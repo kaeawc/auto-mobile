@@ -216,7 +216,12 @@ test("submit budget exhaustion retains its message and append progress", async (
   });
   // Exercise the budget primitive directly: the outer request race owns the
   // deadline on the full handler path, as documented by the production method.
-  expect(await handler.executeInputTypeText("ios", device, "1\n", "done", 1000)).toEqual({
+  expect(
+    await handler.executeInputTypeText("ios", device, "1\n", {
+      imeAction: "done",
+      timeoutMs: 1000,
+    }),
+  ).toEqual({
     success: false,
     error: "input/typeText exceeded 1000ms budget before submit",
   });
@@ -225,7 +230,7 @@ test("submit budget exhaustion retains its message and append progress", async (
     "done",
     timer.now(),
     1000,
-    2,
+    { appendCharsSent: 2 },
   );
   expect(result).toEqual({
     success: false,
@@ -246,13 +251,9 @@ test.each([false, true])(
       error: reason,
     }));
     expect<object>(
-      await handler.runImeActionWithinBudget(
-        { requestImeAction: ime },
-        "done",
-        1000,
-        1000,
-        append ? 2 : undefined,
-      ),
+      await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, {
+        appendCharsSent: append ? 2 : undefined,
+      }),
     ).toEqual({
       success: false,
       action: "done",
@@ -269,7 +270,9 @@ test("runImeActionWithinBudget keeps append rejection as a returned failure", as
     throw new Error(reason);
   });
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, 2),
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, {
+      appendCharsSent: 2,
+    }),
   ).toEqual({ success: false, error: guidance, charsSent: 2 });
 });
 
@@ -299,10 +302,14 @@ test("a successful IME action and an absent submit preserve append progress", as
   const { handler } = createHandler();
   const ime = mock(async () => ({ success: true, action: "done", totalTimeMs: 0 }));
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, 2),
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, {
+      appendCharsSent: 2,
+    }),
   ).toEqual({ success: true, action: "done", totalTimeMs: 0, charsSent: 2 });
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, undefined, 1000, 1000, 2),
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, undefined, 1000, 1000, {
+      appendCharsSent: 2,
+    }),
   ).toEqual({ success: true, charsSent: 2 });
   expect(ime).toHaveBeenCalledTimes(1);
 });

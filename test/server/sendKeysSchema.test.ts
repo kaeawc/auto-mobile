@@ -77,8 +77,11 @@ describe("sendKeysSchema", () => {
       );
       expect(calls).toHaveLength(1);
       expect(calls[0][1]).toEqual(scoped.selector);
-      expect(calls[0][4]).toBe("external");
-      expect(calls[0][5]).toEqual({ container: scoped.container, selectionStrategy: "unique" });
+      expect(calls[0][2]?.display).toBe("external");
+      expect(calls[0][2]?.focus).toEqual({
+        container: scoped.container,
+        selectionStrategy: "unique",
+      });
       expect(response).toMatchObject({
         isError: true,
         content: [expect.objectContaining({ text: expect.stringContaining(error) })],

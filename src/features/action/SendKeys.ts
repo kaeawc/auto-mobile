@@ -10,7 +10,11 @@ import {
 import { TargetFocus } from "./sendkeys/TargetFocus";
 import { TargetState } from "./sendkeys/TargetState";
 import { CommandRunner } from "./sendkeys/CommandRunner";
-import { SendKeysRequestBudget, isSendKeysBudgetExhausted } from "./sendkeys/SendKeysRequestBudget";
+import {
+  SendKeysRequestBudget,
+  isSendKeysBudgetExhausted,
+  type BoundedIosImeOptions,
+} from "./sendkeys/SendKeysRequestBudget";
 import { FocusKeyboardRecovery } from "./sendkeys/FocusKeyboardRecovery";
 import { ActionableError } from "../../models/ActionableError";
 import type { BaseActionResult } from "../../models/BaseActionResult";
@@ -69,6 +73,7 @@ export {
   segmentGraphemes,
 } from "./sendkeys/AndroidTypingConstants";
 import type { ProgressCallback } from "./BaseVisualChange";
+import type { ActionCall } from "./ActionCall";
 
 export const SEND_KEYS_TYPING_MODES = [
   "auto",
@@ -134,6 +139,12 @@ export interface SendKeysFocusOptions {
   selectionStrategy?: ElementSelectionStrategy;
   /** Resolve the field in the app or the AutoMobile prototype only (issue #9305). */
   layer?: HierarchyLayer;
+}
+
+/** `ActionCall` for sendKeys: also carries the target display and the focus scope. */
+export interface SendKeysCall extends ActionCall {
+  display?: string;
+  focus?: SendKeysFocusOptions;
 }
 
 export interface SendKeysTypeCommand {
@@ -525,11 +536,9 @@ export class SendKeys {
   async execute(
     commands: SendKeysCommand[],
     selector?: SendKeysSelector,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    display?: string,
-    options?: SendKeysFocusOptions,
+    call: SendKeysCall = {},
   ): Promise<SendKeysResult> {
+    const options = call.focus;
     this.target.focusedPassword = false;
     this.target.prototypeIdentifiers = [selector?.elementId, selector?.testTag].filter(
       (id): id is string => !!id,
@@ -538,25 +547,16 @@ export class SendKeys {
     this.executor.setTargetLayer?.(this.target.effectiveLayer);
     this.executor.setTargetPasswordField?.(false);
     this.executor.setIosSdkTextTarget?.(undefined);
-    const result = await this.executeFocused(
-      commands,
-      selector,
-      progress,
-      signal,
-      display,
-      options,
-    );
+    const result = await this.executeFocused(commands, selector, call);
     return redactPasswordCommandResults(result, commands, this.target.focusedPassword);
   }
 
   private async executeFocused(
     commands: SendKeysCommand[],
-    selector?: SendKeysSelector,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    display?: string,
-    options?: SendKeysFocusOptions,
+    selector: SendKeysSelector | undefined,
+    call: SendKeysCall,
   ): Promise<SendKeysResult> {
+    const { progress, signal, display, focus: options } = call;
     const focusOptionsError = this.validateFocusOptions(selector, options);
     if (focusOptionsError) {
       return {
@@ -601,10 +601,11 @@ export class SendKeys {
         ? commands[0].key
         : undefined;
     if (this.device.platform === "ios" && semanticKey) {
-      return this.executeBoundedIosIme(commands, selector, progress, signal, semanticKey, {
-        ...options,
-        display,
-        assertCurrent,
+      return this.executeBoundedIosIme(commands, semanticKey, {
+        selector,
+        progress,
+        signal,
+        target: { ...options, display, assertCurrent },
       });
     }
     const routing = { ...options, display, displayId, assertCurrent };
@@ -665,20 +666,10 @@ export class SendKeys {
 
   private executeBoundedIosIme(
     commands: SendKeysCommand[],
-    selector: SendKeysSelector | undefined,
-    progress: ProgressCallback | undefined,
-    signal: AbortSignal | undefined,
     key: SendKeysSemanticKey,
-    target: Pick<SendKeysRouting, "display" | "assertCurrent" | "container" | "selectionStrategy">,
+    options: BoundedIosImeOptions,
   ): Promise<SendKeysResult> {
-    return this.requestBudget.executeBoundedIosIme(
-      commands,
-      selector,
-      progress,
-      signal,
-      key,
-      target,
-    );
+    return this.requestBudget.executeBoundedIosIme(commands, key, options);
   }
 
   private async executeUnbounded(

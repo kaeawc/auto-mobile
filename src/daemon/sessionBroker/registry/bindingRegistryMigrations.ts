@@ -1,3 +1,6 @@
+import * as registryWriters016 from "./migrations/2026_10_28_016_binding_registry_writers";
+import { getMcpServerVersion } from "../../../utils/mcpVersion";
+import { logger } from "../../../utils/logger";
 import * as resourceIndexes011 from "./migrations/2026_10_20_011_session_broker_resource_indexes";
 import * as deviceMutations012 from "./migrations/2026_10_21_012_device_mutation_journal";
 import * as brokerTiming013 from "./migrations/2026_10_21_013_session_broker_timing";
@@ -45,7 +48,19 @@ export const BINDING_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = 
   [BROKER_TIMING_MIGRATION]: brokerTiming013,
   "2026_10_26_014_device_claims": deviceClaims014,
   "2026_10_27_015_device_claims_metadata": deviceClaimsMetadata015,
+  "2026_10_28_016_binding_registry_writers": registryWriters016,
 };
+
+export const KNOWN_BINDING_REGISTRY_SCHEMA_VERSION = Object.keys(BINDING_REGISTRY_MIGRATIONS).at(
+  -1,
+)!;
+
+export interface BindingRegistrySchemaDescription {
+  schemaVersion: string | null;
+  knownSchemaVersion: string;
+  supported: boolean;
+  writerVersion: string | null;
+}
 
 export const bindingRegistryMigrationProvider: MigrationProvider = {
   getMigrations: async () => ({ ...BINDING_REGISTRY_MIGRATIONS }),
@@ -54,6 +69,7 @@ export const bindingRegistryMigrationProvider: MigrationProvider = {
 /** One read-only probe, implemented on the already-open registry connection. */
 export interface BindingRegistrySchemaProbe {
   assertSupportedSchema(): Promise<void>;
+  describeSchema(): Promise<BindingRegistrySchemaDescription>;
 }
 
 /** Shared by open-time guards and resident readers; never writes migration bookkeeping. */
@@ -61,26 +77,83 @@ export async function assertSupportedRegistrySchema<DB>(
   db: Kysely<DB>,
   dbPath: string,
 ): Promise<void> {
+  const executed = await readRegistryMigrations(db);
+  const unknownMigrations = unknownRegistryMigrations(executed);
+  if (unknownMigrations.length > 0) {
+    throw new BindingRegistrySchemaUnsupportedError(
+      dbPath,
+      unknownMigrations,
+      await readBindingRegistryWriterVersions(db, unknownMigrations),
+    );
+  }
+}
+
+async function registryTableExists<DB>(db: Kysely<DB>, tableName: string): Promise<boolean> {
+  const table = await sql<{ name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${tableName}
+  `.execute(db);
+  return table.rows.length > 0;
+}
+
+async function readRegistryMigrations<DB>(db: Kysely<DB>): Promise<string[]> {
   const executed = await sql<{
     name: string;
   }>`SELECT name FROM kysely_migration ORDER BY name`.execute(db);
-  const unknownMigrations = executed.rows
-    .map(({ name }) => name)
-    .filter((name) => !Object.hasOwn(BINDING_REGISTRY_MIGRATIONS, name));
-  if (unknownMigrations.length > 0) {
-    throw new BindingRegistrySchemaUnsupportedError(dbPath, unknownMigrations);
+  return executed.rows.map(({ name }) => name);
+}
+
+function unknownRegistryMigrations(executed: readonly string[]): string[] {
+  return executed.filter((name) => !Object.hasOwn(BINDING_REGISTRY_MIGRATIONS, name));
+}
+
+/** Optional provenance must never replace the typed compatibility refusal with a lookup error. */
+export async function readBindingRegistryWriterVersions<DB>(
+  db: Kysely<DB>,
+  migrationNames: readonly string[],
+): Promise<Readonly<Record<string, string>>> {
+  if (migrationNames.length === 0) {
+    return {};
   }
+  try {
+    if (!(await registryTableExists(db, "binding_registry_migration_writers"))) {
+      return {};
+    }
+    const result = await sql<{ migration_name: string; writer_version: string }>`
+      SELECT migration_name, writer_version FROM binding_registry_migration_writers
+      WHERE migration_name IN (${sql.join(migrationNames)})
+    `.execute(db);
+    return Object.fromEntries(result.rows.map((row) => [row.migration_name, row.writer_version]));
+  } catch (error) {
+    logger.warn("[Bindings] Cannot read registry migration writer versions", error);
+    return {};
+  }
+}
+
+/** Describes the on-disk schema on the resident connection without opening or migrating it. */
+export async function describeBindingRegistrySchema<DB>(
+  db: Kysely<DB>,
+): Promise<BindingRegistrySchemaDescription> {
+  const executed = (await registryTableExists(db, "kysely_migration"))
+    ? await readRegistryMigrations(db)
+    : [];
+  const schemaVersion = executed.at(-1) ?? null;
+  const writers = await readBindingRegistryWriterVersions(
+    db,
+    schemaVersion === null ? [] : [schemaVersion],
+  );
+  return {
+    schemaVersion,
+    knownSchemaVersion: KNOWN_BINDING_REGISTRY_SCHEMA_VERSION,
+    supported: unknownRegistryMigrations(executed).length === 0,
+    writerVersion: schemaVersion === null ? null : (writers[schemaVersion] ?? null),
+  };
 }
 
 /** Fresh databases have no bookkeeping yet; resident handles always have the migration table. */
 async function assertSupportedRegistryOnOpen<DB>(db: Kysely<DB>, dbPath: string): Promise<void> {
-  const table = await sql<{ name: string }>`
-    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kysely_migration'
-  `.execute(db);
-  if (table.rows.length === 0) {
-    return;
+  if (await registryTableExists(db, "kysely_migration")) {
+    await assertSupportedRegistrySchema(db, dbPath);
   }
-  await assertSupportedRegistrySchema(db, dbPath);
 }
 
 /** Exclusion readers cannot perform an upgrade or bypass legacy retirement. */
@@ -112,6 +185,7 @@ export async function migrateBindingRegistry<DB>(
   db: Kysely<DB>,
   dbPath: string,
   beforeMigrate?: () => Promise<void>,
+  options: { writerVersion?: string } = {},
 ): Promise<void> {
   await assertSupportedRegistryOnOpen(db, dbPath);
   const migrator = new Migrator({ db, provider: bindingRegistryMigrationProvider });
@@ -130,11 +204,21 @@ export async function migrateBindingRegistry<DB>(
     if (pending) {
       await beforeMigrate?.();
     }
-    const { error } = await migrator.migrateToLatest();
+    const { error, results } = await migrator.migrateToLatest();
     if (error) {
       throw new ActionableError(
         `Failed to migrate the binding registry at ${dbPath}: ${errorMessage(error)}`,
       );
+    }
+    const executed = (results ?? [])
+      .filter((result) => result.direction === "Up" && result.status === "Success")
+      .map((result) => result.migrationName);
+    if (executed.length > 0) {
+      // Use Kysely's timestamp; never invent provenance for migrations executed by an older build.
+      await sql`INSERT OR IGNORE INTO binding_registry_migration_writers
+        (migration_name, writer_version, recorded_at)
+        SELECT name, ${options.writerVersion ?? getMcpServerVersion()}, timestamp FROM kysely_migration
+        WHERE name IN (${sql.join(executed)})`.execute(db);
     }
   } finally {
     await lock.release();

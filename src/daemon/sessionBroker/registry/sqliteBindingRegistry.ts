@@ -1,3 +1,4 @@
+import { getMcpServerVersion } from "../../../utils/mcpVersion";
 import { SqliteDeviceClaims } from "./sqliteDeviceClaims";
 import { Kysely } from "kysely";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
@@ -68,6 +69,7 @@ import {
 import {
   assertBindingRegistryCurrent,
   assertSupportedRegistrySchema,
+  describeBindingRegistrySchema,
   migrateBindingRegistry,
 } from "./bindingRegistryMigrations";
 import {
@@ -146,6 +148,8 @@ export interface OpenSqliteBindingRegistryOptions extends SqliteBindingRegistryO
   legacyDeviceRetirement?: Pick<LegacySlotDeviceRetirement, "retire">;
   /** Readers only observe a current schema; they must never run migrations. */
   migrate?: boolean;
+  /** Runtime build identity; inject a fixed value in tests. */
+  writerVersion?: string;
 }
 
 /**
@@ -216,6 +220,7 @@ export async function openSqliteBindingRegistry(
         () =>
           options.legacyDeviceRetirement?.retire(new SqliteLegacySlotRetirementStore(db)) ??
           Promise.resolve(),
+        { writerVersion: options.writerVersion ?? getMcpServerVersion() },
       );
     }
   } catch (error) {
@@ -243,6 +248,10 @@ export class SqliteBindingRegistry implements BindingRegistry {
 
   assertSupportedSchema(): Promise<void> {
     return assertSupportedRegistrySchema(this.db, this.dbPath);
+  }
+
+  describeSchema() {
+    return describeBindingRegistrySchema(this.db);
   }
 
   /** Shares this connection, transaction lock and physical authority; never opens another DB. */

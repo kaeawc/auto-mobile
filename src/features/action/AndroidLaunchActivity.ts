@@ -122,16 +122,18 @@ export class AndroidLaunchActivity {
     } catch (error) {
       rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
+      // A missing CtrlProxy launch intent can still be resolved through PackageManager over ADB.
       logger.debug(`[LaunchApp] a11y launch intent failed, falling back to ADB: ${error}`);
     }
     return undefined;
   }
 
   private buildActivityApproachCommands(packageName: string, userId: number): string[] {
-    return [
-      // Ask PackageManager for MAIN/LAUNCHER activities before parsing a full dump.
-      `shell cmd package query-activities --brief --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep ${shellQuote(packageName)}`,
-    ];
+    // Keep handheld resolution first; TV-only apps may expose only Leanback (#15957).
+    return LAUNCHER_CATEGORIES.map(
+      (category) =>
+        `shell cmd package query-activities --brief --user ${userId} -a android.intent.action.MAIN -c ${category} | grep ${shellQuote(packageName)}`,
+    );
   }
 
   private async runActivityApproach(
@@ -482,7 +484,8 @@ export class AndroidLaunchActivity {
             } catch (error) {
               rethrowDeviceTransportUnavailable(error);
               this.assertLaunchNotAborted(signal);
-              logger.info(`[LaunchApp] Pattern ${pattern} failed: ${error}`);
+              // A missing conventional activity name does not rule out the next candidate.
+              logger.debug(`[LaunchApp] Pattern ${pattern} failed: ${error}`);
             }
           }
           return { success: false, pattern: null };

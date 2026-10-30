@@ -213,7 +213,7 @@ function launcherGrid(): FakeGrid {
     box("Add app to favorites", 100, 450),
     box("Search", 300, 270),
     box("Home", 900, 270),
-    box("Settings, button", 1600, 270),
+    { ...box("Settings, button", 1600, 270), "content-desc": "Settings, button" },
   ];
   grid.moves = {
     0: { arrow_up: 1 },
@@ -236,7 +236,7 @@ describe("FocusNavigate blocked directions", () => {
 
   test("tries up after right is a dead end, then reaches the target", async () => {
     const grid = launcherGrid();
-    const result = await navigator(grid).execute({ until: { text: "Settings, button" } });
+    const result = await navigator(grid).execute({ until: { contentDesc: "Settings, button" } });
     expect(result).toMatchObject({ success: true, status: "focused", steps: 4 });
     expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right", "arrow_right"]);
     expect(result.steps).toBe(grid.presses.length);
@@ -259,6 +259,24 @@ describe("FocusNavigate blocked directions", () => {
     const result = await navigator(grid).execute({ until: { text: "Settings, button" } });
     expect(result.status).toBe("focused");
     expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right"]);
+  });
+
+  test("remembers a dead direction when returning to the same focused element", async () => {
+    const grid = launcherGrid();
+    grid.moves = { 0: { arrow_up: 1 }, 1: { arrow_right: 0 } };
+    const result = await navigator(grid).execute({
+      until: { text: "Settings, button" },
+      maxSteps: 4,
+    });
+    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right", "arrow_up"]);
+    expect(result).toEqual({
+      success: false,
+      status: "max_steps",
+      steps: 4,
+      path: [grid.elements[0], grid.elements[1], grid.elements[0], grid.elements[1]],
+      focusedElement: grid.elements[1],
+      message: "Reached maxSteps (4); the target was not focused. Observe before retrying.",
+    });
   });
 
   test("blocked-direction retries count against maxSteps", async () => {

@@ -29,6 +29,12 @@ import {
   type SessionLifecycleSlots,
 } from "./internalContracts";
 
+/** The snapshot a release committed and the one it persisted (a terminal upgrade differs). */
+export interface CommittedReleaseSnapshots {
+  releaseSnapshot: SessionReleaseSnapshot;
+  persistedSnapshot: SessionReleaseSnapshot;
+}
+
 export interface SessionReleaseCommitHost {
   readonly stateRestore: SessionDeviceStateRestore;
   revokeSupersededIdentityReplacement(operation?: SessionReleaseOperation): boolean;
@@ -86,8 +92,7 @@ export interface SessionReleaseCommitHost {
   finishCommittedRelease(
     session: Session,
     reason: ReleaseReasonState,
-    releaseSnapshot: SessionReleaseSnapshot,
-    persistedSnapshot: SessionReleaseSnapshot,
+    snapshots: CommittedReleaseSnapshots,
     options: SessionReleaseOptions,
     pendingCleanup: readonly Promise<void>[],
   ): string;
@@ -268,8 +273,7 @@ export class SessionReleaseCommit {
       return this.host.finishCommittedRelease(
         session,
         reason,
-        releaseSnapshot,
-        persistedSnapshot,
+        { releaseSnapshot, persistedSnapshot },
         options,
         pendingCleanup,
       );
@@ -422,8 +426,7 @@ export class SessionReleaseCommit {
   finishCommittedRelease(
     session: Session,
     reason: ReleaseReasonState,
-    releaseSnapshot: SessionReleaseSnapshot,
-    persistedSnapshot: SessionReleaseSnapshot,
+    { releaseSnapshot, persistedSnapshot }: CommittedReleaseSnapshots,
     options: SessionReleaseOptions,
     pendingCleanup: readonly Promise<void>[],
   ): string {

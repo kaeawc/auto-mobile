@@ -1,7 +1,7 @@
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
 import { readBackWithSettle } from "./readBackWithSettle";
 import { TypingSession } from "./TypingSession";
-import { KeyEventSupport } from "./KeyEventSupport";
+import { KeyEventSupport, type KeyEventLetterCaseCheck } from "./KeyEventSupport";
 import {
   FocusedTextClearVerifier,
   checkAbort as checkAbortCheckpoint,
@@ -211,7 +211,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
       verifyKeyEventLetterCase: (text, typed, signal, display, before) =>
-        this.verifyKeyEventLetterCase(text, typed, "eventOnly", signal, display, before),
+        this.verifyKeyEventLetterCase(text, typed, { mode: "eventOnly", signal, display, before }),
       supportsAndroidKeyCombination: (signal) => this.supportsAndroidKeyCombination(signal),
       preExistingFieldText: (hierarchy, operation) => preExistingFieldText(hierarchy, operation),
       markPartialAfterMutation: (result) => markPartialAfterMutation(result),
@@ -229,8 +229,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
       withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
-      verifyKeyEventLetterCase: (text, typed, mode, signal, display, before) =>
-        this.verifyKeyEventLetterCase(text, typed, mode, signal, display, before),
+      verifyKeyEventLetterCase: (text, typed, check) =>
+        this.verifyKeyEventLetterCase(text, typed, check),
       checkAbort: (signal, error) => this.checkAbort(signal, error),
       getKeyEventPlan: (char, signal) => this.getKeyEventPlan(char, signal),
       clearForReplace: (operation, signal, display) =>
@@ -342,8 +342,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
       withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
-      verifyKeyEventLetterCase: (text, typed, mode, signal, display, before) =>
-        this.verifyKeyEventLetterCase(text, typed, mode, signal, display, before),
+      verifyKeyEventLetterCase: (text, typed, check) =>
+        this.verifyKeyEventLetterCase(text, typed, check),
       checkAbort: (signal, error) => this.checkAbort(signal, error),
       getEventAllKeyEventPlan: (grapheme) => this.getEventAllKeyEventPlan(grapheme),
       getAndroidApiLevel: (signal) => this.getAndroidApiLevel(signal),
@@ -949,19 +949,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private verifyKeyEventLetterCase(
     text: string,
     typed: TextActionResult,
-    mode: "eventAll" | "eventOnly" | "eventLast",
-    signal?: AbortSignal,
-    display?: string,
-    before = "",
+    check: KeyEventLetterCaseCheck,
   ): Promise<TextActionResult> {
-    return this.keyEventSupport.verifyKeyEventLetterCase(
-      text,
-      typed,
-      mode,
-      signal,
-      display,
-      before,
-    );
+    return this.keyEventSupport.verifyKeyEventLetterCase(text, typed, check);
   }
 
   private withTextWarnings(

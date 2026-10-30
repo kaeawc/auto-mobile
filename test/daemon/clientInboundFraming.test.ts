@@ -41,7 +41,7 @@ function setup(limit = 256) {
   const feed = (frame: unknown) =>
     client.testHooks.simulateIncomingData(Buffer.from(JSON.stringify(frame) + "\n"));
   const request = (signal?: AbortSignal) =>
-    client.callTool("tapOn", {}, undefined, undefined, signal).catch((error: unknown) => error);
+    client.callTool("tapOn", {}, undefined, undefined, { signal }).catch((error: unknown) => error);
   return { client, timer, socket, feed, request };
 }
 
@@ -257,7 +257,7 @@ test("overflow preserves the frame error when a connection-closed handler closes
       void client.close();
     });
     const first = client
-      .callTool("tapOn", {}, undefined, undefined, controller.signal)
+      .callTool("tapOn", {}, undefined, undefined, { signal: controller.signal })
       .catch((error: unknown) => error);
     const second = client.callTool("tapOn", {}).catch((error: unknown) => error);
     try {

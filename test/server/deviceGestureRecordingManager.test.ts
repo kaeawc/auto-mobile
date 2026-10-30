@@ -146,14 +146,10 @@ describe("deviceGestureRecordingManager ownership", () => {
         recorder.steps = [capturedStep];
         const ids = new CountingIdGenerator("equivalent");
         const baseSessionUuid = (uuid: string) => uuid.split(":")[0];
-        const pending = startDeviceGestureRecording(
-          device,
-          timer,
-          ids,
-          () => recorder,
-          owner,
+        const pending = startDeviceGestureRecording(device, timer, ids, () => recorder, {
+          ownerSessionUuid: owner,
           baseSessionUuid,
-        );
+        });
         await Promise.resolve();
         if (phase === "active") {
           recorder.startGate.resolve();
@@ -167,8 +163,7 @@ describe("deviceGestureRecordingManager ownership", () => {
             () => {
               throw new Error("joining must reuse the recorder");
             },
-            caller,
-            baseSessionUuid,
+            { ownerSessionUuid: caller, baseSessionUuid },
           );
           if (!admitted) {
             await expect(joined).rejects.toThrow("another session");
@@ -248,7 +243,7 @@ describe("deviceGestureRecordingManager ownership", () => {
       timer,
       new CountingIdGenerator("recording"),
       () => recorder,
-      "session-a",
+      { ownerSessionUuid: "session-a" },
     );
     await Promise.resolve();
     recorder.startGate.resolve();
@@ -273,7 +268,7 @@ describe("deviceGestureRecordingManager retained plan (#10958)", () => {
       timer,
       new CountingIdGenerator("recording"),
       () => recorder,
-      "session-a",
+      { ownerSessionUuid: "session-a" },
     );
     await Promise.resolve();
     recorder.startGate.resolve();
@@ -295,7 +290,7 @@ describe("deviceGestureRecordingManager retained plan (#10958)", () => {
       timer,
       new CountingIdGenerator("recording"),
       () => recorder,
-      "plan-base:pixel",
+      { ownerSessionUuid: "plan-base:pixel" },
     );
     await Promise.resolve();
     recorder.startGate.resolve();
@@ -335,10 +330,14 @@ describe("deviceGestureRecordingManager startup reservation", () => {
         factories += 1;
         return recorder;
       };
-      const first = startDeviceGestureRecording(device, timer, ids, factory, owner);
+      const first = startDeviceGestureRecording(device, timer, ids, factory, {
+        ownerSessionUuid: owner,
+      });
       const checkRefusal = async () => {
         try {
-          await startDeviceGestureRecording(device, timer, ids, factory, stranger);
+          await startDeviceGestureRecording(device, timer, ids, factory, {
+            ownerSessionUuid: stranger,
+          });
           throw new Error("expected an ownership refusal");
         } catch (error) {
           expect(error).toBeInstanceOf(ActionableError);
@@ -351,15 +350,19 @@ describe("deviceGestureRecordingManager startup reservation", () => {
         expect(recorder.stopCount).toBe(0);
       };
       await checkRefusal();
-      const sameOwner = startDeviceGestureRecording(device, timer, ids, factory, owner);
+      const sameOwner = startDeviceGestureRecording(device, timer, ids, factory, {
+        ownerSessionUuid: owner,
+      });
       recorder.startGate.resolve();
       expect(await sameOwner).toEqual(await first);
       await checkRefusal();
-      expect(await startDeviceGestureRecording(device, timer, ids, factory, owner)).toEqual(
-        await first,
-      );
+      expect(
+        await startDeviceGestureRecording(device, timer, ids, factory, { ownerSessionUuid: owner }),
+      ).toEqual(await first);
       await expect(
-        startDeviceGestureRecording(otherDevice, timer, ids, factory, stranger),
+        startDeviceGestureRecording(otherDevice, timer, ids, factory, {
+          ownerSessionUuid: stranger,
+        }),
       ).rejects.toThrow("Recording already active on device");
       await stopDeviceGestureRecording(undefined, undefined, timer);
     });
@@ -763,7 +766,8 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       device,
       timer,
       new CountingIdGenerator("geometry"),
-      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+      () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
     );
     gestures.onGesture?.({
       type: "tap",
@@ -791,7 +795,8 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       device,
       timer,
       new CountingIdGenerator("geometry-label"),
-      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+      () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
     );
     tracker.handleTransition({ change: "changed", displayId: 0, rotation: 1 });
     timer.advanceTime(100);
@@ -818,7 +823,8 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       device,
       timer,
       new CountingIdGenerator("geometry-clean"),
-      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+      () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
     );
     timer.advanceTime(5_000);
     gestures.onGesture?.({

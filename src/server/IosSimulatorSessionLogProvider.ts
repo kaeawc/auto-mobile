@@ -28,6 +28,8 @@ import {
   type SessionLogProvider,
   type SessionLogSimctl,
   type ResetAppLogsRequest,
+  type SessionLogReadBounds,
+  type UnifiedLogReadBounds,
 } from "./DefaultSessionLogService";
 import { SessionLogTimeoutError } from "./SessionLogTimeoutError";
 import {
@@ -82,7 +84,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: SessionLogFilesRequest,
-    maxBytes: number,
+    { maxBytes }: SessionLogReadBounds,
   ): Promise<SessionLogFilesResult> {
     const root = await this.resolveContainerRoot(device, appId, request.container, "read", {
       container: "data",
@@ -122,7 +124,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: SessionLogAppGroupRequest,
-    maxBytes: number,
+    { maxBytes }: SessionLogReadBounds,
   ): Promise<SessionLogAppGroupResult> {
     const root = await this.resolveContainerRoot(device, appId, request.groupId, "read", {
       container: "group",
@@ -140,9 +142,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: UnifiedLogWindowRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
-    retain: "head" | "tail" = "head",
+    { maxBytes, signal, retain = "head" }: UnifiedLogReadBounds,
   ): Promise<UnifiedLogWindowResult> {
     this.requireSimulator(device, "collect the unified log");
     const predicate = unifiedLogPredicate(appId, request.processName);

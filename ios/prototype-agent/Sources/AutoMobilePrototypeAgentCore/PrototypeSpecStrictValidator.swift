@@ -42,6 +42,7 @@ public enum PrototypeSpecStrictValidator {
                 handlers: fields["platform"],
                 channels: fields["channels"],
                 auth: fields["auth"],
+                commerce: fields["commerce"],
                 storage: fields["storage"],
                 location: fields["location"],
                 sensors: fields["sensors"],
@@ -54,6 +55,7 @@ public enum PrototypeSpecStrictValidator {
             try PrototypeMedia.validateNodes(fields, nodes: context.locatedNodes)
             try PrototypeMap.validateNodes(fields, nodes: context.locatedNodes)
             try PrototypeMediaCaptions.validate(fields, nodes: context.locatedNodes)
+            try PrototypeMedia.validateCastButtons(fields, nodes: context.locatedNodes)
             try PrototypeTimerValidator.validate(context.actions)
             try PrototypeStrictSemantics.vocabulary(context, data: modelData)
             try PrototypeLinkify.validate(root: root, nodes: context.locatedNodes)

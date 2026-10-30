@@ -51,6 +51,21 @@ const notificationsCall = {
   ...label,
   onTap: [{ type: "platform", call: "notifications.cancel", args: { all: { value: true } } }],
 };
+const scheduleCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "notifications.schedule",
+      args: {
+        id: { value: "eta" },
+        channel: { value: "reminders" },
+        title: { value: "Soon" },
+        delaySeconds: { value: 60 },
+      },
+    },
+  ],
+};
 const mediaCall = {
   ...label,
   onTap: [{ type: "platform", call: "media.play", args: { player: { value: "main" } } }],
@@ -325,6 +340,7 @@ const fixtures: Record<string, Node> = {
   prototype_platform_camera_v1: cameraCaptureCall,
   prototype_platform_audioRecorder_v1: recorderCall,
   prototype_platform_notifications_v1: notificationsCall,
+  prototype_platform_notifications_scheduled_v1: scheduleCall,
   prototype_platform_media_v1: mediaCall,
   prototype_platform_camera_capture_v1: cameraCaptureCall,
   prototype_platform_camera_video_v1: recordCall,

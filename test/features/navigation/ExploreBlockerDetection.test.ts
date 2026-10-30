@@ -461,7 +461,6 @@ describe("ExploreBlockerDetection", () => {
         hierarchyOf(elements),
         androidDevice,
         null,
-        undefined,
         deps,
       );
 
@@ -488,7 +487,6 @@ describe("ExploreBlockerDetection", () => {
         hierarchyOf(elements),
         androidDevice,
         null,
-        undefined,
         { tapActionFactory: tap.factory, timer },
       );
 
@@ -515,7 +513,6 @@ describe("ExploreBlockerDetection", () => {
         hierarchyOf(elements),
         androidDevice,
         null,
-        undefined,
         deps,
       );
 
@@ -535,7 +532,6 @@ describe("ExploreBlockerDetection", () => {
         hierarchyOf(elements),
         androidDevice,
         null,
-        undefined,
         deps,
       );
 
@@ -563,7 +559,6 @@ describe("ExploreBlockerDetection", () => {
           hierarchyOf(elements),
           androidDevice,
           null,
-          undefined,
           deps,
         );
 
@@ -587,7 +582,6 @@ describe("ExploreBlockerDetection", () => {
           hierarchyOf(elements),
           androidDevice,
           null,
-          undefined,
           deps,
         );
 
@@ -612,7 +606,6 @@ describe("ExploreBlockerDetection", () => {
         hierarchyOf(elements),
         androidDevice,
         null,
-        undefined,
         deps,
       );
 
@@ -646,7 +639,6 @@ describe("ExploreBlockerDetection", () => {
         hierarchyOf(elements),
         androidDevice,
         null,
-        undefined,
         deps,
       );
 
@@ -682,7 +674,6 @@ describe("ExploreBlockerDetection", () => {
           hierarchyOf(elements),
           androidDevice,
           null,
-          undefined,
           deps,
         );
 
@@ -721,7 +712,6 @@ describe("ExploreBlockerDetection", () => {
           hierarchyOf(elements),
           androidDevice,
           null,
-          undefined,
           deps,
         );
 
@@ -747,7 +737,6 @@ describe("ExploreBlockerDetection", () => {
         hierarchyOf(elements),
         androidDevice,
         null,
-        undefined,
         deps,
       );
 
@@ -788,7 +777,6 @@ describe("ExploreBlockerDetection", () => {
           hierarchyOf(elements),
           androidDevice,
           null,
-          undefined,
           deps,
         );
 
@@ -861,7 +849,6 @@ describe("ExploreBlockerDetection", () => {
         hierarchyOf(elements),
         androidDevice,
         null,
-        undefined,
         deps,
       );
 
@@ -887,7 +874,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         parser,
-        undefined,
         deps,
       );
 
@@ -913,7 +899,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         parser,
-        undefined,
         { tapActionFactory: tap.factory, timer },
       );
 
@@ -942,7 +927,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         parser,
-        undefined,
         deps,
       );
 
@@ -970,7 +954,6 @@ describe("ExploreBlockerDetection", () => {
           androidDevice,
           null,
           parser,
-          undefined,
           deps,
         );
 
@@ -993,7 +976,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         parser,
-        undefined,
         deps,
       );
 
@@ -1020,7 +1002,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         notesParser,
-        undefined,
         notesDeps,
       );
 
@@ -1039,7 +1020,6 @@ describe("ExploreBlockerDetection", () => {
         androidDevice,
         null,
         genuineParser,
-        undefined,
         genuineDeps,
       );
 
@@ -1098,14 +1078,10 @@ describe("ExploreBlockerDetection", () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
 
-      const result = await detectAndHandleBlockers(
-        observationWith({}),
-        device,
-        null,
-        parser,
-        undefined,
-        { timer, tapActionFactory: tap.factory },
-      );
+      const result = await detectAndHandleBlockers(observationWith({}), device, null, parser, {
+        timer,
+        tapActionFactory: tap.factory,
+      });
 
       expect(tap.calls).toEqual([{ text: "Allow access", action: "tap" }]);
       expect(result).toBe(true);

@@ -18,17 +18,27 @@ export type EventTableName = (typeof EVENT_TABLES)[number];
 /** @deprecated Alias of the shared {@link AmortizedRetentionState} (#6702). */
 export type EventRetentionState = AmortizedRetentionState;
 
+/** Row cap and amortization for one retention pass; undefined fields take the defaults. */
+export interface EventRetentionBudget {
+  maxRows?: number;
+  checkInterval?: number;
+  // Number of rows just inserted. A batched multi-row INSERT (#3138) advances
+  // the amortization counter by the whole batch so retention still fires roughly
+  // every `checkInterval` rows rather than every `checkInterval` batches.
+  inserted?: number;
+}
+
 export async function pruneEventTableByCount(
   db: Kysely<Database> | undefined,
   table: EventTableName,
   state: EventRetentionState,
-  maxRows: number = RETENTION_MAX_ROWS,
-  checkInterval: number = CLEANUP_CHECK_INTERVAL,
-  // Number of rows just inserted. A batched multi-row INSERT (#3138) advances
-  // the amortization counter by the whole batch so retention still fires roughly
-  // every `checkInterval` rows rather than every `checkInterval` batches.
-  inserted: number = 1,
+  budget: EventRetentionBudget = {},
 ): Promise<void> {
+  const {
+    maxRows = RETENTION_MAX_ROWS,
+    checkInterval = CLEANUP_CHECK_INTERVAL,
+    inserted = 1,
+  } = budget;
   // The counter/guard state machine is shared with rowCapRetention.ts (#6702);
   // this wrapper owns only the event-specific cleanup body and its
   // logging-and-swallowing error policy (CLAUDE.md convention #2).

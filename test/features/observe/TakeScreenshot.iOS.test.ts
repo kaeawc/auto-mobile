@@ -82,7 +82,8 @@ describe("TakeScreenshot iOS cancellation", function () {
         ),
       ).toHaveLength(1);
       expect(pushSpy).toHaveBeenCalledTimes(1);
-      const [deviceId, pushedBase64, , , , options] = pushSpy.mock.calls[0]!;
+      const [deviceId, pushedBase64, , , details] = pushSpy.mock.calls[0]!;
+      const options = details?.options;
       expect(deviceId).toBe("ios-single-decode");
       expect(pushedBase64).toBe(screenshotBase64);
       expect(options?.decodedImage).toBeInstanceOf(Buffer);

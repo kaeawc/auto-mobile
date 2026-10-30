@@ -477,13 +477,9 @@ describe("explicit-display action catches", () => {
         },
       },
     });
-    const result = await action.execute(
-      [{ action: "key", key: "enter" }],
-      undefined,
-      undefined,
-      undefined,
-      "inner",
-    );
+    const result = await action.execute([{ action: "key", key: "enter" }], undefined, {
+      display: "inner",
+    });
     assertResult(result, 7, 9);
     expect(result.commands[0]?.staleDisplay).toEqual(result.staleDisplay);
     expect(h.adb.getExecutedCommands().some((cmd) => cmd.includes("keyevent"))).toBe(false);
@@ -535,13 +531,7 @@ async function caughtExplicitAction(
         ...deps,
         observer: h.observe,
       });
-      return action.execute(
-        [{ action: "key", key: "enter" }],
-        undefined,
-        undefined,
-        undefined,
-        "inner",
-      );
+      return action.execute([{ action: "key", key: "enter" }], undefined, { display: "inner" });
     }
   }
 }

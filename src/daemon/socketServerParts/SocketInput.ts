@@ -266,8 +266,10 @@ export class SocketInput {
       args.deviceId,
       socketSessionId,
       route.action,
-      route.bypassAndroidDeviceListCache ?? false,
-      input?.requester,
+      {
+        bypassAndroidDeviceListCache: route.bypassAndroidDeviceListCache ?? false,
+        requester: input?.requester,
+      },
     );
     const keyed = () =>
       this.callbacks.runTrackedKeyedDeviceInput(
@@ -619,12 +621,8 @@ export class SocketInput {
           // is NOT wrapped in runWithAbortSignal, so there is no ambient signal for
           // press to pick up): without it, session teardown mid-home-press leaves
           // the ADB dispatch and foreground-verification reads running (issue #6289).
-          const pressButton = new PressButton(
-            targetDevice,
-            null,
-            this.state.timer,
-            undefined,
-            (signal, _timeoutMs, send, onDispatch) =>
+          const pressButton = new PressButton(targetDevice, null, this.state.timer, {
+            holdRequest: (signal, _timeoutMs, send, onDispatch) =>
               this.callbacks.holdDispatchedInputRequest(
                 signal,
                 queueEnterMs + totalTimeoutMs - this.state.timer.now(),
@@ -632,7 +630,7 @@ export class SocketInput {
                 onDispatch,
                 "Button press request",
               ),
-          );
+          });
           return await pressButton.press(
             args.button,
             remainingTimeoutMs,
@@ -726,10 +724,12 @@ export class SocketInput {
       signal,
       (_signal, dispatch) =>
         this.callbacks.runInputOperationWithTimeout(
-          "input/key",
-          totalTimeoutMs,
-          remainingTimeoutMs,
-          "UnixSocketServer.handleInputKey",
+          {
+            toolName: "input/key",
+            origin: "UnixSocketServer.handleInputKey",
+            totalTimeoutMs,
+            remainingTimeoutMs,
+          },
           () =>
             this.callbacks.holdDispatchedInputRequest(
               signal,

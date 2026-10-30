@@ -470,12 +470,6 @@ async function bindPreparedDevice(
             deps.timer,
             budgets.automationDeadlineMs,
             signal,
-            () =>
-              acquisitionLifecycleTimeoutError(
-                budgets,
-                requestedIdentity,
-                "binding the device session",
-              ),
             bindUndoneIfUndelivered(
               async (receipt, bindSignal) => {
                 return await bindBootedDeviceSession(
@@ -503,8 +497,16 @@ async function bindPreparedDevice(
               },
               () => state.boot,
             ),
-            (settlement) => {
-              state.bindingSettlements.push(settlement);
+            {
+              timeoutError: () =>
+                acquisitionLifecycleTimeoutError(
+                  budgets,
+                  requestedIdentity,
+                  "binding the device session",
+                ),
+              onOrphan: (settlement) => {
+                state.bindingSettlements.push(settlement);
+              },
             },
           );
     if (readinessResult.preservedSessionId && !autolockEnabled) {
@@ -578,7 +580,7 @@ export async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Pro
           false,
           true,
           "runner-setup",
-          0,
+          { attempts: 0 },
         ),
     };
     const pool = getStartDevicePool(getDeviceToolsDependencies().daemonState);
@@ -701,17 +703,11 @@ export async function bindBootedDeviceSession(
       recoveryTarget,
     });
   if (resumeSessionId) {
-    return await resumePreparedDeviceSession(
-      device,
-      args,
-      resumeSessionId,
-      bind,
-      {
-        autolockEnabled: useAutolock,
-        achievedReadiness,
-      },
+    return await resumePreparedDeviceSession(device, args, resumeSessionId, bind, {
+      autolockEnabled: useAutolock,
+      achievedReadiness,
       daemonState,
-    );
+    });
   }
   const boundSessionId = await bind();
   recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
@@ -727,11 +723,12 @@ async function resumePreparedDeviceSession(
   {
     autolockEnabled,
     achievedReadiness,
+    daemonState,
   }: {
     autolockEnabled: boolean;
     achievedReadiness: DeviceReadinessLevel;
+    daemonState: Pick<DaemonStateLike, "getDevicePool" | "getSessionManager">;
   },
-  daemonState: Pick<DaemonStateLike, "getDevicePool" | "getSessionManager">,
 ): Promise<string> {
   const pool = daemonState.getDevicePool();
   // The resume bind and adoption share a close fence, including provisionDevice callers.

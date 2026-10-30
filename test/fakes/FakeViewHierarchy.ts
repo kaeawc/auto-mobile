@@ -3,7 +3,11 @@ import type {
   ViewHierarchy,
 } from "../../src/features/observe/interfaces/ViewHierarchy";
 import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../src/models";
-import { resolveViewHierarchyReadArgs } from "../../src/features/observe/hierarchyReadArgs";
+import {
+  resolveViewHierarchyReadArgs,
+  type ViewHierarchyReadRequest,
+} from "../../src/features/observe/hierarchyReadArgs";
+import type { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import {
   findAccessibilityFocusedElement,
   findFocusedElement,
@@ -30,20 +34,10 @@ export class FakeViewHierarchy implements ViewHierarchy {
    * Get the view hierarchy (fake implementation).
    */
   async getViewHierarchy(
-    _queryOptions?: any,
-    perfOrRequest?: any,
-    skipWaitForFreshArg?: boolean,
-    minTimestampArg?: number,
-    signalArg?: AbortSignal,
-    readOptionsArg?: number | HierarchyReadOptions,
+    _queryOptions?: ViewHierarchyQueryOptions,
+    request?: ViewHierarchyReadRequest,
   ): Promise<ViewHierarchyResult> {
-    const { skipWaitForFresh, minTimestamp, readOptions } = resolveViewHierarchyReadArgs(
-      perfOrRequest,
-      skipWaitForFreshArg,
-      minTimestampArg,
-      signalArg,
-      readOptionsArg,
-    );
+    const { skipWaitForFresh, minTimestamp, readOptions } = resolveViewHierarchyReadArgs(request);
     if (this.shouldFail && this.failureError) {
       throw this.failureError;
     }
@@ -169,7 +163,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
     return this.calls;
   }
 
-  /** The sixth getViewHierarchy argument of each call, index-aligned with getCalls(). */
+  /** The resolved read policy of each getViewHierarchy call, index-aligned with getCalls(). */
   getReadOptions(): ReadonlyArray<number | HierarchyReadOptions | undefined> {
     return this.readOptionsByCall;
   }

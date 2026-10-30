@@ -149,7 +149,7 @@ describe("explicit bind against a peer's idle forwarding lease (#11349)", () => 
         files.source(),
         sockets,
         () => socketPath,
-        timer,
+        { timer },
       ),
     });
     await pool.initializeWithDevices([DEVICE]);

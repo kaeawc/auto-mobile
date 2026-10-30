@@ -62,7 +62,11 @@ const barrierHandler = async (
   throwIfAborted(signal, true);
 
   try {
-    await coordinator.awaitBarrier(lock, device.deviceId, deviceCount, timeout, namespace, signal);
+    await coordinator.awaitBarrier(lock, device.deviceId, deviceCount, {
+      timeout,
+      namespace,
+      signal,
+    });
   } catch (error) {
     // Release any devices still waiting so they fail fast instead of hanging
     // until their own barrier timeout.

@@ -1,6 +1,7 @@
 import type { WatchSimulatorSimctl } from "../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
 import type { BootedDevice } from "../../src/models";
 import type { WatchLifecycleSimctl } from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
+import type { WatchSimulatorCreator } from "../../src/utils/ios-cmdline-tools/WatchSimulatorProvisioner";
 import type {
   AppleDevice,
   AppleDeviceRuntime,
@@ -91,6 +92,8 @@ export const IPHONE_UDID = "1B2C3D4E-5F60-4718-8293-A1B2C3D4E5F6";
 export class FakeWatchLifecycleSimctl extends FakeWatchSimctl implements WatchLifecycleSimctl {
   readonly commands: string[] = [];
   onStateChange: (() => void) | undefined;
+  /** When set, a boot is logged and then fails with this error, leaving the watch shut down. */
+  bootError: Error | undefined;
 
   constructor(devices: AppleDevice[] = [watchDevice()]) {
     super();
@@ -106,6 +109,9 @@ export class FakeWatchLifecycleSimctl extends FakeWatchSimctl implements WatchLi
 
   async waitForSimulatorReady(udid: string, timeoutMs?: number): Promise<BootedDevice> {
     this.commands.push(`boot ${udid} ${timeoutMs}`);
+    if (this.bootError) {
+      throw this.bootError;
+    }
     const device = this.setState(udid, "Booted");
     return { name: device.name, platform: "ios", deviceId: udid, observedAt: 7 };
   }
@@ -133,5 +139,54 @@ export class FakeWatchLifecycleSimctl extends FakeWatchSimctl implements WatchLi
     return Object.values(this.listing.devices)
       .flat()
       .find((device) => device.udid === udid);
+  }
+}
+
+/**
+ * {@link FakeWatchLifecycleSimctl} plus `simctl create`: a device type and runtime from the fake's
+ * catalog add a shutdown watch under that runtime with the next UDID, and anything else fails as
+ * simctl does; `simctl delete` removes a listed device. Creates and deletes are logged in
+ * `commands`.
+ */
+export class FakeWatchProvisionSimctl
+  extends FakeWatchLifecycleSimctl
+  implements WatchSimulatorCreator
+{
+  createError: Error | undefined;
+  deleteError: Error | undefined;
+  private created = 0;
+
+  constructor(devices: AppleDevice[] = []) {
+    super(devices);
+    this.runtimes = [WATCH_RUNTIME];
+    this.deviceTypes = [WATCH_DEVICE_TYPE];
+  }
+
+  async createSimulator(name: string, deviceType: string, runtime: string): Promise<string> {
+    this.commands.push(`create ${name} ${deviceType} ${runtime}`);
+    if (this.createError) {
+      throw this.createError;
+    }
+    if (!this.deviceTypes.some((type) => type.identifier === deviceType)) {
+      throw new Error(`Invalid device type: ${deviceType}`);
+    }
+    if (!this.runtimes.some((entry) => entry.identifier === runtime)) {
+      throw new Error(`Invalid runtime: ${runtime}`);
+    }
+    this.created++;
+    const udid = `C0FFEE00-0000-4000-8000-${String(this.created).padStart(12, "0")}`;
+    const devices = (this.listing.devices[runtime] ??= []);
+    devices.push(watchDevice({ udid, name, deviceTypeIdentifier: deviceType }));
+    return udid;
+  }
+
+  async deleteSimulator(udid: string): Promise<void> {
+    this.commands.push(`delete ${udid}`);
+    if (this.deleteError) {
+      throw this.deleteError;
+    }
+    for (const [runtime, devices] of Object.entries(this.listing.devices)) {
+      this.listing.devices[runtime] = devices.filter((device) => device.udid !== udid);
+    }
   }
 }

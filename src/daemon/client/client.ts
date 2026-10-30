@@ -714,7 +714,6 @@ export class DaemonClient {
     params: Record<string, any>,
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
-    signal?: AbortSignal,
     options: DaemonToolCallOptions = {},
   ): Promise<any> {
     return this.sendRequest(
@@ -725,8 +724,7 @@ export class DaemonClient {
       },
       progressToken,
       onRequestId,
-      signal,
-      options.tasks,
+      options,
     );
   }
 
@@ -740,7 +738,7 @@ export class DaemonClient {
     tasks: TaskRelayFrame,
     { signal }: { signal?: AbortSignal } = {},
   ): Promise<any> {
-    return this.sendRequest(method, params, undefined, undefined, signal, tasks);
+    return this.sendRequest(method, params, undefined, undefined, { signal, tasks });
   }
 
   /**
@@ -751,7 +749,7 @@ export class DaemonClient {
     params: Record<string, any> = {},
     { signal }: { signal?: AbortSignal } = {},
   ): Promise<any> {
-    return this.sendRequest("resources/read", { uri, ...params }, undefined, undefined, signal);
+    return this.sendRequest("resources/read", { uri, ...params }, undefined, undefined, { signal });
   }
 
   private async sendRequest(
@@ -759,8 +757,7 @@ export class DaemonClient {
     params: Record<string, any>,
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
-    signal?: AbortSignal,
-    tasks?: TaskRelayFrame,
+    { signal, tasks }: DaemonToolCallOptions = {},
   ): Promise<any> {
     signal?.throwIfAborted();
     // Ensure we're connected

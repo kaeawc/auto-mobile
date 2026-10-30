@@ -22,8 +22,35 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   `AndroidOrIosPlatform`. Bookkeeping that only records a device's platform (bindings,
   reservations, sessions) holds the full `Platform`.
 - **Schemas advertise watchOS only where it works.** MCP tool input and output schemas keep
-  `["android", "ios"]` until a tool supports watchOS, so `platform: "watchos"` fails schema
-  validation on every tool today and agents are not offered a value the tool rejects.
+  `["android", "ios"]` until a tool supports watchOS, so agents are not offered a value the tool
+  rejects. A tool that opts in gets its own platform enum (the shared `platformSchema` stays
+  Android/iOS).
+- **Allowlisted app tools.** `installApp`, `uninstallApp`, `listApps`, `launchApp` and
+  `terminateApp` route a watch to `WatchAppManager` (`simctl install|uninstall|listapps|launch|
+  terminate` on the watch UDID) through their executor factories; Android and iOS keep their
+  executors. `installApp` takes only a `.app` (bundle id from Info.plist; `upgrade` from a prior
+  listing). Android-only options are refused by name; `uninstallApp` refuses `keepData: true`.
+  `launchApp` reports a not-installed app without launching; `coldBoot` stops a running process
+  first; `clearAppData` reuses the iOS simulator wipe (terminate, resolve the data container
+  confined to the watch's device-set directory, remove Documents, Library and tmp), and a failed
+  wipe launches nothing. `prototype: true` is refused before any agent preparation. A
+  `terminateApp` whose process is already gone is a success with `wasRunning: false`.
+- **Screenshot-only observe.** `observe` on a watch (`src/server/observeWatch.ts`) captures with
+  `simctl io <udid> screenshot` through `SimCtlClient.screenshot`, writes the PNG into the shared
+  retained screenshot cache, and returns the screenshot with the PNG header's `screenSize` and a
+  `hierarchyUnavailable` note. No CtrlProxy, hierarchy, element matching, snapshot reference or
+  observation resource runs. Hierarchy fields are absent, not empty, so "no elements" is never
+  read as an empty screen; for the same reason the response finalizer neither projects a watch
+  observation to a skeleton nor makes it a session diff baseline. Options that need a hierarchy
+  or an Android/iOS pipeline (`waitFor`, `settled`, `raw`, `includeExtras`, `project`, `scope`,
+  `layer`, `skipBackStack`, `crop`, `screenshotOptions`, `screenshot: "none"`, another display)
+  are refused by name before any capture.
+- **Explicit resolution.** A watch session resolves through the pooled-session path (readiness
+  setup and keep-awake are Android-only). A sessionless call reaches a watch only with
+  `platform: "watchos"`: readiness then resolves a watch a fresh watchOS listing shows booted (by
+  deviceId, else the connection's watch pin, else the only booted watch) and runs no verification,
+  boot, CtrlProxy or settings step. A watch pin never decides a platform-less call.
+  `setActiveDevice` selects a pooled watch only when the call names `"watchos"`.
 - **Plain tools that look up a device themselves** (device management such as `killDevice`) are not
   behind the registry gate. They reach a watch only through watch inventory, so each decides
   watches explicitly. `startDevice` with `platform: "watchos"` takes an exact UDID or exact name
@@ -31,6 +58,18 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   and binds a pooled session at readiness `booted`; no automation runner step runs. `killDevice`
   takes a watch through the same holder checks and stops it with `simctl shutdown`. Both resolve
   the target from the watch listing, so a non-watch UDID is refused before any simctl command.
+  `provisionDevice` with `device.platform: "watchos"` (its own branch of the request union, so
+  Android and iOS validation is unchanged) takes exact runtime and device-type identifiers from the
+  watch catalog. Under a lifecycle lease on the name, rebound to the UDID once known, it adopts a
+  watch whose name, UDID, device type and runtime all match, or creates one fresh with
+  `simctl create` (never cloned; a named UDID is never created). With `boot` it boots and binds
+  like `startDevice`, and a watch it created is deleted again if boot or bind fails. `resources`,
+  `enableTools` and `readiness: "automation"` are refused; readiness defaults to `"none"`.
+  `deleteDevice` with `target.platform: "watchos"` resolves the watch by UDID from the watch
+  listing (absent means already deleted), applies killDevice's caller checks under the
+  `deleteDevice` name, stops a running watch through killDevice before taking its teardown lease
+  (killDevice's own lease would otherwise wait on it), then runs `simctl delete` and requires a
+  fresh watch listing that no longer shows it.
 - **`"either"` keeps meaning Android or iOS.** Listing `scanned` flags carry a `watchos` entry;
   until watch inventory exists it is `false`, so a watch is never treated as a freshly listed
   device.

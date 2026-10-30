@@ -328,8 +328,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
         vmSnapshotTimeoutMs,
         null,
         this.device.deviceId,
-        undefined,
-        { skipWakeAndUnlock: true },
+        { options: { skipWakeAndUnlock: true } },
       );
 
       logger.info("VM snapshot restoration complete");

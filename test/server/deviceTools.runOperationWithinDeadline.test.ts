@@ -24,7 +24,6 @@ function start(signal?: AbortSignal, undoOutcome: () => Promise<void> = async ()
     timer,
     timer.now() + 1_000,
     signal,
-    timeoutError,
     async (_signal, undoIfUndelivered, onDelivered) => {
       onDelivered(() => delivered.push("session"));
       undoIfUndelivered(async (result) => {
@@ -33,7 +32,7 @@ function start(signal?: AbortSignal, undoOutcome: () => Promise<void> = async ()
       });
       return await gate.promise;
     },
-    (pending) => orphans.push(pending),
+    { timeoutError, onOrphan: (pending) => orphans.push(pending) },
   ).then(
     (result) => ({ result }),
     (error: unknown) => ({ error }),

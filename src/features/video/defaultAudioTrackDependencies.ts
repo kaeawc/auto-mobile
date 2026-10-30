@@ -28,10 +28,22 @@ export function openFileBackedPcm(path: string): PcmFile {
   return {
     write: (chunk) => {
       if (failure) {
-        return;
+        return undefined;
       }
       bytes += chunk.byteLength;
-      stream.write(chunk);
+      if (stream.write(chunk)) {
+        return undefined;
+      }
+      // The buffer is full: hold the source until it drains, or the stream closes on an error.
+      return new Promise<void>((resolve) => {
+        const settle = () => {
+          stream.off("drain", settle);
+          stream.off("close", settle);
+          resolve();
+        };
+        stream.on("drain", settle);
+        stream.on("close", settle);
+      });
     },
     close: () => {
       closing ??= new Promise<number>((resolve, reject) => {

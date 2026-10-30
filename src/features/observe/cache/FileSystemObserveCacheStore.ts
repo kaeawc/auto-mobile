@@ -74,6 +74,12 @@ export const OBSERVE_RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
  */
 export type ObserveCacheFileWriter = (filePath: string, data: string) => Promise<void>;
 
+/** Disk operations behind {@link FileSystemObserveCacheStore}'s cleanup; real fs by default. */
+export interface ObserveCacheDiskOperations {
+  unlinkFile?: typeof unlinkAsync;
+  diskMetadata?: Pick<FileSystem, "readdir" | "stat">;
+}
+
 /**
  * File-system backed implementation of {@link ObserveResultCacheStore}.
  *
@@ -94,6 +100,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   private readonly writeFile: ObserveCacheFileWriter;
   private readonly instanceId: string;
   private readonly unlinkFile: typeof unlinkAsync;
+  private readonly diskMetadata: Pick<FileSystem, "readdir" | "stat">;
   private pendingDiskCleanup: Promise<void> = Promise.resolve();
 
   /**
@@ -114,11 +121,10 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     cacheDir?: string,
     writeFile: ObserveCacheFileWriter = writeFileAsync,
     idGenerator: IdGenerator = defaultIdGenerator,
-    unlinkFile: typeof unlinkAsync = unlinkAsync,
-    private readonly diskMetadata: Pick<FileSystem, "readdir" | "stat"> = {
-      readdir: sortedReaddir,
-      stat: statAsync,
-    },
+    {
+      unlinkFile = unlinkAsync,
+      diskMetadata = { readdir: sortedReaddir, stat: statAsync },
+    }: ObserveCacheDiskOperations = {},
   ) {
     this.timer = timer;
     this.cacheDir = cacheDir ?? getTempDir(TEMP_SUBDIRS.OBSERVE_RESULTS);
@@ -130,6 +136,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     }
     this.instanceId = encodeURIComponent(instanceId);
     this.unlinkFile = unlinkFile;
+    this.diskMetadata = diskMetadata;
     this.ensureCacheDirExists();
   }
 

@@ -638,16 +638,26 @@ function runtimeIncompatibleError(
   );
 }
 
-export function createDefaultExactDeviceProvisioner(
-  deviceManager: PlatformDeviceManager,
-  deviceCreationGate: DeviceCreationGate,
-  androidConfigWriter: AndroidAvdConfigWriter = new FileAndroidAvdConfigWriter(),
-  assertAdoptable?: ExactDeviceAdoptionGuard,
-  simulatorCreation?: SimulatorCreator,
+/** Optional seams for createDefaultExactDeviceProvisioner; absent ones use production defaults. */
+export interface DefaultExactDeviceProvisionerOptions {
+  androidConfigWriter?: AndroidAvdConfigWriter;
+  assertAdoptable?: ExactDeviceAdoptionGuard;
+  simulatorCreation?: SimulatorCreator;
   ios?: Pick<
     DefaultExactDeviceProvisionerDependencies,
     "iosSimulator" | "iosRuntimeCatalog" | "prebootProfile" | "timer" | "lifecycleCoordinator"
-  >,
+  >;
+}
+
+export function createDefaultExactDeviceProvisioner(
+  deviceManager: PlatformDeviceManager,
+  deviceCreationGate: DeviceCreationGate,
+  {
+    androidConfigWriter = new FileAndroidAvdConfigWriter(),
+    assertAdoptable,
+    simulatorCreation,
+    ios,
+  }: DefaultExactDeviceProvisionerOptions = {},
 ): ExactDeviceProvisioner {
   return new DefaultExactDeviceProvisioner({
     assertAdoptable,

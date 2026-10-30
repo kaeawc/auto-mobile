@@ -193,7 +193,10 @@ export class ThresholdManager {
     weight: number = 1.0,
     ttlHours: number = 24,
   ): Promise<void> {
-    await this.storeThresholdsWith(this.db, deviceId, capabilities, thresholds, weight, ttlHours);
+    await this.storeThresholdsWith(this.db, deviceId, capabilities, thresholds, {
+      weight,
+      ttlHours,
+    });
   }
 
   private async storeThresholdsWith(
@@ -210,9 +213,9 @@ export class ThresholdManager {
       cpuUsageThresholdPercent: number;
       touchLatencyThresholdMs: number;
     },
-    weight: number = 1.0,
-    ttlHours: number = 24,
+    options: { weight?: number; ttlHours?: number } = {},
   ): Promise<void> {
+    const { weight = 1.0, ttlHours = 24 } = options;
     const sessionId = this.getCurrentSessionId();
 
     const newThresholds: NewPerformanceThresholds = {

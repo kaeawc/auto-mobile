@@ -10,6 +10,14 @@ export interface PoolCapacityStats {
   error: number;
 }
 
+/** What else counts toward, and is reported with, a pool capacity check. */
+export interface PoolCapacityContext {
+  /** Android emulators being recovered, which count toward capacity. */
+  recoveringAndroidImages: number;
+  /** The already-rendered refresh-failure prefix (empty when the last refresh succeeded). */
+  refreshContext: string;
+}
+
 /**
  * Throws the "not enough devices" error when the pool plus eligible Android recoveries cannot
  * satisfy a multi-device acquisition (`recoveringAndroidImages` are Android emulators being
@@ -21,8 +29,7 @@ export function assertPoolCapacity(
   stats: PoolCapacityStats,
   requiredCount: number,
   platform: Platform | undefined,
-  recoveringAndroidImages: number,
-  refreshContext: string,
+  { recoveringAndroidImages, refreshContext }: PoolCapacityContext,
 ): void {
   if (
     matcher.hasSufficientCapacityIncludingAndroidRecovery(

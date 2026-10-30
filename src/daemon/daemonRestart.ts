@@ -407,14 +407,11 @@ export async function restartAcceptanceSessionWhileLocked(
   let replacedByOtherGeneration = false;
   try {
     await client.connect();
-    restartToken = await requestAcceptanceRestartAdmission(
-      host,
-      client,
-      status,
+    restartToken = await requestAcceptanceRestartAdmission(host, client, status, {
       generation,
       scope,
       startupSecret,
-    );
+    });
     await commitAcceptanceRestartAdmission(host, client, status, restartToken);
     if (await verifyAcceptanceGenerationBeforeSignal(host, status, generation)) {
       host.signalProcess(status.pid!, "SIGKILL");
@@ -462,9 +459,15 @@ export async function requestAcceptanceRestartAdmission(
   host: DaemonRestartHost,
   client: DaemonClientLike,
   status: DaemonStatus,
-  generation: DaemonGenerationIdentity,
-  scope: AcceptanceSessionRestartScope,
-  startupSecret: string,
+  {
+    generation,
+    scope,
+    startupSecret,
+  }: {
+    generation: DaemonGenerationIdentity;
+    scope: AcceptanceSessionRestartScope;
+    startupSecret: string;
+  },
 ): Promise<string> {
   const result: unknown = await client.callDaemonMethod(DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD, {
     ...status,

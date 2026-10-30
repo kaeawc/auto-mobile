@@ -258,8 +258,14 @@ async function requestedPoolDevice(
       throw discoveryIncomplete;
     }
   }
-  if (!device) {
-    throw new ActionableError(`Device '${deviceId}' not found in device pool`);
+  if (!device || (device.platform === "watchos") !== (platform === "watchos")) {
+    // A watch is selected only when the call names watchOS, and naming it selects only a watch.
+    throw new ActionableError(
+      `Device '${deviceId}' not found in device pool` +
+        (device?.platform === "watchos"
+          ? '; pass platform "watchos" to select an Apple Watch'
+          : ""),
+    );
   }
   return device;
 }

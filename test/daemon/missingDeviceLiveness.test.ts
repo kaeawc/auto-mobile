@@ -3,9 +3,9 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { Mutex } from "async-mutex";
 import {
   MissingDeviceLiveness,
-  MISSING_DEVICE_MISS_THRESHOLD,
   type MissingDeviceLivenessPoolPort,
 } from "../../src/daemon/missingDeviceLiveness";
+import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/deviceLossMisses";
 import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { MutablePooledDevice } from "./helpers/DaemonDisconnectHarness";
@@ -20,6 +20,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import { registerDeviceResourceInvalidation } from "../../src/daemon/deviceResourceInvalidation";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
 
 const deviceId = "emulator-5554";
 
@@ -61,7 +62,7 @@ async function flushUntil(condition: () => boolean): Promise<void> {
 function harness() {
   const timer = new FakeTimer();
   const devices = new Map<string, PooledDevice>();
-  const misses = new Map<string, number>();
+  const misses = new DeviceLossMisses();
   const calls: string[] = [];
   const outcomes: string[] = [];
   const settlements: (string | undefined)[] = [];
@@ -159,13 +160,9 @@ function harness() {
 }
 
 function emptyRefresh(h: ReturnType<typeof harness>) {
-  return h.liveness.removeMissingDevicesForRefresh(
-    false,
-    1,
-    new Set(),
-    new Set(),
-    new Set(["android"]),
-  );
+  return h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), new Set(), {
+    succeededPlatforms: new Set(["android"]),
+  });
 }
 
 describe("MissingDeviceLiveness", () => {
@@ -315,7 +312,7 @@ describe("MissingDeviceLiveness", () => {
     async (platformHasAnotherDevice) => {
       const h = harness();
       h.devices.set(deviceId, pooled());
-      const monitorMisses = new Map<string, number>();
+      const monitorMisses = new DeviceLossMisses();
       const bootedPlatforms = new Set<"android">(platformHasAnotherDevice ? ["android"] : []);
       const evaluate = (sourceSucceeded: boolean) =>
         evaluateDeviceDisconnects({
@@ -327,13 +324,9 @@ describe("MissingDeviceLiveness", () => {
           candidatePlatforms: new Map([[deviceId, "android" as const]]),
         });
       const refresh = (sourceSucceeded: boolean) =>
-        h.liveness.removeMissingDevicesForRefresh(
-          false,
-          1,
-          new Set(),
-          bootedPlatforms,
-          new Set(sourceSucceeded ? ["android" as const] : []),
-        );
+        h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), bootedPlatforms, {
+          succeededPlatforms: new Set(sourceSucceeded ? ["android" as const] : []),
+        });
 
       for (let miss = 1; miss < MISSING_DEVICE_MISS_THRESHOLD; miss++) {
         h.timer.advanceTime(5_000);
@@ -370,7 +363,9 @@ describe("MissingDeviceLiveness", () => {
     const device = pooled();
     h.devices.set(deviceId, device);
     expect(
-      await h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), new Set(), new Set()),
+      await h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), new Set(), {
+        succeededPlatforms: new Set(),
+      }),
     ).toBe(0);
     expect(h.misses.has(deviceId)).toBe(false);
     device.sessionId = "session";

@@ -324,8 +324,7 @@ async function runAdmittedCall(deps: ToolCallIngressDeps, call: AdmittedCall) {
       result,
       acquiredSessionUuid,
       options.sessionToolSelectionService,
-      call.requestedEnableTools,
-      plan.connectionProfileUuid,
+      { enableTools: call.requestedEnableTools, connectionProfileUuid: plan.connectionProfileUuid },
     );
     bindActiveDeviceResult(plan, result);
     await bindNamedSession(plan, { result, readOutsideBoundSession: call.readOutsideBoundSession });

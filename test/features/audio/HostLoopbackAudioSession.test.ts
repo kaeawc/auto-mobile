@@ -208,7 +208,9 @@ describe("HostLoopbackAudioSession capture", () => {
   test("an open-ended capture streams PCM until stopped by closing stdin", async () => {
     const { session, helpers } = setup();
     const received: number[] = [];
-    const stream = await session.streamCapture((pcm) => received.push(...pcm));
+    const stream = await session.streamCapture((pcm) => {
+      received.push(...pcm);
+    });
     expect(helpers[0].args).toEqual(["capture", "--until-stopped", "--sample-rate", "48000"]);
     helpers[0].stdout.write(pcmBytes([7, 8]));
     // Closing stdin is the helper's cue to write its last buffer and exit.
@@ -246,6 +248,68 @@ describe("HostLoopbackAudioSession capture", () => {
     await turns(2);
     timer.advanceTime(CAPTURE_DRAIN_MS);
     await expect(stopping).rejects.toThrow("may be missing");
+  });
+
+  test("a busy sink pauses the helper's stdout until it settles", async () => {
+    const { session, helpers } = setup();
+    let release: () => void = () => {};
+    const stream = await session.streamCapture(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    helpers[0].stdout.write(pcmBytes([1]));
+    await turns(1);
+    expect(helpers[0].stdout.isPaused()).toBe(true);
+    release();
+    await turns(1);
+    expect(helpers[0].stdout.isPaused()).toBe(false);
+    helpers[0].exit(0);
+    await stream.stop();
+  });
+
+  test("a sink still busy after the helper exits extends the output wait instead of failing", async () => {
+    const { session, helpers, timer } = setup();
+    let release: () => void = () => {};
+    const stream = await session.streamCapture(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    helpers[0].stdin.on("finish", () => {
+      helpers[0].stdout.write(pcmBytes([1]));
+      helpers[0].exit(0);
+    });
+    const stopping = stream.stop();
+    await turns(3);
+    // Three drain windows pass while the disk is slow; the stop keeps waiting.
+    timer.advanceTime(CAPTURE_DRAIN_MS * 3);
+    await turns(1);
+    release();
+    await expect(stopping).resolves.toBeUndefined();
+  });
+
+  test("a helper held back by a busy sink is not killed at the stop grace", async () => {
+    const { session, helpers, timer } = setup();
+    let release: () => void = () => {};
+    const stream = await session.streamCapture(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    helpers[0].stdout.write(pcmBytes([1]));
+    await turns(1);
+    const stopping = stream.stop();
+    // Well past the 2 s grace while the disk is slow: the helper is waiting on us, not hung.
+    timer.advanceTime(6_000);
+    await turns(1);
+    expect(helpers[0].signals).toEqual([]);
+    release();
+    helpers[0].exit(0);
+    await expect(stopping).resolves.toBeUndefined();
   });
 
   test("less audio than asked for is timedOut, not an error", async () => {

@@ -291,6 +291,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | button          | native   | material | —     |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
+| castButton      | material | material | —     |
 | chart           | material | material | —     |
 | checkbox        | material | material | —     |
 | chip            | material | material | —     |
@@ -1804,6 +1805,7 @@ without them. A device advertising `prototype_network_v1` also writes `/data` fo
 | `statusKey`            | A declared **string** state key (a numeric or boolean key is refused). Set to `"loading"`, then `"success"` or `"error"`, so `visibleWhen` can show a spinner or an error. Inside a repeat it may hold placeholders like any state key.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `via`                  | `"host"` (default) or `"device"`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `timeoutMs`            | Optional integer, 1 to `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `allowSecureInRequest` | Optional boolean. Lets this request send a `storage.secure` key; without it any reference to one is refused.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `onSuccess`, `onError` | Optional action lists (1 to 32). Recursive: a request may carry requests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 **Limits** live in the contract's `limits` and `src/features/prototype/prototypeRequestLimits.ts`
@@ -2219,9 +2221,15 @@ replay `test/fixtures/prototype-spec/ble/codecs.json`. The module contract and r
 `{status, transactionId}` into `into`, where `status` is `purchased`, `deferred` or `pending`; a back-out is the
 typed error `cancelled`. `commerce.restore` takes no arguments. The `commerce.entitlementsChanged` event and the
 read-only keys `/platform/commerce/entitlements` and `/platform/commerce/lastTransaction` complete the module.
-No argument carries an amount, merchant, key or card: prices come only from the catalog. The root `commerce`
-catalog block, the check that `productId` names a catalog product and `commerce.checkout` are not in the
-contract yet, and no production runtime advertises the module.
+No argument carries an amount, merchant, key or card: prices come only from the catalog.
+
+The root `commerce` catalog (needs `commerce` in `requires.platform`) is `{backend: "fake", products}` with 1 to
+32 products. Each product has a unique `id` (an identifier), a `title`, a `kind` (`consumable`, `nonConsumable`
+or `subscription`) and a `price` of a decimal-string `amount` (up to two decimal places) and an upper-case
+three-letter `currency`. Only a subscription may have a `period` or `trialPeriod`, an ISO 8601 duration of
+whole days, weeks, months or years (`P7D`, `P1M`). The block has no merchant, gateway, key, card or URL field.
+Every `commerce.*` call needs the catalog, and a literal `productId` must name one of its products.
+`commerce.checkout` is not in the contract, and no production runtime advertises the module.
 
 **Secure storage (#14321).** `storage.secure` lists up to 8 `state:` keys the runtime keeps in the Android
 Keystore or the iOS Keychain instead of plaintext storage. Each must be a declared state key holding a string,
@@ -2229,8 +2237,11 @@ and it may not also appear in `storage.keys`. The list needs the `secureStorage`
 (`prototype_platform_secureStorage_v1`) in `requires.platform`; its one read-only key,
 `/platform/secureStorage/locked`, is true while a biometric-bound key is still locked.
 `secureAuth: {"state:<key>": "biometric"}` binds a secure key to a `biometric.authenticate` and needs `biometric`
-in `requires.platform`. A secure key never leaves the device through an emit `context`. The validators refuse
-`{state: <secure key>}` there. No production runtime advertises the module yet.
+in `requires.platform`. A secure key never leaves the device through an emit `context`: the validators refuse
+`{state: <secure key>}` there. A `request` may send one only with `allowSecureInRequest: true`; otherwise a
+`{state: <secure key>}` binding in a header, query value or body (whole, form entry or multipart value), or a
+`{<secure key>}` placeholder in the URL, a header or a query value, is refused. No production runtime advertises
+the module yet.
 
 **Motion and sensors (#14327).** The `sensors` module (`prototype_platform_sensors_v1`) has no calls and one
 event, `sensors.shake`, handled in `platform.on`. Its read-only keys are flat, because a `/platform` pointer reads
@@ -2279,7 +2290,10 @@ importance, description?, showBadge?}]}`: 1-8 channels with unique key-shaped id
 most 64), `importance` one of `min`, `low`, `default` or `high`, and an optional `description` (at most
 256). The block needs `notifications` in `requires.platform`. A literal `channel` on `notifications.post`
 must name a declared channel, a literal `actions` list needs unique ids, and `notifications.cancel` takes
-exactly one of `id`, `group` or `all`; bound values are checked by the runtime. On iOS, `min` and `low`
+exactly one of `id`, `group` or `all`; bound values are checked by the runtime.
+`notifications.schedule` takes the `post` arguments plus `delaySeconds` (a whole number, 1 to 604800)
+and needs `prototype_platform_notifications_scheduled_v1` as well; the same channel and action-id rules
+apply, and `notifications.scheduledFired` reports a scheduled notification that fired (#14283). On iOS, `min` and `low`
 map to the passive interruption level and `default` and `high` to active. No production runtime
 advertises the module yet.
 
@@ -2340,6 +2354,24 @@ pointer to an array of `{startMs, endMs, text}` cues that each end after they st
 unique per player; `hls:` ids are reserved for in-band HLS tracks. `media.setCaptions` (`player`,
 `track`, `""` for off) selects a track and `/platform/media/players/<id>/captionTrack` reports it.
 The cue parser and caption overlay are separate slices.
+
+**Feed autoplay.** A `videoPlayer` with
+`autoplay: "whenVisible"` may set `visibleThreshold` (0.1-1, default 0.6) and `resumePosition`;
+either field without `"whenVisible"` is an error. Feed players share at most
+`MAX_PROTOTYPE_ACTIVE_DECODERS` (3) decoders, allocated by a pure function that Kotlin and Swift
+both replay against `test/fixtures/prototype-media-pool`:
+
+- The anchor is the settled pager page, or else the most visible player, with ties going to the
+  topmost.
+- The window is the anchor, the next item and the previous item, in that order.
+- The anchor plays only in the foreground, and only when its page has settled or, in a list, when
+  it is at least `visibleThreshold` visible.
+- Other window players preload; held players outside the window are released.
+- When nothing is visible, every player is released.
+
+The allocator only decides which players play, preload or release. Each renderer reports visible
+fractions, the settled page and foreground state, binds pooled players to surfaces and preloads.
+
 **Queues (#14249, contract only).** A declared player takes exactly one of `source` or `queue`, a
 `/data` pointer to an array of `{id, title, artist?, album?, artwork?, source, durationMs?}` items
 with unique ids; `appendData` and `removeData` edit the queue at runtime. A queued player, and the
@@ -2373,8 +2405,12 @@ app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause 
 `sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
 `receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
 `connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
-cast `media` player id) and `volume`. CtrlProxy never advertises the module; the `castButton` node is a
-separate slice.
+cast `media` player id) and `volume`. CtrlProxy never advertises the module.
+
+The `castButton` node is the system route picker that starts a session; there is no start call. Its
+required `player` names a declared `media.players` id or an inline `videoPlayer` id, and optional
+`protocols` (1-2 unique of `googleCast`, `airplay`) limits the routes it offers. Every `castButton`
+needs `cast` in `requires.platform`. No renderer draws it yet.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

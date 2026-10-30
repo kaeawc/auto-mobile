@@ -93,7 +93,7 @@ describe("PlanExecutor executeStep refactor", () => {
       "Fake barrier",
       z.object({ device: z.string() }),
       async (_params, _progress, signal) => {
-        const pending = coordinator.awaitBarrier("plan-abort", "B", 2, 120000, undefined, signal);
+        const pending = coordinator.awaitBarrier("plan-abort", "B", 2, { timeout: 120000, signal });
         started.resolve();
         await pending;
         return createStructuredToolResponse({ success: true });

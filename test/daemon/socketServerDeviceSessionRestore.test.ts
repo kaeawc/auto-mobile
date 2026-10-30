@@ -338,9 +338,9 @@ test("healthy bound route is synchronous and does not read persistence", async (
       },
       1_000,
       h.socketId,
-      new ProgressExtendableDeadline(h.timer.now(), 1_000),
-      1_000,
+      { deadline: new ProgressExtendableDeadline(h.timer.now(), 1_000), originalTimeoutMs: 1_000 },
     );
+
     expect(h.forwarded).toHaveLength(before + 1);
     await forward;
     expect(lookup).not.toHaveBeenCalled();

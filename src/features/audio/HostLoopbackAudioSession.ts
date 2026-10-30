@@ -2,6 +2,7 @@ import type {
   AudioInjection,
   AudioStream,
   CaptureResult,
+  PcmSink,
   InjectAudioOptions,
   InjectionResult,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
@@ -41,6 +42,13 @@ export interface HostLoopbackAudioSessionDeps {
 }
 
 type EarlyEnd = Exclude<InjectionResult["reason"], "completed">;
+
+/** How `feed` learns the injection ended and reports playback progress. */
+interface FeedControl {
+  ended: Promise<void>;
+  isEnded: () => boolean;
+  progress: { started(): void; queued(frames: number): void };
+}
 
 function helperMissing(code: EmulatorAudioErrorCode, envName: string): EmulatorAudioError {
   return new EmulatorAudioError(
@@ -129,12 +137,16 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
         : this.timer.setTimeout(() => end("max_duration"), options.maxDurationMs);
     let framesQueued = 0;
     let playbackStartMs: number | undefined;
-    const feeding = this.feed(helper, pcm, options, ended, () => halted, {
-      started: () => {
-        playbackStartMs ??= this.timer.monotonicNow?.() ?? this.timer.now();
-      },
-      queued: (frames) => {
-        framesQueued += frames;
+    const feeding = this.feed(helper, pcm, options, {
+      ended,
+      isEnded: () => halted,
+      progress: {
+        started: () => {
+          playbackStartMs ??= this.timer.monotonicNow?.() ?? this.timer.now();
+        },
+        queued: (frames) => {
+          framesQueued += frames;
+        },
       },
     });
     const done = (async (): Promise<InjectionResult> => {
@@ -184,7 +196,9 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     const helper = await this.start(
       "capture",
       ["capture", "--duration-ms", String(options.durationMs), "--sample-rate", String(sampleRate)],
-      (chunk) => received.push(chunk),
+      (chunk) => {
+        received.push(chunk);
+      },
     );
     let timedOut = false;
     const deadline = this.timer.setTimeout(() => {
@@ -208,10 +222,7 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     };
   }
 
-  async streamCapture(
-    sink: (pcm: Uint8Array) => void,
-    options: { sampleRate?: number } = {},
-  ): Promise<AudioStream> {
+  async streamCapture(sink: PcmSink, options: { sampleRate?: number } = {}): Promise<AudioStream> {
     const sampleRate = helperRate(options.sampleRate ?? CAPTURE_SAMPLE_RATE);
     const helper = await this.start(
       "capture",
@@ -223,12 +234,12 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     // crash) or a pipe still open after the drain wait means the tail may be missing (#15860).
     const stop = async (): Promise<void> => {
       helper.process.stdin.end();
-      const kill = this.timer.setTimeout(
-        () => helper.process.kill("SIGTERM"),
-        STREAM_STOP_GRACE_MS,
+      // A helper blocked writing to a pipe a busy sink has not drained cannot exit yet; it is not hung.
+      const cancelKill = this.idleDeadline(helper, STREAM_STOP_GRACE_MS, () =>
+        helper.process.kill("SIGTERM"),
       );
       const exitCode = await helper.exited;
-      this.timer.clearTimeout(kill);
+      cancelKill();
       const ended = await this.untilOutputEnded(helper);
       if (exitCode !== 0) {
         throw helper.failure();
@@ -253,16 +264,30 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
 
   /**
    * Waits for the last PCM after exit, bounded so a pipe that never closes cannot hang the call.
-   * Resolves true when the output ended, false when the wait ran out.
+   * The bound counts only time the consumer is idle: output held back by a busy sink (a slow disk)
+   * is not a stuck pipe. Resolves true when the output ended, false when the wait ran out.
    */
   private untilOutputEnded(helper: RunningLoopbackHelper): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      const handle = this.timer.setTimeout(() => resolve(false), CAPTURE_DRAIN_MS);
+      const cancel = this.idleDeadline(helper, CAPTURE_DRAIN_MS, () => resolve(false));
       void helper.outputEnded.then(() => {
-        this.timer.clearTimeout(handle);
+        cancel();
         resolve(true);
       });
     });
+  }
+
+  /**
+   * Runs `expire` after `ms`, re-arming instead while the helper's sink is busy, so time spent
+   * waiting on a slow consumer never counts against the helper. Returns a cancel function.
+   */
+  private idleDeadline(helper: RunningLoopbackHelper, ms: number, expire: () => void): () => void {
+    let handle: ReturnType<Timer["setTimeout"]>;
+    const arm = () => {
+      handle = this.timer.setTimeout(() => (helper.sinkBusy() ? arm() : expire()), ms);
+    };
+    arm();
+    return () => this.timer.clearTimeout(handle);
   }
 
   async close(): Promise<void> {
@@ -275,7 +300,7 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
   private async start(
     operation: LoopbackOperation,
     args: string[],
-    onStdout?: (chunk: Uint8Array) => void,
+    onStdout?: PcmSink,
   ): Promise<RunningLoopbackHelper> {
     const path = this.deps.helperPath();
     if (!path) {
@@ -300,10 +325,9 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     helper: RunningLoopbackHelper,
     pcm: PcmAudio,
     options: InjectAudioOptions,
-    ended: Promise<void>,
-    isEnded: () => boolean,
-    progress: { started(): void; queued(frames: number): void },
+    control: FeedControl,
   ): Promise<void> {
+    const { ended, isEnded, progress } = control;
     const delayMs = options.startDelayMs;
     if (delayMs) {
       // Ends early when the injection does, so stop() never waits out a start delay.

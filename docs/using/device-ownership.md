@@ -301,6 +301,45 @@ the device really should be stopped out from under its holder.
 - A refused `deleteDevice` carries the same typed fields as a refused
   `killDevice`.
 
+## Apple Watch simulators
+
+A watch is reached only by naming it: `platform: "watchos"`, or the
+`sessionUuid` of a watch session. A call without a platform never lands on a
+watch, even after one was selected.
+
+- `setActiveDevice` selects a watch only with `platform: "watchos"`; a bare
+  watch `deviceId` is not found. With a `sessionUuid` it binds the watch to that
+  session, otherwise it makes the watch the connection's active watch, which
+  only calls naming `platform: "watchos"` use.
+- `installApp`, `uninstallApp`, `listApps`, `launchApp` and `terminateApp`
+  work on a watch. `installApp` takes a `.app` bundle built for the watchOS
+  simulator; `.ipa`, `.apk` and the Android-only options are refused by name.
+  `uninstallApp` refuses `keepData: true`, because uninstalling always removes
+  the app's data.
+- `launchApp` on a watch accepts `coldBoot`, `clearAppData` (wipes the app's
+  Documents, Library and tmp before launching) and `launchArguments`, and
+  returns the app's `pid`. `intent`, `activityName`, `userId` and
+  `prototype: true` are refused. An app that is not installed fails with
+  `App is not installed`.
+- `provisionDevice` with `device.platform: "watchos"` takes the watch's exact
+  `name`, optional `deviceId`, and `spec.runtime` and `spec.deviceType`
+  identifiers from the host's watchOS runtimes and Apple Watch device types. It
+  adopts a watch that matches all of them, or creates one; a near match, an
+  unknown identifier or a `deviceId` that names no watch is refused. With
+  `boot` (the default) it boots the watch and returns a `sessionId`; a watch it
+  created is deleted again if that fails. `resources`, `enableTools` and
+  `readiness: "automation"` are refused; `readiness` is always `"none"`.
+- `observe` on a watch returns only a fresh screenshot (`screenshotPath`,
+  `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note:
+  the view hierarchy is not available on watchOS yet. `viewHierarchy`,
+  `skeleton`, `elements` and the other element fields are absent, not empty, so
+  read the screenshot rather than treating the screen as empty. Options that
+  need a hierarchy (`waitFor`, `raw`, `project`, `scope`, `layer`, `crop` and
+  the like), `screenshot: "none"` and `screenshotOptions` are refused by name.
+- Every other device tool refuses a watch with `<tool> does not support watchOS
+  yet`. `startDevice` and `killDevice` start and stop a watch named with
+  `platform: "watchos"`.
+
 ## A device that drops off
 
 An Android device that `adb` still lists as `offline` stays held for up to 60

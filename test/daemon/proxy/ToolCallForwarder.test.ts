@@ -134,14 +134,7 @@ describe("ToolCallForwarder", () => {
   test("forwards the routed args and applies the result between begin and end of the call", async () => {
     const h = createHarness();
     h.setResult({ content: [{ type: "text", text: "ok" }] });
-    const out = await h.forwarder.forward(
-      "observe",
-      { a: 1 },
-      undefined,
-      undefined,
-      undefined,
-      MODE,
-    );
+    const out = await h.forwarder.forward("observe", { a: 1 }, undefined, undefined, { ...MODE });
     expect(h.sent).toEqual([{ name: "observe", args: { a: 1, sessionUuid: "s1" } }]);
     expect(out.forwardedSessionUuid).toBe("s1");
     expect(h.events).toEqual(["begin:s1", "apply:0", "end:s1"]);
@@ -158,7 +151,7 @@ describe("ToolCallForwarder", () => {
   test("a result deferred to a task is returned without being applied", async () => {
     const h = createHarness();
     h.deferNext();
-    const out = await h.forwarder.forward("observe", {}, undefined, undefined, undefined, MODE);
+    const out = await h.forwarder.forward("observe", {}, undefined, undefined, { ...MODE });
     expect(out.result).toEqual({ content: [] });
     expect(h.events.some((e) => e.startsWith("apply"))).toBe(false);
     expect(h.events.at(-1)).toBe("end:s1");
@@ -168,7 +161,7 @@ describe("ToolCallForwarder", () => {
     const h = createHarness();
     const seen: number[] = [];
     h.setResult({ content: [] });
-    await h.forwarder.forward("observe", {}, "tok", (p) => seen.push(p), undefined, MODE);
+    await h.forwarder.forward("observe", {}, "tok", (p) => seen.push(p), { ...MODE });
     expect(h.events).toContain("apply:1");
     expect([...h.listeners.values()].every((m) => m.size === 0)).toBe(true);
   });
@@ -177,7 +170,7 @@ describe("ToolCallForwarder", () => {
     const h = createHarness();
     h.setSendError(new Error("unknown tool"));
     await expect(
-      h.forwarder.forward("observe", {}, undefined, undefined, undefined, MODE),
+      h.forwarder.forward("observe", {}, undefined, undefined, { ...MODE }),
     ).rejects.toThrow("unavailable:observe");
     expect(h.events).toEqual(["begin:s1", "end:s1"]);
     expect(h.ledger.activeReleaseEpochReferences.size).toBe(0);
@@ -188,7 +181,7 @@ describe("ToolCallForwarder", () => {
     const boom = new Error("boom");
     h.setSendError(boom);
     await expect(
-      h.forwarder.forward("observe", {}, undefined, undefined, undefined, MODE),
+      h.forwarder.forward("observe", {}, undefined, undefined, { ...MODE }),
     ).rejects.toBe(boom);
     expect(h.events.at(-1)).toBe("end:s1");
   });
@@ -198,7 +191,10 @@ describe("ToolCallForwarder", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(
-      h.forwarder.forward("observe", {}, undefined, undefined, controller.signal, MODE),
+      h.forwarder.forward("observe", {}, undefined, undefined, {
+        signal: controller.signal,
+        ...MODE,
+      }),
     ).rejects.toBeDefined();
     expect(h.sent).toEqual([]);
   });

@@ -46,7 +46,8 @@ internal object PrototypeNotificationRules {
       "notifications.cancel" ->
         if (cancelTargets.count { it in args } == 1) null
         else fail("$path.args", "notifications.cancel takes exactly one of id, group or all")
-      "notifications.post" -> postError(args, path, root)
+      "notifications.post",
+      "notifications.schedule" -> postError(args, path, root)
       else -> null
     }
   }

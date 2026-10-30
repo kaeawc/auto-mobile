@@ -233,14 +233,14 @@ export class SwipeOn extends BaseVisualChange {
       dependencies.voiceOverExecutor ??
       deviceIosSdkBridgeSwipeRunner(
         device,
-        new VoiceOverSwipeExecutor(
+        new VoiceOverSwipeExecutor({
           device,
-          this.executeGesture,
-          IOSCtrlProxyClient.getInstance(device),
+          executeGesture: this.executeGesture,
+          iosClient: IOSCtrlProxyClient.getInstance(device),
           iosVoiceOverDetector,
-          this.timer,
+          timer: this.timer,
           featureFlags,
-        ),
+        }),
       );
     this.scrollUntilVisible = new ScrollUntilVisible({
       device,
@@ -502,8 +502,7 @@ export class SwipeOn extends BaseVisualChange {
           viewHierarchy,
           searchCriteria,
           this.visionConfig,
-          errorMsg,
-          { visionAnalyzer: this.visionAnalyzer },
+          { baseError: errorMsg, visionAnalyzer: this.visionAnalyzer },
         );
       }
 
@@ -735,14 +734,11 @@ export class SwipeOn extends BaseVisualChange {
         { x: result.x1, y: result.y1 },
         requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
       );
-    const assessment = await settleSdkRouteAssessment(
-      assess(),
-      previous,
-      result.observation,
+    const assessment = await settleSdkRouteAssessment(assess(), previous, result.observation, {
       swipeEndedAtMs,
-      sdkRoutes,
-      assess,
-    );
+      source: sdkRoutes,
+      reassess: assess,
+    });
     if (!assessment) {
       return;
     }

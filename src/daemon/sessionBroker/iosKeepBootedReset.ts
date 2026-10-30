@@ -104,10 +104,9 @@ export class IosKeepBootedReset {
     profile: IosResetProfile,
     assertOwned: () => Promise<void>,
     scope: DeviceMutationScope,
-    reuseCount: number,
-    options: { signal?: AbortSignal; runResetBoot?: ResetBootRunner } = {},
+    options: { reuseCount: number; signal?: AbortSignal; runResetBoot?: ResetBootRunner },
   ): Promise<ResetOutcome> {
-    const { signal, runResetBoot } = options;
+    const { reuseCount, signal, runResetBoot } = options;
     this.assertInput(device, profile, scope, reuseCount);
     const phases: Record<string, number> = {};
     const owned = async () => {
@@ -142,8 +141,7 @@ export class IosKeepBootedReset {
             this.dependencies.simctl,
             device.deviceId,
             profile,
-            "Booted",
-            "start keep-booted reset",
+            { state: "Booted", action: "start keep-booted reset" },
             { signal: context.signal, timeoutMs: this.innerReadTimeoutMs() },
           ),
         );
@@ -370,7 +368,8 @@ export class IosKeepBootedReset {
       this.dependencies.hostLoad ?? defaultHostLoadReader(),
     );
     try {
-      return await this.cleaningAttempt(context, callerSignal, phase, phases, operation, {
+      return await this.cleaningAttempt(context, callerSignal, phase, phases, {
+        operation,
         first,
         timeoutMs: first.budgetMs,
       });
@@ -385,7 +384,8 @@ export class IosKeepBootedReset {
         error,
         callerSignal,
       );
-      return this.cleaningAttempt(context, callerSignal, phase, phases, operation, {
+      return this.cleaningAttempt(context, callerSignal, phase, phases, {
+        operation,
         first,
         timeoutMs: retryBudget(first),
       });
@@ -397,8 +397,11 @@ export class IosKeepBootedReset {
     callerSignal: AbortSignal | undefined,
     phase: string,
     phases: Record<string, number>,
-    operation: () => Promise<Result>,
-    { first, timeoutMs }: { first: LoadScaledBudget; timeoutMs: number },
+    {
+      operation,
+      first,
+      timeoutMs,
+    }: { operation: () => Promise<Result>; first: LoadScaledBudget; timeoutMs: number },
   ): Promise<Result> {
     const controller = new AbortController();
     context.signal = combineAbortSignals(controller.signal, callerSignal) ?? controller.signal;
@@ -457,8 +460,7 @@ export class IosKeepBootedReset {
           this.dependencies.simctl,
           device.deviceId,
           profile,
-          "Booted",
-          "confirm keep-booted health",
+          { state: "Booted", action: "confirm keep-booted health" },
           { signal: context.signal, timeoutMs: this.innerReadTimeoutMs() },
         );
         await context.assertOwned();

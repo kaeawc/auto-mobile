@@ -183,7 +183,7 @@ const actions: Record<string, Run> = {
       observer: observe,
       timestampProvider: { now: async () => 1 },
       lastRenderedObservation: rendered(key),
-    }).execute([{ action: "key", key: "enter" }], undefined, undefined, undefined, key),
+    }).execute([{ action: "key", key: "enter" }], undefined, { display: key }),
 };
 
 let proxySpies: Array<ReturnType<typeof spyOn>> = [];

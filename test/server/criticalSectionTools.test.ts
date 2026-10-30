@@ -80,12 +80,14 @@ describe("criticalSection tool", () => {
     const coordinator = CriticalSectionCoordinator.createForTesting(timer);
     const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
     let peerError: unknown;
-    const peer = coordinator.awaitBarrier("mismatch", "peer", 2, 120000, "plan").then(
-      () => "unexpected success",
-      (error: unknown) => {
-        peerError = error;
-      },
-    );
+    const peer = coordinator
+      .awaitBarrier("mismatch", "peer", 2, { timeout: 120000, namespace: "plan" })
+      .then(
+        () => "unexpected success",
+        (error: unknown) => {
+          peerError = error;
+        },
+      );
     try {
       await expect(
         ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(

@@ -47,6 +47,17 @@ export function launcherActivitiesCommand(userId: number): string {
   );
 }
 
+/**
+ * The Android TV counterpart of {@link launcherActivitiesCommand}: apps such as TV Settings
+ * expose only MAIN/LEANBACK_LAUNCHER, so the LAUNCHER query reports them unlaunchable (#15957).
+ */
+export function leanbackActivitiesCommand(userId: number): string {
+  return (
+    `shell cmd package query-activities --brief --user ${userId} ` +
+    "-a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER"
+  );
+}
+
 // `--brief` prints one flattened `pkg/activity` component per line, but the
 // surrounding "N activities found:" / "Activity #0:" chrome varies by API
 // level, so match the component lines rather than assuming a layout.
@@ -208,6 +219,23 @@ export function applyLauncherPackages(
   for (const packageName of packageNames) {
     const entry = catalog.get(packageName) ?? {};
     catalog.set(packageName, { ...entry, launchable: launcherPackages.has(packageName) });
+  }
+  return catalog;
+}
+
+/**
+ * Mark every listed package that owns a LEANBACK_LAUNCHER activity launchable. Only ever
+ * upgrades: a package missing from the set keeps the LAUNCHER-derived answer.
+ */
+export function applyLeanbackPackages(
+  catalog: AndroidAppCatalog,
+  packageNames: Iterable<string>,
+  leanbackPackages: ReadonlySet<string>,
+): AndroidAppCatalog {
+  for (const packageName of packageNames) {
+    if (leanbackPackages.has(packageName)) {
+      catalog.set(packageName, { ...catalog.get(packageName), launchable: true });
+    }
   }
   return catalog;
 }

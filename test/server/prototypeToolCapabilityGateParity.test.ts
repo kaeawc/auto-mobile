@@ -707,6 +707,38 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_notifications_scheduled_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["notifications"],
+        permissions: [{ name: "notifications", purpose: "Remind you" }],
+      },
+      notifications: { channels: [{ id: "reminders", name: "Reminders", importance: "default" }] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "notifications.schedule",
+                args: {
+                  id: { value: "eta" },
+                  channel: { value: "reminders" },
+                  title: { value: "Soon" },
+                  delaySeconds: { value: 60 },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_notifications_v1"],
+  },
   prototype_platform_media_v1: {
     minimalSpec: {
       ...base,
@@ -820,6 +852,17 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: {
       ...base,
       requires: { platform: ["commerce"] },
+      commerce: {
+        backend: "fake",
+        products: [
+          {
+            id: "coins_100",
+            title: "100 coins",
+            kind: "consumable",
+            price: { amount: "0.99", currency: "USD" },
+          },
+        ],
+      },
       root: {
         ...base.root,
         children: [

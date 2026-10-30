@@ -543,7 +543,6 @@ export class PerformanceMonitor {
       device,
       now,
       metrics,
-      jankFrames,
       server,
       createAndroidWindowSample({
         recordGfxWindowSample,
@@ -634,7 +633,7 @@ export class PerformanceMonitor {
 
     // iOS has no app touch source here; SDK frame readings are already raw.
     // Host `ps` yields only RSS, not a meminfo-style component breakdown.
-    this.pushMetrics(device, now, metrics, jankFrames, server, {
+    this.pushMetrics(device, now, metrics, server, {
       fps,
       frameTimeMs,
       jankFrames,
@@ -662,7 +661,6 @@ export class PerformanceMonitor {
       cpuUsagePercent: number | null;
       memoryUsageMb: number | null;
     },
-    jankFrames: number | null,
     server: PerformanceDataPusher,
     // Raw per-interval readings for the windowed buffer only (null on an idle
     // no-frame tick), kept separate from the cached/fabricated stream values.
@@ -728,7 +726,7 @@ export class PerformanceMonitor {
       const streamData: PerformanceStreamData = {
         fps: metrics.fps ?? 0,
         frameTimeMs: metrics.frameTimeMs ?? 0,
-        jankFrames: jankFrames ?? 0,
+        jankFrames: metrics.jankFrames ?? 0,
         droppedFrames: 0, // Not tracked in real-time monitoring
         memoryUsageMb: metrics.memoryUsageMb ?? 0,
         cpuUsagePercent: metrics.cpuUsagePercent ?? 0,

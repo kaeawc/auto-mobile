@@ -139,10 +139,13 @@ describe("Android gesture duration wire", () => {
       client.testHooks.installedGestures = new CtrlProxyGestures(context);
       const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
       try {
-        const pending = new ExecuteGesture(device, adb, timer).swipe(10, 20, 30, 40, {
-          scrollMode: "a11y",
-          duration,
-        });
+        const pending = new ExecuteGesture(device, adb, timer).swipe(
+          { x1: 10, y1: 20, x2: 30, y2: 40 },
+          {
+            scrollMode: "a11y",
+            duration,
+          },
+        );
         await flush();
         expect(sent).toHaveLength(1);
         const message = JSON.parse(sent[0]!) as {
@@ -263,10 +266,13 @@ describe("Android swipe request duration bounds", () => {
     client.testHooks.installedGestures = new CtrlProxyGestures(context);
     const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     try {
-      const pending = new ExecuteGesture(device, adb, timer).swipe(10, 20, 30, 40, {
-        scrollMode: "a11y",
-        duration: SWIPE_RETURN_DURATION_MAX_MS,
-      });
+      const pending = new ExecuteGesture(device, adb, timer).swipe(
+        { x1: 10, y1: 20, x2: 30, y2: 40 },
+        {
+          scrollMode: "a11y",
+          duration: SWIPE_RETURN_DURATION_MAX_MS,
+        },
+      );
       await flush();
       expect(sent).toHaveLength(1);
       timer.advanceTime(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);

@@ -185,7 +185,7 @@ async function cleanupRepo(
   maxRows: number,
   checkInterval: number,
 ): Promise<void> {
-  await pruneEventTableByCount(db, repo.table, state, maxRows, checkInterval);
+  await pruneEventTableByCount(db, repo.table, state, { maxRows, checkInterval });
 }
 
 describe("event repository retention (#2799)", () => {
@@ -225,7 +225,10 @@ describe("event repository retention (#2799)", () => {
 
         // This insert trips the gate and starts (but does not finish) the
         // async cleanup body — it is parked on the real DB's count(*) query.
-        const first = pruneEventTableByCount(db, "log_events", state, 1000, checkInterval);
+        const first = pruneEventTableByCount(db, "log_events", state, {
+          maxRows: 1000,
+          checkInterval,
+        });
 
         // A burst of checkInterval-worth of further inserts lands before that
         // cleanup resolves. Each is fired without awaiting the prior one, so
@@ -234,7 +237,9 @@ describe("event repository retention (#2799)", () => {
         // sustained write burst.
         const burst: Promise<void>[] = [];
         for (let i = 0; i < checkInterval; i++) {
-          burst.push(pruneEventTableByCount(db, "log_events", state, 1000, checkInterval));
+          burst.push(
+            pruneEventTableByCount(db, "log_events", state, { maxRows: 1000, checkInterval }),
+          );
         }
 
         // Buggy behavior: the counter was zeroed by `first` before the
@@ -253,7 +258,7 @@ describe("event repository retention (#2799)", () => {
         // With the counter left armed, the very next insert retries the gate
         // immediately rather than waiting another full checkInterval.
         sqls.length = 0;
-        await pruneEventTableByCount(db, "log_events", state, 1000, checkInterval);
+        await pruneEventTableByCount(db, "log_events", state, { maxRows: 1000, checkInterval });
         expect(countOccurrences(sqls, "count(")).toBe(1);
         expect(state.insertsSinceCleanup).toBe(0);
       } finally {
@@ -436,13 +441,21 @@ describe("event repository retention (#2799)", () => {
           sqls.length = 0;
           // A single call reporting `inserted: interval` must immediately arm the
           // gate — a batched INSERT of N rows counts as N, not 1.
-          await pruneEventTableByCount(db, repo.table, state, 1000, interval, interval);
+          await pruneEventTableByCount(db, repo.table, state, {
+            maxRows: 1000,
+            checkInterval: interval,
+            inserted: interval,
+          });
           expect(countOccurrences(sqls, "count(")).toBe(1);
 
           // And a call reporting fewer than the interval does NOT fire the gate.
           sqls.length = 0;
           const state2 = createRetentionState();
-          await pruneEventTableByCount(db, repo.table, state2, 1000, interval, interval - 1);
+          await pruneEventTableByCount(db, repo.table, state2, {
+            maxRows: 1000,
+            checkInterval: interval,
+            inserted: interval - 1,
+          });
           expect(countOccurrences(sqls, "count(")).toBe(0);
         } finally {
           await db.destroy();

@@ -152,14 +152,10 @@ export class DaemonSessions {
       ...(this.host.foreignCtrlProxyForwardEvidence()
         ? {
             foreignDeviceOwnership: androidOwnershipWithMirror(
-              new ForwardLeaseForeignDeviceOwnership(
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                this.host.services.timer(),
-                this.host.foreignCtrlProxyForwardEvidence(),
-              ),
+              new ForwardLeaseForeignDeviceOwnership(undefined, undefined, undefined, undefined, {
+                timer: this.host.services.timer(),
+                forwardEvidence: this.host.foreignCtrlProxyForwardEvidence(),
+              }),
               androidClaimMirror,
             ),
           }

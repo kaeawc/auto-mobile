@@ -571,8 +571,7 @@ describe("DevicePool", () => {
             replacement,
             sourceImage,
             undefined,
-            undefined,
-            excludeExecutionId,
+            { excludeExecutionId },
           );
         } finally {
           await reservation.release();
@@ -697,11 +696,13 @@ describe("DevicePool", () => {
           replacement,
           sourceImage,
           undefined,
-          () => {
-            // Session work can discover the replacement inside addDevice, so
-            // the marker must exist before that publication point.
-            expect(devicePool.getDevice(replacement.deviceId)).toBeNull();
-            readinessMarkerPublished = true;
+          {
+            beforeReplacementPublishes: () => {
+              // Session work can discover the replacement inside addDevice, so
+              // the marker must exist before that publication point.
+              expect(devicePool.getDevice(replacement.deviceId)).toBeNull();
+              readinessMarkerPublished = true;
+            },
           },
         );
 

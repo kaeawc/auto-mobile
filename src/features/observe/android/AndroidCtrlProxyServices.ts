@@ -649,13 +649,9 @@ export abstract class AndroidCtrlProxyServices extends AndroidCtrlProxyDelegatin
           return client.loggerInstance;
         },
         requestHierarchySync: (signal, timeoutMs, diagnostics) =>
-          client.requestHierarchySync(
-            new NoOpPerformanceTracker(),
-            false,
-            signal,
-            timeoutMs,
+          client.requestHierarchySync(new NoOpPerformanceTracker(), false, signal, timeoutMs, {
             diagnostics,
-          ),
+          }),
       });
     }
     return this.serviceReadinessVerifierInstance;

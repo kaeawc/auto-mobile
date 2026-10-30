@@ -386,14 +386,10 @@ export class TapAnyElement extends BaseVisualChange {
         timeoutMs,
         signal,
       });
-      identifyObservedHierarchy(
-        this.tapPlatform,
-        snapshot.hierarchy,
-        "fresh",
-        this.timer,
-        undefined,
-        { captureId: snapshot.captureId, iosMultiPanel: this.iosMultiPanel },
-      );
+      identifyObservedHierarchy(this.tapPlatform, snapshot.hierarchy, "fresh", this.timer, {
+        captureId: snapshot.captureId,
+        iosMultiPanel: this.iosMultiPanel,
+      });
       return snapshot.hierarchy;
     } catch (error) {
       throwIfAborted(signal);
@@ -471,7 +467,6 @@ export class TapAnyElement extends BaseVisualChange {
           refreshed,
           "fresh",
           this.timer,
-          undefined,
           { iosMultiPanel: this.iosMultiPanel },
         );
         const found = this.findClickableElement(options, selectedCapture.hierarchy, {
@@ -549,7 +544,6 @@ export class TapAnyElement extends BaseVisualChange {
       viewHierarchy,
       "cached-ok",
       this.timer,
-      undefined,
       { captureId: observeResult.observationId, iosMultiPanel: this.iosMultiPanel },
     );
     const searchDurationMs = this.getSearchUntilDuration(options);
@@ -770,8 +764,7 @@ export class TapAnyElement extends BaseVisualChange {
         } else {
           await this.androidTapper.executeAndroidTap(
             action,
-            tapPoint.x,
-            tapPoint.y,
+            tapPoint,
             longPressDuration,
             target,
             tapContext,
@@ -782,27 +775,25 @@ export class TapAnyElement extends BaseVisualChange {
           target,
           action,
           longPressDuration,
-          observeResult.screenSize,
-          { ...tapContext, selectionOptions: options, refresh, dispatch },
+          {
+            ...tapContext,
+            screenSize: observeResult.screenSize,
+            selectionOptions: options,
+            refresh,
+            dispatch,
+          },
         );
         break;
       }
       case "ios":
         targetDisplay?.assertCurrent();
         assertSelectedCapture(selectedCapture);
-        await this.iosTapper.executeIosTap(
-          action,
-          tapPoint.x,
-          tapPoint.y,
-          longPressDuration,
-          element,
-          {
-            signal,
-            displayFence: fence,
-            scoped: target.scoped,
-            voiceOverEnabled: target.talkBackState ?? undefined,
-          },
-        );
+        await this.iosTapper.executeIosTap(action, tapPoint, longPressDuration, element, {
+          signal,
+          displayFence: fence,
+          scoped: target.scoped,
+          voiceOverEnabled: target.talkBackState ?? undefined,
+        });
         break;
       default:
         throw unsupportedPlatformError(this.device.platform, "tap any element");

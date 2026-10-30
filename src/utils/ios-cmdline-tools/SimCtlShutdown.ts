@@ -25,6 +25,15 @@ import { getAbortSignal } from "../AbortContext";
 import { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownError";
 import { isIosSimulatorAlreadyStoppedError } from "./simulatorStateErrors";
 
+/** Trailing options for one `simctl` argv invocation. */
+export interface SimctlArgvOptions {
+  /** Overrides the ambient abort signal for this invocation. */
+  signal?: AbortSignal;
+  /** On timeout, wait for the timed-out child to settle before rejecting. */
+  waitForTimedOutCommandSettlement?: boolean;
+  env?: NodeJS.ProcessEnv;
+}
+
 export interface SimCtlShutdownContext {
   prebootProfile?: Pick<SimulatorPrebootProfile, "removeHostState">;
   executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
@@ -40,9 +49,7 @@ export interface SimCtlShutdownContext {
     args: string[],
     timeoutMs?: number,
     displayCommand?: string,
-    explicitSignal?: AbortSignal,
-    waitForTimedOutCommandSettlement?: boolean,
-    env?: NodeJS.ProcessEnv,
+    options?: SimctlArgvOptions,
   ): Promise<ExecResult>;
   readSimulatorState(
     udid: string,
@@ -113,13 +120,10 @@ export class SimCtlShutdown {
       if (cleanupDeadlineMs !== undefined) {
         await this.executeCleanupShutdown(udid, cleanupDeadlineMs, signal);
       } else {
-        await this.context.executeCommandArgv(
-          ["shutdown", udid],
-          timeoutMs,
-          `shutdown ${udid}`,
+        await this.context.executeCommandArgv(["shutdown", udid], timeoutMs, `shutdown ${udid}`, {
           signal,
-          true,
-        );
+          waitForTimedOutCommandSettlement: true,
+        });
       }
       this.context.invalidateDeviceListCache();
       if (cleanupDeadlineMs !== undefined) {
@@ -147,13 +151,10 @@ export class SimCtlShutdown {
     try {
       await raceWithDeadline(
         () =>
-          this.context.executeCommandArgv(
-            ["shutdown", udid],
-            remainingMs,
-            `shutdown ${udid}`,
-            cleanupSignal,
-            false,
-          ),
+          this.context.executeCommandArgv(["shutdown", udid], remainingMs, `shutdown ${udid}`, {
+            signal: cleanupSignal,
+            waitForTimedOutCommandSettlement: false,
+          }),
         {
           timer: this.context.timer,
           timeoutMs: remainingMs,
@@ -392,8 +393,7 @@ export class SimCtlShutdown {
         ["erase", udid],
         SIMCTL_COMMAND_TIMEOUT_MS,
         `erase ${udid}`,
-        signal,
-        true,
+        { signal, waitForTimedOutCommandSettlement: true },
       );
       lease.state.lastBootSucceeded = false;
       lease.state.ownerToken = undefined;
@@ -423,8 +423,7 @@ export class SimCtlShutdown {
         ["delete", udid],
         options.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS,
         `delete ${udid}`,
-        options.signal,
-        true,
+        { signal: options.signal, waitForTimedOutCommandSettlement: true },
       );
       try {
         await this.prebootProfile.removeHostState(udid);

@@ -18,13 +18,18 @@ const MAX_READINESS_DIAGNOSTIC_CHARS = 512;
 
 export type TargetReadinessState = "absent" | "offline" | "not-ready";
 
+/** What the readiness wait last learned about its target before timing out. */
+export interface ReadinessTimeoutDetails {
+  correlationFailure?: string;
+  diagnostic?: ReadinessDiagnostic;
+  target?: { deviceId: string; state: TargetReadinessState };
+}
+
 export function readinessTimeoutError(
   avdName: string,
   timeoutMs: number,
   processExitError: ActionableError | null,
-  correlationFailure?: string,
-  diagnostic?: ReadinessDiagnostic,
-  target?: { deviceId: string; state: TargetReadinessState },
+  { correlationFailure, diagnostic, target }: ReadinessTimeoutDetails = {},
 ): ActionableError {
   if (processExitError) {
     return processExitError;

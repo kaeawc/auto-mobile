@@ -284,8 +284,10 @@ describe("EmulatorAudioService capture", () => {
       session.streamStopError = new Error("stream broke");
     });
     const received: number[] = [];
-    const stream = await service.startStream("emulator-5554", (pcm) => received.push(...pcm));
-    sessions[0].streamSink?.(Uint8Array.from([1, 2]));
+    const stream = await service.startStream("emulator-5554", (pcm) => {
+      received.push(...pcm);
+    });
+    void sessions[0].streamSink?.(Uint8Array.from([1, 2]));
     await expect(stream.stop()).rejects.toThrow("stream broke");
     await expect(stream.stop()).rejects.toThrow("stream broke");
     expect(received).toEqual([1, 2]);

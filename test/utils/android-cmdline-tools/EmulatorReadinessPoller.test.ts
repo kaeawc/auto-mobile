@@ -58,8 +58,8 @@ function setup(
     getLaunchTargetDeviceId: () => undefined,
     captureLaunchTargetDeviceId: () => {},
     maybeRecoverFreshOffline: async () => {},
-    nextPollingDelayMs: (_tracker, _options, _id, _now, interval, remaining) =>
-      Math.min(interval, remaining),
+    nextPollingDelayMs: (_tracker, _options, _id, _now, budget) =>
+      Math.min(budget.pollingIntervalMs, budget.remainingPollingTimeMs),
     getBootedDevicesWithDiagnostics: async () => ({ devices: [emulator], diagnostics: [] }),
     findNamedEmulator: (_name, _child, running) => ({ emulator: running[0] }),
     resolvedReadyAvdName: async (avdName) => avdName,
@@ -81,7 +81,7 @@ describe("DefaultEmulatorReadinessPoller", () => {
     timer.setTimeout(() => controller.abort(reason), 120);
 
     await expect(
-      poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, controller.signal),
+      poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, { signal: controller.signal }),
     ).rejects.toBe(reason);
 
     expect(timer.now()).toBe(120);
@@ -183,7 +183,7 @@ describe("DefaultEmulatorReadinessPoller", () => {
     const reason = new Error("test finished");
     // Bun's `expect(...).rejects` blocks until settlement, so capture the rejection as a value.
     const pending = poller
-      .waitForEmulatorReady("Pixel_9", 5_000, child, undefined, controller.signal)
+      .waitForEmulatorReady("Pixel_9", 5_000, child, undefined, { signal: controller.signal })
       .then(() => undefined)
       .catch((error: unknown) => error);
 
@@ -279,8 +279,8 @@ describe("DefaultEmulatorReadinessPoller", () => {
   test("returns the booted device once every readiness signal passes", async () => {
     const { poller, timer } = setup(readyAdb(), () => null);
 
-    const device = await poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, undefined, {
-      skipWakeAndUnlock: true,
+    const device = await poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, {
+      options: { skipWakeAndUnlock: true },
     });
 
     // The caller is released when the poller finishes, not on the 500 ms fallback tick.
@@ -301,8 +301,8 @@ describe("DefaultEmulatorReadinessPoller", () => {
     );
 
     await expect(
-      poller.waitForEmulatorReady("Pixel_9", 3_000, null, undefined, undefined, {
-        skipWakeAndUnlock: true,
+      poller.waitForEmulatorReady("Pixel_9", 3_000, null, undefined, {
+        options: { skipWakeAndUnlock: true },
       }),
     ).rejects.toThrow(/failed to become ready within 3000ms[\s\S]*phase=system-boot-complete/);
     expect(timer.now()).toBeGreaterThanOrEqual(3_000);
@@ -316,8 +316,8 @@ describe("DefaultEmulatorReadinessPoller", () => {
     child.pid = 4242;
     const stdout = child.stdout;
 
-    const pending = poller.waitForEmulatorReady("Pixel_9", 60_000, child, undefined, undefined, {
-      skipWakeAndUnlock: true,
+    const pending = poller.waitForEmulatorReady("Pixel_9", 60_000, child, undefined, {
+      options: { skipWakeAndUnlock: true },
     });
     await Promise.resolve();
     stdout.emit("data", "corrupt system image");
@@ -333,8 +333,9 @@ describe("DefaultEmulatorReadinessPoller", () => {
     controller.abort(reason);
 
     await expect(
-      poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, controller.signal, {
-        skipWakeAndUnlock: true,
+      poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, {
+        signal: controller.signal,
+        options: { skipWakeAndUnlock: true },
       }),
     ).rejects.toBe(reason);
   });

@@ -253,6 +253,24 @@ internal object PrototypeDataText {
       PrototypeDataValues.rendered(PrototypeDataPointer.resolve(data, pointer))
     }
 
+  /**
+   * Binds the `{data:/pointer}` placeholders of authored [text] and passes only the authored text
+   * between them through [literal] (state interpolation), in one pass: a data value is never
+   * scanned again, so data cannot introduce a `{key}` state placeholder (#14321).
+   */
+  fun bindAround(text: String, data: JsonObject?, literal: (String) -> String): String =
+    buildString {
+      var cursor = 0
+      for (placeholder in placeholders(text)) {
+        append(literal(text.substring(cursor, placeholder.start)))
+        append(
+          PrototypeDataValues.rendered(PrototypeDataPointer.resolve(data, placeholder.pointer)),
+        )
+        cursor = placeholder.end
+      }
+      append(literal(text.substring(cursor)))
+    }
+
   fun bindSources(text: String, data: JsonObject?, platform: JsonObject?): String {
     val sources =
       placeholders(text).map { it to data } + placeholders(text, "platform").map { it to platform }

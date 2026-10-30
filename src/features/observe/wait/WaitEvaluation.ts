@@ -138,8 +138,10 @@ const runWaitForConditionDsl = async (
   waitFor: WaitForConditionDsl,
   signal: AbortSignal | undefined,
   timer: Timer,
-  skipBackStack: boolean = false,
-  platform?: BootedDevice["platform"],
+  {
+    skipBackStack = false,
+    platform,
+  }: { skipBackStack?: boolean; platform?: BootedDevice["platform"] } = {},
 ): Promise<WaitForObservationOutcome> => {
   const startTime = timer.now();
   const timeoutMs =
@@ -408,7 +410,10 @@ export const waitForObservation = async (
   // legacy element/textAny/activeWindow path below is unchanged (back-compat).
   if (isConditionDsl(waitFor)) {
     return complete(
-      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, skipBackStack, platform),
+      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, {
+        skipBackStack,
+        platform,
+      }),
     );
   }
 
@@ -473,14 +478,11 @@ export const waitForObservation = async (
   const minTimestamp = waitTimestampFloor(needsHierarchyFreshness, baselineTimestamp);
   let polls = 1;
   const modes = new Map<string, MatchMode>();
-  let waitEvaluation = evaluateWaitForObservation(
-    finder,
-    waitFor,
-    observation,
-    platform,
+  let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform, {
     displayInventory,
-    { modes, iosMultiPanel },
-  );
+    modes,
+    iosMultiPanel,
+  });
 
   if (waitMatchReady(waitEvaluation, observation, settleReady, resetMatchedHash)) {
     const waitMs = timer.now() - startTime;
@@ -923,7 +925,8 @@ function evaluateFreshWaitObservation({
         awaitedElement: undefined,
         diagnostic: waitCaptureUnavailableReason(observation),
       }
-    : evaluateWaitForObservation(finder, waitFor, observation, platform, displayInventory, {
+    : evaluateWaitForObservation(finder, waitFor, observation, platform, {
+        displayInventory,
         modes,
         iosMultiPanel,
       });

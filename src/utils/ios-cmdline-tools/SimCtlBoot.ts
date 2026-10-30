@@ -70,6 +70,14 @@ export interface SimCtlBootContext {
   /** Drop the cached simulator listing; a boot changes the state it recorded. */
   invalidateDeviceListCache(): void;
 }
+/** Trailing options for `SimCtlBoot.runCoordinatedBoot`. */
+interface CoordinatedBootOptions<T> {
+  /** This call starts the boot itself (rejects when the simulator is already running). */
+  ownsBoot: boolean;
+  /** Adopts a prior successful boot when the simulator is still booted. */
+  adoptPriorSuccess?: () => Promise<T>;
+}
+
 export class SimCtlBoot {
   constructor(private readonly context: SimCtlBootContext) {}
 
@@ -278,10 +286,10 @@ export class SimCtlBoot {
     udid: string,
     deadlineMs: number,
     signal: AbortSignal | undefined,
-    ownsBoot: boolean,
     operation: () => Promise<T>,
-    adoptPriorSuccess?: () => Promise<T>,
+    options: CoordinatedBootOptions<T>,
   ): Promise<T> {
+    const { ownsBoot, adoptPriorSuccess } = options;
     const lease = await this.acquireSimulatorBoot(udid, deadlineMs, signal);
     const priorBootSucceeded = lease.state.lastBootSucceeded;
     if (!priorBootSucceeded) {
@@ -406,22 +414,32 @@ export class SimCtlBoot {
       // boot wait with its own independent timeout budget (issue #3938 follow-up),
       // so skip straight to metadata resolution.
       if (options?.assumeBooted) {
-        return await this.runCoordinatedBoot(udid, deadlineMs, getAbortSignal(), false, () =>
-          this.resolveReadySimulator(udid, this.remainingBootTimeoutMs(udid, deadlineMs)),
+        return await this.runCoordinatedBoot(
+          udid,
+          deadlineMs,
+          getAbortSignal(),
+          () => this.resolveReadySimulator(udid, this.remainingBootTimeoutMs(udid, deadlineMs)),
+          { ownsBoot: false },
         );
       }
 
       // Use `simctl bootstatus -b` which blocks until the simulator is fully
       // booted (data migration complete, system app ready, springboard launched).
       // This is far more reliable than polling `simctl list devices` for state.
-      return await this.runCoordinatedBoot(udid, deadlineMs, getAbortSignal(), false, async () => {
-        const verified = await this.bootAndVerify(udid, deadlineMs);
-        return this.resolveReadySimulator(
-          udid,
-          this.remainingBootTimeoutMs(udid, deadlineMs),
-          verified,
-        );
-      });
+      return await this.runCoordinatedBoot(
+        udid,
+        deadlineMs,
+        getAbortSignal(),
+        async () => {
+          const verified = await this.bootAndVerify(udid, deadlineMs);
+          return this.resolveReadySimulator(
+            udid,
+            this.remainingBootTimeoutMs(udid, deadlineMs),
+            verified,
+          );
+        },
+        { ownsBoot: false },
+      );
     } catch (error) {
       throw this.classifyBootReadinessError(udid, error);
     } finally {
@@ -785,16 +803,18 @@ export class SimCtlBoot {
       udid,
       deadlineMs,
       getAbortSignal(),
-      true,
       async () => {
         this.context.bootPresentationGenerations.delete(udid);
         const verified = await this.bootAndVerify(udid, deadlineMs);
         perf.endOperation("simctlBoot");
         return this.resolveRegisteredBootSimulator(udid, deadlineMs, perf, verified);
       },
-      () => {
-        perf.endOperation("simctlBoot");
-        return this.resolveRegisteredBootSimulator(udid, deadlineMs, perf);
+      {
+        ownsBoot: true,
+        adoptPriorSuccess: () => {
+          perf.endOperation("simctlBoot");
+          return this.resolveRegisteredBootSimulator(udid, deadlineMs, perf);
+        },
       },
     );
   }

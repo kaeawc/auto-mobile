@@ -2225,17 +2225,15 @@ describe("ResourceRegistry Template Matching", () => {
   });
 
   test("should match simple template with single parameter", () => {
-    ResourceRegistry.registerTemplate(
-      "test://items/{id}",
-      "Test Item",
-      "Test item description",
-      "application/json",
-      async (params) => ({
+    ResourceRegistry.registerTemplate("test://items/{id}", "Test Item", {
+      description: "Test item description",
+      mimeType: "application/json",
+      handler: async (params) => ({
         uri: `test://items/${params.id}`,
         mimeType: "application/json",
         text: JSON.stringify({ id: params.id }),
       }),
-    );
+    });
 
     const match = ResourceRegistry.matchTemplate("test://items/123");
     expect(match).toBeDefined();
@@ -2244,17 +2242,15 @@ describe("ResourceRegistry Template Matching", () => {
   });
 
   test("should match template with multiple parameters", () => {
-    ResourceRegistry.registerTemplate(
-      "test://users/{userId}/posts/{postId}",
-      "User Post",
-      "A user's post",
-      "application/json",
-      async (params) => ({
+    ResourceRegistry.registerTemplate("test://users/{userId}/posts/{postId}", "User Post", {
+      description: "A user's post",
+      mimeType: "application/json",
+      handler: async (params) => ({
         uri: `test://users/${params.userId}/posts/${params.postId}`,
         mimeType: "application/json",
         text: JSON.stringify(params),
       }),
-    );
+    });
 
     const match = ResourceRegistry.matchTemplate("test://users/user-123/posts/post-456");
     expect(match).toBeDefined();
@@ -2262,17 +2258,15 @@ describe("ResourceRegistry Template Matching", () => {
   });
 
   test("should not match non-matching URIs", () => {
-    ResourceRegistry.registerTemplate(
-      "test://items/{id}",
-      "Test Item",
-      "Test item description",
-      "application/json",
-      async (params) => ({
+    ResourceRegistry.registerTemplate("test://items/{id}", "Test Item", {
+      description: "Test item description",
+      mimeType: "application/json",
+      handler: async (params) => ({
         uri: `test://items/${params.id}`,
         mimeType: "application/json",
         text: "{}",
       }),
-    );
+    });
 
     expect(ResourceRegistry.matchTemplate("test://other/123")).toBeUndefined();
     expect(ResourceRegistry.matchTemplate("test://items/")).toBeUndefined();
@@ -2293,17 +2287,15 @@ describe("ResourceRegistry Template Matching", () => {
       }),
     );
 
-    ResourceRegistry.registerTemplate(
-      "test://items/{id}",
-      "Generic Item",
-      "A generic item",
-      "application/json",
-      async (params) => ({
+    ResourceRegistry.registerTemplate("test://items/{id}", "Generic Item", {
+      description: "A generic item",
+      mimeType: "application/json",
+      handler: async (params) => ({
         uri: `test://items/${params.id}`,
         mimeType: "application/json",
         text: JSON.stringify({ type: "template", id: params.id }),
       }),
-    );
+    });
 
     // Exact match should be found
     const exactResource = ResourceRegistry.getResource("test://items/special");
@@ -2317,17 +2309,15 @@ describe("ResourceRegistry Template Matching", () => {
   });
 
   test("should return template definitions in correct format", () => {
-    ResourceRegistry.registerTemplate(
-      "test://items/{id}",
-      "Test Item",
-      "Test item description",
-      "application/json",
-      async () => ({
+    ResourceRegistry.registerTemplate("test://items/{id}", "Test Item", {
+      description: "Test item description",
+      mimeType: "application/json",
+      handler: async () => ({
         uri: "test://items/1",
         mimeType: "application/json",
         text: "{}",
       }),
-    );
+    });
 
     const definitions = ResourceRegistry.getTemplateDefinitions();
     expect(definitions).toHaveLength(1);
@@ -2340,13 +2330,11 @@ describe("ResourceRegistry Template Matching", () => {
   });
 
   test("precompiles the template regex once at registration and reuses it across reads (#3427)", () => {
-    ResourceRegistry.registerTemplate(
-      "test://items/{id}",
-      "Test Item",
-      "Test item description",
-      "application/json",
-      async (params) => ({ uri: `test://items/${params.id}`, text: "{}" }),
-    );
+    ResourceRegistry.registerTemplate("test://items/{id}", "Test Item", {
+      description: "Test item description",
+      mimeType: "application/json",
+      handler: async (params) => ({ uri: `test://items/${params.id}`, text: "{}" }),
+    });
 
     const first = ResourceRegistry.matchTemplate("test://items/1");
     const second = ResourceRegistry.matchTemplate("test://items/2");
@@ -2362,13 +2350,11 @@ describe("ResourceRegistry Template Matching", () => {
   });
 
   test("does not construct a new RegExp during matchTemplate (#3427)", () => {
-    ResourceRegistry.registerTemplate(
-      "test://items/{id}",
-      "Test Item",
-      "Test item description",
-      "application/json",
-      async (params) => ({ uri: `test://items/${params.id}`, text: "{}" }),
-    );
+    ResourceRegistry.registerTemplate("test://items/{id}", "Test Item", {
+      description: "Test item description",
+      mimeType: "application/json",
+      handler: async (params) => ({ uri: `test://items/${params.id}`, text: "{}" }),
+    });
 
     // Count RegExp constructions while only reading, not registering.
     const OriginalRegExp = globalThis.RegExp;
@@ -2392,13 +2378,11 @@ describe("ResourceRegistry Template Matching", () => {
   });
 
   test("matches a trailing {path} param greedily across slashes", () => {
-    ResourceRegistry.registerTemplate(
-      "test://files/{id}/{path}",
-      "File",
-      "A nested file",
-      "application/json",
-      async (params) => ({ uri: `test://files/${params.id}/${params.path}`, text: "{}" }),
-    );
+    ResourceRegistry.registerTemplate("test://files/{id}/{path}", "File", {
+      description: "A nested file",
+      mimeType: "application/json",
+      handler: async (params) => ({ uri: `test://files/${params.id}/${params.path}`, text: "{}" }),
+    });
 
     const match = ResourceRegistry.matchTemplate("test://files/app1/dir/sub/file.txt");
     expect(match).toBeDefined();

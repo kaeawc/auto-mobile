@@ -93,8 +93,10 @@ export function applicationWindowSafeTapPoint(
   target: Element,
   bounds: ElementBounds,
   point: { x: number; y: number },
-  imeBounds?: ElementBounds,
-  ownWindows: OwnPrototypeCoverRule = "none",
+  {
+    imeBounds,
+    ownWindows = "none",
+  }: { imeBounds?: ElementBounds; ownWindows?: OwnPrototypeCoverRule } = {},
 ): { point: { x: number; y: number } | null; coveredBy?: string } {
   return safeTapPoint({
     hierarchy,

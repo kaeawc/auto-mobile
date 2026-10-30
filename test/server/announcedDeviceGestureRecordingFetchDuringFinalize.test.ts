@@ -117,7 +117,7 @@ describe("the previous owner fetches the announced device gesture recording whil
           return { steps: [step], stepCount: 1 };
         },
       }),
-      OWNER,
+      { ownerSessionUuid: OWNER },
     );
     const manager = new FakeSessionManager();
     registerRecordingSessionCleanup(manager, {
@@ -198,7 +198,7 @@ describe("the previous owner fetches the announced device gesture recording whil
           return { steps: [step], stepCount: 1 };
         },
       }),
-      OWNER,
+      { ownerSessionUuid: OWNER },
     );
     const stopped = stopDeviceGestureRecording(started.recordingId, undefined, timer);
     // Observe rejection immediately while the requester joins the same stop.

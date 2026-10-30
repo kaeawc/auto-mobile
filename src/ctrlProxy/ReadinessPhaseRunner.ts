@@ -269,9 +269,7 @@ export class ReadinessPhaseRunner {
         (isAndroidFrameworkUnavailable(detail) || isForegroundUserPending(detail)),
       options.deadlineExhausted ?? false,
       phase,
-      attempts,
-      detail,
-      options.failureKind,
+      { attempts, diagnosticCause: detail, failureKind: options.failureKind },
     );
     if (options.deadlineExhausted) {
       context.deadlineFailure = failure;

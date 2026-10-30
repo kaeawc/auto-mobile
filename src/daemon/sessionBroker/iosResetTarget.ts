@@ -25,8 +25,7 @@ export async function readExpectedIosResetTarget(
   simctl: Pick<SimCtl, "readSimulatorTarget">,
   udid: string,
   profile: IosResetProfile,
-  expectedState: "Booted" | "Shutdown",
-  action: string,
+  { state: expectedState, action }: { state: "Booted" | "Shutdown"; action: string },
   options?: { signal?: AbortSignal; timeoutMs: number },
 ): Promise<void> {
   let target;

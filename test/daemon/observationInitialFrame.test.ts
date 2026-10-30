@@ -59,15 +59,20 @@ class FakeObservationStreamServer {
     screenshotBase64: string,
     screenWidth: number,
     screenHeight: number,
-    metadata?: Record<string, unknown>,
-    options?: {
-      captureSequence?: number;
-      coordinateSpace?: "px";
-      nativeScale?: number;
-      frameContext?: string;
-      rotation?: number;
-      initialFrameSubscriber?: InitialFrameSubscriber;
-    },
+    {
+      metadata,
+      options,
+    }: {
+      metadata?: Record<string, unknown>;
+      options?: {
+        captureSequence?: number;
+        coordinateSpace?: "px";
+        nativeScale?: number;
+        frameContext?: string;
+        rotation?: number;
+        initialFrameSubscriber?: InitialFrameSubscriber;
+      };
+    } = {},
   ): boolean {
     const screenshotOptions =
       options?.captureSequence === undefined && options?.rotation === undefined
@@ -1220,12 +1225,11 @@ class FakeTargetedInitialFrameServer extends FakeObservationStreamServer {
     data: string,
     width: number,
     height: number,
-    metadata?: Record<string, unknown>,
-    options?: Parameters<FakeObservationStreamServer["pushScreenshotUpdate"]>[5],
+    details: Parameters<FakeObservationStreamServer["pushScreenshotUpdate"]>[4] = {},
   ): boolean {
-    const destinations = this.destinations(deviceId, options?.initialFrameSubscriber);
+    const destinations = this.destinations(deviceId, details.options?.initialFrameSubscriber);
     for (const destination of destinations) {
-      destination.pushScreenshotUpdate(deviceId, data, width, height, metadata, options);
+      destination.pushScreenshotUpdate(deviceId, data, width, height, details);
     }
     return destinations.length > 0;
   }

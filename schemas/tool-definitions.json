@@ -2685,7 +2685,7 @@
             "platform": {
               "description": "Platform reported by automobile:devices/booted",
               "type": "string",
-              "enum": ["android", "ios"]
+              "enum": ["android", "ios", "watchos"]
             },
             "isVirtual": {
               "description": "Virtual-device flag reported by automobile:devices/booted",
@@ -9161,7 +9161,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (two presses left focus unchanged). Activate the result with sendKeys key enter.",
+    "description": "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). Activate the result with sendKeys key enter.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -14813,8 +14813,13 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "artifactPath": {
-          "description": "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa",
+          "description": "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa; watchOS: .app",
           "type": "string"
         },
         "splits": {
@@ -14895,10 +14900,6 @@
         "allowDestructiveRecovery": {
           "description": "Android: false refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
           "type": "boolean"
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -15405,8 +15406,13 @@
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "clearAppData": {
-          "description": "Clear app data before launch (default false)",
+          "description": "Clear app data before launch (default false); on watchOS wipes the app's data container",
           "type": "boolean"
         },
         "coldBoot": {
@@ -15414,7 +15420,7 @@
           "type": "boolean"
         },
         "launchArguments": {
-          "description": "Arguments passed to the launched iOS app. On Android use intent instead.",
+          "description": "Arguments passed to the launched iOS or watchOS app. On Android use intent instead.",
           "type": "array",
           "items": {
             "type": "string"
@@ -15582,10 +15588,6 @@
           "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -17587,6 +17589,11 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "type": {
           "description": "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) are visible while content providers and RRO overlays are not. 'user' and 'system' keep their meaning and must be asked for explicitly; 'all' returns every installed package. The default degrades to 'user' when the device reports no launchability signal, and an explicit 'launchable' is then rejected rather than silently empty. On a physical iOS device, where user/system classification is unavailable (devicectl reports no such signal), an omitted type returns every app (reported as 'all') and an explicit 'user' or 'system' filter is rejected rather than silently honored.",
           "type": "string",
@@ -17601,10 +17608,6 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -17767,7 +17770,7 @@
       "$defs": {
         "__schema0": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": ["android", "ios", "watchos"]
         }
       }
     },
@@ -20549,14 +20552,15 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
+    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. On an Apple Watch simulator (platform: 'watchos' or a watch session) observe returns only a screenshot and screenSize, with hierarchyUnavailable instead of any hierarchy or element field; options that need a hierarchy are refused. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": ["android", "ios", "watchos"]
         },
         "waitFor": {
           "$defs": {
@@ -22465,6 +22469,21 @@
         "isScreenRound": {
           "description": "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
           "type": "boolean"
+        },
+        "hierarchyUnavailable": {
+          "description": "Apple Watch simulator only: this observation is a screenshot with screenSize; the view hierarchy is not available on watchOS yet. viewHierarchy, skeleton, context, elements and the other element fields are absent, not empty: their absence does not mean an empty screen.",
+          "type": "object",
+          "properties": {
+            "platform": {
+              "type": "string",
+              "const": "watchos"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": ["platform", "message"],
+          "additionalProperties": false
         },
         "systemInsets": {
           "$ref": "#/$defs/__schema11"
@@ -29173,6 +29192,9 @@
                                 "type": "string",
                                 "enum": ["host", "device"]
                               },
+                              "allowSecureInRequest": {
+                                "type": "boolean"
+                              },
                               "timeoutMs": {
                                 "type": "integer",
                                 "minimum": 1,
@@ -34734,6 +34756,213 @@
                     },
                     "type": {
                       "type": "string",
+                      "enum": ["map"]
+                    },
+                    "mapStyle": {
+                      "type": "string",
+                      "enum": ["plain", "streets"]
+                    },
+                    "camera": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "lat": {
+                              "type": "number",
+                              "minimum": -90,
+                              "maximum": 90
+                            },
+                            "lng": {
+                              "type": "number",
+                              "minimum": -180,
+                              "maximum": 180
+                            },
+                            "zoom": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 22
+                            },
+                            "bearing": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 360
+                            },
+                            "tilt": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 60
+                            }
+                          },
+                          "required": ["lat", "lng", "zoom"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "data": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                            }
+                          },
+                          "required": ["data"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "fit": {
+                      "type": "string",
+                      "enum": ["none", "markers", "route"]
+                    },
+                    "markers": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                        },
+                        "as": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                        },
+                        "id": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "lat": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/30/properties/markers/properties/id"
+                        },
+                        "lng": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/30/properties/markers/properties/id"
+                        },
+                        "title": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/30/properties/markers/properties/id"
+                        },
+                        "icon": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
+                        },
+                        "heading": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/30/properties/markers/properties/id"
+                        },
+                        "animateMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2000
+                        }
+                      },
+                      "required": ["path", "as", "id", "lat", "lng", "title"],
+                      "additionalProperties": false
+                    },
+                    "polylines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                          },
+                          "width": {
+                            "type": "number",
+                            "minimum": 1,
+                            "maximum": 16
+                          },
+                          "color": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
+                          }
+                        },
+                        "required": ["path"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
+                    },
+                    "showUserLocation": {
+                      "type": "boolean"
+                    },
+                    "onMarkerTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "onCameraIdle": {
+                      "type": "object",
+                      "properties": {
+                        "into": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
+                        }
+                      },
+                      "required": ["into"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["type"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "semantics": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/semantics"
+                    },
+                    "onAppear": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
+                    },
+                    "scrollLinked": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollLinked"
+                    },
+                    "scrollTransition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/scrollTransition"
+                    },
+                    "ios": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/ios"
+                    },
+                    "android": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/android"
+                    },
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "sharedKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/sharedKey"
+                    },
+                    "press": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/press"
+                    },
+                    "shared": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/shared"
+                    },
+                    "keyframes": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/keyframes"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "animate": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/animate"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
                       "enum": ["videoPlayer"]
                     },
                     "player": {
@@ -34825,6 +35054,14 @@
                     },
                     "positionKey": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
+                    },
+                    "visibleThreshold": {
+                      "type": "number",
+                      "minimum": 0.1,
+                      "maximum": 1
+                    },
+                    "resumePosition": {
+                      "type": "boolean"
                     },
                     "captions": {
                       "type": "array",
@@ -34951,140 +35188,22 @@
                     },
                     "type": {
                       "type": "string",
-                      "enum": ["map"]
+                      "enum": ["castButton"]
                     },
-                    "mapStyle": {
-                      "type": "string",
-                      "enum": ["plain", "streets"]
+                    "player": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                     },
-                    "camera": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "lat": {
-                              "type": "number",
-                              "minimum": -90,
-                              "maximum": 90
-                            },
-                            "lng": {
-                              "type": "number",
-                              "minimum": -180,
-                              "maximum": 180
-                            },
-                            "zoom": {
-                              "type": "number",
-                              "minimum": 0,
-                              "maximum": 22
-                            },
-                            "bearing": {
-                              "type": "number",
-                              "minimum": 0,
-                              "maximum": 360
-                            },
-                            "tilt": {
-                              "type": "number",
-                              "minimum": 0,
-                              "maximum": 60
-                            }
-                          },
-                          "required": ["lat", "lng", "zoom"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "data": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
-                            }
-                          },
-                          "required": ["data"],
-                          "additionalProperties": false
-                        }
-                      ]
-                    },
-                    "fit": {
-                      "type": "string",
-                      "enum": ["none", "markers", "route"]
-                    },
-                    "markers": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
-                        },
-                        "as": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
-                        },
-                        "id": {
-                          "type": "string",
-                          "maxLength": 256
-                        },
-                        "lat": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/31/properties/markers/properties/id"
-                        },
-                        "lng": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/31/properties/markers/properties/id"
-                        },
-                        "title": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/31/properties/markers/properties/id"
-                        },
-                        "icon": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
-                        },
-                        "heading": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/31/properties/markers/properties/id"
-                        },
-                        "animateMs": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 2000
-                        }
-                      },
-                      "required": ["path", "as", "id", "lat", "lng", "title"],
-                      "additionalProperties": false
-                    },
-                    "polylines": {
+                    "protocols": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "path": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
-                          },
-                          "width": {
-                            "type": "number",
-                            "minimum": 1,
-                            "maximum": 16
-                          },
-                          "color": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
-                          }
-                        },
-                        "required": ["path"],
-                        "additionalProperties": false
+                        "type": "string",
+                        "enum": ["googleCast", "airplay"]
                       },
                       "minItems": 1,
-                      "maxItems": 8
-                    },
-                    "showUserLocation": {
-                      "type": "boolean"
-                    },
-                    "onMarkerTap": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear"
-                    },
-                    "onCameraIdle": {
-                      "type": "object",
-                      "properties": {
-                        "into": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
-                        }
-                      },
-                      "required": ["into"],
-                      "additionalProperties": false
+                      "maxItems": 2
                     }
                   },
-                  "required": ["type"],
+                  "required": ["type", "player"],
                   "additionalProperties": false
                 },
                 {
@@ -35327,7 +35446,7 @@
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/33/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -35410,7 +35529,7 @@
                       "enum": ["tooltip"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/33/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
@@ -35530,7 +35649,7 @@
                       "enum": ["start", "end"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/33/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
                     },
                     "scrim": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
@@ -35619,7 +35738,7 @@
                       "enum": ["menu"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/33/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
                     },
                     "items": {
                       "type": "array",
@@ -35629,10 +35748,10 @@
                             "type": "object",
                             "properties": {
                               "label": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/33/properties/confirm/properties/label"
+                                "$ref": "#/properties/spec/properties/root/anyOf/34/properties/confirm/properties/label"
                               },
                               "onTap": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/33/properties/confirm/properties/onTap"
+                                "$ref": "#/properties/spec/properties/root/anyOf/34/properties/confirm/properties/onTap"
                               },
                               "icon": {
                                 "$ref": "#/properties/spec/properties/root/anyOf/1/properties/swipeActions/properties/start/items/properties/icon"
@@ -35742,14 +35861,14 @@
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/33/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/33/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -36098,10 +36217,10 @@
                       "maxItems": 1
                     },
                     "header": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/40/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/41/properties/children/items"
                     },
                     "footer": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/40/properties/children/items"
+                      "$ref": "#/properties/spec/properties/root/anyOf/41/properties/children/items"
                     }
                   },
                   "required": ["type", "repeat", "children"],
@@ -36186,7 +36305,7 @@
                       "default": "vertical"
                     },
                     "refresh": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/40/properties/refresh"
+                      "$ref": "#/properties/spec/properties/root/anyOf/41/properties/refresh"
                     },
                     "fadeEdges": {
                       "type": "object",
@@ -36476,7 +36595,7 @@
                                 "maxItems": 32
                               },
                               "onBack": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/43/properties/routes/allOf/0/additionalProperties/properties/onEnter"
+                                "$ref": "#/properties/spec/properties/root/anyOf/44/properties/routes/allOf/0/additionalProperties/properties/onEnter"
                               }
                             },
                             "additionalProperties": false
@@ -36690,7 +36809,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/44/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/45/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -36780,7 +36899,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/33/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/34/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",
@@ -37668,6 +37787,69 @@
               "additionalProperties": false,
               "description": "Fake sign-in accounts for auth.signIn (prototype_platform_auth_v1); unique ids, no passwords or tokens"
             },
+            "commerce": {
+              "type": "object",
+              "properties": {
+                "backend": {
+                  "type": "string",
+                  "const": "fake"
+                },
+                "products": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])"
+                      },
+                      "title": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "\\S"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": ["consumable", "nonConsumable", "subscription"]
+                      },
+                      "price": {
+                        "type": "object",
+                        "properties": {
+                          "amount": {
+                            "type": "string",
+                            "maxLength": 12,
+                            "pattern": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,2})?$(?![\\s\\S])"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "maxLength": 3,
+                            "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                          }
+                        },
+                        "required": ["amount", "currency"],
+                        "additionalProperties": false
+                      },
+                      "period": {
+                        "type": "string",
+                        "maxLength": 8,
+                        "pattern": "^P[1-9][0-9]{0,2}[DWMY]$(?![\\s\\S])"
+                      },
+                      "trialPeriod": {
+                        "$ref": "#/properties/spec/properties/commerce/properties/products/items/properties/period"
+                      }
+                    },
+                    "required": ["id", "title", "kind", "price"],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 32
+                }
+              },
+              "required": ["backend", "products"],
+              "additionalProperties": false,
+              "description": "Fake store catalog for commerce.purchase (prototype_platform_commerce_v1); unique product ids, no real payment fields"
+            },
             "location": {
               "type": "object",
               "properties": {
@@ -37777,7 +37959,7 @@
                             "enum": ["video", "audio"]
                           },
                           "source": {
-                            "$ref": "#/properties/spec/properties/root/anyOf/30/properties/source"
+                            "$ref": "#/properties/spec/properties/root/anyOf/31/properties/source"
                           },
                           "queue": {
                             "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/3/properties/data"
@@ -40179,6 +40361,44 @@
               },
               "required": ["platform", "name", "spec"],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "string",
+                  "const": "watchos"
+                },
+                "name": {
+                  "description": "Exact watch simulator name",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "deviceId": {
+                  "description": "Exact watch simulator UDID; a UDID that names no watch is refused, not created",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "spec": {
+                  "type": "object",
+                  "properties": {
+                    "runtime": {
+                      "description": "watchOS CoreSimulator runtime identifier",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "deviceType": {
+                      "description": "Apple Watch CoreSimulator device-type identifier",
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["runtime", "deviceType"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["platform", "name", "spec"],
+              "additionalProperties": false
             }
           ]
         },
@@ -40188,8 +40408,7 @@
           "type": "boolean"
         },
         "readiness": {
-          "description": "Whether to wait for the AutoMobile automation runner after device boot",
-          "default": "automation",
+          "description": "Whether to wait for the AutoMobile automation runner after device boot (default \"automation\"); watchOS has no runner and takes only \"none\" (its default)",
           "type": "string",
           "enum": ["automation", "none"]
         },
@@ -40370,7 +40589,7 @@
             },
             "platform": {
               "type": "string",
-              "enum": ["android", "ios"]
+              "enum": ["android", "ios", "watchos"]
             },
             "isVirtual": {
               "type": "boolean"
@@ -49104,8 +49323,9 @@
           ]
         },
         "platform": {
+          "description": "Inferred from the device; \"watchos\" is required to select an Apple Watch simulator",
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": ["android", "ios", "watchos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -51010,7 +51230,7 @@
                 "nightMode": {
                   "type": "string",
                   "enum": ["on", "off", "unset"],
-                  "description": "Vehicle night-mode signal on an Android Automotive emulator, restored to its prior value; or unset."
+                  "description": "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override."
                 }
               },
               "additionalProperties": false,
@@ -63290,6 +63510,11 @@
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "includeExtras": {
           "description": "Opt in to raw accessibility extras metadata in structuredContent only (default off). Only meaningful with project:'full' or raw:true; text content always omits extras.",
           "type": "boolean"
@@ -63302,10 +63527,6 @@
           "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -65256,8 +65477,13 @@
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "keepData": {
-          "description": "Keep app data after uninstall (Android only, default false)",
+          "description": "Keep app data after uninstall (Android only, default false; refused on watchOS)",
           "type": "boolean"
         },
         "expectedSigningSha256": {
@@ -65269,10 +65495,6 @@
             "type": "string",
             "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
           }
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",

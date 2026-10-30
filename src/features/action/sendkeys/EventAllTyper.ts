@@ -23,6 +23,7 @@ import { readBackWithSettle } from "./readBackWithSettle";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 import type { Timer } from "../../../utils/SystemTimer";
 import { passwordTextPlaceholder } from "../imeFailureDiagnostics";
+import type { KeyEventLetterCaseCheck } from "./KeyEventSupport";
 interface AndroidEventAllProgress {
   mutated: boolean;
   committedGraphemes: number;
@@ -65,10 +66,7 @@ export interface EventAllTyperHost {
   verifyKeyEventLetterCase(
     text: string,
     typed: TextActionResult,
-    mode: "eventAll" | "eventOnly" | "eventLast",
-    signal?: AbortSignal,
-    display?: string,
-    before?: string,
+    check: KeyEventLetterCaseCheck,
   ): Promise<TextActionResult>;
   checkAbort(signal?: AbortSignal, error?: unknown): void;
   getEventAllKeyEventPlan(grapheme: string): Promise<KeyEventPlan | null>;
@@ -150,13 +148,11 @@ export class EventAllTyper implements AndroidModeTyper {
     const confirmed = unchangedWarning
       ? await this.confirmReplaceAfterUnchangedClear(text, unchangedWarning, typed, signal, display)
       : typed;
-    const caseChecked = await this.host.verifyKeyEventLetterCase(
-      text,
-      confirmed,
-      "eventAll",
+    const caseChecked = await this.host.verifyKeyEventLetterCase(text, confirmed, {
+      mode: "eventAll",
       signal,
       display,
-    );
+    });
     return outcome.batchedKeyRun
       ? this.verifyPre31Delivery(graphemes, caseChecked, signal, display)
       : caseChecked;

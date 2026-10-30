@@ -54,7 +54,7 @@ describe("cross-daemon claim store: torn claims cannot exist and unreadable ones
       source,
       new UnreachableProbe(),
       () => undefined,
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
   }
 

@@ -3,6 +3,7 @@ import type {
   AudioInjection,
   InjectAudioOptions,
   InjectionResult,
+  PcmSink,
 } from "../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import type { EmulatorGrpcEndpoint } from "../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 import type { PcmAudio } from "../../src/utils/audio/pcm";
@@ -46,11 +47,11 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
     };
   }
 
-  streamSink: ((pcm: Uint8Array) => void) | undefined;
+  streamSink: PcmSink | undefined;
   streamStops = 0;
   streamStopError: Error | undefined;
 
-  async streamCapture(sink: (pcm: Uint8Array) => void, options: { sampleRate?: number } = {}) {
+  async streamCapture(sink: PcmSink, options: { sampleRate?: number } = {}) {
     this.streamSink = sink;
     return {
       sampleRate: options.sampleRate ?? 48_000,

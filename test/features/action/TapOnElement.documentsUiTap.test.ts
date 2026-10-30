@@ -191,7 +191,7 @@ for (const action of ["tap", "doubleTap"]) {
       talkBackStrategy: strategy,
       talkBackDriverFactory: { createDriver: () => new FakeTalkBackNavigationDriver() },
     });
-    await tap.executeAndroidTap(action, 540, 380, 0, row, { isTalkBackEnabled: true });
+    await tap.executeAndroidTap(action, { x: 540, y: 380 }, 0, row, { isTalkBackEnabled: true });
     expect(strategy.fallbackCalls).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(action === "tap" ? 1 : 2);
   });

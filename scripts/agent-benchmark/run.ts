@@ -400,8 +400,7 @@ async function claimForBenchmark(
     undefined,
     undefined,
     () => undefined,
-    undefined,
-    createForeignCtrlProxyForwardEvidence(),
+    { forwardEvidence: createForeignCtrlProxyForwardEvidence() },
   );
   const holder = async () => {
     await ownership.refresh([serial]);

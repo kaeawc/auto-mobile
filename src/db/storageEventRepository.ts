@@ -185,5 +185,8 @@ export async function cleanupIfNeeded(
   maxRows?: number,
   checkInterval?: number,
 ): Promise<void> {
-  await cleanupEventTable("storage_events", retentionState, db, maxRows, checkInterval);
+  await cleanupEventTable("storage_events", retentionState, db, {
+    maxRows,
+    checkInterval,
+  });
 }

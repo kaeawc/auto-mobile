@@ -554,7 +554,7 @@ export class TwoDaemonWorld {
       this.claims.forProcess(current),
       this.probe,
       () => socketPath,
-      timer,
+      { timer },
     );
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, daemonSessionId, {
@@ -1140,7 +1140,7 @@ export class TwoDaemonWorld {
           undefined,
           undefined,
           undefined,
-          { toolName: "killDevice", force: false },
+          { foreignClaim: { toolName: "killDevice", force: false } },
         );
         if (!reservation || process.dead) {
           return;

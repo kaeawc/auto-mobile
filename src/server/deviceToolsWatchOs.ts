@@ -77,7 +77,7 @@ export async function startWatchDevice(
           });
           stage.current = "binding the device session";
           const sessionId = await bindWatchSession(
-            { watch, boot, rawArgs },
+            { watch, boot, rawArgs, operation: "startDevice" },
             bindSession,
             deps.timer,
             deadlineMs,
@@ -96,8 +96,13 @@ export async function startWatchDevice(
  * start path: a request cancelled or timed out once the bind minted a session never delivers that
  * session's UUID, so the session it minted (and its claim) is released again (#11565).
  */
-async function bindWatchSession(
-  { watch, boot, rawArgs }: { watch: ListedWatch; boot: WatchBootResult; rawArgs: object },
+export async function bindWatchSession(
+  {
+    watch,
+    boot,
+    rawArgs,
+    operation,
+  }: { watch: ListedWatch; boot: WatchBootResult; rawArgs: object; operation: string },
   bindSession: BindBootedSession,
   timer: DeviceToolsDependencies["timer"],
   deadlineMs: number,
@@ -107,10 +112,6 @@ async function bindWatchSession(
     timer,
     deadlineMs,
     signal,
-    () =>
-      new ActionableError(
-        `startDevice timed out while binding the device session; target=watchos:${watch.deviceId}`,
-      ),
     bindUndoneIfUndelivered(
       async (receipt, bindSignal) =>
         await bindSession(boot.device, sessionArgs(rawArgs), undefined, null, {
@@ -119,6 +120,12 @@ async function bindWatchSession(
           signal: bindSignal,
         }),
     ),
+    {
+      timeoutError: () =>
+        new ActionableError(
+          `${operation} timed out while binding the device session; target=watchos:${watch.deviceId}`,
+        ),
+    },
   );
 }
 
@@ -193,7 +200,7 @@ function parseWatchStartArgs(rawArgs: object): WatchStartDeviceArgs {
   );
 }
 
-function defaultWatchLifecycle(): WatchSimulatorLifecycle {
+export function defaultWatchLifecycle(): WatchSimulatorLifecycle {
   const simctl = new SimCtlClient();
   return new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl));
 }

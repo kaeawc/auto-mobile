@@ -83,9 +83,12 @@ export function registerLocalizationResources(): void {
   ResourceRegistry.registerTemplate(
     LOCALIZATION_RESOURCE_TEMPLATES.DEVICE_LOCALIZATION,
     "Device Localization Settings",
-    "Current localization settings (locale, time zone, text direction, time format, calendar) for a device.",
-    "application/json",
-    async (params) => getLocalizationResource(params.deviceId),
+    {
+      description:
+        "Current localization settings (locale, time zone, text direction, time format, calendar) for a device.",
+      mimeType: "application/json",
+      handler: async (params) => getLocalizationResource(params.deviceId),
+    },
   );
 
   logger.info("[LocalizationResources] Registered localization resources");

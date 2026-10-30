@@ -291,14 +291,10 @@ export class BaseVisualChange {
     // pre-gesture await (including actions that skip the stability wait entirely).
     const beforeWindowRead = captureStabilityWindow(this.window, this.device, options);
     const { actionStartTime, clockSkewMs } = await this.readActionClock(perf);
-    const blockResult = await this.runBlock(
-      block,
-      previousObserveResult,
-      state,
-      options,
+    const blockResult = await this.runBlock(block, previousObserveResult, state, options, {
       perf,
       coordinateAction,
-    );
+    });
     if (this.isUnconfirmedIosFailure(blockResult, options)) {
       perf.end();
       // Returned before any post-action read, so `observation` is absent (see ObservedEnvelope).
@@ -600,9 +596,9 @@ export class BaseVisualChange {
     previous: ObserveResult | null,
     state: CallerFenceState,
     options: ObservedChangeOptions,
-    perf: PerformanceTracker,
-    coordinateAction: boolean,
+    stage: { perf: PerformanceTracker; coordinateAction: boolean },
   ): Promise<R | ObservedActionResult> {
+    const { perf, coordinateAction } = stage;
     return perf.track("executeBlock", async () => {
       throwIfAborted(options.signal);
       if (coordinateAction && this.actionDisplayRevision() !== state.displayRevision) {
@@ -1030,6 +1026,7 @@ export class BaseVisualChange {
       window: this.window,
       adb: this.adb,
       deviceId: this.device.deviceId,
+      formFactor: this.device.formFactor,
       timer: this.timer,
     }).verify(options);
   }

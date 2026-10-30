@@ -559,8 +559,8 @@ test("idle exemption follows the live progress-extended deadline", async () => {
   const server = connectedServer(timer, socket);
   const completed = Promise.withResolvers<DaemonResponse | undefined>();
   const deadline = new ProgressExtendableDeadline(0, longBudgetMs, 40 * 60 * 1000);
-  server.requestHandler = (_sessionId, _socket, _request, _receivedAtMs, onAdmitted) => {
-    onAdmitted?.(deadline);
+  server.requestHandler = (_sessionId, _socket, _request, _receivedAtMs, handling) => {
+    handling?.onAdmitted?.(deadline);
     return completed.promise;
   };
   sendRequest(socket);

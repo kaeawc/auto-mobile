@@ -121,7 +121,7 @@ const pngBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 const methods: RequestMethod[] = [
   {
     name: "requestAction",
-    invoke: (h, s) => h.client.requestAction("click", "id", LONG_TIMEOUT_MS, perf, undefined, s),
+    invoke: (h, s) => h.client.requestAction("click", "id", LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestClickFocusedInput",
@@ -154,7 +154,8 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestClipboard",
-    invoke: (h, s) => h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) =>
+      h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestSettingsGet",
@@ -163,7 +164,11 @@ const methods: RequestMethod[] = [
   {
     name: "requestSettingsPut",
     invoke: (h, s) =>
-      h.client.requestSettingsPut("global", "key", "1", undefined, LONG_TIMEOUT_MS, perf, s),
+      h.client.requestSettingsPut("global", "key", "1", undefined, {
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestSettingsList",
@@ -171,7 +176,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestGlobalAction",
-    invoke: (h, s) => h.client.requestGlobalAction("back", LONG_TIMEOUT_MS, perf, undefined, s),
+    invoke: (h, s) => h.client.requestGlobalAction("back", LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "validateFrameContext",
@@ -262,7 +267,8 @@ const methods: RequestMethod[] = [
   {
     name: "requestGestureEnd",
     abortable: false,
-    invoke: (h) => h.client.requestGestureEnd("g", 1, 2, false, LONG_TIMEOUT_MS, perf),
+    invoke: (h) =>
+      h.client.requestGestureEnd("g", 1, 2, false, { timeoutMs: LONG_TIMEOUT_MS, perf }),
   },
   {
     name: "requestSetText",
@@ -275,7 +281,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "commitViaIme",
-    invoke: (h, s) => h.client.commitViaIme("hi", undefined, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) => h.client.commitViaIme("hi", undefined, LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestImeAction",
@@ -493,7 +499,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestScreenshot",
-    invoke: (h, s) => h.client.requestScreenshot(LONG_TIMEOUT_MS, perf, false, s),
+    invoke: (h, s) => h.client.requestScreenshot(LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestHierarchySync",
@@ -517,7 +523,13 @@ const methods: RequestMethod[] = [
   {
     name: "setPreference",
     abortable: false,
-    invoke: (h) => h.client.setPreference("pkg", "file", "key", "1", "STRING", LONG_TIMEOUT_MS),
+    invoke: (h) =>
+      h.client.setPreference(
+        "pkg",
+        "file",
+        { key: "key", value: "1", type: "STRING" },
+        LONG_TIMEOUT_MS,
+      ),
   },
   {
     name: "removePreference",

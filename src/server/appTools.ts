@@ -6,17 +6,12 @@ import { AppPermissions, type SetAppPermissionsResult } from "../features/action
 import { CrashApp } from "../features/action/CrashApp";
 import {
   type AndroidInstallRequest,
-  InstallApp,
   type InstallAppCall,
   type InstallGuardOptions,
 } from "../features/action/InstallApp";
 import { ResetKeychain } from "../features/action/ResetKeychain";
-import { TerminateApp, type TerminateAppCall } from "../features/action/TerminateApp";
-import {
-  UninstallApp,
-  type UninstallAppCall,
-  type UninstallGuardOptions,
-} from "../features/action/UninstallApp";
+import type { TerminateAppCall } from "../features/action/TerminateApp";
+import { type UninstallAppCall, type UninstallGuardOptions } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
 import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
@@ -87,6 +82,15 @@ import {
   type UninstallAppArgs,
   uninstallAppSchema,
 } from "./appToolsSchemas";
+import {
+  assertWatchLaunchSupported,
+  createPlatformInstallApp,
+  createPlatformLaunchApp,
+  createPlatformQueryInstalledApps,
+  createPlatformTerminateApp,
+  createPlatformUninstallApp,
+  type WatchAppManagerFactory,
+} from "./appToolsWatch";
 import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
@@ -156,8 +160,10 @@ export interface ListAppsToolDependencies {
   queryInstalledApps: typeof queryInstalledApps;
 }
 
-const createDefaultListAppsToolDependencies = (): ListAppsToolDependencies => ({
-  queryInstalledApps,
+const createDefaultListAppsToolDependencies = (
+  watchApps?: WatchAppManagerFactory,
+): ListAppsToolDependencies => ({
+  queryInstalledApps: createPlatformQueryInstalledApps(watchApps),
 });
 
 export interface TerminateAppExecutor {
@@ -168,9 +174,11 @@ export interface TerminateAppToolDependencies {
   createTerminateApp(device: BootedDevice): TerminateAppExecutor;
 }
 
-const defaultTerminateAppToolDependencies: TerminateAppToolDependencies = {
-  createTerminateApp: (device) => new TerminateApp(device),
-};
+const createDefaultTerminateAppToolDependencies = (
+  watchApps?: WatchAppManagerFactory,
+): TerminateAppToolDependencies => ({
+  createTerminateApp: (device) => createPlatformTerminateApp(device, watchApps),
+});
 
 export interface CrashAppExecutor {
   execute(appId: string, call?: ActionCall): Promise<CrashAppResult>;
@@ -216,9 +224,11 @@ export interface UninstallAppToolDependencies {
   createUninstallApp(device: BootedDevice): UninstallAppExecutor;
 }
 
-const defaultUninstallAppToolDependencies: UninstallAppToolDependencies = {
-  createUninstallApp: (device) => new UninstallApp(device),
-};
+const createDefaultUninstallAppToolDependencies = (
+  watchApps?: WatchAppManagerFactory,
+): UninstallAppToolDependencies => ({
+  createUninstallApp: (device) => createPlatformUninstallApp(device, watchApps),
+});
 
 export interface InspectPackageSigningExecutor {
   execute(
@@ -238,9 +248,11 @@ const defaultInspectPackageSigningToolDependencies: InspectPackageSigningToolDep
       : new InspectPackageSigning(device),
 };
 
-const defaultInstallAppToolDependencies: InstallAppToolDependencies = {
-  createInstallApp: (device) => new InstallApp(device),
-};
+const createDefaultInstallAppToolDependencies = (
+  watchApps?: WatchAppManagerFactory,
+): InstallAppToolDependencies => ({
+  createInstallApp: (device) => createPlatformInstallApp(device, watchApps),
+});
 
 function buildTerminateMessage(appId: string, result: TerminateAppResult): string {
   if (result.wasInstalled === false) {
@@ -401,6 +413,7 @@ const createLaunchAppHandler =
     let prototypeLaunch: PrototypeLaunch | undefined;
     try {
       signal?.throwIfAborted();
+      assertWatchLaunchSupported(device, args);
       prototypeLaunch = args.prototype
         ? await beginPrototypeLaunch(dependencies, device, args.appId)
         : undefined;
@@ -718,29 +731,35 @@ export interface AppToolsDependencies {
   appLifecycle?: Partial<AppLifecycleToolDependencies>;
   inspectPackageSigning?: Partial<InspectPackageSigningToolDependencies>;
   appPermissionsFactory?: AppPermissionsFactory;
+  /** The Apple Watch app manager the app tools use for a watch (install through terminate). */
+  watchApps?: WatchAppManagerFactory;
 }
 
 /** Builds every injectable handler from real defaults overlaid with `dependencies`. */
 function createAppToolHandlers(dependencies: AppToolsDependencies) {
   const listAppsHandler = createListAppsHandler({
-    ...createDefaultListAppsToolDependencies(),
+    ...createDefaultListAppsToolDependencies(dependencies.watchApps),
     ...dependencies.listApps,
   });
   const launchAppDependencies: LaunchAppToolDependencies = {
     ...createDefaultLaunchAppToolDependencies(),
+    createLaunchApp: (device) => createPlatformLaunchApp(device, dependencies.watchApps),
     ...dependencies.launchApp,
   };
   const launchAppHandler = createLaunchAppHandler(launchAppDependencies);
   const terminateAppHandler = createTerminateAppHandler(
-    { ...defaultTerminateAppToolDependencies, ...dependencies.terminateApp },
+    {
+      ...createDefaultTerminateAppToolDependencies(dependencies.watchApps),
+      ...dependencies.terminateApp,
+    },
     launchAppDependencies,
   );
   const uninstallAppHandler = createUninstallAppHandler({
-    ...defaultUninstallAppToolDependencies,
+    ...createDefaultUninstallAppToolDependencies(dependencies.watchApps),
     ...dependencies.uninstallApp,
   });
   const installAppHandler = createInstallAppHandler({
-    ...defaultInstallAppToolDependencies,
+    ...createDefaultInstallAppToolDependencies(dependencies.watchApps),
     ...dependencies.installApp,
   });
   const crashAppHandler = createCrashAppHandler({

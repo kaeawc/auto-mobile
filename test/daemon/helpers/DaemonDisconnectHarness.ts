@@ -127,7 +127,7 @@ export class DaemonDisconnectHarness extends Daemon {
     return this.runtime.deviceDisconnectMonitor;
   }
 
-  get disconnectMisses(): Map<string, number> {
+  get disconnectMisses(): DeviceLossState["misses"] {
     return this.deviceLoss.misses;
   }
 

@@ -7,6 +7,7 @@ import type { AutolockClient, DeviceAutolockManager } from "./deviceAutolockMana
 import type {
   DeviceReadinessReservation,
   PooledDevice,
+  ReadinessReservationOptions,
   RestartStopTargetIdentity,
   ShutdownIdentityReservation,
 } from "./devicePool";
@@ -125,16 +126,14 @@ export class DeviceReservations {
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
-    autolockClient?: AutolockClient & { restartResumeSessionId?: string },
-    enforceAndroidRecoveryExclusion = false,
+    options?: ReadinessReservationOptions,
   ): Promise<DeviceReadinessReservation> {
     const reservation = await this.port.shutdownReservationCoordinator.reserveDeviceForReadiness(
       deviceId,
       expectedIdentity,
       stableRuntimeName,
       verifiedAndroidAvdName,
-      autolockClient,
-      enforceAndroidRecoveryExclusion,
+      options,
     );
     // A reservation hides an idle device from allocation, so taking and giving it back are
     // idle/assigned transitions subscribers must hear about (#11568).
@@ -160,8 +159,10 @@ export class DeviceReservations {
         device,
         stableRuntimeName,
         undefined,
-        { restartResumeSessionId: sessionId },
-        true,
+        {
+          autolockClient: { restartResumeSessionId: sessionId },
+          enforceAndroidRecoveryExclusion: true,
+        },
       );
       permission.owners.add(reservation.owner);
       return Object.assign(

@@ -342,7 +342,9 @@ describe("DaemonMcpProxy waits out device_cleanup_in_progress (#11900)", () => {
     try {
       const controller = new AbortController();
       const reason = new Error("caller cancelled cleanup wait");
-      const call = proxy.callTool("getAndroid", {}, undefined, undefined, controller.signal);
+      const call = proxy.callTool("getAndroid", {}, undefined, undefined, {
+        signal: controller.signal,
+      });
       const rejected = call.then(
         () => {
           throw new Error("Expected caller cancellation");

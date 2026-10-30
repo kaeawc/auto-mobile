@@ -1,6 +1,7 @@
 import type { Server as NetServer, Socket } from "node:net";
 import { UnixSocketServer, type StrokeAdmission } from "../../../src/daemon/socketServer";
 import type { ProgressExtendableDeadline } from "../../../src/daemon/mcpRequestTimeout";
+import type { SocketRequestHandling } from "../../../src/daemon/socketServerParts/SocketAdmission";
 import type { BootedDevice } from "../../../src/models";
 import type { DaemonNotification, DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { ResourceUpdateTargets } from "../../../src/daemon/listChangedBroadcast";
@@ -53,7 +54,7 @@ export class UnixSocketServerHarness extends UnixSocketServer {
       socket: Socket,
       request: DaemonRequest,
       receivedAtMs: number,
-      onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
+      handling?: SocketRequestHandling,
     ) => Promise<DaemonResponse | undefined>,
   ) {
     this.handleRequest = handler;

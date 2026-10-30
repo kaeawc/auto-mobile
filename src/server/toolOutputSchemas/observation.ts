@@ -453,6 +453,14 @@ export const observeResultSchema = z
       .describe(
         "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
       ),
+    hierarchyUnavailable: z
+      .object({ platform: z.literal("watchos"), message: z.string() })
+      .optional()
+      .describe(
+        "Apple Watch simulator only: this observation is a screenshot with screenSize; the view " +
+          "hierarchy is not available on watchOS yet. viewHierarchy, skeleton, context, elements " +
+          "and the other element fields are absent, not empty: their absence does not mean an empty screen.",
+      ),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
     diagnostics: z

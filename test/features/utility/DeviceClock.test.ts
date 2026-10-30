@@ -59,7 +59,7 @@ function harness() {
     },
   };
   const write = async (input: SetDeviceClockInput) => {
-    const clock = await writeDeviceClock(android, adapter, input, slot, dependencies);
+    const clock = await writeDeviceClock(android, adapter, input, { slot, dependencies });
     expect(setDeviceStateResultSchema.parse({ message: "Clock result", clock })).toBeDefined();
     return clock;
   };
@@ -177,8 +177,7 @@ describe("device clock", () => {
       android,
       adapter,
       { mode: "reset" },
-      h.slot,
-      h.dependencies,
+      { slot: h.slot, dependencies: h.dependencies },
     );
     expect(result.verified).toBe(true);
     expect(adapter.instantMs).toBe(h.timer.now());
@@ -284,8 +283,7 @@ describe("device clock", () => {
       android,
       new UnrootFailure(),
       { mode: "reset" },
-      h.slot,
-      h.dependencies,
+      { slot: h.slot, dependencies: h.dependencies },
     );
     expect(result.verified).toBe(true);
     expect(h.slot.get()).toBeUndefined();

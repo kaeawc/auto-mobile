@@ -217,9 +217,11 @@ export async function selectAndroidOpenLinkChooser(
   device: BootedDevice,
   packageName: string,
   opened: OpenURLResult,
-  url?: string,
-  chooser: Pick<HandleIntentChooser, "execute"> = new HandleIntentChooser(device),
-  signal?: AbortSignal,
+  {
+    url,
+    chooser = new HandleIntentChooser(device),
+    signal,
+  }: { url?: string; chooser?: Pick<HandleIntentChooser, "execute">; signal?: AbortSignal },
 ): Promise<OpenURLResult> {
   if (device.platform !== "android") {
     throw new ActionableError("chooserAppPackage is supported only on Android.");
@@ -707,7 +709,6 @@ function buildIosOpenAlertOptions(
             undefined,
             undefined,
             IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
-            undefined,
             { abortSignal: signal },
           )
       : undefined,
@@ -736,14 +737,16 @@ export const createSendKeysHandler =
     await assertSendKeysRunnerCompatible(device);
     RecompositionTracker.getInstance().recordInteraction(device.deviceId);
     const sendKeys = (deps.sendKeysFactory ?? defaultSendKeysFactory)(device);
-    const result = await sendKeys.execute(
-      args.commands,
-      args.selector,
+    const result = await sendKeys.execute(args.commands, args.selector, {
       progress,
       signal,
-      args.display,
-      { container: args.container, selectionStrategy: args.selectionStrategy, layer: args.layer },
-    );
+      display: args.display,
+      focus: {
+        container: args.container,
+        selectionStrategy: args.selectionStrategy,
+        layer: args.layer,
+      },
+    });
     const dismissal = await dismissKeyboardAfterSendKeys(
       device,
       serverConfig.isDismissKeyboardAfterInputEnabled(),
@@ -817,14 +820,11 @@ export const createOpenLinkHandler =
     const opened = await openUrl.execute(args.url, { signal });
     throwIfAborted(signal);
     const result = args.chooserAppPackage
-      ? await selectAndroidOpenLinkChooser(
-          device,
-          args.chooserAppPackage,
-          opened,
-          opened.url,
-          (deps.openLinkChooserFactory ?? defaultOpenLinkChooserFactory)(device),
+      ? await selectAndroidOpenLinkChooser(device, args.chooserAppPackage, opened, {
+          url: opened.url,
+          chooser: (deps.openLinkChooserFactory ?? defaultOpenLinkChooserFactory)(device),
           signal,
-        )
+        })
       : opened;
     throwIfAborted(signal);
     const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;

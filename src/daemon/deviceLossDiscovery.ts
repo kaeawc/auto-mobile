@@ -26,7 +26,7 @@ import {
   selectTransitionalDeviceIds,
 } from "./disconnectMonitor";
 import type { DevicePool, PooledDevice } from "./devicePool";
-import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
+import { MISSING_DEVICE_MISS_THRESHOLD, type DeviceLossMisses } from "./deviceLossMisses";
 
 /**
  * The stateless half of the device-disconnect monitor, split out of daemon.ts (#11808): discovery
@@ -256,6 +256,13 @@ export interface ListedAndroidStates {
   listedNonDeviceIds?: Set<string>;
 }
 
+/** The disconnect candidates a listed-state probe asks about, and what discovery already booted. */
+export interface ListedAndroidCandidates {
+  candidateDeviceIds: Set<string>;
+  bootedDeviceIds: Set<string>;
+  candidatePlatforms: Map<string, Platform>;
+}
+
 /**
  * Online-ness is otherwise binary: an in-session Android emulator that
  * dropped to ADB `offline` looks identical to one that is fully gone, since
@@ -271,9 +278,7 @@ export async function probeListedAndroidStates(
   devicePool: Pick<DevicePool, "getAndroidTransportAliases">,
   deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidListedDeviceStates">,
   planActive: boolean,
-  candidateDeviceIds: Set<string>,
-  bootedDeviceIds: Set<string>,
-  candidatePlatforms: Map<string, Platform>,
+  { candidateDeviceIds, bootedDeviceIds, candidatePlatforms }: ListedAndroidCandidates,
 ): Promise<ListedAndroidStates> {
   if (planActive) {
     return {};
@@ -405,7 +410,7 @@ export function collectDisconnectedRecordings<Device extends { id: string }>(
 }
 
 export function logDisconnectMisses(
-  deviceDisconnectMisses: Map<string, number>,
+  deviceDisconnectMisses: DeviceLossMisses,
   disconnectResult: Pick<DisconnectMonitorEvaluation, "missed" | "transitional">,
   planDeviceIds: ReadonlySet<string>,
   bootedDeviceIds: Set<string>,

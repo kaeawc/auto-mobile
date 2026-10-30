@@ -3,6 +3,19 @@ import { z } from "zod/v4";
 /** Shared platform schema — single source of truth for all tool schemas. */
 export const platformSchema = z.enum(["android", "ios"]);
 
+/**
+ * `platform` for a tool that accepts an Apple Watch simulator (installApp, uninstallApp, listApps,
+ * launchApp, terminateApp, observe; #14908, #14910). Every other tool keeps the shared Android/iOS {@link platformSchema}.
+ * A fresh instance per field, so the tool schema never emits a dangling `$ref`.
+ */
+export const watchAwarePlatformSchema = () =>
+  z
+    .enum(["android", "ios", "watchos"])
+    .optional()
+    .describe(
+      'Device platform. Name "watchos" to target an Apple Watch simulator, unless sessionUuid is a watch session',
+    );
+
 export const DEVICE_LABEL_DESCRIPTION = "Device label";
 
 export const includeExtrasSchema = z

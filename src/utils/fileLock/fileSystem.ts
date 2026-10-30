@@ -395,9 +395,13 @@ export function* publishFile(
   content: string,
   pid: number,
   fileSystem: LockFileSystem,
-  idGenerator: IdGenerator = defaultIdGenerator,
-  postPublish?: (tmp: string) => Steps<void>,
+  options: {
+    idGenerator?: IdGenerator;
+    /** Runs after the exclusive link, while the private temp name still exists. */
+    postPublish?: (tmp: string) => Steps<void>;
+  } = {},
 ): Steps<Publication> {
+  const { idGenerator = defaultIdGenerator, postPublish } = options;
   const tmp = `${path}.${pid}.${++lockState.publicationCounter}.${idGenerator.next()}.tmp`;
   let linking = false;
   try {
@@ -434,7 +438,7 @@ export function* publishReclaimGuard(
   fileSystem: LockFileSystem,
   idGenerator: IdGenerator = defaultIdGenerator,
 ): Steps<"created" | "contended" | "failed"> {
-  const publication = yield* publishFile(path, content, pid, fileSystem, idGenerator);
+  const publication = yield* publishFile(path, content, pid, fileSystem, { idGenerator });
   if (typeof publication === "string") {
     return publication;
   }

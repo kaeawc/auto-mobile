@@ -137,10 +137,15 @@ function selectBootedDevices(
 
 function listingDiscoveryObservation(
   requestedPlatforms: Platform[],
-  succeededPlatforms: Set<Platform>,
-  succeededSources: Set<DiscoverySource> | undefined,
-  discoveryErrors: BootedDeviceDiscovery["discoveryErrors"],
-  sourceErrors: BootedDeviceDiscovery["sourceErrors"],
+  {
+    succeededPlatforms,
+    succeededSources,
+    discoveryErrors,
+    sourceErrors,
+  }: Pick<
+    BootedDeviceDiscovery,
+    "succeededPlatforms" | "succeededSources" | "discoveryErrors" | "sourceErrors"
+  >,
   pool: { getAllDevices(): Iterable<{ platform: Platform; id: string }> } | null | undefined,
 ) {
   // One classifier for every inventory surface (#11605): a source whose tooling is not installed
@@ -290,10 +295,7 @@ export function createListingHandlers() {
 
     const discovery = listingDiscoveryObservation(
       requestedPlatforms,
-      succeededPlatforms,
-      succeededSources,
-      discoveryErrors,
-      sourceErrors,
+      { succeededPlatforms, succeededSources, discoveryErrors, sourceErrors },
       pool,
     );
 
@@ -311,14 +313,13 @@ export function createListingHandlers() {
     );
     // Refresh the broker binding snapshot so held devices are not reported as free.
     await pool?.refreshInventoryOwnership();
-    const devices = listDevicePayloads(
-      matchingBooted,
-      pool,
-      configured.images,
-      (deviceId) => pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
-      (deviceId) => pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
+    const devices = listDevicePayloads(matchingBooted, pool, configured.images, {
+      aliasesForDevice: (deviceId) =>
+        pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
+      transportAvdNameForDevice: (deviceId) =>
+        pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
       transitionalHolds,
-    );
+    });
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createStructuredToolResponse({

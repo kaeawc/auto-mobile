@@ -429,7 +429,7 @@ describe("TapOnElement extended selectors", () => {
       const options = { action: "longPress" as const, resolvedHierarchy: notificationHierarchy };
       const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
       try {
-        await tapOn.executeAndroidTap("longPress", 50, 25, 1000, uniqueIdElement, {
+        await tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, uniqueIdElement, {
           options: options,
           isTalkBackEnabled: false,
         });
@@ -458,7 +458,7 @@ describe("TapOnElement extended selectors", () => {
         const options = { action: "longPress" as const, resolvedHierarchy };
         const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
         try {
-          await harness.tapOn.executeAndroidTap("longPress", 50, 25, 1000, element, {
+          await harness.tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, element, {
             options: options,
             isTalkBackEnabled: false,
           });
@@ -482,7 +482,7 @@ describe("TapOnElement extended selectors", () => {
         const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(raw);
         const read = spyOn(proxy, "getAccessibilityHierarchy");
         try {
-          await tapOn.executeAndroidTap("longPress", 50, 25, 1000, uniqueIdElement, {
+          await tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, uniqueIdElement, {
             signal: controller.signal,
             options: options,
             isTalkBackEnabled: false,
@@ -513,7 +513,7 @@ describe("TapOnElement extended selectors", () => {
       });
       try {
         await expect(
-          tapOn.executeAndroidTap("longPress", 50, 25, 1000, uniqueIdElement, {
+          tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, uniqueIdElement, {
             signal: controller.signal,
             isTalkBackEnabled: false,
           }),
@@ -575,10 +575,10 @@ describe("TapOnElement extended selectors", () => {
           });
           expect(result.success).toBe(true);
           expect(stable).toHaveBeenCalledTimes(1);
-          expect(dispatch.mock.calls[0]?.[5]?.options).toMatchObject({
+          expect(dispatch.mock.calls[0]?.[4]?.options).toMatchObject({
             resolvedHierarchy: notificationHierarchy,
           });
-          expect(dispatch.mock.calls[0]?.[5]?.options?.resolvedHierarchy).toBe(
+          expect(dispatch.mock.calls[0]?.[4]?.options?.resolvedHierarchy).toBe(
             notificationHierarchy,
           );
           expect(proxy.getHierarchyRequestCount()).toBe(0);

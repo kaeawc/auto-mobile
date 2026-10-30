@@ -9,7 +9,11 @@ import { CtrlProxySdkCapabilities, sdkCapabilityQueryOptions } from "./CtrlProxy
 import type { PinchRequest, TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
 import type { IosActivateAccessibilityLinkRequest } from "./CtrlProxyVoiceOver";
 
-import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
+import {
+  iosWireDeadlineParams,
+  type IOSDispatchResult,
+  type IosFrameDispatchOptions,
+} from "./CtrlProxyDispatch";
 
 import type { CtrlProxySdkTriggerResult } from "./types";
 import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
@@ -57,7 +61,7 @@ import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
 import { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
 
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
-import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
+import { CtrlProxyDatabase, type TablePage } from "./CtrlProxyDatabase";
 import { CtrlProxyPermissions } from "./CtrlProxyPermissions";
 
 import type {
@@ -289,16 +293,9 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     signal?: AbortSignal,
     timeoutMs?: number,
   ): ReturnType<IosCtrlProxy["requestHierarchySync"]> {
-    return this.hierarchy.requestHierarchySync(
-      perf,
-      disableAllFiltering,
-      signal,
-      timeoutMs,
-      false,
-      {
-        forceCapture: true,
-      },
-    );
+    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, {
+      forceCapture: true,
+    });
   }
 
   async requestHierarchySyncWithoutObservationStreamPush(
@@ -307,7 +304,9 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     signal?: AbortSignal,
     timeoutMs?: number,
   ): Promise<CtrlProxySyncedHierarchy | null> {
-    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
+    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, {
+      suppressObservationStreamPush: true,
+    });
   }
 
   async requestHierarchySyncForObserver(
@@ -322,7 +321,8 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     if (remaining <= 0) {
       throw new ObserverPendingRequestTimeoutError();
     }
-    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, remaining, true, {
+    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, remaining, {
+      suppressObservationStreamPush: true,
       forceCapture: true,
       observerMode: true,
     });
@@ -537,21 +537,12 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     button: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: IosFrameDispatchOptions,
   ): Promise<IOSDispatchResult<CtrlProxyPressButtonResult>> {
     if (button.toLowerCase() === "home" || button.toLowerCase() === "recent") {
       this.sdkCapability.invalidateSdkCapabilities();
     }
-    return this.navigation.requestPressButton(
-      button,
-      timeoutMs,
-      perf,
-      frameContext,
-      signal,
-      onDispatch,
-    );
+    return this.navigation.requestPressButton(button, timeoutMs, perf, options);
   }
 
   async requestRecentApps(
@@ -678,8 +669,7 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
       hierarchy,
       new SimCtlClient(this.device),
       () => this.screenshot.requestScreenshot(timeoutMs, perf, signal),
-      signal,
-      currentPanel?.key,
+      { signal, activePanelKey: currentPanel?.key },
     );
   }
 
@@ -944,13 +934,12 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
     appId: string,
     databasePath: string,
     table: string,
-    limit?: number,
-    offset?: number,
+    page?: TablePage,
     timeoutMs?: number,
   ): Promise<import("../../database/DatabaseInspector").TableDataResult> {
     const options = sdkCapabilityQueryOptions(this.timer, timeoutMs ?? 5000);
     await this.sdkCapability.requireSdkCapability("database", appId, options);
-    return this.database.getTableData(appId, databasePath, table, limit, offset, options);
+    return this.database.getTableData(appId, databasePath, table, page, options);
   }
 
   async getTableStructureForIos(

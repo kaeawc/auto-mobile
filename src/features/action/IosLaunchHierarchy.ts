@@ -63,7 +63,9 @@ export class IosLaunchHierarchy {
 
     // Fast path: if cache already has the correct app's hierarchy, skip the round-trip.
     // This makes warm launches (app already foreground) ~0ms instead of ~133ms.
-    const cached = await xcTestClient.getLatestHierarchy(false, 0, undefined, true, 0);
+    const cached = await xcTestClient.getLatestHierarchy(false, 0, undefined, true, {
+      minTimestamp: 0,
+    });
     const cachedPkg = (cached?.hierarchy as { packageName?: string } | null)?.packageName;
     if (this.isCachedIosHierarchyReady(cachedPkg, expectedPackageName)) {
       logger.info(

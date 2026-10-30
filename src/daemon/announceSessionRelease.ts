@@ -31,8 +31,7 @@ export function announceSessionRelease(
   shutdown: ShutdownReleaseAnnouncements,
   sessionId: string,
   releaseReason: string,
-  snapshot: SessionReleaseSnapshot,
-  options: { upgradeOnly?: boolean } = {},
+  { snapshot, upgradeOnly }: { snapshot: SessionReleaseSnapshot; upgradeOnly?: boolean },
 ): void {
   const recordingIds = announcer.takeRecordingIds(sessionId);
   if (shutdown.fallbacks?.has(sessionId)) {
@@ -43,7 +42,7 @@ export function announceSessionRelease(
   }
   const extras: SessionReleaseExtras = {
     ...(recordingIds.length > 0 ? { recordingIds } : {}),
-    ...(options.upgradeOnly ? { upgradeOnly: true } : {}),
+    ...(upgradeOnly ? { upgradeOnly: true } : {}),
   };
   announcer.emit(
     sessionId,

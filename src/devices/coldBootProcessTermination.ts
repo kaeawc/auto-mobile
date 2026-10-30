@@ -146,11 +146,10 @@ export function watchSurvivingProcess(
   exited: Promise<void>,
   label: string,
   timer: TerminationTimer,
-  isRunning: (pid: number) => boolean = isProcessRunning,
-  processGeneration: Pick<
-    LockOwnerGenerationProbe,
-    "current" | "compare"
-  > = defaultLockOwnerGenerationProbe,
+  {
+    isProcessRunning: isRunning = isProcessRunning,
+    processGeneration = defaultLockOwnerGenerationProbe,
+  }: Pick<OwnedEmulatorTerminationOptions, "isProcessRunning" | "processGeneration"> = {},
 ): Promise<void> {
   const pid = processHandle.pid;
   const token = pid === undefined ? undefined : processGeneration.current(pid);
@@ -259,14 +258,10 @@ export async function terminateOwnedEmulatorProcess(
     `[startDevice] Emulator process ${handle.pid ?? "unknown"} for ${label} survived ` +
       "SIGTERM and SIGKILL; holding the AVD lifecycle lease until it is gone",
   );
-  const gone = watchSurvivingProcess(
-    handle,
-    exited,
-    label,
-    timer,
-    options.isProcessRunning,
-    options.processGeneration,
-  );
+  const gone = watchSurvivingProcess(handle, exited, label, timer, {
+    isProcessRunning: options.isProcessRunning,
+    processGeneration: options.processGeneration,
+  });
   options.markHeldByUnkillableProcess?.(handle.pid);
   return { state: "survived", gone };
 }

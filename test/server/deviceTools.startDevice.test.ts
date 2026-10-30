@@ -2584,10 +2584,13 @@ describe("startDevice handler", () => {
               false,
               kind !== "terminal-runner",
               "runner-connect",
-              42,
-              kind === "device-lost"
-                ? new DeviceLostError(androidDevice.deviceId, "device lost", "incident")
-                : undefined,
+              {
+                attempts: 42,
+                diagnosticCause:
+                  kind === "device-lost"
+                    ? new DeviceLostError(androidDevice.deviceId, "device lost", "incident")
+                    : undefined,
+              },
             );
       let readyDevice: BootedDevice | undefined;
       let bindFailure = kind === "bind-offline";

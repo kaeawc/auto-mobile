@@ -4,6 +4,7 @@ import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ProgressCallback } from "./BaseVisualChange";
+import type { ActionCall } from "./ActionCall";
 import {
   BootedDevice,
   Element,
@@ -69,6 +70,11 @@ interface FieldVerificationOutcome {
 
 interface TextFocusRecovery {
   occlusionError?: KeyboardOcclusionError;
+}
+
+/** `ActionCall` for applying one field value; carries the per-field IME recovery state. */
+interface FieldApplyCall extends ActionCall {
+  focusRecovery?: TextFocusRecovery;
 }
 
 type FieldApplicationResult = {
@@ -166,14 +172,11 @@ export class SetUIStateFields {
         }
 
         // Apply the value based on field type
-        const applyResult = await this.applyFieldValue(
-          element,
-          fieldSpec,
-          fieldType,
+        const applyResult = await this.applyFieldValue(element, fieldSpec, fieldType, {
           progress,
           signal,
           focusRecovery,
-        );
+        });
 
         // An unclassified field or exhausted IME recovery cannot benefit from
         // repeating the same operation (#4242, #9258).
@@ -598,10 +601,9 @@ export class SetUIStateFields {
     element: Element,
     fieldSpec: FieldSpec,
     fieldType: FieldType,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    focusRecovery: TextFocusRecovery = {},
+    call: FieldApplyCall = {},
   ): Promise<FieldApplicationResult> {
+    const { progress, signal, focusRecovery = {} } = call;
     const tapOnElement = this.getTapOnElement();
     const inputText = this.getInputText();
     const clearText = this.getClearText();

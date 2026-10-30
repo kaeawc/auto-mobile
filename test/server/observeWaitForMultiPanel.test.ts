@@ -63,16 +63,14 @@ describe("waitFor multi-panel element visibility", () => {
     const screenSize = resolveActionableHierarchyScreenSize(raw, true) ?? undefined;
     expect(screenSize).toEqual({ width: 951, height: 669 });
     expect(
-      findWaitForElement(finder, waitFor, raw, "ios", new Map(), {
+      findWaitForElement(finder, waitFor, raw, "ios", {
         iosMultiPanel: true,
         observationScreenSize: screenSize,
       })?.text,
     ).toBe(duoSelectionText);
-    expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), false)).toBeNull();
-    expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), {})).toBeNull();
-    expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), true)?.text).toBe(
-      duoSelectionText,
-    );
+    expect(findWaitForElement(finder, waitFor, raw, "ios", false)).toBeNull();
+    expect(findWaitForElement(finder, waitFor, raw, "ios", {})).toBeNull();
+    expect(findWaitForElement(finder, waitFor, raw, "ios", true)?.text).toBe(duoSelectionText);
   });
 
   test("matches the right-hand target in an unprojected iOS Duo hierarchy", async () => {

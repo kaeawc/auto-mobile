@@ -65,16 +65,26 @@ interface NavigationRecordingContext {
   forgetFailedEdgeReplay(pairKey: string, actionKey: string): void;
 }
 /** Atomic graph recording and post-commit effects, invoked only through the manager's write queue. */
+/** The manager-owned write epoch and callbacks a recorder commits through. */
+export interface NavigationGraphRecorderWiring {
+  navigationWriteState: { epoch: number };
+  context: NavigationRecordingContext;
+}
+
 export class NavigationGraphRecorder {
   private readonly ACTIVE_NAVIGATION_WINDOW_MS = 1000;
+  private readonly navigationWriteState: { epoch: number };
+  private readonly context: NavigationRecordingContext;
   constructor(
     private readonly repository: NavigationRepository,
     private readonly testCoverageRepository: TestCoverageRepository,
     private readonly timer: Timer,
     private readonly state: NavigationRecordingState,
-    private readonly navigationWriteState: { epoch: number },
-    private readonly context: NavigationRecordingContext,
-  ) {}
+    { navigationWriteState, context }: NavigationGraphRecorderWiring,
+  ) {
+    this.navigationWriteState = navigationWriteState;
+    this.context = context;
+  }
 
   public async recordNavigationEventUnlocked(
     event: IncomingNavigationEvent,
@@ -229,8 +239,7 @@ export class NavigationGraphRecorder {
       appId,
       previousScreen,
       screenName,
-      toolName,
-      toolArgs,
+      { toolName, toolArgs },
       timestamp,
     );
     // The action just led from this screen to that one, so a remembered replay

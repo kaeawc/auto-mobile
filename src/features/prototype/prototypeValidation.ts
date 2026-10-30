@@ -111,7 +111,7 @@ function visitReference(
 ): PrototypeValidationError | undefined {
   const nested = nestedReferences[String(rule.name)];
   if (nested) {
-    return visitNested(value, rule, path, context, depth, nested);
+    return visitNested(value, rule, path, context, { depth, nested });
   }
   const itemImages = rule.name === "item" ? imageSlotUses(object(value)?.image) : 0;
   if (itemImages > 0) {
@@ -182,8 +182,7 @@ function visitNested(
   rule: Rule,
   path: string,
   context: Context,
-  depth: number,
-  nested: { limit: number; message: string },
+  { depth, nested }: { depth: number; nested: { limit: number; message: string } },
 ): PrototypeValidationError | undefined {
   const name = rule.name ?? "";
   if (++context.nesting[name] > nested.limit) {

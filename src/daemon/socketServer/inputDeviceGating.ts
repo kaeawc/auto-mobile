@@ -62,6 +62,13 @@ export interface InputRequestContext {
   requester?: () => string | undefined;
 }
 
+/** How an `input/*` frame's target is listed and whose frame it is. */
+export interface InputTargetResolveOptions {
+  /** Re-read the Android device list instead of a cached one; defaults off. */
+  bypassAndroidDeviceListCache?: boolean;
+  requester?: InputRequestContext["requester"];
+}
+
 /** Owner fence and device-key wait bound for one tracked `input/*` execution. */
 export interface InputDeviceGate {
   onDispatch?: () => void;
@@ -231,8 +238,7 @@ export class InputDeviceGating {
     deviceId: string | undefined,
     socketSessionId: string | undefined,
     action: InputTargetAction,
-    bypassAndroidDeviceListCache: boolean = false,
-    requester?: () => string | undefined,
+    { bypassAndroidDeviceListCache = false, requester }: InputTargetResolveOptions = {},
   ): Promise<BootedDevice> {
     const targetDevice = await this.ports.selectInputTargetDevice(
       platform,

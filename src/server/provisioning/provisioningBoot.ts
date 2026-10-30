@@ -86,7 +86,6 @@ export async function provisionExactDevice(
         timer,
         totalDeadlineMs,
         signal,
-        "provisioning the exact device",
         async (deadlineSignal) =>
           await provisioner.provision({
             platform: args.device.platform,
@@ -110,7 +109,7 @@ export async function provisionExactDevice(
             deadlineMs: totalDeadlineMs,
             signal: deadlineSignal,
           }),
-        collectPendingSettlement,
+        { phase: "provisioning the exact device", onPendingSettlement: collectPendingSettlement },
       ),
     );
   } finally {
@@ -177,15 +176,16 @@ function assertProvisionAndroidIdentities(
 }
 
 const PROVISION_ANDROID_IDENTITY_BACKOFF = fixedBackoff(250);
+
+/** The request window an exact-device discovery runs in, and whether this request created it. */
+type ProvisionDiscoveryWindow = { totalDeadlineMs: number; signal: AbortSignal; created: boolean };
 const MAX_PROVISION_ANDROID_IDENTITY_REDISCOVERIES = 3;
 
 async function discoverProvisionAndroidIdentities(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  totalDeadlineMs: number,
-  signal: AbortSignal,
-  created: boolean,
+  { totalDeadlineMs, signal, created }: ProvisionDiscoveryWindow,
 ): Promise<BootedDevice[]> {
   const backoff = deps.provisionAndroidIdentityBackoff ?? PROVISION_ANDROID_IDENTITY_BACKOFF;
   for (let attempt = 0; ; attempt++) {
@@ -249,25 +249,19 @@ async function discoverAlreadyBootedDevices(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  totalDeadlineMs: number,
-  operationSignal: AbortSignal,
-  created: boolean,
+  { totalDeadlineMs, signal: operationSignal, created }: ProvisionDiscoveryWindow,
 ): Promise<BootedDevice[]> {
   return await runProvisionDeviceWithinDeadline(
     deps.timer,
     totalDeadlineMs,
     operationSignal,
-    "discovering an already-running exact device",
     async (deadlineSignal) => {
       if (args.device.platform === "android") {
-        return await discoverProvisionAndroidIdentities(
-          args,
-          deps,
-          deviceManager,
+        return await discoverProvisionAndroidIdentities(args, deps, deviceManager, {
           totalDeadlineMs,
-          deadlineSignal,
+          signal: deadlineSignal,
           created,
-        );
+        });
       }
       const alreadyBootedDevices = await deviceManager.getBootedDevices(args.device.platform);
       // FUNNEL 1: acquisition matches this observation against the pooled
@@ -275,6 +269,7 @@ async function discoverAlreadyBootedDevices(
       await reconcileDiscoveryObservation(alreadyBootedDevices, "provisionDevice-exact");
       return alreadyBootedDevices;
     },
+    { phase: "discovering an already-running exact device" },
   );
 }
 
@@ -290,7 +285,6 @@ async function reserveReadinessWithinDeadline(
     deps.timer,
     totalDeadlineMs,
     signal,
-    "reserving device readiness",
     async (reservationSignal) => {
       const reservation = await reserveProvisionDeviceReadiness(ctx, args, boot);
       if (reservationSignal.aborted) {
@@ -301,6 +295,7 @@ async function reserveReadinessWithinDeadline(
       }
       return reservation;
     },
+    { phase: "reserving device readiness" },
   );
 }
 
@@ -309,8 +304,8 @@ export async function bootExactProvisionedDevice(
   args: InternalProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  deviceCreationGate: DeviceCreationGate,
   {
+    deviceCreationGate,
     provisioned,
     perf,
     totalDeadlineMs,
@@ -338,14 +333,11 @@ export async function bootExactProvisionedDevice(
   let resources: DeviceResourceConfigurationResult | undefined;
   let manufacturerProfile: Record<string, unknown> | undefined;
   try {
-    const alreadyBooted = await discoverAlreadyBootedDevices(
-      args,
-      deps,
-      deviceManager,
+    const alreadyBooted = await discoverAlreadyBootedDevices(args, deps, deviceManager, {
       totalDeadlineMs,
-      operationSignal,
-      provisioned.created === true,
-    );
+      signal: operationSignal,
+      created: provisioned.created === true,
+    });
     const exactBootedDevice = findExactProvisionedBootedDevice(
       args.device.platform,
       alreadyBooted,
@@ -403,7 +395,8 @@ export async function bootExactProvisionedDevice(
         );
         operationSignal.throwIfAborted();
         awaitingReadiness = true;
-        await ensureProvisionDeviceReadiness(ctx, args, deps, boot!.device, requestedIdentity, {
+        await ensureProvisionDeviceReadiness(ctx, args, deps, boot!.device, {
+          requestedIdentity,
           totalDeadlineMs: totalDeadlineMs,
           perf: perf,
           signal: operationSignal,

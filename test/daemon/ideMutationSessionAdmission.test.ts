@@ -43,8 +43,8 @@ class WriteRecordingCtrlProxy extends FakeCtrlProxy {
   override async setPreference(
     ...args: Parameters<FakeCtrlProxy["setPreference"]>
   ): ReturnType<FakeCtrlProxy["setPreference"]> {
-    if (typeof args[5] === "object") {
-      args[5].onDispatch?.();
+    if (typeof args[3] === "object") {
+      args[3].onDispatch?.();
     }
     this.writes.push("setPreference");
   }

@@ -13,7 +13,7 @@ import { DefaultElementParser } from "../../../src/features/utility/ElementParse
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { InputText } from "../../../src/features/action/InputText";
+import { InputText, type InputTextDependencies } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -66,10 +66,13 @@ describe("InputText.execute", () => {
   const createInputText = (
     device: BootedDevice,
     adb: ConstructorParameters<typeof InputText>[1],
-    keyboardCloserFactory?: ConstructorParameters<typeof InputText>[2],
-    targetFocuserFactory?: ConstructorParameters<typeof InputText>[4],
+    keyboardCloserFactory?: InputTextDependencies["keyboardCloserFactory"],
+    targetFocuserFactory?: InputTextDependencies["targetFocuserFactory"],
   ): InputText =>
-    new InputText(device, adb, keyboardCloserFactory, fakeTimer, targetFocuserFactory, {
+    new InputText(device, adb, {
+      keyboardCloserFactory,
+      timer: fakeTimer,
+      targetFocuserFactory,
       observeScreen: fakeObserveScreen,
       window: fakeWindow,
       awaitIdle: fakeAwaitIdle,
@@ -520,18 +523,21 @@ describe("InputText.execute", () => {
     });
     const error =
       'Failed to perform tap on element: Target "Continue as Guest" is covered by the soft keyboard; dismiss the keyboard first.';
-    const input = new InputText(device, adb, undefined, timer, () => ({
-      focus: async (selector, signal) => {
-        const result = await tap.execute({ ...selector, action: "focus" }, { signal });
-        return {
-          success: result.success,
-          error: result.error,
-          focusVerified: result.focusVerified === true,
-          matchedId: result.selectedElement?.resourceId,
-          matchedText: result.selectedElement?.text,
-        };
-      },
-    }));
+    const input = new InputText(device, adb, {
+      timer,
+      targetFocuserFactory: () => ({
+        focus: async (selector, signal) => {
+          const result = await tap.execute({ ...selector, action: "focus" }, { signal });
+          return {
+            success: result.success,
+            error: result.error,
+            focusVerified: result.focusVerified === true,
+            matchedId: result.selectedElement?.resourceId,
+            matchedText: result.selectedElement?.text,
+          };
+        },
+      }),
+    });
     expect(
       await input.execute("secret", {
         mode: "a11y",

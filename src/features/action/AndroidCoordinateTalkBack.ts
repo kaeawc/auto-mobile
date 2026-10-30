@@ -100,14 +100,11 @@ export class AndroidCoordinateTalkBack {
           onDispatch?.();
         };
         const result = this.dependencies.useContextualFocusTap
-          ? await this.requestContextualTalkBackFocus(
-              { x, y },
-              duration,
-              frameContext,
+          ? await this.requestContextualTalkBackFocus({ x, y }, duration, frameContext, {
               signal,
               fence,
-              reportDispatch,
-            )
+              onDispatch: reportDispatch,
+            })
           : await driver.requestTapCoordinates({ x, y, duration, onDispatch: reportDispatch });
         if (result.success) {
           context.onTapDelivered();
@@ -133,8 +130,7 @@ export class AndroidCoordinateTalkBack {
     const result = await awaitWhileRequestIsLive(
       options.action === "longPress"
         ? this.dependencies.talkBackStrategy.executeCoordinateFallback(
-            point.x,
-            point.y,
+            { x: point.x, y: point.y },
             "longPress",
             tapDurationMs(options, "android"),
             guardedDriver,
@@ -166,10 +162,9 @@ export class AndroidCoordinateTalkBack {
     point: { x: number; y: number },
     duration: number,
     frameContext: string | undefined,
-    signal: AbortSignal | undefined,
-    fence: DisplayFence,
-    onDispatch: () => void,
+    context: { signal: AbortSignal | undefined; fence: DisplayFence; onDispatch: () => void },
   ): Promise<{ success: boolean; error?: string }> {
+    const { signal, fence, onDispatch } = context;
     let dispatched = false;
     try {
       const result = await this.dependencies.androidClient.requestTapCoordinates({

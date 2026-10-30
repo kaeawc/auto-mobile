@@ -114,10 +114,13 @@ function adoptReportedPrototypes(
   events: PrototypeEventCoordinator,
   source: PrototypeEventSource,
   scope: PrototypeScope,
-  prototypes: readonly unknown[] | undefined,
-  options: { replayed: readonly PrototypeEvent[]; timersSupported: boolean },
+  report: {
+    prototypes: readonly unknown[] | undefined;
+    replayed: readonly PrototypeEvent[];
+    timersSupported: boolean;
+  },
 ): void {
-  const { replayed, timersSupported } = options;
+  const { prototypes, replayed, timersSupported } = report;
   const reported = parseReportedPrototypes(prototypes);
   const reportedIds = new Set(reported.map((entry) => entry.id));
   const history = groupByPrototype(replayed);
@@ -196,14 +199,11 @@ async function inspectDevice(
   if (!result.success) {
     return { success: false, error: result.error ?? "Prototype inspect failed" };
   }
-  adoptReportedPrototypes(
-    store,
-    events,
-    prototypeEventSource(target.transport),
-    scope,
-    result.prototypes,
-    { replayed, timersSupported: await client.supportsCommand(PROTOTYPE_TIMERS_CAPABILITY) },
-  );
+  adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), scope, {
+    prototypes: result.prototypes,
+    replayed,
+    timersSupported: await client.supportsCommand(PROTOTYPE_TIMERS_CAPABILITY),
+  });
   return {
     success: true,
     ...statusOutput(store, events, scope, { deviceDark: "fresh" }),
@@ -223,8 +223,7 @@ export async function deviceRequestAction(
   host: Pick<PrototypeHandlerDependencies, "store" | "events" | "reverses">,
   device: BootedDevice,
   target: PrototypeTarget,
-  scope: PrototypeScope,
-  signal: AbortSignal | undefined,
+  { scope, signal }: { scope: PrototypeScope; signal: AbortSignal | undefined },
 ): Promise<PrototypeOutput> {
   if (args.action === "simulate") {
     return performPrototypeSimulate(target, args);
@@ -326,7 +325,8 @@ async function inspectIosAgent(
           },
         ]
       : [];
-  adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), scope, reported, {
+  adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), scope, {
+    prototypes: reported,
     replayed: [],
     timersSupported: ios.supportsCapability(PROTOTYPE_TIMERS_CAPABILITY),
   });

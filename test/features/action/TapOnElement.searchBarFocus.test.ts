@@ -68,7 +68,9 @@ function verifySelectedField(
 ): boolean {
   const tap = new TapOnElement(device, null, { timer: new FakeTimer() });
   const observation = ResultFaker.observeResult({ viewHierarchy: hierarchy });
-  return tap.testHooks.verifyFocusedInputTarget(options, target, observation, "Search videos");
+  return tap.testHooks.verifyFocusedInputTarget(options, target, observation, {
+    labelText: "Search videos",
+  });
 }
 
 describe("iOS search bar focus fixture", () => {

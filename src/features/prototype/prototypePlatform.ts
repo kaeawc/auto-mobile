@@ -8,6 +8,7 @@ import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
 import { prototypeMediaQueueError, prototypeMediaQueueFields } from "./prototypeMediaQueue";
 import {
+  prototypeCastButtonError,
   prototypeMediaCallError,
   prototypeMediaError,
   prototypeMediaPlayers,
@@ -17,6 +18,7 @@ import {
 import { prototypeMapError } from "./prototypeMap";
 import { prototypeShareArgumentsError } from "./prototypeShare";
 import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
+import { prototypeCommerceBlockError, prototypeCommerceCallError } from "./prototypeCommerce";
 import {
   prototypeNotificationsBlockError,
   prototypeNotificationsReadValid,
@@ -24,6 +26,7 @@ import {
 } from "./prototypeNotifications";
 import {
   prototypeSecureStorageEmitError,
+  prototypeSecureStorageRequestError,
   prototypeSecureStorageError,
 } from "./prototypeSecureStorage";
 import { prototypeLocationBlockError } from "./prototypeLocationBlock";
@@ -366,7 +369,12 @@ function argumentsError(
       }
       continue;
     }
-    const error = argumentValueError(action, name, args[name], at, declared.value, check);
+    const error = argumentValueError(
+      action,
+      { name, value: args[name], at },
+      declared.value,
+      check,
+    );
     if (error) {
       return error;
     }
@@ -630,7 +638,10 @@ export function prototypePlatformError(
     }
   }
   for (const { value, path } of actions) {
-    const found = emitNameError(value, path) ?? prototypeSecureStorageEmitError(value, path, root);
+    const found =
+      emitNameError(value, path) ??
+      prototypeSecureStorageEmitError(value, path, root) ??
+      prototypeSecureStorageRequestError(value, path, root);
     if (found) {
       return found;
     }
@@ -639,27 +650,42 @@ export function prototypePlatformError(
 }
 
 /**
- * The first error in the root-level blocks: realtime channels, the auth block, secure storage keys,
- * the location block, then `requires`.
+ * The root-level checks, in order: realtime channels, the auth, commerce, secure storage, location,
+ * sensors and notifications blocks, media players and nodes, then `requires`. Kotlin's
+ * `rootChecks` keeps the same order.
  */
+const ROOT_BLOCK_CHECKS: readonly ((
+  root: Raw,
+  check: PrototypePlatformValueCheck,
+) => PrototypePlatformError | undefined)[] = [
+  prototypeChannelsError,
+  prototypeAuthBlockError,
+  prototypeCommerceBlockError,
+  prototypeSecureStorageError,
+  prototypeLocationBlockError,
+  prototypeSensorsBlockError,
+  prototypeNotificationsBlockError,
+  prototypeMediaError,
+  prototypeMediaQueueError,
+  prototypeVideoPlayerError,
+  prototypeMapError,
+  prototypeMediaCaptionsError,
+  prototypeCastButtonError,
+  requiresError,
+];
+
+/** The first error in the root-level blocks. */
 function rootBlockError(
   root: Raw,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
-  return (
-    prototypeChannelsError(root) ??
-    prototypeAuthBlockError(root) ??
-    prototypeSecureStorageError(root) ??
-    prototypeLocationBlockError(root) ??
-    prototypeSensorsBlockError(root) ??
-    prototypeNotificationsBlockError(root) ??
-    prototypeMediaError(root) ??
-    prototypeMediaQueueError(root, check) ??
-    prototypeVideoPlayerError(root) ??
-    prototypeMapError(root) ??
-    prototypeMediaCaptionsError(root, check) ??
-    requiresError(root)
-  );
+  for (const rootCheck of ROOT_BLOCK_CHECKS) {
+    const error = rootCheck(root, check);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
 }
 
 /** The modules a use needs: its own for calls, handlers, reads and declarations. */
@@ -842,9 +868,7 @@ export const PROTOTYPE_PLATFORM_MODULE_GATES = [
 
 function argumentValueError(
   action: Raw,
-  name: string,
-  value: unknown,
-  at: string,
+  { name, value, at }: { name: string; value: unknown; at: string },
   rule: Rule,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
@@ -876,6 +900,7 @@ function channelUseError(
   return use.kind === "call"
     ? (prototypeChannelCallError(use.action, use.path, root) ??
         prototypeAuthCallError(use.action, use.path, root) ??
+        prototypeCommerceCallError(use.action, use.path, root) ??
         prototypeNotificationsCallError(use.action, use.path, root) ??
         prototypeMediaCallError(use.action, use.path, players))
     : undefined;

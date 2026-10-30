@@ -135,8 +135,22 @@ async function resolveStoppedReservedRead(
   deviceId: string,
 ): Promise<BootedDevice> {
   return withReadRestartReservation(input, deviceId, () =>
-    read.resolve(deviceId, input.signal, input.args.platform || "either"),
+    read.resolve(
+      deviceId,
+      input.signal,
+      input.args.platform || pooledWatchPlatform(deviceId) || "either",
+    ),
   );
+}
+
+/**
+ * A pooled watch read without a platform (a late or gated read of a watch session's device) is
+ * listed as a watch: "either" lists Android and iOS only, so it would never find it (#14908).
+ */
+function pooledWatchPlatform(deviceId: string): "watchos" | undefined {
+  return defaultDaemonContext.devicePool()?.getDevice(deviceId)?.platform === "watchos"
+    ? "watchos"
+    : undefined;
 }
 
 class ReadTargetBecameHeld extends Error {
@@ -191,8 +205,7 @@ export async function ensureReadTargetOrWatch(
   platform: SomePlatform,
   providedDeviceId: string | undefined,
   options: DeviceReadyOptions,
-  read: SessionlessDeviceRead,
-  readinessTarget: string | undefined,
+  { read, readinessTarget }: { read: SessionlessDeviceRead; readinessTarget: string | undefined },
 ): Promise<
   | { device: BootedDevice; watched?: undefined }
   | { watched: ExecutionTargetContext; device?: undefined }

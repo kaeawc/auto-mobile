@@ -115,8 +115,8 @@ function transport(variant: Variant, first: ReturnType<typeof runner>, parked?: 
   spyOn(ios, "requestDrag").mockImplementation(({ signal, onDispatch }) =>
     send(signal, onDispatch),
   );
-  spyOn(android, "requestGlobalAction").mockImplementation(
-    (_button, _timeout, _perf, _context, signal, dispatch) => send(signal, dispatch),
+  spyOn(android, "requestGlobalAction").mockImplementation((_button, _timeout, _perf, options) =>
+    send(options?.signal, options?.onDispatch),
   );
   spyOn(ios, "requestPressBack").mockImplementation((_timeout, _perf, _context, signal, dispatch) =>
     send(signal, dispatch),
@@ -368,9 +368,9 @@ test.each([false, true])(
     let sent = false;
     const fake = transport("pressButton android back", runner());
     spyOn(fake.android, "requestGlobalAction").mockImplementation(
-      (_button, _timeout, _perf, _context, signal, dispatch) => {
-        signal?.throwIfAborted();
-        dispatch?.();
+      (_button, _timeout, _perf, options) => {
+        options?.signal?.throwIfAborted();
+        options?.onDispatch?.();
         sent = true;
         return first.promise;
       },
@@ -504,7 +504,7 @@ test("ide/setKeyValue needs no input hold: separate tracked execution, atomic wr
   const pending = Promise.withResolvers<void>();
   let sent = false;
   const write = spyOn(f.client, "setPreference").mockImplementation(
-    (_app, _file, _key, _value, _type, options) => {
+    (_app, _file, _entry, options) => {
       if (typeof options === "object") {
         options.onDispatch?.();
       }

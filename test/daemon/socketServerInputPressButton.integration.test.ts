@@ -464,8 +464,8 @@ describe("UnixSocketServer input/pressButton", () => {
     spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
     const deviceRequest = spyOn(client, "requestGlobalAction").mockImplementation(
       async (...args: Parameters<typeof client.requestGlobalAction>) => {
-        args[4]?.throwIfAborted();
-        args[5]?.();
+        args[3]?.signal?.throwIfAborted();
+        args[3]?.onDispatch?.();
         sent = true;
         operationStarted.resolve();
         await releaseOperation.promise;
@@ -521,8 +521,8 @@ describe("UnixSocketServer input/pressButton", () => {
       async (...args: Parameters<typeof client.requestGlobalAction>) => {
         operationStarted.resolve();
         await releaseOperation.promise;
-        args[4]?.throwIfAborted();
-        args[5]?.();
+        args[3]?.signal?.throwIfAborted();
+        args[3]?.onDispatch?.();
         sent = true;
         return { success: true, totalTimeMs: 1, action: "global" };
       },

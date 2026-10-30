@@ -6,10 +6,15 @@ import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { StaleDisplayError } from "../StaleDisplayError";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
-import type { BaseResult } from "../shared/types";
+import type { BaseResult, DispatchOptions } from "../shared/types";
 import type { CtrlProxyActionResult, DelegateContext } from "./types";
 
 export type IOSDispatchResult<T> = T & Pick<CtrlProxyActionResult, "dispatched" | "acknowledged">;
+
+/** {@link DispatchOptions} plus the observed frame the command is fenced to. */
+export interface IosFrameDispatchOptions extends DispatchOptions {
+  frameContext?: string;
+}
 
 /**
  * Device-mutating runner commands that carry the host's wait budget as `timeoutMs` (#10084).

@@ -254,8 +254,8 @@ export class TapDisplayRouter {
         point,
         options.action,
         this.host.strategy().longPressDurationMs,
-        element,
         {
+          tapElement: element,
           options: {
             ...this.host.withObservationScreenSize(options, target.observation),
             verification: { refresh: options.verification.refresh, dispatch: dispatchAction },
@@ -511,9 +511,11 @@ export class TapDisplayRouter {
       options,
       result.element,
       result.observation,
-      labelText,
-      result.selectedElement?.indexInMatches,
-      previousObservation.viewHierarchy,
+      {
+        labelText,
+        selectedIndex: result.selectedElement?.indexInMatches,
+        preTapHierarchy: previousObservation.viewHierarchy,
+      },
     );
     if (!result.focusVerified) {
       result.success = false;

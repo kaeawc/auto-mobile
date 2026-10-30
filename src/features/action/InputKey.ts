@@ -1,4 +1,5 @@
 import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
+import type { DispatchOptions } from "../observe/shared/types";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError, type BootedDevice } from "../../models";
@@ -133,8 +134,7 @@ export interface InputKeyIosClient {
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: DispatchOptions,
   ): Promise<
     IOSDispatchResult<{
       success: boolean;
@@ -374,8 +374,7 @@ export class InputKey {
         [...new Set(modifiers)],
         timeoutMs,
         undefined,
-        signal,
-        onDispatch,
+        { signal, onDispatch },
       );
     } catch (error) {
       throwIfAborted(signal);

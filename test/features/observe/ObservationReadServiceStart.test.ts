@@ -765,7 +765,7 @@ test("iOS readiness budget exhaustion after admission is typed even when the rea
     false,
     true,
     "runner-setup",
-    1,
+    { attempts: 1 },
   );
   h.setSetup(async () => {
     throw timeout;
@@ -797,7 +797,7 @@ test.each([
       false,
       deadlineExhausted,
       "runner-setup",
-      1,
+      { attempts: 1 },
     );
     h.setSetup(async () => {
       throw failure;

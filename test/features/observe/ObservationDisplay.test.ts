@@ -430,17 +430,13 @@ describe("observation display stamp", () => {
     const client = makeViewHierarchyCtrlProxy({
       getAccessibilityHierarchy: async () => converter.convertToViewHierarchyResult(raw),
     });
-    const hierarchy = new ViewHierarchy(
-      device,
-      new FakeAdbClientFactory(adb),
-      client,
-      timer,
-      () => ({
+    const hierarchy = new ViewHierarchy(device, new FakeAdbClientFactory(adb), client, timer, {
+      observeAccessibilityManagerFactory: () => ({
         isAccessibilityServiceHealthy: async () => false,
         rebindIfUnhealthy: async () => false,
         waitForAccessibilityServiceBinding: async () => "unhealthy",
       }),
-    );
+    });
     try {
       const screen = new RealObserveScreen(
         device,
@@ -773,23 +769,15 @@ describe("panel fingerprint routing", () => {
   test("resolves a native cover size without probing and gives unique id precedence", async () => {
     const cache = new ObservedAndroidDisplayCache(new FakeTimer());
     const adb = new FakeAdbExecutor();
-    const cover = await cache.panelForLogicalId(
-      fold,
-      adb,
-      0,
-      undefined,
-      { panelFingerprint: coverSize },
-      false,
-    );
+    const cover = await cache.panelForLogicalId(fold, adb, 0, {
+      identity: { panelFingerprint: coverSize },
+      allowProbe: false,
+    });
     expect(cover?.key).toBe("4619827551948147201");
-    const inner = await cache.panelForLogicalId(
-      fold,
-      adb,
-      0,
-      undefined,
-      { panelUniqueId: "local:4619827259835644672", panelFingerprint: coverSize },
-      false,
-    );
+    const inner = await cache.panelForLogicalId(fold, adb, 0, {
+      identity: { panelUniqueId: "local:4619827259835644672", panelFingerprint: coverSize },
+      allowProbe: false,
+    });
     expect(inner?.key).toBe("4619827259835644672");
     expect(adb.getExecutedCommands()).toEqual([]);
   });
@@ -824,32 +812,26 @@ describe("panel fingerprint routing", () => {
         adb.setCommandResponse("cmd display get-displays", createExecResult(displayList, ""));
         try {
           expect(
-            await cache.panelForLogicalId(
-              candidate,
-              adb,
-              0,
-              undefined,
-              { panelFingerprint: size },
-              false,
-            ),
+            await cache.panelForLogicalId(candidate, adb, 0, {
+              identity: { panelFingerprint: size },
+              allowProbe: false,
+            }),
           ).toBeUndefined();
           expect(adb.getExecutedCommands()).toEqual([]);
           const expected = panels?.find((p) => p.key === "4619827259835644672");
           expect(
-            await cache.panelForLogicalId(candidate, adb, 0, undefined, { panelFingerprint: size }),
+            await cache.panelForLogicalId(candidate, adb, 0, {
+              identity: { panelFingerprint: size },
+            }),
           ).toEqual(expected);
           expect(adb.getExecutedCommands()).toHaveLength(1);
           await cache.resolve(candidate, adb);
           const reads = adb.getExecutedCommands().length;
           expect(
-            await cache.panelForLogicalId(
-              candidate,
-              adb,
-              0,
-              undefined,
-              { panelFingerprint: size },
-              false,
-            ),
+            await cache.panelForLogicalId(candidate, adb, 0, {
+              identity: { panelFingerprint: size },
+              allowProbe: false,
+            }),
           ).toEqual(expected);
           expect(adb.getExecutedCommands()).toHaveLength(reads);
         } finally {

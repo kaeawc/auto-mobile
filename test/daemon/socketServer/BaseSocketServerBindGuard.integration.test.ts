@@ -40,7 +40,10 @@ class TestServer extends BaseSocketServer {
     reachability?: DaemonSocketReachabilityLike,
     owner?: AuxiliarySocketOwner,
   ) {
-    super(socketPath, new FakeTimer(), "BindGuardTest", 0, reachability, owner);
+    super(socketPath, new FakeTimer(), "BindGuardTest", 0, {
+      socketReachability: reachability,
+      socketOwner: owner,
+    });
   }
 
   protected async processLine(_socket: Socket, _line: string): Promise<void> {

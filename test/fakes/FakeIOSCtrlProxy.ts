@@ -3,7 +3,10 @@ import type { TapCoordinatesRequest } from "../../src/features/observe/shared/Sh
 import type { IosActivateAccessibilityLinkRequest } from "../../src/features/observe/ios/CtrlProxyVoiceOver";
 import { IosCtrlProxy } from "../../src/features/observe/ios";
 import { convertIosHierarchy } from "../helpers/iosHierarchyConverter";
-import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
+import type {
+  IOSDispatchResult,
+  IosFrameDispatchOptions,
+} from "../../src/features/observe/ios/CtrlProxyDispatch";
 import {
   CtrlProxyScreenshotResult,
   CtrlProxyDragResult,
@@ -68,6 +71,7 @@ import {
   resolveAccessibilityHierarchyArgs,
   type AccessibilityHierarchyRequest,
 } from "../../src/features/observe/hierarchyReadArgs";
+import type { LatestHierarchyOptions } from "../../src/features/observe/android/types";
 
 /**
  * Fake implementation of IosCtrlProxy for testing
@@ -699,7 +703,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     timeout: number = 100,
     perf?: PerformanceTracker,
     skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
+    _options?: LatestHierarchyOptions,
   ): Promise<CtrlProxyHierarchyResponse> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getLatestHierarchy");
@@ -801,9 +805,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     x: number,
     y: number,
     _timeoutMs?: number,
-    _frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { signal, onDispatch }: IosFrameDispatchOptions = {},
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
     signal?.throwIfAborted();
     await this.applyDelay("tap");
@@ -1447,7 +1449,6 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     resourceId?: string,
     label?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("action");

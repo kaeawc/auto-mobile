@@ -14,6 +14,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeCancelTimerAction
 import dev.jasonpearson.automobile.protocol.PrototypeCardNode
 import dev.jasonpearson.automobile.protocol.PrototypeCarouselNode
+import dev.jasonpearson.automobile.protocol.PrototypeCastButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeChartNode
 import dev.jasonpearson.automobile.protocol.PrototypeCheck
 import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
@@ -733,8 +734,17 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
-    // Contract only (#14253): no renderer draws a video player yet.
+    // Contract only (#14253, #14239): no renderer draws a video player or cast button yet.
     is PrototypeVideoPlayerNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
+    is PrototypeCastButtonNode ->
       copy(
         semantics = semantics,
         onAppear = onAppear,

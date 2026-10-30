@@ -175,7 +175,7 @@ describe("Storage Tools Registration", () => {
         appId: string;
         suite: string;
         key: string;
-        value: string;
+        value: string | null;
         type: string;
       }> = [];
       useStorageToolsDependenciesForTesting({
@@ -183,7 +183,7 @@ describe("Storage Tools Registration", () => {
           deleteKeychainItemForIos: async () => {
             throw new Error("unexpected keychain call");
           },
-          setPreference: async (appId, suite, key, value, type) => {
+          setPreference: async (appId, suite, { key, value, type }) => {
             calls.push({ appId, suite, key, value, type });
           },
           removePreference: async () => {},

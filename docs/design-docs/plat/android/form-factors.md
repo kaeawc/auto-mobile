@@ -37,7 +37,7 @@ TV navigation is a focus problem: D-pad keys can be sent and the focused element
 1. **Activate focused item.** Android treats `KEYCODE_ENTER` and `KEYCODE_DPAD_CENTER` both as select, so `enter` is the activation key and no `select` key exists. If checklist row 3 shows `enter` does not activate on a TV image, add `select` (`KEYCODE_DPAD_CENTER`) to **both** `SUPPORTED_INPUT_KEYS` and `INPUT_KEY_CODE_MAP`: `InputKeyName` derives from the first and the second is checked against it, so one entry alone does not compile.
 2. **`focusNavigate({ until, direction?, maxSteps?, settleMs? })`** (`src/features/action/FocusNavigate.ts`, Android only). Observe; stop if the focused element matches `until`; else press one D-pad key and repeat. `until` matches on `text`, `contentDesc` and `resourceId`. Returns the path of focused elements.
    - Direction: given `direction`, else the arrow from the focused element's bounds centre toward the nearest `until` match; with no match on screen, `arrow_down`.
-   - Stops on match, `maxSteps` (default 30), or two consecutive presses leaving focus unchanged. Statuses: `focused`, `max_steps`, `stuck`.
+   - Stops on match, `maxSteps` (default 30), or when every direction toward the target has left focus unchanged on the current element (ranked dominant axis first; a direction that did not move focus is blocked until focus moves; an explicit `direction` stops after two unchanged presses). Statuses: `focused`, `max_steps`, `stuck`.
    - Why a tool, not an agent loop: one call replaces up to 30 round-trips, and stuck detection needs the previous observation.
 3. **TV matching.** Extend `FormFactor` with `tv`, classified from system-image tag first, geometry second.
 

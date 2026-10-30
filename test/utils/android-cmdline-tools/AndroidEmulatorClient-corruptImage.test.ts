@@ -705,13 +705,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: fakeFactory,
     });
     const controller = new AbortController();
-    const readiness = client.waitForEmulatorReady(
-      "Pixel_9_Pro",
-      60_000,
-      fakeChild,
-      undefined,
-      controller.signal,
-    );
+    const readiness = client.waitForEmulatorReady("Pixel_9_Pro", 60_000, fakeChild, undefined, {
+      signal: controller.signal,
+    });
     let rejection: Error | undefined;
     void readiness.catch((error) => {
       rejection = error instanceof Error ? error : new Error(String(error));
@@ -806,13 +802,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: fakeFactory,
     });
 
-    const result = await client.waitForEmulatorReady(
-      "Pixel_9_Pro",
-      5_000,
-      fakeChild,
-      undefined,
-      controller.signal,
-    );
+    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, fakeChild, undefined, {
+      signal: controller.signal,
+    });
 
     expect(result.deviceId).toBe("emulator-5554");
     expect(fakeAdb.wasCommandExecuted("shell getprop sys.boot_completed")).toBe(true);

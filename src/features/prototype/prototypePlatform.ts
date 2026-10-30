@@ -640,28 +640,41 @@ export function prototypePlatformError(
 }
 
 /**
- * The first error in the root-level blocks: realtime channels, the auth block, secure storage keys,
- * the location block, then `requires`.
+ * The root-level checks, in order: realtime channels, the auth, commerce, secure storage, location,
+ * sensors and notifications blocks, media players and nodes, then `requires`. Kotlin's
+ * `rootChecks` keeps the same order.
  */
+const ROOT_BLOCK_CHECKS: readonly ((
+  root: Raw,
+  check: PrototypePlatformValueCheck,
+) => PrototypePlatformError | undefined)[] = [
+  prototypeChannelsError,
+  prototypeAuthBlockError,
+  prototypeCommerceBlockError,
+  prototypeSecureStorageError,
+  prototypeLocationBlockError,
+  prototypeSensorsBlockError,
+  prototypeNotificationsBlockError,
+  prototypeMediaError,
+  prototypeMediaQueueError,
+  prototypeVideoPlayerError,
+  prototypeMapError,
+  prototypeMediaCaptionsError,
+  requiresError,
+];
+
+/** The first error in the root-level blocks. */
 function rootBlockError(
   root: Raw,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
-  return (
-    prototypeChannelsError(root) ??
-    prototypeAuthBlockError(root) ??
-    prototypeCommerceBlockError(root) ??
-    prototypeSecureStorageError(root) ??
-    prototypeLocationBlockError(root) ??
-    prototypeSensorsBlockError(root) ??
-    prototypeNotificationsBlockError(root) ??
-    prototypeMediaError(root) ??
-    prototypeMediaQueueError(root, check) ??
-    prototypeVideoPlayerError(root) ??
-    prototypeMapError(root) ??
-    prototypeMediaCaptionsError(root, check) ??
-    requiresError(root)
-  );
+  for (const rootCheck of ROOT_BLOCK_CHECKS) {
+    const error = rootCheck(root, check);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
 }
 
 /** The modules a use needs: its own for calls, handlers, reads and declarations. */

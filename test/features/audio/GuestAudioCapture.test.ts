@@ -142,7 +142,9 @@ describe("AdbGuestAudioCapture", () => {
       adb.setCommandResponse("--es op start", createExecResult(diagnostic, ""));
       const error = await capture.open("emulator-5554").catch((thrown: unknown) => thrown);
       expect(error).toMatchObject({ code: "audio_guest_capture_unavailable" });
-      if (!(error instanceof Error)) throw new Error("Expected a capture failure");
+      if (!(error instanceof Error)) {
+        throw new Error("Expected a capture failure");
+      }
       expect(error.message).toContain(detail);
       if (errorCode !== "no_matching_receiver") {
         expect(error.message).not.toContain("reinstall");
@@ -172,7 +174,9 @@ describe("AdbGuestAudioCapture", () => {
     class SlowAdb extends FakeAdbExecutor {
       override async execute(...args: Parameters<FakeAdbExecutor["execute"]>) {
         const response = await super.execute(...args);
-        if (args[0].includes("start")) timer.advanceTime(8_000);
+        if (args[0].includes("start")) {
+          timer.advanceTime(8_000);
+        }
         return response;
       }
     }
@@ -194,7 +198,9 @@ describe("AdbGuestAudioCapture", () => {
     adb.setCommandResponse("--es op status", reply(`failed ${"x".repeat(4_000)}`));
     const error = await capture.open("emulator-5554").catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(Error);
-    if (!(error instanceof Error)) throw new Error("Expected a capture failure");
+    if (!(error instanceof Error)) {
+      throw new Error("Expected a capture failure");
+    }
     expect(error.message).toContain(`failed ${"x".repeat(2_000)}`);
     expect(error.message.length).toBeLessThan(2_600);
     expect(adb.getExecutedCommands().every((command) => command.includes("am broadcast"))).toBe(
@@ -264,12 +270,15 @@ describe("AdbGuestAudioCapture", () => {
       const { adb, capture, emulator, discovery } = setup();
       const handle = await capture.open("emulator-5554");
       adb.clearHistory();
-      if (identity === "changed") emulator.pid = 456;
-      else if (identity === "missing") discovery.findByConsolePort = async () => undefined;
-      else
+      if (identity === "changed") {
+        emulator.pid = 456;
+      } else if (identity === "missing") {
+        discovery.findByConsolePort = async () => undefined;
+      } else {
         discovery.findByConsolePort = async () => {
           throw new Error("discovery failed");
         };
+      }
       await handle.close();
       expect(adb.getExecutedCommands()).toEqual([]);
     });

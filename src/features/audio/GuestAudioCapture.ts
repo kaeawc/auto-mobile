@@ -151,7 +151,9 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       return reply.resultData.slice(0, 2_048);
     };
     const close = async (): Promise<void> => {
-      if (closed || !startAttempted) return;
+      if (closed || !startAttempted) {
+        return;
+      }
       closed = true;
       try {
         if (emulatorPid === undefined || (await this.emulatorPidFor(deviceId)) !== emulatorPid) {
@@ -182,15 +184,21 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       }
       startAttempted = true;
       const started = await broadcast("start", deadline);
-      if (started.split(" ", 1)[0] !== "running") throw unavailable(deviceId, started);
+      if (started.split(" ", 1)[0] !== "running") {
+        throw unavailable(deviceId, started);
+      }
       const runningSince = this.now();
       while (this.now() < deadline) {
         const now = this.now();
-        if (now - runningSince >= this.settleMs) return { close };
+        if (now - runningSince >= this.settleMs) {
+          return { close };
+        }
         await this.timer.sleep(Math.min(this.pollMs, deadline - now));
         const status = await broadcast("status", deadline);
         // A non-running sample refuses immediately; a later sample cannot revive this open.
-        if (status.split(" ", 1)[0] !== "running") throw unavailable(deviceId, status);
+        if (status.split(" ", 1)[0] !== "running") {
+          throw unavailable(deviceId, status);
+        }
       }
       throw unavailable(deviceId, "capture verification deadline expired");
     } catch (error) {

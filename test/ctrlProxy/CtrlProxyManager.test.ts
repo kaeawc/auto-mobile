@@ -596,7 +596,16 @@ describe("CtrlProxyManager", function () {
 
       test("does not grant below API 37", async () => {
         const adb = await installOnApi("36\n");
-        expect(adb.wasCommandExecuted("pm grant")).toBe(false);
+        expect(adb.wasCommandExecuted(grantCommand)).toBe(false);
+      });
+
+      test("grants RECORD_AUDIO on install", async () => {
+        const adb = await installOnApi("36\n");
+        expect(
+          adb.wasCommandExecuted(
+            `shell pm grant ${AndroidCtrlProxyManager.PACKAGE} android.permission.RECORD_AUDIO`,
+          ),
+        ).toBe(true);
       });
 
       test("tolerates an unknown-permission refusal", async () => {

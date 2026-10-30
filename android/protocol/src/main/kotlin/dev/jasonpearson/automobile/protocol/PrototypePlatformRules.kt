@@ -90,6 +90,9 @@ internal object PrototypePlatformRules {
       { action, path, root, _ -> PrototypeCommerceRules.callError(action, path, root) },
       { action, path, root, _ -> PrototypeNotificationRules.callError(action, path, root) },
       { action, path, _, declared -> PrototypeMedia.callError(action, path, declared.players) },
+      { action, path, _, declared ->
+        PrototypeCameraPreview.callError(action, path, declared.previews)
+      },
     )
 
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {
@@ -108,14 +111,6 @@ internal object PrototypePlatformRules {
           ?: (use as? Use.Call)?.let { call ->
             callChecks.firstNotNullOfOrNull { it(call.action, call.path, root, declared) }
           })
-          ?: (if (use is Use.Call)
-            PrototypeChannels.callError(use.action, use.path, root)
-              ?: PrototypeAuthRules.callError(use.action, use.path, root)
-              ?: PrototypeNotificationRules.callError(use.action, use.path, root)
-              ?: PrototypeMedia.callError(use.action, use.path, declared.players)
-              ?: PrototypeCameraPreview.callError(use.action, use.path, declared.previews)
-          else null))
-      (useError(use, declared) ?: moduleCallError(use, root, declared.players, declared.previews))
         ?.let {
           return it
         }
@@ -360,20 +355,4 @@ private fun argumentValueError(
     return it
   }
   return null
-}
-
-/** Module-specific rules for one platform call, in the order full validation reports them. */
-private fun moduleCallError(
-  use: Use,
-  root: JsonObject,
-  players: Set<String>,
-  previews: Set<String>,
-): PrototypeSpecError? {
-  val call = use as? Use.Call ?: return null
-  val (action, path) = call.action to call.path
-  return PrototypeChannels.callError(action, path, root)
-    ?: PrototypeAuthRules.callError(action, path, root)
-    ?: PrototypeNotificationRules.callError(action, path, root)
-    ?: PrototypeMedia.callError(action, path, players)
-    ?: PrototypeCameraPreview.callError(action, path, previews)
 }

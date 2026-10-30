@@ -6,6 +6,7 @@ import type { DevicePoolDependencies } from "./devicePoolParts/contracts";
 import {
   ForwardLeaseForeignDeviceOwnership,
   iosDeviceOwnershipFileSource,
+  watchDeviceOwnershipFileSource,
 } from "./foreignDeviceOwnership";
 export * from "./devicePoolParts/contracts";
 export { classifyPoolStatus, type GenericAvailability, type PoolStatusBucket } from "./deviceHold";
@@ -119,9 +120,16 @@ export class DevicePool {
     if (deps.deviceClaimMirrors?.ios) {
       ios.attachClaimMirror(deps.deviceClaimMirrors.ios);
     }
+    // Watch claims are not mirrored into device_claims for now: its platform CHECK admits only
+    // android and ios (owner default, #14908). The claim files alone decide cross-daemon ownership.
+    const watch = new ForwardLeaseForeignDeviceOwnership(
+      process.pid,
+      watchDeviceOwnershipFileSource,
+    );
     return new DevicePool({
       foreignDeviceOwnership: android,
       iosForeignDeviceOwnership: ios,
+      watchForeignDeviceOwnership: watch,
       ...deps,
     });
   }

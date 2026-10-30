@@ -12,7 +12,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { didSourceSucceedForDevice } from "../../utils/discoverySource";
 import { getAbortSignal, throwIfRequestAborted } from "../../utils/AbortContext";
 import { type AutolockClient } from "../deviceAutolockManager";
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, Platform } from "../../models";
 import type { PooledDevice } from "../devicePoolTypes";
 import {
   ALLOCATION_SNAPSHOT_STALE_RETRIES,
@@ -306,25 +306,8 @@ export class DevicePoolTargetDiscovery {
       let result: string | undefined;
       try {
         const snapshot = await raceWithDeadline(
-          async (): Promise<TargetDeviceDiscoverySnapshot> => {
-            const targetPlatform = capturedEntry?.platform ?? platform;
-            if (targetPlatform === "android") {
-              const androidPresence = await this.callbacks.takeFreshPresenceDiscovery("android");
-              return { capturedEntry, androidPresence, bootedDevices: androidPresence.devices };
-            }
-            if (capturedEntry) {
-              return {
-                capturedEntry,
-                iosLiveness: await this.state.idleDeviceReaper.getIosLivenessSnapshot(),
-              };
-            }
-            const discovery = await this.callbacks.takeFreshPresenceDiscovery("ios");
-            return {
-              capturedEntry,
-              bootedDevices: discovery.devices,
-              iosLiveness: await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery }),
-            };
-          },
+          async () =>
+            await this.takeTargetSnapshot(deviceId, capturedEntry, platform, unavailableMessage),
           { timer: this.state.timer, signal: getAbortSignal(), label: "Exact device discovery" },
         );
         const skipTransportWait = [
@@ -392,6 +375,44 @@ export class DevicePoolTargetDiscovery {
         throw new ActionableError(unavailableMessage);
       }
     }
+  }
+
+  /** The pre-lock discovery evidence an exact bind judges its target by. */
+  private async takeTargetSnapshot(
+    deviceId: string,
+    capturedEntry: PooledDevice | undefined,
+    platform: Platform,
+    unavailableMessage: string,
+  ): Promise<TargetDeviceDiscoverySnapshot> {
+    const targetPlatform = capturedEntry?.platform ?? platform;
+    if (targetPlatform === "android") {
+      const androidPresence = await this.callbacks.takeFreshPresenceDiscovery("android");
+      return { capturedEntry, androidPresence, bootedDevices: androidPresence.devices };
+    }
+    if (targetPlatform === "watchos") {
+      // A watch has no iOS liveness snapshot (#14908): one fresh watchOS listing must show it
+      // booted, for a pooled entry and a new one alike, before it is bound.
+      const discovery = await this.callbacks.takeFreshPresenceDiscovery("watchos");
+      if (
+        !didSourceSucceedForDevice(discovery, "watchos", deviceId) ||
+        !discovery.devices.some((device) => device.deviceId === deviceId)
+      ) {
+        throw new ActionableError(unavailableMessage);
+      }
+      return { capturedEntry, bootedDevices: discovery.devices };
+    }
+    if (capturedEntry) {
+      return {
+        capturedEntry,
+        iosLiveness: await this.state.idleDeviceReaper.getIosLivenessSnapshot(),
+      };
+    }
+    const discovery = await this.callbacks.takeFreshPresenceDiscovery("ios");
+    return {
+      capturedEntry,
+      bootedDevices: discovery.devices,
+      iosLiveness: await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery }),
+    };
   }
 
   async validateOrReloadIdlePooledDevice(

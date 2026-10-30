@@ -15153,7 +15153,7 @@
             },
             "platform": {
               "type": "string",
-              "enum": ["android", "ios"]
+              "enum": ["android", "ios", "watchos"]
             }
           },
           "required": ["name", "deviceId", "platform"],

@@ -146,49 +146,117 @@ export const startDeviceParametersSchema = z.object({
   enableTools: enableToolsSchemaField,
 });
 
+/**
+ * Accept both the legacy `{ device: {...} }` startDevice payload and the top-level shape.
+ * Top-level fields win so mixed callers can override nested values intentionally.
+ */
+export function mergeLegacyStartDevicePayload(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+  const parsed = input as Record<string, unknown>;
+  const legacyDevice = parsed.device;
+  if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
+    return input;
+  }
+  return {
+    ...(legacyDevice as Record<string, unknown>),
+    ...parsed,
+  };
+}
+
+/** Cross-field rules shared by startDevice's own parse and its registered input. */
+function refineStartDeviceParameters(
+  value: Pick<
+    z.output<typeof startDeviceParametersSchema>,
+    "cameraPosterQr" | "cameraPosterPath" | "avdName" | "name"
+  > & { platform: string },
+  context: z.RefinementCtx,
+): void {
+  if (value.cameraPosterQr !== undefined && value.cameraPosterPath !== undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["cameraPosterQr"],
+      message: "cameraPosterQr and cameraPosterPath are mutually exclusive",
+    });
+  }
+  if (value.avdName !== undefined && value.platform !== "android") {
+    context.addIssue({
+      code: "custom",
+      path: ["avdName"],
+      message: "avdName is only supported for Android startDevice requests",
+    });
+  }
+  if (value.avdName !== undefined && value.name !== undefined && value.avdName !== value.name) {
+    context.addIssue({
+      code: "custom",
+      path: ["avdName"],
+      message: "avdName and name must identify the same Android device when both are supplied",
+    });
+  }
+}
+
 export const startDeviceSchema = z.preprocess(
+  mergeLegacyStartDevicePayload,
+  startDeviceParametersSchema.superRefine(refineStartDeviceParameters),
+);
+
+/**
+ * startDevice for an Apple Watch simulator (#14908): an exact UDID and/or exact name only. Every
+ * other startDevice option is Android/iOS-only, so the parse is strict and the handler names the
+ * rejected keys. `sessionUuid` is accepted and ignored here: caller identity comes from routing.
+ */
+export const watchStartDeviceParametersSchema = z
+  .object({
+    platform: z.literal("watchos"),
+    deviceId: z.string().min(1).optional().describe("Apple Watch simulator UDID"),
+    name: z.string().min(1).optional().describe("Exact Apple Watch simulator name"),
+    timeoutMs: startDeviceParametersSchema.shape.timeoutMs.describe("Total boot timeout in ms"),
+    enableTools: enableToolsSchemaField,
+    sessionUuid: z.string().optional(),
+  })
+  .strict();
+
+export const watchStartDeviceSchema = z.preprocess(
   (input) => {
-    if (!input || typeof input !== "object" || Array.isArray(input)) {
-      return input;
+    const merged = mergeLegacyStartDevicePayload(input);
+    if (merged === input || !merged || typeof merged !== "object") {
+      return merged;
     }
-
-    const parsed = input as Record<string, unknown>;
-    const legacyDevice = parsed.device;
-    if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
-      return input;
-    }
-
-    // Accept both the legacy { device: {...} } payload and the new top-level shape.
-    // Top-level fields win so mixed callers can override nested values intentionally.
-    return {
-      ...(legacyDevice as Record<string, unknown>),
-      ...parsed,
-    };
+    // The legacy wrapper was merged in; it is not itself an option.
+    const fields = { ...(merged as Record<string, unknown>) };
+    delete fields.device;
+    return fields;
   },
-  startDeviceParametersSchema.superRefine((value, context) => {
-    if (value.cameraPosterQr !== undefined && value.cameraPosterPath !== undefined) {
+  watchStartDeviceParametersSchema.superRefine((value, context) => {
+    if (value.deviceId === undefined && value.name === undefined) {
       context.addIssue({
         code: "custom",
-        path: ["cameraPosterQr"],
-        message: "cameraPosterQr and cameraPosterPath are mutually exclusive",
-      });
-    }
-    if (value.avdName !== undefined && value.platform !== "android") {
-      context.addIssue({
-        code: "custom",
-        path: ["avdName"],
-        message: "avdName is only supported for Android startDevice requests",
-      });
-    }
-    if (value.avdName !== undefined && value.name !== undefined && value.avdName !== value.name) {
-      context.addIssue({
-        code: "custom",
-        path: ["avdName"],
-        message: "avdName and name must identify the same Android device when both are supplied",
+        path: ["deviceId"],
+        message: "A watchOS startDevice request needs deviceId or name",
       });
     }
   }),
 );
+
+export type WatchStartDeviceArgs = z.output<typeof watchStartDeviceParametersSchema>;
+
+/**
+ * startDevice's registered input: the Android/iOS request with `platform` widened to "watchos".
+ * A watch request's options are then checked strictly by its handler, which names any it refuses.
+ */
+export const startDeviceRegistrationSchema = z.preprocess(
+  mergeLegacyStartDevicePayload,
+  startDeviceParametersSchema
+    .extend({ platform: z.enum(["android", "ios", "watchos"]) })
+    .superRefine(refineStartDeviceParameters),
+);
+
+/** A startDevice request as registered, before the platform's own parse. */
+export type StartDeviceRequest = z.output<typeof startDeviceRegistrationSchema>;
+
+/** A registered startDevice request that names an Apple Watch simulator. */
+export type WatchStartDeviceRequest = StartDeviceRequest & { platform: "watchos" };
 
 export const devicePreparationTimeoutSchema = z
   .object({

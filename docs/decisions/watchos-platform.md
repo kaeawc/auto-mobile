@@ -25,8 +25,12 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   `["android", "ios"]` until a tool supports watchOS, so `platform: "watchos"` fails schema
   validation on every tool today and agents are not offered a value the tool rejects.
 - **Plain tools that look up a device themselves** (device management such as `killDevice`) are not
-  behind the registry gate. They reach a watch only through watch inventory, so the change that
-  lists watch simulators decides each of them explicitly.
+  behind the registry gate. They reach a watch only through watch inventory, so each decides
+  watches explicitly. `startDevice` with `platform: "watchos"` takes an exact UDID or exact name
+  only (every other option is refused), boots or adopts the watch under its stable lifecycle lease
+  and binds a pooled session at readiness `booted`; no automation runner step runs. `killDevice`
+  takes a watch through the same holder checks and stops it with `simctl shutdown`. Both resolve
+  the target from the watch listing, so a non-watch UDID is refused before any simctl command.
 - **`"either"` keeps meaning Android or iOS.** Listing `scanned` flags carry a `watchos` entry;
   until watch inventory exists it is `false`, so a watch is never treated as a freshly listed
   device.

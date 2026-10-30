@@ -49,10 +49,13 @@ import { ProgressCallback } from "./toolRegistry";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
+import { isWatchStartRequest, startWatchDevice } from "./deviceToolsWatchOs";
 import {
   DevicePreparationBudgets,
   DeviceToolsDependencies,
   StartDeviceArgs,
+  type StartDeviceSessionArgs,
+  type StartDeviceRequest,
   acquisitionLifecycleTimeoutError,
   androidSourceImageWithBootedMetadata,
   assertAndroidBootDidNotEnterRecovery,
@@ -609,7 +612,7 @@ export async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Pro
 
 export async function bindBootedDeviceSession(
   device: BootedDevice,
-  args: StartDeviceArgs,
+  args: StartDeviceSessionArgs,
   sourceImage?: DeviceInfo,
   childProcess?: ChildProcess | null,
   {
@@ -714,7 +717,7 @@ export async function bindBootedDeviceSession(
 /** A join can complete without running this start's assigner, so adopt R through the reuse bind. */
 async function resumePreparedDeviceSession(
   device: BootedDevice,
-  args: StartDeviceArgs,
+  args: StartDeviceSessionArgs,
   resumeSessionId: string,
   bind: (target?: SessionRecoveryTarget) => Promise<string>,
   {
@@ -778,7 +781,7 @@ async function resumePreparedDeviceSession(
 }
 
 export function restartResumeSessionForDevice(
-  args: StartDeviceArgs,
+  args: StartDeviceSessionArgs,
   device: BootedDevice,
 ): string | undefined {
   const pool = initializedDevicePool();
@@ -930,10 +933,13 @@ export function createBootAndPrepareDevice(rollbackCreatedDevice: CreatedDeviceR
 export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   const { prepareDevice, stripInternalAcquisitionParams } = hooks;
   const startDeviceHandler = async (
-    rawArgs: StartDeviceArgs,
+    rawArgs: StartDeviceArgs | StartDeviceRequest,
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    if (isWatchStartRequest(rawArgs)) {
+      return await startWatchDevice(rawArgs, bindBootedDeviceSession, signal);
+    }
     const internalSessionId = internalMcpSessionId(rawArgs);
     const args = {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),

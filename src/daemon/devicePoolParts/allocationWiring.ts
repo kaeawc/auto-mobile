@@ -28,6 +28,7 @@ type AllocationWiringState = Pick<
   | "criteriaMatcher"
   | "foreignDeviceOwnership"
   | "iosForeignDeviceOwnership"
+  | "watchForeignDeviceOwnership"
   | "devices"
   | "DEVICE_WAIT_TIMEOUT_MS"
   | "RECOVERY_RESPONSE_MARGIN_MS"
@@ -186,6 +187,9 @@ export class DevicePoolAllocationWiring {
       },
       get iosForeignDeviceOwnership() {
         return pool.iosForeignDeviceOwnership;
+      },
+      get watchForeignDeviceOwnership() {
+        return pool.watchForeignDeviceOwnership;
       },
       get timer() {
         return pool.timer;

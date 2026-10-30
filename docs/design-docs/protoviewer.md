@@ -530,6 +530,8 @@ Local and pull-request builds without `PROTOVIEWER_RELEASE_VERSION` stay debug-s
 (`ProtoViewerVersioning`). It is strictly monotonic in version order, bounded under Play's
 2,100,000,000 cap (major <= 2099, minor and patch <= 999), and `0.0.89` gives `89`. The release
 `versionName` is the same plain version.
+The APK build receives the release version's MAJOR.MINOR.PATCH core, so prerelease and build-metadata
+suffixes do not reach the convention and share the core's `versionCode`.
 
 **AAB, R8 and mapping.** `:protoviewer:bundleRelease` writes
 `build/outputs/bundle/release/protoviewer-release.aab` and is finalized by

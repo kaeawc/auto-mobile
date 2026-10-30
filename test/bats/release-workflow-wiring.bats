@@ -1001,7 +1001,7 @@ wiring_requires_yq() {
   [ "$(yq -r '.jobs.build.env.PROTOVIEWER_KEY_ALIAS' "$workflow")" = '${{ secrets.RELEASE_KEY_ALIAS }}' ]
   [ "$(yq -r '.jobs.build.env.PROTOVIEWER_KEY_PASSWORD' "$workflow")" = '${{ secrets.RELEASE_KEY_PASSWORD }}' ]
   [ "$(yq -r '.on.workflow_call.inputs."release-version".required' "$workflow")" = "true" ]
-  [ "$(yq -r '.jobs."build-candidate-protoviewer-apk".with."release-version"' .github/workflows/prepare-release.yml)" = '${{ inputs.version }}' ]
+  [ "$(yq -r '.jobs."build-candidate-protoviewer-apk".with."release-version"' .github/workflows/prepare-release.yml)" = '${{ needs.prepare-version.outputs.protoviewer_version }}' ]
 }
 
 @test "ProtoViewer release smoke selects the published automobile-protoviewer asset (#15301)" {
@@ -1030,4 +1030,27 @@ wiring_requires_yq() {
   [ "$(yq -r '.jobs.android.env.PROTOVIEWER_KEYSTORE_PASSWORD' "$workflow")" = '${{ secrets.RELEASE_KEYSTORE_PASSWORD }}' ]
   [ "$(yq -r '.jobs.android.env.PROTOVIEWER_KEY_ALIAS' "$workflow")" = '${{ secrets.RELEASE_KEY_ALIAS }}' ]
   [ "$(yq -r '.jobs.android.env.PROTOVIEWER_KEY_PASSWORD' "$workflow")" = '${{ secrets.RELEASE_KEY_PASSWORD }}' ]
+}
+
+@test "ProtoViewer APK build receives the plain release core version, not a prerelease string (#15301)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+
+  run yq -r '.jobs."build-candidate-protoviewer-apk".with."release-version"' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ needs.prepare-version.outputs.protoviewer_version }}' ]
+
+  run yq -r '.jobs."prepare-version".outputs.protoviewer_version' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ steps.protoviewer-version.outputs.version }}' ]
+
+  run yq -r '.jobs."prepare-version".steps[] | select(.id == "protoviewer-version") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [ "$output" != "null" ]
+  grep -Fq '%%[-+]*' <<<"$output"
+
+  run yq -r '.jobs."prepare-version".steps[] | select(.id == "protoviewer-version") | .env.RELEASE_VERSION' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = '${{ inputs.version }}' ]
 }

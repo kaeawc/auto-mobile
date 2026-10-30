@@ -26,6 +26,7 @@ jobs:
     outputs:
       release_commit: ${{ steps.commit.outputs.release_commit }}
       base_main_commit: ${{ steps.commit.outputs.base_main_commit }}
+      protoviewer_version: ${{ steps.protoviewer-version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -34,6 +35,19 @@ jobs:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+
+      - name: Derive ProtoViewer core version
+        id: protoviewer-version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          core="${RELEASE_VERSION%%[-+]*}"
+          if [[ ! "$core" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::ProtoViewer release version core must match MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          echo "version=${core}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -170,7 +184,7 @@ jobs:
     needs: prepare-version
     uses: ./.github/workflows/build-protoviewer-apk.yml
     with:
-      release-version: ${{ inputs.version }}
+      release-version: ${{ needs.prepare-version.outputs.protoviewer_version }}
       checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
       upload-artifact: true
       artifact-retention-days: 90

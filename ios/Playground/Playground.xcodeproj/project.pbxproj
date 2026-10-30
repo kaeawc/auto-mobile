@@ -31,6 +31,7 @@
 		74B26B0EEA25ED44F4A9ABC5 /* SdkContractBatchTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CF4AE2E3B75AC24CF7B717F /* SdkContractBatchTap.swift */; };
 		788B7DDDA3C8D747DCEC3E79 /* SdkContractLaunch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76D62C2A235EB2D2A41251D4 /* SdkContractLaunch.swift */; };
 		7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */; };
+		7FB8FD4A23F144C56E82ED91 /* AutoMobileSdkWire in Frameworks */ = {isa = PBXBuildFile; productRef = E7909901F9E62FDA576C6E64 /* AutoMobileSdkWire */; };
 		7FDB62C4B6F0092619122928 /* SemanticLinksDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF63AC7E447335C9A68A4F7 /* SemanticLinksDemo.swift */; };
 		8BABD5EAF292349273BC02E7 /* AutoMobileSdkWire in Frameworks */ = {isa = PBXBuildFile; productRef = 22380480854B815D50B735C4 /* AutoMobileSdkWire */; };
 		95CF2D08679D32C4A9966ACD /* CrayonSketchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */; };
@@ -124,6 +125,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E46744897A309BECE20573D9 /* AutoMobileSDK in Frameworks */,
+				7FB8FD4A23F144C56E82ED91 /* AutoMobileSdkWire in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -322,6 +324,7 @@
 			name = Playground;
 			packageProductDependencies = (
 				5B1F96DAE2D3DE50DD89C21C /* AutoMobileSDK */,
+				E7909901F9E62FDA576C6E64 /* AutoMobileSdkWire */,
 			);
 			productName = Playground;
 			productReference = E40DD68F934F5F0D2981ACA1 /* Playground.app */;
@@ -768,6 +771,10 @@
 		6F8D59223D0149A0731816E3 /* AutoMobileHighlightCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AutoMobileHighlightCore;
+		};
+		E7909901F9E62FDA576C6E64 /* AutoMobileSdkWire */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutoMobileSdkWire;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -118,8 +118,9 @@ export function iosVisibleTapArea({
     forTapTarget: true,
   }).bounds;
   const belowStatus =
-    belowChrome && clipBelowStatusBar(belowChrome, matched, target, nodes, context);
-  const belowTabs = belowStatus && clipBelowTabBars(belowStatus, matched, target, nodes, context);
+    belowChrome && clipBelowStatusBar(belowChrome, matched, target, { nodes, context });
+  const belowTabs =
+    belowStatus && clipBelowTabBars(belowStatus, matched, target, { nodes, context });
   return (
     belowTabs &&
     clipIosTapBoundsToScrollAncestors(nodes, contextTargetNode(nodes, context, target), belowTabs)
@@ -130,8 +131,7 @@ function clipBelowStatusBar(
   visible: ElementBounds,
   matched: Element,
   target: Element,
-  nodes: readonly SearchableEntry[],
-  context: IosVisibleTapContext,
+  { nodes, context }: { nodes: readonly SearchableEntry[]; context: IosVisibleTapContext },
 ): ElementBounds | null {
   const screenSize = context.screen;
   const matchedNode = contextTargetNode(nodes, context, matched);
@@ -158,8 +158,7 @@ function clipBelowTabBars(
   visible: ElementBounds,
   matched: Element,
   target: Element,
-  nodes: readonly SearchableEntry[],
-  context: IosVisibleTapContext,
+  { nodes, context }: { nodes: readonly SearchableEntry[]; context: IosVisibleTapContext },
 ): ElementBounds | null {
   // A tab bar is app chrome, so it need not appear in systemInsets.
   const screenSize = context.screen;

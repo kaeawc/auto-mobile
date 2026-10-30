@@ -1,3 +1,4 @@
+import { ActionableError } from "../../../models/ActionableError";
 import type { ProtoViewerResult } from "./protoViewerContract";
 export { ProtoViewerEntryPointMissingError } from "./ProtoViewerEntryPointMissingError";
 export { ProtoViewerForegroundError } from "./ProtoViewerForegroundError";
@@ -22,3 +23,13 @@ export interface ProtoViewerDevice {
 export const PROTOVIEWER_RESULT_POLL_MS = 250;
 export const PROTOVIEWER_DEFAULT_TIMEOUT_MS = 15_000;
 export const PROTOVIEWER_CLEANUP_TIMEOUT_MS = 5_000;
+
+/** Simulator builds must advertise file delivery before the host publishes a command. */
+export class ProtoViewerInboxUnsupportedError extends ActionableError {
+  constructor() {
+    super(
+      "This ProtoViewer build did not advertise file inbox delivery. Install a newer ProtoViewer built with scripts/ios/protoviewer-build.sh and retry.",
+    );
+    this.name = "ProtoViewerInboxUnsupportedError";
+  }
+}

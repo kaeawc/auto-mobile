@@ -1,4 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
+import { ForegroundUserUnreadableError } from "./ForegroundUserUnreadableError";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
@@ -25,7 +26,7 @@ export async function resolveSetupUser(
   const current = await adb.executeCommand("shell am get-current-user", { noRetry: true });
   const user = /^\s*(\d+)\s*$/.exec(current.stdout)?.[1];
   if (user === undefined) {
-    throw new ActionableError(
+    throw new ForegroundUserUnreadableError(
       `CtrlProxy has to be set up for the foreground user on an automotive device, but \`am get-current-user\` did not return a user id (${JSON.stringify(`${current.stdout}${current.stderr}`.trim())}). Make sure a driver user is signed in and in the foreground, then retry.`,
     );
   }

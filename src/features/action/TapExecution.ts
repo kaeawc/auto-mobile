@@ -354,13 +354,10 @@ export class TapExecution {
       : undefined;
 
     // Return error result with debug info instead of throwing
-    return this.host.readScopeFailureResult(
-      requestedAction,
-      state.effectiveAction,
-      error,
-      state.searchUntilStats,
+    return this.host.readScopeFailureResult(requestedAction, state.effectiveAction, error, {
+      searchUntilStats: state.searchUntilStats,
       debugContext,
-    );
+    });
   }
 
   private async executeObservedTap(
@@ -504,13 +501,12 @@ export class TapExecution {
       if (searchOutcome.visibilityError) {
         throw searchOutcome.visibilityError;
       }
-      await this.host.handleElementNotFound(
-        options,
+      await this.host.handleElementNotFound(options, {
         observeResult,
-        searchOutcome.containerFound,
+        containerFound: searchOutcome.containerFound,
         signal,
-        searchOutcome.selection,
-      );
+        selection: searchOutcome.selection,
+      });
     }
 
     return searchOutcome;
@@ -670,8 +666,7 @@ export class TapExecution {
         options,
         observeResult,
         target.action,
-        requireResourceId,
-        signal,
+        { requireResourceId, signal },
       );
       if (!stable.ok) {
         perf.end();
@@ -784,23 +779,18 @@ export class TapExecution {
       this.host.strategy().retryTapIfNoChange &&
       target.iosBackend?.backend !== "sdk"
     ) {
-      await this.host.retryTapIfNoChange(
-        preTapHash,
-        tapPoint,
-        target.action,
-        target.longPressDuration,
-        {
-          tapElement: target.tapElement,
-          options: {
-            ...this.host.withObservationScreenSize(target.tapOptions, observeResult),
-            displayFence: fence,
-          },
-          isTalkBackEnabled: target.isAccessibilityServiceEnabled!,
-          screenSize: observeResult.screenSize,
-          signal,
-          selection: target.finalSelection,
+      await this.host.retryTapIfNoChange(preTapHash, tapPoint, target.action, {
+        longPressDuration: target.longPressDuration,
+        tapElement: target.tapElement,
+        options: {
+          ...this.host.withObservationScreenSize(target.tapOptions, observeResult),
+          displayFence: fence,
         },
-      );
+        isTalkBackEnabled: target.isAccessibilityServiceEnabled!,
+        screenSize: observeResult.screenSize,
+        signal,
+        selection: target.finalSelection,
+      });
     }
 
     perf.end();
@@ -841,8 +831,8 @@ export class TapExecution {
           target.action,
           tapPoint,
           target.longPressDuration,
-          target.tapElement,
           {
+            element: target.tapElement,
             signal,
             options: {
               ...target.tapOptions,
@@ -885,17 +875,12 @@ export class TapExecution {
         if (target.iosBackend?.backend === "sdk") {
           return;
         }
-        await this.host.executeiOSTap(
-          target.action,
-          tapPoint,
-          target.longPressDuration,
-          target.tapElement,
-          {
-            isVoiceOverEnabled: target.isAccessibilityServiceEnabled,
-            displayFence: fence,
-            signal,
-          },
-        );
+        await this.host.executeiOSTap(target.action, tapPoint, target.longPressDuration, {
+          element: target.tapElement,
+          isVoiceOverEnabled: target.isAccessibilityServiceEnabled,
+          displayFence: fence,
+          signal,
+        });
       },
     });
   }
@@ -984,8 +969,13 @@ export class TapExecution {
     requestedAction: NonNullable<TapOnElementOptions["action"]>,
     action: TapOnElementOptions["action"],
     error: unknown,
-    searchUntilStats: SearchUntilStats | undefined,
-    debugContext: Awaited<ReturnType<typeof buildElementSearchDebugContext>>,
+    {
+      searchUntilStats,
+      debugContext,
+    }: {
+      searchUntilStats?: SearchUntilStats;
+      debugContext: Awaited<ReturnType<typeof buildElementSearchDebugContext>>;
+    },
   ): TapOnFocusResult {
     const errorMsg = errorMessage(error);
     return markFocusFailure(

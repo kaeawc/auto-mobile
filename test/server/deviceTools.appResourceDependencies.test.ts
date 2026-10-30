@@ -26,6 +26,8 @@ for (const path of ["notifyResourcesChanged", "syncInstalledAppResourceRegistry"
     );
     let calls = 0;
     const appResourceDependencies: AppResourceDependencies = {
+      // Disable the device-traits read: this test only proves the injected lister is retained.
+      injectedDeviceTraits: null,
       listInstalledAppsFactory: () => {
         calls++;
         return {

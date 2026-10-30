@@ -8,6 +8,68 @@ final class PrototypeBundleExportTests: XCTestCase {
         _ = PrototypeBundleFixtures.corpus
     }
 
+    func testImportIdentityIgnoresResourceOrderAndRequires() {
+        let first = PrototypeBundleAsset(mediaType: "image/png", bytes: Data([1]))
+        let second = PrototypeBundleAsset(mediaType: "image/jpeg", bytes: Data([2]))
+        let ids = [PrototypeBundleID("z"), PrototypeBundleID("a")]
+        let forward = Dictionary(uniqueKeysWithValues: [(ids[0], first), (ids[1], second)])
+        let reverse = Dictionary(uniqueKeysWithValues: [(ids[1], second), (ids[0], first)])
+        let spec = Data("spec".utf8)
+        XCTAssertEqual(
+            PrototypeBundle(spec: spec, assets: forward, fonts: reverse, requires: []).importIdentity,
+            PrototypeBundle(spec: spec, assets: reverse, fonts: forward, requires: ["advisory"]).importIdentity
+        )
+    }
+
+    func testImportIdentityIncludesSpecAndEachResourceIDMediaTypeAndBytes() {
+        let spec = Data("spec".utf8)
+        for font in [false, true] {
+            let original = PrototypeBundleAsset(mediaType: font ? "font/ttf" : "image/png", bytes: Data([1]))
+            let variants: [(PrototypeBundleID, PrototypeBundleAsset)] = [
+                (.init("other"), original),
+                (.init("same"), .init(mediaType: font ? "font/otf" : "image/jpeg", bytes: original.bytes)),
+                (.init("same"), .init(mediaType: original.mediaType, bytes: Data([2]))),
+            ]
+            let resources = [PrototypeBundleID("same"): original]
+            let baseline = PrototypeBundle(
+                spec: spec, assets: font ? [:] : resources, fonts: font ? resources : [:], requires: []
+            )
+            for (id, asset) in variants {
+                let changed = [id: asset]
+                XCTAssertNotEqual(baseline.importIdentity, PrototypeBundle(
+                    spec: spec, assets: font ? [:] : changed, fonts: font ? changed : [:], requires: []
+                ).importIdentity)
+            }
+            XCTAssertNotEqual(baseline.importIdentity, PrototypeBundle(
+                spec: Data("changed".utf8), assets: baseline.assets, fonts: baseline.fonts, requires: []
+            ).importIdentity)
+        }
+    }
+
+    func testImportIdentitySeparatesImageAndFontGroupsEvenWithSameID() {
+        let resources = [PrototypeBundleID("same"): PrototypeBundleAsset(mediaType: "image/png", bytes: Data([1]))]
+        let image = PrototypeBundle(spec: Data(), assets: resources, fonts: [:], requires: [])
+        let font = PrototypeBundle(spec: Data(), assets: [:], fonts: resources, requires: [])
+        let both = PrototypeBundle(spec: Data(), assets: resources, fonts: resources, requires: [])
+        XCTAssertNotEqual(image.importIdentity, font.importIdentity)
+        XCTAssertNotEqual(both.importIdentity, image.importIdentity)
+        XCTAssertNotEqual(both.importIdentity, font.importIdentity)
+    }
+
+    func testImportIdentityPreservesExactUnicodeIDBytesAndFieldBoundaries() {
+        let asset = PrototypeBundleAsset(mediaType: "image/png", bytes: Data([1]))
+        let composed = PrototypeBundle(spec: Data(), assets: [.init("\u{e9}"): asset], fonts: [:], requires: [])
+        let decomposed = PrototypeBundle(spec: Data(), assets: [.init("e\u{301}"): asset], fonts: [:], requires: [])
+        XCTAssertNotEqual(composed.importIdentity, decomposed.importIdentity)
+        let first = PrototypeBundle(
+            spec: Data(), assets: [.init("a:b"): .init(mediaType: "c", bytes: Data([1]))], fonts: [:], requires: []
+        )
+        let second = PrototypeBundle(
+            spec: Data(), assets: [.init("a"): .init(mediaType: "b:c", bytes: Data([1]))], fonts: [:], requires: []
+        )
+        XCTAssertNotEqual(first.importIdentity, second.importIdentity)
+    }
+
     func testUploadAssetReferencesSkipOpaqueLiterals() throws {
         let data = Data(#"""
         {"id":"uploads","window":{"placement":{"type":"fullscreen"}},

@@ -291,9 +291,12 @@ export class BaseVisualChange {
     // pre-gesture await (including actions that skip the stability wait entirely).
     const beforeWindowRead = captureStabilityWindow(this.window, this.device, options);
     const { actionStartTime, clockSkewMs } = await this.readActionClock(perf);
-    const blockResult = await this.runBlock(block, previousObserveResult, state, options, {
-      perf,
-      coordinateAction,
+    const blockResult = await this.runBlock(block, previousObserveResult, state, {
+      options,
+      stage: {
+        perf,
+        coordinateAction,
+      },
     });
     if (this.isUnconfirmedIosFailure(blockResult, options)) {
       perf.end();
@@ -303,13 +306,10 @@ export class BaseVisualChange {
     this.invalidateCtrlProxyCacheForDisplay(options);
 
     const observationStartTime = resolveObservationStartTime(options, actionStartTime, clockSkewMs);
-    const packageName = await resolvePackageName(
-      this.window,
-      options,
-      previousObserveResult,
-      await beforeWindowRead,
+    const packageName = await resolvePackageName(this.window, options, previousObserveResult, {
+      beforeWindow: await beforeWindowRead,
       timeoutMs,
-    );
+    });
     const gfxMetrics = await this.awaitUiStability(options, packageName, timeoutMs, perf);
 
     const observed = await this.takeObservation(blockResult, previousObserveResult, {
@@ -595,8 +595,13 @@ export class BaseVisualChange {
     ) => Promise<R | ObservedActionResult>,
     previous: ObserveResult | null,
     state: CallerFenceState,
-    options: ObservedChangeOptions,
-    stage: { perf: PerformanceTracker; coordinateAction: boolean },
+    {
+      options,
+      stage,
+    }: {
+      options: ObservedChangeOptions;
+      stage: { perf: PerformanceTracker; coordinateAction: boolean };
+    },
   ): Promise<R | ObservedActionResult> {
     const { perf, coordinateAction } = stage;
     return perf.track("executeBlock", async () => {

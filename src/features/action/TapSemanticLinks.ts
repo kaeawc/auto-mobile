@@ -168,9 +168,11 @@ export class TapSemanticLinks {
   async activateSemanticLink(
     text: string,
     occurrence: number,
-    owner?: Element,
-    viewHierarchy?: ViewHierarchyResult,
-    signal?: AbortSignal,
+    {
+      owner,
+      viewHierarchy,
+      signal,
+    }: { owner?: Element; viewHierarchy?: ViewHierarchyResult; signal?: AbortSignal },
   ): Promise<{ success: boolean; error?: string; warning?: string }> {
     const confirmActivation = (result: CtrlProxyActionResult, invalidate: () => void): void => {
       if (result.dispatched && result.acknowledged !== true) {
@@ -295,13 +297,11 @@ export class TapSemanticLinks {
     if (options.container && !owner) {
       return { success: false, error: "Semantic link container is no longer present" };
     }
-    const activation = await this.host.activateSemanticLink(
-      linkText,
-      occurrence,
+    const activation = await this.host.activateSemanticLink(linkText, occurrence, {
       owner,
       viewHierarchy,
       signal,
-    );
+    });
     if (!activation.success) {
       return { success: false, error: activation.error };
     }
@@ -337,13 +337,11 @@ export class TapSemanticLinks {
     signal?: AbortSignal;
   }): Promise<TapOnFocusOutcome | ObservedActionResult> {
     const occurrence = subtext.occurrence ?? 0;
-    const activation = await this.host.activateSemanticLink(
-      subtext.text,
-      occurrence,
-      element,
+    const activation = await this.host.activateSemanticLink(subtext.text, occurrence, {
+      owner: element,
       viewHierarchy,
       signal,
-    );
+    });
     if (!activation.success) {
       return { success: false, error: activation.error };
     }

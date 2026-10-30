@@ -118,13 +118,10 @@ export function createIosSdkBridgeTapper(options: IosSdkBridgeTapperOptions): Io
       if (web && enabled() && request.action !== "focus") {
         const action = webTapAction(request.action, web);
         return action
-          ? performIosSdkWebAction(
-              options.webClient?.() ?? null,
-              web,
-              action,
-              "click",
-              request.signal,
-            )
+          ? performIosSdkWebAction(options.webClient?.() ?? null, web, action, {
+              verb: "click",
+              signal: request.signal,
+            })
           : { backend: "xctest", fallbackReason: "unsupported" };
       }
       const target = iosSdkBridgeTarget(request.element);

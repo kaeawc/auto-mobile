@@ -400,9 +400,7 @@ export class ScrollUntilVisible {
     const element = await this.findElementInHierarchy(
       options.lookFor!,
       observation.viewHierarchy!,
-      options.container,
-      container,
-      options.layer,
+      { container: options.container, containerElement: container, layer: options.layer },
     );
     return element && this.isElementWithinContainer(element, container.bounds, observation)
       ? element
@@ -642,9 +640,7 @@ export class ScrollUntilVisible {
     const element = await this.findElementInHierarchy(
       options.lookFor!,
       observation.viewHierarchy!,
-      options.container,
-      container,
-      options.layer,
+      { container: options.container, containerElement: container, layer: options.layer },
     );
     if (element && this.isElementWithinContainer(element, container.bounds, observation)) {
       return element;
@@ -806,9 +802,15 @@ export class ScrollUntilVisible {
   async findElementInHierarchy(
     lookFor: NonNullable<SwipeOnOptions["lookFor"]>,
     viewHierarchy: ViewHierarchyResult,
-    container?: SwipeOnOptions["container"],
-    containerElement?: Element,
-    layer?: SwipeOnOptions["layer"],
+    {
+      container,
+      containerElement,
+      layer,
+    }: {
+      container?: SwipeOnOptions["container"];
+      containerElement?: Element;
+      layer?: SwipeOnOptions["layer"];
+    } = {},
   ): Promise<Element | null> {
     if (!lookFor.text && !lookFor.elementId) {
       return null;

@@ -49,6 +49,7 @@ actor PrototypeMcpInbox {
     func ensureDirectories() throws {
         try files.createDirectory(root.appendingPathComponent("inbox", isDirectory: true))
         try files.createDirectory(root.appendingPathComponent("results", isDirectory: true))
+        try files.writeAtomic(root.appendingPathComponent("delivery"), bytes: Data("file-inbox-v1".utf8))
     }
 
     /// Deletes regular files in `inbox` and `results` not modified for [prototypeMcpOrphanMaxAge].
@@ -69,6 +70,38 @@ actor PrototypeMcpInbox {
             }
         }
         return removed
+    }
+
+    /// Called serially while the scene is active. Only final .request names are consumable;
+    /// staged files and bundles wait for their command. All dispatch uses the URL handler's contract.
+    func receiveFiles(screen: String? = nil) -> [(PrototypeMcpRequest, PrototypeLibraryEntry?)] {
+        sweepOrphans()
+        let inbox = root.appendingPathComponent("inbox", isDirectory: true)
+        var consumed: [(PrototypeMcpRequest, PrototypeLibraryEntry?)] = []
+        do {
+            for name in try files.children(inbox).sorted() where name.hasSuffix(".request") {
+                let request = String(name.dropLast(".request".count))
+                guard PrototypeMcpRequest.validRequestId(request) else { continue }
+                let url = inbox.appendingPathComponent(name)
+                let command: PrototypeMcpRequest
+                do {
+                    let bytes = try files.read(url, cap: 4096)
+                    guard let parsed = PrototypeMcpRequest.parseFile(bytes, request: request) else { continue }
+                    command = parsed
+                } catch {
+                    command = .unsupported(request: request, reason: "Unable to read MCP request JSON")
+                }
+                consumed.append((command, handle(command, screen: screen)))
+                // A malformed import still owns its pushed bundle. Consume both on every attempt.
+                for path in [url, inbox.appendingPathComponent("\(request).automobile-proto")]
+                    where files.exists(path)
+                {
+                    do { try files.remove(path) }
+                    catch { warning("MCP request cleanup failed: \(error.localizedDescription)") }
+                }
+            }
+        } catch { warning("Cannot read MCP requests: \(error.localizedDescription)") }
+        return consumed
     }
 
     /// A found open waits for the UI's load callback before reporting success.

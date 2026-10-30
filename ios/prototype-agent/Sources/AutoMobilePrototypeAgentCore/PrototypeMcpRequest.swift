@@ -1,6 +1,6 @@
 import Foundation
 
-/// Twin of protoViewerContract.ts. The scheme carries identifiers only, never spec bytes.
+/// Twin of protoViewerContract.ts. File requests and legacy URLs carry identifiers only, never spec bytes.
 enum PrototypeMcpRequest: Hashable, Sendable {
     case importBundle(request: String, label: String?)
     case open(request: String, libraryId: String)
@@ -37,6 +37,32 @@ enum PrototypeMcpRequest: Hashable, Sendable {
             return .open(request: request, libraryId: id)
         default: return .unsupported(request: request, reason: "Unknown MCP action; update ProtoViewer")
         }
+    }
+
+    /// The atomically published inbox/<request>.request filename owns the identity, even for bad JSON.
+    /// Twin: ProtoViewerIosRequest in protoViewerContract.ts.
+    static func parseFile(_ bytes: Data, request: String) -> Self? {
+        guard validRequestId(request) else { return nil }
+        do {
+            let payload = try JSONDecoder().decode(FileRequest.self, from: bytes)
+            switch payload.action {
+            case "import": return .importBundle(request: request, label: payload.label)
+            case "open":
+                guard let id = payload.libraryId else {
+                    return .unsupported(request: request, reason: "open needs a library id")
+                }
+                return .open(request: request, libraryId: id)
+            default: return .unsupported(request: request, reason: "Unknown MCP action; update ProtoViewer")
+            }
+        } catch {
+            return .unsupported(request: request, reason: "Malformed MCP request JSON")
+        }
+    }
+
+    private struct FileRequest: Decodable {
+        let action: String
+        let label: String?
+        let libraryId: String?
     }
 
     static func validRequestId(_ request: String) -> Bool {

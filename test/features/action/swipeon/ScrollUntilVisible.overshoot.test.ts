@@ -1246,7 +1246,7 @@ test("lookFor treats a temporarily missing container as a miss and retries withi
       {
         hierarchy: { node: target },
       },
-      scope,
+      { container: scope },
     ),
   ).toBeNull();
   const found = await scroll.findElementInHierarchy(
@@ -1260,7 +1260,7 @@ test("lookFor treats a temporarily missing container as a miss and retries withi
         }),
       },
     },
-    scope,
+    { container: scope },
   );
   expect(found?.["resource-id"]).toBe("com.app:id/login");
 });

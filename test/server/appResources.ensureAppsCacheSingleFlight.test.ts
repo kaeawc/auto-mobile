@@ -10,7 +10,7 @@ import type { InstalledAppsDetailedResult } from "../../src/features/observe/Lis
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 
-let deps: AppResourceDependencies = {};
+let deps: AppResourceDependencies = { injectedDeviceTraits: null };
 function useListInstalledAppsFactoryForTests(
   value: AppResourceDependencies["listInstalledAppsFactory"] | null,
 ): void {

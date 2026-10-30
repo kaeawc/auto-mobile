@@ -228,8 +228,9 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   share about credential-like headers and query keys and private or loopback hosts. No thumbnails in
   the first release.
 - Importing a prototype whose `spec.id` already exists creates a new entry with its own library id
-  and empty storage. On iOS, a matching `specSha256` instead reuses the existing entry, preserving
-  its label, provenance and storage. Replace and keep-both are later work.
+  and empty storage. On iOS, a matching spec SHA-256 plus identical image and font resource IDs,
+  media types and byte SHA-256 values instead reuses the existing entry, preserving its label,
+  provenance and storage. Unreadable candidates are skipped. Replace and keep-both are later work.
 - Not in the first release: user-facing URL import, universal links, compact `?spec=` links, QR. The
   internal scheme `automobile-proto://` remains for legacy callers (section 7): it imports a
   host-staged inbox bundle or opens an existing library entry. Simulator hosts use the file inbox
@@ -344,10 +345,10 @@ Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When 
   sets up `adb reverse`.
 - A provenance indicator lives in an app-reserved region outside the spec's drawable bounds and
   stays visible while network is enabled.
-- Storage is keyed by library id; a new import starts empty. The bundle carries no prototype id (its
-  identity is `specSha256` plus the `spec.id` inside `spec.json`), so there is no bundle-id
-  comparison; the only identity checks are `bundle.json.specSha256` against the inflated
-  `spec.json` and the app-assigned library id.
+- Storage is keyed by library id; a new entry starts empty. The bundle carries `spec.id` inside
+  `spec.json` but no app-assigned library id, so there is no bundle-id comparison. The transport
+  verifies `bundle.json.specSha256` against the inflated `spec.json` before the composite import
+  identity comparison described above.
 - Imported-prototype content is marked as imported in `observe` and `awaitEvent`; `open` states
   when an entry is imported; host attach is off by default for imported prototypes.
 - Limits: 200 prototypes and 100 MiB per library, enforced at commit and on load, plus a render
@@ -398,7 +399,8 @@ The shared request-policy and storage work is tracked in #13622.
   250 ms while active, the app consumes final request files through the same handler as legacy
   URLs. It validates imports, sets `source: mcp` for new entries, and removes each command and bundle
   after the attempt, including malformed commands. Malformed JSON produces a typed rejected
-  result. Same-spec-SHA-256 imports return the existing entry without writes or label changes.
+  result. Imports with identical spec bytes and image/font resource identity return the existing
+  entry without writes or label changes.
   The app atomically publishes `results/<request>.json` using the same result shapes as Android.
   Rejections are reported in that file rather than an alert. Open reports `opened` only after
   the viewer loads. Polling stops when the scene becomes inactive.
@@ -407,7 +409,7 @@ The shared request-policy and storage work is tracked in #13622.
   cleanup timeout. The app sweeps inbox and result files older than ten minutes; fresh files,
   folders and files with unknown ages are retained. An absent app, unresolved container, or
   unusable inbox keeps the template save path with a logged warning. A result deadline is a
-  hard failure; retrying the same spec is safe because imports are idempotent.
+  hard failure; retrying the same bundle is safe because imports are idempotent.
   Physical devices keep the template path's existing behavior; `open` needs an iOS simulator.
   `devicectl` delivery to dev-signed physical devices remains later work.
 - `prototype save`: on Android (for the current user) or an iOS simulator, when ProtoViewer is installed, build a

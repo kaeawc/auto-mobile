@@ -53,6 +53,23 @@ struct PrototypeBundle: Sendable {
     let requires: [String]
     var specSha256: String { Self.sha256(spec) }
 
+    /// Retry identity excludes labels/provenance and advisory capabilities, but includes all resource bytes.
+    var importIdentity: String {
+        var fields = [specSha256]
+        for (group, resources) in [("images", assets), ("fonts", fonts)] {
+            fields.append(contentsOf: [group, String(resources.count)])
+            for (id, asset) in resources.sorted(by: { $0.key.bytes.lexicographicallyPrecedes($1.key.bytes) }) {
+                fields.append(contentsOf: [id.string, asset.mediaType, asset.sha256])
+            }
+        }
+        // UTF-8 byte lengths preserve exact ID spelling and make every field boundary unambiguous.
+        let canonical = fields.reduce(into: Data()) { bytes, field in
+            bytes.append(contentsOf: "\(field.utf8.count):".utf8)
+            bytes.append(contentsOf: field.utf8)
+        }
+        return Self.sha256(canonical)
+    }
+
     static let maxEntries = 36
     static let maxSpecBytes = 1_048_576
     static let maxManifestBytes = 65536

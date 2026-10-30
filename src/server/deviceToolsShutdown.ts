@@ -190,7 +190,8 @@ async function runPostShutdownStep(
   perf.startOperation(operationName);
   try {
     if (strictDeadline) {
-      await runWithinShutdownDeadline(context.device, context.timer, context.deadlineMs, detail, {
+      await runWithinShutdownDeadline(context.device, context.timer, context.deadlineMs, {
+        detail,
         requestAbortSignal: context.requestAbortSignal,
         operation: async () => await operation(),
         timeoutMs: context.timeoutMs,
@@ -250,8 +251,8 @@ async function resolvePooledAvdKillTarget(
     device,
     pooledAvdIdentity.capture,
     devicePool,
-    dependencies.resolveRunningAndroidAvdName,
     {
+      resolveRunningAvdName: dependencies.resolveRunningAndroidAvdName,
       budget: {
         timer: dependencies.timer,
         deadlineMs: budget.deadlineMs,
@@ -423,18 +424,13 @@ export async function commitStoppedRestartHold(
   }
   try {
     const attempt = Promise.resolve(commit());
-    await runWithinShutdownDeadline(
-      context.device,
-      dependencies.timer,
-      context.deadlineMs,
-      "restart holder terminal write did not complete",
-      {
-        // Invoke before racing: even a spent shutdown budget must attempt the durable write.
-        requestAbortSignal: undefined,
-        operation: async () => await attempt,
-        timeoutMs,
-      },
-    );
+    await runWithinShutdownDeadline(context.device, dependencies.timer, context.deadlineMs, {
+      detail: "restart holder terminal write did not complete",
+      // Invoke before racing: even a spent shutdown budget must attempt the durable write.
+      requestAbortSignal: undefined,
+      operation: async () => await attempt,
+      timeoutMs,
+    });
   } catch (error) {
     logger.warn(
       `[DeviceTools] Stopped device ${context.device.deviceId} restart holder write failed: ${error}`,
@@ -549,8 +545,8 @@ async function killProcessAndRetireOwnership(
       device,
       dependencies.timer,
       shutdownDeadlineMs,
-      "platform shutdown command did not complete",
       {
+        detail: "platform shutdown command did not complete",
         requestAbortSignal: requestAbortSignal,
         operation: async (signal, timeoutMs) => {
           platformShutdown = deviceManager
@@ -844,8 +840,8 @@ export async function shutdownDevice(
           device,
           dependencies.timer,
           shutdownDeadlineMs,
-          "shutdown preparation did not complete",
           {
+            detail: "shutdown preparation did not complete",
             requestAbortSignal: requestAbortSignal,
             operation: async (signal) =>
               await devicePool?.reserveDeviceForShutdown(

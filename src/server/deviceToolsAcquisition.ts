@@ -220,8 +220,8 @@ async function reserveStartStableDeviceLifecycle(
       deviceId: stableTarget.stableId,
     },
     timer,
-    budgets.automationDeadlineMs,
     {
+      deadlineMs: budgets.automationDeadlineMs,
       requestAbortSignal: signal,
       timeoutError: (detail) =>
         acquisitionLifecycleTimeoutError(
@@ -279,8 +279,7 @@ async function resolveStartStableDeviceLifecycleTarget(
       args.deviceId,
       budgets.automationDeadlineMs,
       deviceUtils,
-      timer,
-      signal,
+      { timer, signal },
     );
   }
   if (args.platform !== "ios" || !args.name || args.deviceId) {
@@ -290,8 +289,8 @@ async function resolveStartStableDeviceLifecycleTarget(
     { name: args.name, platform: "ios", deviceId: args.name },
     timer,
     budgets.automationDeadlineMs,
-    "iOS simulator identity discovery did not complete",
     {
+      detail: "iOS simulator identity discovery did not complete",
       requestAbortSignal: signal,
       operation: async () =>
         await deviceUtils.getDeviceImagesDetailed("ios", {
@@ -517,8 +516,8 @@ async function prepareDevice(
         budgets.requestedAndroidIdentifierPair,
         deviceUtils,
         bootDeadlineMs,
-        deps.timer,
         {
+          timer: deps.timer,
           signal: coordinatedSignal,
           collectPendingSettlement: (settlement) => {
             if (settlement) {

@@ -98,8 +98,8 @@ async function resolveAndroidStartupLeaseImageName(
       { name: deviceId, platform: "android", deviceId },
       timer,
       lookupDeadlineMs,
-      "Android AVD image lookup for the startup lease did not complete",
       {
+        detail: "Android AVD image lookup for the startup lease did not complete",
         requestAbortSignal: signal,
         operation: async (lookupSignal) =>
           await deviceUtils.listDeviceImages("android", lookupSignal),
@@ -253,8 +253,8 @@ async function ownsAndroidStartupOfflineRecovery(
       { platform: "android", name: avdName, deviceId: avdName },
       timer,
       lookupDeadlineMs,
-      "Android startup lease running-device discovery did not complete",
       {
+        detail: "Android startup lease running-device discovery did not complete",
         requestAbortSignal: signal,
         operation: async (signal) => {
           const discovery = await deviceUtils.getBootedDevicesDetailed("android", {

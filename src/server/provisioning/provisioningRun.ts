@@ -108,8 +108,8 @@ async function reserveProvisionLifecycleLease(
         deviceId: args.device.name,
       },
       deps.timer,
-      totalDeadlineMs,
       {
+        deadlineMs: totalDeadlineMs,
         requestAbortSignal: signal,
         timeoutError: (detail) =>
           new ProvisionDeviceError(

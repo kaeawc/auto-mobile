@@ -456,7 +456,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     await tapAny.execute({ action: "tap" }, { signal: controller.signal });
 
-    const [, , , , signalArg] = probeSpy.mock.calls[0] ?? [];
+    const signalArg = probeSpy.mock.calls[0]?.[2]?.signal;
     expect(signalArg).toBe(controller.signal);
   });
 

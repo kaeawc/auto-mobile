@@ -113,11 +113,8 @@ export async function bindWatchSession(
   deadlineMs: number,
   signal: AbortSignal,
 ): Promise<string> {
-  return await runOperationWithinDeadline(
-    timer,
-    deadlineMs,
-    signal,
-    bindUndoneIfUndelivered(
+  return await runOperationWithinDeadline(timer, deadlineMs, signal, {
+    operation: bindUndoneIfUndelivered(
       async (receipt, bindSignal) =>
         await bindSession(boot.device, sessionArgs(rawArgs), undefined, null, {
           achievedReadiness: "booted",
@@ -125,13 +122,11 @@ export async function bindWatchSession(
           signal: bindSignal,
         }),
     ),
-    {
-      timeoutError: () =>
-        new ActionableError(
-          `${operation} timed out while binding the device session; target=watchos:${watch.deviceId}`,
-        ),
-    },
-  );
+    timeoutError: () =>
+      new ActionableError(
+        `${operation} timed out while binding the device session; target=watchos:${watch.deviceId}`,
+      ),
+  });
 }
 
 async function reserveWatchLifecycle(
@@ -144,8 +139,12 @@ async function reserveWatchLifecycle(
     { platform: "watchos", stableId: watch.deviceId },
     { name: watch.name, platform: "watchos", deviceId: watch.deviceId },
     deps.timer,
-    deadlineMs,
-    { requestAbortSignal: signal, operation: "start", coordinator: deps.lifecycleCoordinator },
+    {
+      deadlineMs,
+      requestAbortSignal: signal,
+      operation: "start",
+      coordinator: deps.lifecycleCoordinator,
+    },
   );
 }
 

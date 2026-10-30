@@ -56,17 +56,12 @@ export async function stopIosCtrlProxyBeforeShutdown(
       await ctrlProxyClientLifecycle.retireForShutdown("ios", context.device.deviceId);
       await xcTestManager.stop();
     })();
-    await runWithinShutdownDeadline(
-      context.device,
-      context.timer,
-      context.deadlineMs,
-      "iOS CtrlProxy shutdown did not complete",
-      {
-        requestAbortSignal: context.requestAbortSignal,
-        operation: async () => await stop,
-        timeoutMs: context.timeoutMs,
-      },
-    );
+    await runWithinShutdownDeadline(context.device, context.timer, context.deadlineMs, {
+      detail: "iOS CtrlProxy shutdown did not complete",
+      requestAbortSignal: context.requestAbortSignal,
+      operation: async () => await stop,
+      timeoutMs: context.timeoutMs,
+    });
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
       resumeCtrlProxyWhenPreparationSettles(stop, context.device, daemonState);
@@ -105,13 +100,11 @@ export async function stopAndroidCtrlProxyBeforeShutdown(
   perf.startOperation("stopAndroidCtrlProxy");
   try {
     stop = stopAndroidObservers(context.device);
-    await runWithinShutdownDeadline(
-      context.device,
-      context.timer,
-      context.deadlineMs,
-      "Android observer detach did not complete",
-      { requestAbortSignal: context.requestAbortSignal, operation: async () => await stop },
-    );
+    await runWithinShutdownDeadline(context.device, context.timer, context.deadlineMs, {
+      detail: "Android observer detach did not complete",
+      requestAbortSignal: context.requestAbortSignal,
+      operation: async () => await stop,
+    });
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
       resumeCtrlProxyWhenPreparationSettles(stop, context.device, daemonState);
@@ -212,17 +205,12 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
   const { device, timer, shutdownDeadlineMs, requestAbortSignal, timeoutMs } = context;
   const reconnect = async (): Promise<boolean> => {
     try {
-      return await runWithinShutdownDeadline(
-        device,
-        timer,
-        shutdownDeadlineMs,
-        "Android observer reconnect did not complete",
-        {
-          requestAbortSignal: requestAbortSignal,
-          operation: async () => await observer.ensureConnected(),
-          timeoutMs: timeoutMs,
-        },
-      );
+      return await runWithinShutdownDeadline(device, timer, shutdownDeadlineMs, {
+        detail: "Android observer reconnect did not complete",
+        requestAbortSignal: requestAbortSignal,
+        operation: async () => await observer.ensureConnected(),
+        timeoutMs: timeoutMs,
+      });
     } catch (error) {
       if (isShutdownTimeoutError(error) || requestAbortSignal?.aborted) {
         // Platform setup does not accept an AbortSignal. Invalidate the

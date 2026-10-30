@@ -265,7 +265,7 @@ describe("--cli surfaces a held-device refusal", () => {
         } as never,
         "precondition",
         "device_owned_by_other_session",
-        "deleteDevice refused: device 'emulator-5554' is held by another session.",
+        { message: "deleteDevice refused: device 'emulator-5554' is held by another session." },
       ),
     );
 

@@ -82,11 +82,8 @@ export async function provisionExactDevice(
     // (avdmanager, sdkmanager, adb, simctl, xcodebuild) record their command
     // spans into this same timing tree.
     return await runWithPerfTracker(ambientPerfFor(perf), () =>
-      runProvisionDeviceWithinDeadline(
-        timer,
-        totalDeadlineMs,
-        signal,
-        async (deadlineSignal) =>
+      runProvisionDeviceWithinDeadline(timer, totalDeadlineMs, signal, {
+        operation: async (deadlineSignal) =>
           await provisioner.provision({
             platform: args.device.platform,
             name: args.device.name,
@@ -109,8 +106,9 @@ export async function provisionExactDevice(
             deadlineMs: totalDeadlineMs,
             signal: deadlineSignal,
           }),
-        { phase: "provisioning the exact device", onPendingSettlement: collectPendingSettlement },
-      ),
+        phase: "provisioning the exact device",
+        onPendingSettlement: collectPendingSettlement,
+      }),
     );
   } finally {
     perf.endOperation("provisionExactDevice");
@@ -251,11 +249,8 @@ async function discoverAlreadyBootedDevices(
   deviceManager: PlatformDeviceManager,
   { totalDeadlineMs, signal: operationSignal, created }: ProvisionDiscoveryWindow,
 ): Promise<BootedDevice[]> {
-  return await runProvisionDeviceWithinDeadline(
-    deps.timer,
-    totalDeadlineMs,
-    operationSignal,
-    async (deadlineSignal) => {
+  return await runProvisionDeviceWithinDeadline(deps.timer, totalDeadlineMs, operationSignal, {
+    operation: async (deadlineSignal) => {
       if (args.device.platform === "android") {
         return await discoverProvisionAndroidIdentities(args, deps, deviceManager, {
           totalDeadlineMs,
@@ -269,8 +264,8 @@ async function discoverAlreadyBootedDevices(
       await reconcileDiscoveryObservation(alreadyBootedDevices, "provisionDevice-exact");
       return alreadyBootedDevices;
     },
-    { phase: "discovering an already-running exact device" },
-  );
+    phase: "discovering an already-running exact device",
+  });
 }
 
 /** Reserve the booted device's readiness inside the request deadline; a late reservation is released. */
@@ -281,11 +276,8 @@ async function reserveReadinessWithinDeadline(
   boot: DeviceBootResult,
   { totalDeadlineMs, signal }: { totalDeadlineMs: number; signal: AbortSignal },
 ): Promise<DeviceReadinessReservation | undefined> {
-  return runProvisionDeviceWithinDeadline(
-    deps.timer,
-    totalDeadlineMs,
-    signal,
-    async (reservationSignal) => {
+  return runProvisionDeviceWithinDeadline(deps.timer, totalDeadlineMs, signal, {
+    operation: async (reservationSignal) => {
       const reservation = await reserveProvisionDeviceReadiness(ctx, args, boot);
       if (reservationSignal.aborted) {
         void reservation?.().catch((error) =>
@@ -295,8 +287,8 @@ async function reserveReadinessWithinDeadline(
       }
       return reservation;
     },
-    { phase: "reserving device readiness" },
-  );
+    phase: "reserving device readiness",
+  });
 }
 
 export async function bootExactProvisionedDevice(

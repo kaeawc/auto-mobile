@@ -1205,8 +1205,11 @@ describe("killDevice handler", () => {
         unknownEmulator,
         { avdName: "Pixel_8_Old", incarnation: entry.incarnation },
         pool,
-        async () => undefined,
-        { budget: { timer: new FakeTimer(), deadlineMs: 30_000 }, force: false },
+        {
+          resolveRunningAvdName: async () => undefined,
+          budget: { timer: new FakeTimer(), deadlineMs: 30_000 },
+          force: false,
+        },
       );
       expect(confirmation.kind).toBe("refusal");
       if (confirmation.kind !== "refusal") {

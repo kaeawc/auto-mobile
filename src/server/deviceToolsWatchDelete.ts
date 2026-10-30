@@ -59,12 +59,9 @@ export async function deleteWatchDevice(
     return await runWatchDelete(args, steps, operation.signal, deadlineMs);
   } catch (error) {
     if (operation.timedOut()) {
-      return createTeardownFailureResponse(
-        args,
-        "destroy",
-        "teardown_deadline_exceeded",
-        `deleteDevice did not finish deleting Apple Watch simulator ${args.target.stableId} within ${args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS}ms.`,
-      );
+      return createTeardownFailureResponse(args, "destroy", "teardown_deadline_exceeded", {
+        message: `deleteDevice did not finish deleting Apple Watch simulator ${args.target.stableId} within ${args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS}ms.`,
+      });
     }
     operation.signal.throwIfAborted();
     logger.warn(
@@ -74,12 +71,9 @@ export async function deleteWatchDevice(
     if (error instanceof ActionableError && Reflect.get(error, "code") !== undefined) {
       throw error;
     }
-    return createTeardownFailureResponse(
-      args,
-      "destroy",
-      "watch_delete_failed",
-      errorMessage(error),
-    );
+    return createTeardownFailureResponse(args, "destroy", "watch_delete_failed", {
+      message: errorMessage(error),
+    });
   } finally {
     operation.dispose();
   }
@@ -100,17 +94,14 @@ async function runWatchDelete(
       args,
       "already_absent",
       { stop: "not_required", destroy: "not_required" },
-      VERIFIED,
+      { verification: VERIFIED },
     );
   }
   if (args.target.stableName && args.target.stableName !== watch.name) {
-    return createTeardownFailureResponse(
-      args,
-      "precondition",
-      "identity_conflict",
-      `Apple Watch simulator ${udid} is named '${watch.name}', not '${args.target.stableName}'.`,
-      { resolved: watch },
-    );
+    return createTeardownFailureResponse(args, "precondition", "identity_conflict", {
+      message: `Apple Watch simulator ${udid} is named '${watch.name}', not '${args.target.stableName}'.`,
+      resolved: watch,
+    });
   }
   const device: BootedDevice = { name: watch.name, platform: "watchos", deviceId: udid };
   await steps.assertCaller(device);
@@ -124,8 +115,7 @@ async function runWatchDelete(
     args,
     "destroyed",
     { stop: wasRunning ? "accepted" : "not_required", destroy: "accepted" },
-    VERIFIED,
-    { resolved: watch },
+    { verification: VERIFIED, resolved: watch },
   );
 }
 

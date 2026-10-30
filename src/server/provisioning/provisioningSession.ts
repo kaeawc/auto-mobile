@@ -66,26 +66,26 @@ export async function bindProvisionedDeviceSession(
     binding.timer,
     binding.totalDeadlineMs,
     binding.signal,
-    bindUndoneIfUndelivered(
-      async (receipt, bindSignal) =>
-        ctx.bindBootedDeviceSession(
-          boot.device,
-          provisionSessionArgs(args),
-          sourceImage,
-          boot.processHandle,
-          // Our own stable-name readiness reservation must not deny our
-          // own bind when the pooled incarnation changed during readiness.
-          provisionSessionBindingOptions(
-            args,
-            readinessReservation,
-            settlementState,
-            receipt,
-            bindSignal,
-          ),
-        ),
-      () => boot,
-    ),
     {
+      operation: bindUndoneIfUndelivered(
+        async (receipt, bindSignal) =>
+          ctx.bindBootedDeviceSession(
+            boot.device,
+            provisionSessionArgs(args),
+            sourceImage,
+            boot.processHandle,
+            // Our own stable-name readiness reservation must not deny our
+            // own bind when the pooled incarnation changed during readiness.
+            provisionSessionBindingOptions(
+              args,
+              readinessReservation,
+              settlementState,
+              receipt,
+              bindSignal,
+            ),
+          ),
+        () => boot,
+      ),
       phase: "binding the device session",
       onPendingSettlement: (settlement) => {
         settlementState.bindingSettlements.push(settlement);

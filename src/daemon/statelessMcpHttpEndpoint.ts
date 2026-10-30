@@ -339,7 +339,7 @@ export class StatelessMcpHttpEndpoint<
     };
 
     if (this.isModernRequest(req, parsedBody)) {
-      await this.handleModern(req, res, parsedBody, scope, headerSessionKey, sendJsonRpcError);
+      await this.handleModern(req, res, parsedBody, scope, { headerSessionKey, sendJsonRpcError });
       return;
     }
 
@@ -428,8 +428,13 @@ export class StatelessMcpHttpEndpoint<
     res: Res,
     parsedBody: unknown,
     scope: StatelessMcpRequestScope,
-    headerSessionKey: string | undefined,
-    sendJsonRpcError: (message: string, error?: unknown) => void,
+    {
+      headerSessionKey,
+      sendJsonRpcError,
+    }: {
+      headerSessionKey: string | undefined;
+      sendJsonRpcError: (message: string, error?: unknown) => void;
+    },
   ): Promise<void> {
     const bus = this.getModernBus();
     const slot = this.openListenSlot(parsedBody, res);

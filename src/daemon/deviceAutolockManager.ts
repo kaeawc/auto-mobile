@@ -360,14 +360,11 @@ export class DeviceAutolockManager {
       this.mcpSessionAcquiredAutolocks.set(owner, acquired);
     }
     // A refused owner is not persisted either, so a restart cannot restore it (#11192).
-    await this.persistAcquiredAutolockSession(
-      device,
-      session,
-      assignmentSnapshot,
-      owner,
+    await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, {
+      mcpSessionId: owner,
       collectCancellationSettlement,
       signal,
-    );
+    });
     receipt.minted = mintedSession(session, deviceId);
     this.noteStateChanged(device);
 
@@ -396,9 +393,15 @@ export class DeviceAutolockManager {
     device: PooledDevice,
     session: Session,
     snapshot: SessionAssignmentSnapshot,
-    mcpSessionId?: string,
-    collectCancellationSettlement?: (settlement: Promise<void>) => void,
-    signal?: AbortSignal,
+    {
+      mcpSessionId,
+      collectCancellationSettlement,
+      signal,
+    }: {
+      mcpSessionId?: string;
+      collectCancellationSettlement?: (settlement: Promise<void>) => void;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<void> {
     const cancelPublishedSession = async () => {
       // Only this newly minted session may be compensated; never a replacement.

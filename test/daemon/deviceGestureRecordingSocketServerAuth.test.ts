@@ -51,8 +51,7 @@ describe("DeviceGestureRecordingSocketServer user-input capture contract (#11919
     timer,
     { authorize: () => {} },
     { assertDeviceActionable: () => {} },
-    undefined,
-    async () => {},
+    { bindingGate: async () => {} },
   );
   let drainInFlightStop: (() => Promise<void>) | undefined;
 
@@ -233,13 +232,9 @@ describe("DeviceGestureRecordingSocketServer gates the resolved device before re
         throw new ActionableError(`Refusing ${purpose} on device '${candidate}'`);
       },
     };
-    const server = new TestableServer(
-      undefined,
-      undefined,
-      recordingAuthenticator([]),
-      gate,
-      resolution,
-    );
+    const server = new TestableServer(undefined, undefined, recordingAuthenticator([]), gate, {
+      deviceResolution: resolution,
+    });
 
     // No deviceId on the request: the target is only known after selection, so
     // the gate's one chance to refuse it is between selection and readiness.
@@ -268,13 +263,9 @@ describe("DeviceGestureRecordingSocketServer gates the resolved device before re
         order.push(`gate:${candidate}`);
       },
     };
-    const server = new TestableServer(
-      undefined,
-      undefined,
-      recordingAuthenticator([]),
-      gate,
-      resolution,
-    );
+    const server = new TestableServer(undefined, undefined, recordingAuthenticator([]), gate, {
+      deviceResolution: resolution,
+    });
 
     await expect(
       server.invoke({
@@ -309,7 +300,9 @@ describe("DeviceGestureRecordingSocketServer authorization (issue #4752)", () =>
       "device gesture recording",
       {} as NodeJS.ProcessEnv,
     );
-    const server = new TestableServer(undefined, undefined, auth, undefined, resolution);
+    const server = new TestableServer(undefined, undefined, auth, undefined, {
+      deviceResolution: resolution,
+    });
 
     await expect(server.invoke({ command: "start", sessionUuid: "live" })).rejects.toThrow(
       /different daemon session/,
@@ -500,14 +493,10 @@ describe("DeviceGestureRecordingSocketServer broker-binding exclusion (#11352)",
         throw new ActionableError("device_assigned_to_binding");
       }
     };
-    const server = new TestableServer(
-      undefined,
-      undefined,
-      recordingAuthenticator([]),
-      openGate,
-      resolution,
-      slotGate,
-    );
+    const server = new TestableServer(undefined, undefined, recordingAuthenticator([]), openGate, {
+      deviceResolution: resolution,
+      bindingGate: slotGate,
+    });
     return { order, server };
   }
 

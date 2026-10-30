@@ -554,7 +554,7 @@ export class TwoDaemonWorld {
       this.claims.forProcess(current),
       this.probe,
       () => socketPath,
-      timer,
+      { timer },
     );
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, daemonSessionId, {

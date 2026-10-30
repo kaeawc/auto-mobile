@@ -68,7 +68,7 @@ describe("FakeDaemonClient abort (client.ts rechecks signal.aborted after listen
         return new Promise<void>(() => {});
       },
     });
-    const call = fake.callTool("observe", {}, undefined, undefined, controller.signal);
+    const call = fake.callTool("observe", {}, undefined, undefined, { signal: controller.signal });
     expect(await call.catch((error: unknown) => error)).toBe(reason);
   });
 

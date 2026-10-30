@@ -187,14 +187,10 @@ export class DevicePoolMultiAllocation {
       if (shortfall.refresh) {
         refreshFailure = shortfall.refresh.failure;
       }
-      assertPoolCapacity(
-        this.state.criteriaMatcher,
-        shortfall.stats,
-        requiredCount,
-        platform,
-        this.state.recoveryCoordinator.recoveringAndroidImages.size,
-        refreshFailureContext(refreshFailure),
-      );
+      assertPoolCapacity(this.state.criteriaMatcher, shortfall.stats, requiredCount, platform, {
+        recoveringAndroidImages: this.state.recoveryCoordinator.recoveringAndroidImages.size,
+        refreshContext: refreshFailureContext(refreshFailure),
+      });
       this.state.multiDeviceAllocations.enqueue(ticket);
       // Queue waits consume deadline time, but never allocation attempts.
       const assigned = new Set<string>();

@@ -315,7 +315,7 @@ describe("ownerless recording acquisition adoption", () => {
           { fallbacks: null, announced: null },
           id,
           reason,
-          snapshot,
+          { snapshot },
         );
       });
       await manager.releaseSession("holder");
@@ -436,7 +436,7 @@ describe("ownerless recording acquisition adoption", () => {
               { fallbacks: null, announced: null },
               id,
               reason,
-              snapshot,
+              { snapshot },
             );
           });
           await manager.releaseSession("holder");

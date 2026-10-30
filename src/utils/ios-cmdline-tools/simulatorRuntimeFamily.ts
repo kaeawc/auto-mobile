@@ -1,7 +1,30 @@
+import { isIosDuoDeviceType } from "./iosDeviceType";
 import type { AppleDeviceType } from "./SimCtlSupport";
 
+const IOS_RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.iOS-";
 const WATCH_OS_RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.watchOS-";
 const APPLE_WATCH_PRODUCT_FAMILY = "Apple Watch";
+const IOS_PRODUCT_FAMILIES: ReadonlySet<string> = new Set(["iPhone", "iPad"]);
+
+/**
+ * Whether a CoreSimulator runtime identifier is an iOS runtime. The iOS listing is an allowlist:
+ * Apple Watch, Apple TV and Vision Pro runtimes share `simctl list` but are never iOS devices.
+ */
+export function isIosSimulatorRuntime(runtimeId: string): boolean {
+  return runtimeId.startsWith(IOS_RUNTIME_PREFIX);
+}
+
+/**
+ * Whether a `simctl list devicetypes` entry is an iPhone or iPad model (the iPhone Duo included,
+ * matched by its identifier). Apple Watch, Apple TV and Vision Pro models are not iOS images.
+ */
+export function isIosDeviceType(
+  deviceType: Pick<AppleDeviceType, "identifier" | "productFamily">,
+): boolean {
+  return (
+    IOS_PRODUCT_FAMILIES.has(deviceType.productFamily) || isIosDuoDeviceType(deviceType.identifier)
+  );
+}
 
 /**
  * Whether a CoreSimulator runtime identifier (a `simctl list devices --json` key) is an Apple

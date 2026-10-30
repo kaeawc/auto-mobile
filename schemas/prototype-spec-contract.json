@@ -15533,6 +15533,304 @@
               "optional": true
             }
           }
+        },
+        "map": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["map"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "sharedKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": true
+            },
+            "shared": {
+              "rule": {
+                "kind": "ref",
+                "name": "shared"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "enum",
+                    "values": [
+                      "none",
+                      "fade",
+                      "expand",
+                      "slide",
+                      "slideStart",
+                      "slideEnd",
+                      "scale",
+                      "blurReplace"
+                    ]
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": {
+                          "kind": "enum",
+                          "values": [
+                            "none",
+                            "fade",
+                            "expand",
+                            "slide",
+                            "slideStart",
+                            "slideEnd",
+                            "scale",
+                            "blurReplace"
+                          ]
+                        },
+                        "optional": false
+                      },
+                      "delayMs": {
+                        "rule": {
+                          "kind": "number",
+                          "integer": true,
+                          "min": 0,
+                          "max": 600
+                        },
+                        "optional": true
+                      }
+                    }
+                  }
+                ]
+              },
+              "optional": true
+            },
+            "animate": {
+              "rule": {
+                "kind": "ref",
+                "name": "animate"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "scrollTransition": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollTransition"
+              },
+              "optional": true
+            },
+            "scrollLinked": {
+              "rule": {
+                "kind": "ref",
+                "name": "scrollLinked"
+              },
+              "optional": true
+            },
+            "onAppear": {
+              "optional": true,
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                }
+              }
+            },
+            "semantics": {
+              "rule": {
+                "kind": "ref",
+                "name": "semantics"
+              },
+              "optional": true
+            },
+            "ios": {
+              "rule": {
+                "kind": "ref",
+                "name": "iosNamespace"
+              },
+              "optional": true
+            },
+            "android": {
+              "rule": {
+                "kind": "ref",
+                "name": "androidNamespace"
+              },
+              "optional": true
+            },
+            "press": {
+              "rule": {
+                "kind": "ref",
+                "name": "press"
+              },
+              "optional": true
+            },
+            "keyframes": {
+              "rule": {
+                "kind": "ref",
+                "name": "keyframes"
+              },
+              "optional": true
+            },
+            "mapStyle": {
+              "rule": {
+                "kind": "enum",
+                "values": ["plain", "streets"]
+              },
+              "optional": true
+            },
+            "camera": {
+              "rule": {
+                "kind": "ref",
+                "name": "mapCamera"
+              },
+              "optional": true
+            },
+            "fit": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "markers", "route"]
+              },
+              "optional": true
+            },
+            "markers": {
+              "rule": {
+                "kind": "ref",
+                "name": "mapMarkers"
+              },
+              "optional": true
+            },
+            "polylines": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "mapPolyline"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "showUserLocation": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
+            "onMarkerTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "onCameraIdle": {
+              "rule": {
+                "kind": "object",
+                "fields": {
+                  "into": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              "optional": true
+            }
+          }
         }
       }
     },
@@ -21983,6 +22281,172 @@
         }
       }
     },
+    "mapCamera": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "object",
+          "fields": {
+            "lat": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -90,
+                "max": 90
+              },
+              "optional": false
+            },
+            "lng": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": -180,
+                "max": 180
+              },
+              "optional": false
+            },
+            "zoom": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 22
+              },
+              "optional": false
+            },
+            "bearing": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 360
+              },
+              "optional": true
+            },
+            "tilt": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0,
+                "max": 60
+              },
+              "optional": true
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "data": {
+              "rule": {
+                "kind": "pointer"
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
+    },
+    "mapMarkers": {
+      "kind": "object",
+      "fields": {
+        "path": {
+          "rule": {
+            "kind": "pointer"
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
+        },
+        "id": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "lat": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "lng": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "title": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": false
+        },
+        "icon": {
+          "rule": {
+            "kind": "ref",
+            "name": "iconName"
+          },
+          "optional": true
+        },
+        "heading": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 256
+          },
+          "optional": true
+        },
+        "animateMs": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0,
+            "max": 2000
+          },
+          "optional": true
+        }
+      }
+    },
+    "mapPolyline": {
+      "kind": "object",
+      "fields": {
+        "path": {
+          "rule": {
+            "kind": "pointer"
+          },
+          "optional": false
+        },
+        "width": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1,
+            "max": 16
+          },
+          "optional": true
+        },
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
+    },
     "sensorsBlock": {
       "kind": "object",
       "fields": {
@@ -23220,6 +23684,19 @@
           }
         }
       }
+    },
+    "map": {
+      "capability": "prototype_platform_map_v1",
+      "calls": {},
+      "events": {
+        "markerTap": {
+          "sensitive": false
+        },
+        "cameraIdle": {
+          "sensitive": false
+        }
+      },
+      "state": {}
     },
     "audioRecorder": {
       "capability": "prototype_platform_audioRecorder_v1",
@@ -24489,6 +24966,10 @@
     "videoPlayer": {
       "ios": "material",
       "android": "material"
+    },
+    "map": {
+      "ios": "neutral",
+      "android": "neutral"
     }
   },
   "stringFields": [

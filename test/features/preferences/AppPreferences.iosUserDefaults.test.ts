@@ -20,7 +20,11 @@ import { iosPreferenceCommandTimeoutError } from "../../../src/features/preferen
 import { parseIosUserDefaultsPlist } from "../../../src/features/preferences/IosUserDefaultsPlist";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { CtrlProxyServicePortChangedError } from "../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
-import type { KeyValueEntry, KeyValueType } from "../../../src/features/storage/storageTypes";
+import type {
+  KeyValueEntry,
+  KeyValueType,
+  KeyValueWrite,
+} from "../../../src/features/storage/storageTypes";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/utils/storageSdkErrors";
 import { buildPlist, PlistReal } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
@@ -85,10 +89,8 @@ class FakeKeyValueClient implements IosPreferenceKeyValueClient {
   async setPreference(
     appId: string,
     store: string,
-    key: string,
-    value: string | null,
-    type: KeyValueType,
-    timeoutMs?: Parameters<IosPreferenceKeyValueClient["setPreference"]>[5],
+    { key, value, type }: KeyValueWrite,
+    timeoutMs?: Parameters<IosPreferenceKeyValueClient["setPreference"]>[3],
   ): ReturnType<IosPreferenceKeyValueClient["setPreference"]> {
     this.calls.push({
       operation: "set",
@@ -516,7 +518,11 @@ describe("iOS app UserDefaults resolution", () => {
   for (const { type, sdkType, value, flag } of typedCases) {
     test(`SDK ${type} write and verification use the same store`, async () => {
       const { preferences, sdk, simctl, plist } = harness();
-      await sdk.setPreference(input.appId, input.suite, input.key, String(value), sdkType);
+      await sdk.setPreference(input.appId, input.suite, {
+        key: input.key,
+        value: String(value),
+        type: sdkType,
+      });
       expect(await preferences.getPreference(input)).toMatchObject({
         value,
         type,
@@ -705,7 +711,12 @@ describe("iOS app UserDefaults resolution", () => {
           totalTimeMs: 0,
         });
         expect(await read).toMatchObject({ type: "INT", value: "42" });
-        const write = existing.setPreference(input.appId, "Standard", input.key, "42", "INT", 2500);
+        const write = existing.setPreference(
+          input.appId,
+          "Standard",
+          { key: input.key, value: "42", type: "INT" },
+          2500,
+        );
         await Promise.resolve();
         manager.resolve(manager.getPendingIds()[0]!, { success: true, totalTimeMs: 0 });
         await write;
@@ -719,7 +730,12 @@ describe("iOS app UserDefaults resolution", () => {
         existing.getPreference(input.appId, "Standard", input.key, 2500),
       ).rejects.toThrow("Failed to connect to CtrlProxy");
       await expect(
-        existing.setPreference(input.appId, "Standard", input.key, "42", "INT", 2500),
+        existing.setPreference(
+          input.appId,
+          "Standard",
+          { key: input.key, value: "42", type: "INT" },
+          2500,
+        ),
       ).rejects.toThrow("Failed to connect to CtrlProxy");
       expect(connect).not.toHaveBeenCalled();
     } finally {

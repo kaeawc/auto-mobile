@@ -66,7 +66,7 @@ import type { PrototypeRequestHost } from "../../prototype/prototypeRequestHandl
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type {
   KeyValueEntry,
-  KeyValueType,
+  KeyValueWrite,
   PreferenceFile,
   StorageChangedEvent,
 } from "../../storage/storageTypes";
@@ -385,12 +385,10 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   async setPreference(
     packageName: string,
     fileName: string,
-    key: string,
-    value: string | null,
-    type: KeyValueType,
+    entry: KeyValueWrite,
     timeoutMsOrOptions?: number | import("../../storage/storageTypes").StorageWriteOptions,
   ): Promise<void> {
-    return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMsOrOptions);
+    return this.storage.setPreference(packageName, fileName, entry, timeoutMsOrOptions);
   }
 
   async removePreference(

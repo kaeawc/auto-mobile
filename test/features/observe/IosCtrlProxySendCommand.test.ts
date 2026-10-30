@@ -105,7 +105,12 @@ const methods: Method[] = [
     type: "set_preference",
     write: true,
     invoke: (h, onDispatch) =>
-      h.storage.setPreference("app", "prefs", "key", null, "STRING", { timeoutMs: 50, onDispatch }),
+      h.storage.setPreference(
+        "app",
+        "prefs",
+        { key: "key", value: null, type: "STRING" },
+        { timeoutMs: 50, onDispatch },
+      ),
     literal:
       '{"type":"set_preference","requestId":"set_preference_wire-1","timeoutMs":50,"appId":"app","fileName":"prefs","key":"key","value":null,"valueType":"STRING","sessionId":"session","mutationToken":"mutation"}',
     timeout: "Set preference timeout after 50ms",
@@ -299,7 +304,12 @@ for (const method of methods) {
 
 test("storage preserves SDK error mapping for null set as remove", async () => {
   const h = await harness();
-  const pending = h.storage.setPreference("app", "prefs", "key", null, "STRING", 50);
+  const pending = h.storage.setPreference(
+    "app",
+    "prefs",
+    { key: "key", value: null, type: "STRING" },
+    50,
+  );
   await flushDispatch();
   h.manager.resolve("set_preference_wire-1", {
     success: false,

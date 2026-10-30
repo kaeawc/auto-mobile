@@ -171,7 +171,11 @@ describe("CtrlProxyStorage (iOS)", function () {
         };
         const write = () =>
           method === "setPreference"
-            ? storage.setPreference("com.example", "prefs", "k", "v", "STRING")
+            ? storage.setPreference("com.example", "prefs", {
+                key: "k",
+                value: "v",
+                type: "STRING",
+              })
             : method === "removePreference"
               ? storage.removePreference("com.example", "prefs", "k")
               : storage.clearPreferenceStore("com.example", "prefs");
@@ -412,13 +416,11 @@ describe("CtrlProxyStorage (iOS)", function () {
       try {
         iosMutationTokens.set(testDevice.deviceId, "com.example.app", "launch-secret");
         client.bindSession("session-1");
-        const resultPromise = client.setPreference(
-          "com.example.app",
-          "Standard",
-          "theme",
-          "dark",
-          "STRING",
-        );
+        const resultPromise = client.setPreference("com.example.app", "Standard", {
+          key: "theme",
+          value: "dark",
+          type: "STRING",
+        });
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket!, 1);
@@ -461,13 +463,11 @@ describe("CtrlProxyStorage (iOS)", function () {
       );
 
       try {
-        const resultPromise = client.setPreference(
-          "com.example.app",
-          "Standard",
-          "count",
-          "bad",
-          "INT",
-        );
+        const resultPromise = client.setPreference("com.example.app", "Standard", {
+          key: "count",
+          value: "bad",
+          type: "INT",
+        });
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket!, 1);
@@ -499,13 +499,11 @@ describe("CtrlProxyStorage (iOS)", function () {
         fakeTimer,
       );
       try {
-        const resultPromise = client.setPreference(
-          "com.example.app",
-          "duoStore",
-          "key",
-          "42",
-          "INT",
-        );
+        const resultPromise = client.setPreference("com.example.app", "duoStore", {
+          key: "key",
+          value: "42",
+          type: "INT",
+        });
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket!, 1);
@@ -756,9 +754,7 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
     const promise = storage.setPreference(
       "com.app",
       "Standard",
-      "theme",
-      "dark",
-      "STRING",
+      { key: "theme", value: "dark", type: "STRING" },
       TIMEOUT,
     );
     await flush();
@@ -793,7 +789,11 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
   ] as const) {
     const call = () =>
       operation === "setPreference"
-        ? storage.setPreference("com.app", "group.x", "key", "value", "STRING")
+        ? storage.setPreference("com.app", "group.x", {
+            key: "key",
+            value: "value",
+            type: "STRING",
+          })
         : operation === "removePreference"
           ? storage.removePreference("com.app", "group.x", "key")
           : storage.clearPreferenceStore("com.app", "group.x");
@@ -820,7 +820,11 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
   }
 
   test("null set maps verification failure as remove", async () => {
-    const promise = storage.setPreference("com.app", "Standard", "key", null, "STRING");
+    const promise = storage.setPreference("com.app", "Standard", {
+      key: "key",
+      value: null,
+      type: "STRING",
+    });
     await flush();
     h.resolveLast({ success: false, totalTimeMs: 1, error: "write_verification_failed" });
     await expect(promise).rejects.toThrow(
@@ -832,7 +836,11 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
     ["iOS key-value storage rejected the value: invalid_store_name", "bundle id"],
     ["iOS key-value storage failed: write_verification_failed", "persistent domain"],
   ])("maps preference SDK errors: %s", async (message, guidance) => {
-    const promise = storage.setPreference("com.app", "Standard", "key", "value", "STRING");
+    const promise = storage.setPreference("com.app", "Standard", {
+      key: "key",
+      value: "value",
+      type: "STRING",
+    });
     await flush();
     h.resolveLast({ success: false, totalTimeMs: 1, error: message });
     try {
@@ -907,7 +915,13 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
       wireType: "set_preference",
       timeoutMsg: `Set preference timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Failed to set preference",
-      call: () => storage.setPreference("com.app", "Standard", "theme", "dark", "STRING", TIMEOUT),
+      call: () =>
+        storage.setPreference(
+          "com.app",
+          "Standard",
+          { key: "theme", value: "dark", type: "STRING" },
+          TIMEOUT,
+        ),
       successPayload: { success: true, totalTimeMs: 1 },
       assertSuccess: (value) => {
         expect(value).toBeUndefined();

@@ -590,9 +590,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
       new CtrlProxyStorage(h.context, () => "fixture-session-id").setPreference(
         "com.example.app",
         "Standard",
-        "launch_count",
-        "42",
-        "INT",
+        { key: "launch_count", value: "42", type: "INT" },
       ),
     resolveWith: { success: true },
   },

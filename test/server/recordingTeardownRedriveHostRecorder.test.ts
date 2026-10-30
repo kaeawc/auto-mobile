@@ -134,11 +134,8 @@ test("a host orphan is redriven even without a pool incarnation", async () => {
 test("device identity replacement still stops the independent host process", async () => {
   const h = await harness(true);
   await h.start();
-  h.sessionRelease.mock.calls[0]![0](
-    "holder",
-    "sim-id",
-    "idle-timeout",
-    {
+  h.sessionRelease.mock.calls[0]![0]("holder", "sim-id", "idle-timeout", {
+    snapshot: {
       sessionId: "holder",
       deviceId: "sim-id",
       releaseReason: "idle-timeout",
@@ -146,8 +143,8 @@ test("device identity replacement still stops the independent host process", asy
       terminal: false,
       heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
     },
-    { deviceIdentityReplaced: true },
-  );
+    deviceIdentityReplaced: true,
+  });
   await h.pending.mock.calls[0]![1];
   expect(h.stop).toHaveBeenCalledTimes(1);
 });

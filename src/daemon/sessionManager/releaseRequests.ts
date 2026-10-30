@@ -150,13 +150,7 @@ export class SessionReleaseRequests {
     // Not async: a pass-through, so it adds no microtask to the release's settled budget.
     if (request.expectedOwner) {
       const { expectedOwner, ...rest } = request;
-      return this.releaseIfOwned(
-        sessionId,
-        expectedOwner.session,
-        expectedOwner.deviceId,
-        releaseReason,
-        rest,
-      );
+      return this.releaseIfOwned(sessionId, expectedOwner, releaseReason, rest);
     }
     return this.releaseSessionForReason(sessionId, releaseReason, request);
   }
@@ -176,8 +170,7 @@ export class SessionReleaseRequests {
       this.releaseSessionAttempt(
         sessionId,
         releaseReason,
-        allowExpired,
-        commitFence,
+        { allowExpired, commitFence },
         releaseOptions,
       );
     if (isExpiryReleaseReason(releaseReason)) {
@@ -197,8 +190,10 @@ export class SessionReleaseRequests {
   private async releaseSessionAttempt(
     sessionId: string,
     releaseReason: string,
-    allowExpired: boolean,
-    shouldCommit?: ReleaseCommitFence,
+    {
+      allowExpired,
+      commitFence: shouldCommit,
+    }: { allowExpired: boolean; commitFence?: ReleaseCommitFence },
     options: SessionReleaseOptions = {},
   ): Promise<string | null> {
     const session =
@@ -353,8 +348,10 @@ export class SessionReleaseRequests {
   /** Release only the recorded session incarnation while it still owns the device. */
   private async releaseIfOwned(
     sessionId: string,
-    expectedSession: Session,
-    expectedDeviceId: string,
+    {
+      session: expectedSession,
+      deviceId: expectedDeviceId,
+    }: NonNullable<ReleaseSessionRequest["expectedOwner"]>,
     releaseReason: SessionReleaseReason = "explicit-release",
     request: ReleaseSessionRequest = {},
   ): Promise<string | null> {

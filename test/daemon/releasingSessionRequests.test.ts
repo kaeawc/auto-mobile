@@ -157,7 +157,7 @@ describe("requests during device session release", () => {
         },
       }),
     });
-    manager.onSessionRelease((_id, _device, _reason, snapshot) => snapshots.push(snapshot));
+    manager.onSessionRelease((_id, _device, _reason, { snapshot }) => snapshots.push(snapshot));
     registry = new ObserverSessionRegistry(timer, 10000);
     manager.setObserverSessionRegistry(registry);
     state = {

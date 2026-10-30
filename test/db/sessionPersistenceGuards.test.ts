@@ -260,7 +260,7 @@ describe("session persistence guards live in the statement, not in a prior read"
         deviceId: string;
         expiryOrigin: string | undefined;
       }> = [];
-      manager.onSessionRelease((_sessionId, deviceId, reason, _snapshot, options) => {
+      manager.onSessionRelease((_sessionId, deviceId, reason, options) => {
         releases.push({ reason, deviceId, expiryOrigin: options.expiryOrigin });
       });
       await manager.createSession(SESSION, DEVICE, "android", {

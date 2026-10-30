@@ -249,18 +249,20 @@ export class DevicePoolLifecycleWiring {
     this.state.sessionManager.onSessionCreated((session) => {
       this.state.deviceReservations.handleSessionCreated(session);
     });
-    this.state.sessionManager.onSessionRelease((sessionId, deviceId, reason, snapshot, options) => {
-      this.state.deviceReservations.handleSessionRelease(sessionId, reason, snapshot, options);
-      this.callbacks.clearMcpSessionOwnership(sessionId);
-      // An expiry handler that owns the ordered release consumes its capture after the attempt.
-      if (options.expiryOrigin && !options.deviceReleaseManaged) {
-        this.callbacks.releaseExpiredSessionDevice(sessionId, deviceId);
-      } else {
-        this.callbacks.captureReleasedDevice(sessionId, deviceId);
-        this.state.autolockManager.clearReleasedAutolockState(sessionId, deviceId);
-      }
-      this.state.recoveryCoordinator.finalizeReleasedRecoverySession(sessionId);
-    });
+    this.state.sessionManager.onSessionRelease(
+      (sessionId, deviceId, reason, { snapshot, ...options }) => {
+        this.state.deviceReservations.handleSessionRelease(sessionId, reason, snapshot, options);
+        this.callbacks.clearMcpSessionOwnership(sessionId);
+        // An expiry handler that owns the ordered release consumes its capture after the attempt.
+        if (options.expiryOrigin && !options.deviceReleaseManaged) {
+          this.callbacks.releaseExpiredSessionDevice(sessionId, deviceId);
+        } else {
+          this.callbacks.captureReleasedDevice(sessionId, deviceId);
+          this.state.autolockManager.clearReleasedAutolockState(sessionId, deviceId);
+        }
+        this.state.recoveryCoordinator.finalizeReleasedRecoverySession(sessionId);
+      },
+    );
   }
 
   createShutdownReservationsPort(): DeviceShutdownReservationsPoolPort {

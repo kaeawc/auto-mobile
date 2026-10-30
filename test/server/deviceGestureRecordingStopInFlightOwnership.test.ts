@@ -117,11 +117,8 @@ describe("releasing a session whose device gesture recording stop is in flight (
     };
     registerRecordingSessionCleanup(manager, deps);
 
-    releaseCallbacks[0]?.(
-      "session-a",
-      device.deviceId,
-      "idle-timeout",
-      {
+    releaseCallbacks[0]?.("session-a", device.deviceId, "idle-timeout", {
+      snapshot: {
         sessionId: "session-a",
         deviceId: device.deviceId,
         releaseReason: "idle-timeout",
@@ -129,8 +126,7 @@ describe("releasing a session whose device gesture recording stop is in flight (
         terminal: false,
         heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
       },
-      {},
-    );
+    });
 
     expect(pending).toHaveLength(1);
     expect(pending[0].deviceId).toBe(device.deviceId);

@@ -32,7 +32,7 @@ function deferredFor(host: HeldPlanAppCleanupHost): Map<string, DeferredPlanAppC
   // A terminal upgrade of an already-finished release must not touch the device's next owner
   // (#10825). Registered as pending device cleanup so the next session cannot acquire the device
   // before the cleanup settles; `run` bounds itself to `capMs`.
-  host.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
+  host.onSessionRelease((sessionId, deviceId, _reason, options) => {
     if (options?.upgradeOnly) {
       return;
     }

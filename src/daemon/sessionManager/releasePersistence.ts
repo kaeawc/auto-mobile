@@ -40,10 +40,11 @@ export interface SessionReleasePersistenceHost {
     error: DeviceSessionRowNotRewritableError | DeviceSessionRowNotReleasableError,
     sessionId: string,
     guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
-    write: (
-      guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
-    ) => Promise<T>,
-    release?: RefusedRowWriteRelease,
+    release: RefusedRowWriteRelease & {
+      write: (
+        guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
+      ) => Promise<T>;
+    },
   ): Promise<T>;
   readonly sessionSlots: Pick<
     SessionLifecycleSlots,
@@ -141,13 +142,13 @@ export class SessionReleasePersistence {
         ...guard,
         expectedRowGeneration: precondition.expectedRowGeneration,
       },
-      (next) =>
-        write({
-          ...precondition,
-          expectedRowGeneration: next.expectedRowGeneration,
-          unlessTerminalOrOwnedByLivePeer: next,
-        }),
       {
+        write: (next) =>
+          write({
+            ...precondition,
+            expectedRowGeneration: next.expectedRowGeneration,
+            unlessTerminalOrOwnedByLivePeer: next,
+          }),
         writingReleaseReason: snapshot.releaseReason,
         unlessDaemonShutdown: precondition.unlessDaemonShutdown,
         incarnation: this.releaseRowSessions.get(snapshot)?.deref(),
@@ -204,8 +205,8 @@ export class SessionReleasePersistence {
           ...guard,
           expectedRowGeneration: precondition.expectedRowGeneration,
         },
-        (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
         {
+          write: (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
           writingReleaseReason: snapshot.releaseReason,
           unlessDaemonShutdown: precondition.unlessDaemonShutdown,
         },

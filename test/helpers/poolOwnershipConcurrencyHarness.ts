@@ -476,7 +476,7 @@ class OwnershipWorld {
         this.liveIncarnations.add(session.sessionId);
       }
     });
-    manager.onSessionRelease((sessionId, deviceId, reason, _snapshot, options) => {
+    manager.onSessionRelease((sessionId, deviceId, reason, options) => {
       if (life.dead || options?.upgradeOnly) {
         return;
       }

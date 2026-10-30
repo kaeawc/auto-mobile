@@ -563,7 +563,7 @@ describe("device restart reserves the entire recovery window", () => {
         await original(...args);
       };
       let notices = 0;
-      sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+      sessions.onSessionRelease((_id, _device, _reason, { snapshot }) => {
         if (snapshot.terminal) {
           notices++;
         }
@@ -592,7 +592,7 @@ describe("device restart reserves the entire recovery window", () => {
         );
       };
       let notices = 0;
-      sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+      sessions.onSessionRelease((_id, _device, _reason, { snapshot }) => {
         if (snapshot.terminal) {
           notices++;
         }
@@ -636,7 +636,7 @@ describe("device restart reserves the entire recovery window", () => {
       );
       expect(claimedGeneration).toBe(previousGeneration + 1);
       let terminalNotices = 0;
-      sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+      sessions.onSessionRelease((_id, _device, _reason, { snapshot }) => {
         if (snapshot.terminal) {
           terminalNotices++;
         }
@@ -691,7 +691,7 @@ describe("device restart reserves the entire recovery window", () => {
       sessions.attachLiveDaemonSessionIds(() => new Set([DAEMON_A, DAEMON_B]));
       await handoff();
       let terminalNotices = 0;
-      sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+      sessions.onSessionRelease((_id, _device, _reason, { snapshot }) => {
         if (snapshot.terminal) {
           terminalNotices++;
         }
@@ -740,7 +740,7 @@ describe("device restart reserves the entire recovery window", () => {
       sessions.setKeepScreenAwake(HOLDER, { applied: true, method: "settings" });
       let releasePersisted: Promise<void> | undefined;
       let persisted = false;
-      sessions.onSessionRelease((_id, _device, reason, _snapshot, options) => {
+      sessions.onSessionRelease((_id, _device, reason, options) => {
         if (reason.startsWith("device-restart:")) {
           releasePersisted = options.releasePersisted;
           void releasePersisted?.then(() => {
@@ -788,7 +788,7 @@ describe("device restart reserves the entire recovery window", () => {
       const idleDeadline = sessions.getSession(HOLDER)!.expiresAt;
       let releasePersisted: Promise<void> | undefined;
       let persisted = false;
-      sessions.onSessionRelease((_id, _device, reason, _snapshot, options) => {
+      sessions.onSessionRelease((_id, _device, reason, options) => {
         if (reason.startsWith("device-restart:")) {
           releasePersisted = options.releasePersisted;
           void releasePersisted?.then(() => {

@@ -634,7 +634,7 @@ export class TwoDaemonWorld {
       }
       this.log(`  ${self.name} session ${session.sessionId} live on ${session.assignedDevice}`);
     });
-    manager.onSessionRelease((sessionId, deviceId, reason, _snapshot, options) => {
+    manager.onSessionRelease((sessionId, deviceId, reason, options) => {
       if (self.dead || options?.upgradeOnly) {
         return;
       }

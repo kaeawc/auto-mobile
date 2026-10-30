@@ -8,8 +8,14 @@ import type { IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { parseBroadcastOutput } from "../intent/SendBroadcast";
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
+import {
+  grantRecordAudioPermission,
+  RECORD_AUDIO_PERMISSION,
+} from "../../ctrlProxy/grantRecordAudioPermission";
+import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
 
 export interface GuestAudioCaptureHandle {
   close(): Promise<void>;
@@ -33,6 +39,7 @@ export interface GuestAudioCaptureOptions {
   pollMs?: number;
   /** Default 3 seconds: a capture opened only 2.5 seconds earlier has crashed the emulator. */
   settleMs?: number;
+  resolveSetupUser?: (deviceId: string) => Promise<number | undefined>;
 }
 
 function unavailable(deviceId: string, detail: string): EmulatorAudioError {
@@ -40,7 +47,7 @@ function unavailable(deviceId: string, detail: string): EmulatorAudioError {
     "audio_guest_capture_unavailable",
     `Cannot verify an open guest microphone capture on ${deviceId}: ${detail}. ` +
       "Injection was refused to protect the emulator. The guest microphone capture is provided " +
-      "by the CtrlProxy app; its RECORD_AUDIO permission is granted at install. " +
+      "by the CtrlProxy app. " +
       "Stop competing recordings and retry. AutoMobile does not enable adb root.",
   );
 }
@@ -60,8 +67,11 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     private readonly adbFor: (deviceId: string) => Pick<AdbExecutor, "execute">,
     private readonly discovery: EmulatorGrpcDiscovery,
     private readonly ids: IdGenerator,
-    private readonly timer: Pick<Timer, "now" | "monotonicNow" | "sleep"> = defaultTimer,
-    options: GuestAudioCaptureOptions = {},
+    private readonly timer: Pick<
+      Timer,
+      "now" | "monotonicNow" | "sleep" | "setTimeout" | "clearTimeout"
+    > = defaultTimer,
+    private readonly options: GuestAudioCaptureOptions = {},
   ) {
     this.now = timer.monotonicNow?.bind(timer) ?? timer.now.bind(timer);
     this.timeoutMs = options.timeoutMs ?? 8_000;
@@ -189,6 +199,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     };
     try {
       emulatorPid = await this.emulatorPidFor(deviceId);
+      await this.ensureRecordAudioPermission(adb, deviceId, deadline);
       lease = this.ids.next();
       if (!lease || /[\r\n\0]/.test(lease)) {
         throw unavailable(deviceId, "the capture lease is invalid");
@@ -221,6 +232,93 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       throw error instanceof EmulatorAudioError
         ? error
         : unavailable(deviceId, errorMessage(error));
+    }
+  }
+
+  private async ensureRecordAudioPermission(
+    adb: Pick<AdbExecutor, "execute">,
+    deviceId: string,
+    deadline: number,
+  ): Promise<void> {
+    const timeout = () => {
+      const remaining = deadline - this.now();
+      if (remaining <= 0) {
+        throw unavailable(deviceId, "capture verification deadline expired");
+      }
+      return Math.min(BROADCAST_TIMEOUT_MS, remaining);
+    };
+    const unverifiable = (error: unknown, operation: "read" | "grant"): EmulatorAudioError => {
+      if (error instanceof EmulatorAudioError) {
+        return error;
+      }
+      timeout();
+      return unavailable(
+        deviceId,
+        `the RECORD_AUDIO check could not ${operation}: ${errorMessage(error)}`,
+      );
+    };
+    let userId: number | undefined;
+    try {
+      timeout();
+      const resolveSetupUser = this.options.resolveSetupUser;
+      if (resolveSetupUser) {
+        userId = await raceWithDeadline(() => resolveSetupUser(deviceId), {
+          timer: this.timer,
+          timeoutMs: deadline - this.now(),
+          label: "CtrlProxy setup user resolution",
+          timeoutError: () => unavailable(deviceId, "capture verification deadline expired"),
+        });
+      }
+      timeout();
+    } catch (error) {
+      throw unverifiable(error, "read");
+    }
+    const permissionDenied = (reason: string) =>
+      new EmulatorAudioError(
+        "audio_record_permission_not_granted",
+        `${RECORD_AUDIO_PERMISSION} is not granted to ${CTRL_PROXY_PACKAGE}: ${reason}. ` +
+          `Run: adb shell pm grant ${CTRL_PROXY_PACKAGE} ${RECORD_AUDIO_PERMISSION}`,
+      );
+    const isGranted = async () => {
+      let result;
+      try {
+        result = await adb.execute(["shell", "dumpsys", "package", CTRL_PROXY_PACKAGE], {
+          noRetry: true,
+          timeoutMs: timeout(),
+        });
+      } catch (error) {
+        throw unverifiable(error, "read");
+      }
+      timeout();
+      if (result.error) {
+        throw unverifiable(result.error, "read");
+      }
+      const permission = parseAndroidRuntimePermissions(
+        result.stdout,
+        CTRL_PROXY_PACKAGE,
+        userId,
+      )?.runtimePermissions.get(RECORD_AUDIO_PERMISSION);
+      if (!permission) {
+        throw permissionDenied("the runtime permission row is absent");
+      }
+      return permission.state === "granted";
+    };
+    if (await isGranted()) {
+      return;
+    }
+    const grant = await grantRecordAudioPermission(adb, userId, timeout(), timeout);
+    if (!grant.granted && grant.transportError instanceof EmulatorAudioError) {
+      throw grant.transportError;
+    }
+    timeout();
+    if (!grant.granted) {
+      if ("transportError" in grant) {
+        throw unverifiable(grant.transportError, "grant");
+      }
+      throw permissionDenied(grant.reason);
+    }
+    if (!(await isGranted())) {
+      throw permissionDenied("the runtime permission remains ungranted after pm grant");
     }
   }
 

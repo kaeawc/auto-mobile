@@ -64,6 +64,7 @@ export interface AndroidCtrlProxyApkInstallerHost {
   clearAvailabilityCache(): void;
   readonly timer: Timer;
   executeApkStage(command: string, stage: string): Promise<ExecResult>;
+  grantPostInstallPermissions(): Promise<void>;
   grantLocalNetworkAfterInstall(): Promise<void>;
   statusInspectionDeviceError(error: unknown): Error | undefined;
   getApiLevel(): Promise<[number | null, boolean]>;
@@ -336,8 +337,7 @@ export class AndroidCtrlProxyApkInstaller {
 
       logger.info("APK installed successfully");
       this.host.clearAvailabilityCache();
-      await grantRecordAudioPermission(this.host.adb, await this.host.setupUser());
-      await this.host.grantLocalNetworkAfterInstall();
+      await this.host.grantPostInstallPermissions();
     } catch (error) {
       // A failed adb install can still have changed package state before the
       // command reported an error.
@@ -405,6 +405,11 @@ export class AndroidCtrlProxyApkInstaller {
         shouldRetry: (error) => error instanceof RetryableCtrlProxyInstallFailure,
       },
     );
+  }
+
+  async grantPostInstallPermissions(): Promise<void> {
+    await grantRecordAudioPermission(this.host.adb, await this.host.setupUser());
+    await this.host.grantLocalNetworkAfterInstall();
   }
 
   async grantLocalNetworkAfterInstall(): Promise<void> {

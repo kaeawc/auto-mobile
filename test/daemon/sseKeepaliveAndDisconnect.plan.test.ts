@@ -4,7 +4,7 @@ import { planDisconnectMonitorHarness } from "./helpers/planDisconnectMonitorHar
 import { getPerformanceMonitor } from "../../src/features/performance/PerformanceMonitor";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { logger } from "../../src/utils/logger";
-import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
+import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/deviceLossMisses";
 const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 afterEach(() => DaemonState.getInstance().reset());
 const PLAN_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;

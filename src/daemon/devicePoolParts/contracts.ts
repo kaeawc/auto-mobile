@@ -65,6 +65,7 @@ import {
 } from "../../devices/virtualDeviceLifecycleCoordinator";
 import { type OwnerDisconnectReleaseDeferral } from "../ownerDisconnectRelease";
 import type { PooledDevice } from "../devicePoolTypes";
+import { DeviceLossMisses, type DeviceLossMissPort } from "../deviceLossMisses";
 
 export type DeviceAutolockChildProcess = ChildProcess;
 
@@ -435,8 +436,8 @@ export interface DevicePoolDependencies {
   idGenerator?: IdGenerator;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
-  /** Shared with the daemon monitor so refresh and monitor count one streak. */
-  missingDeviceMisses?: Map<string, number>;
+  /** The daemon monitor's miss owner, seen through its port, so refresh and monitor count one streak. */
+  missingDeviceMisses?: DeviceLossMissPort;
   adbServerResetQuarantineFactory?: (
     pool: AdbServerResetQuarantinePoolPort,
   ) => AdbServerResetQuarantine;
@@ -477,8 +478,8 @@ export function createAndroidTransportAliases(factory?: AdbClientFactory): Andro
   return new AndroidTransportAliases(factory ?? androidTransportIdentityAdbFactory);
 }
 
-export function resolveMissingDeviceMisses(shared?: Map<string, number>): Map<string, number> {
-  return shared ?? new Map();
+export function resolveMissingDeviceMisses(shared?: DeviceLossMissPort): DeviceLossMissPort {
+  return shared ?? new DeviceLossMisses();
 }
 
 export function createDevicePoolRefresh(

@@ -22,6 +22,7 @@ import {
   loadDerivedDevicectlListing,
   derivePhysicalDevicectlRecord,
 } from "../helpers/devicectlListFixtures";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
 
 /**
  * Issue #5683: iOS has two independent discovery sources behind one platform
@@ -427,7 +428,7 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
 
 describe("disconnect monitor ages out only devices whose own source succeeded (#5683)", () => {
   const evaluate = (succeededSources: Array<"ios-simulator" | "ios-physical">) => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const result = evaluateDeviceDisconnects({
       deviceDisconnectMisses: misses,
       confirmedDisconnectedDeviceIds: new Set<string>(),

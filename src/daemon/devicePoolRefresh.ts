@@ -19,6 +19,7 @@ import {
 } from "../utils/discoverySource";
 import type { DeviceCriteriaMatcher } from "./DeviceCriteriaMatcher";
 import type { PooledDevice } from "./devicePool";
+import type { DeviceLossMissPort } from "./deviceLossMisses";
 import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 
 export interface DevicePoolRefreshResult {
@@ -99,7 +100,7 @@ export interface DevicePoolRefreshPort {
     evidence: IdentityEvidence,
   ): Pick<PooledDevice, "identityObservedAt" | "identityUnresolved">;
   getDeviceSessionStarts(): Map<string, number>;
-  getRefreshMissingDeviceMisses(): Map<string, number>;
+  getRefreshMissingDeviceMisses(): DeviceLossMissPort;
   getSettledLateShutdowns(): Map<string, { incarnation: number; refreshGeneration: number }>;
   getIntentionalShutdowns(): Map<string, number>;
   seedLastUsedAt(now: number): number;
@@ -273,7 +274,7 @@ export class DevicePoolRefresh {
           });
           this.pool.notifyDeviceIncarnationAssigned?.(device.deviceId);
           this.pool.getDeviceSessionStarts().set(device.deviceId, now);
-          this.pool.getRefreshMissingDeviceMisses().delete(device.deviceId);
+          this.pool.getRefreshMissingDeviceMisses().reset(device.deviceId);
           await this.pool.setDeviceSessionTracking(device.deviceId, now);
           logger.info(`Added device ${device.deviceId} to pool during refresh`);
           return true;

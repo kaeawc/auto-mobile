@@ -502,17 +502,17 @@ The Android module builds a Play-uploadable AAB next to the APK. The Gradle side
 `gradle.properties` (local). `build-protoviewer-apk.yml` sets the `PROTOVIEWER_*` inputs at job level
 using the shared release keystore secrets and the required `release-version` input, supplied by
 `prepare-release.yml` from `inputs.version`. The `gradle-task-run` action decodes
-`RELEASE_KEYSTORE_BASE64` into `android/keystore/release.keystore`; no dedicated ProtoViewer keystore
+`RELEASE_KEYSTORE_BASE64` into the keystore file under the Gradle project directory; no dedicated ProtoViewer keystore
 secrets are wired.
 
-| Input                                 | Purpose                                                   | CI source                                                                 |
-| ------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `PROTOVIEWER_KEYSTORE_PATH`           | keystore file (relative paths resolve against `android/`) | workflow env: `${{ github.workspace }}/android/keystore/release.keystore` |
-| `PROTOVIEWER_KEYSTORE_PASSWORD`       | store password                                            | `RELEASE_KEYSTORE_PASSWORD` secret                                        |
-| `PROTOVIEWER_KEY_ALIAS`               | key alias                                                 | `RELEASE_KEY_ALIAS` secret                                                |
-| `PROTOVIEWER_KEY_PASSWORD`            | key password                                              | `RELEASE_KEY_PASSWORD` secret                                             |
-| `PROTOVIEWER_RELEASE_VERSION`         | plain `MAJOR.MINOR.PATCH` of the release tag              | required `release-version` workflow input                                 |
-| `PROTOVIEWER_REQUIRE_RELEASE_SIGNING` | `true` in release workflows: fail closed                  | workflow env: `true`                                                      |
+| Input                                 | Purpose                                                   | CI source                                              |
+| ------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------ |
+| `PROTOVIEWER_KEYSTORE_PATH`           | keystore file (relative paths resolve against `android/`) | workflow env: the workspace path of that keystore file |
+| `PROTOVIEWER_KEYSTORE_PASSWORD`       | store password                                            | `RELEASE_KEYSTORE_PASSWORD` secret                     |
+| `PROTOVIEWER_KEY_ALIAS`               | key alias                                                 | `RELEASE_KEY_ALIAS` secret                             |
+| `PROTOVIEWER_KEY_PASSWORD`            | key password                                              | `RELEASE_KEY_PASSWORD` secret                          |
+| `PROTOVIEWER_RELEASE_VERSION`         | plain `MAJOR.MINOR.PATCH` of the release tag              | required `release-version` workflow input              |
+| `PROTOVIEWER_REQUIRE_RELEASE_SIGNING` | `true` in release workflows: fail closed                  | workflow env: `true`                                   |
 
 Whether the key is the Play upload key or the app-signing key is decided at Play App Signing
 enrolment; record it next to the key.

@@ -183,7 +183,7 @@ export function nullableString(record: Record<string, unknown>, field: string): 
 }
 
 export function isBindingPlatform(value: unknown): value is BindingPlatform {
-  return value === "android" || value === "ios";
+  return value === "android" || value === "ios" || value === "watchos";
 }
 
 export function parseJournalTarget(json: string): BindingJournalTarget {

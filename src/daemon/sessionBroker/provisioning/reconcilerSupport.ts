@@ -2,15 +2,22 @@ import { BROKER_DEVICE_NAME_PREFIX } from "../persistedIdentity";
 import { ProvisionDeviceError } from "../../../devices/exactDeviceProvisioning";
 import { BootCapacityExhaustedError } from "../../../models/BootCapacityExhaustedError";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import type {
-  BindingAssignmentRecord,
-  BindingBindingExpectation,
-  BindingCasFailure,
-  BindingExecOwner,
-  BindingKey,
+import {
+  WATCH_BINDING_UNSUPPORTED_MESSAGE,
+  type BindingAssignmentRecord,
+  type BindingBindingExpectation,
+  type BindingCasFailure,
+  type BindingExecOwner,
+  type BindingKey,
+  type BindingPlatform,
+  type ManagedBindingPlatform,
 } from "../registry/bindingRegistry";
 import type { BindingSpecFingerprint } from "./DefaultManagedSpecResolver";
-import type { BindingReconcileFailure, BindingReconcileFailureCode } from "./ReconcileAbort";
+import {
+  ReconcileAbort,
+  type BindingReconcileFailure,
+  type BindingReconcileFailureCode,
+} from "./ReconcileAbort";
 import type {
   BindingReconcileRequest,
   BindingReconcileResult,
@@ -107,6 +114,24 @@ export function failure(
   };
 }
 
+/** A reconcile request on a platform whose bindings the broker can create, boot and reuse. */
+export type ManagedReconcileRequest = Omit<BindingReconcileRequest, "platform"> & {
+  platform: ManagedBindingPlatform;
+};
+
+/**
+ * Narrow a reconcile request to a managed platform. A watch binding is refused as
+ * `spec_unsupported` before any registry or native work (#15882 part 1); every later step takes
+ * the narrowed request, so no creation, boot or reuse path can see a watch.
+ */
+export function managedRequestOrAbort(request: BindingReconcileRequest): ManagedReconcileRequest {
+  const platform: BindingPlatform = request.platform;
+  if (platform === "watchos") {
+    throw new ReconcileAbort(failure("spec_unsupported", WATCH_BINDING_UNSUPPORTED_MESSAGE));
+  }
+  return { ...request, platform };
+}
+
 export function casFailure(result: BindingCasFailure, step: string): BindingReconcileFailure {
   switch (result.kind) {
     case "scope_not_valid":
@@ -200,7 +225,7 @@ export function expectationOf(assignment: BindingAssignmentRecord): BindingBindi
 }
 
 export interface ReconcileContext {
-  request: BindingReconcileRequest;
+  request: ManagedReconcileRequest;
   resolvedSpec: BindingResolvedSpec;
   fingerprint: BindingSpecFingerprint;
   evidence: BindingReconcileEvidence;

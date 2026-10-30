@@ -51,9 +51,15 @@ export function toRecord(
  * binding's requested spec may omit `deviceType` (owner decision Q4), so it is read with the managed
  * schema: reading it as an exact spec would turn an adoptable create into a deletion.
  */
-export function recordedSpec(entry: BindingJournalEntry): BindingRequestedSpec | undefined {
-  const schema =
-    journalCreationPlatform(entry) === "android" ? androidBindingSpecSchema : iosBindingSpecSchema;
+export function recordedSpec(
+  entry: Pick<BindingJournalEntry, "platform" | "target">,
+): BindingRequestedSpec | undefined {
+  const platform = journalCreationPlatform(entry);
+  if (platform === "watchos") {
+    // No watch spec is managed yet (#15882 part 1): never read one with the iOS schema.
+    return undefined;
+  }
+  const schema = platform === "android" ? androidBindingSpecSchema : iosBindingSpecSchema;
   const parsed = schema.safeParse(entry.target.requestedSpec);
   return parsed.success ? parsed.data : undefined;
 }

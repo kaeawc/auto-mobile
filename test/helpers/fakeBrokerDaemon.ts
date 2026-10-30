@@ -23,7 +23,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
-import type { BindingProcessIdentity } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
+import {
+  requireManagedBindingPlatform,
+  type BindingProcessIdentity,
+} from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "./fakeSessionBrokerDevicePort";
 
 /** Real durable broker semantics; all storage is :memory: and native I/O is fake. */
@@ -179,7 +182,8 @@ export async function createFakeBrokerDaemon(
           inventory.push({
             name: assignment.deviceName,
             deviceId: assignment.stableDeviceId,
-            platform: assignment.platform,
+            // The fake broker serves Android and iOS profiles only; a watch row is a defect here.
+            platform: requireManagedBindingPlatform(assignment.platform),
           });
         }
       }

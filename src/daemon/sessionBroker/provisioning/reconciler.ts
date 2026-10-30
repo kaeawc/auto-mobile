@@ -42,6 +42,7 @@ import {
   encodeManagedSpecFingerprint,
   expectationOf,
   failure,
+  managedRequestOrAbort,
   provisionFailure,
   withCreateDeadline,
   type ReadyResult,
@@ -254,11 +255,12 @@ export class BindingReconciler {
   }
 
   private async reconcileSteps(
-    request: BindingReconcileRequest,
+    requested: BindingReconcileRequest,
     evidence: BindingReconcileEvidence,
   ): Promise<BindingReconcileResult> {
     const { registry } = this.deps;
-    this.checkBudget(request);
+    this.checkBudget(requested);
+    const request = managedRequestOrAbort(requested);
     // Resolve first: an unsupported spec fails before any registry or device mutation.
     const resolution = await this.deps.resolver.resolve(request.platform, request.requestedSpec, {
       signal: request.signal,

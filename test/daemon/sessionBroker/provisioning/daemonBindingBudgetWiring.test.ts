@@ -12,6 +12,7 @@ import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeInventory, FakeProvisioner, FakeDeleter } from "../registry/fixtures/reconcilerFakes";
 import { assignBindingDevice } from "./bindingFixtures";
+import type { WatchBindingInventorySource } from "../../../../src/daemon/sessionBroker/provisioning/DeviceManagerBindingInventory";
 
 const SPEC = { runtime: "system-images;android-35;google_apis;arm64-v8a", deviceType: "pixel_8" };
 const OWNER = { daemonId: "wire", pid: 101 };
@@ -22,7 +23,10 @@ class NoSessions implements BrokerDeviceAcquisitionSessions {
   async adoptManagedExecutionLivenessPolicy(): Promise<void> {}
   async releaseSession(): Promise<void> {}
 }
-function wiring(resourceBudgetPolicy?: BindingResourceBudgetPolicy) {
+function wiring(
+  resourceBudgetPolicy?: BindingResourceBudgetPolicy,
+  watchInventory?: WatchBindingInventorySource,
+) {
   const timer = new FakeTimer();
   const registry = new FakeBindingRegistry(timer, () => false);
   const inventory = new FakeInventory();
@@ -57,6 +61,7 @@ function wiring(resourceBudgetPolicy?: BindingResourceBudgetPolicy) {
       provisioner,
       deleter,
       checkBootCapacity: async () => {},
+      ...(watchInventory ? { watchInventory } : {}),
       androidImageCatalog: { listInstalledPackages: async () => [SPEC.runtime] },
       androidProfileCatalog: { listProfileIds: async () => [SPEC.deviceType] },
       androidConfigReader: {
@@ -172,5 +177,39 @@ describe("host total-resource limit wiring", () => {
     });
     expect(h.provisioner.calls).toEqual([]);
     expect(h.deleter.calls).toEqual([]);
+  });
+  test("a running daemon-named Apple Watch fills the shared limit (#15882)", async () => {
+    const h = wiring(
+      { limit: () => 1 },
+      {
+        listWatchSimulators: async () => [
+          {
+            platform: "watchos",
+            name: "ambroker-watch-0-g1-nonce",
+            deviceId: "WATCH-1",
+            isRunning: true,
+            state: "Booted",
+          },
+        ],
+      },
+    );
+    expect(await h.acquire()).toMatchObject({
+      outcome: "failed",
+      bindings: [
+        {
+          failure: {
+            code: "binding_budget_exhausted",
+            budget: {
+              usage: { total: 2, orphaned: 1 },
+              charged: [
+                { kind: "preparing" },
+                { kind: "orphaned", platform: "watchos", stableDeviceId: "WATCH-1" },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(h.provisioner.calls).toEqual([]);
   });
 });

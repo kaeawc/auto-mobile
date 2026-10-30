@@ -13,8 +13,10 @@ import {
   isEmulatorQemuProcess,
 } from "../../../src/features/bootAdmission/AndroidCapacitySource";
 import {
+  assertBootCapacityAvailable,
   createBootAdmissionGates,
   describeBootCapacity,
+  reserveBootCapacity,
 } from "../../../src/features/bootAdmission/sharedBootAdmissionGates";
 import { parsePsSnapshot } from "../../../src/devices/bootAdmission/psSnapshot";
 import { testOverrides } from "../../../src/utils/testOverrides";
@@ -414,6 +416,28 @@ describe("shared boot admission gates", () => {
     const gates = createBootAdmissionGates({ env: {}, timer: new FakeTimer() });
     expect(gates.android).toBeUndefined();
     expect(gates.ios).toBeUndefined();
+  });
+
+  test("a watch boot is checked and reserved against the simulator (iOS) gate (#15882)", async () => {
+    const asked: string[] = [];
+    const gate = (name: string) => ({
+      assertCapacityAvailable: async () => {
+        asked.push(`assert:${name}`);
+      },
+      reserveBoot: async () => {
+        asked.push(`reserve:${name}`);
+        return {
+          run: <T>(operation: () => Promise<T>) => operation(),
+          release: () => {},
+          markReplacedDeviceGone: () => {},
+        };
+      },
+    });
+    const gates = { android: gate("android"), ios: gate("ios") };
+    await assertBootCapacityAvailable("watchos", {}, gates);
+    await reserveBootCapacity("watchos", { timeoutMs: 1 }, gates);
+    await assertBootCapacityAvailable("android", {}, gates);
+    expect(asked).toEqual(["assert:ios", "reserve:ios", "assert:android"]);
   });
 
   test("describeBootCapacity aborts only the reporter that times out", async () => {

@@ -25,7 +25,10 @@ import { parseAndroidSystemImageRuntime } from "../../../utils/android-cmdline-t
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { stableStringify } from "../../../utils/stableStringify";
-import { type BindingPlatform } from "../registry/bindingRegistry";
+import {
+  type BindingPlatform,
+  WATCH_BINDING_UNSUPPORTED_MESSAGE,
+} from "../registry/bindingRegistry";
 import { type BindingRequestedSpec } from "./DefaultManagedSpecMatcher";
 
 /**
@@ -125,6 +128,18 @@ export function computeManagedSpecFingerprint(
     .update(stableStringify({ version: BINDING_SPEC_FINGERPRINT_VERSION, platform, resolvedSpec }))
     .digest("hex");
   return { version: BINDING_SPEC_FINGERPRINT_VERSION, hash };
+}
+
+function watchBindingUnsupported(): {
+  kind: "unsupported";
+  code: "spec_unsupported";
+  message: string;
+} {
+  return {
+    kind: "unsupported",
+    code: "spec_unsupported",
+    message: WATCH_BINDING_UNSUPPORTED_MESSAGE,
+  };
 }
 
 /** Request-only constraints must not enter provisionDevice or configuration fingerprints. */
@@ -251,6 +266,9 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     resolvedSpec: ResolvedExactDeviceSpecification,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecCreatability> {
+    if (platform === "watchos") {
+      return watchBindingUnsupported();
+    }
     if (platform === "ios") {
       const resolution = await this.resolve(
         platform,
@@ -287,6 +305,10 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     spec: BindingRequestedSpec,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution> {
+    if (platform === "watchos") {
+      // Never resolved as an iOS spec: watch bindings are not managed yet (#15882 part 1).
+      return watchBindingUnsupported();
+    }
     const readCatalog = this.catalogRead(options.signal);
     const unsupported = await this.findUnsupportedSpec(platform, spec, options.signal, readCatalog);
     if (unsupported) {

@@ -70,6 +70,11 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   `deleteDevice` name, stops a running watch through killDevice before taking its teardown lease
   (killDevice's own lease would otherwise wait on it), then runs `simctl delete` and requires a
   fresh watch listing that no longer shows it.
+- **Shared limits.** A watch is charged wherever a host limit counts devices: the broker's
+  managed-device limit (`totalDeviceCap`) counts `watchos` bindings and running daemon-named
+  watches in one total with Android and iOS devices, and a cold watch boot is admitted through the
+  simulator boot gate. The binding registry persists `watchos`, but broker-managed watch bindings
+  are refused (`spec_unsupported`) until creation, reuse and boot are implemented for them.
 - **`"either"` keeps meaning Android or iOS.** Listing `scanned` flags carry a `watchos` entry;
   until watch inventory exists it is `false`, so a watch is never treated as a freshly listed
   device.

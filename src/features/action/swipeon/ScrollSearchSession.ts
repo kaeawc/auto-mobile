@@ -2,7 +2,7 @@ import { freshSwipeHierarchy, swipeHierarchyReadTimeoutMs } from "./freshSwipeHi
 import type { IosSdkTapOutcome } from "../IosSdkBridgeTapRouter";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import { type StaleDisplayDetails } from "../../observe/StaleDisplayError";
-import { scopedSearchDescription } from "./swipeSelectorScopes";
+import { scopedSearchDescription, usesScopedSwipeLookFor } from "./swipeSelectorScopes";
 import {
   ActionableError,
   Element,
@@ -363,7 +363,7 @@ export class ScrollSearchSession {
    */
   private async scrollWebElementIntoView(): Promise<void> {
     const scroller = this.deps.webScrollIntoView;
-    if (!scroller || this.request.strategy || this.deps.device.platform !== "ios") {
+    if (!scroller || !this.webScrollApplies()) {
       return;
     }
     const outcome = await scroller.scroll(
@@ -402,6 +402,21 @@ export class ScrollSearchSession {
     if (this.foundElement) {
       this.webScroll = outcome;
     }
+  }
+
+  /**
+   * Only an unscoped iOS search asks the page: the snapshot carries no native container or layer,
+   * so a scoped search could scroll an element outside its scope; it swipes as usual.
+   */
+  private webScrollApplies(): boolean {
+    const { container, layer, lookFor } = this.request.options;
+    return (
+      !this.request.strategy &&
+      this.deps.device.platform === "ios" &&
+      container === undefined &&
+      layer === undefined &&
+      !usesScopedSwipeLookFor(lookFor)
+    );
   }
 
   /** The backend fields of a page-scrolled search, or none when only swipes ran. */

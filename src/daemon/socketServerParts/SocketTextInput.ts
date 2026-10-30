@@ -110,8 +110,7 @@ export class SocketTextInput {
                 device.deviceId,
                 socketSessionId,
                 "input/typeText",
-                true,
-                input?.requester,
+                { bypassAndroidDeviceListCache: true, requester: input?.requester },
               )
             : device,
         checksFrame: true,

@@ -179,7 +179,7 @@ export async function reserveProvisionDeviceReadiness(
     boot.device,
     boot.sourceImage?.name ?? boot.device.name,
     undefined,
-    readinessReservationOwner(args),
+    { autolockClient: readinessReservationOwner(args) },
   );
 }
 

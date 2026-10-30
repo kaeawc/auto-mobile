@@ -10,6 +10,8 @@ import {
   ShutdownForeignClaim,
   ShutdownIdentityReservation,
   DeviceReadinessReservation,
+  type ReadinessReservationOptions,
+  type ShutdownReservationOptions,
 } from "./contracts";
 import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
@@ -23,10 +25,7 @@ export interface ReservationsOperations {
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName?: string,
     verifiedAndroidAvdName?: string,
-    autolockClient?: AutolockClient & {
-      restartResumeSessionId?: string;
-    },
-    enforceAndroidRecoveryExclusion?: boolean,
+    options?: ReadinessReservationOptions,
   ): Promise<DeviceReadinessReservation>;
   /** An admitted owner may prepare R even if R's control call recovered it during boot. */
   reserveRestartRecoveryReadiness(
@@ -42,8 +41,7 @@ export interface ReservationsOperations {
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
     assertHolder?: () => void,
-    foreignClaim?: ShutdownForeignClaim,
-    options?: { fenceUnpooled?: boolean },
+    options?: ShutdownReservationOptions,
   ): Promise<ShutdownDeviceReservation | undefined>;
   claimShutdownAgainstOtherDaemons(
     reservation: ShutdownDeviceReservation,
@@ -130,18 +128,14 @@ export class DevicePoolReservations {
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName?: string,
     verifiedAndroidAvdName?: string,
-    autolockClient?: AutolockClient & {
-      restartResumeSessionId?: string;
-    },
-    enforceAndroidRecoveryExclusion = false,
+    options?: ReadinessReservationOptions,
   ): Promise<DeviceReadinessReservation> {
     return this.state.deviceReservations.reserveDeviceForReadiness(
       deviceId,
       expectedIdentity,
       stableRuntimeName,
       verifiedAndroidAvdName,
-      autolockClient,
-      enforceAndroidRecoveryExclusion,
+      options,
     );
   }
 
@@ -192,23 +186,22 @@ export class DevicePoolReservations {
   }
 
   /**
-   * @param foreignClaim set by lifecycle tools that stop a device another daemon could be driving
-   *   (killDevice, deleteDevice, #11200): see {@link claimShutdownAgainstOtherDaemons}.
+   * @param options.foreignClaim set by lifecycle tools that stop a device another daemon could be
+   *   driving (killDevice, deleteDevice, #11200): see {@link claimShutdownAgainstOtherDaemons}.
    */
   async reserveDeviceForShutdown(
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
     assertHolder?: () => void,
-    foreignClaim?: ShutdownForeignClaim,
-    options?: { fenceUnpooled?: boolean },
+    { foreignClaim, ...coordinatorOptions }: ShutdownReservationOptions = {},
   ): Promise<ShutdownDeviceReservation | undefined> {
     const reserved = await this.state.shutdownReservationCoordinator.reserveDeviceForShutdown(
       deviceId,
       abortSignal,
       autolockClient,
       assertHolder,
-      options,
+      coordinatorOptions,
     );
     const reservation = reserved && this.notifyingShutdownReservation(reserved);
     if (!reservation || !foreignClaim) {

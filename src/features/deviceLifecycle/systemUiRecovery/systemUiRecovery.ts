@@ -255,8 +255,10 @@ export async function handoffSystemUiAnrReplacement(
     replacementBoot.device,
     sourceImage,
     replacementBoot.processHandle,
-    () => publishReplacementReadinessMarker?.(replacementBoot.device),
-    getShutdownInitiatingExecutionId(),
+    {
+      beforeReplacementPublishes: () => publishReplacementReadinessMarker?.(replacementBoot.device),
+      excludeExecutionId: getShutdownInitiatingExecutionId(),
+    },
   );
 }
 
@@ -527,7 +529,7 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
         boot.device,
         sourceImage.name,
         sourceImage.name,
-        recoveryAutolockClient,
+        { autolockClient: recoveryAutolockClient },
       )
     : undefined;
   const state: SystemUiAnrRestartState = {

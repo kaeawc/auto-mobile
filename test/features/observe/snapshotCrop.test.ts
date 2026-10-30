@@ -34,7 +34,7 @@ describe("snapshot crop geometry", () => {
       realPng,
       { left: 1, top: 1, right: 3, bottom: 3 },
       { platform: "android", screenSize: { width: 4, height: 4 } },
-      realBackend,
+      { backend: realBackend },
     );
     const raw = await realBackend.rawPixels(result.png);
     expect({ width: raw.width, height: raw.height }).toEqual({ width: 2, height: 2 });
@@ -47,7 +47,7 @@ describe("snapshot crop geometry", () => {
       source,
       { left: 2, top: 1, right: 5, bottom: 4 },
       { platform: "android", screenSize: { width: 8, height: 6 } },
-      image,
+      { backend: image },
     );
     expect(result.imageSize).toEqual({ width: 3, height: 3 });
     expect(result.rasterBounds).toEqual({ left: 2, top: 1, right: 5, bottom: 4 });
@@ -62,7 +62,7 @@ describe("snapshot crop geometry", () => {
       source,
       { left: 0.25, top: 1.5, right: 2.25, bottom: 3.1 },
       { platform: "ios", screenSize: { width: 4, height: 5 }, nativeScale: 3 },
-      backend(12, 15),
+      { backend: backend(12, 15) },
     );
     expect(result.rasterBounds).toEqual({ left: 0, top: 4, right: 7, bottom: 10 });
     expect(result.scaleProvenance).toBe("native-scale-confirmed");
@@ -74,7 +74,7 @@ describe("snapshot crop geometry", () => {
       source,
       requestedBounds,
       { platform: "android", screenSize: { width: 5, height: 5 } },
-      backend(5, 5),
+      { backend: backend(5, 5) },
     );
     expect(result.clipped).toBe(true);
     expect(result.requestedBounds).toEqual(requestedBounds);
@@ -86,7 +86,7 @@ describe("snapshot crop geometry", () => {
       source,
       { left: 1, top: 1, right: 3, bottom: 3 },
       { platform: "ios", screenSize: { width: 4, height: 4 }, nativeScale: 3 },
-      backend(8, 8),
+      { backend: backend(8, 8) },
     );
     expect(result.pixelsPerNativeUnit).toEqual({ x: 2, y: 2 });
     expect(result.scaleProvenance).toBe("raster-dimensions");
@@ -104,7 +104,7 @@ describe("snapshot crop geometry", () => {
         source,
         { left: 0, top: 0, right: 200, bottom: 100 },
         { platform: "ios", screenSize: { width: 874, height: 402 }, rotation, nativeScale: 3 },
-        image,
+        { backend: image },
       );
       // #8780 device evidence: rotation 1's display top-left is the native raster top-right.
       expect(result.rasterBounds).toEqual(rasterBounds);
@@ -123,7 +123,7 @@ describe("snapshot crop geometry", () => {
       source,
       { left: 0, top: 1, right: 3, bottom: 3 },
       { platform: "ios", screenSize: { width: 4, height: 6 }, rotation: 2 },
-      image,
+      { backend: image },
     );
     expect(result.rasterBounds).toEqual({ left: 2, top: 6, right: 8, bottom: 10 });
     expect(result.imageSize).toEqual({ width: 6, height: 4 });
@@ -163,7 +163,7 @@ describe("snapshot crop geometry", () => {
           screenSize: rotation === 2 ? { width: 4, height: 4 } : { width: 6, height: 4 },
           rotation,
         },
-        realBackend,
+        { backend: realBackend },
       );
       const raw = await realBackend.rawPixels(result.png);
       expect(result.imageSize).toEqual({ width: 2, height: 1 });
@@ -186,7 +186,7 @@ describe("snapshot crop geometry", () => {
           rotation,
           rasterOrientation: "display",
         },
-        image,
+        { backend: image },
       );
       expect(result.imageSize).toEqual({ width: 4, height: 2 });
       expect(image.lastPipeline?.operations).toEqual([
@@ -198,10 +198,14 @@ describe("snapshot crop geometry", () => {
   test("rejects empty and out-of-screen rectangles", async () => {
     const geometry = { platform: "android" as const, screenSize: { width: 5, height: 5 } };
     await expect(
-      cropSnapshot(source, { left: 1, top: 1, right: 1, bottom: 2 }, geometry, backend(5, 5)),
+      cropSnapshot(source, { left: 1, top: 1, right: 1, bottom: 2 }, geometry, {
+        backend: backend(5, 5),
+      }),
     ).rejects.toThrow("nonempty");
     await expect(
-      cropSnapshot(source, { left: 7, top: 1, right: 8, bottom: 2 }, geometry, backend(5, 5)),
+      cropSnapshot(source, { left: 7, top: 1, right: 8, bottom: 2 }, geometry, {
+        backend: backend(5, 5),
+      }),
     ).rejects.toThrow("outside");
   });
 });

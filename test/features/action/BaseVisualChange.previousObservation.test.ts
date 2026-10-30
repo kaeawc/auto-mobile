@@ -79,9 +79,12 @@ function harness(initiallyVerified = true, revealAfterAction = false) {
     override async captureSettled(observationId: string) {
       captures.push(phase);
       const path = await super.captureSettled(observationId);
-      screenshotState.updateForObservation(device.deviceId, observationId, path, undefined, {
-        width: 1080,
-        height: 1920,
+      screenshotState.updateForObservation(device.deviceId, observationId, {
+        path,
+        imageSize: {
+          width: 1080,
+          height: 1920,
+        },
       });
       return path;
     }

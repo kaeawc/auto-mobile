@@ -112,7 +112,7 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
             rotation: snapshot.hierarchy.rotation,
             nativeScale: snapshot.hierarchy.nativeScale,
           },
-          dependencies.imageBackend ?? resolveImageBackend(),
+          { backend: dependencies.imageBackend ?? resolveImageBackend() },
         );
         const outputDirectory =
           dependencies.outputDirectory?.() ?? ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS);

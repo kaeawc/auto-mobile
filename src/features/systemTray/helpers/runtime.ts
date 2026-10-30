@@ -160,7 +160,7 @@ export const captureSystemTrayTerminalEvidence = async (
     (getDeviceDataStreamServer()?.hasSubscriberForDevice(device.deviceId) ?? false);
   if (shouldCaptureScreenshot) {
     await awaitWhileRequestIsLive(
-      Promise.resolve(observeScreen.captureScreenshot?.(undefined, signal, observation)),
+      Promise.resolve(observeScreen.captureScreenshot?.(undefined, { signal, observation })),
       signal,
     );
     return;

@@ -2366,9 +2366,10 @@ describe("post-action screenshot resolved display", () => {
       class CaptureRecorder extends FakeScreenshotRecorder {
         override async captureFresh(
           _id?: string,
-          _perf?: PerformanceTracker,
-          signal?: AbortSignal,
-          displayId?: number,
+          {
+            signal,
+            displayId,
+          }: { perf?: PerformanceTracker; signal?: AbortSignal; displayId?: number } = {},
         ): Promise<void> {
           ids.push(displayId);
           expect(

@@ -502,9 +502,7 @@ describe("display read routing", () => {
     const recorder = {
       captureSettled: async (
         _id: string,
-        _perf: unknown,
-        _signal: AbortSignal | undefined,
-        displayId: number | undefined,
+        { displayId }: { perf?: unknown; signal?: AbortSignal; displayId?: number } = {},
       ) => {
         screenshotDisplayId = displayId;
         return "/tmp/selected-display.png";
@@ -564,9 +562,7 @@ describe("display read routing", () => {
     const recorder = {
       captureSettled: async (
         _id: string,
-        _perf: unknown,
-        _signal: AbortSignal | undefined,
-        displayId?: number,
+        { displayId }: { perf?: unknown; signal?: AbortSignal; displayId?: number } = {},
       ) => {
         routedDisplayId = displayId;
         return "/tmp/default-display.png";

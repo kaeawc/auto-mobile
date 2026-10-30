@@ -227,7 +227,7 @@ test("snapshotOf crop input retains absent runner rotation rather than guessing 
         rotation: result.viewHierarchy?.rotation,
         nativeScale: result.viewHierarchy?.nativeScale,
       },
-      image,
+      { backend: image },
     ),
   ).rejects.toThrow("incompatible aspect ratios");
   expect(result.viewHierarchy?.rotation).toBeUndefined();

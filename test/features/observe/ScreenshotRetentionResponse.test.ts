@@ -48,6 +48,8 @@ test("fresh device-read and settled paths report the same host-clock ten-minute 
   timer.advanceTime(1234);
   await screen["captureDeviceReadScreenshot"](result);
   expect(result.screenshotExpiresAt).toBe(601_234);
-  await screen["captureSettledScreenshot"](result, new NoOpPerformanceTracker(), undefined, true);
+  await screen["captureSettledScreenshot"](result, new NoOpPerformanceTracker(), undefined, {
+    strict: true,
+  });
   expect(result.screenshotExpiresAt).toBe(601_234);
 });

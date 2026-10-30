@@ -74,7 +74,7 @@ function setup(
   recorder.captureSettled = async (observationId) => {
     recorder.captureSettledCalls++;
     const path = "/fake/settled.png";
-    store.updateForObservation(device.deviceId, observationId, path, undefined, captureSize);
+    store.updateForObservation(device.deviceId, observationId, { path, imageSize: captureSize });
     return path;
   };
   let capturedDisplayId: number | undefined;
@@ -196,7 +196,7 @@ test.each([1, 2, 3])("rotated iOS %s retains portrait raster dimensions", async 
       nativeScale: observation.viewHierarchy?.nativeScale,
       rasterOrientation: observation.screenshotOrientation,
     },
-    backend,
+    { backend },
   );
   expect(crop).toMatchObject({
     imageSize: { width: 600, height: 300 },
@@ -209,11 +209,14 @@ test.each([1, 2, 3])("rotated iOS %s retains portrait raster dimensions", async 
 
 test("encoded downscaled capture reports the written raster", async () => {
   const { screen, store, recorder } = setup("android", 1080, 2400, 1);
-  recorder.captureSettled = async (observationId, _perf, _signal, _display, encoding) => {
+  recorder.captureSettled = async (observationId, { options: encoding } = {}) => {
     expect(encoding).toEqual({ format: "webp", quality: 70 });
-    store.updateForObservation(device.deviceId, observationId, "/fake/small.webp", undefined, {
-      width: 540,
-      height: 1200,
+    store.updateForObservation(device.deviceId, observationId, {
+      path: "/fake/small.webp",
+      imageSize: {
+        width: 540,
+        height: 1200,
+      },
     });
     return "/fake/small.webp";
   };
@@ -310,7 +313,7 @@ test("missing capture dimensions succeeds, clears old dimensions, and warns", as
   const observation = await screen.execute(options);
   setCaptureSize(undefined);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  await screen.captureScreenshot(undefined, undefined, observation, "settled");
+  await screen.captureScreenshot(undefined, { observation, screenshot: "settled" });
   expect(observation.screenshotSettled).toBe(true);
   expect(observation.screenshotImageSize).toBeUndefined();
   expect(observation.screenshotPixelsPerNativeUnit).toBeUndefined();
@@ -360,9 +363,12 @@ test("per-display settled and device reads use the captured panel geometry", asy
 test("fresh settled capture uses writer dimensions without another file read", async () => {
   const { screen, recorder, store } = setup();
   recorder.captureSettled = async (observationId) => {
-    store.updateForObservation(device.deviceId, observationId, "/fake/settled.png", undefined, {
-      width: 540,
-      height: 1200,
+    store.updateForObservation(device.deviceId, observationId, {
+      path: "/fake/settled.png",
+      imageSize: {
+        width: 540,
+        height: 1200,
+      },
     });
     return "/fake/settled.png";
   };

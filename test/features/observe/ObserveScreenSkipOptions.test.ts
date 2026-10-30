@@ -205,7 +205,7 @@ describe("ObserveScreen skip options", () => {
   test("deferred capture marks a skipped terminal observation so its screenshot URI is emitted", async () => {
     const observation = await observeScreen.execute({ skipScreenshot: true });
 
-    await observeScreen.captureScreenshot(undefined, undefined, observation);
+    await observeScreen.captureScreenshot(undefined, { observation });
 
     expect(fakeScreenshotRecorder.captureFreshCalls).toBe(1);
     const finalized = finalizeToolResponse(createStructuredToolResponse(observation), {
@@ -280,7 +280,7 @@ describe("ObserveScreen skip options", () => {
       screenshot: "async",
       screenshotOptions: { hidePrototypes: true },
     });
-    await observeScreen.captureScreenshot(undefined, undefined, result, "async");
+    await observeScreen.captureScreenshot(undefined, { observation: result, screenshot: "async" });
     expect(fakeScreenshotRecorder.captureOptions).toEqual([{ hidePrototypes: true }, undefined]);
     expect(result.screenshotIncludesPrototype).toBeUndefined();
   });

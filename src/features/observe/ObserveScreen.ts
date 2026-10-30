@@ -33,10 +33,7 @@ import {
   requireAndroidOrIosPlatform,
   type ViewHierarchyResult,
 } from "../../models";
-import type {
-  ObserveScreenshotOptions,
-  ScreenshotEncodingOptions,
-} from "./screenshot/screenshotOptions";
+import type { ScreenshotEncodingOptions } from "./screenshot/screenshotOptions";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import {
   AdbClientFactory,
@@ -53,6 +50,7 @@ import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import type {
+  CaptureScreenshotOptions,
   DeviceReadOptions,
   ObserveScreen,
   ObserveScreenExecuteOptions,
@@ -720,10 +718,7 @@ export class RealObserveScreen implements ObserveScreen {
 
   async captureScreenshot(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    observation?: ObserveResult,
-    screenshot?: ScreenshotMode,
-    screenshotOptions?: ObserveScreenshotOptions,
+    { signal, observation, screenshot, screenshotOptions }: CaptureScreenshotOptions = {},
   ): Promise<void> {
     const screenshotObservation = observation ?? this.createBaseResult();
     const displayId = await this.screenshotDisplayId(signal, observation);
@@ -737,21 +732,18 @@ export class RealObserveScreen implements ObserveScreen {
       }
     }
     if (screenshotMode === "settled") {
-      await this.captureSettledScreenshot(
-        screenshotObservation,
-        perf,
-        signal,
-        screenshot === "settled",
-        { displayId, screenshotOptions },
-      );
+      await this.captureSettledScreenshot(screenshotObservation, perf, signal, {
+        strict: screenshot === "settled",
+        displayId,
+        screenshotOptions,
+      });
     } else {
-      await this.screenshotRecorder.captureFresh(
-        screenshotObservation.observationId,
+      await this.screenshotRecorder.captureFresh(screenshotObservation.observationId, {
         perf,
         signal,
         displayId,
         capture,
-      );
+      });
     }
     if (observation) {
       await this.runAccessibilityAudit(observation, perf);

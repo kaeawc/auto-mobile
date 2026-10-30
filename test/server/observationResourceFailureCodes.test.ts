@@ -226,7 +226,7 @@ describe("observation resource failure envelopes", () => {
 
   test("evicted observation cannot serve its retained image", async () => {
     const { observationId } = await observe();
-    store.updateForObservation(deviceA.deviceId, observationId, "/fake/evicted.png");
+    store.updateForObservation(deviceA.deviceId, observationId, { path: "/fake/evicted.png" });
     cache.clear(deviceA.deviceId);
     failure(
       await read(buildObservationScreenshotUri(deviceA.deviceId, observationId)),
@@ -241,7 +241,7 @@ describe("observation resource failure envelopes", () => {
   test("superseded URI never serves the newer observation image", async () => {
     const old = await observe();
     const newer = await observe();
-    store.updateForObservation(deviceA.deviceId, newer.observationId, "/fake/new.png");
+    store.updateForObservation(deviceA.deviceId, newer.observationId, { path: "/fake/new.png" });
     failure(
       await read(buildObservationScreenshotUri(deviceA.deviceId, old.observationId)),
       "OBSERVATION_NOT_RETAINED",
@@ -265,7 +265,7 @@ describe("observation resource failure envelopes", () => {
       observationId,
     });
     expect(body.retryAfterMs).toBe(OBSERVATION_SCREENSHOT_NOT_READY_RETRY_AFTER_MS);
-    store.updateForObservation(deviceA.deviceId, observationId, "/fake/completed.png");
+    store.updateForObservation(deviceA.deviceId, observationId, { path: "/fake/completed.png" });
     image(await read(uri));
   });
 
@@ -316,7 +316,7 @@ describe("observation resource failure envelopes", () => {
     ["", "SCREENSHOT_READ_FAILED"],
   ])("retained file read errno %s becomes %s", async (errno, code) => {
     const { observationId } = await observe();
-    store.updateForObservation(deviceA.deviceId, observationId, "/fake/mismatch.webp");
+    store.updateForObservation(deviceA.deviceId, observationId, { path: "/fake/mismatch.webp" });
     const error = Object.assign(
       new Error("ENOENT EACCES misleading prose"),
       errno ? { code: errno } : {},
@@ -344,7 +344,7 @@ describe("observation resource failure envelopes", () => {
     "immutable success preserves $mimeType bytes despite extension mismatch",
     async (fixture) => {
       const { observationId } = await observe();
-      store.updateForObservation(deviceA.deviceId, observationId, "/fake/mismatch.png");
+      store.updateForObservation(deviceA.deviceId, observationId, { path: "/fake/mismatch.png" });
       useScreenshotFileSystem({
         stat: async () => ({ isFile: () => true }),
         readFile: async () => fixture.bytes,
@@ -357,7 +357,7 @@ describe("observation resource failure envelopes", () => {
     const a = await observe(deviceA);
     const b = await observe(deviceB);
     const otherBytes = Buffer.from("other device");
-    store.updateForObservation(deviceB.deviceId, b.observationId, "/fake/b.png");
+    store.updateForObservation(deviceB.deviceId, b.observationId, { path: "/fake/b.png" });
     useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async (path) => (path === "/fake/b.png" ? otherBytes : images[0].bytes),
@@ -366,7 +366,7 @@ describe("observation resource failure envelopes", () => {
     const missing = await read(uri);
     expect(missing.blob).toBeUndefined();
     expect(missing.text).not.toContain(deviceB.deviceId);
-    store.updateForObservation(deviceA.deviceId, a.observationId, "/fake/a.png");
+    store.updateForObservation(deviceA.deviceId, a.observationId, { path: "/fake/a.png" });
     image(await read(uri));
     expect((await read(uri)).blob).not.toBe(otherBytes.toString("base64"));
   });
@@ -703,7 +703,7 @@ describe("observation resource failure envelopes", () => {
     const { observationId } = await observe();
     resolveSession();
     store.update(deviceA.deviceId, "/fake/directory");
-    store.updateForObservation(deviceA.deviceId, observationId, "/fake/directory");
+    store.updateForObservation(deviceA.deviceId, observationId, { path: "/fake/directory" });
     useScreenshotFileSystem({
       stat: async () => ({ isFile: () => false }),
       readFile: async () => {
@@ -727,7 +727,7 @@ describe("observation resource failure envelopes", () => {
     const pending = read(buildObservationScreenshotUri(deviceA.deviceId, observationId));
     await Promise.resolve();
     const newer = await observe();
-    store.updateForObservation(deviceA.deviceId, newer.observationId, "/fake/newer.png");
+    store.updateForObservation(deviceA.deviceId, newer.observationId, { path: "/fake/newer.png" });
     store.endObservation(deviceA.deviceId, observationId, SCREENSHOT_CAPTURE_SUPERSEDED_REASON);
     failure(await pending, "OBSERVATION_NOT_RETAINED", {
       deviceId: deviceA.deviceId,
@@ -737,12 +737,14 @@ describe("observation resource failure envelopes", () => {
 
   test("observation replaced during file read never returns either image", async () => {
     const { observationId } = await observe();
-    store.updateForObservation(deviceA.deviceId, observationId, "/fake/old.png");
+    store.updateForObservation(deviceA.deviceId, observationId, { path: "/fake/old.png" });
     useScreenshotFileSystem({
       stat: async () => ({ isFile: () => true }),
       readFile: async () => {
         const newer = await observe();
-        store.updateForObservation(deviceA.deviceId, newer.observationId, "/fake/newer.png");
+        store.updateForObservation(deviceA.deviceId, newer.observationId, {
+          path: "/fake/newer.png",
+        });
         return images[0].bytes;
       },
     });

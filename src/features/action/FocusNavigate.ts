@@ -22,7 +22,7 @@ export const FOCUS_NAVIGATE_DEFAULT_MAX_STEPS = 30;
 export const FOCUS_NAVIGATE_MAX_STEPS_LIMIT = 100;
 export const FOCUS_NAVIGATE_DEFAULT_SETTLE_MS = 200;
 export const FOCUS_NAVIGATE_MAX_SETTLE_MS = 5000;
-/** Consecutive presses that leave focus unchanged before the loop gives up. */
+/** Consecutive explicit-direction presses that leave focus unchanged before the loop gives up. */
 export const FOCUS_NAVIGATE_STUCK_PRESSES = 2;
 
 export const FOCUS_NAVIGATE_STATUSES = ["focused", "max_steps", "stuck"] as const;
@@ -192,7 +192,7 @@ function focusKey(element: Element | null): string {
 /** Tracks whether the last press moved focus, and which directions failed on this element. */
 interface FocusProgress {
   readonly unchanged: number;
-  /** Directions that did not move focus off the current element; cleared once focus moves. */
+  /** Directions that did not move focus off this element during this navigation call. */
   readonly blocked: ReadonlySet<FocusNavigateDirection>;
   /** Records an observation; returns true when focus differs from the previous one. */
   observe(key: string): boolean;
@@ -200,7 +200,8 @@ interface FocusProgress {
 }
 
 function createFocusProgress(): FocusProgress {
-  const blocked = new Set<FocusNavigateDirection>();
+  const blockedByElement = new Map<string, Set<FocusNavigateDirection>>();
+  let blocked = new Set<FocusNavigateDirection>();
   let unchanged = 0;
   let previousKey: string | undefined;
   let lastDirection: FocusNavigateDirection | undefined;
@@ -208,13 +209,16 @@ function createFocusProgress(): FocusProgress {
     get unchanged() {
       return unchanged;
     },
-    blocked,
+    get blocked() {
+      return blocked;
+    },
     observe(key) {
       const didNotMove = previousKey !== undefined && key === previousKey;
       const moved = key !== previousKey;
       unchanged = didNotMove ? unchanged + 1 : 0;
       if (!didNotMove) {
-        blocked.clear();
+        blocked = blockedByElement.get(key) ?? new Set<FocusNavigateDirection>();
+        blockedByElement.set(key, blocked);
       } else if (lastDirection) {
         blocked.add(lastDirection);
       }

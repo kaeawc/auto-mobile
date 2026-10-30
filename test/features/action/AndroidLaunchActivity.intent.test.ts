@@ -106,3 +106,58 @@ describe("Android explicit intent launch (#14080)", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 });
+
+describe("Android launcher discovery categories", () => {
+  test("a LAUNCHER component keeps the existing launch path without a Leanback probe", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("resolve-activity", createExecResult(`${APP}/.PhoneHome`, ""));
+    adb.setCommandResponse("am start", createExecResult("Starting: Intent", ""));
+    expect(await launcher(adb).performLaunch(APP, undefined, 0, perf())).toEqual({
+      success: true,
+      packageName: APP,
+      activityName: "intent_launch",
+      userId: 0,
+    });
+    expect(adb.getExecutedCommands()).toEqual([
+      `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LAUNCHER '${APP}'`,
+      `shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n '${APP}/.PhoneHome'`,
+    ]);
+  });
+
+  test("discovers a Leanback component when resolve-activity is unavailable", async () => {
+    const app = "com.android.tv.settings";
+    const adb = new FakeAdbExecutor();
+    adb.setDefaultResponse(createExecResult("Error: Activity does not exist", ""));
+    adb.setCommandError("resolve-activity", new Error("Unknown command: resolve-activity"));
+    adb.setCommandResponse(
+      "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
+      createExecResult("Error: no launcher", ""),
+    );
+    adb.setCommandResponse(
+      "query-activities --brief --user 10 -a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER",
+      createExecResult(`${app}/.MainSettings`, ""),
+    );
+    adb.setCommandResponse(
+      `shell am start --user 10 -n '${app}/.MainSettings'`,
+      createExecResult("Starting: Intent", ""),
+    );
+    const ctrlProxy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("CtrlProxy unavailable in fake discovery test");
+    });
+    try {
+      const result = await launcher(adb).performLaunch(app, undefined, 10, perf());
+      expect(result).toEqual({
+        success: true,
+        packageName: app,
+        activityName: ".MainSettings",
+        userId: 10,
+      });
+      expect(adb.getExecutedCommands()).toContain(
+        `shell am start --user 10 -n '${app}/.MainSettings'`,
+      );
+      expect(adb.getExecutedCommands().some((command) => command.includes("pm dump"))).toBe(false);
+    } finally {
+      ctrlProxy.mockRestore();
+    }
+  });
+});

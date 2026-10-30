@@ -1,3 +1,4 @@
+import type { BindingRegistrySchemaProbe } from "../sessionBroker/registry/bindingRegistryMigrations";
 import type { SessionBrokerService } from "../sessionBroker/service";
 import type { SessionBrokerProtocolErrorCode } from "../../devices/sessionBrokerResult";
 import type { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
@@ -45,6 +46,8 @@ import type { PowerRegistry } from "../../features/utility/power/PowerRegistry";
 export interface DaemonStateAccess {
   isInitialized(): boolean;
   isSessionBrokerMode?(): boolean;
+  /** Resident handle only; must never open or migrate a registry. */
+  getBindingRegistrySchemaProbe?(): Pick<BindingRegistrySchemaProbe, "describeSchema"> | undefined;
   getSessionBrokerService?(): SessionBrokerService | undefined;
   /** Overrides this process's daemon instance identifier (tests). */
   getDaemonInstance?(): string;

@@ -490,13 +490,18 @@ transactions for cross-process admission; assignment generations and native jour
 operations stay private, and allocation indices are never public session
 identities. Provider-local SQLite only (no Talos PostgreSQL change).
 An executed migration unknown to this daemon disables registry exclusion for generic
-acquisition: the `files_only` diagnostic names the path, migrations and remedy, and a
-warning is logged once per process per registry path. Managed bindings are not enforced
+acquisition: the `files_only` diagnostic names the path, migrations, recorded writer
+versions and remedy, and a warning is logged once per process per registry path.
+Managed bindings are not enforced
 in files-only mode: this daemon can allocate a device held only by a managed binding,
 because allocation claim files alone decide ownership. The device-claims mirror skips
 reads, writes, opens and retries until daemon restart. Writers and ownership readers
 requiring current registry evidence still fail with non-retryable
-`registry_schema_unsupported`; the schema guard runs before any migration or write.
+`registry_schema_unsupported`; its payload includes recorded writer versions and the
+schema guard runs before any migration or write. Migration provenance records only
+migrations executed by the current upgrade; earlier migrations remain unknown.
+In broker mode, `daemon/capabilities` describes the schema and its compatibility on
+an already-open registry connection without opening or migrating a registry.
 
 Broker mode holds a process-generation-aware host lock and refuses startup over
 unaccounted managed inventory or live generic sessions (drain the prior provider

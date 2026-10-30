@@ -664,7 +664,9 @@ export async function runSessionRowInterleaving(
           background(
             "re-issue",
             manager
-              .getOrCreateSession(sessionId, poolOf(manager), "android", undefined, true)
+              .getOrCreateSession(sessionId, poolOf(manager), "android", {
+                requireIssuedSession: true,
+              })
               .then(adoptIncarnation)
               .finally(() => {
                 reissuing = false;

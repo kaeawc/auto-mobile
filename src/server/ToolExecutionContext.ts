@@ -102,14 +102,12 @@ export async function createToolExecutionContext(
   // Get or create session
   const session =
     admittedSession ??
-    (await sessionManager.getOrCreateSession(
-      sessionUuid,
-      devicePool,
-      sessionOptions.platform,
+    (await sessionManager.getOrCreateSession(sessionUuid, devicePool, sessionOptions.platform, {
       execution,
       requireIssuedSession,
-      { requestDeadlineMs: sessionOptions.requestDeadlineMs, signal },
-    ));
+      requestDeadlineMs: sessionOptions.requestDeadlineMs,
+      signal,
+    }));
 
   if (!sessionManager.isAdmittedForAutomation(session)) {
     throw new ActionableError(`Session ${sessionUuid} was released during setup`);

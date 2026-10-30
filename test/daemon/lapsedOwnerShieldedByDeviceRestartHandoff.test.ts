@@ -89,8 +89,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       SESSION,
       { assignDeviceToSession: async (id: string) => (await createOnPixelA(id)).assignedDevice },
       "android",
-      undefined,
-      true,
+      { requireIssuedSession: true },
     );
   }
 
@@ -182,8 +181,7 @@ describe("a device restart under a session whose owner already lost its heartbea
           assignDeviceToSession: async (id: string) => (await createOnPixelA(id)).assignedDevice,
         },
         "android",
-        undefined,
-        true,
+        { requireIssuedSession: true },
       )
       .then(
         () => "issued-again" as const,

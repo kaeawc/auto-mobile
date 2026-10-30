@@ -739,7 +739,7 @@ async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): 
       const session = requireDaemonSession(sessionManager, sessionId);
       const deviceId = session.assignedDevice;
       // Preserve the CLI's ordering: a rejected session release never frees the device.
-      await releaseSessionAndDevice(sessionManager, pool, deviceId, sessionId, undefined, {
+      await releaseSessionAndDevice(sessionManager, pool, deviceId, sessionId, {
         deferFailureFallback: true,
       });
       printReleased(false, `Session ${sessionId} released`, deviceId);

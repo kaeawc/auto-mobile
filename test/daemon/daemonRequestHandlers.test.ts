@@ -1000,7 +1000,9 @@ describe("handleDaemonRequest", () => {
     };
 
     try {
-      await restartedManager.getOrCreateSession(sessionId, recoverer, "android", undefined, true);
+      await restartedManager.getOrCreateSession(sessionId, recoverer, "android", {
+        requireIssuedSession: true,
+      });
       const state = new FakeDaemonState(
         restartedManager,
         new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),

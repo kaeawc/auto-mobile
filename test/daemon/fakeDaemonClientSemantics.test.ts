@@ -9,11 +9,18 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // hermetically through testHooks.attachSocket + FakeSocket (no real socket, pid file or daemon).
 
 function realClient(): { client: DaemonClient; hangUp: () => void } {
-  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {}, null, {
-    idGenerator: new FakeIdGenerator(["p"]),
-    platformOverride: "darwin",
-    maxInboundFrameBytes: 64,
-  });
+  const client = new DaemonClient(
+    "/fake/socket",
+    1000,
+    new FakeTimer(),
+    {},
+    {
+      clientIdentity: null,
+      idGenerator: new FakeIdGenerator(["p"]),
+      platformOverride: "darwin",
+      maxInboundFrameBytes: 64,
+    },
+  );
   client.testHooks.attachSocket(new FakeSocket());
   // An oversized frame closes the connection through handleSocketClosed (client.ts ~L990).
   const hangUp = () => client.testHooks.simulateIncomingData(Buffer.from("x".repeat(65) + "\n"));

@@ -88,7 +88,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
       const { manager, pool } = daemon();
 
       const outcome = await manager
-        .getOrCreateSession(SESSION, pool, "android", undefined, true)
+        .getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true })
         .then(
           () => "recovered",
           (e: unknown) => (e instanceof Error ? e.message : String(e)),
@@ -105,7 +105,9 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     await repo.markReleased(SESSION, "released", 2_000, PLAN_AUTO_RELEASE_REASON);
     const { manager, pool } = daemon();
 
-    const session = await manager.getOrCreateSession(SESSION, pool, "android", undefined, true);
+    const session = await manager.getOrCreateSession(SESSION, pool, "android", {
+      requireIssuedSession: true,
+    });
 
     expect(session.assignedDevice).toBe(DEVICE);
     expect(await repo.getSession(SESSION)).toMatchObject({
@@ -125,7 +127,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
         release_reason: PLAN_AUTO_RELEASE_REASON,
       });
 
-      await manager.getOrCreateSession(SESSION, pool, "android", undefined, true);
+      await manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true });
       expect(await repo.getSession(SESSION)).toMatchObject({ status: "active" });
     }
   });
@@ -139,10 +141,12 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     });
     const before = await repo.getSession(SESSION);
 
-    const error = await manager.getOrCreateSession(SESSION, pool, "android", undefined, true).then(
-      () => undefined,
-      (e: unknown) => e,
-    );
+    const error = await manager
+      .getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true })
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
 
     expect(error).toBe(busy);
     expect(error).not.toBeInstanceOf(DeviceSessionRowChangedError);
@@ -165,7 +169,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
     expect(manager.getSession(SESSION)).toBeNull();
     expect((await repo.listRecoverableSessions(2_000)).map((row) => row.session_uuid)).toEqual([]);
     // The UUID is still issuable by name afterwards.
-    await manager.getOrCreateSession(SESSION, pool, "android", undefined, true);
+    await manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true });
     expect(manager.getSession(SESSION)).not.toBeNull();
   });
 
@@ -219,7 +223,9 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
       await setUp([ios(SIM_B), ios(SIM_A)]);
       await runPlanOnSimA();
 
-      const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+      const session = await manager.getOrCreateSession(SESSION, pool, "ios", {
+        requireIssuedSession: true,
+      });
 
       expect(session.assignedDevice).toBe(SIM_A);
     });
@@ -234,7 +240,9 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
         expectedIdentity: ios(SIM_A),
       });
 
-      const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+      const session = await manager.getOrCreateSession(SESSION, pool, "ios", {
+        requireIssuedSession: true,
+      });
 
       expect(session.assignedDevice).toBe(SIM_B);
       expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
@@ -253,7 +261,9 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
       // A daemon that no longer has the plan's device.
       await setUp([ios(SIM_B)]);
 
-      const session = await manager.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+      const session = await manager.getOrCreateSession(SESSION, pool, "ios", {
+        requireIssuedSession: true,
+      });
 
       expect(session.assignedDevice).toBe(SIM_B);
       expect(await repo.getSession(SESSION)).toMatchObject({ status: "active", device_id: SIM_B });
@@ -270,7 +280,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
       });
 
       await expect(
-        manager.getOrCreateSession(SESSION, pool, "ios", undefined, true),
+        manager.getOrCreateSession(SESSION, pool, "ios", { requireIssuedSession: true }),
       ).rejects.toThrow("target-busy");
 
       expect(pool.getDevice(SIM_B)?.sessionId).toBeNull();

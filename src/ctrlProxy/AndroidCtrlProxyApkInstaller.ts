@@ -4,6 +4,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../utils/logger";
+import { grantRecordAudioPermission } from "./grantRecordAudioPermission";
 import { grantLocalNetworkPermission } from "./grantLocalNetworkPermission";
 import { VerifiedArtifactCache } from "../utils/VerifiedArtifactCache";
 import { isPathInside } from "../utils/filesystem/pathContainment";
@@ -312,6 +313,7 @@ export class AndroidCtrlProxyApkInstaller {
 
       logger.info("APK installed successfully");
       this.host.clearAvailabilityCache();
+      await grantRecordAudioPermission(this.host.adb, await this.host.setupUser());
       await this.host.grantLocalNetworkAfterInstall();
     } catch (error) {
       // A failed adb install can still have changed package state before the

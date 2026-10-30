@@ -370,8 +370,8 @@ export class DevicePoolInitialization {
       this.callbacks,
       assignedDevice,
       sessionId,
-      reason,
       {
+        reason,
         release: () =>
           this.state.sessionManager.releaseSession(sessionId, reason, {
             expectedOwner: { session: session, deviceId: assignedDevice },

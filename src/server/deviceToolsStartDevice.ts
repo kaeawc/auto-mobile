@@ -754,9 +754,7 @@ async function resumePreparedDeviceSession(
         },
       },
       device.platform,
-      undefined,
-      true,
-      { signal: getAbortSignal() },
+      { requireIssuedSession: true, signal: getAbortSignal() },
     );
     if (session.assignedDevice !== device.deviceId || session.platform !== device.platform) {
       throw new ActionableError(

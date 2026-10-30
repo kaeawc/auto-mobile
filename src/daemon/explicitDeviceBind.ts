@@ -932,12 +932,7 @@ export class ExplicitDeviceBind {
       existingSessionId,
       undefined,
       undefined,
-      undefined,
-      false,
-      {
-        callerExecutionId: this.port.ambientExecutionIdReader?.getExecutionId(),
-        signal,
-      },
+      { callerExecutionId: this.port.ambientExecutionIdReader?.getExecutionId(), signal },
     );
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
     return refreshedSession.sessionId;

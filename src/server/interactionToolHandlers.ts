@@ -107,9 +107,12 @@ export async function setKeyboardProfileForTool(
     );
   }
   const registry = record.registry ?? defaultKeyboardProfileRestoreRegistry;
-  return setKeyboardProfileRecorded(device, profile, client, signal, {
-    owner: record.owner,
-    registry,
+  return setKeyboardProfileRecorded(device, profile, client, {
+    signal,
+    record: {
+      owner: record.owner,
+      registry,
+    },
   });
 }
 

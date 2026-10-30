@@ -922,10 +922,9 @@ describe("getNavigationGraph over a re-traversed graph (#10194)", () => {
   test("lists one transition and one edge count for N identical traversal rows", async () => {
     const db = await createTestDatabase();
     const repository = new NavigationRepository(db);
-    const manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(db),
-    );
+    const manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository(db),
+    });
     await repository.getOrCreateApp(APP);
     const traversals = Array.from({ length: 10 }, (_, index) => ({
       app_id: APP,

@@ -240,7 +240,9 @@ export class AndroidInboundMessageRouter {
           serverConfig.isNavigationScreenshotsEnabled()
         ) {
           await NavigationScreenshotManager.getInstance()
-            .captureAndStore(this.ctx.device, this.ctx.adb, event.applicationId, event.destination)
+            .captureAndStore(this.ctx.device, this.ctx.adb, event.applicationId, {
+              screenName: event.destination,
+            })
             .then((screenshotPath) => {
               if (this.ctx.closed) {
                 // The screenshot is optional; do not attach it to a session that has ended.

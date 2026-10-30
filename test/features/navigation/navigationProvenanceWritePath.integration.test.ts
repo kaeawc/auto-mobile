@@ -38,7 +38,10 @@ describe("NavigationGraphManager provenance write path", () => {
     db = await createTestDatabase();
     const navRepo = new NavigationRepository(db);
     const coverageRepo = new TestCoverageRepository(db);
-    manager = NavigationGraphManager.createForTesting(navRepo, coverageRepo, undefined, SESSION);
+    manager = NavigationGraphManager.createForTesting(navRepo, {
+      testCoverageRepository: coverageRepo,
+      sessionUuid: SESSION,
+    });
     NavigationGraphManager.setInstanceForTesting(manager);
     TelemetryRecorder.resetInstance();
     telemetrySpy = spyOn(
@@ -220,12 +223,10 @@ describe("NavigationGraphManager provenance write path", () => {
     }
     const switchingRepo = new SwitchingRepo(db);
     const coverageRepo = new TestCoverageRepository(db);
-    const m = NavigationGraphManager.createForTesting(
-      switchingRepo,
-      coverageRepo,
-      undefined,
-      SESSION,
-    );
+    const m = NavigationGraphManager.createForTesting(switchingRepo, {
+      testCoverageRepository: coverageRepo,
+      sessionUuid: SESSION,
+    });
 
     await m.setCurrentApp(APP);
     m.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
@@ -282,12 +283,10 @@ describe("NavigationGraphManager provenance write path", () => {
     }
     const switchingRepo = new SwitchingRepo(db);
     const coverageRepo = new TestCoverageRepository(db);
-    const m = NavigationGraphManager.createForTesting(
-      switchingRepo,
-      coverageRepo,
-      undefined,
-      SESSION,
-    );
+    const m = NavigationGraphManager.createForTesting(switchingRepo, {
+      testCoverageRepository: coverageRepo,
+      sessionUuid: SESSION,
+    });
 
     await m.setCurrentApp(APP);
     m.setBuildContext({ appId: APP, deviceId: "device-A", versionCode: 7, contentHash: "hashA" });

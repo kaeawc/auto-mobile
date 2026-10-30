@@ -624,9 +624,11 @@ describe("IOSCtrlProxyClient lazy build context", () => {
     async (alreadyResolved) => {
       const nextManager = NavigationGraphManager.createForTesting(
         new NavigationRepository(harness.db),
-        new TestCoverageRepository(harness.db),
-        timer,
-        "session-B",
+        {
+          testCoverageRepository: new TestCoverageRepository(harness.db),
+          timer,
+          sessionUuid: "session-B",
+        },
       );
       const sessionManager = spyOn(
         NavigationGraphManager,

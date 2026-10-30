@@ -17,13 +17,21 @@ export type ExploreInternalToolCall = (
 
 /** Device/session-aware recovery using the exploration's injected transport and clock. */
 export class ExplorePlatformRecovery {
+  private readonly callInternalTool: ExploreInternalToolCall;
+  private readonly sessionUuid?: string;
+
   constructor(
     private readonly device: BootedDevice,
     private readonly adb: AdbExecutor | undefined,
     private readonly timer: Timer,
-    private readonly callInternalTool: ExploreInternalToolCall,
-    private readonly sessionUuid?: string,
-  ) {}
+    {
+      callInternalTool,
+      sessionUuid,
+    }: { callInternalTool: ExploreInternalToolCall; sessionUuid?: string },
+  ) {
+    this.callInternalTool = callInternalTool;
+    this.sessionUuid = sessionUuid;
+  }
 
   async pressBack(signal?: AbortSignal): Promise<void> {
     if (this.device.platform === "android") {

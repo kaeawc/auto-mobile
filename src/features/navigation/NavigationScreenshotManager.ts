@@ -182,8 +182,10 @@ export class NavigationScreenshotManager {
     device: BootedDevice,
     adb: AdbExecutor,
     appId: string,
-    screenName: string,
-    screenshotCapture?: ScreenshotCapture,
+    {
+      screenName,
+      screenshotCapture,
+    }: { screenName: string; screenshotCapture?: ScreenshotCapture },
   ): Promise<string | null> {
     const cacheKey = `${appId}_${screenName}`;
 
@@ -195,13 +197,10 @@ export class NavigationScreenshotManager {
     }
 
     // Create the capture promise
-    const capturePromise = this.doCaptureAndStore(
-      device,
-      adb,
-      appId,
+    const capturePromise = this.doCaptureAndStore(device, adb, appId, {
       screenName,
       screenshotCapture,
-    );
+    });
 
     // Track it
     this.pendingCaptures.set(cacheKey, capturePromise);
@@ -251,8 +250,10 @@ export class NavigationScreenshotManager {
     device: BootedDevice,
     adb: AdbExecutor,
     appId: string,
-    screenName: string,
-    screenshotCapture?: ScreenshotCapture,
+    {
+      screenName,
+      screenshotCapture,
+    }: { screenName: string; screenshotCapture?: ScreenshotCapture },
   ): Promise<string | null> {
     const startTime = this.timer.now();
 

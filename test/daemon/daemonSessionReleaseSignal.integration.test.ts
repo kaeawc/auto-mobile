@@ -242,12 +242,10 @@ describe("Daemon session-release signal wiring", () => {
     const db = await createTestDatabase();
     NavigationGraphManager.setInstanceForSessionForTesting(
       "session-rebind-navigation",
-      NavigationGraphManager.createForTesting(
-        new NavigationRepository(db),
-        new TestCoverageRepository(db),
-        undefined,
-        "session-rebind-navigation",
-      ),
+      NavigationGraphManager.createForTesting(new NavigationRepository(db), {
+        testCoverageRepository: new TestCoverageRepository(db),
+        sessionUuid: "session-rebind-navigation",
+      }),
     );
     const daemon = new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository(db) });
     const sessionManager = daemon.getSessionManager();

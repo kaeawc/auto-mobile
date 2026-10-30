@@ -296,8 +296,8 @@ describe("navigation graph composition", () => {
             edge,
             state,
             { getCurrentScreen: () => actual },
-            timer,
             {
+              timer,
               elementConfidence: resolution.status === "back" ? 1 : resolution.confidence,
               setStopReason: () => {},
             },

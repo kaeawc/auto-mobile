@@ -65,23 +65,25 @@ interface NavigationRecordingContext {
   forgetFailedEdgeReplay(pairKey: string, actionKey: string): void;
 }
 /** Atomic graph recording and post-commit effects, invoked only through the manager's write queue. */
-/** The manager-owned write epoch and callbacks a recorder commits through. */
+/** The manager-owned recording state, write epoch and callbacks a recorder commits through. */
 export interface NavigationGraphRecorderWiring {
+  state: NavigationRecordingState;
   navigationWriteState: { epoch: number };
   context: NavigationRecordingContext;
 }
 
 export class NavigationGraphRecorder {
   private readonly ACTIVE_NAVIGATION_WINDOW_MS = 1000;
+  private readonly state: NavigationRecordingState;
   private readonly navigationWriteState: { epoch: number };
   private readonly context: NavigationRecordingContext;
   constructor(
     private readonly repository: NavigationRepository,
     private readonly testCoverageRepository: TestCoverageRepository,
     private readonly timer: Timer,
-    private readonly state: NavigationRecordingState,
-    { navigationWriteState, context }: NavigationGraphRecorderWiring,
+    { state, navigationWriteState, context }: NavigationGraphRecorderWiring,
   ) {
+    this.state = state;
     this.navigationWriteState = navigationWriteState;
     this.context = context;
   }
@@ -204,7 +206,7 @@ export class NavigationGraphRecorder {
 
     // Record per-node provenance for the current build/device/session (#4984),
     // in the same transaction as the node mutation.
-    await recordNodeProvenance(repository, appId, n.id, timestamp, provenance);
+    await recordNodeProvenance(repository, appId, n.id, { timestamp, provenance });
 
     // Record node visit for test coverage if session is active
     if (this.state.activeTestSession) {
@@ -250,7 +252,7 @@ export class NavigationGraphRecorder {
     );
 
     // Record per-edge provenance using the SAME snapshot as the node (#4984).
-    await recordEdgeProvenance(repository, appId, edge.id, timestamp, provenance);
+    await recordEdgeProvenance(repository, appId, edge.id, { timestamp, provenance });
 
     // Record edge traversal for test coverage if session is active
     if (this.state.activeTestSession) {
@@ -273,13 +275,10 @@ export class NavigationGraphRecorder {
     const { appId, timestamp, modalStack, interaction } = transition;
     // Store UI elements if present in interaction
     if (interaction?.uiState?.selectedElements) {
-      await storeUIElements(
-        repository,
-        this.state.currentAppId,
-        edgeId,
-        interaction.uiState.selectedElements,
+      await storeUIElements(repository, this.state.currentAppId, edgeId, {
+        selectedElements: interaction.uiState.selectedElements,
         timestamp,
-      );
+      });
     }
 
     // Store modal stacks for from/to
@@ -298,13 +297,10 @@ export class NavigationGraphRecorder {
 
     // Store scroll position if present
     if (interaction?.uiState?.scrollPosition) {
-      await storeScrollPosition(
-        repository,
-        this.state.currentAppId,
-        edgeId,
-        interaction.uiState.scrollPosition,
+      await storeScrollPosition(repository, this.state.currentAppId, edgeId, {
+        scrollPosition: interaction.uiState.scrollPosition,
         timestamp,
-      );
+      });
     }
   }
 
@@ -475,7 +471,7 @@ export class NavigationGraphRecorder {
         await repository.updateNodeVisit(existingNode.id, timestamp);
 
         // Record per-node provenance for this reach (#4984), same transaction.
-        await recordNodeProvenance(repository, appId, existingNode.id, timestamp, provenance);
+        await recordNodeProvenance(repository, appId, existingNode.id, { timestamp, provenance });
 
         // Record node visit for test coverage if session is active
         if (this.state.activeTestSession) {

@@ -51,7 +51,9 @@ describe("navigation_edges distinct-transition readers (#10194)", () => {
   beforeEach(async () => {
     db = await createTestDatabase({ foreignKeys: true });
     repo = new NavigationRepository(db);
-    manager = NavigationGraphManager.createForTesting(repo, new TestCoverageRepository(db));
+    manager = NavigationGraphManager.createForTesting(repo, {
+      testCoverageRepository: new TestCoverageRepository(db),
+    });
     await repo.getOrCreateApp(APP);
     await manager.setCurrentApp(APP);
   });

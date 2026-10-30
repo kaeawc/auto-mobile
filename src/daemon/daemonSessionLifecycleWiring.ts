@@ -190,7 +190,7 @@ export function wireSessionLifecycle(
     new DeviceSettingDefaultsRepository(),
     new DefaultDeviceSettingsAccess(),
     (deviceId) => sessionManager.getSessionForDevice(deviceId),
-    timer,
+    { timer },
   );
   installDeviceSettingDefaults(settingDefaults);
   registerDeviceSettingDefaultsIdentityListener(settingDefaults);

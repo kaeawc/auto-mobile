@@ -422,7 +422,7 @@ describe("custom intent chooser label fallback", () => {
       {
         chooserMetadata: {
           ...metadata("Application Name", rows),
-          getActivityLabel: async (_device, packageName, url, executor) =>
+          getActivityLabel: async (_device, packageName, url, { adb: executor }) =>
             resolveChooserActivityLabel(executor, packageName, url),
         },
       },
@@ -924,7 +924,7 @@ test("bounds a slow post-tap hierarchy read by the remaining verification budget
     {
       chooserMetadata: {
         getLabel: async () => "Example",
-        getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+        getFreshHierarchy: async (_device, _factory, floor, { timeoutMs } = {}) => {
           if (floor < 1000) {
             return { ...chooser, updatedAt: floor };
           }
@@ -961,7 +961,7 @@ test("accepts a confirming hierarchy read that completes at the verification dea
     {
       chooserMetadata: {
         getLabel: async () => "Example",
-        getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+        getFreshHierarchy: async (_device, _factory, floor, { timeoutMs } = {}) => {
           if (floor < 1000) {
             return { ...chooser, updatedAt: floor };
           }
@@ -992,7 +992,7 @@ test("returns the typed verification failure when a bounded hierarchy read rejec
     {
       chooserMetadata: {
         getLabel: async () => "Example",
-        getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
+        getFreshHierarchy: async (_device, _factory, floor, { timeoutMs } = {}) => {
           if (floor < 1000) {
             return { ...chooser, updatedAt: floor };
           }

@@ -290,10 +290,8 @@ function withAudioOutcome(result: RecordingResult, warning: string | undefined):
 /** A PCM sink over `file` that can be abandoned: later chunks are dropped and a waiting write is released. */
 function abandonableWriter(file: PcmFile): { sink: PcmSink; abandon: () => void } {
   let abandoned = false;
-  let release: () => void = () => {};
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  // Only the write in flight can be waiting; it is cleared when it settles so nothing accumulates.
+  let releaseWaiting: (() => void) | undefined;
   return {
     sink: (chunk) => {
       if (abandoned) {
@@ -304,13 +302,19 @@ function abandonableWriter(file: PcmFile): { sink: PcmSink; abandon: () => void 
         return undefined;
       }
       return new Promise<void>((resolve) => {
-        void busy.then(resolve, resolve);
-        void released.then(resolve);
+        const settle = () => {
+          if (releaseWaiting === settle) {
+            releaseWaiting = undefined;
+          }
+          resolve();
+        };
+        releaseWaiting = settle;
+        void busy.then(settle, settle);
       });
     },
     abandon: () => {
       abandoned = true;
-      release();
+      releaseWaiting?.();
     },
   };
 }

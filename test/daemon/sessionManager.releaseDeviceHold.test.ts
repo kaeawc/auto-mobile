@@ -123,9 +123,7 @@ describe("session release device ownership hold", () => {
         { latitude: 0, longitude: 0 },
         { latitude: 0, longitude: 1 },
       ],
-      1_000,
-      500,
-      true,
+      { durationMs: 1_000, updateIntervalMs: 500, loop: true },
       async () => {
         writes.push("location-fix");
       },

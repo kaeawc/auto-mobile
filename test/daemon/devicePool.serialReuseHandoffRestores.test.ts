@@ -1279,9 +1279,7 @@ warmedTest(
           { latitude: 0, longitude: 0 },
           { latitude: 0, longitude: 1 },
         ],
-        1000,
-        500,
-        true,
+        { durationMs: 1000, updateIntervalMs: 500, loop: true },
         async () => {
           h.restores.push(`location-fix:${original.deviceId}`);
         },

@@ -81,8 +81,7 @@ export function createClockSkewFaultInjector(
         device,
         deps.adapter(),
         { mode: "reset" },
-        undefined,
-        clockDeps,
+        { dependencies: clockDeps },
       );
       if (!result.verified) {
         throw new ActionableError(
@@ -103,8 +102,7 @@ export function createClockSkewFaultInjector(
       device,
       deps.adapter(),
       { mode: "set", instant },
-      undefined,
-      clockDeps,
+      { dependencies: clockDeps },
     );
     if (nothingOwed(result) && !active) {
       if (!result.supported) {

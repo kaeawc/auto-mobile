@@ -37,10 +37,11 @@ test("backward clock jump clears the cached hierarchy and accepts a newly pushed
       device,
       adapter,
       { mode: "set", instant: new Date(now - 3_600_000).toISOString() },
-      undefined,
       {
-        hostClock: timer,
-        invalidate: (deviceId) => invalidateDisplayCaches(deviceId, "Device clock changed"),
+        dependencies: {
+          hostClock: timer,
+          invalidate: (deviceId) => invalidateDisplayCaches(deviceId, "Device clock changed"),
+        },
       },
     );
     expect(result.verified).toBe(true);

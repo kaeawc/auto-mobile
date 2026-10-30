@@ -145,8 +145,7 @@ test("an owner read of a non-default display answers its caller without touching
       false,
       undefined,
       1000,
-      undefined,
-      2,
+      { displayId: 2 },
     );
     const { requestId, displayId } = await sentHierarchyRequest(socket);
     expect(displayId).toBe(2);
@@ -179,8 +178,7 @@ test.each([undefined, 0])(
         false,
         undefined,
         1000,
-        undefined,
-        displayId,
+        { displayId },
       );
       const { requestId } = await sentHierarchyRequest(socket);
       socket.simulateMessage(frame("default refreshed", SECOND_DISPLAY, 0, 2, requestId));
@@ -209,8 +207,7 @@ test("an unanswered explicit display read keeps its marker so the late reply sta
       false,
       undefined,
       100,
-      undefined,
-      2,
+      { displayId: 2 },
     );
     const { requestId } = await sentHierarchyRequest(socket);
     expect(markerCount(client)).toBe(1);
@@ -247,8 +244,7 @@ test("an aborted explicit display read keeps its marker until the late reply is 
       false,
       controller.signal,
       1000,
-      undefined,
-      2,
+      { displayId: 2 },
     );
     const { requestId } = await sentHierarchyRequest(socket);
     controller.abort();
@@ -275,8 +271,7 @@ test("retained markers are cleared on socket close and capped for an unresponsiv
         false,
         undefined,
         100,
-        undefined,
-        2,
+        { displayId: 2 },
       );
       await sentHierarchyRequest(socket);
       timer.advanceTime(100);
@@ -298,8 +293,7 @@ test("a runner error for an explicit display read releases its marker", async ()
       false,
       undefined,
       1000,
-      undefined,
-      2,
+      { displayId: 2 },
     );
     const { requestId } = await sentHierarchyRequest(socket);
     socket.simulateMessage(JSON.stringify({ type: "error", requestId, error: "capture failed" }));
@@ -320,8 +314,7 @@ test("a legacy id-less frame from another display does not answer an explicit di
       false,
       undefined,
       200,
-      undefined,
-      2,
+      { displayId: 2 },
     );
     await sentHierarchyRequest(socket);
     // A legacy APK echoes no request id: this is the default display's push, not display 2's.
@@ -343,8 +336,7 @@ test("a legacy id-less frame for the requested display still answers the read", 
       false,
       undefined,
       200,
-      undefined,
-      2,
+      { displayId: 2 },
     );
     await sentHierarchyRequest(socket);
     socket.simulateMessage(frame("external legacy", SECOND_DISPLAY, 2, 5));

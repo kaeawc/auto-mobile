@@ -59,7 +59,7 @@ class FakeSystemClient implements SystemClient {
     ...args: Parameters<SystemClient["requestGlobalAction"]>
   ): Promise<GlobalActionResult> {
     this.sentActions.push(args[0]);
-    args[5]?.();
+    args[3]?.onDispatch?.();
     return this.reply(args[0]);
   }
 }
@@ -120,7 +120,7 @@ describe("PressButton Android system actions (#14095)", () => {
       override async requestGlobalAction(
         ...args: Parameters<SystemClient["requestGlobalAction"]>
       ): Promise<GlobalActionResult> {
-        frameContexts.push(args[3]);
+        frameContexts.push(args[3]?.frameContext);
         return super.requestGlobalAction(...args);
       }
     }

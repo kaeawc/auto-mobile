@@ -65,7 +65,7 @@ const okResult: ScreenshotResult = { success: true, data: "abc", format: "png" }
 describe("AndroidScreenshotRequester", () => {
   test("a connection failure returns a typed failure without sending", async () => {
     const { requester, frames } = harness({ connected: false });
-    const result = await requester.requestScreenshot(1000, perf, false);
+    const result = await requester.requestScreenshot(1000, perf);
     expect(result).toEqual({
       success: false,
       error: "Failed to connect to accessibility service",
@@ -75,14 +75,14 @@ describe("AndroidScreenshotRequester", () => {
 
   test("an already-aborted signal short-circuits before connecting", async () => {
     const { requester, calls } = harness();
-    const result = await requester.requestScreenshot(1000, perf, false, AbortSignal.abort());
+    const result = await requester.requestScreenshot(1000, perf, { signal: AbortSignal.abort() });
     expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
     expect(calls.connect).toBe(0);
   });
 
   test("a round trip binds the capture, sends one frame, resolves, and cleans up", async () => {
     const { requester, context, requestManager, frames, calls } = harness();
-    const pending = requester.requestScreenshot(1000, perf, false);
+    const pending = requester.requestScreenshot(1000, perf);
     const [requestId] = await pendingIds(requestManager);
     expect(frames).toEqual([{ type: "request_screenshot", requestId }]);
     expect(context.screenshotCaptureBindings.get(requestId!)).toEqual({
@@ -98,7 +98,9 @@ describe("AndroidScreenshotRequester", () => {
 
   test("a suppressed push registers the id then drops it after the response", async () => {
     const { requester, context, requestManager } = harness();
-    const pending = requester.requestScreenshot(1000, perf, true);
+    const pending = requester.requestScreenshot(1000, perf, {
+      suppressObservationStreamPush: true,
+    });
     const [requestId] = await pendingIds(requestManager);
     expect(context.screenshotObservationStreamSuppressions.has(requestId!)).toBe(true);
     expect(context.screenshotCaptureBindings.size).toBe(0);
@@ -109,7 +111,7 @@ describe("AndroidScreenshotRequester", () => {
 
   test("a timeout resolves a typed failure", async () => {
     const { requester, timer, requestManager } = harness();
-    const pending = requester.requestScreenshot(500, perf, false);
+    const pending = requester.requestScreenshot(500, perf);
     await pendingIds(requestManager);
     timer.advanceTime(500);
     expect(await pending).toEqual({ success: false, error: "Screenshot timeout after 500ms" });
@@ -118,7 +120,7 @@ describe("AndroidScreenshotRequester", () => {
   test("a post-dispatch abort settles the request and records a late-cancelled id", async () => {
     const { requester, context, requestManager } = harness();
     const controller = new AbortController();
-    const pending = requester.requestScreenshot(1000, perf, false, controller.signal);
+    const pending = requester.requestScreenshot(1000, perf, { signal: controller.signal });
     const [requestId] = await pendingIds(requestManager);
     controller.abort();
     const result = await pending;

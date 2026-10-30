@@ -465,11 +465,10 @@ describe("NavigateTo replay safety", () => {
       requestGlobalAction: async (
         _action: string,
         _timeout?: number,
-        _packageName?: string,
-        _frameContext?: string,
-        signal?: AbortSignal,
+        _perf?: unknown,
+        options?: { signal?: AbortSignal },
       ) => {
-        presses.push(signal);
+        presses.push(options?.signal);
         controller.abort();
         return { success: false, error: "cancelled" };
       },

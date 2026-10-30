@@ -21,6 +21,10 @@ import {
   resolveComponentActivity,
 } from "./launcherActivityParsing";
 
+const LAUNCHER_CATEGORY = "android.intent.category.LAUNCHER";
+/** Launcher categories in resolution order; TV-only apps declare only the leanback one. */
+const LAUNCHER_CATEGORIES = [LAUNCHER_CATEGORY, "android.intent.category.LEANBACK_LAUNCHER"];
+
 /** Budget for the Android a11y service to answer a launch-intent request. */
 const A11Y_LAUNCH_INTENT_TIMEOUT_MS = 3_000;
 export function amStartReportedFailure(stdout: string, stderr: string): boolean {
@@ -184,12 +188,36 @@ export class AndroidLaunchActivity {
     return [];
   }
 
-  private async resolveAndroidLauncherComponent(
+  /**
+   * The package's launcher component and the category that resolved it. A TV-only app declares
+   * only LEANBACK_LAUNCHER (#15957), so that category is tried when LAUNCHER resolves nothing.
+   */
+  private async resolveAndroidLauncherTarget(
     packageName: string,
     userId: number,
     signal?: AbortSignal,
+  ): Promise<{ component: string; category: string } | undefined> {
+    for (const category of LAUNCHER_CATEGORIES) {
+      const component = await this.resolveAndroidLauncherComponent(
+        packageName,
+        userId,
+        category,
+        signal,
+      );
+      if (component) {
+        return { component, category };
+      }
+    }
+    return undefined;
+  }
+
+  private async resolveAndroidLauncherComponent(
+    packageName: string,
+    userId: number,
+    category: string,
+    signal?: AbortSignal,
   ): Promise<string | undefined> {
-    const command = `shell cmd package resolve-activity --brief --user ${userId} -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
+    const command = `shell cmd package resolve-activity --brief --user ${userId} -c ${category} ${shellQuote(packageName)}`;
     try {
       const result = await this.deps.adb.executeCommand(command);
       this.assertLaunchNotAborted(signal);
@@ -221,10 +249,13 @@ export class AndroidLaunchActivity {
   ): Promise<{ success: boolean; amReportedError?: boolean }> {
     logger.info(`[LaunchApp] Trying am start with intent for user ${userId}`);
     try {
-      const component = await this.resolveAndroidLauncherComponent(packageName, userId, signal);
+      const resolved = await this.resolveAndroidLauncherTarget(packageName, userId, signal);
       this.assertLaunchNotAborted(signal);
-      const launcherTarget = component ? `-n ${shellQuote(component)}` : shellQuote(packageName);
-      const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${launcherTarget}`;
+      const launcherTarget = resolved
+        ? `-n ${shellQuote(resolved.component)}`
+        : shellQuote(packageName);
+      const category = resolved?.category ?? LAUNCHER_CATEGORY;
+      const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c ${category} ${launcherTarget}`;
       logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
       const result = await this.deps.adb.executeCommand(intentCmd);
       this.assertLaunchNotAborted(signal);

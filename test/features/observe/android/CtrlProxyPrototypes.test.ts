@@ -566,7 +566,9 @@ describe("CtrlProxy prototypes", () => {
         sent.push(JSON.parse(String(data)));
       });
       try {
-        void client.requestShowPrototype(spec, 5000, undefined, displayId).catch(() => undefined);
+        void client
+          .requestShowPrototype(spec, 5000, undefined, { displayId })
+          .catch(() => undefined);
         for (let turn = 0; turn < 10; turn++) {
           await Promise.resolve();
         }
@@ -599,12 +601,12 @@ describe("CtrlProxy prototypes", () => {
       const { client, socket } = await harness(commands ? [...commands] : null);
       const send = spyOn(socket, "send");
       try {
-        await expect(client.requestShowPrototype(spec, 5000, undefined, 2)).rejects.toBeInstanceOf(
-          ActionableError,
-        );
-        await expect(client.requestShowPrototype(spec, 5000, undefined, 2)).rejects.toThrow(
-          "prototype_display_id_v2",
-        );
+        await expect(
+          client.requestShowPrototype(spec, 5000, undefined, { displayId: 2 }),
+        ).rejects.toBeInstanceOf(ActionableError);
+        await expect(
+          client.requestShowPrototype(spec, 5000, undefined, { displayId: 2 }),
+        ).rejects.toThrow("prototype_display_id_v2");
         expect(send).not.toHaveBeenCalled();
       } finally {
         send.mockRestore();
@@ -977,9 +979,9 @@ describe("CtrlProxy prototypes", () => {
       });
     });
     try {
-      expect(
-        await client.requestShowPrototype(spec, 5000, undefined, undefined, reset),
-      ).toMatchObject({ success: true });
+      expect(await client.requestShowPrototype(spec, 5000, undefined, { reset })).toMatchObject({
+        success: true,
+      });
       expect(frames).toHaveLength(1);
       expect(frames[0].reset).toBe(wire);
       expect(Object.hasOwn(frames[0], "reset")).toBe(wire !== undefined);
@@ -1010,9 +1012,7 @@ describe("CtrlProxy prototypes", () => {
       });
       try {
         expect(
-          await client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
-            replaceOthers,
-          }),
+          await client.requestShowPrototype(spec, 5000, undefined, { replaceOthers }),
         ).toMatchObject({ success: true });
         expect(frames).toHaveLength(1);
         expect(Object.hasOwn(frames[0], "replaceOthers")).toBe(replaceOthers === false);
@@ -1032,9 +1032,7 @@ describe("CtrlProxy prototypes", () => {
       const send = spyOn(socket, "send");
       try {
         await expectRefusal(
-          client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
-            replaceOthers: false,
-          }),
+          client.requestShowPrototype(spec, 5000, undefined, { replaceOthers: false }),
           "replaceOthers:false",
         );
         expect(send).not.toHaveBeenCalled();
@@ -1133,7 +1131,7 @@ describe("CtrlProxy prototypes", () => {
       });
       try {
         void client
-          .requestShowPrototype(spec, 5000, undefined, undefined, undefined, appearance)
+          .requestShowPrototype(spec, 5000, undefined, { appearance })
           .catch(() => undefined);
         for (let turn = 0; turn < 10; turn++) {
           await Promise.resolve();

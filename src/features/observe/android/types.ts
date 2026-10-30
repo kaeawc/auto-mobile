@@ -212,6 +212,20 @@ export interface HierarchySyncDiagnostics {
   failureReason?: string;
 }
 
+/** Trailing options for `getLatestHierarchy`. */
+export interface LatestHierarchyOptions {
+  /** Cached data must have `updatedAt` at or after this value to count as fresh. Defaults to 0. */
+  minTimestamp?: number;
+  signal?: AbortSignal;
+}
+
+/** Trailing options for `requestHierarchySync`. */
+export interface HierarchySyncRequestOptions {
+  /** Out-parameter populated with the failure detail; see {@link HierarchySyncDiagnostics}. */
+  diagnostics?: HierarchySyncDiagnostics;
+  displayId?: number;
+}
+
 /**
  * Interface for cached hierarchy with metadata
  */

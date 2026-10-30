@@ -83,6 +83,13 @@ export function interpolateRoute(
   return waypoints[waypoints.length - 1];
 }
 
+/** How long one pass of a route takes, how often a fix is sent, and whether it repeats. */
+interface LocationRoutePlayback {
+  durationMs: number;
+  updateIntervalMs: number;
+  loop: boolean;
+}
+
 interface ActiveRoute {
   cancel(): void;
   inFlight?: Promise<void>;
@@ -193,9 +200,7 @@ export class LocationRouteRegistry {
   start(
     deviceId: string,
     waypoints: readonly LocationWaypoint[],
-    durationMs: number,
-    updateIntervalMs: number,
-    loop: boolean,
+    { durationMs, updateIntervalMs, loop }: LocationRoutePlayback,
     emit: (
       point: LocationWaypoint,
       options: { signal: AbortSignal; timeoutMs: number },

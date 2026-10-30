@@ -179,7 +179,7 @@ export async function handleHeartbeat(
   const manager = state.getSessionManager();
   const session = sessionForIngress(manager, sessionId);
   if (!session || isSessionReleasing(manager, sessionId, session)) {
-    return heartbeatMiss(state, manager, sessionId, heartbeatParams, ackReport);
+    return heartbeatMiss(state, manager, sessionId, { params: heartbeatParams, report: ackReport });
   }
   const context = { manager, session, sessionId, params: heartbeatParams, report: ackReport };
   return heartbeatOwnership(context);
@@ -213,8 +213,7 @@ async function heartbeatMiss(
   state: DaemonStateAccess,
   manager: HeartbeatContext["manager"],
   sessionId: string,
-  heartbeatParams: ReturnType<typeof parseHeartbeatParams>,
-  ackReport: HeartbeatAckReport,
+  { params: heartbeatParams, report: ackReport }: Pick<HeartbeatContext, "params" | "report">,
 ): Promise<DaemonMethodResult> {
   const miss = await resolveHeartbeatMiss(
     manager,
@@ -277,13 +276,10 @@ function heartbeatOwnershipRejection(
   outcome: Awaited<ReturnType<typeof resolveLivenessOwnership>>,
 ): DaemonMethodResult | Promise<DaemonMethodResult> | undefined {
   const { manager, sessionId, report } = ctx;
-  const rejection = rejectHeartbeatWithoutOwnership(
-    manager,
-    ctx.session,
-    sessionId,
-    token,
+  const rejection = rejectHeartbeatWithoutOwnership(manager, ctx.session, sessionId, {
+    livenessOwnerToken: token,
     outcome,
-  );
+  });
   if (rejection?.code === DAEMON_SESSION_NOT_FOUND_CODE) {
     // Name the release that ended this claim without recording anything afterward (#11646).
     return sessionNotFoundResult(manager, sessionId, report.daemonInstance);
@@ -425,8 +421,7 @@ function rejectHeartbeatWithoutOwnership(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   session: Session,
   sessionId: string,
-  livenessOwnerToken: string,
-  outcome: LivenessClaimOutcome,
+  { livenessOwnerToken, outcome }: { livenessOwnerToken: string; outcome: LivenessClaimOutcome },
 ): DaemonMethodResult | undefined {
   // A claim can yield while release ends admission or replaces this UUID.
   // Keep the request bound to the device session admitted above.

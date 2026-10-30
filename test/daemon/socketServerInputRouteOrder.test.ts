@@ -24,8 +24,13 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     createFakeDaemonState(),
     new FakeTimer(),
   ).testHooks.input;
-  server.resolveInputTargetDevice = async (_platform, _deviceId, _session, action, options) => {
-    events.push(`resolve:${action}:${options?.bypassAndroidDeviceListCache === true}`);
+  server.resolveInputTargetDevice = async (
+    _platform,
+    _deviceId,
+    _session,
+    { action, bypassAndroidDeviceListCache },
+  ) => {
+    events.push(`resolve:${action}:${bypassAndroidDeviceListCache === true}`);
 
     return androidDevice;
   };
@@ -47,7 +52,7 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     }
     return 1000;
   };
-  server.dispatchFencedInput = async (gesture, _signal, _timeout, _send, onDispatch) => {
+  server.dispatchFencedInput = async (gesture, _signal, _timeout, { send: _send, onDispatch }) => {
     events.push(`dispatch:${gesture}`);
     onDispatch?.();
     return { success: true } as never;

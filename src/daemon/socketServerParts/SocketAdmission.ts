@@ -154,8 +154,10 @@ export class SocketAdmission {
     sessionId: string,
     ownerSocket: Socket,
     request: DaemonRequest,
-    receivedAtMs: number = this.state.timer.now(),
-    handling?: SocketRequestHandling,
+    {
+      receivedAtMs = this.state.timer.now(),
+      handling,
+    }: { receivedAtMs?: number; handling?: SocketRequestHandling } = {},
   ): Promise<DaemonResponse | undefined> {
     const context = requestHandlingContext(handling, request, sessionId, receivedAtMs);
     const session = this.state.sessions.get(sessionId);
@@ -232,7 +234,7 @@ export class SocketAdmission {
     // explicit-device call does not wait behind another device's call (issue #6387).
     const deviceId = this.state.onFrameTrace ? this.callbacks.frameDeviceId(request) : undefined;
     if (this.state.onFrameTrace) {
-      this.callbacks.traceFrame("admission_requested", request.id, deviceId);
+      this.callbacks.traceFrame("admission_requested", request.id, { deviceId });
     }
     return session.requestQueue
       .run<DaemonResponse | undefined>(
@@ -246,7 +248,7 @@ export class SocketAdmission {
           }
           handling?.onAdmitted?.(deadline);
           if (this.state.onFrameTrace) {
-            this.callbacks.traceFrame("admission_granted", request.id, deviceId);
+            this.callbacks.traceFrame("admission_granted", request.id, { deviceId });
           }
           // A cancelled provisionDevice is answered by its handler (after a bounded wait for the
           // typed cancellation result), not by this race, which would reply at once (#11074).
@@ -692,13 +694,10 @@ export class SocketAdmission {
     try {
       if (request.method.startsWith("daemon/")) {
         // The socket's cancellation reaches long daemon methods (broker binding acquisition).
-        const daemonResponse = await handleDaemonRequest(
-          request,
-          this.state.daemonState,
-          undefined,
-          cancellation.signal,
-          { socketSessionId: sessionId },
-        );
+        const daemonResponse = await handleDaemonRequest(request, this.state.daemonState, {
+          signal: cancellation.signal,
+          context: { socketSessionId: sessionId },
+        });
         return {
           id: request.id,
           type: "mcp_response",
@@ -714,8 +713,8 @@ export class SocketAdmission {
         request,
         sessionId,
         ownerSocket,
-        cancellation.signal,
         {
+          cancelSignal: cancellation.signal,
           receivedAtMs,
           onOwnerSignal: (signal) => owner.adopt(signal),
 
@@ -770,58 +769,57 @@ export class SocketAdmission {
         initialRoute,
         request,
         sessionId,
-        async (route) => {
-          const remainingTimeoutMs = this.callbacks.requireRemainingMcpForwardBudget(
-            request,
-            totalTimeoutMs,
-            deadline,
-            "waiting in queue",
-          );
-          const queueWaitMs = Math.max(0, totalTimeoutMs - remainingTimeoutMs);
-          const forwardLabel = this.callbacks.describeMcpForwardRequest(request);
-          logger.debug(
-            `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
-          );
-          const forwardStartMs = this.state.timer.now();
-          try {
-            const sessionWasActiveBeforeForward = this.callbacks.wasRequestSessionActive(request);
-            const response = await this.callbacks.forwardMcpRequest({
+        {
+          fn: async (route) => {
+            const remainingTimeoutMs = this.callbacks.requireRemainingMcpForwardBudget(
               request,
-              route,
-              socketSessionId: sessionId,
-              signal: mcpRequest.signal,
               totalTimeoutMs,
               deadline,
-            });
-            if (this.callbacks.isMcpRequestOwnerCurrent(sessionId, mcpRequest.signal)) {
-              this.callbacks.recordBoundMcpClientKey(
+              "waiting in queue",
+            );
+            const queueWaitMs = Math.max(0, totalTimeoutMs - remainingTimeoutMs);
+            const forwardLabel = this.callbacks.describeMcpForwardRequest(request);
+            logger.debug(
+              `[McpForward] start executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`,
+            );
+            const forwardStartMs = this.state.timer.now();
+            try {
+              const sessionWasActiveBeforeForward = this.callbacks.wasRequestSessionActive(request);
+              const response = await this.callbacks.forwardMcpRequest({
                 request,
-                sessionId,
                 route,
-                sessionWasActiveBeforeForward,
-                response,
+                socketSessionId: sessionId,
+                signal: mcpRequest.signal,
+                totalTimeoutMs,
+                deadline,
+              });
+              if (this.callbacks.isMcpRequestOwnerCurrent(sessionId, mcpRequest.signal)) {
+                this.callbacks.recordBoundMcpClientKey(request, sessionId, route, {
+                  sessionWasActiveBeforeForward,
+                  response,
+                });
+              }
+              return response;
+            } finally {
+              logger.debug(
+                `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.state.timer.now() - forwardStartMs}`,
               );
             }
-            return response;
-          } finally {
-            logger.debug(
-              `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.state.timer.now() - forwardStartMs}`,
-            );
-          }
-        },
-        {
-          remainingMs: () => this.callbacks.remainingMcpForwardBudget({ deadline }),
-          timeoutError: (executionKey) =>
-            new McpTimeoutError({
-              toolName:
-                request.method === "tools/call"
-                  ? (request.params?.name ?? request.method)
-                  : request.method,
-              timeoutMs: totalTimeoutMs,
-              origin: "UnixSocketServer.handleRequest",
-              detail: `spent ${totalTimeoutMs - this.callbacks.remainingMcpForwardBudget({ deadline })}ms waiting in queue for ${executionKey}`,
-              code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
-            }),
+          },
+          chainWait: {
+            remainingMs: () => this.callbacks.remainingMcpForwardBudget({ deadline }),
+            timeoutError: (executionKey) =>
+              new McpTimeoutError({
+                toolName:
+                  request.method === "tools/call"
+                    ? (request.params?.name ?? request.method)
+                    : request.method,
+                timeoutMs: totalTimeoutMs,
+                origin: "UnixSocketServer.handleRequest",
+                detail: `spent ${totalTimeoutMs - this.callbacks.remainingMcpForwardBudget({ deadline })}ms waiting in queue for ${executionKey}`,
+                code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
+              }),
+          },
         },
       );
       if (isDaemonShuttingDownToolResult(result)) {

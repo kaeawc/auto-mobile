@@ -48,7 +48,7 @@ describe("explicit release of a session with a call in flight", () => {
         params: { sessionId: SESSION, requireKnown: true },
       },
       state,
-      tracker,
+      { executions: tracker },
     );
 
     expect(reply.success).toBe(true);
@@ -89,9 +89,7 @@ describe("explicit release of a session with a call in flight", () => {
         params: { sessionId, requireKnown: true },
       },
       state,
-      tracker,
-      signal,
-      { socketSessionId: REQUESTER },
+      { executions: tracker, signal, context: { socketSessionId: REQUESTER } },
     );
   }
 

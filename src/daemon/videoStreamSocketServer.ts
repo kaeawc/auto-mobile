@@ -113,7 +113,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   ) {
     // Idle timeout disabled: this stream is outbound-only after the handshake, and a viewer that
     // never sends another byte is the normal case, not a dead peer.
-    super(socketPath, timer, "VideoStream", 0);
+    super(socketPath, timer, "VideoStream", { idleTimeoutMs: 0 });
     this.authenticator = authenticator;
     this.admissionGate = admissionGate;
     this.pipeline = new VideoStreamCapturePipeline(

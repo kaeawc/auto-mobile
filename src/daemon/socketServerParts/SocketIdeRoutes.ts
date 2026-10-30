@@ -124,40 +124,47 @@ export class SocketIdeRoutes {
     request: DaemonRequest,
     sessionId: string,
     ownerSocket: Socket,
-    cancelSignal: AbortSignal,
     {
+      cancelSignal,
       receivedAtMs,
       onOwnerSignal,
       onInputDispatch,
     }: {
+      cancelSignal: AbortSignal;
       receivedAtMs: number;
       onOwnerSignal: (signal: AbortSignal) => void;
       onInputDispatch?: () => void;
     },
   ): Promise<unknown> {
     if (!isOwnerFencedMethod(request.method, IDE_DEVICE_MUTATION_METHODS)) {
-      return await this.callbacks.handleLocalSocketRequest(request, sessionId);
+      return await this.callbacks.handleLocalSocketRequest(request, { socketSessionId: sessionId });
     }
     const owner = this.callbacks.mcpRequestSignal(sessionId, ownerSocket, cancelSignal);
     onOwnerSignal(owner.signal);
     try {
-      return await this.callbacks.handleLocalSocketRequest(
-        request,
-        sessionId,
-        owner.signal,
+      return await this.callbacks.handleLocalSocketRequest(request, {
+        socketSessionId: sessionId,
+        signal: owner.signal,
         receivedAtMs,
         onInputDispatch,
-      );
+      });
     } finally {
       owner.dispose();
     }
   }
   async handleLocalSocketRequest(
     request: DaemonRequest,
-    socketSessionId?: string,
-    signal?: AbortSignal,
-    receivedAtMs?: number,
-    onInputDispatch?: () => void,
+    {
+      socketSessionId,
+      signal,
+      receivedAtMs,
+      onInputDispatch,
+    }: {
+      socketSessionId?: string;
+      signal?: AbortSignal;
+      receivedAtMs?: number;
+      onInputDispatch?: () => void;
+    } = {},
   ): Promise<any | undefined> {
     if (request.method.startsWith("input/")) {
       // A frame whose socket closed or whose client cancelled it while it sat in the socket
@@ -184,13 +191,10 @@ export class SocketIdeRoutes {
     socketSessionId: string | undefined,
     input: InputRequestContext,
   ): Promise<any | undefined> {
-    return await dispatchInputRoute(
-      this.inputRouteHandlers,
-      route,
-      request,
+    return await dispatchInputRoute(this.inputRouteHandlers, route, request, {
       socketSessionId,
       input,
-    );
+    });
   }
   /** The handler each `input/*` route table entry names (#11815). */
   private readonly inputRouteHandlers: InputRouteHandlers<InputRequestContext> = {
@@ -245,8 +249,8 @@ export class SocketIdeRoutes {
       this.callbacks.listBootedDevicesForIdeAction(platform, serial, signal),
     resolveIdeActionDevices: (platform, serial, signal) =>
       this.callbacks.resolveIdeActionDevices(platform, serial, signal),
-    runIdeKeyValueMutation: (platform, device, appId, fileName, mutation) =>
-      this.callbacks.runIdeKeyValueMutation(platform, device, appId, fileName, mutation),
+    runIdeKeyValueMutation: (platform, device, appId, mutation) =>
+      this.callbacks.runIdeKeyValueMutation(platform, device, appId, mutation),
   });
   /** The `ide/*` and daemon-lifecycle routes this socket serves, by method name (#11813). */
   private readonly ideRouteHandlers: ReadonlyMap<string, IdeServerRouteHandler> = new Map<
@@ -343,8 +347,8 @@ export class SocketIdeRoutes {
     platform: "android" | "ios",
     device: BootedDevice,
     appId: string,
-    fileName: string,
     mutation: {
+      fileName: string;
       ideMutation: IdeMutationCall | undefined;
       viaSdk: (onDispatch: () => void) => Promise<PreferenceStoreResolution | void>;
       viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
@@ -353,13 +357,7 @@ export class SocketIdeRoutes {
     usedDirectFileFallback: boolean;
     resolution: PreferenceStoreResolution | undefined;
   }> {
-    return await this.ideDeviceRoutes.runIdeKeyValueMutation(
-      platform,
-      device,
-      appId,
-      fileName,
-      mutation,
-    );
+    return await this.ideDeviceRoutes.runIdeKeyValueMutation(platform, device, appId, mutation);
   }
   async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {
     const registeredTool = daemonToolRegistry().getRegisteredTool(toolName);
@@ -447,14 +445,12 @@ export class SocketIdeRoutes {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: InputTargetAction,
-    options?: InputTargetResolveOptions,
+    options: InputTargetResolveOptions & { action: InputTargetAction },
   ): Promise<BootedDevice> {
     return await this.inputDeviceGating.resolveInputTargetDevice(
       platform,
       deviceId,
       socketSessionId,
-      action,
       options,
     );
   }
@@ -489,15 +485,16 @@ export class SocketIdeRoutes {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: InputTargetAction,
-    bypassAndroidDeviceListCache: boolean = false,
+    {
+      action,
+      bypassAndroidDeviceListCache = false,
+    }: { action: InputTargetAction; bypassAndroidDeviceListCache?: boolean },
   ): Promise<BootedDevice> {
     return await this.inputDeviceGating.selectInputTargetDevice(
       platform,
       deviceId,
       socketSessionId,
-      action,
-      bypassAndroidDeviceListCache,
+      { action, bypassAndroidDeviceListCache },
     );
   }
   async runTrackedKeyedDeviceInput<T>(
@@ -517,16 +514,12 @@ export class SocketIdeRoutes {
     toolName: string,
     origin: string,
     totalTimeoutMs: number,
-    budgetStartMs: number,
-    input?: InputRequestContext,
+    { budgetStartMs, input }: { budgetStartMs: number; input?: InputRequestContext },
   ): InputDeviceGate {
-    return this.inputDeviceGating.inputDeviceGate(
-      toolName,
-      origin,
-      totalTimeoutMs,
+    return this.inputDeviceGating.inputDeviceGate(toolName, origin, totalTimeoutMs, {
       budgetStartMs,
       input,
-    );
+    });
   }
   async runHeldInputOperation<T>(
     method: string,
@@ -545,10 +538,18 @@ export class SocketIdeRoutes {
     gesture: "Tap" | "Swipe",
     signal: AbortSignal | undefined,
     timeoutMs: number,
-    send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-    onDispatch?: () => void,
+    {
+      send,
+      onDispatch,
+    }: {
+      send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>;
+      onDispatch?: () => void;
+    },
   ): Promise<T> {
-    return this.inputDeviceGating.dispatchFencedInput(gesture, signal, timeoutMs, send, onDispatch);
+    return this.inputDeviceGating.dispatchFencedInput(gesture, signal, timeoutMs, {
+      send,
+      onDispatch,
+    });
   }
   async reconcileDiscoveryObservation(
     devices: readonly BootedDevice[],
@@ -570,15 +571,13 @@ export class SocketIdeRoutes {
     toolName: string,
     targetDevice: BootedDevice,
     operation: InputOperation<T>,
-    ownerSignal?: AbortSignal,
-    requester?: () => string | undefined,
+    options: { ownerSignal?: AbortSignal; requester?: () => string | undefined } = {},
   ): Promise<T> {
     return await this.inputDeviceGating.runTrackedDeviceInput(
       toolName,
       targetDevice,
       operation,
-      ownerSignal,
-      requester,
+      options,
     );
   }
   async admitInputAsControlCall(

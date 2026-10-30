@@ -300,7 +300,10 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
       throw new Error("Expected forwarded tool arguments to be an object");
     }
     const result = await fixture.client.callTool({ name, arguments: forwarded });
-    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
+    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, {
+      sessionWasActiveBeforeForward: true,
+      response: result,
+    });
     return result;
   };
   const daemon = new FakeDaemonManager();

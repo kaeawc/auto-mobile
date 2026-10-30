@@ -799,7 +799,8 @@ describe("a holder's control frame refused before it reaches the device", () => 
           let directWrites = 0;
           const call = new AbortController();
           const pending = runWithAbortSignal(call.signal, () =>
-            internals.runIdeKeyValueMutation("android", androidDevice, "com.example", "prefs", {
+            internals.runIdeKeyValueMutation("android", androidDevice, "com.example", {
+              fileName: "prefs",
               ideMutation: {
                 track: () => {},
                 admit: () => {},

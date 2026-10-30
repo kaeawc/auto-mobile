@@ -113,14 +113,10 @@ function harness(
     options: ScopeOptions = scoped,
     selector: SendKeysSelector | undefined = { elementId: "quantity" },
   ) =>
-    action.execute(
-      route.endsWith("ime") ? [{ action: "key", key: "done" }] : commands,
-      selector,
-      undefined,
-      undefined,
-      route.includes("display") ? "external" : undefined,
-      options,
-    );
+    action.execute(route.endsWith("ime") ? [{ action: "key", key: "done" }] : commands, selector, {
+      display: route.includes("display") ? "external" : undefined,
+      focus: options,
+    });
   return { calls, targets, execute, action, adb, observer };
 }
 
@@ -299,14 +295,7 @@ test("default focuser forwards sibling scope options into TapOnElement", async (
     },
   );
   try {
-    const result = await action.execute(
-      commands,
-      { elementId: "quantity" },
-      undefined,
-      undefined,
-      undefined,
-      scoped,
-    );
+    const result = await action.execute(commands, { elementId: "quantity" }, { focus: scoped });
     expect(result.error).toBe("Target not found within container");
     expect(tap).toHaveBeenCalledTimes(1);
     expect(tap.mock.calls[0][0]).toMatchObject({
@@ -323,8 +312,10 @@ test.each(["container", "selectionStrategy"] as const)(
   "direct caller: %s without selector sends nothing",
   async (field) => {
     const h = harness("android", async () => ({ success: true }));
-    const result = await h.action.execute(commands, undefined, undefined, undefined, undefined, {
-      [field]: scoped[field],
+    const result = await h.action.execute(commands, undefined, {
+      focus: {
+        [field]: scoped[field],
+      },
     });
     expect(result).toMatchObject({
       success: false,

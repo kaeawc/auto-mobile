@@ -33,13 +33,10 @@ describe("FocusVerifier", () => {
       viewHierarchy: { hierarchy: { node: createFlatNodeForTest({ node: [] }) } },
     };
     expect(
-      verifier(() => (finds += 1)).verify(
-        options,
-        target,
-        observation as ObserveResult,
-        "Search",
-        0,
-      ),
+      verifier(() => (finds += 1)).verify(options, target, observation as ObserveResult, {
+        labelText: "Search",
+        selectedIndex: 0,
+      }),
     ).toBe(false);
   });
 });
@@ -90,14 +87,18 @@ describe("FocusVerifier on iOS (#13539)", () => {
 
   test("a focused field holding text is the target even though its text changed", () => {
     expect(
-      iosVerifier().verify(options, target, focusedObservation("tabsearch"), "Search Tabs"),
+      iosVerifier().verify(options, target, focusedObservation("tabsearch"), {
+        labelText: "Search Tabs",
+      }),
     ).toBe(true);
   });
 
   test("a focused field elsewhere on screen is not the target", () => {
     const elsewhere = { ...target, bounds: { left: 12, top: 100, right: 296, bottom: 134 } };
     expect(
-      iosVerifier().verify(options, elsewhere, focusedObservation("tabsearch"), "Search Tabs"),
+      iosVerifier().verify(options, elsewhere, focusedObservation("tabsearch"), {
+        labelText: "Search Tabs",
+      }),
     ).toBe(false);
   });
 });

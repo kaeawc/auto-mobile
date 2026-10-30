@@ -164,7 +164,7 @@ function createAppendTextInput(
   timer: FakeTimer,
 ): InputText {
   const factory = { create: () => adb };
-  return new InputText(device, factory, undefined, timer);
+  return new InputText(device, factory, { timer });
 }
 
 /** Let every already-queued microtask run before the fake clock moves. */

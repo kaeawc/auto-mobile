@@ -10,11 +10,11 @@ import { record, type Raw } from "./prototypeTemplate";
  * player.
  */
 
-/** `videoPlayer` nodes at their authored paths. */
-function videoPlayers(root: Raw): { node: Raw; path: string }[] {
+/** Nodes of one media type at their authored paths. */
+function mediaNodes(root: Raw, type: "videoPlayer" | "castButton"): { node: Raw; path: string }[] {
   const found: { node: Raw; path: string }[] = [];
   walkPrototypeNodes(root, (node, path) => {
-    if (node.type === "videoPlayer") {
+    if (node.type === type) {
       found.push({ node, path });
     }
   });
@@ -27,7 +27,7 @@ function videoPlayers(root: Raw): { node: Raw; path: string }[] {
  */
 export function prototypeMediaPlayers(root: Raw): Set<string> {
   const players = new Set(Object.keys(record(record(root.media)?.players) ?? {}));
-  for (const { node } of videoPlayers(root)) {
+  for (const { node } of mediaNodes(root, "videoPlayer")) {
     if (node.source !== undefined && typeof node.id === "string") {
       players.add(node.id);
     }
@@ -40,7 +40,7 @@ export function prototypeVideoPlayerError(root: Raw): PrototypePlatformError | u
   const declared = Object.keys(record(record(root.media)?.players) ?? {});
   const platform = record(root.requires)?.platform;
   const state = record(root.state) ?? {};
-  for (const { node, path } of videoPlayers(root)) {
+  for (const { node, path } of mediaNodes(root, "videoPlayer")) {
     const error = videoPlayerError(node, path, {
       declared,
       media: Array.isArray(platform) && platform.includes("media"),
@@ -78,6 +78,36 @@ function videoPlayerError(
   }
   if (typeof node.positionKey === "string" && typeof scope.state[node.positionKey] !== "number") {
     return fail(`${path}.positionKey`, "positionKey must name a declared number state key");
+  }
+  return feedFieldError(node, path);
+}
+
+/** `visibleThreshold` and `resumePosition` tune `autoplay: "whenVisible"` only (#14258). */
+function feedFieldError(node: Raw, path: string): PrototypePlatformError | undefined {
+  if (node.autoplay === "whenVisible") {
+    return undefined;
+  }
+  const field = ["visibleThreshold", "resumePosition"].find((name) => node[name] !== undefined);
+  return field === undefined
+    ? undefined
+    : { path: `${path}.${field}`, message: `${field} needs autoplay whenVisible` };
+}
+
+/**
+ * The first `castButton` node rule a spec breaks (#14239): it needs `cast` in `requires.platform`
+ * and its `player` names a declared or inline media player.
+ */
+export function prototypeCastButtonError(root: Raw): PrototypePlatformError | undefined {
+  const platform = record(root.requires)?.platform;
+  const cast = Array.isArray(platform) && platform.includes("cast");
+  const players = prototypeMediaPlayers(root);
+  for (const { node, path } of mediaNodes(root, "castButton")) {
+    if (!cast) {
+      return { path, message: "castButton requires cast in requires.platform" };
+    }
+    if (typeof node.player === "string" && !players.has(node.player)) {
+      return { path: `${path}.player`, message: "Unknown media player" };
+    }
   }
   return undefined;
 }

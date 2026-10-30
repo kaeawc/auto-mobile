@@ -1,5 +1,5 @@
 import { indeterminateTapError } from "../action/coordinateTapDispatch";
-import { ActionableError, type TraversalOrderResult } from "../../models";
+import { ActionableError, type Point, type TraversalOrderResult } from "../../models";
 import type { DisplayFence, DisplayFenceOption } from "../action/BaseVisualChange";
 import { StaleDisplayError } from "../observe/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -318,21 +318,20 @@ export class TalkBackTapStrategy {
   /**
    * Execute a coordinate-based tap as a fallback when focus navigation fails or isn't applicable.
    *
-   * @param x - X coordinate
-   * @param y - Y coordinate
+   * @param point - Coordinate to touch
    * @param action - The action to perform
    * @param durationMs - Duration for the tap (used for longPress)
    * @param driver - The TalkBack navigation driver
    * @returns Result indicating success/failure
    */
   async executeCoordinateFallback(
-    x: number,
-    y: number,
+    point: Point,
     action: TalkBackFallbackAction,
     durationMs: number,
     driver: TalkBackNavigationDriver,
     fenceOptions: DisplayFenceOption = {},
   ): Promise<TalkBackTapResult> {
+    const { x, y } = point;
     const fence = fenceOptions.displayFence;
     const tapDuration = action === "longPress" ? durationMs : 50;
 
@@ -407,9 +406,15 @@ export class TalkBackTapStrategy {
 
     // Keep the focus tap outside TalkBack's activation double-tap window.
     await this.timer.sleep(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
-    const activationResult = await this.executeCoordinateFallback(x, y, "doubleTap", 50, driver, {
-      displayFence: fence,
-    });
+    const activationResult = await this.executeCoordinateFallback(
+      { x, y },
+      "doubleTap",
+      50,
+      driver,
+      {
+        displayFence: fence,
+      },
+    );
     return {
       ...activationResult,
       focusCompleted: true,
@@ -424,21 +429,20 @@ export class TalkBackTapStrategy {
    * against a different row. Nodes without an advertised semantic action retain
    * the coordinate fallback.
    *
-   * @param x - X coordinate (for coordinate fallback)
-   * @param y - Y coordinate (for coordinate fallback)
+   * @param point - Coordinate for the coordinate fallback
    * @param durationMs - Long press duration in milliseconds
    * @param element - The target element
    * @param driver - The TalkBack navigation driver
    * @returns Result indicating success/failure and method used
    */
   async executeLongPress(
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
     element: Element,
     driver: TalkBackNavigationDriver,
     fenceOptions: DisplayFenceOption & TalkBackTargetContext = {},
   ): Promise<TalkBackTapResult> {
+    let { x, y } = point;
     const fence = fenceOptions.displayFence;
     const target = await resolveTalkBackActionTarget(
       element,
@@ -463,7 +467,7 @@ export class TalkBackTapStrategy {
       if (targetError) {
         logger.info(`[TalkBackTapStrategy] ${targetError}`);
         return {
-          ...(await this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
+          ...(await this.executeCoordinateFallback({ x, y }, "longPress", durationMs, driver, {
             displayFence: fence,
           })),
           ...confirmedElement,
@@ -503,7 +507,7 @@ export class TalkBackTapStrategy {
     }
 
     return {
-      ...(await this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
+      ...(await this.executeCoordinateFallback({ x, y }, "longPress", durationMs, driver, {
         displayFence: fence,
       })),
       ...confirmedElement,

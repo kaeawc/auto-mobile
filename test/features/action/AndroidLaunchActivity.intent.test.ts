@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import { AndroidLaunchActivity } from "../../../src/features/action/AndroidLaunchActivity";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidLaunchIntentError } from "../../../src/features/action/androidLaunchIntent";
 import { createExecResult } from "../../../src/utils/execResult";
 import { DefaultPerformanceTracker } from "../../../src/utils/PerformanceTracker";
@@ -19,6 +20,31 @@ function launcher(adb: FakeAdbExecutor) {
 const perf = () => new DefaultPerformanceTracker(new FakeTimer());
 
 describe("Android explicit intent launch (#14080)", () => {
+  test("secondary-user fallbacks keep the same user and skip untargetable monkey", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell am start --user 10 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER",
+      createExecResult("Error: no launcher", ""),
+    );
+    adb.setCommandResponse("query-activities", createExecResult(`${APP}/.MainActivity`, ""));
+    adb.setCommandResponse("shell am start --user 10 -n", createExecResult("Starting: Intent", ""));
+    const ctrlProxy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("CtrlProxy unavailable in this fake-only fallback test");
+    });
+    try {
+      const result = await launcher(adb).performLaunch(APP, undefined, 10, perf());
+      expect(result).toMatchObject({ success: true, userId: 10 });
+      const commands = adb.getExecutedCommands();
+      expect(commands.some((command) => command.startsWith("shell monkey"))).toBe(false);
+      expect(commands.filter((command) => command.startsWith("shell am start"))).toEqual([
+        `shell am start --user 10 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER '${APP}'`,
+        `shell am start --user 10 -n '${APP}/.MainActivity'`,
+      ]);
+    } finally {
+      ctrlProxy.mockRestore();
+    }
+  });
+
   test("starts the component with extras in one am start, without fallbacks", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(

@@ -751,8 +751,7 @@ describe("tapOn (Android default display)", () => {
     try {
       await createTap(timer, client).executeAndroidTap(
         "doubleTap",
-        540,
-        380,
+        { x: 540, y: 380 },
         0,
         { ...plainElement, "hierarchy-source": "uiautomator" },
         {

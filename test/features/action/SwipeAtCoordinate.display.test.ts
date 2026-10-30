@@ -69,7 +69,7 @@ function setup(
     timer,
     androidClient: ctrl,
     executeGesture: {
-      swipe: async (x1, y1, x2, y2, opts) => {
+      swipe: async ({ x1, y1, x2, y2 }, opts) => {
         opts?.displayFence?.assertCurrent();
         gestureSwipes.push([x1, y1, x2, y2, opts?.displayFence !== undefined]);
         return { success: true, x1, y1, x2, y2, duration: opts?.duration ?? 0 };

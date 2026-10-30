@@ -7,7 +7,7 @@ import type {
 import { getReturnDuration, validateSwipeTimingOptions } from "./swipeTiming";
 import { ActionableError } from "../../../models/ActionableError";
 import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
-import type { FencedGestureOptions } from "../ExecuteGesture";
+import type { FencedGestureOptions, SwipeLine } from "../ExecuteGesture";
 import { BootedDevice } from "../../../models";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeResult } from "../../../models/SwipeResult";
@@ -20,6 +20,15 @@ import type { IosCtrlProxy } from "../../observe/ios";
 import { Timer } from "../../../utils/interfaces/Timer";
 import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 import { throwIfAborted } from "../../../utils/toolUtils";
+
+export type VoiceOverSwipeExecutorDependencies = {
+  device: BootedDevice;
+  executeGesture: GestureExecutor;
+  iosClient: IosCtrlProxy;
+  iosVoiceOverDetector: IosVoiceOverDetector;
+  timer: Timer;
+  featureFlags?: FeatureFlagReader;
+};
 
 /**
  * VoiceOverSwipeExecutor handles iOS swipes while VoiceOver is enabled.
@@ -36,14 +45,28 @@ import { throwIfAborted } from "../../../utils/toolUtils";
  * Parallel to TalkBackSwipeExecutor for Android TalkBack.
  */
 export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
-  constructor(
-    private readonly device: BootedDevice,
-    private readonly executeGesture: GestureExecutor,
-    private readonly iosClient: IosCtrlProxy,
-    private readonly iosVoiceOverDetector: IosVoiceOverDetector,
-    private readonly timer: Timer,
-    private readonly featureFlags?: FeatureFlagReader,
-  ) {}
+  private readonly device: BootedDevice;
+  private readonly executeGesture: GestureExecutor;
+  private readonly iosClient: IosCtrlProxy;
+  private readonly iosVoiceOverDetector: IosVoiceOverDetector;
+  private readonly timer: Timer;
+  private readonly featureFlags?: FeatureFlagReader;
+
+  constructor({
+    device,
+    executeGesture,
+    iosClient,
+    iosVoiceOverDetector,
+    timer,
+    featureFlags,
+  }: VoiceOverSwipeExecutorDependencies) {
+    this.device = device;
+    this.executeGesture = executeGesture;
+    this.iosClient = iosClient;
+    this.iosVoiceOverDetector = iosVoiceOverDetector;
+    this.timer = timer;
+    this.featureFlags = featureFlags;
+  }
 
   /**
    * Execute a swipe gesture with VoiceOver awareness.
@@ -80,7 +103,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
           signal,
         });
       }
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, { perf, signal });
+      return this.executeGesture.swipe({ x1, y1, x2, y2 }, gestureOptions, { perf, signal });
     }
 
     // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
@@ -107,27 +130,21 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
             perf,
             signal,
           })
-        : await this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, { perf, signal });
+        : await this.executeGesture.swipe({ x1, y1, x2, y2 }, gestureOptions, { perf, signal });
       return withEpilogueWarning(result, warning);
     }
 
     // VoiceOver is enabled
     if (boomerang) {
       return this.voiceOverScrollFailure(
-        x1,
-        y1,
-        x2,
-        y2,
+        { x1, y1, x2, y2 },
         gestureOptions?.duration ?? 300,
         "VoiceOver boomerang gestures are not supported because they require XCTest-synthesized touches, which do not reach VoiceOver",
       );
     }
 
     return this.voiceOverScrollFailure(
-      x1,
-      y1,
-      x2,
-      y2,
+      { x1, y1, x2, y2 },
       gestureOptions?.duration ?? 300,
       "VoiceOver scrolling is not supported: CtrlProxy only provides XCTest-synthesized touches, which do not reach VoiceOver",
     );
@@ -168,7 +185,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     const forwardOptions = this.buildGestureOptions(gestureOptions, forwardDuration);
     const returnOptions = this.buildGestureOptions(gestureOptions, returnDuration);
 
-    const forwardResult = await this.executeGesture.swipe(x1, y1, x2, y2, forwardOptions, {
+    const forwardResult = await this.executeGesture.swipe({ x1, y1, x2, y2 }, forwardOptions, {
       perf,
       signal,
     });
@@ -182,7 +199,11 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       timer: this.timer,
       apexPauseMs: boomerang.apexPauseMs,
       signal,
-      returnSwipe: () => this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, { perf, signal }),
+      returnSwipe: () =>
+        this.executeGesture.swipe({ x1: x2, y1: y2, x2: x1, y2: y1 }, returnOptions, {
+          perf,
+          signal,
+        }),
     });
     if (!returnResult.success) {
       return {
@@ -205,14 +226,8 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     };
   }
 
-  private voiceOverScrollFailure(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number,
-    error: string,
-  ): SwipeResult {
+  private voiceOverScrollFailure(line: SwipeLine, duration: number, error: string): SwipeResult {
+    const { x1, y1, x2, y2 } = line;
     return {
       success: false,
       error,

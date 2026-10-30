@@ -260,6 +260,7 @@ export class HomeScreen extends BaseVisualChange {
     }
     if (
       !(await isForegroundLauncher(launcherPackage, this.adb, this.device.deviceId, this.timer, {
+        formFactor: this.device.formFactor,
         incarnationToken: deviceIncarnationToken(this.device.deviceId),
         signal,
         timeoutMs: 5000,

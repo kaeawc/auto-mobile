@@ -532,8 +532,7 @@ describe("TalkBackTapStrategy", () => {
       });
       await expect(
         strategy.executeLongPress(
-          50,
-          50,
+          { x: 50, y: 50 },
           800,
           buildElement({ "resource-id": "test:id/button" }),
           driver,
@@ -551,7 +550,7 @@ describe("TalkBackTapStrategy", () => {
       driver.setElements([element], 0);
       driver.setActionResult({ success: true, action: "long_click", totalTimeMs: 1 });
 
-      const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
+      const result = await strategy.executeLongPress({ x: 50, y: 50 }, 1000, element, driver);
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("accessibility-action");
@@ -577,7 +576,7 @@ describe("TalkBackTapStrategy", () => {
         error: "service unavailable",
       });
 
-      const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
+      const result = await strategy.executeLongPress({ x: 50, y: 50 }, 1000, element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("accessibility-action");
@@ -596,7 +595,7 @@ describe("TalkBackTapStrategy", () => {
       } as Element;
       driver.setNodeActionSelectorsSupported(false);
 
-      const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
+      const result = await strategy.executeLongPress({ x: 50, y: 50 }, 1000, element, driver);
 
       expect(result).toEqual({ success: true, method: "coordinate-fallback" });
       expect(driver.getActionCount()).toBe(0);
@@ -611,7 +610,7 @@ describe("TalkBackTapStrategy", () => {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
 
-      const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
+      const result = await strategy.executeLongPress({ x: 50, y: 50 }, 1000, element, driver);
 
       expect(result).toEqual({ success: true, method: "coordinate-fallback" });
       expect(driver.getActionCount()).toBe(0);
@@ -624,7 +623,7 @@ describe("TalkBackTapStrategy", () => {
         text: "Button",
       } as Element;
 
-      const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
+      const result = await strategy.executeLongPress({ x: 50, y: 50 }, 1000, element, driver);
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("coordinate-fallback");
@@ -648,7 +647,7 @@ describe("TalkBackTapStrategy", () => {
         driver.hierarchy = testTagHierarchy;
         driver.setActionResult(notFound);
 
-        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+        const result = await strategy.executeLongPress({ x: 120, y: 130 }, 1000, row, driver);
 
         expect(result.success).toBe(true);
         expect(result.method).toBe("coordinate-fallback");
@@ -660,7 +659,7 @@ describe("TalkBackTapStrategy", () => {
         driver.hierarchy = testTagHierarchyWithoutFirstRow;
         driver.setActionResult(notFound);
 
-        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+        const result = await strategy.executeLongPress({ x: 120, y: 130 }, 1000, row, driver);
 
         expect(result).toMatchObject({
           success: false,
@@ -675,7 +674,7 @@ describe("TalkBackTapStrategy", () => {
         driver.hierarchy = testTagHierarchyWithFirstRowMoved;
         driver.setActionResult(notFound);
 
-        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+        const result = await strategy.executeLongPress({ x: 120, y: 130 }, 1000, row, driver);
 
         expect(result.semanticActionFailure).toBe(true);
         expect(driver.getTapCount()).toBe(0);
@@ -685,7 +684,7 @@ describe("TalkBackTapStrategy", () => {
         driver.hierarchy = null;
         driver.setActionResult(notFound);
 
-        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+        const result = await strategy.executeLongPress({ x: 120, y: 130 }, 1000, row, driver);
 
         expect(result.semanticActionFailure).toBe(true);
         expect(driver.getTapCount()).toBe(0);
@@ -707,7 +706,7 @@ describe("TalkBackTapStrategy", () => {
       });
       driver.setTapResult({ success: false, totalTimeMs: 1, error: "gesture failed" });
 
-      const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
+      const result = await strategy.executeLongPress({ x: 50, y: 50 }, 1000, element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");
@@ -716,7 +715,7 @@ describe("TalkBackTapStrategy", () => {
 
   describe("executeCoordinateFallback", () => {
     test("does not report activation from a single touch for tap action", async () => {
-      const result = await strategy.executeCoordinateFallback(50, 50, "tap", 500, driver);
+      const result = await strategy.executeCoordinateFallback({ x: 50, y: 50 }, "tap", 500, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");
@@ -726,7 +725,12 @@ describe("TalkBackTapStrategy", () => {
     });
 
     test("performs double tap for doubleTap action", async () => {
-      const result = await strategy.executeCoordinateFallback(50, 50, "doubleTap", 500, driver);
+      const result = await strategy.executeCoordinateFallback(
+        { x: 50, y: 50 },
+        "doubleTap",
+        500,
+        driver,
+      );
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("coordinate-fallback");
@@ -735,7 +739,12 @@ describe("TalkBackTapStrategy", () => {
     });
 
     test("uses full duration for longPress action", async () => {
-      const result = await strategy.executeCoordinateFallback(50, 50, "longPress", 1000, driver);
+      const result = await strategy.executeCoordinateFallback(
+        { x: 50, y: 50 },
+        "longPress",
+        1000,
+        driver,
+      );
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("coordinate-fallback");
@@ -746,7 +755,12 @@ describe("TalkBackTapStrategy", () => {
     test("returns error when atomic doubleTap fails before dispatch", async () => {
       driver.queueTapResult({ success: false, totalTimeMs: 1, error: "tap failed" });
 
-      const result = await strategy.executeCoordinateFallback(50, 50, "doubleTap", 500, driver);
+      const result = await strategy.executeCoordinateFallback(
+        { x: 50, y: 50 },
+        "doubleTap",
+        500,
+        driver,
+      );
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");
@@ -761,7 +775,7 @@ describe("TalkBackTapStrategy", () => {
       driver.queueTapResult({ success: false, totalTimeMs: 5000, error: "double tap timed out" });
 
       await expect(
-        strategy.executeCoordinateFallback(50, 50, "doubleTap", 500, driver),
+        strategy.executeCoordinateFallback({ x: 50, y: 50 }, "doubleTap", 500, driver),
       ).rejects.toThrow("outcome is indeterminate");
       expect(driver.doubleTapHistory).toHaveLength(1);
       expect(driver.getTapCount()).toBe(0);
@@ -770,7 +784,7 @@ describe("TalkBackTapStrategy", () => {
     test("returns error when single tap fails", async () => {
       driver.setTapResult({ success: false, totalTimeMs: 1, error: "tap failed" });
 
-      const result = await strategy.executeCoordinateFallback(50, 50, "tap", 500, driver);
+      const result = await strategy.executeCoordinateFallback({ x: 50, y: 50 }, "tap", 500, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");

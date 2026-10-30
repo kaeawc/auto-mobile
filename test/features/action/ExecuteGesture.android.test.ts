@@ -37,7 +37,7 @@ describe("ExecuteGesture Android swipe", () => {
   ] as const)(
     "formats ADB duration %s as %s without changing coordinates",
     async (duration, expected) => {
-      await createGesture().swipe(10.5, 20.5, 30.5, 40.5, { duration });
+      await createGesture().swipe({ x1: 10.5, y1: 20.5, x2: 30.5, y2: 40.5 }, { duration });
       expect(fakeAdb.getExecutedCommands()).toEqual([
         `shell input swipe 10.5 20.5 30.5 40.5 ${expected}`,
       ]);
@@ -45,14 +45,17 @@ describe("ExecuteGesture Android swipe", () => {
   );
 
   test("dispatches an ADB input swipe with the given coordinates and duration in adb mode", async () => {
-    const result = await createGesture().swipe(10, 20, 30, 40, { duration: 250 });
+    const result = await createGesture().swipe(
+      { x1: 10, y1: 20, x2: 30, y2: 40 },
+      { duration: 250 },
+    );
 
     expect(result).toEqual({ success: true, x1: 10, y1: 20, x2: 30, y2: 40, duration: 250 });
     expect(fakeAdb.getExecutedCommands()).toEqual(["shell input swipe 10 20 30 40 250"]);
   });
 
   test("defaults the ADB swipe duration to 300ms when none is supplied", async () => {
-    const result = await createGesture().swipe(0, 0, 100, 100);
+    const result = await createGesture().swipe({ x1: 0, y1: 0, x2: 100, y2: 100 });
 
     expect(result.duration).toBe(300);
     expect(fakeAdb.getExecutedCommands()).toEqual(["shell input swipe 0 0 100 100 300"]);
@@ -62,7 +65,10 @@ describe("ExecuteGesture Android swipe", () => {
     fakeA11yService.setSwipeResult({ success: true, totalTimeMs: 42, gestureTimeMs: 30 });
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
+    const result = await createGesture().swipe(
+      { x1: 5, y1: 6, x2: 7, y2: 8 },
+      { scrollMode: "a11y", duration: 120 },
+    );
 
     expect(result.success).toBe(true);
     expect(result.a11yTotalTimeMs).toBe(42);
@@ -84,7 +90,10 @@ describe("ExecuteGesture Android swipe", () => {
     });
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
+    const result = await createGesture().swipe(
+      { x1: 5, y1: 6, x2: 7, y2: 8 },
+      { scrollMode: "a11y", duration: 120 },
+    );
 
     // Still reports success, but records why it fell back and issues the ADB swipe.
     expect(result.success).toBe(true);
@@ -101,7 +110,10 @@ describe("ExecuteGesture Android swipe", () => {
     fakeA11yService.setSwipeDispatchesBeforeResult(true);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
+    const result = await createGesture().swipe(
+      { x1: 5, y1: 6, x2: 7, y2: 8 },
+      { scrollMode: "a11y", duration: 120 },
+    );
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/outcome is indeterminate.*Do not retry automatically/i);
@@ -114,7 +126,10 @@ describe("ExecuteGesture Android swipe", () => {
     fakeA11yService.setSwipeDispatchesBeforeResult(true);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 120 });
+    const result = await createGesture().swipe(
+      { x1: 5, y1: 6, x2: 7, y2: 8 },
+      { scrollMode: "a11y", duration: 120 },
+    );
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/outcome is indeterminate.*Do not retry automatically/i);
@@ -126,7 +141,10 @@ describe("ExecuteGesture Android swipe", () => {
     fakeA11yService.setFailureMode("swipe", new Error("socket closed"));
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const result = await createGesture().swipe(5, 6, 7, 8, { scrollMode: "a11y", duration: 90 });
+    const result = await createGesture().swipe(
+      { x1: 5, y1: 6, x2: 7, y2: 8 },
+      { scrollMode: "a11y", duration: 90 },
+    );
 
     expect(result.success).toBe(true);
     expect(result.fallbackReason).toContain("socket closed");

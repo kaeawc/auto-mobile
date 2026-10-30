@@ -307,7 +307,7 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .enum(["on", "off", DEVICE_CONDITION_UNSET])
           .optional()
           .describe(
-            "Vehicle night-mode signal on an Android Automotive emulator, restored to its prior value; or unset.",
+            "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override.",
           ),
       })
       .strict()

@@ -9,15 +9,21 @@ import type { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBac
 // Indexed private method types and Function.bind preserve the real signatures.
 declare const fence: DisplayFence;
 declare const tapOnElement: TapOnElement;
-declare const element: Parameters<TapOnElement["executeAndroidTap"]>[4];
-void tapOnElement.executeAndroidTap("tap", 10, 10, 50, element);
-void tapOnElement.executeAndroidTap("tap", 10, 10, 50, element, {
+declare const element: Parameters<TapOnElement["executeAndroidTap"]>[3];
+void tapOnElement.executeAndroidTap("tap", { x: 10, y: 10 }, 50, element);
+void tapOnElement.executeAndroidTap("tap", { x: 10, y: 10 }, 50, element, {
   options: {
     action: "tap",
     displayFence: fence,
   },
 });
-const talkBackFlag = tapOnElement.executeAndroidTap.bind(tapOnElement, "tap", 10, 10, 50, element);
+const talkBackFlag = tapOnElement.executeAndroidTap.bind(
+  tapOnElement,
+  "tap",
+  { x: 10, y: 10 },
+  50,
+  element,
+);
 void talkBackFlag({ isTalkBackEnabled: false });
 // @ts-expect-error The TalkBack flag is a boolean, never a display fence.
 void talkBackFlag({ isTalkBackEnabled: fence });
@@ -32,8 +38,8 @@ void talkBackFlag({ isTalkBackEnabled: { assertCurrent: 1 } });
 declare const call0: TapOnElement["executeAndroidTap"];
 declare const args0: Parameters<typeof call0>;
 void call0(...args0);
-const options0 = call0.bind(undefined, args0[0], args0[1], args0[2], args0[3], args0[4]);
-void options0(args0[5]);
+const options0 = call0.bind(undefined, args0[0], args0[1], args0[2], args0[3]);
+void options0(args0[4]);
 void options0({ options: { action: "tap", displayFence: fence } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
 void options0({ options: { action: "tap", displayFence: [] } });
@@ -107,16 +113,16 @@ void call2(...args2, { assertCurrent: 1 });
 declare const call3: TapOnElement["retryTapIfNoChange"];
 declare const args3: Parameters<typeof call3>;
 void call3(...args3);
-const options3 = call3.bind(undefined, args3[0], args3[1], args3[2], args3[3], args3[4]);
-void options3(args3[5]);
-void options3({ ...args3[5], options: { action: "tap", displayFence: fence } });
+const options3 = call3.bind(undefined, args3[0], args3[1], args3[2], args3[3]);
+void options3(args3[4]);
+void options3({ ...args3[4], options: { action: "tap", displayFence: fence } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options3({ ...args3[5], options: { action: "tap", displayFence: [] } });
+void options3({ ...args3[4], options: { action: "tap", displayFence: [] } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options3({ ...args3[5], options: { action: "tap", displayFence: {} } });
+void options3({ ...args3[4], options: { action: "tap", displayFence: {} } });
 void options3(
   // @ts-expect-error A fence must implement assertCurrent(): void.
-  { ...args3[5], options: { action: "tap", displayFence: { assertCurrent: 1 } } },
+  { ...args3[4], options: { action: "tap", displayFence: { assertCurrent: 1 } } },
 );
 // @ts-expect-error Arrays are not dispatch options.
 void options3([]);
@@ -153,7 +159,7 @@ void call4(...args4, { assertCurrent: 1 });
 declare const call5: TapOnElement["executeiOSTap"];
 declare const args5: Parameters<typeof call5>;
 void call5(...args5);
-const options5 = call5.bind(undefined, args5[0], args5[1], args5[2], args5[3], args5[4]);
+const options5 = call5.bind(undefined, args5[0], args5[1], args5[2], args5[3]);
 void options5();
 void options5({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -197,7 +203,7 @@ void call6(...args6, { assertCurrent: 1 });
 declare const call7: TapOnElement["executeIOSTapWithVoiceOver"];
 declare const args7: Parameters<typeof call7>;
 void call7(...args7);
-const options7 = call7.bind(undefined, args7[0], args7[1], args7[2], args7[3], args7[4]);
+const options7 = call7.bind(undefined, args7[0], args7[1], args7[2], args7[3]);
 void options7();
 void options7({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -241,7 +247,7 @@ void call8(...args8, { assertCurrent: 1 });
 declare const call9: TapAnyAndroidTapper["executeAndroidTap"];
 declare const args9: Parameters<typeof call9>;
 void call9(...args9);
-const options9 = call9.bind(undefined, args9[0], args9[1], args9[2], args9[3], args9[4]);
+const options9 = call9.bind(undefined, args9[0], args9[1], args9[2], args9[3]);
 void options9();
 void options9({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -263,7 +269,7 @@ void call9(...args9, { assertCurrent: 1 });
 declare const call10: TapAnyAndroidTapper["executeAndroidTalkBackTap"];
 declare const args10: Parameters<typeof call10>;
 void call10(...args10);
-const options10 = call10.bind(undefined, args10[0], args10[1], args10[2], args10[3], args10[4]);
+const options10 = call10.bind(undefined, args10[0], args10[1], args10[2], args10[3]);
 void options10();
 void options10({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -285,7 +291,7 @@ void call10(...args10, { assertCurrent: 1 });
 declare const call11: TapAnyAndroidTapper["retryAndroidTapIfNoChange"];
 declare const args11: Parameters<typeof call11>;
 void call11(...args11);
-const options11 = call11.bind(undefined, args11[0], args11[1], args11[2], args11[3], args11[4]);
+const options11 = call11.bind(undefined, args11[0], args11[1], args11[2], args11[3]);
 void options11();
 void options11({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -307,7 +313,7 @@ void call11(...args11, { assertCurrent: 1 });
 declare const call12: TapAnyIosTapper["executeIosTap"];
 declare const args12: Parameters<typeof call12>;
 void call12(...args12);
-const options12 = call12.bind(undefined, args12[0], args12[1], args12[2], args12[3], args12[4]);
+const options12 = call12.bind(undefined, args12[0], args12[1], args12[2], args12[3]);
 void options12();
 void options12({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -329,7 +335,7 @@ void call12(...args12, { assertCurrent: 1 });
 declare const call13: TapAnyIosTapper["executeIosTapWithCoordinates"];
 declare const args13: Parameters<typeof call13>;
 void call13(...args13);
-const options13 = call13.bind(undefined, args13[0], args13[1], args13[2], args13[3], args13[4]);
+const options13 = call13.bind(undefined, args13[0], args13[1], args13[2], args13[3]);
 void options13();
 void options13({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -351,7 +357,7 @@ void call13(...args13, { assertCurrent: 1 });
 declare const call14: ExecuteGesture["executeA11ySwipe"];
 declare const args14: Parameters<typeof call14>;
 void call14(...args14);
-const options14 = call14.bind(undefined, args14[0], args14[1], args14[2], args14[3], args14[4]);
+const options14 = call14.bind(undefined, args14[0], args14[1]);
 void options14();
 void options14({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -373,7 +379,7 @@ void call14(...args14, { assertCurrent: 1 });
 declare const call15: ExecuteGesture["executeXCTestSwipe"];
 declare const args15: Parameters<typeof call15>;
 void call15(...args15);
-const options15 = call15.bind(undefined, args15[0], args15[1], args15[2], args15[3]);
+const options15 = call15.bind(undefined, args15[0]);
 void options15();
 void options15({ displayFence: fence });
 void options15({ displayFence: fence, lockScreen: true, timeoutMs: 5000 });
@@ -462,7 +468,7 @@ void call18(...args18, { assertCurrent: 1 });
 declare const call19: TalkBackTapStrategy["executeCoordinateFallback"];
 declare const args19: Parameters<typeof call19>;
 void call19(...args19);
-const options19 = call19.bind(undefined, args19[0], args19[1], args19[2], args19[3], args19[4]);
+const options19 = call19.bind(undefined, args19[0], args19[1], args19[2], args19[3]);
 void options19();
 void options19({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -484,7 +490,7 @@ void call19(...args19, { assertCurrent: 1 });
 declare const call20: TalkBackTapStrategy["executeLongPress"];
 declare const args20: Parameters<typeof call20>;
 void call20(...args20);
-const options20 = call20.bind(undefined, args20[0], args20[1], args20[2], args20[3], args20[4]);
+const options20 = call20.bind(undefined, args20[0], args20[1], args20[2], args20[3]);
 void options20();
 void options20({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.

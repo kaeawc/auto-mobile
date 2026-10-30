@@ -113,13 +113,9 @@ describe("sendKeys pinned-panel focus check over captured fold windows (#9208)",
     describe(`${focusedCapture.role} panel holds focus (${focusedCapture.posture})`, () => {
       test("pin on the focused panel dispatches text, clear and IME", async () => {
         const h = harness(focusedCapture, focusedCapture.panelKey);
-        const result = await h.action.execute(
-          commands,
-          undefined,
-          undefined,
-          undefined,
-          focusedCapture.panelKey,
-        );
+        const result = await h.action.execute(commands, undefined, {
+          display: focusedCapture.panelKey,
+        });
         expect(result.success).toBe(true);
         expect(h.clientCalls).toEqual(["insert:hello", "clear", "ime"]);
       });
@@ -129,13 +125,9 @@ describe("sendKeys pinned-panel focus check over captured fold windows (#9208)",
       // reachable. The concurrent-display captures below cover that branch.
       test("pin on the other (disconnected) panel is refused before the focus check", async () => {
         const h = harness(focusedCapture, otherCapture.panelKey);
-        const result = await h.action.execute(
-          commands,
-          undefined,
-          undefined,
-          undefined,
-          otherCapture.panelKey,
-        );
+        const result = await h.action.execute(commands, undefined, {
+          display: otherCapture.panelKey,
+        });
         expect(result.success).toBe(false);
         expect(result.error).toContain(`Display "${otherCapture.panelKey}"`);
         expect(result.error).toContain("is not connected in the current posture");
@@ -250,7 +242,7 @@ describe("sendKeys pinned-panel focus check over captured concurrent displays (#
 
   for (const route of ["pin", "explicit"] as const) {
     const run = (h: ReturnType<typeof concurrentHarness>, display: string) => {
-      const execute = () => h.action.execute(commands, undefined, undefined, undefined, display);
+      const execute = () => h.action.execute(commands, undefined, { display });
       return route === "pin"
         ? runWithSelectedDisplayPin({ pin: display, inventory: h.device.displays }, execute)
         : execute();
@@ -296,13 +288,7 @@ describe("sendKeys pinned-panel focus check over captured concurrent displays (#
   test("refusal falls back to unknown when the top focused display cannot be read", async () => {
     const h = concurrentHarness("inner", overlayPanel);
     h.adb.setCommandResponse("mTopFocusedDisplayId", createExecResult("", ""));
-    const result = await h.action.execute(
-      commands,
-      undefined,
-      undefined,
-      undefined,
-      overlayPanel.key,
-    );
+    const result = await h.action.execute(commands, undefined, { display: overlayPanel.key });
     expect(result.success).toBe(false);
     expect(result.error).toContain("focused panel is unknown");
   });

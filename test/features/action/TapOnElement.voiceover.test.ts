@@ -76,7 +76,12 @@ describe("TapOnElement VoiceOver mode", () => {
         const result = { success: false, error, dispatched: true };
         fakeIosClient.setVoiceOverActivateResult(result);
         await expect(
-          tapOnElement.testHooks.executeIOSTapWithVoiceOver(action, element, 50, 50, 1000),
+          tapOnElement.testHooks.executeIOSTapWithVoiceOver(
+            action,
+            element,
+            { x: 50, y: 50 },
+            1000,
+          ),
         ).rejects.toMatchObject({
           message: `Tap outcome is indeterminate: the request was dispatched but no result was confirmed (${error}). Do not retry automatically.`,
         });
@@ -98,7 +103,12 @@ describe("TapOnElement VoiceOver mode", () => {
           await wireCtrlProxy();
           const result = { success: false, error, dispatched: true, acknowledged: true };
           fakeIosClient.setVoiceOverActivateResult(result);
-          await tapOnElement.testHooks.executeIOSTapWithVoiceOver(action, element, 50, 50, 1000);
+          await tapOnElement.testHooks.executeIOSTapWithVoiceOver(
+            action,
+            element,
+            { x: 50, y: 50 },
+            1000,
+          );
           expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(1);
           expect(fakeIosClient.getTapHistory()).toEqual([
             { x: 50, y: 50, duration: action === "longPress" ? 1000 : 50 },
@@ -115,7 +125,12 @@ describe("TapOnElement VoiceOver mode", () => {
           acknowledged: false,
         };
         fakeIosClient.setVoiceOverActivateResult(result);
-        await tapOnElement.testHooks.executeIOSTapWithVoiceOver(action, element, 50, 50, 1000);
+        await tapOnElement.testHooks.executeIOSTapWithVoiceOver(
+          action,
+          element,
+          { x: 50, y: 50 },
+          1000,
+        );
         expect(fakeIosClient.getTapHistory()).toHaveLength(1);
         expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(1);
       });
@@ -125,7 +140,12 @@ describe("TapOnElement VoiceOver mode", () => {
         const existing = spyOnIosExistingInstance(fakeIosClient);
         const invalidate = spyOn(fakeIosClient, "invalidateCache");
         try {
-          await tapOnElement.testHooks.executeIOSTapWithVoiceOver(action, element, 50, 50, 1000);
+          await tapOnElement.testHooks.executeIOSTapWithVoiceOver(
+            action,
+            element,
+            { x: 50, y: 50 },
+            1000,
+          );
           expect(invalidate).toHaveBeenCalledTimes(1);
           expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(1);
           expect(fakeIosClient.getTapHistory()).toHaveLength(0);
@@ -163,8 +183,7 @@ describe("TapOnElement VoiceOver mode", () => {
           await tapOnElement.testHooks.executeIOSTapWithVoiceOver(
             action,
             element,
-            50,
-            50,
+            { x: 50, y: 50 },
             duration,
           );
           expect(request.mock.calls[0][1]).toBe(action === "longPress" ? "long_press" : "activate");
@@ -184,7 +203,7 @@ describe("TapOnElement VoiceOver mode", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
       await wireCtrlProxy();
 
-      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, element, {
+      await tapOnElement.testHooks.executeiOSTap("tap", { x: 50, y: 50 }, 50, element, {
         isVoiceOverEnabled: false,
       });
 
@@ -196,7 +215,7 @@ describe("TapOnElement VoiceOver mode", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
       await wireCtrlProxy();
 
-      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, undefined, {
+      await tapOnElement.testHooks.executeiOSTap("tap", { x: 50, y: 50 }, 50, undefined, {
         isVoiceOverEnabled: false,
       });
 
@@ -208,7 +227,7 @@ describe("TapOnElement VoiceOver mode", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       await wireCtrlProxy();
 
-      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, element, {
+      await tapOnElement.testHooks.executeiOSTap("tap", { x: 50, y: 50 }, 50, element, {
         isVoiceOverEnabled: true,
       });
 
@@ -222,7 +241,7 @@ describe("TapOnElement VoiceOver mode", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       await wireCtrlProxy();
 
-      await tapOnElement.testHooks.executeiOSTap("tap", 50, 50, 50, undefined, {
+      await tapOnElement.testHooks.executeiOSTap("tap", { x: 50, y: 50 }, 50, undefined, {
         isVoiceOverEnabled: true,
       });
 
@@ -250,7 +269,7 @@ describe("TapOnElement VoiceOver mode", () => {
       // Patch IOSCtrlProxyClient.getInstance to return fakeIosClient
       const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
-      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
+      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, { x: 50, y: 50 }, 50);
 
       const history = fakeIosClient.getVoiceOverActivateHistory();
       expect(history).toHaveLength(1);
@@ -268,7 +287,7 @@ describe("TapOnElement VoiceOver mode", () => {
 
       const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
-      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
+      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, { x: 50, y: 50 }, 50);
 
       const history = fakeIosClient.getVoiceOverActivateHistory();
       expect(history).toHaveLength(1);
@@ -284,7 +303,7 @@ describe("TapOnElement VoiceOver mode", () => {
 
       const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
-      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
+      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, { x: 50, y: 50 }, 50);
 
       expect(coordinateFallbackCalls).toBe(1);
       expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
@@ -300,7 +319,12 @@ describe("TapOnElement VoiceOver mode", () => {
 
       const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
-      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("longPress", element, 50, 50, 1000);
+      await tapOnElement.testHooks.executeIOSTapWithVoiceOver(
+        "longPress",
+        element,
+        { x: 50, y: 50 },
+        1000,
+      );
 
       const history = fakeIosClient.getVoiceOverActivateHistory();
       expect(history).toHaveLength(1);
@@ -323,7 +347,7 @@ describe("TapOnElement VoiceOver mode", () => {
 
       const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
-      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
+      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, { x: 50, y: 50 }, 50);
 
       const history = fakeIosClient.getVoiceOverActivateHistory();
       expect(history[0].action).toBe("activate");
@@ -339,7 +363,12 @@ describe("TapOnElement VoiceOver mode", () => {
 
       const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
-      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("doubleTap", element, 50, 50, 50);
+      await tapOnElement.testHooks.executeIOSTapWithVoiceOver(
+        "doubleTap",
+        element,
+        { x: 50, y: 50 },
+        50,
+      );
 
       const history = fakeIosClient.getVoiceOverActivateHistory();
       expect(history[0].action).toBe("activate");
@@ -357,7 +386,7 @@ describe("TapOnElement VoiceOver mode", () => {
 
       const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
-      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
+      await tapOnElement.testHooks.executeIOSTapWithVoiceOver("tap", element, { x: 50, y: 50 }, 50);
 
       expect(coordinateFallbackCalls).toBe(1);
 

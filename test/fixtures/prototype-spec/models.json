@@ -520,11 +520,7 @@
   },
   "nodeMap": {
     "type": "map",
-    "camera": {
-      "lat": 37.77,
-      "lng": -122.42,
-      "zoom": 12
-    },
+    "camera": { "lat": 37.77, "lng": -122.42, "zoom": 12 },
     "markers": {
       "path": "/stops",
       "as": "stop",
@@ -533,21 +529,10 @@
       "lng": "{stop.lng}",
       "title": "{stop.name}"
     },
-    "onMarkerTap": [
-      {
-        "type": "setState",
-        "key": "text",
-        "value": "{stop.id}"
-      }
-    ]
+    "onMarkerTap": [{ "type": "setState", "key": "text", "value": "{stop.id}" }]
   },
-  "nodeVideoPlayer": {
-    "type": "videoPlayer",
-    "id": "clip",
-    "source": {
-      "sample": "countdown"
-    }
-  },
+  "nodeVideoPlayer": { "type": "videoPlayer", "id": "clip", "source": { "sample": "countdown" } },
+  "nodeCastButton": { "type": "castButton", "player": "main", "protocols": ["airplay"] },
   "nodeDialog": {
     "type": "dialog",
     "openWhen": {
@@ -936,7 +921,6 @@
     "into": "/data/response",
     "statusKey": "status",
     "via": "host",
-    "allowSecureInRequest": false,
     "timeoutMs": 1000,
     "onSuccess": [
       {

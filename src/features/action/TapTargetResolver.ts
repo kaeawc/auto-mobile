@@ -9,7 +9,7 @@ import {
   type StableTapTargetResult,
 } from "./androidStableTapTarget";
 import { pollSearchUntil } from "./searchUntilPoller";
-import { FocusVerifier } from "./tapFocusVerifier";
+import { FocusVerifier, type FocusVerificationHints } from "./tapFocusVerifier";
 import { readFreshPlatformHierarchy, returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
 import { POST_TAP_EFFECT_POLL_MS } from "./tapPostTapSettler";
 import { resolveSearchUntilDuration } from "./tapSharedHelpers";
@@ -230,13 +230,9 @@ export class TapTargetResolver {
     options: TapOnElementOptions,
     target: Element,
     observation?: ObserveResult,
-    labelText?: string,
-    selectedIndex?: number,
-    preTapHierarchy?: ViewHierarchyResult,
+    hints: FocusVerificationHints = {},
   ): boolean {
-    return this.host
-      .focusVerifier()
-      .verify(options, target, observation, labelText, selectedIndex, preTapHierarchy);
+    return this.host.focusVerifier().verify(options, target, observation, hints);
   }
 
   invisibleMatchFailure(

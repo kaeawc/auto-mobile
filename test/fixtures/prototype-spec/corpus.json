@@ -130,12 +130,14 @@
     "material-app-bar-dialog-pickers.json",
     "material-controls.json",
     "material-slider-chip-card.json",
+    "media-cast-button.json",
     "media-image-data-no-root-data.json",
     "media-image-data.json",
     "media-literal-id.json",
     "media-players.json",
     "media-repeat-asset.json",
     "media-tab-item-data.json",
+    "media-video-feed.json",
     "media-video-player-captions.json",
     "media-video-player-screen-named-data.json",
     "media-video-player.json",
@@ -1033,6 +1035,12 @@
     "media-captions-duplicate-id.json",
     "media-captions-reserved-hls-id.json",
     "media-captions-too-many.json",
+    "media-cast-button-bad-protocol.json",
+    "media-cast-button-duplicate-protocol.json",
+    "media-cast-button-empty-protocols.json",
+    "media-cast-button-no-player.json",
+    "media-cast-button-requires-undeclared.json",
+    "media-cast-button-unknown-player.json",
     "media-data-empty-object.json",
     "media-data-not-pointer.json",
     "media-data-not-string.json",
@@ -1056,6 +1064,11 @@
     "media-source-bad-url.json",
     "media-source-two-keys.json",
     "media-source-unknown-sample.json",
+    "media-video-feed-resume-not-boolean.json",
+    "media-video-feed-resume-without-autoplay.json",
+    "media-video-feed-threshold-over-one.json",
+    "media-video-feed-threshold-under-minimum.json",
+    "media-video-feed-threshold-without-when-visible.json",
     "media-video-player-bad-autoplay.json",
     "media-video-player-bad-content-scale.json",
     "media-video-player-both-sources.json",
@@ -1885,6 +1898,7 @@
     "strict-duplicate-envelope.json",
     "strict-duplicate-escaped-key.json",
     "strict-duplicate-opaque.json",
+    "strict-gate-media-cast-button.json",
     "strict-gate-media-video-player.json",
     "strict-gate-on-appear-prototype_timers_v1.json",
     "strict-gate-prepend-prototype_lazy_list_v1.json",
@@ -3290,6 +3304,12 @@
       "prototype_data_model_v1",
       "prototype_platform_commerce_v1",
       "prototype_platform_v1"
-    ]
+    ],
+    "media-cast-button.json": [
+      "prototype_platform_cast_v1",
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "media-video-feed.json": ["prototype_platform_media_v1", "prototype_platform_v1"]
   }
 }

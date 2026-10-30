@@ -291,6 +291,7 @@ There are no iOS prototype screenshot baselines to re-record.
 | button          | native   | material | —     |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
+| castButton      | material | material | —     |
 | chart           | material | material | —     |
 | checkbox        | material | material | —     |
 | chip            | material | material | —     |
@@ -2350,6 +2351,24 @@ pointer to an array of `{startMs, endMs, text}` cues that each end after they st
 unique per player; `hls:` ids are reserved for in-band HLS tracks. `media.setCaptions` (`player`,
 `track`, `""` for off) selects a track and `/platform/media/players/<id>/captionTrack` reports it.
 The cue parser and caption overlay are separate slices.
+
+**Feed autoplay.** A `videoPlayer` with
+`autoplay: "whenVisible"` may set `visibleThreshold` (0.1-1, default 0.6) and `resumePosition`;
+either field without `"whenVisible"` is an error. Feed players share at most
+`MAX_PROTOTYPE_ACTIVE_DECODERS` (3) decoders, allocated by a pure function that Kotlin and Swift
+both replay against `test/fixtures/prototype-media-pool`:
+
+- The anchor is the settled pager page, or else the most visible player, with ties going to the
+  topmost.
+- The window is the anchor, the next item and the previous item, in that order.
+- The anchor plays only in the foreground, and only when its page has settled or, in a list, when
+  it is at least `visibleThreshold` visible.
+- Other window players preload; held players outside the window are released.
+- When nothing is visible, every player is released.
+
+The allocator only decides which players play, preload or release. Each renderer reports visible
+fractions, the settled page and foreground state, binds pooled players to surfaces and preloads.
+
 **Queues (#14249, contract only).** A declared player takes exactly one of `source` or `queue`, a
 `/data` pointer to an array of `{id, title, artist?, album?, artwork?, source, durationMs?}` items
 with unique ids; `appendData` and `removeData` edit the queue at runtime. A queued player, and the
@@ -2383,8 +2402,12 @@ app) and `cast.setVolume` (`volume` 0-1, the remote device volume); play, pause 
 `sessionFailed` (data `reason`: `media_not_castable`, `play_services_unavailable`, `network` or
 `receiver`) and `remoteVolume`. `/platform/cast/state` is `unavailable`, `noDevices`, `notConnected`,
 `connecting` or `connected`, with `deviceName`, `protocol` (`googleCast` or `airplay`), `player` (the
-cast `media` player id) and `volume`. CtrlProxy never advertises the module; the `castButton` node is a
-separate slice.
+cast `media` player id) and `volume`. CtrlProxy never advertises the module.
+
+The `castButton` node is the system route picker that starts a session; there is no start call. Its
+required `player` names a declared `media.players` id or an inline `videoPlayer` id, and optional
+`protocols` (1-2 unique of `googleCast`, `airplay`) limits the routes it offers. Every `castButton`
+needs `cast` in `requires.platform`. No renderer draws it yet.
 
 **Haptics and sound (#14329).** The `haptics` module has one call,
 `haptics.perform` with `effect` one of `click`, `tick`, `heavyClick`, `doubleClick`, `selection`,

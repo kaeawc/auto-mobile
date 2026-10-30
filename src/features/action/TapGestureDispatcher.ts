@@ -19,6 +19,7 @@ import {
   Element,
   ElementSelectionResult,
   ObserveResult,
+  type Point,
   ViewHierarchyResult,
 } from "../../models";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
@@ -128,8 +129,7 @@ export class TapGestureDispatcher {
 
   async executeAndroidTap(
     action: string,
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
     element: Element,
     {
@@ -142,6 +142,7 @@ export class TapGestureDispatcher {
       isTalkBackEnabled?: boolean;
     } = {},
   ): Promise<ScreenReaderNavigationResult | undefined> {
+    const { x, y } = point;
     const { displayFence: fence, resolvedHierarchy, onActivationWarning } = options ?? {};
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled =
@@ -236,8 +237,7 @@ export class TapGestureDispatcher {
           : await this.host
               .talkBackStrategy()
               .executeCoordinateFallback(
-                x,
-                y,
+                { x, y },
                 action as "doubleTap" | "longPress",
                 durationMs,
                 driver,
@@ -375,8 +375,7 @@ export class TapGestureDispatcher {
       await dispatchAndroidCoordinateTap(
         this.host.accessibilityService(),
         this.host.adb(),
-        x,
-        y,
+        { x, y },
         10,
         { signal },
       );
@@ -439,10 +438,13 @@ export class TapGestureDispatcher {
     options: TapVerificationOptions,
     hierarchy: ViewHierarchyResult,
     action: string,
-    isTalkBackEnabled: boolean,
-    selection: ElementSelectionResult,
-    previousTarget: Element,
+    retry: {
+      isTalkBackEnabled: boolean;
+      selection: ElementSelectionResult;
+      previousTarget: Element;
+    },
   ): Element | null {
+    const { isTalkBackEnabled, selection, previousTarget } = retry;
     if (options.ensureChecked !== undefined) {
       return this.host.resolveEnsureCheckedRetryTarget(
         options,
@@ -471,14 +473,15 @@ export class TapGestureDispatcher {
     tapPoint: { x: number; y: number },
     action: string,
     longPressDuration: number,
-    tapElement: Element,
     {
+      tapElement,
       options,
       isTalkBackEnabled,
       screenSize,
       signal,
       selection,
     }: {
+      tapElement: Element;
       options: TapVerificationOptions & DisplayFenceOption;
       isTalkBackEnabled: boolean;
       screenSize: ObserveResult["screenSize"];
@@ -526,9 +529,7 @@ export class TapGestureDispatcher {
       retryOptions,
       probe.hierarchy,
       action,
-      isTalkBackEnabled,
-      refreshedSelection,
-      tapElement,
+      { isTalkBackEnabled, selection: refreshedSelection, previousTarget: tapElement },
     );
     if (!retryTarget) {
       return;
@@ -575,14 +576,11 @@ export class TapGestureDispatcher {
       await options.verification.dispatch(retryPoint);
       return;
     }
-    await this.host.executeAndroidTap(
-      action,
-      retryPoint.x,
-      retryPoint.y,
-      longPressDuration,
-      retryTarget,
-      { signal, options: { ...options, resolvedHierarchy: probe.hierarchy }, isTalkBackEnabled },
-    );
+    await this.host.executeAndroidTap(action, retryPoint, longPressDuration, retryTarget, {
+      signal,
+      options: { ...options, resolvedHierarchy: probe.hierarchy },
+      isTalkBackEnabled,
+    });
   }
 
   isScreenReaderNavigationEnabled(options?: TapOnElementOptions): boolean {
@@ -677,7 +675,7 @@ export class TapGestureDispatcher {
       // Long press: try ACTION_LONG_CLICK first, then coordinate gesture fallback
       const longPressResult = await this.host
         .talkBackStrategy()
-        .executeLongPress(x, y, durationMs, element, driver, {
+        .executeLongPress({ x, y }, durationMs, element, driver, {
           displayFence: fence,
           ...targetContext,
         });
@@ -769,7 +767,7 @@ export class TapGestureDispatcher {
         ? await this.host.talkBackStrategy().executePreciseTap(x, y, driver, fence)
         : await this.host
             .talkBackStrategy()
-            .executeCoordinateFallback(x, y, fallbackAction, durationMs, driver, {
+            .executeCoordinateFallback({ x, y }, fallbackAction, durationMs, driver, {
               displayFence: fence,
             });
 
@@ -795,14 +793,20 @@ export class TapGestureDispatcher {
 
   async executeiOSTap(
     action: string,
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
     element?: Element,
     { isVoiceOverEnabled, ...fenceOptions }: IosTapOptions & { isVoiceOverEnabled?: boolean } = {},
   ): Promise<void> {
+    const { x, y } = point;
     if (isVoiceOverEnabled && element) {
-      await this.host.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, fenceOptions);
+      await this.host.executeIOSTapWithVoiceOver(
+        action,
+        element,
+        { x, y },
+        durationMs,
+        fenceOptions,
+      );
       return;
     }
 
@@ -824,13 +828,13 @@ export class TapGestureDispatcher {
 
     if (action === "doubleTap") {
       fence?.assertCurrent();
-      await dispatchIosDoubleTap(client, x, y, tapDuration, undefined, { signal });
+      await dispatchIosDoubleTap(client, { x, y }, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.host.device().deviceId)?.invalidateCache();
     } else {
       // Single tap or long press
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
+      await dispatchIosCoordinateTap(client, { x, y }, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.host.device().deviceId)?.invalidateCache();
     }
   }
@@ -838,11 +842,11 @@ export class TapGestureDispatcher {
   executeIOSTapWithVoiceOver(
     action: string,
     element: Element,
-    x: number,
-    y: number,
+    point: Point,
     durationMs: number,
     fenceOptions?: IosTapOptions,
   ): Promise<void> {
+    const { x, y } = point;
     return tapViaVoiceOver({
       device: this.host.device(),
       action,

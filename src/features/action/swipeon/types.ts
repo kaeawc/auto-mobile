@@ -1,6 +1,6 @@
 import type { AndroidCtrlProxyClient } from "../../observe/android";
 import type { TalkBackSwipeCtrlProxy } from "./TalkBackSwipeExecutor";
-import type { FencedGestureOptions } from "../ExecuteGesture";
+import type { FencedGestureOptions, SwipeLine } from "../ExecuteGesture";
 import type { ActionCall } from "../ActionCall";
 import type { Timer } from "../../../utils/SystemTimer";
 import {
@@ -99,14 +99,7 @@ export interface OverlayAnalyzer {
 }
 
 export interface GestureExecutor {
-  swipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    options?: FencedGestureOptions,
-    call?: ActionCall,
-  ): Promise<SwipeResult>;
+  swipe(line: SwipeLine, options?: FencedGestureOptions, call?: ActionCall): Promise<SwipeResult>;
 }
 
 export interface ScrollAccessibilityService {

@@ -167,10 +167,7 @@ test.each(ownerCommands)(
             ? executeTouchscreenInput(adb, "swipe 10 20 30 40 100", 2, owner.signal)
             : command === ownerCommands[2]
               ? new ExecuteGesture(device, adb, timer).swipe(
-                  10,
-                  20,
-                  30,
-                  40,
+                  { x1: 10, y1: 20, x2: 30, y2: 40 },
                   { duration: 100 },
                   { signal: owner.signal },
                 )

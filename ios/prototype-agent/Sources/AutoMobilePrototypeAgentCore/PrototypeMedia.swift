@@ -44,6 +44,21 @@ enum PrototypeMedia {
         }
     }
 
+    /// Throws at the first `castButton` node rule a spec breaks (#14239): it needs `cast` in
+    /// `requires.platform` and its `player` names a declared or inline media player.
+    static func validateCastButtons(_ spec: [String: JSONValue], nodes: [PrototypeLocatedValue]) throws {
+        let cast = PrototypeContractValidator.strings(spec["requires"]?.objectFields?["platform"]).contains("cast")
+        let known = players(spec["media"]).union(spec["root"].map(inlinePlayers) ?? [])
+        for node in nodes where node.value["type"] == .string("castButton") {
+            guard cast else {
+                throw PrototypeLimits.violation(node.path, "castButton requires cast in requires.platform")
+            }
+            if let player = node.value["player"]?.stringValue, !known.contains(player) {
+                throw PrototypeLimits.violation("\(node.path).player", "Unknown media player")
+            }
+        }
+    }
+
     private static func validateNode(
         _ node: [String: JSONValue], path: String, declared: Set<String>, media: Bool, state: [String: JSONValue]
     ) throws {
@@ -70,6 +85,15 @@ enum PrototypeMedia {
                     "\(path).positionKey", "positionKey must name a declared number state key"
                 )
             }
+        }
+        try validateFeedFields(node, path: path)
+    }
+
+    /// `visibleThreshold` and `resumePosition` tune `autoplay: "whenVisible"` only (#14258).
+    private static func validateFeedFields(_ node: [String: JSONValue], path: String) throws {
+        guard node["autoplay"] != .string("whenVisible") else { return }
+        if let field = ["visibleThreshold", "resumePosition"].first(where: { node[$0] != nil }) {
+            throw PrototypeLimits.violation("\(path).\(field)", "\(field) needs autoplay whenVisible")
         }
     }
 

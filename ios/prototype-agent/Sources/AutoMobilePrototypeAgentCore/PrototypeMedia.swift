@@ -44,6 +44,21 @@ enum PrototypeMedia {
         }
     }
 
+    /// Throws at the first `castButton` node rule a spec breaks (#14239): it needs `cast` in
+    /// `requires.platform` and its `player` names a declared or inline media player.
+    static func validateCastButtons(_ spec: [String: JSONValue], nodes: [PrototypeLocatedValue]) throws {
+        let cast = PrototypeContractValidator.strings(spec["requires"]?.objectFields?["platform"]).contains("cast")
+        let known = players(spec["media"]).union(spec["root"].map(inlinePlayers) ?? [])
+        for node in nodes where node.value["type"] == .string("castButton") {
+            guard cast else {
+                throw PrototypeLimits.violation(node.path, "castButton requires cast in requires.platform")
+            }
+            if let player = node.value["player"]?.stringValue, !known.contains(player) {
+                throw PrototypeLimits.violation("\(node.path).player", "Unknown media player")
+            }
+        }
+    }
+
     private static func validateNode(
         _ node: [String: JSONValue], path: String, declared: Set<String>, media: Bool, state: [String: JSONValue]
     ) throws {

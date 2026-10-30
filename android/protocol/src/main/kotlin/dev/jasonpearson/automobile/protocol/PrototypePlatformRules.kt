@@ -76,6 +76,7 @@ internal object PrototypePlatformRules {
       PrototypeMedia::videoPlayerError,
       PrototypeMap::error,
       PrototypeMediaCaptions::error,
+      PrototypeMedia::castButtonError,
       { root, _ -> requiresError(root) },
     )
 

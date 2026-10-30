@@ -8,6 +8,7 @@ import { prototypeLinksArgumentsError } from "./prototypeLinks";
 import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
 import { prototypeMediaQueueError, prototypeMediaQueueFields } from "./prototypeMediaQueue";
 import {
+  prototypeCastButtonError,
   prototypeMediaCallError,
   prototypeMediaError,
   prototypeMediaPlayers,
@@ -660,6 +661,7 @@ const ROOT_BLOCK_CHECKS: readonly ((
   prototypeVideoPlayerError,
   prototypeMapError,
   prototypeMediaCaptionsError,
+  prototypeCastButtonError,
   requiresError,
 ];
 

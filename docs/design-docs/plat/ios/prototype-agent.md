@@ -25,6 +25,7 @@ use native controls. No rendering changes accompany this default.
 | button          | native   | material | —     |
 | card            | material | material | —     |
 | carousel        | neutral  | neutral  | —     |
+| castButton      | material | material | —     |
 | chart           | material | material | —     |
 | checkbox        | material | material | —     |
 | chip            | material | material | —     |

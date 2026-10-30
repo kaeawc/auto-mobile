@@ -81,7 +81,25 @@ const videoPlayerShape = {
   captions: z.array(prototypeMediaCaptionSchema).min(1).max(8).optional(),
 };
 
-/** The `videoPlayer` node schema: the shared node fields plus its own. */
-export function prototypeVideoPlayerSchema<T extends z.ZodRawShape>(common: T) {
-  return z.object({ ...common, ...videoPlayerShape }).strict();
+/**
+ * The `castButton` node's own fields (#14239): the system route picker for a declared or inline
+ * `player` (checked in `prototypeCastButton.ts`), optionally limited to some protocols.
+ */
+const castButtonShape = {
+  type: z.enum(["castButton"]),
+  player: keySchema,
+  protocols: z
+    .array(z.enum(["googleCast", "airplay"]))
+    .min(1)
+    .max(2)
+    .refine((protocols) => new Set(protocols).size === protocols.length)
+    .optional(),
+};
+
+/** The media node schemas (`videoPlayer`, `castButton`): the shared node fields plus their own. */
+export function prototypeMediaNodeSchemas<T extends z.ZodRawShape>(common: T) {
+  return [
+    z.object({ ...common, ...videoPlayerShape }).strict(),
+    z.object({ ...common, ...castButtonShape }).strict(),
+  ] as const;
 }

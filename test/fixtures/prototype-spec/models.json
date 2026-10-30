@@ -532,6 +532,7 @@
     "onMarkerTap": [{ "type": "setState", "key": "text", "value": "{stop.id}" }]
   },
   "nodeVideoPlayer": { "type": "videoPlayer", "id": "clip", "source": { "sample": "countdown" } },
+  "nodeCastButton": { "type": "castButton", "player": "main", "protocols": ["airplay"] },
   "nodeDialog": {
     "type": "dialog",
     "openWhen": {

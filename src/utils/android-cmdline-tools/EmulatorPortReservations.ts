@@ -261,6 +261,9 @@ export function resetEmulatorLaunchReservations(): void {
   state.inFlightAvdLaunches.clear();
   state.unreservedLaunchAvdNames.clear();
   state.terminalReservationGeneration = 0;
+  for (const lease of state.grpcLeasesByChild.values()) {
+    lease.release();
+  }
   state.grpcLeasesByChild.clear();
 }
 

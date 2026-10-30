@@ -4,6 +4,7 @@ import type { EmulatorGrpcPortRegistry } from "../../src/utils/android-cmdline-t
 /** Separate registry views can share one store without sharing reservation module state. */
 export class FakeEmulatorGrpcPortRegistry implements EmulatorGrpcPortRegistry {
   readonly claims: number[] = [];
+  readonly releasedPorts: number[] = [];
   readonly failures = new Map<number, Error>();
 
   constructor(private readonly store = new Map<number, object>()) {}
@@ -28,6 +29,7 @@ export class FakeEmulatorGrpcPortRegistry implements EmulatorGrpcPortRegistry {
       release: () => {
         if (this.store.get(port) === owner) {
           this.store.delete(port);
+          this.releasedPorts.push(port);
         }
       },
     };

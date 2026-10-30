@@ -133,6 +133,22 @@ describe("DefaultEmulatorPortReservations.reserveEmulatorGrpcPort", () => {
     expect((await reservations.reserveEmulatorGrpcPort()).port).toBe(EMULATOR_GRPC_PORT_FIRST);
   });
 
+  test("reset releases a tracked lease even when its child never exits", async () => {
+    const registry = new FakeEmulatorGrpcPortRegistry();
+    const reservations = reservationsWithHostPorts(new FakePortAvailabilityChecker(), registry);
+    const lease = await reservations.reserveEmulatorGrpcPort();
+    expect(lease.port).toBe(8554);
+    reservations.trackEmulatorGrpcLease(new FakeChildProcess(), lease);
+
+    resetEmulatorLaunchReservations();
+
+    const fresh = reservationsWithHostPorts(new FakePortAvailabilityChecker(), registry);
+    expect((await fresh.reserveEmulatorGrpcPort()).port).toBe(8554);
+    expect(registry.releasedPorts).toEqual([8554]);
+    resetEmulatorLaunchReservations();
+    expect(registry.releasedPorts).toEqual([8554]);
+  });
+
   test("fails with an actionable error when every candidate port is taken", async () => {
     const taken = new Set<number>();
     for (let port = EMULATOR_GRPC_PORT_FIRST; port <= EMULATOR_GRPC_PORT_LAST; port += 1) {
@@ -165,6 +181,24 @@ describe("FileEmulatorGrpcPortRegistry", () => {
       });
     return { files, alive, directory, view };
   }
+
+  test("reset releases every tracked file-backed lock without child exit", async () => {
+    const { files, directory, view } = harness();
+    const reservations = reservationsWithHostPorts(new FakePortAvailabilityChecker(), view());
+    for (const port of [8554, 8555]) {
+      const lease = await reservations.reserveEmulatorGrpcPort();
+      expect(lease.port).toBe(port);
+      reservations.trackEmulatorGrpcLease(new FakeChildProcess(), lease);
+      expect(files.exists(`${directory}/${port}.lock`)).toBe(true);
+    }
+
+    resetEmulatorLaunchReservations();
+
+    expect(files.exists(`${directory}/8554.lock`)).toBe(false);
+    expect(files.exists(`${directory}/8555.lock`)).toBe(false);
+    const fresh = reservationsWithHostPorts(new FakePortAvailabilityChecker(), view());
+    expect((await fresh.reserveEmulatorGrpcPort()).port).toBe(8554);
+  });
 
   test("reservation instances sharing a directory get consecutive ports across module resets", async () => {
     const { view } = harness();

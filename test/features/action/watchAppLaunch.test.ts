@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { describe, expect, test } from "bun:test";
 import { WatchAppManager } from "../../../src/features/action/watch/WatchAppManager";
 import { PACKAGE_NOT_INSTALLED_ERROR } from "../../../src/features/action/LaunchPackageRemovedError";
@@ -28,8 +29,8 @@ async function arrange({ install = true } = {}) {
   const removed: string[] = [];
   const apps = new WatchAppManager(watch, simctl, plist, undefined, {
     containerOwnership: simulatorOwnership,
-    rm: async (path) => {
-      removed.push(String(path));
+    rm: async (target) => {
+      removed.push(String(target));
     },
   });
   if (install) {
@@ -98,7 +99,7 @@ describe("WatchAppManager launch", () => {
 
     const container = simulatorDataContainer(UDID);
     expect(removed.sort()).toEqual(
-      ["Documents", "Library", "tmp"].map((folder) => `${container}/${folder}`),
+      ["Documents", "Library", "tmp"].map((folder) => path.join(container, folder)),
     );
     // The strict stop, then the wipe backend's own (lenient) terminate finding nothing to stop.
     expect(simctl.commands.slice(1)).toEqual([
@@ -124,6 +125,25 @@ describe("WatchAppManager launch", () => {
 
     expect(result).toMatchObject({ success: false, packageName: BUNDLE });
     expect(result.error).toContain("EACCES: permission denied");
+    expect(simctl.commands.some((command) => command.startsWith("launch"))).toBe(false);
+  });
+
+  test("a call cancelled while its data container is resolved wipes nothing and launches nothing", async () => {
+    const { simctl, apps, removed } = await arrange();
+    const controller = new AbortController();
+    const lookup = simctl.executeCommandArgs.bind(simctl);
+    simctl.executeCommandArgs = async (args) => {
+      const result = await lookup(args);
+      controller.abort(new Error("caller cancelled"));
+      return result;
+    };
+
+    const error = await rejection(
+      apps.launch(BUNDLE, { ...LAUNCH, clearAppData: true, signal: controller.signal }),
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(removed).toEqual([]);
     expect(simctl.commands.some((command) => command.startsWith("launch"))).toBe(false);
   });
 

@@ -216,7 +216,7 @@ export class WatchAppManager {
     const cleared = await new SimulatorIosClearDataBackend(deviceId, {
       ...this.dataWipe,
       simctl: this.simctl,
-    }).clearAppData(appId);
+    }).clearAppData(appId, call.signal);
     return cleared.success
       ? undefined
       : {

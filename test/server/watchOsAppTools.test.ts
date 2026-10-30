@@ -31,6 +31,7 @@ import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWatchAppsSimctl, FakeWatchBundleIds } from "../fakes/FakeWatchApps";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import * as path from "node:path";
 import { simulatorDataContainer, simulatorOwnership } from "../helpers/simulatorContainerFixture";
 import { toolJson } from "../helpers/toolResponse";
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
@@ -161,8 +162,8 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     const wiped: string[] = [];
     const dataWipe = {
       containerOwnership: simulatorOwnership,
-      rm: async (path: unknown) => {
-        wiped.push(String(path));
+      rm: async (target: unknown) => {
+        wiped.push(String(target));
       },
     };
     registerAppTools({
@@ -315,8 +316,8 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     );
     expect(cleared).toMatchObject({ success: true, packageName: BUNDLE });
     expect(wiped.sort()).toEqual(
-      ["Documents", "Library", "tmp"].map(
-        (folder) => `${simulatorDataContainer(watch.deviceId)}/${folder}`,
+      ["Documents", "Library", "tmp"].map((folder) =>
+        path.join(simulatorDataContainer(watch.deviceId), folder),
       ),
     );
 

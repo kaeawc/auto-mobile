@@ -11,6 +11,7 @@ import type {
 } from "./AndroidDeviceInventoryScanner";
 import type { AndroidEmulatorReadinessOptions } from "./AndroidEmulatorClient";
 import type { AdbDeviceState } from "./interfaces/AdbExecutor";
+import type { EmulatorOfflineRecovery } from "./EmulatorOfflineRecovery";
 import type { TargetReadinessState } from "./emulatorReadinessEvaluation";
 
 export interface OfflineTracker {
@@ -76,21 +77,9 @@ export interface EmulatorReadinessHost {
   getLaunchTargetDeviceId(childProcess?: ChildProcess | null): string | undefined;
   captureLaunchTargetDeviceId(childProcess: ChildProcess, output: string): void;
   maybeRecoverFreshOffline(
-    tracker: OfflineTracker,
-    options: AndroidEmulatorReadinessOptions | undefined,
-    deviceId: string | undefined,
-    startTime: number,
-    timeoutMs: number,
-    context: { avdName: string; signal: AbortSignal | undefined },
+    ...args: Parameters<EmulatorOfflineRecovery["maybeRecoverFreshOffline"]>
   ): Promise<void>;
-  nextPollingDelayMs(
-    tracker: OfflineTracker,
-    options: AndroidEmulatorReadinessOptions | undefined,
-    deviceId: string | undefined,
-    now: number,
-    pollingIntervalMs: number,
-    remainingPollingTimeMs: number,
-  ): number;
+  nextPollingDelayMs(...args: Parameters<EmulatorOfflineRecovery["nextPollingDelayMs"]>): number;
   getBootedDevicesWithDiagnostics(
     onlyEmulators?: boolean,
     options?: BootedDeviceScanOptions,
@@ -114,14 +103,19 @@ export interface EmulatorReadinessHost {
   classifyEmulatorExitOutput(output: string): ActionableError | null;
 }
 
+/** Cancellation and post-readiness behaviour for one readiness wait. */
+export interface EmulatorReadyWait {
+  signal?: AbortSignal;
+  options?: AndroidEmulatorReadinessOptions;
+}
+
 export interface EmulatorReadinessPoller {
   waitForEmulatorReady(
     avdName: string,
     timeoutMs?: number,
     childProcess?: ChildProcess | null,
     targetDeviceId?: string,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    wait?: EmulatorReadyWait,
   ): Promise<BootedDevice>;
   wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void>;
   detectOfflineFailure(

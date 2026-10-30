@@ -8,6 +8,7 @@ import {
   parseConsoleAcknowledgement,
   RealEmulatorConsoleClient,
   EmulatorConsoleTransport,
+  type EmulatorConsoleExecuteOptions,
   AVD_SNAPSHOT_CONSOLE_TIMEOUT_MS,
 } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 
@@ -28,8 +29,7 @@ class RecordingTransport implements EmulatorConsoleTransport {
     port: number,
     authToken: string | null,
     commands: string[],
-    signal?: AbortSignal,
-    timeoutMs?: number,
+    { signal, timeoutMs }: EmulatorConsoleExecuteOptions = {},
   ): Promise<string> {
     this.calls.push({ host, port, authToken, commands, signal, timeoutMs });
     if (this.failWith) {
@@ -392,13 +392,9 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
     const socket = new FakeSocket();
     const timer = new FakeTimer();
     const controller = new AbortController();
-    const pending = makeTransport(socket, timer).execute(
-      "localhost",
-      5554,
-      null,
-      ["geo fix 1 2"],
-      controller.signal,
-    );
+    const pending = makeTransport(socket, timer).execute("localhost", 5554, null, ["geo fix 1 2"], {
+      signal: controller.signal,
+    });
     controller.abort();
     await expect(pending).rejects.toThrow("cancelled");
     expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -464,8 +460,7 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
       5554,
       null,
       ["avd snapshot save fixture"],
-      undefined,
-      30_000,
+      { timeoutMs: 30_000 },
     );
     timer.advanceTime(5000);
     expect(socket.destroyed).toBe(false);

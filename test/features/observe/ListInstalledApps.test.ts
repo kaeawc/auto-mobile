@@ -560,6 +560,45 @@ describe("ListInstalledApps", function () {
         expect(byName("com.android.contacts")?.launchable).toBe(false);
       });
 
+      test("a TV tops up cached rows: a LEANBACK-only package is launchable on a cache hit", async function () {
+        const tv = { ...mockDevice, formFactor: "tv" } as BootedDevice;
+        const repo = new FakeInstalledAppsRepository();
+        const timer = new FakeTimer();
+        timer.advanceTime(1000);
+        const now = timer.now();
+        await repo.replaceInstalledApps(tv.deviceId, [
+          {
+            device_id: tv.deviceId,
+            user_id: 0,
+            package_name: "com.android.tv.settings",
+            is_system: 1,
+            installed_at: now,
+            last_verified_at: now,
+            profile_type: "primary",
+          },
+          {
+            device_id: tv.deviceId,
+            user_id: 0,
+            package_name: "com.android.contacts",
+            is_system: 1,
+            installed_at: now,
+            last_verified_at: now,
+            profile_type: "primary",
+          },
+        ]);
+
+        const cached = new ListInstalledApps(tv, new FakeAdbClientFactory(fakeAdb), null, {
+          cacheEnabled: true,
+          installedAppsRepository: repo,
+          timer,
+        });
+        const result = await cached.executeDetailed();
+
+        const byName = (name: string) => result.system.find((app) => app.packageName === name);
+        expect(byName("com.android.tv.settings")?.launchable).toBe(true);
+        expect(byName("com.android.contacts")?.launchable).toBe(false);
+      });
+
       test("a phone never queries LEANBACK_LAUNCHER", async function () {
         const phone = { ...mockDevice, formFactor: "phone" } as BootedDevice;
 

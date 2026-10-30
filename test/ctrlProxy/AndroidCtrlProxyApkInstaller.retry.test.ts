@@ -61,6 +61,9 @@ class FakeInstallerHost implements AndroidCtrlProxyApkInstallerHost {
     }
     return next;
   }
+  async grantPostInstallPermissions(): Promise<void> {
+    await this.grantLocalNetworkAfterInstall();
+  }
   async grantLocalNetworkAfterInstall(): Promise<void> {
     this.events.push("grant");
     if (this.grantError) {

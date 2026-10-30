@@ -65,7 +65,7 @@ export interface AndroidCtrlProxyCompatibilityHost {
   consumeCompletedPrefetchedApk(destinationPath: string): Promise<boolean>;
   clearAvailabilityCache(): void;
   executeApkStage(command: string, stage: string): Promise<ExecResult>;
-  grantLocalNetworkAfterInstall(): Promise<void>;
+  grantPostInstallPermissions(): Promise<void>;
   install(apkPath: string): Promise<void>;
   enable(): Promise<void>;
   readonly savedPrototypes: SavedPrototypeService;
@@ -518,7 +518,7 @@ export class AndroidCtrlProxyCompatibility {
       perf.endOperation("installApk");
       logger.info("[CTRL_PROXY] APK upgraded successfully");
       this.host.clearAvailabilityCache();
-      await this.host.grantLocalNetworkAfterInstall();
+      await this.host.grantPostInstallPermissions();
       return {
         ...result,
         status: "upgraded",

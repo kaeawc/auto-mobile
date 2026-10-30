@@ -10,6 +10,11 @@ import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { parseBroadcastOutput } from "../intent/SendBroadcast";
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
+import {
+  grantRecordAudioPermission,
+  RECORD_AUDIO_PERMISSION,
+} from "../../ctrlProxy/grantRecordAudioPermission";
+import { parseAndroidRuntimePermissions } from "../action/parseAndroidRuntimePermissions";
 
 export interface GuestAudioCaptureHandle {
   close(): Promise<void>;
@@ -40,7 +45,7 @@ function unavailable(deviceId: string, detail: string): EmulatorAudioError {
     "audio_guest_capture_unavailable",
     `Cannot verify an open guest microphone capture on ${deviceId}: ${detail}. ` +
       "Injection was refused to protect the emulator. The guest microphone capture is provided " +
-      "by the CtrlProxy app; its RECORD_AUDIO permission is granted at install. " +
+      "by the CtrlProxy app. " +
       "Stop competing recordings and retry. AutoMobile does not enable adb root.",
   );
 }
@@ -189,6 +194,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     };
     try {
       emulatorPid = await this.emulatorPidFor(deviceId);
+      await this.ensureRecordAudioPermission(adb, deadline);
       lease = this.ids.next();
       if (!lease || /[\r\n\0]/.test(lease)) {
         throw unavailable(deviceId, "the capture lease is invalid");
@@ -221,6 +227,53 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       throw error instanceof EmulatorAudioError
         ? error
         : unavailable(deviceId, errorMessage(error));
+    }
+  }
+
+  private async ensureRecordAudioPermission(
+    adb: Pick<AdbExecutor, "execute">,
+    deadline: number,
+  ): Promise<void> {
+    try {
+      const timeout = () => {
+        const remaining = deadline - this.now();
+        if (remaining <= 0) {
+          throw new Error("permission verification deadline expired");
+        }
+        return Math.min(BROADCAST_TIMEOUT_MS, remaining);
+      };
+      const isGranted = async () => {
+        const result = await adb.execute(["shell", "dumpsys", "package", CTRL_PROXY_PACKAGE], {
+          noRetry: true,
+          timeoutMs: timeout(),
+        });
+        if (result.error) {
+          throw new Error(result.error);
+        }
+        timeout();
+        return (
+          parseAndroidRuntimePermissions(result.stdout, CTRL_PROXY_PACKAGE)?.runtimePermissions.get(
+            RECORD_AUDIO_PERMISSION,
+          )?.state === "granted"
+        );
+      };
+      if (await isGranted()) {
+        return;
+      }
+      // Match the guest broadcast's default user, rather than the automotive setup user.
+      const grant = await grantRecordAudioPermission(adb, undefined, timeout());
+      if (!grant.granted) {
+        throw new Error(grant.reason);
+      }
+      if (!(await isGranted())) {
+        throw new Error("the runtime permission remains ungranted after pm grant");
+      }
+    } catch (error) {
+      throw new EmulatorAudioError(
+        "audio_record_permission_not_granted",
+        `${RECORD_AUDIO_PERMISSION} is not granted to ${CTRL_PROXY_PACKAGE}: ${errorMessage(error)}. ` +
+          `Run: adb shell pm grant ${CTRL_PROXY_PACKAGE} ${RECORD_AUDIO_PERMISSION}`,
+      );
     }
   }
 

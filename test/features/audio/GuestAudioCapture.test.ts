@@ -14,7 +14,22 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { EmulatorAudioService } from "../../../src/features/audio/EmulatorAudioService";
 import { FakeEmulatorAudioSession } from "../../fakes/FakeEmulatorAudioSession";
+import { EmulatorAudioError } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
 
+const PACKAGE = "dev.jasonpearson.automobile.ctrlproxy";
+const PERMISSION = "android.permission.RECORD_AUDIO";
+const DUMP_COMMAND = `shell dumpsys package ${PACKAGE}`;
+const GRANT_COMMAND = `shell pm grant ${PACKAGE} ${PERMISSION}`;
+const permissionDump = (granted: boolean) =>
+  createExecResult(
+    `Packages:
+  Package [${PACKAGE}] (123):
+    User 0: installed=true
+      runtime permissions:
+        ${PERMISSION}: granted=${granted}, flags=[]
+`,
+    "",
+  );
 const COMPONENT = "dev.jasonpearson.automobile.ctrlproxy/.GuestAudioCaptureReceiver";
 const ACTION = "dev.jasonpearson.automobile.GUEST_AUDIO_CAPTURE";
 const reply = (state: string) =>
@@ -23,6 +38,7 @@ function setup(options: GuestAudioCaptureOptions = {}) {
   const adb = new FakeAdbExecutor();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
+  adb.setCommandResponse(DUMP_COMMAND, permissionDump(true));
   adb.setCommandResponse("--es op start", reply("running"));
   adb.setCommandResponse("--es op status", reply("running"));
   adb.setCommandResponse("--es op stop", reply("stopped"));
@@ -50,17 +66,68 @@ describe("AdbGuestAudioCapture", () => {
     const handle = await capture.open("emulator-5554", { leaseMs: 3_720_000 });
     await handle.close();
     const commands = adb.getExecutedCommands();
-    expect(commands[0]).toContain("--el leaseTimeoutMs 3720000");
-    const subsequent = commands.slice(1);
+    expect(commands[1]).toContain("--el leaseTimeoutMs 3720000");
+    const subsequent = commands.slice(2);
     expect(subsequent.some((command) => command.includes("--es op status"))).toBe(true);
     expect(subsequent.some((command) => command.includes("--es op stop"))).toBe(true);
     expect(subsequent.every((command) => !command.includes("leaseTimeoutMs"))).toBe(true);
   });
 
+  test("already granted RECORD_AUDIO is checked before start without a grant command", async () => {
+    const { adb, capture } = setup();
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
+    expect(adb.getExecutedCommands()[0]).toBe(DUMP_COMMAND);
+    expect(adb.getExecutedCommands()[1]).toContain("--es op start");
+    expect(adb.wasCommandExecuted(GRANT_COMMAND)).toBe(false);
+    await handle.close();
+  });
+
+  test("grants missing RECORD_AUDIO and verifies it again before start", async () => {
+    const { adb, capture } = setup();
+    adb.setCommandResponseSequence(DUMP_COMMAND, [permissionDump(false), permissionDump(true)]);
+    const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
+    expect(adb.getExecutedCommands().slice(0, 3)).toEqual([
+      DUMP_COMMAND,
+      GRANT_COMMAND,
+      DUMP_COMMAND,
+    ]);
+    expect(adb.getExecutedCommands()[3]).toContain("--es op start");
+    for (const call of adb.getCommandCalls().slice(0, 3)) {
+      expect(call.noRetry).toBe(true);
+      expect(call.timeoutMs).toBeGreaterThan(0);
+      expect(call.timeoutMs).toBeLessThanOrEqual(2_000);
+    }
+    await handle.close();
+  });
+
+  test.each(["transport", "unknown permission", "still denied", "unreadable state"])(
+    "%s refuses injection with a typed RECORD_AUDIO error before any broadcast",
+    async (failure) => {
+      const { adb, capture } = setup();
+      adb.setCommandResponse(DUMP_COMMAND, permissionDump(false));
+      if (failure === "transport") {
+        adb.setCommandError(GRANT_COMMAND, new Error("transport reset"));
+      } else if (failure === "unknown permission") {
+        adb.setCommandResponse(GRANT_COMMAND, createExecResult("", "Unknown permission"));
+        // A failed command must refuse even if a later read would report a grant.
+        adb.setCommandResponseSequence(DUMP_COMMAND, [permissionDump(false), permissionDump(true)]);
+      } else if (failure === "unreadable state") {
+        adb.setCommandError(DUMP_COMMAND, new Error("cannot read package"));
+      }
+      const opening = capture.open("emulator-5554", { leaseMs: 60_000 });
+      await expect(opening).rejects.toBeInstanceOf(EmulatorAudioError);
+      await expect(opening).rejects.toMatchObject({
+        code: "audio_record_permission_not_granted",
+        message: expect.stringContaining(`adb shell pm grant ${PACKAGE} ${PERMISSION}`),
+      });
+      expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+    },
+  );
+
   test("opens the explicit ordered broadcast and verifies the default settle window", async () => {
     const { adb, timer, capture } = setup();
     const handle = await capture.open("emulator-5554", { leaseMs: 60_000 });
-    expect(adb.getExecutedCommands()[0]).toBe(
+    expect(adb.getExecutedCommands()[1]).toBe(
       `shell am broadcast -n ${COMPONENT} -a ${ACTION} --es op start --es lease capture-1 --el leaseTimeoutMs 60000`,
     );
     expect(timer.monotonicNow()).toBe(3_000);
@@ -195,6 +262,7 @@ describe("AdbGuestAudioCapture", () => {
       }
     }
     const adb = new SlowAdb();
+    adb.setCommandResponse(DUMP_COMMAND, permissionDump(true));
     adb.setCommandResponse("--es op start", reply("running"));
     adb.setCommandResponse("--es op stop", reply("stopped"));
     const capture = new AdbGuestAudioCapture(
@@ -219,9 +287,11 @@ describe("AdbGuestAudioCapture", () => {
     }
     expect(error.message).toContain(`failed ${"x".repeat(2_000)}`);
     expect(error.message.length).toBeLessThan(2_600);
-    expect(adb.getExecutedCommands().every((command) => command.includes("am broadcast"))).toBe(
-      true,
-    );
+    expect(
+      adb
+        .getExecutedCommands()
+        .every((command) => command === DUMP_COMMAND || command.includes("am broadcast")),
+    ).toBe(true);
   });
 
   test("transport failures clean up without replacing the original error", async () => {
@@ -245,6 +315,7 @@ describe("AdbGuestAudioCapture", () => {
       }
     }
     const adb = new FailedStatusAdb();
+    adb.setCommandResponse(DUMP_COMMAND, permissionDump(true));
     adb.setCommandResponse("--es op start", reply("running"));
     adb.setCommandResponse("--es op stop", reply("stopped"));
     const capture = new AdbGuestAudioCapture(

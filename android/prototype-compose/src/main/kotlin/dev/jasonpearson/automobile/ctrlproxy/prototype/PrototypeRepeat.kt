@@ -756,6 +756,14 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     // Contract only (#14309): no renderer draws a map yet.
     is PrototypeMapNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeCameraPreviewNode ->
       copy(
         semantics = semantics,

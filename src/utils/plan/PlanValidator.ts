@@ -280,14 +280,10 @@ export class PlanValidator {
         ? effectiveOwner
         : undefined;
     for (let j = 0; j < subSteps.length; j++) {
-      this.recordCriticalSectionSubstepLabel(
-        subSteps[j],
-        i,
-        j,
+      this.recordCriticalSectionSubstepLabel(subSteps[j], i, j, labelErrors, {
         deviceSet,
-        labelErrors,
         ownerDevice,
-      );
+      });
     }
   }
 
@@ -295,9 +291,8 @@ export class PlanValidator {
     sub: unknown,
     i: number,
     j: number,
-    deviceSet: Set<string>,
     labelErrors: DeviceLabelErrors,
-    ownerDevice: string | undefined,
+    { deviceSet, ownerDevice }: { deviceSet: Set<string>; ownerDevice: string | undefined },
   ): void {
     if (!sub || typeof sub !== "object") {
       return;

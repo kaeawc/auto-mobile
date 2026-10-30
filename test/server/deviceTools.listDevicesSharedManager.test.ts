@@ -91,8 +91,7 @@ describe("listDevices default device manager (#11063)", () => {
         new FakeSimctl() as never,
         createFakeAndroidEmulator(),
         new InMemoryVirtualDeviceLifecycleCoordinator(timer),
-        timer,
-        lister,
+        { timer, physicalIosDevices: lister },
       ),
     );
   });

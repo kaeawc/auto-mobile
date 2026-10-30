@@ -339,7 +339,7 @@ describe("WebRtcStreamSocketServer", () => {
         },
         undefined,
         undefined,
-        timer,
+        { timer },
       ),
     ).rejects.toThrow("No connected android devices found.");
     expect(calls).toBe(1);
@@ -357,7 +357,7 @@ describe("WebRtcStreamSocketServer", () => {
       },
       undefined,
       "ios",
-      timer,
+      { timer },
     );
     expect(device).toBe(IOS);
     expect(calls).toBe(3);
@@ -373,7 +373,7 @@ describe("WebRtcStreamSocketServer", () => {
         },
         undefined,
         "ios",
-        timer,
+        { timer },
       ),
     ).rejects.toThrow(/No connected ios devices found/);
   });
@@ -385,8 +385,7 @@ describe("WebRtcStreamSocketServer", () => {
       { getBootedDevices: async () => [] },
       undefined,
       "ios",
-      timer,
-      controller.signal,
+      { timer, signal: controller.signal },
     );
     while (timer.getPendingTimeoutCount() === 0) {
       await Promise.resolve();

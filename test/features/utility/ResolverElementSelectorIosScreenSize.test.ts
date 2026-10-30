@@ -81,8 +81,7 @@ test("observe identification projects an unstamped Duo tree with the device flag
     issue8379SelectionHierarchy(),
     "cached-ok",
     new FakeTimer(),
-    new FakeIdGenerator(),
-    { iosMultiPanel: true },
+    { ids: new FakeIdGenerator(), iosMultiPanel: true },
   );
   expect({
     width: snapshot.hierarchy.screenWidth,

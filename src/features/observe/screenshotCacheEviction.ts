@@ -103,6 +103,13 @@ export interface ScreenshotEvictionPlan {
   skippedReferenced: number;
 }
 
+export interface ScreenshotEvictionGuards {
+  /** A file still referenced by a live cache entry is skipped and counted in `skippedReferenced`. */
+  isReferenced?: (path: string) => boolean;
+  /** A protected file is never selected. */
+  isProtected?: (path: string) => boolean;
+}
+
 /**
  * Pure selector for size-based screenshot eviction. Plans oldest-first deletion
  * until under `maxSizeBytes`, but never selects a file younger than `minAgeMs`
@@ -113,8 +120,7 @@ export function selectScreenshotsToEvict(
   maxSizeBytes: number,
   minAgeMs: number,
   nowMs: number,
-  isReferenced: (path: string) => boolean = () => false,
-  isProtected: (path: string) => boolean = () => false,
+  { isReferenced = () => false, isProtected = () => false }: ScreenshotEvictionGuards = {},
 ): ScreenshotEvictionPlan {
   const total = files.reduce((sum, f) => sum + f.size, 0);
   if (total <= maxSizeBytes) {

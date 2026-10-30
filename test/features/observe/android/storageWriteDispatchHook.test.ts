@@ -74,7 +74,12 @@ describe("a storage write whose call was cancelled before it was sent", () => {
     function write(onDispatch: () => void): Promise<unknown> {
       const options = { onDispatch };
       return method === "setPreference"
-        ? client.setPreference("com.example", "prefs", "k", "v", "STRING", options)
+        ? client.setPreference(
+            "com.example",
+            "prefs",
+            { key: "k", value: "v", type: "STRING" },
+            options,
+          )
         : method === "removePreference"
           ? client.removePreference("com.example", "prefs", "k", options)
           : client.clearPreferenceStore("com.example", "prefs", options);

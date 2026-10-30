@@ -308,7 +308,8 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
       wireType: "get_table_data",
       timeoutMsg: `Get table data timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Get table data failed",
-      call: () => db.getTableData("com.app", "/db/main.db", "users", 50, 0, TIMEOUT),
+      call: () =>
+        db.getTableData("com.app", "/db/main.db", "users", { limit: 50, offset: 0 }, TIMEOUT),
       successPayload: {
         success: true,
         totalTimeMs: 1,

@@ -141,11 +141,8 @@ export async function storeScrollPosition(
     containerElementId = containerElement.id;
   }
 
-  await repository.setScrollPosition(
-    edgeId,
-    targetElement.id,
-    scrollPosition.direction,
+  await repository.setScrollPosition(edgeId, targetElement.id, scrollPosition.direction, {
     containerElementId,
-    scrollPosition.speed,
-  );
+    speed: scrollPosition.speed,
+  });
 }

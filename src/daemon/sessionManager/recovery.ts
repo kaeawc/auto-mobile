@@ -26,7 +26,7 @@ import {
   LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   LEGACY_DEFAULT_SESSION_TIMEOUT_MS,
   type SessionLifecycleSlots,
-  type SharedSessionAssignment,
+  type PersistedSessionRecovery,
   isSessionRecoveryIdentityLossError,
   persistedHeartbeatTimeoutSource,
   persistedLivenessPolicy,
@@ -48,8 +48,7 @@ export interface SessionRecoveryHost {
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
     persisted: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    recovery: PersistedSessionRecovery,
   ): Promise<Session>;
   readonly daemonSessionId: string | undefined;
   readonly deviceSessionRepository: Pick<
@@ -89,8 +88,7 @@ export class SessionRecovery {
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
     listed: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    recovery: PersistedSessionRecovery,
   ): Promise<Session> {
     if (this.host.isLapsedUnownedRestartRecovery(listed)) {
       listed = await this.host.admitPersistedSession(sessionId, listed);
@@ -105,8 +103,7 @@ export class SessionRecovery {
         devicePool,
         platform,
         claim?.row ?? listed,
-        initialOwnership,
-        shared,
+        recovery,
       );
     } catch (error) {
       if (claim) {

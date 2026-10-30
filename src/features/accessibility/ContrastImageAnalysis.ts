@@ -307,7 +307,7 @@ export class ContrastImageAnalysis {
       if (visited.has(seed.y * image.width + seed.x)) {
         continue;
       }
-      const region = this.strokeRegion(image, bounds, color, seed, visited, budget);
+      const region = this.strokeRegion(image, bounds, color, seed, { visited, budget });
       const width = region.right - region.left + 1;
       const height = region.bottom - region.top + 1;
       if (region.count <= width * height * GLYPH_MAX_FILL) {
@@ -324,8 +324,7 @@ export class ContrastImageAnalysis {
     bounds: Element["bounds"],
     color: RGB,
     seed: { x: number; y: number },
-    visited: Set<number>,
-    budget: { pixels: number },
+    { visited, budget }: { visited: Set<number>; budget: { pixels: number } },
   ): { count: number; left: number; top: number; right: number; bottom: number } {
     const left = Math.ceil(bounds.left);
     const top = Math.ceil(bounds.top);
@@ -525,8 +524,7 @@ export class ContrastImageAnalysis {
     image: RawImage,
     bounds: Element["bounds"],
     textColor: RGB,
-    x: number,
-    y: number,
+    { x, y }: { x: number; y: number },
     radius: number,
   ): RGB[] {
     const colors: RGB[] = [];
@@ -556,8 +554,7 @@ export class ContrastImageAnalysis {
         image,
         bounds,
         elementColors.textColor,
-        x,
-        y,
+        { x, y },
         radius,
       );
       const background = this.colorClusters(colors)[0];
@@ -572,7 +569,7 @@ export class ContrastImageAnalysis {
           colors.filter((color) => this.isSimilarColor(color, background.color)),
           false,
         )[0].color;
-        return this.fringe.isGlyphPixel(image, bounds, elementColors, local, x, y)
+        return this.fringe.isGlyphPixel(image, bounds, elementColors, local, { x, y })
           ? elementColors.backgroundColor
           : local;
       }

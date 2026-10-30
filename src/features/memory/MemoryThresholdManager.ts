@@ -240,7 +240,10 @@ export class MemoryThresholdManager {
     weight: number = 1.0,
     ttlHours: number = 24,
   ): Promise<void> {
-    await this.storeThresholdsWith(this.db, deviceId, packageName, thresholds, weight, ttlHours);
+    await this.storeThresholdsWith(this.db, deviceId, packageName, thresholds, {
+      weight,
+      ttlHours,
+    });
   }
 
   private async storeThresholdsWith(
@@ -254,9 +257,9 @@ export class MemoryThresholdManager {
       gcDurationThresholdMs: number;
       unreachableObjectsThreshold: number;
     },
-    weight: number = 1.0,
-    ttlHours: number = 24,
+    options: { weight?: number; ttlHours?: number } = {},
   ): Promise<void> {
+    const { weight = 1.0, ttlHours = 24 } = options;
     const newThresholds: NewMemoryThresholds = {
       device_id: deviceId,
       package_name: packageName,

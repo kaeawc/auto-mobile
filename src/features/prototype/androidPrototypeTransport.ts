@@ -53,18 +53,13 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
 
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
     return withParsedAppearance(
-      await this.client.requestShowPrototype(
-        spec,
-        options.timeoutMs,
-        undefined,
-        options.displayId,
-        options.reset,
-        {
-          appearance: options.appearance,
-          replaceOthers: options.replaceOthers,
-          locale: spec.strings ? options.locale : undefined,
-        },
-      ),
+      await this.client.requestShowPrototype(spec, options.timeoutMs, undefined, {
+        displayId: options.displayId,
+        reset: options.reset,
+        appearance: options.appearance,
+        replaceOthers: options.replaceOthers,
+        locale: spec.strings ? options.locale : undefined,
+      }),
     );
   }
 

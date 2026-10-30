@@ -402,9 +402,14 @@ export class TapTargetResolver {
       this.host.device(),
       this.host.adb(),
       captured.displayId,
-      signal,
-      { panelUniqueId: captured.panelUniqueId, panelFingerprint: captured.panelFingerprint },
-      false,
+      {
+        signal,
+        identity: {
+          panelUniqueId: captured.panelUniqueId,
+          panelFingerprint: captured.panelFingerprint,
+        },
+        allowProbe: false,
+      },
     );
     const resolved = await displayCache.resolve(this.host.device(), this.host.adb(), signal);
     const panel =
@@ -787,8 +792,7 @@ export class TapTargetResolver {
           description: `Interactive element for tapping (action: ${options.action})`,
         },
         this.host.visionConfig(),
-        baseError,
-        { signal, visionAnalyzer: this.host.visionAnalyzer() },
+        { baseError, signal, visionAnalyzer: this.host.visionAnalyzer() },
       );
       throw new TapTargetUnavailableError(enrichedMsg, "not-found");
     }

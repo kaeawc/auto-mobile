@@ -223,7 +223,7 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
         source,
         { query: async () => ({ kind: "unsupported", detail: "fake" }) },
         () => undefined,
-        timer,
+        { timer },
       );
       const mirror = new StoreDeviceClaimMirror({
         platform: "android",
@@ -421,7 +421,7 @@ describe("startup rehydration respects foreign device claims", () => {
         }),
       },
       () => undefined,
-      timer,
+      { timer },
     );
     ownership.attachClaimMirror(mirror);
     const devices = new FakeDeviceManager();

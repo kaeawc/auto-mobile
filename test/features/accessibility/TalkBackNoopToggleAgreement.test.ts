@@ -32,14 +32,10 @@ function harness(enabledServices: string) {
   const timer = new FakeTimer();
   const detector = new DefaultAccessibilityDetector(timer);
   const probe = new FakeTalkBackDialogProbe();
-  const toggle = new TalkBackToggle(
-    device,
-    adb,
-    detector,
-    timer,
-    new FakeSecureSettingsRpc(),
-    probe,
-  );
+  const toggle = new TalkBackToggle(device, adb, detector, timer, {
+    secureSettings: new FakeSecureSettingsRpc(),
+    dialogProbe: probe,
+  });
   const strategy = new AndroidTapStrategy(device, adb, detector);
   return { adb, probe, toggle, strategy };
 }
@@ -77,14 +73,10 @@ describe("a no-op TalkBack toggle and the tapOn screen-reader path", () => {
     adb.setCommandError("enabled_accessibility_services", new Error("device offline"));
     const timer = new FakeTimer();
     const detector = new DefaultAccessibilityDetector(timer);
-    const toggle = new TalkBackToggle(
-      device,
-      adb,
-      detector,
-      timer,
-      new FakeSecureSettingsRpc(),
-      new FakeTalkBackDialogProbe(),
-    );
+    const toggle = new TalkBackToggle(device, adb, detector, timer, {
+      secureSettings: new FakeSecureSettingsRpc(),
+      dialogProbe: new FakeTalkBackDialogProbe(),
+    });
     const strategy = new AndroidTapStrategy(device, adb, detector);
 
     const result = await toggle.toggle(false);

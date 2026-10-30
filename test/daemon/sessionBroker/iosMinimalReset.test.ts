@@ -78,7 +78,7 @@ async function harness(options: { maxUses?: number } = {}) {
         }
       },
       SCOPE,
-      reuseCount,
+      { reuseCount },
     );
   return { journal, calls, mutations, state, run, recordingGaps };
 }

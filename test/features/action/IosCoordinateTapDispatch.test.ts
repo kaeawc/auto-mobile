@@ -52,7 +52,7 @@ function scriptedClient(options: {
   const signals: Array<AbortSignal | undefined> = [];
   return {
     signals,
-    requestDoubleTapCoordinates: async (_x, _y, _t, _frame, signal, onDispatch) => {
+    requestDoubleTapCoordinates: async (_x, _y, _t, { signal, onDispatch } = {}) => {
       signals.push(signal);
       if (options.dispatch) {
         onDispatch?.();
@@ -255,14 +255,10 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
     onDispatch?: () => void,
   ) =>
     doubleTap
-      ? new CtrlProxyGestures(h.context).requestDoubleTapCoordinates(
-          1,
-          2,
-          50,
-          undefined,
+      ? new CtrlProxyGestures(h.context).requestDoubleTapCoordinates(1, 2, 50, {
           signal,
           onDispatch,
-        )
+        })
       : new CtrlProxyGestures(h.context).requestTapCoordinates({
           x: 1,
           y: 2,
@@ -374,14 +370,9 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
 
 describe("iOS requestAction dispatch tracking (#9971)", () => {
   const act = (h: ReturnType<typeof createIosDelegateHarness>, onDispatch: () => void) =>
-    new CtrlProxyVoiceOver(h.context).requestAction(
-      "activate",
-      "com.app:id/go",
-      undefined,
-      50,
-      undefined,
-      { onDispatch },
-    );
+    new CtrlProxyVoiceOver(h.context).requestAction("activate", "com.app:id/go", undefined, 50, {
+      onDispatch,
+    });
 
   test("a timeout after the write is dispatched, unacknowledged and not retryable", async () => {
     const h = createIosDelegateHarness();
@@ -470,14 +461,11 @@ describe("tapAt on iOS (#9971)", () => {
       expect(result.success).toBe(true);
       expect(double).toHaveBeenCalledTimes(1);
       expect(single).toHaveBeenCalledTimes(0);
-      expect(double).toHaveBeenCalledWith(
-        10,
-        20,
-        undefined,
-        "epoch:1",
-        controller.signal,
-        expect.any(Function),
-      );
+      expect(double).toHaveBeenCalledWith(10, 20, undefined, {
+        frameContext: "epoch:1",
+        signal: controller.signal,
+        onDispatch: expect.any(Function),
+      });
       // Explicit-display settling may sleep after delivery; there is no double-tap gap.
       expect(timer.getSleepHistory()).not.toContain(200);
     },

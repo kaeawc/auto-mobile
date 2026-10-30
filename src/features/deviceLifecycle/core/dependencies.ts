@@ -301,7 +301,7 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       androidAdbFactory: unadmittedAdbClientFactory,
       daemonState: daemonStateLikeFrom(defaultDaemonContext),
       deviceResourceControllerFactory: () =>
-        new DefaultDeviceResourceController(undefined, undefined, undefined, undefined, undefined, {
+        new DefaultDeviceResourceController(undefined, undefined, undefined, undefined, {
           applications: new DeviceResourceApplicationRepository(),
         }),
       deviceResourceObserverFactory: () =>
@@ -332,13 +332,10 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceProvisionerFactory: () =>
         createDefaultDeviceProvisioner(undefined, undefined, getDefaultSimulatorCreationService()),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
-        createDefaultExactDeviceProvisioner(
-          deviceManager,
-          deviceCreationGate,
-          undefined,
-          assertNotBindingDeviceForAdoption,
-          getDefaultSimulatorCreationService(),
-        ),
+        createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate, {
+          assertAdoptable: assertNotBindingDeviceForAdoption,
+          simulatorCreation: getDefaultSimulatorCreationService(),
+        }),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
       stopAndroidObservers: defaultStopAndroidObservers,

@@ -52,8 +52,7 @@ export function createDefaultOnDemandAuditEngines(device: BootedDevice): OnDeman
       return new WcagAudit().audit(
         elements,
         viewHierarchy.hierarchy,
-        screenshotPath,
-        appId,
+        { screenshotPath, packageName: appId },
         config,
         {
           density: viewHierarchy.density,

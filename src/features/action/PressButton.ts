@@ -170,6 +170,13 @@ export function acceptAndroidHomeAlreadyOnLauncher(
   }
 }
 
+/** Display-fence collaborators, CtrlProxy overrides and the iOS/dispatch seams; all optional. */
+export type PressButtonCollaborators = DisplayFenceDependencies &
+  PressButtonCtrlProxyOverrides & {
+    simctl?: Pick<SimCtl, "executeCommandArgs">;
+    holdRequest?: DispatchedRequestHold;
+  };
+
 /** Per-press dispatch inputs threaded through the platform helpers (#11835). */
 interface PressDispatchOptions {
   timeoutMs?: number;
@@ -183,17 +190,19 @@ export class PressButton extends BaseVisualChange {
   private readonly frameContextClient?: PressButtonCtrlProxyOverrides["frameContextClient"];
   private readonly systemActionClient?: PressButtonCtrlProxyOverrides["systemActionClient"];
   private readonly deviceTraits?: DeviceTraits;
+  private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
+  private readonly holdRequest?: DispatchedRequestHold;
 
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
-    private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
-    private readonly holdRequest?: DispatchedRequestHold,
-    collaborators: DisplayFenceDependencies & PressButtonCtrlProxyOverrides = {},
+    collaborators: PressButtonCollaborators = {},
   ) {
     super(device, adb, timer, undefined, collaborators);
     this.device = device;
+    this.simctl = collaborators.simctl ?? new SimCtlClient(device);
+    this.holdRequest = collaborators.holdRequest;
     this.iosLockStateInvalidator = collaborators.iosLockStateInvalidator;
     this.globalActionClient = collaborators.globalActionClient;
     this.frameContextClient = collaborators.frameContextClient;
@@ -604,14 +613,11 @@ export class PressButton extends BaseVisualChange {
         signal,
         budget,
         (fenced, markDispatch) =>
-          client.requestGlobalAction(
-            action.wireAction,
-            budget,
-            undefined,
+          client.requestGlobalAction(action.wireAction, budget, undefined, {
             frameContext,
-            fenced,
-            markDispatch,
-          ),
+            signal: fenced,
+            onDispatch: markDispatch,
+          }),
         () => {
           dispatched = true;
           onDispatch?.();
@@ -677,14 +683,11 @@ export class PressButton extends BaseVisualChange {
         signal,
         globalActionTimeout,
         (fenced, markDispatch) =>
-          client.requestGlobalAction(
-            normalized,
-            globalActionTimeout,
-            undefined,
+          client.requestGlobalAction(normalized, globalActionTimeout, undefined, {
             frameContext,
-            fenced,
-            markDispatch,
-          ),
+            signal: fenced,
+            onDispatch: markDispatch,
+          }),
         () => {
           // HOME is idempotent; only latch presses that must not be replayed.
           dispatched = normalized !== "home";
@@ -789,14 +792,11 @@ export class PressButton extends BaseVisualChange {
             signal,
             timeoutMs,
             (fenced, dispatch) =>
-              client.requestPressButton(
-                normalizedButton,
-                timeoutMs,
-                undefined,
+              client.requestPressButton(normalizedButton, timeoutMs, undefined, {
                 frameContext,
-                fenced,
-                dispatch,
-              ),
+                signal: fenced,
+                onDispatch: dispatch,
+              }),
             onDispatch,
           );
       this.assertHeldRequestLive(signal);

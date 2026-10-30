@@ -46,7 +46,6 @@ describe("iOS Simulator service transitions (#6693)", () => {
       plist,
       timer,
       (path) => plist.readDirectory(path),
-      undefined,
       { applications: store },
     );
     request = {

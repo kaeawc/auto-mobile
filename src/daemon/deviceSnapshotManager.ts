@@ -928,8 +928,7 @@ async function importLegacySnapshot(
   manifest: DeviceSnapshotManifest,
   snapshotStore: DeviceSnapshotStorePort,
   snapshotRepository: DeviceSnapshotRepositoryPort,
-  now: () => Date,
-  pathOptions?: SnapshotPathOptions,
+  { now, pathOptions }: { now: () => Date; pathOptions?: SnapshotPathOptions },
 ): Promise<DeviceSnapshotRecord | null> {
   const { avdSnapshots } = await getDeviceSnapshotDependencies();
   const sizeBytes = await resolveSnapshotSizeBytes(
@@ -973,7 +972,9 @@ async function hydrateLegacySnapshot(
 ): Promise<DeviceSnapshotRecord | null> {
   const flatManifest = await discoverSnapshotManifest(snapshotName, snapshotStore, undefined, now);
   if (flatManifest) {
-    return importLegacySnapshot(snapshotName, flatManifest, snapshotStore, snapshotRepository, now);
+    return importLegacySnapshot(snapshotName, flatManifest, snapshotStore, snapshotRepository, {
+      now,
+    });
   }
 
   // Not at the flat/unscoped path — a restore-by-name doesn't know which
@@ -984,14 +985,10 @@ async function hydrateLegacySnapshot(
     return null;
   }
 
-  return importLegacySnapshot(
-    snapshotName,
-    scoped.manifest,
-    snapshotStore,
-    snapshotRepository,
+  return importLegacySnapshot(snapshotName, scoped.manifest, snapshotStore, snapshotRepository, {
     now,
-    scoped.pathOptions,
-  );
+    pathOptions: scoped.pathOptions,
+  });
 }
 
 /**
@@ -1110,7 +1107,7 @@ async function importFlatLegacySnapshots(
       manifest,
       snapshotStore,
       snapshotRepository,
-      now,
+      { now },
     );
     if (record) {
       existingSnapshots.add(snapshotName);
@@ -1179,8 +1176,7 @@ async function importScopedLegacySnapshots(
         manifest,
         snapshotStore,
         snapshotRepository,
-        now,
-        pathOptions,
+        { now, pathOptions },
       );
       if (record) {
         existingSnapshots.add(snapshotName);
@@ -1803,9 +1799,11 @@ async function scheduleVmRetentionRetry(
   deviceName: string,
   config: DeviceSnapshotConfig,
   state: VmRetentionState,
-  currentSizeBytes: number,
-  maxSizeBytes: number,
-  excludeFromEviction: string | undefined,
+  {
+    currentSizeBytes,
+    maxSizeBytes,
+    excludeFromEviction,
+  }: { currentSizeBytes: number; maxSizeBytes: number; excludeFromEviction: string | undefined },
 ): Promise<void> {
   const remainsOverLimit =
     state.snapshots.length > config.maxVmSnapshotsPerAvd ||
@@ -1887,14 +1885,11 @@ async function enforceVmSnapshotRetentionForDevice(
     if (state.evictedSnapshotNames.length > 0) {
       await notifySnapshotResources();
     }
-    await scheduleVmRetentionRetry(
-      deviceName,
-      config,
-      state,
+    await scheduleVmRetentionRetry(deviceName, config, state, {
       currentSizeBytes,
       maxSizeBytes,
-      options.excludeFromEviction,
-    );
+      excludeFromEviction: options.excludeFromEviction,
+    });
 
     return {
       evictedSnapshotNames: state.evictedSnapshotNames,

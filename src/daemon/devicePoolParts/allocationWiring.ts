@@ -581,20 +581,8 @@ export class DevicePoolAllocationWiring {
         this.callbacks.deviceHeldByExistingSession(sessionId),
       addDevice: (device, sourceImage, awaitSessionTracking, identityEvidence) =>
         this.callbacks.addDevice(device, sourceImage, awaitSessionTracking, identityEvidence),
-      waitForDeviceReadyOrCancel: (
-        device,
-        childProcess,
-        timeoutMs,
-        signal,
-        timer,
-        cancelOwnedBoot,
-      ) =>
-        waitForDeviceReadyOrCancel(this.state.deviceManager, device, childProcess, {
-          timeoutMs,
-          signal,
-          timer,
-          cancelOwnedBoot,
-        }),
+      waitForDeviceReadyOrCancel: (device, childProcess, options) =>
+        waitForDeviceReadyOrCancel(this.state.deviceManager, device, childProcess, options),
     });
   }
 }

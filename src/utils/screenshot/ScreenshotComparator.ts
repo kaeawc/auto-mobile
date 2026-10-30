@@ -31,6 +31,19 @@ export interface ScreenshotComparisonFailure {
 
 export type ScreenshotComparisonResult = ScreenshotComparisonSuccess | ScreenshotComparisonFailure;
 
+/** Injectable clock and image backend for `compareImages`. */
+export interface ImageComparisonDeps {
+  timer?: Timer;
+  backend?: ImageBackend;
+}
+
+function resolveImageComparisonDeps(deps: ImageComparisonDeps): {
+  timer: Timer;
+  backend: ImageBackend;
+} {
+  return { timer: deps.timer ?? defaultTimer, backend: deps.backend ?? resolveImageBackend() };
+}
+
 export class ScreenshotComparator {
   private static readonly PNG_HEADER = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -164,6 +177,7 @@ export class ScreenshotComparator {
    * @param buffer2 Second image buffer
    * @param threshold Pixelmatch threshold (0-1, default 0.1)
    * @param fastMode Enable fast mode for bulk comparisons (lower quality but faster)
+   * @param deps Injectable clock and image backend (defaults: system timer, resolved backend)
    * @returns Promise with comparison result
    */
   static async compareImages(
@@ -171,9 +185,9 @@ export class ScreenshotComparator {
     buffer2: Buffer,
     threshold: number = 0.1,
     fastMode: boolean = false,
-    timer: Timer = defaultTimer,
-    backend: ImageBackend = resolveImageBackend(),
+    deps: ImageComparisonDeps = {},
   ): Promise<ScreenshotComparisonResult> {
+    const { timer, backend } = resolveImageComparisonDeps(deps);
     const comparisonStart = timer.now();
     logger.debug(
       `Starting image comparison with threshold ${threshold}${fastMode ? " (fast mode)" : ""}`,

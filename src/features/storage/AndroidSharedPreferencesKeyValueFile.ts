@@ -83,11 +83,18 @@ function serializeDirectMutationPerFile<T>(
   );
 }
 
+/** The app, SharedPreferences file and Android user a direct-file key-value mutation targets. */
+export interface AndroidKeyValueFileTarget {
+  appId: string;
+  fileName: string;
+  userId?: number;
+}
+
 /** Writes `key` = `value` (of `type`) into the on-device SharedPreferences XML file. */
 export async function setAndroidKeyValueDirect(
   adb: AdbExecutor,
   deviceId: string,
-  target: { appId: string; fileName: string; userId?: number },
+  target: AndroidKeyValueFileTarget,
   entry: { key: string; value: string; type: KeyValueType },
 ): Promise<void> {
   const { appId, fileName, userId } = target;
@@ -119,11 +126,10 @@ export async function setAndroidKeyValueDirect(
 export async function removeAndroidKeyValueDirect(
   adb: AdbExecutor,
   deviceId: string,
-  appId: string,
-  fileName: string,
+  target: AndroidKeyValueFileTarget,
   key: string,
-  userId?: number,
 ): Promise<void> {
+  const { appId, fileName, userId } = target;
   const safeFileName = androidKeyValueFileName(fileName);
   const targetUser = userId ?? (await resolveDefaultAndroidPreferencesUser(adb, appId));
   return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {

@@ -4,7 +4,7 @@ import type { PrototypePlatformError } from "./prototypePlatform";
 /**
  * Notification rules (#14280) the contract cannot express: the root `notifications` block needs
  * `notifications` in `requires.platform` and unique channel ids; a literal `notifications.post`
- * channel names a declared channel and its action ids are unique; `notifications.cancel` names
+ * (or `notifications.schedule`) channel names a declared channel and its action ids are unique; `notifications.cancel` names
  * exactly one target; a channel-scoped `/platform` read names a declared channel. Kotlin and Swift `PrototypeNotificationRules` mirror these checks.
  */
 export function prototypeNotificationsBlockError(root: Raw): PrototypePlatformError | undefined {
@@ -32,7 +32,7 @@ export function prototypeNotificationsBlockError(root: Raw): PrototypePlatformEr
 
 const cancelTargets = ["id", "group", "all"];
 
-/** Cross-argument checks for `notifications.post` and `notifications.cancel` calls. */
+/** Cross-argument checks for `notifications.post`, `.schedule` and `.cancel` calls. */
 export function prototypeNotificationsCallError(
   action: Raw,
   path: string,
@@ -48,10 +48,13 @@ export function prototypeNotificationsCallError(
           message: "notifications.cancel takes exactly one of id, group or all",
         };
   }
-  if (action.call !== "notifications.post") {
-    return undefined;
-  }
-  // A bound channel or action list is checked by the runtime once it resolves.
+  return action.call === "notifications.post" || action.call === "notifications.schedule"
+    ? postError(args, path, root)
+    : undefined;
+}
+
+// A bound channel or action list is checked by the runtime once it resolves.
+function postError(args: Raw, path: string, root: Raw): PrototypePlatformError | undefined {
   const channel = record(args.channel)?.value;
   if (typeof channel === "string" && !declaredChannels(root).has(channel)) {
     return { path: `${path}.args.channel.value`, message: "Undeclared notification channel" };

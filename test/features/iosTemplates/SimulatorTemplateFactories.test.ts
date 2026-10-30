@@ -30,15 +30,15 @@ test("production factories with disabled service resolve no template dependencie
   const exact = createDefaultExactDeviceProvisioner(
     new FakeDeviceManager(),
     { isCreationAllowed: () => true, describeSource: () => "test" },
-    undefined,
-    undefined,
-    service,
     {
-      iosSimulator: creator,
-      iosRuntimeCatalog: undefined,
-      timer: new FakeTimer(),
-      lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
-      prebootProfile: { apply: async () => ({ applied: true, resources: [], labels: [] }) },
+      simulatorCreation: service,
+      ios: {
+        iosSimulator: creator,
+        iosRuntimeCatalog: undefined,
+        timer: new FakeTimer(),
+        lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
+        prebootProfile: { apply: async () => ({ applied: true, resources: [], labels: [] }) },
+      },
     },
   );
   await exact.provision({

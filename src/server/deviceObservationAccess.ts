@@ -90,8 +90,10 @@ async function findObservationReadTarget(
   signal: AbortSignal | undefined,
   access: DeviceObservationAccess,
   platform: SomePlatform,
-  retry: DeviceReadRetryOptions,
-  confirmStopped?: ConfirmStoppedReadTarget,
+  {
+    retry,
+    confirmStopped,
+  }: { retry: DeviceReadRetryOptions; confirmStopped?: ConfirmStoppedReadTarget },
 ): Promise<{ device: BootedDevice | undefined; devices: BootedDevice[] }> {
   const targetPlatform = explicitReadTargetPlatform(deviceId, platform);
   try {
@@ -154,13 +156,9 @@ export async function resolveDeviceForObservationRead(
   platform: SomePlatform = "either",
   retry: DeviceReadRetryOptions = {},
 ): Promise<BootedDevice> {
-  const { device, devices } = await findObservationReadTarget(
-    deviceId,
-    signal,
-    access,
-    platform,
+  const { device, devices } = await findObservationReadTarget(deviceId, signal, access, platform, {
     retry,
-  );
+  });
   if (!device) {
     throw providedReadTargetNotFound(deviceId, platform, devices);
   }
@@ -203,8 +201,7 @@ export function sessionlessDeviceReadFor(
         signal,
         access,
         platform ?? "either",
-        retry,
-        confirmStopped,
+        { retry, confirmStopped },
       );
       return device;
     },

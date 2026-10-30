@@ -85,7 +85,7 @@ const videoPlayerShape = {
 
 /**
  * The `castButton` node's own fields (#14239): the system route picker for a declared or inline
- * `player` (checked in `prototypeCastButton.ts`), optionally limited to some protocols.
+ * `player` (checked in `prototypeMedia.ts`), optionally limited to some protocols.
  */
 const castButtonShape = {
   type: z.enum(["castButton"]),

@@ -155,6 +155,7 @@
     "notify-channels-block.json",
     "notify-post-messaging.json",
     "notify-post-styles.json",
+    "notify-schedule.json",
     "ns-accessory-chart.json",
     "ns-android-ignored-on-ios.json",
     "ns-block-both.json",
@@ -1141,6 +1142,12 @@
     "notify-post-without-channels-block.json",
     "notify-progress-indeterminate-false.json",
     "notify-progress-over.json",
+    "notify-schedule-delay-fraction.json",
+    "notify-schedule-delay-over.json",
+    "notify-schedule-delay-zero.json",
+    "notify-schedule-duplicate-action-id.json",
+    "notify-schedule-missing-delay.json",
+    "notify-schedule-undeclared-channel.json",
     "notify-set-badge-missing-permission.json",
     "notify-set-badge-negative.json",
     "notify-title-over-limit.json",
@@ -1963,6 +1970,7 @@
     "strict-gate-prototype_platform_media_queue_v1.json",
     "strict-gate-prototype_platform_media_v1.json",
     "strict-gate-prototype_platform_namespace_v1.json",
+    "strict-gate-prototype_platform_notifications_scheduled_v1.json",
     "strict-gate-prototype_platform_notifications_v1.json",
     "strict-gate-prototype_platform_power_v1.json",
     "strict-gate-prototype_platform_realtime_device_v1.json",
@@ -3310,6 +3318,11 @@
       "prototype_platform_media_v1",
       "prototype_platform_v1"
     ],
-    "media-video-feed.json": ["prototype_platform_media_v1", "prototype_platform_v1"]
+    "media-video-feed.json": ["prototype_platform_media_v1", "prototype_platform_v1"],
+    "notify-schedule.json": [
+      "prototype_platform_notifications_scheduled_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_v1"
+    ]
   }
 }

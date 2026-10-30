@@ -109,7 +109,7 @@ async function runWatchDelete(
       "precondition",
       "identity_conflict",
       `Apple Watch simulator ${udid} is named '${watch.name}', not '${args.target.stableName}'.`,
-      watch,
+      { resolved: watch },
     );
   }
   const device: BootedDevice = { name: watch.name, platform: "watchos", deviceId: udid };
@@ -125,7 +125,7 @@ async function runWatchDelete(
     "destroyed",
     { stop: wasRunning ? "accepted" : "not_required", destroy: "accepted" },
     VERIFIED,
-    watch,
+    { resolved: watch },
   );
 }
 

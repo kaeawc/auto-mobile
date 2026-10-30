@@ -12,6 +12,7 @@ import type {
   DiscoveryReconcileOptions,
   PooledDevice,
   SystemUiAnrRecoveryHandoff,
+  SystemUiAnrReplacementOptions,
 } from "./devicePool";
 import type { DeviceRuntimeIdentity } from "./deviceRuntimeIdentity";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
@@ -128,8 +129,7 @@ export class DeviceReplacement {
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
     childProcess?: ChildProcess | null,
-    beforeReplacementPublishes?: () => void,
-    excludeExecutionId?: string,
+    { beforeReplacementPublishes, excludeExecutionId }: SystemUiAnrReplacementOptions = {},
   ): Promise<SystemUiAnrRecoveryHandoff> {
     return await this.port.assignmentMutex.runExclusive(async () => {
       // The caller's marker must cover the entire visible replacement

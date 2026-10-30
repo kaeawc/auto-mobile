@@ -24468,6 +24468,177 @@
           "permissions": ["notifications"],
           "background": [],
           "sensitive": false
+        },
+        "schedule": {
+          "args": {
+            "id": { "optional": false, "value": { "kind": "string", "max": 128 } },
+            "channel": { "optional": false, "value": { "kind": "string", "pattern": "stateKey" } },
+            "title": {
+              "optional": false,
+              "value": { "kind": "string", "nonblank": true, "max": 128 }
+            },
+            "body": { "optional": true, "value": { "kind": "string", "max": 1024 } },
+            "largeImage": { "optional": true, "value": { "kind": "string", "max": 128 } },
+            "style": {
+              "optional": true,
+              "value": {
+                "kind": "tagged",
+                "variants": {
+                  "bigText": {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": { "kind": "enum", "values": ["bigText"] },
+                        "optional": false
+                      }
+                    }
+                  },
+                  "bigPicture": {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": { "kind": "enum", "values": ["bigPicture"] },
+                        "optional": false
+                      },
+                      "image": { "rule": { "kind": "string", "max": 128 }, "optional": false }
+                    }
+                  },
+                  "inbox": {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": { "kind": "enum", "values": ["inbox"] },
+                        "optional": false
+                      },
+                      "lines": {
+                        "rule": {
+                          "kind": "array",
+                          "min": 1,
+                          "max": 6,
+                          "item": { "kind": "string", "max": 256 }
+                        },
+                        "optional": false
+                      },
+                      "summary": { "rule": { "kind": "string", "max": 128 }, "optional": true }
+                    }
+                  },
+                  "messaging": {
+                    "kind": "object",
+                    "fields": {
+                      "type": {
+                        "rule": { "kind": "enum", "values": ["messaging"] },
+                        "optional": false
+                      },
+                      "self": {
+                        "rule": { "kind": "string", "nonblank": true, "max": 64 },
+                        "optional": false
+                      },
+                      "conversationTitle": {
+                        "rule": { "kind": "string", "max": 128 },
+                        "optional": true
+                      },
+                      "messages": {
+                        "rule": {
+                          "kind": "array",
+                          "min": 1,
+                          "max": 7,
+                          "item": {
+                            "kind": "object",
+                            "fields": {
+                              "from": {
+                                "rule": { "kind": "string", "nonblank": true, "max": 64 },
+                                "optional": true
+                              },
+                              "text": {
+                                "rule": { "kind": "string", "max": 1024 },
+                                "optional": false
+                              },
+                              "image": {
+                                "rule": { "kind": "string", "max": 128 },
+                                "optional": true
+                              }
+                            }
+                          }
+                        },
+                        "optional": false
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "group": { "optional": true, "value": { "kind": "string", "max": 128 } },
+            "badge": {
+              "optional": true,
+              "value": { "kind": "number", "integer": true, "min": 0, "max": 9999 }
+            },
+            "data": { "optional": true, "value": { "kind": "json", "maxBytes": 1024 } },
+            "actions": {
+              "optional": true,
+              "value": {
+                "kind": "array",
+                "min": 1,
+                "max": 3,
+                "item": {
+                  "kind": "object",
+                  "fields": {
+                    "id": {
+                      "rule": { "kind": "string", "pattern": "stateKey" },
+                      "optional": false
+                    },
+                    "label": {
+                      "rule": { "kind": "string", "nonblank": true, "max": 64 },
+                      "optional": false
+                    },
+                    "opensApp": { "rule": { "kind": "boolean" }, "optional": true },
+                    "reply": {
+                      "rule": {
+                        "kind": "object",
+                        "fields": {
+                          "placeholder": {
+                            "rule": { "kind": "string", "max": 64 },
+                            "optional": true
+                          }
+                        }
+                      },
+                      "optional": true
+                    }
+                  }
+                }
+              }
+            },
+            "progress": {
+              "optional": true,
+              "value": {
+                "kind": "choice",
+                "options": [
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "value": {
+                        "rule": { "kind": "number", "integer": false, "min": 0, "max": 1 },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": { "indeterminate": { "rule": { "kind": "true" }, "optional": false } }
+                  }
+                ]
+              }
+            },
+            "silent": { "optional": true, "value": { "kind": "boolean" } },
+            "ongoing": { "optional": true, "value": { "kind": "boolean" } },
+            "delaySeconds": {
+              "optional": false,
+              "value": { "kind": "number", "integer": true, "min": 1, "max": 604800 }
+            }
+          },
+          "permissions": ["notifications"],
+          "background": [],
+          "sensitive": false,
+          "capability": "prototype_platform_notifications_scheduled_v1"
         }
       },
       "events": {
@@ -24482,7 +24653,8 @@
         },
         "dismissed": {
           "sensitive": false
-        }
+        },
+        "scheduledFired": { "sensitive": false }
       },
       "state": {
         "badge": {

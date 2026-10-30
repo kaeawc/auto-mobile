@@ -37,7 +37,7 @@ function fakeReleaseStore() {
 }
 
 const binding = (store: SessionToolBindingStore) =>
-  new SessionToolBinding(undefined, undefined, undefined, undefined, undefined, store);
+  new SessionToolBinding(undefined, undefined, undefined, { store });
 
 describe("SessionToolBindingStore", () => {
   test("two bindings on one store share a key's binding, but not the direct slot", () => {
@@ -58,14 +58,7 @@ describe("SessionToolBindingStore", () => {
   test("subscribes once and reports a release exactly once across attached bindings", () => {
     const fake = fakeReleaseStore();
     const first = binding(fake.store);
-    const second = new SessionToolBinding(
-      "session-a",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      fake.store,
-    );
+    const second = new SessionToolBinding("session-a", undefined, undefined, { store: fake.store });
     first.bind("key-1", "session-a");
 
     expect(fake.subscriptions()).toBe(1);
@@ -80,14 +73,9 @@ describe("SessionToolBindingStore", () => {
 
   test("a detached binding keeps no release teardown; the keyed binding still clears", () => {
     const fake = fakeReleaseStore();
-    const detached = new SessionToolBinding(
-      "session-a",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      fake.store,
-    );
+    const detached = new SessionToolBinding("session-a", undefined, undefined, {
+      store: fake.store,
+    });
     const live = binding(fake.store);
     live.bind("key-1", "session-a");
     detached.dispose();

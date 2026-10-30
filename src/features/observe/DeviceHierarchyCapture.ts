@@ -30,7 +30,11 @@ import {
   projectActionableHierarchy,
 } from "./HierarchyNormalization";
 import type { SettleObserve } from "./interfaces/SettleObserve";
-import type { HierarchySyncDiagnostics, ObserverHierarchyRequestOptions } from "./android/types";
+import type {
+  HierarchySyncDiagnostics,
+  HierarchySyncRequestOptions,
+  ObserverHierarchyRequestOptions,
+} from "./android/types";
 import {
   existingHierarchyClient,
   getObservationReadServiceStart,
@@ -55,8 +59,7 @@ export interface HierarchySyncClient {
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
     timeoutMs: number,
-    diagnostics?: HierarchySyncDiagnostics,
-    displayId?: number,
+    options?: HierarchySyncRequestOptions,
   ): Promise<SyncedHierarchy | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
   connectForObservationRead?(): Promise<boolean>;
@@ -128,7 +131,10 @@ async function requestSyncHierarchy(
         : request.displayId,
     );
   } else {
-    synced = await client.requestHierarchySync(...args, diagnostics, request.displayId);
+    synced = await client.requestHierarchySync(...args, {
+      diagnostics,
+      displayId: request.displayId,
+    });
   }
   if (!synced) {
     const detail =

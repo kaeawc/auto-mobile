@@ -27,9 +27,11 @@ import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager
 import { resolveIosAppListBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import {
   applyLauncherPackages,
+  applyLeanbackPackages,
   catalogFromPackageRecords,
   launcherProbeFallbackReason,
   launcherActivitiesCommand,
+  leanbackActivitiesCommand,
   mergeSystemAppCatalogEntry,
   needsLauncherProbe,
   parseLauncherPackages,
@@ -397,6 +399,7 @@ export class ListInstalledApps {
         signal?.throwIfAborted();
         await this.topUpLaunchability(catalog, packageNames, userId, signal);
       }
+      await this.topUpLeanbackLaunchability(catalog, packageNames, userId, signal);
     }
     return catalogByUser;
   }
@@ -414,6 +417,21 @@ export class ListInstalledApps {
   }
 
   /** Explain when the label-capable CtrlProxy catalog must be topped up by adb. */
+  /** Top up a CtrlProxy-derived catalog: the LAUNCHER probe where it is incomplete, then Leanback. */
+  private async completeCtrlProxyCatalog(
+    proxy: AndroidInstalledPackagesRequest,
+    catalog: AndroidAppCatalog,
+    packageNames: string[],
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (needsLauncherProbe(catalog, packageNames)) {
+      this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, packageNames);
+      await this.topUpLaunchability(catalog, packageNames, userId, signal);
+    }
+    await this.topUpLeanbackLaunchability(catalog, packageNames, userId, signal);
+  }
+
   private warnCtrlProxyCatalogFallback(
     proxy: AndroidInstalledPackagesRequest,
     userId: number,
@@ -791,9 +809,8 @@ export class ListInstalledApps {
           ? (new Map() as AndroidAppCatalog)
           : catalogFromPackageRecords(records);
         const listedPackages = [...userPackages, ...systemPackages];
-        if (!options.namesOnly && needsLauncherProbe(catalog, listedPackages)) {
-          this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, listedPackages);
-          await this.topUpLaunchability(catalog, listedPackages, userId, signal);
+        if (!options.namesOnly) {
+          await this.completeCtrlProxyCatalog(proxy, catalog, listedPackages, userId, signal);
         }
         return { userPackages, systemPackages, catalog };
       }
@@ -811,8 +828,36 @@ export class ListInstalledApps {
       const listedPackages = [...userPackages, ...systemPackages];
       this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, listedPackages);
       await this.topUpLaunchability(catalog, listedPackages, userId, signal);
+      await this.topUpLeanbackLaunchability(catalog, listedPackages, userId, signal);
     }
     return { userPackages, systemPackages, catalog };
+  }
+
+  /**
+   * Android TV apps such as Settings expose only MAIN/LEANBACK_LAUNCHER, which the LAUNCHER
+   * catalog reports unlaunchable (#15957). Runs only on a device known to be a TV, so
+   * phones and tablets keep their single launcher probe.
+   */
+  private async topUpLeanbackLaunchability(
+    catalog: AndroidAppCatalog,
+    packageNames: string[],
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (this.device.formFactor !== "tv") {
+      return;
+    }
+    try {
+      const result = await this.adb.executeCommand(leanbackActivitiesCommand(userId), { signal });
+      signal?.throwIfAborted();
+      applyLeanbackPackages(catalog, packageNames, parseLauncherPackages(result.stdout));
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Best-effort enrichment: without it a LEANBACK-only app keeps the LAUNCHER answer.
+      logger.debug(
+        `[ListInstalledApps] Leanback activity probe failed for user ${userId}: ${error}`,
+      );
+    }
   }
 
   /**

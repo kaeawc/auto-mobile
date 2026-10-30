@@ -109,14 +109,18 @@ export async function getEdgeModals(
   return modals.map((m) => m.modal_identifier);
 }
 
-type ScrollOptions = { containerElementId?: number; speed?: string; swipeCount?: number };
+export type ScrollPositionOptions = {
+  containerElementId?: number;
+  speed?: string;
+  swipeCount?: number;
+};
 
 export async function setScrollPosition(
   ctx: NavigationQueryContext,
   edgeId: number,
   targetElementId: number,
   direction: string,
-  { containerElementId, speed, swipeCount }: ScrollOptions,
+  { containerElementId, speed, swipeCount }: ScrollPositionOptions,
 ): Promise<void> {
   const db = ctx.getDb();
   const scrollPos: NewScrollPosition = {

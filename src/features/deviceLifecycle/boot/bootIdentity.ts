@@ -166,8 +166,10 @@ export async function validateRequestedAndroidIdentifiersBeforeBoot(
   deviceUtils: PlatformDeviceManager,
   bootDeadlineMs: number,
   timer: Timer,
-  signal: AbortSignal | undefined,
-  collectPendingSettlement?: ColdBootSettlementCollector,
+  {
+    signal,
+    collectPendingSettlement,
+  }: { signal: AbortSignal | undefined; collectPendingSettlement?: ColdBootSettlementCollector },
 ): Promise<void> {
   if (!pair) {
     return;

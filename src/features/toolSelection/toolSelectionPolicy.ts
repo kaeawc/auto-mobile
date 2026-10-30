@@ -216,8 +216,18 @@ export async function isToolEnabledForAnyRoute(
   return false;
 }
 
+export interface AssertToolEnabledOptions {
+  /** The MCP connection profile whose own override is rechecked, when the caller has one. */
+  connectionProfileUuid?: string;
+  /**
+   * The callable the remediation sentence names — the MCP `setToolEnabled` tool by default.
+   * See `assertToolEnabledForAnySession`.
+   */
+  remediationMethodName?: string;
+}
+
 /**
- * @param remediationMethodName The callable the remediation sentence names — the MCP
+ * @param options.remediationMethodName The callable the remediation sentence names — the MCP
  * `setToolEnabled` tool by default. Pass `IDE_SET_SESSION_TOOL_ENABLED_METHOD` from a rejection
  * raised on the direct IDE socket channel (see `assertSocketToolEnabled` in
  * src/daemon/socketServer.ts): that caller cannot invoke an MCP tool, only the socket's own
@@ -228,9 +238,9 @@ export async function assertToolEnabledForAnySession(
   declaredDefault: boolean,
   sessionUuids: ReadonlyArray<string | undefined>,
   sessionToolSelectionService?: ToolSelectionReader,
-  connectionProfileUuid?: string,
-  remediationMethodName: string = SET_TOOL_ENABLED_TOOL_NAME,
+  options: AssertToolEnabledOptions = {},
 ): Promise<void> {
+  const { connectionProfileUuid, remediationMethodName = SET_TOOL_ENABLED_TOOL_NAME } = options;
   if (
     await isToolEnabledForAnySession(
       toolName,

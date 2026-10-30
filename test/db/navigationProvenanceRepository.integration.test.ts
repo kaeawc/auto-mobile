@@ -85,7 +85,13 @@ describe("NavigationRepository provenance observations", () => {
   });
 
   test("out-of-order edge observations keep first_seen <= last_seen (MIN/MAX)", async () => {
-    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const edge = await repo.createEdge(
+      "com.example.app",
+      "Home",
+      "Details",
+      { toolName: "tapOn", toolArgs: null },
+      150,
+    );
     const build = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
 
     await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 300);
@@ -101,7 +107,13 @@ describe("NavigationRepository provenance observations", () => {
   });
 
   test("edge observations dedup on (edge, build, device, session)", async () => {
-    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const edge = await repo.createEdge(
+      "com.example.app",
+      "Home",
+      "Details",
+      { toolName: "tapOn", toolArgs: null },
+      150,
+    );
     const build = await repo.getOrCreateBuildKey("com.example.app", 1, "hashA");
 
     await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 150);
@@ -145,7 +157,13 @@ describe("NavigationRepository provenance observations", () => {
   });
 
   test("getEdgeProvenanceForApp joins build keys keyed by edge id", async () => {
-    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const edge = await repo.createEdge(
+      "com.example.app",
+      "Home",
+      "Details",
+      { toolName: "tapOn", toolArgs: null },
+      150,
+    );
     const build = await repo.getOrCreateBuildKey("com.example.app", 3, "hashC");
     await repo.recordEdgeObservation(edge.id, build.id, "device-1", "session-1", 150);
 
@@ -179,7 +197,13 @@ describe("NavigationRepository provenance observations", () => {
   });
 
   test("getEdgeProvenanceForApp excludes observations whose build key belongs to another app", async () => {
-    const edge = await repo.createEdge("com.example.app", "Home", "Details", "tapOn", null, 150);
+    const edge = await repo.createEdge(
+      "com.example.app",
+      "Home",
+      "Details",
+      { toolName: "tapOn", toolArgs: null },
+      150,
+    );
     const ownBuild = await repo.getOrCreateBuildKey("com.example.app", 3, "hashC");
     await repo.recordEdgeObservation(edge.id, ownBuild.id, "device-1", "session-1", 150);
 

@@ -146,7 +146,7 @@ describe("RotaryInput", () => {
     );
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const action = new PressButton(device, adb, timer, undefined, undefined, {
+    const action = new PressButton(device, adb, timer, {
       window,
       observeScreen: observe,
       awaitIdle: new FakeAwaitIdle(),
@@ -160,9 +160,7 @@ describe("RotaryInput", () => {
   test("pressButton refuses a phone and stray steps before sending anything", async () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
-    const phone = new PressButton(device, adb, timer, undefined, undefined, {
-      deviceTraits: traitsOf(null),
-    });
+    const phone = new PressButton(device, adb, timer, { deviceTraits: traitsOf(null) });
     await expect(phone.execute("rotary_select")).rejects.toThrow(/Android Automotive/);
     await expect(phone.execute("home", { steps: 3 })).rejects.toThrow(/rotary_rotate/);
     expect(adb.getExecutedCommands()).toEqual([]);

@@ -475,15 +475,14 @@ export class SqliteBindingRegistry implements BindingRegistry {
     const settler = assertSettlerForState(state, options);
     return this.db
       .transaction()
-      .execute((trx) => this.updateBindingStateIn(trx, key, expected, state, settler));
+      .execute((trx) => this.updateBindingStateIn(trx, key, expected, { state, settler }));
   }
 
   private async updateBindingStateIn(
     trx: Executor,
     key: BindingKey,
     expected: BindingBindingExpectation,
-    state: BindingAssignmentState,
-    settler: BindingProcessIdentity | null,
+    { state, settler }: { state: BindingAssignmentState; settler: BindingProcessIdentity | null },
     journaled = false,
   ): Promise<UpdateBindingStateResult> {
     const checked = await this.checkBinding(trx, key, expected, journaled);
@@ -934,8 +933,10 @@ export class SqliteBindingRegistry implements BindingRegistry {
             trx,
             key,
             change.expected,
-            change.state,
-            assertSettlerForState(change.state, change.options),
+            {
+              state: change.state,
+              settler: assertSettlerForState(change.state, change.options),
+            },
             true,
           );
     return result.kind === "committed" || result.kind === "updated" ? result.assignment : result;

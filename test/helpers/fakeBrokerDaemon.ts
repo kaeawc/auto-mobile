@@ -112,7 +112,7 @@ export async function createFakeBrokerDaemon(
     scope.scope.scopeKey,
     { acquire: () => {}, release: () => {} },
     timer,
-    new InMemoryMutationRecordingGaps(),
+    { recordingGaps: new InMemoryMutationRecordingGaps() },
   );
   const state: DaemonStateAccess = {
     isInitialized: () => true,

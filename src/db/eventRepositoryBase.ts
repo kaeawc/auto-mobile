@@ -3,6 +3,7 @@ import type { Database } from "./types";
 import { getDatabase } from "./database";
 import {
   pruneEventTableByCount,
+  type EventRetentionBudget,
   type EventRetentionState,
   type EventTableName,
 } from "./eventRetention";
@@ -35,9 +36,7 @@ export async function cleanupEventTable(
   table: EventTableName,
   state: EventRetentionState,
   db?: Kysely<Database>,
-  maxRows?: number,
-  checkInterval?: number,
-  inserted?: number,
+  budget: EventRetentionBudget = {},
 ): Promise<void> {
-  await pruneEventTableByCount(db, table, state, maxRows, checkInterval, inserted);
+  await pruneEventTableByCount(db, table, state, budget);
 }

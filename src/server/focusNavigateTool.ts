@@ -96,7 +96,7 @@ function createKeyPresser(device: BootedDevice): FocusKeyPresser {
 export const focusNavigateTool = defineDeviceTool({
   name: "focusNavigate",
   description:
-    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (two presses left focus unchanged). Activate the result with sendKeys key enter.",
+    "Move D-pad focus to an element on a focus-driven UI such as Android TV. Observes, and until the focused element matches `until` (text, contentDesc or resourceId) presses the D-pad arrow that moves toward the nearest match, or `direction` when given. When a press leaves focus unchanged, the next arrow toward the match is tried. Returns the path of focused elements and a status: focused, max_steps (default 30) or stuck (every arrow toward the match left focus unchanged; two unchanged presses with `direction`). Activate the result with sendKeys key enter.",
   input: focusNavigateInput,
   handler: async (device, args, _progress, signal) => {
     if (device.platform !== "android") {

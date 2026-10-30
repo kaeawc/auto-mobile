@@ -70,8 +70,20 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
 
   test("edge provenance is unioned and deduped across aggregated edge rows", async () => {
     // Two distinct edge rows for the SAME transition aggregate into one summary edge.
-    const edge1 = await seedRepo.createEdge(APP, "Home", "Details", "tapOn", null, 150);
-    const edge2 = await seedRepo.createEdge(APP, "Home", "Details", "tapOn", null, 160);
+    const edge1 = await seedRepo.createEdge(
+      APP,
+      "Home",
+      "Details",
+      { toolName: "tapOn", toolArgs: null },
+      150,
+    );
+    const edge2 = await seedRepo.createEdge(
+      APP,
+      "Home",
+      "Details",
+      { toolName: "tapOn", toolArgs: null },
+      160,
+    );
     const buildA = await seedRepo.getOrCreateBuildKey(APP, 1, "hashA");
     const buildB = await seedRepo.getOrCreateBuildKey(APP, 2, "hashB");
     // Same (build, device, session) on both edge rows → deduped to one record.

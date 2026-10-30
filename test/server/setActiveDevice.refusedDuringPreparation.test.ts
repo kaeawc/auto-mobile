@@ -337,7 +337,7 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
             h.device,
             undefined,
             undefined,
-            { mcpSessionId: "client-a" },
+            { autolockClient: { mcpSessionId: "client-a" } },
           );
         }
       };
@@ -398,7 +398,7 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
             h.device,
             undefined,
             undefined,
-            { mcpSessionId: "client-a" },
+            { autolockClient: { mcpSessionId: "client-a" } },
           );
         };
         const select = createSetActiveDeviceHandler({
@@ -482,7 +482,7 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
             h.device,
             undefined,
             undefined,
-            { mcpSessionId: "client-a" },
+            { autolockClient: { mcpSessionId: "client-a" } },
           );
         },
       });
@@ -538,7 +538,7 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
         h.device,
         undefined,
         undefined,
-        { mcpSessionId: "client-a" },
+        { autolockClient: { mcpSessionId: "client-a" } },
       );
       const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
       try {

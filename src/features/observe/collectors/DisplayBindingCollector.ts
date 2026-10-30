@@ -206,14 +206,11 @@ export class AndroidDisplayBindingCollector implements DisplayBindingCollector {
     assertRoutedDisplayReported(context, reportedId, panelUniqueId);
     const focusedPanel =
       typeof reportedId === "number" || panelUniqueId
-        ? await androidDisplayCache.panelForLogicalId(
-            device,
-            adb,
-            reportedId,
+        ? await androidDisplayCache.panelForLogicalId(device, adb, reportedId, {
             signal,
-            { panelUniqueId, panelFingerprint: result.viewHierarchy?.panelFingerprint },
-            explicitlyRouted,
-          )
+            identity: { panelUniqueId, panelFingerprint: result.viewHierarchy?.panelFingerprint },
+            allowProbe: explicitlyRouted,
+          })
         : undefined;
     assertFocusedPanelIsRequested(requestedPanel, focusedPanel);
     const geometryChanged = displayTransitions.geometryChanged(device.deviceId, result.screenSize);

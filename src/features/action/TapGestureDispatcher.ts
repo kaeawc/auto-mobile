@@ -384,7 +384,7 @@ export class TapGestureDispatcher {
     logger.info(`[TapOnElement] Using ADB input recovery for DocumentsUI row at (${x}, ${y})`);
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
-    await executeTouchscreenInput(this.host.adb(), `tap ${x} ${y}`, undefined, signal);
+    await executeTouchscreenInput(this.host.adb(), `tap ${x} ${y}`, undefined, { signal });
   }
 
   resolveEnsureCheckedRetryTarget(

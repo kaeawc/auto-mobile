@@ -424,9 +424,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
             reject(
               this.host.formatEarlyExitError(
                 avdName,
-                state.exitCode ?? null,
-                state.exitSignal ?? null,
-                state.earlyExitCategory,
+                {
+                  code: state.exitCode ?? null,
+                  signal: state.exitSignal ?? null,
+                  category: state.earlyExitCategory,
+                },
                 flushLaunchOutput(),
                 "",
               ),
@@ -472,8 +474,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
         context.perf.endOperation("panicDetection");
         context.resolve(context.child);
       },
-      options.expectedDeviceId,
-      options.signal,
+      { expectedDeviceId: options.expectedDeviceId, signal: options.signal },
     );
   }
 
@@ -645,9 +646,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     const postValidationExitError = (output: string): ActionableError => {
       const formattedError = this.host.formatEarlyExitError(
         avdName,
-        state.exitCode ?? null,
-        state.exitSignal ?? null,
-        state.earlyExitCategory,
+        {
+          code: state.exitCode ?? null,
+          signal: state.exitSignal ?? null,
+          category: state.earlyExitCategory,
+        },
         output,
         "",
       );
@@ -1054,9 +1057,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       reject(
         this.host.formatEarlyExitError(
           avdName,
-          completedExitCode,
-          completedExitSignal,
-          category,
+          { code: completedExitCode, signal: completedExitSignal, category },
           finalizedOutput,
           accelCheckOutput,
         ),

@@ -24,18 +24,29 @@ interface LaunchObservationDependencies {
   observeScreen: Pick<import("../observe/interfaces/ObserveScreen").ObserveScreen, "execute">;
   cacheInvalidator: DeviceWindowCacheInvalidator;
 }
+/** How long to wait for the launched package, and the launch facts that shape the wait. */
+export interface LaunchObservationWaitOptions {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  signal?: AbortSignal;
+  coldBoot?: boolean;
+  expectedUserId?: number;
+}
 /** Reconciles a launch result against foreground, task and system-overlay evidence. */
 export class LaunchObservation {
   constructor(private readonly deps: LaunchObservationDependencies) {}
   async ensureLaunchObservationMatchesPackage(
     result: LaunchAppResult,
     expectedPackageName: string,
-    timeoutMs: number = LAUNCH_OBSERVATION_TIMEOUT_MS,
-    pollIntervalMs: number = LAUNCH_OBSERVATION_POLL_INTERVAL_MS,
-    signal: AbortSignal | undefined,
-    options: { coldBoot?: boolean; expectedUserId?: number },
+    options: LaunchObservationWaitOptions,
   ): Promise<LaunchAppResult> {
-    const { coldBoot, expectedUserId } = options;
+    const {
+      timeoutMs = LAUNCH_OBSERVATION_TIMEOUT_MS,
+      pollIntervalMs = LAUNCH_OBSERVATION_POLL_INTERVAL_MS,
+      signal,
+      coldBoot,
+      expectedUserId,
+    } = options;
     signal?.throwIfAborted();
     result = await this.collapseNotificationShadeIfCovering(result, signal);
     if (

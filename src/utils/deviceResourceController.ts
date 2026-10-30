@@ -51,6 +51,8 @@ export interface DeviceResourceControllerExtras {
   applications?: DeviceResourceApplicationStore | null;
   /** Unsafe iOS resource combinations to refuse; defaults to the shipped table. */
   hazards?: readonly IosDeviceResourceHazard[];
+  /** Handles Android requests; defaults to `AndroidDeviceResourceController`. */
+  android?: DeviceResourceController;
 }
 
 export class DefaultDeviceResourceController implements DeviceResourceController {
@@ -59,13 +61,14 @@ export class DefaultDeviceResourceController implements DeviceResourceController
     plist: Pick<PlistReader, "readJsonFile"> = new PlistClient(),
     private readonly timer: Pick<Timer, "now" | "sleep"> = defaultTimer,
     readDirectory: (path: string) => Promise<string[]> = readdir,
-    private readonly android: DeviceResourceController = new AndroidDeviceResourceController(),
     extras: DeviceResourceControllerExtras = {},
   ) {
+    this.android = extras.android ?? new AndroidDeviceResourceController();
     this.applications = extras.applications ?? null;
     this.hazards = extras.hazards ?? iosDeviceResourceHazards;
     this.reader = new IosDeviceResourceReader({ simctl, plist, timer, readDirectory });
   }
+  private readonly android: DeviceResourceController;
   private readonly reader: IosDeviceResourceReader;
   private readonly applications: DeviceResourceApplicationStore | null;
   private readonly hazards: readonly IosDeviceResourceHazard[];

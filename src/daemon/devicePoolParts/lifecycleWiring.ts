@@ -386,14 +386,13 @@ export class DevicePoolLifecycleWiring {
         this.callbacks.clearAutoStartSuppressionForBootedDevice(device),
       foldObservationIntoPooledEntry: (pooled, device, source) =>
         this.callbacks.foldObservationIntoPooledEntry(pooled, device, source),
-      removeMissingDevicesForRefresh: (held, generation, ids, platforms, succeeded, sources) =>
+      removeMissingDevicesForRefresh: (held, generation, ids, platforms, discovery) =>
         this.state.missingDeviceLiveness.removeMissingDevicesForRefresh(
           held,
           generation,
           ids,
           platforms,
-          succeeded,
-          sources,
+          discovery,
         ),
       notifyDeviceReady: (id) => this.callbacks.notifyDeviceReady(id),
       liftUnconfirmedRecoveringAndroidImages: (discovery, generation) =>
@@ -420,13 +419,8 @@ export class DevicePoolLifecycleWiring {
         this.callbacks.recordEmulatorLossIncident(id, path, exit),
       finishEmulatorLossIncident: (id, outcome) =>
         this.callbacks.finishEmulatorLossIncident(id, outcome),
-      evictMissingPooledDevice: (device, reason, attempt, incidentId, captured, preparation) =>
-        this.callbacks.evictMissingPooledDevice(device, reason, {
-          attemptDeviceLossRecovery: attempt,
-          incidentId,
-          incidentCaptureComplete: captured,
-          recoveryPreparation: preparation,
-        }),
+      evictMissingPooledDevice: (device, reason, options) =>
+        this.callbacks.evictMissingPooledDevice(device, reason, options),
     };
   }
 

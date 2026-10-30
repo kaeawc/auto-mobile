@@ -37,10 +37,10 @@ export interface PrototypeShowOptions {
   locale?: string;
 }
 
-/** Show flags shared with legacy positional appearance callers in the Android client. */
+/** Per-show flags the Android client's `requestShowPrototype` takes after its timeout and tracker. */
 export type PrototypeShowOverrides = Pick<
   PrototypeShowOptions,
-  "appearance" | "replaceOthers" | "locale"
+  "displayId" | "reset" | "appearance" | "replaceOthers" | "locale"
 >;
 
 /** A device's own view of its prototype, where the platform can answer one. */

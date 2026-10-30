@@ -123,7 +123,7 @@ export interface UIStateSetupContext {
 export type UIStateSetupFactory = (context: UIStateSetupContext) => UIStateSetup;
 
 const defaultUIStateSetupFactory: UIStateSetupFactory = ({ device, adb, timer, sessionUuid }) =>
-  new DefaultUIStateSetup(device, adb, undefined, timer, sessionUuid);
+  new DefaultUIStateSetup(device, adb, undefined, timer, { sessionUuid });
 
 /** Optional collaborators for {@link NavigateTo}; each defaults to the production implementation. */
 export interface NavigateToDependencies {
@@ -424,8 +424,7 @@ export class NavigateTo {
           edge,
           options,
           uiStateSetup,
-          executedPath,
-          { startTime, state: context.replayState },
+          { startTime, state: context.replayState, executedPath },
           signal,
         );
       } catch (error) {
@@ -956,10 +955,10 @@ export class NavigateTo {
     edge: NavigationEdge,
     options: NavigateToOptions,
     uiStateSetup: UIStateSetup,
-    executedPath: string[],
-    run: ReplayRun,
+    run: ReplayRun & { executedPath: string[] },
     signal?: AbortSignal,
   ): Promise<void> {
+    const { executedPath } = run;
     throwIfAborted(signal);
     if (edge.interaction) {
       // Set up scroll position if required (must happen before UI state setup)
@@ -987,7 +986,7 @@ export class NavigateTo {
         ...edge.interaction,
         args: stripNavigationToolParams(edge.interaction.args),
       };
-      await this.replayToolCall(edge, interaction, options, { ...run, executedPath }, signal);
+      await this.replayToolCall(edge, interaction, options, run, signal);
       executedPath.push(`${edge.interaction.toolName}(${JSON.stringify(interaction.args)})`);
     } else if (edge.edgeType === "back") {
       logger.info(`[NAVIGATE_TO] Edge ${edge.from} → ${edge.to} is a Back edge, using back button`);

@@ -470,14 +470,11 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(result.success).toBe(true);
     expect(tapSpy).toHaveBeenCalledTimes(0);
     expect(doubleSpy).toHaveBeenCalledTimes(1);
-    expect(doubleSpy).toHaveBeenCalledWith(
-      42,
-      84,
-      TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-      undefined,
-      undefined,
-      expect.any(Function),
-    );
+    expect(doubleSpy).toHaveBeenCalledWith(42, 84, TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS, {
+      frameContext: undefined,
+      signal: undefined,
+      onDispatch: expect.any(Function),
+    });
   });
 
   test("VoiceOver enabled + tap sizes an explicit requestVoiceOverActivate timeout, floored at the established 5s default", async () => {
@@ -725,7 +722,6 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "com.test.app:id/submit_button",
       undefined,
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-      undefined,
       { abortSignal: undefined, onDispatch: expect.any(Function) },
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
@@ -817,7 +813,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
       await tapAny.execute({ action: "tap" }, { signal: controller.signal });
 
-      const options = actionSpy.mock.calls[0]?.[5];
+      const options = actionSpy.mock.calls[0]?.[4];
       expect(options?.abortSignal).toBe(controller.signal);
       expect(typeof options?.onDispatch).toBe("function");
     });
@@ -921,7 +917,6 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "com.test.app:id/submit_button",
       undefined,
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
-      undefined,
       { abortSignal: undefined, onDispatch: expect.any(Function) },
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
@@ -948,7 +943,6 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "com.test.app:id/submit_button",
       undefined,
       DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-      undefined,
       { duration: 1750, abortSignal: undefined, onDispatch: expect.any(Function) },
     );
     expect(fakeIosClient.getActionHistory()[0]?.duration).toBe(1750);

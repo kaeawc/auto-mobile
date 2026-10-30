@@ -800,7 +800,9 @@ export class TapAtCoordinate extends BaseVisualChange {
     }
     throwIfAborted(signal);
     context.assertCurrent();
-    await executeTouchscreenInput(this.adb, command, displayId, signal, context.assertCurrent, {
+    await executeTouchscreenInput(this.adb, command, displayId, {
+      signal,
+      assertCurrent: context.assertCurrent,
       timeoutMs:
         duration >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
     });

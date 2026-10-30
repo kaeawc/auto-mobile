@@ -53,3 +53,9 @@ export interface NavigationEdgeTarget {
   toolName: string | null;
   toolArgs: string | null;
 }
+
+/** The tool call that produced a navigation edge, when known. */
+export interface NavigationEdgeTool {
+  toolName: string | null;
+  toolArgs: Record<string, any> | null;
+}

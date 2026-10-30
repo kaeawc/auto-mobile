@@ -377,9 +377,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       this.adb,
       `swipe ${from.x} ${from.y} ${to.x} ${to.y} ${inputDurationArgument(duration)}`,
       displayId,
-      signal,
-      target.assertCurrent,
-      { onDispatch },
+      { signal, assertCurrent: target.assertCurrent, onDispatch },
     );
     return { success: true, x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration };
   }

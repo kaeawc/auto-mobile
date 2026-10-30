@@ -61,8 +61,7 @@ export interface SessionRebindingHost {
     assignedDevice: string,
     platform: Platform,
     stableDeviceId: string | undefined,
-    deferCleanup?: (cleanup: DeferredRebindCleanup) => void,
-    recovery?: boolean,
+    options: Pick<RebindSessionOptions, "deferCleanup" | "recovery">,
   ): Promise<Session>;
   readonly slotShadowProbe: SessionSlotShadowProbe<Session>;
   endSessionTerminallyReleasedInRow(session: Session): Promise<Error>;
@@ -140,8 +139,7 @@ export class SessionRebinding {
       assignedDevice,
       platform,
       options.stableDeviceId ?? existing.stableDeviceId,
-      options.deferCleanup,
-      options.recovery === true,
+      { deferCleanup: options.deferCleanup, recovery: options.recovery === true },
     );
     const rebind = { session: existing, promise };
     this.host.sessionSlots.setRebind(sessionId, rebind);

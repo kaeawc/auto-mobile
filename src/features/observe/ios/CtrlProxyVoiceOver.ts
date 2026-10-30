@@ -47,6 +47,7 @@ export interface VoiceOverActivationOptions {
 }
 
 export interface CtrlProxyRequestActionOptions {
+  perf?: PerformanceTracker;
   abortSignal?: AbortSignal;
   duration?: number;
   /** Fires once the request frame was written; after it the action may have run. */
@@ -142,8 +143,7 @@ export class CtrlProxyVoiceOver {
    * @param resourceId - The resource-id / accessibility identifier of the target element
    * @param label - The accessibility label (content-desc) as fallback when no resourceId
    * @param timeoutMs - Request timeout in milliseconds (default: 5000)
-   * @param perf - Optional performance tracker
-   * @param options - Optional caller cancellation signal and action duration
+   * @param options - Optional performance tracker, caller cancellation signal and action duration
    * @returns Action result
    */
   async requestAction(
@@ -151,7 +151,6 @@ export class CtrlProxyVoiceOver {
     resourceId?: string,
     label?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
     let dispatched = false;
@@ -166,7 +165,7 @@ export class CtrlProxyVoiceOver {
         duration: options?.duration,
       },
       timeoutMs,
-      perf,
+      perf: options?.perf,
       cancelScreenshotBackoff: false,
       abortSignal: options?.abortSignal,
       onDispatch: () => {

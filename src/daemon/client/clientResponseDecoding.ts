@@ -306,6 +306,8 @@ export function toDaemonStatus(rawStatus: unknown, socketPath: string): DaemonSt
 export interface DaemonToolCallOptions {
   /** The MCP Tasks extension relay for this call (#4668); absent when the client did not declare it. */
   readonly tasks?: TaskRelayFrame;
+  /** Abandons this call (and only this call) when aborted. */
+  readonly signal?: AbortSignal;
 }
 
 export interface DaemonClientLike {
@@ -316,7 +318,6 @@ export interface DaemonClientLike {
     params: Record<string, any>,
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
-    signal?: AbortSignal,
     options?: DaemonToolCallOptions,
   ): Promise<any>;
   /**

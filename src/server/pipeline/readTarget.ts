@@ -205,8 +205,7 @@ export async function ensureReadTargetOrWatch(
   platform: SomePlatform,
   providedDeviceId: string | undefined,
   options: DeviceReadyOptions,
-  read: SessionlessDeviceRead,
-  readinessTarget: string | undefined,
+  { read, readinessTarget }: { read: SessionlessDeviceRead; readinessTarget: string | undefined },
 ): Promise<
   | { device: BootedDevice; watched?: undefined }
   | { watched: ExecutionTargetContext; device?: undefined }

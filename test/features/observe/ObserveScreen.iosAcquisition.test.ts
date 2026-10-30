@@ -217,17 +217,11 @@ describe("iOS acquisition through real delegate, normalization and observe proje
   test("observer sync response carries device acquisition", async () => {
     const h = harness(null);
     try {
-      const response = await h.delegate.requestHierarchySync(
-        undefined,
-        false,
-        undefined,
-        100,
-        true,
-        {
-          forceCapture: true,
-          observerMode: true,
-        },
-      );
+      const response = await h.delegate.requestHierarchySync(undefined, false, undefined, 100, {
+        suppressObservationStreamPush: true,
+        forceCapture: true,
+        observerMode: true,
+      });
       expect(acquisition(response!)).toEqual(["device"]);
       expect(h.commands.map((command) => command.type)).toEqual(["request_hierarchy"]);
       expect(h.context.getCachedHierarchy()).toBeNull();
@@ -267,7 +261,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       h.timer.enableAutoAdvance();
       const sync = spyOn(h.client, "requestHierarchySync").mockImplementation(
         (perf, filtering, signal, timeout, options) =>
-          h.delegate.requestHierarchySync(perf, filtering, signal, timeout, false, options),
+          h.delegate.requestHierarchySync(perf, filtering, signal, timeout, options),
       );
       const convert = spyOn(h.client, "convertToViewHierarchyResult").mockImplementation((value) =>
         h.delegate.convertToViewHierarchyResult(value),

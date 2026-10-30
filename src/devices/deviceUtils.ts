@@ -90,6 +90,12 @@ export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 
 export type { DeviceDiscoveryError };
 
+/** Trailing MultiPlatformDeviceManager seams; absent ones use the production defaults. */
+export interface MultiPlatformDeviceManagerOptions {
+  timer?: Pick<Timer, "now">;
+  physicalIosDevices?: IosPhysicalDeviceLister | null;
+}
+
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private foreignSource?: ForeignAndroidSerialSource;
   private adb: AdbExecutor;
@@ -110,15 +116,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * @param adb - An instance of AdbExecutor for interacting with Android Debug Bridge
    * @param simctl - An instance of SimCtlClient for interacting with iOS simulator controls
    * @param emulator - An instance of AndroidEmulatorClient for managing Android emulators
-   * @param physicalIosDevices - Discovery seam for connected physical iOS devices (devicectl)
+   * @param options.timer - Clock for discovery bookkeeping
+   * @param options.physicalIosDevices - Discovery seam for connected physical iOS devices (devicectl)
    */
   constructor(
     adb: AdbExecutor | null = null,
     simctl: DeviceManagerSimCtl | null = null,
     emulator: AndroidEmulatorForDeviceManager | null = null,
     lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
-    timer: Pick<Timer, "now"> = defaultTimer,
-    physicalIosDevices: IosPhysicalDeviceLister | null = null,
+    { timer = defaultTimer, physicalIosDevices }: MultiPlatformDeviceManagerOptions = {},
   ) {
     this.adb = adb || defaultAdbClientFactory.create(null);
     this.simctl = simctl || new SimCtlClient();

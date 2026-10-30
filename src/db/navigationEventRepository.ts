@@ -92,12 +92,9 @@ export async function cleanupIfNeeded(
   checkInterval?: number,
   inserted?: number,
 ): Promise<void> {
-  await cleanupEventTable(
-    "navigation_events",
-    retentionState,
-    db,
+  await cleanupEventTable("navigation_events", retentionState, db, {
     maxRows,
     checkInterval,
     inserted,
-  );
+  });
 }

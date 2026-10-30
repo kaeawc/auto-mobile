@@ -133,19 +133,26 @@ function unpooledEmulatorStableIds(
   return [transportAvdName, isUnresolvedAndroidEmulatorName(device) ? undefined : device.name];
 }
 
-export function listDevicePayloads(
-  booted: BootedDevice[],
-  devicePool: DevicePoolReads | undefined,
-  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
-  aliasesForDevice: (deviceId: string) => string[] = (deviceId) =>
-    devicePool?.getAndroidTransportAliases(deviceId) ?? [],
-  transportAvdNameForDevice: (deviceId: string) => string | undefined = (deviceId) =>
-    devicePool?.getAndroidTransportAvdName(deviceId),
+/** Per-listing Android transport lookups and holds; absent ones read the device pool. */
+export interface ListDevicePayloadsOptions {
+  aliasesForDevice?: (deviceId: string) => string[];
+  transportAvdNameForDevice?: (deviceId: string) => string | undefined;
   /**
    * Held devices their platform lists in a transitional state, by device id: Android in a
    * non-`device` adb state (#11455), iOS `Booting` / `Shutting Down` (#11573).
    */
-  transitionalHolds: ReadonlyMap<string, TransitionalHold> = new Map(),
+  transitionalHolds?: ReadonlyMap<string, TransitionalHold>;
+}
+
+export function listDevicePayloads(
+  booted: BootedDevice[],
+  devicePool: DevicePoolReads | undefined,
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+  {
+    aliasesForDevice = (deviceId) => devicePool?.getAndroidTransportAliases(deviceId) ?? [],
+    transportAvdNameForDevice = (deviceId) => devicePool?.getAndroidTransportAvdName(deviceId),
+    transitionalHolds = new Map(),
+  }: ListDevicePayloadsOptions = {},
 ) {
   const sessionManager = defaultDaemonContext.sessionManager();
   const sessions = new Map(

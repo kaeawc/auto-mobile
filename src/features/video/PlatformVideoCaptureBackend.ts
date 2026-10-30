@@ -173,8 +173,7 @@ async function startScreenrecordProcess(
   adb: Pick<AdbExecutor, "spawn">,
   screenrecordArgv: string[],
   config: VideoCaptureConfig,
-  device: BootedDevice,
-  physicalDisplayId: string | undefined,
+  { device, physicalDisplayId }: { device: BootedDevice; physicalDisplayId: string | undefined },
   { timer, cleanupFailedStart }: ScreenrecordStartHooks,
 ): Promise<{
   process: TrackedChildProcess;
@@ -959,6 +958,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     // A recording owns its process after this method returns. The request signal
     // must bound only startup, not kill an accepted recording after its caller
     // has moved on to post-tool auditing.
+    const hooks: ScreenrecordStartHooks = {
+      timer: this.timer,
+      cleanupFailedStart: (pid) => this.cleanupFailedAndroidStartDetached(adb, deviceTempPath, pid),
+    };
     const {
       process,
       exitState,
@@ -967,10 +970,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       devicePid,
       warning,
       physicalDisplayId: effectivePhysicalId,
-    } = await startScreenrecordProcess(adb, args, config, device, physicalDisplayId, {
-      timer: this.timer,
-      cleanupFailedStart: (pid) => this.cleanupFailedAndroidStartDetached(adb, deviceTempPath, pid),
-    });
+    } = await startScreenrecordProcess(adb, args, config, { device, physicalDisplayId }, hooks);
 
     const backendHandle: AndroidBackendHandle = {
       kind: "android",

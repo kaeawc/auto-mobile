@@ -507,14 +507,10 @@ export class BindingJournal {
       );
     }
     if (located.kind === "blocked") {
-      return this.removalBlocked(
-        entry,
-        located.reason,
-        located.message,
-        undefined,
+      return this.removalBlocked(entry, located.reason, located.message, {
         signal,
-        options.deadlineMs,
-      );
+        deadlineMs: options.deadlineMs,
+      });
     }
     const { device, stableId } = located;
     const locatedPending = this.pendingRemoval(
@@ -853,9 +849,7 @@ export class BindingJournal {
         entry,
         claim.kind === "held" ? "device_busy" : "discovery_incomplete",
         `Uncommitted device '${stableId}' cannot be removed: ${claim.reason}`,
-        { newStableId: stableId },
-        signal,
-        deadlineMs,
+        { target: { newStableId: stableId }, signal, deadlineMs },
       );
     }
     const deletion = await this.stages.deleteDevice(
@@ -873,9 +867,7 @@ export class BindingJournal {
         entry,
         "cleanup_pending",
         `Removing uncommitted device '${stableId}' failed: ${deletion.message}`,
-        { newStableId: stableId },
-        signal,
-        deadlineMs,
+        { target: { newStableId: stableId }, signal, deadlineMs },
       );
     }
     const closed = await this.removalRegistryStage(
@@ -951,9 +943,15 @@ export class BindingJournal {
     entry: BindingJournalEntry,
     reason: BindingJournalBlockReason,
     message: string,
-    target?: Partial<BindingJournalEntry["target"]>,
-    signal?: AbortSignal,
-    deadlineMs?: number,
+    {
+      target,
+      signal,
+      deadlineMs,
+    }: {
+      target?: Partial<BindingJournalEntry["target"]>;
+      signal?: AbortSignal;
+      deadlineMs?: number;
+    },
   ) {
     return this.removalRegistryStage(
       () => this.recordBlocked(entry, reason, message, target, signal),

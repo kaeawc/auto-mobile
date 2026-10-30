@@ -819,7 +819,7 @@ test.each(["timeout", "reply", "abort"])(
         { action: "longPress", duration: Number.MAX_SAFE_INTEGER },
         undefined,
         undefined,
-        controller.signal,
+        { signal: controller.signal },
       )
       .catch((error: unknown) => error);
     const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];

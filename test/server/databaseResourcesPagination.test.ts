@@ -121,8 +121,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
       "com.example.app",
       "/app/Documents/app.db",
       "notes",
-      expectedLimit,
-      expectedOffset,
+      { limit: expectedLimit, offset: expectedOffset },
     );
   });
 
@@ -294,8 +293,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
       "com.example.app",
       "/app/Documents/app.db",
       "notes",
-      50,
-      0,
+      { limit: 50, offset: 0 },
     );
   });
 

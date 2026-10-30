@@ -347,9 +347,15 @@ test("an append event followed by a stale whole-data patch preserves the device 
 test("status snapshot replays extend and maxItems", () => {
   const store = new InMemoryPrototypeStatusStore(new FakeTimer());
   const scope = { deviceId: "d" };
-  store.record(scope, "show", { id: "shop" }, { success: true }, undefined, {
-    data: { cart: [{ sku: "a" }] },
-  });
+  store.record(
+    scope,
+    "show",
+    { id: "shop" },
+    { success: true },
+    {
+      data: { cart: [{ sku: "a" }] },
+    },
+  );
   store.recordEvent(
     scope,
     decodePrototypeEvent(
@@ -407,9 +413,15 @@ test("prepend event without its page abandons the mirror", () => {
 test("status snapshot replays prepend and maxItems", () => {
   const store = new InMemoryPrototypeStatusStore(new FakeTimer());
   const scope = { deviceId: "d" };
-  store.record(scope, "show", { id: "shop" }, { success: true }, undefined, {
-    data: { cart: [{ sku: "a" }] },
-  });
+  store.record(
+    scope,
+    "show",
+    { id: "shop" },
+    { success: true },
+    {
+      data: { cart: [{ sku: "a" }] },
+    },
+  );
   store.recordEvent(
     scope,
     decodePrototypeEvent(

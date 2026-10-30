@@ -11,6 +11,7 @@ import type {
   PooledDevice,
   SessionRecoveryPreparation,
 } from "./devicePool";
+import type { MissingDeviceEvictionOptions } from "./missingDeviceLiveness";
 import type { SessionManager } from "./sessionManager";
 
 export interface EmulatorProcessLifecyclePoolPort {
@@ -39,10 +40,10 @@ export interface EmulatorProcessLifecyclePoolPort {
   evictMissingPooledDevice(
     device: PooledDevice,
     reason: string,
-    attemptDeviceLossRecovery: boolean,
-    incidentId: string | undefined,
-    incidentCaptureComplete: boolean,
-    recoveryPreparation: SessionRecoveryPreparation | undefined,
+    options: Pick<
+      MissingDeviceEvictionOptions,
+      "attemptDeviceLossRecovery" | "incidentId" | "incidentCaptureComplete" | "recoveryPreparation"
+    >,
   ): Promise<void>;
 }
 
@@ -294,10 +295,12 @@ export class EmulatorProcessLifecycle {
             await this.pool.evictMissingPooledDevice(
               device,
               `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
-              true,
-              incidentId,
-              true,
-              preparation,
+              {
+                attemptDeviceLossRecovery: true,
+                incidentId,
+                incidentCaptureComplete: true,
+                recoveryPreparation: preparation,
+              },
             );
           } catch (error) {
             await this.finishFailedEvictionIncident(incidentId);

@@ -68,7 +68,11 @@ follows the current user on Android 10+. When the booted device's `formFactor` i
 check, enabled-services read, enable, disable, rebind writes and the local-network grant target that user,
 and the rebind health check reads that user's `User state[` block. A device that is not automotive issues
 no extra command and the exact commands it always did. An unreadable user is an `ActionableError` naming
-the user problem. Unverified on an AAOS emulator (#14916); the gate relies on the AVD's form factor, so a
+the user problem. User 0 is the driver only on a build without a headless system user: when an automotive
+device reports user 0, `ro.fw.mu.headless_system_user` (what `UserManager.isHeadlessSystemUserMode()`
+reads) is checked, and on a headless build the read throws `ForegroundUserPendingError`. Runner readiness
+treats that like a missing framework service and retries setup within its budget, so `sys.boot_completed`
+alone never lets CtrlProxy be set up for user 0 before the switch to the driver user. Unverified on an AAOS emulator (#14916); the gate relies on the AVD's form factor, so a
 physical head unit is not covered.
 
 An AAOS image is a normal Android build with a car SystemUI; app windows are in the accessibility tree. Same three questions as TV (service enables, `observe` returns a hierarchy, multi-display behaviour for cluster/passenger screens; see `docs/design-docs/plat/android/windowing.md`).

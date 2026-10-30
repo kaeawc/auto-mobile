@@ -169,7 +169,7 @@ async function withCapturedScreenshotImage<T extends ObserveResponsePayload>(
   screenshotPath: string | undefined,
   options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
 ): Promise<ObserveResponse<T>> {
-  const delivery = await inlineScreenshotImage(screenshotPath, result, options.signal);
+  const delivery = await inlineScreenshotImage(screenshotPath, result, { signal: options.signal });
   await publishScreenshotPaths(result, options.protection);
   const response = createStructuredToolResponse({
     ...result,
@@ -345,8 +345,7 @@ export async function attachObserveCrop(
     args.crop,
     { ...result, deviceId: device.deviceId },
     requireAndroidOrIosPlatform(device.platform, "Observe crop"),
-    dependencies,
-    selectorObservation,
+    { dependencies, selectorObservation },
   );
 }
 

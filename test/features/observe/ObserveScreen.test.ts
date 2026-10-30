@@ -1452,9 +1452,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
       readonly ids: Array<number | undefined> = [];
       override async captureFresh(
         _id?: string,
-        _perf?: PerformanceTracker,
-        _signal?: AbortSignal,
-        displayId?: number,
+        { displayId }: { perf?: PerformanceTracker; signal?: AbortSignal; displayId?: number } = {},
       ): Promise<void> {
         this.ids.push(displayId);
       }
@@ -1475,7 +1473,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
     }
     const debug = spyOn(logger, "debug");
     try {
-      await observe.captureScreenshot(undefined, undefined, observation, "async");
+      await observe.captureScreenshot(undefined, { observation, screenshot: "async" });
       expect(recorder.ids).toEqual([scenario.expected]);
       if (scenario.fallback) {
         expect(debug.mock.calls).toContainEqual([
@@ -1502,7 +1500,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
     );
     const observation = observe.createBaseResult();
     await expect(
-      observe.captureScreenshot(undefined, undefined, observation, "async"),
+      observe.captureScreenshot(undefined, { observation, screenshot: "async" }),
     ).rejects.toThrow('display: "all" is not supported for single-panel targeting');
     expect(recorder.captureFreshCalls).toBe(0);
   });

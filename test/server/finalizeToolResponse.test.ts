@@ -1730,7 +1730,7 @@ describe("finalizeToolResponse", () => {
         return cached;
       });
       const capture = spyOn(fake, "captureScreenshot").mockImplementation(
-        async (_perf, _signal, observation) => {
+        async (_perf, { observation } = {}) => {
           if (!observation) {
             throw new Error("Expected the adopted observation");
           }
@@ -1738,7 +1738,7 @@ describe("finalizeToolResponse", () => {
           screenshots.updateForObservation(
             requireValue(observation.deviceId),
             observation.observationId,
-            "/fake/adopted.png",
+            { path: "/fake/adopted.png" },
           );
         },
       );
@@ -1752,7 +1752,7 @@ describe("finalizeToolResponse", () => {
         const adopted = response.structuredContent!.observation;
         expect(adopted.screenshotCaptureAttempted).toBe(true);
         expect(capture).toHaveBeenCalledTimes(1);
-        expect(capture.mock.calls[0][2]?.observationId).toBe(adopted.observationId);
+        expect(capture.mock.calls[0][1]?.observation?.observationId).toBe(adopted.observationId);
         expect(reads.mock.calls.every(([options]) => options?.skipScreenshot === true)).toBe(true);
         const finalized = finalizeToolResponse(response, {
           name: "tapOn",

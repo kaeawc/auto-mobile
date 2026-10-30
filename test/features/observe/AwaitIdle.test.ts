@@ -298,13 +298,9 @@ describe("AwaitIdle UI stability deadline", () => {
     );
 
     await expect(
-      awaitIdle.waitForUiStabilityWithState(
-        "com.example.app",
-        100,
-        state,
-        undefined,
-        controller.signal,
-      ),
+      awaitIdle.waitForUiStabilityWithState("com.example.app", 100, state, {
+        signal: controller.signal,
+      }),
     ).rejects.toBe(reason);
     expect(adb.getCommandCalls()).toHaveLength(2);
   });

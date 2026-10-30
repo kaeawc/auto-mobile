@@ -22,6 +22,13 @@ interface ScreenshotState {
   timestamp: number;
 }
 
+/** Observation-scoped screenshot outcome written by `updateForObservation`. */
+export interface ScreenshotStateUpdate {
+  path?: string;
+  error?: string;
+  imageSize?: { width: number; height: number };
+}
+
 /**
  * Read/write API for the most recent screenshot path/error per device.
  *
@@ -38,9 +45,7 @@ export interface ScreenshotStateStore {
   updateForObservation(
     deviceId: string,
     observationId: string,
-    path?: string,
-    error?: string,
-    imageSize?: { width: number; height: number },
+    options?: ScreenshotStateUpdate,
   ): void;
   /** Register a screenshot write that will later be committed for this observation. */
   beginObservation(deviceId: string, observationId: string): void;
@@ -102,9 +107,7 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
   updateForObservation(
     deviceId: string,
     observationId: string,
-    path?: string,
-    error?: string,
-    imageSize?: { width: number; height: number },
+    { path, error, imageSize }: ScreenshotStateUpdate = {},
   ): void {
     if (this.isClearedObservation(deviceId, observationId)) {
       logger.debug(
@@ -181,7 +184,7 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     const existing = this.findObservation(deviceId, observationId);
     // A late cancellation must not replace a real path or error recorded by another capture.
     if (!existing || (existing.path === null && existing.error === null)) {
-      this.updateForObservation(deviceId, observationId, undefined, reason);
+      this.updateForObservation(deviceId, observationId, { error: reason });
       return;
     }
     this.completeObservation(deviceId, observationId);

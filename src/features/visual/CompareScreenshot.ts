@@ -108,8 +108,7 @@ export class CompareScreenshot<S extends VisualScreen = VisualScreen> {
       screen.png,
       request.target ? regionBounds(request.target, screen) : screenBounds(screen.geometry),
       screen.geometry,
-      this.deps.backend,
-      "compareScreenshot",
+      { backend: this.deps.backend, label: "compareScreenshot" },
     );
     const profile = await this.deps.profile(screen);
     const base: CompareBase = { baseline: request.baseline, mode: request.mode, profile };

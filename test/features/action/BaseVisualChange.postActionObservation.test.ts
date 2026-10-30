@@ -782,7 +782,7 @@ describe("BaseVisualChange post-action observation", () => {
         updatedAt: screen,
       }),
     );
-    fakeObserveScreen.captureScreenshot = async (_perf, _signal, observation) => {
+    fakeObserveScreen.captureScreenshot = async (_perf, { observation } = {}) => {
       order.push(`capture-${observation?.observationId}-screen-${screen}`);
       if (observation) {
         observation.screenshotPath = `screen-${screen}.png`;

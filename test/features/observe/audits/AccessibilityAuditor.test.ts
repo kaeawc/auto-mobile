@@ -180,7 +180,7 @@ describe("resolveObservationScreenshotPath", () => {
 
   test("returns the path recorded for the same observation", async () => {
     const shotA = await seedScreenshot("a.jpg");
-    store.updateForObservation(deviceId, "obs-A", shotA);
+    store.updateForObservation(deviceId, "obs-A", { path: shotA });
 
     expect(await resolveFor("obs-A")).toBe(shotA);
   });
@@ -188,14 +188,14 @@ describe("resolveObservationScreenshotPath", () => {
   test("does not hand observation B the device-wide capture of observation A", async () => {
     const shotA = await seedScreenshot("a.jpg");
     store.update(deviceId, shotA);
-    store.updateForObservation(deviceId, "obs-A", shotA);
+    store.updateForObservation(deviceId, "obs-A", { path: shotA });
 
     expect(await resolveFor("obs-B")).toBeUndefined();
   });
 
   test("returns nothing when this observation's capture failed, even with older files on disk", async () => {
     await seedScreenshot("older-screen.jpg");
-    store.updateForObservation(deviceId, "obs-B", undefined, "screencap failed");
+    store.updateForObservation(deviceId, "obs-B", { error: "screencap failed" });
 
     expect(await resolveFor("obs-B")).toBeUndefined();
   });
@@ -209,7 +209,7 @@ describe("resolveObservationScreenshotPath", () => {
   });
 
   test("returns nothing when the recorded file is gone", async () => {
-    store.updateForObservation(deviceId, "obs-B", path.join(dir, "missing.jpg"));
+    store.updateForObservation(deviceId, "obs-B", { path: path.join(dir, "missing.jpg") });
 
     expect(await resolveFor("obs-B")).toBeUndefined();
   });

@@ -4,7 +4,7 @@ import type { BootedDevice, ScreenScaleMetadata, ViewHierarchyResult } from "../
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { logger } from "../../../utils/logger";
 import type {
-  DefaultScreenshotBackoffScheduler,
+  ScreenshotBackoffConfigInput,
   ScreenshotBackoffScheduler,
   ScreenshotCaptureResult,
 } from "../ScreenshotBackoffScheduler";
@@ -44,7 +44,7 @@ export interface AndroidObservationStreamContext {
   createScreenshotBackoffScheduler(
     capture: () => Promise<ScreenshotCaptureResult>,
     emit: (result: ScreenshotCaptureResult) => void,
-    options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2],
+    options: ScreenshotBackoffConfigInput,
   ): ScreenshotBackoffScheduler;
   forwardHierarchyToObservationStream(
     hierarchy: ViewHierarchyResult,

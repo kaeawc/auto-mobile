@@ -371,8 +371,7 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
       files,
       this.effectiveCap(state),
       SCREENSHOT_PATH_MIN_LIFETIME_MS,
-      this.timer.now(),
-      { isReferenced, isProtected },
+      { nowMs: this.timer.now(), isReferenced, isProtected },
     );
     // Both size pressure and the idle age sweep obey exactly the same guarantee.
     const candidates = new Set([
@@ -511,8 +510,10 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
       files,
       this.limits.keepPerDevice,
       (file) => this.lastTouched(file, state),
-      screenshotFileDeviceToken(nodePath.basename(path)),
-      (filePath) => this.key(filePath),
+      {
+        incomingDevice: screenshotFileDeviceToken(nodePath.basename(path)),
+        key: (filePath) => this.key(filePath),
+      },
     );
     return files
       .map((file) => {

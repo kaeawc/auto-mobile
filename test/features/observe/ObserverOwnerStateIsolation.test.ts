@@ -251,12 +251,10 @@ test.each(["active", "all"])(
     const session = await sessions.createSession("owner", device.deviceId, "android");
     sessions.setLastRenderedObservation("owner", baseline);
     await store.put(device.deviceId, baseline, store.currentGeneration(device.deviceId));
-    screenshotState.updateForObservation(
-      device.deviceId,
-      "owner-baseline",
-      "/fake/owner.png",
-      "owner error",
-    );
+    screenshotState.updateForObservation(device.deviceId, "owner-baseline", {
+      path: "/fake/owner.png",
+      error: "owner error",
+    });
     screenshotState.beginObservation(device.deviceId, "owner-pending");
     expect(snapshotReferences.capture(device.deviceId, baseline).status).toBe("captured");
     displayTransitions.record(device.deviceId, baseline);

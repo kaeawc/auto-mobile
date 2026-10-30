@@ -32,8 +32,7 @@ export interface SystemTrayObserver {
   execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult>;
   captureScreenshot?(
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    observation?: ObserveResult,
+    options?: { signal?: AbortSignal; observation?: ObserveResult },
   ): Promise<void>;
   runAccessibilityAudit?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
 }

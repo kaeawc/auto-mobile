@@ -216,7 +216,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     writeFileSync(file, "img");
     svc.setNextResult({ success: true, path: file });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getPath("test-device")).toBe(file);
     expect(store.getError("test-device")).toBeUndefined();
@@ -228,22 +228,29 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     writeFileSync(file, "img");
 
     svc.setNextResult({ success: true, path: file, screenshotFormat: "jpeg" });
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(svc.lastCaptureOptions).toEqual({});
   });
 
   test("passes prototype hiding to the capture and keeps the device's own encoding (#9305)", async () => {
-    await recorder.capture("observation", new NoOpPerformanceTracker(), undefined, 2, {
-      hidePrototypes: true,
+    await recorder.capture("observation", {
+      perf: new NoOpPerformanceTracker(),
+      displayId: 2,
+      capture: {
+        hidePrototypes: true,
+      },
     });
 
     expect(svc.lastCaptureOptions).toEqual({ displayId: 2, hidePrototypes: true });
   });
 
   test("captureFresh passes prototype hiding to the capture (#9305)", async () => {
-    await recorder.captureFresh("observation", new NoOpPerformanceTracker(), undefined, undefined, {
-      hidePrototypes: true,
+    await recorder.captureFresh("observation", {
+      perf: new NoOpPerformanceTracker(),
+      capture: {
+        hidePrototypes: true,
+      },
     });
 
     expect(svc.lastCaptureOptions).toEqual({ hidePrototypes: true });
@@ -267,7 +274,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
   test("failure writes error to store", async () => {
     svc.setNextResult({ success: false, error: "capture failed" });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getPath("test-device")).toBeUndefined();
     expect(store.getError("test-device")).toBe("capture failed");
@@ -276,7 +283,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
   test("failure without explicit error message uses default", async () => {
     svc.setNextResult({ success: false });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getError("test-device")).toBe("Failed to capture screenshot");
   });
@@ -284,7 +291,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
   test("missing file path on success records descriptive error", async () => {
     svc.setNextResult({ success: true });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getError("test-device")).toBe("Screenshot capture returned no file path");
   });
@@ -292,7 +299,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
   test("success with path that no longer exists on disk records error", async () => {
     svc.setNextResult({ success: true, path: "/tmp/does-not-exist-xyz-12345.png" });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getError("test-device")).toBe("Screenshot file missing after capture");
     expect(store.getPath("test-device")).toBeUndefined();
@@ -305,7 +312,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
   test("cancelled capture does not write to store", async () => {
     svc.setNextResult({ success: false, error: `${OPERATION_CANCELLED_MESSAGE} mid-capture` });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getUpdateCount()).toBe(0);
     expect(store.isObservationPending("test-device", "observation")).toBe(false);
@@ -315,7 +322,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     svc.setNextAborted(true);
     svc.setNextResult({ success: true, path: "/tmp/x.png" });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getUpdateCount()).toBe(0);
     expect(store.getPathForObservation("test-device", "observation")).toBeUndefined();
@@ -327,7 +334,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     svc.setNextIsLatest(false);
     svc.setNextResult({ success: true, path: "/tmp/x.png" });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getUpdateCount()).toBe(0);
     expect(store.getPathForObservation("test-device", "observation")).toBeUndefined();
@@ -336,11 +343,11 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
   });
 
   test("late cancellation does not replace a path already recorded for the observation", async () => {
-    store.updateForObservation("test-device", "observation", "/tmp/already-recorded.png");
+    store.updateForObservation("test-device", "observation", { path: "/tmp/already-recorded.png" });
     svc.setNextAborted(true);
     svc.setNextResult({ success: true, path: "/tmp/stale.png" });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getPathForObservation("test-device", "observation")).toBe(
       "/tmp/already-recorded.png",
@@ -353,7 +360,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     svc.setNextResult({ success: true, path: "/tmp/skip.png" });
     svc.setNextIsLatest(false); // avoid the onComplete success path also writing
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(store.getError("test-device")).toBe("network down");
   });
@@ -361,7 +368,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
   test("capture() coalesces ordinary work so a fresh capture is not cancelled", async () => {
     svc.setNextResult({ success: false, error: OPERATION_CANCELLED_MESSAGE });
 
-    await recorder.capture("observation", new NoOpPerformanceTracker());
+    await recorder.capture("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(svc.lastTrackerOptions?.coalesceWithPending).toBe(true);
   });
@@ -369,7 +376,7 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
   test("captureFresh() queues terminal evidence after pending work", async () => {
     svc.setNextResult({ success: false, error: OPERATION_CANCELLED_MESSAGE });
 
-    await recorder.captureFresh("observation", new NoOpPerformanceTracker());
+    await recorder.captureFresh("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(svc.lastTrackerOptions?.queueAfterPending).toBe(true);
     expect(svc.lastTrackerOptions?.coalesceWithPending).toBeUndefined();
@@ -387,9 +394,13 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     ]);
     const queuedRecorder = new DefaultObserveScreenshotRecorder(mockDevice, queued.service, store);
 
-    const first = queuedRecorder.capture("observation-first", new NoOpPerformanceTracker());
+    const first = queuedRecorder.capture("observation-first", {
+      perf: new NoOpPerformanceTracker(),
+    });
     await queued.captureStarts[0]!.promise;
-    const second = queuedRecorder.capture("observation-second", new NoOpPerformanceTracker());
+    const second = queuedRecorder.capture("observation-second", {
+      perf: new NoOpPerformanceTracker(),
+    });
     await Promise.resolve();
 
     expect(queued.captureCount).toBe(1);
@@ -411,12 +422,13 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     const secondRecorder = new DefaultObserveScreenshotRecorder(mockDevice, shared.service, store);
     const abortController = new AbortController();
 
-    const first = firstRecorder.capture(
-      "observation-first",
-      new NoOpPerformanceTracker(),
-      abortController.signal,
-    );
-    const second = secondRecorder.capture("observation-second", new NoOpPerformanceTracker());
+    const first = firstRecorder.capture("observation-first", {
+      perf: new NoOpPerformanceTracker(),
+      signal: abortController.signal,
+    });
+    const second = secondRecorder.capture("observation-second", {
+      perf: new NoOpPerformanceTracker(),
+    });
     await shared.captureStarts[0]!.promise;
     abortController.abort();
     shared.captureGates[0]!.open();
@@ -450,7 +462,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     writeFileSync(file, "img");
     svc.setNextResult({ success: true, path: file });
 
-    const returnValue = recorder.start("observation", new NoOpPerformanceTracker());
+    const returnValue = recorder.start("observation", { perf: new NoOpPerformanceTracker() });
 
     expect(returnValue).toBeUndefined();
     expect(store.getUpdateCount()).toBe(0); // nothing yet — runs async
@@ -461,8 +473,11 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
   });
 
   test("start() passes prototype hiding to the capture (#9305)", async () => {
-    recorder.start("observation", new NoOpPerformanceTracker(), undefined, undefined, {
-      hidePrototypes: true,
+    recorder.start("observation", {
+      perf: new NoOpPerformanceTracker(),
+      capture: {
+        hidePrototypes: true,
+      },
     });
     await svc.lastCapturePromise();
 
@@ -472,7 +487,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
   test("start() registers its observation before returning", () => {
     svc.setNextResult({ success: false, error: "still pending" });
 
-    recorder.start("observation-pending", new NoOpPerformanceTracker());
+    recorder.start("observation-pending", { perf: new NoOpPerformanceTracker() });
 
     expect(store.hasPendingObservation("test-device", "observation-pending")).toBe(true);
   });
@@ -480,11 +495,13 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
   test("awaitable capture methods register their observations before awaiting", async () => {
     svc.setNextResult({ success: false, error: "still pending" });
 
-    const capture = recorder.capture("capture-observation", new NoOpPerformanceTracker());
+    const capture = recorder.capture("capture-observation", { perf: new NoOpPerformanceTracker() });
     expect(store.hasPendingObservation("test-device", "capture-observation")).toBe(true);
     await capture;
 
-    const freshCapture = recorder.captureFresh("fresh-observation", new NoOpPerformanceTracker());
+    const freshCapture = recorder.captureFresh("fresh-observation", {
+      perf: new NoOpPerformanceTracker(),
+    });
     expect(store.hasPendingObservation("test-device", "fresh-observation")).toBe(true);
     await freshCapture;
   });
@@ -493,7 +510,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     svc.setNextIsLatest(false);
     svc.setNextResult({ success: true, path: "/tmp/x.png" });
 
-    recorder.start("observation", new NoOpPerformanceTracker());
+    recorder.start("observation", { perf: new NoOpPerformanceTracker() });
 
     await svc.lastCapturePromise();
 
@@ -506,7 +523,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     svc.setNextAborted(true);
     svc.setNextResult({ success: true, path: "/tmp/x.png" });
 
-    recorder.start("observation", new NoOpPerformanceTracker());
+    recorder.start("observation", { perf: new NoOpPerformanceTracker() });
 
     await svc.lastCapturePromise();
 
@@ -518,7 +535,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
   test("start() with failed capture writes error", async () => {
     svc.setNextResult({ success: false, error: "boom" });
 
-    recorder.start("observation", new NoOpPerformanceTracker());
+    recorder.start("observation", { perf: new NoOpPerformanceTracker() });
 
     await svc.lastCapturePromise();
 
@@ -529,7 +546,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     svc.setNextResult({ success: true, path: "/tmp/skip.png" });
     svc.setNextIsLatest(false);
 
-    recorder.start("observation", new NoOpPerformanceTracker());
+    recorder.start("observation", { perf: new NoOpPerformanceTracker() });
     await svc.lastCapturePromise();
 
     expect(svc.lastTrackerOptions?.coalesceWithPending).toBe(true);
@@ -552,9 +569,9 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
       queuedStore,
     );
 
-    queuedRecorder.start("observation-first", new NoOpPerformanceTracker());
+    queuedRecorder.start("observation-first", { perf: new NoOpPerformanceTracker() });
     await queued.captureStarts[0]!.promise;
-    queuedRecorder.start("observation-second", new NoOpPerformanceTracker());
+    queuedRecorder.start("observation-second", { perf: new NoOpPerformanceTracker() });
     await Promise.resolve();
 
     expect(queued.captureCount).toBe(1);
@@ -591,7 +608,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     };
 
     svc.setNextResult({ success: true, path: "/tmp/no-exist.png" });
-    recorder.start("observation", fakeTracker);
+    recorder.start("observation", { perf: fakeTracker });
 
     await svc.lastCapturePromise();
 

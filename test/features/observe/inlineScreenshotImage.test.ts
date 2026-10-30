@@ -47,7 +47,7 @@ describe("inlineScreenshotImage", () => {
     [webp, "image/webp"],
   ])("returns exact captured bytes as %s", async (bytes, mimeType) => {
     const fs = new FakeScreenshotFileSystem(bytes);
-    const delivery = await inlineScreenshotImage("/capture", {}, undefined, fs);
+    const delivery = await inlineScreenshotImage("/capture", {}, { fileSystem: fs });
     expect(delivery).toEqual({
       image: { type: "image", data: bytes.toString("base64"), mimeType },
       screenshotImage: { included: true, mimeType, sizeBytes: bytes.length },
@@ -60,8 +60,7 @@ describe("inlineScreenshotImage", () => {
     const delivery = await inlineScreenshotImage(
       "/capture.png",
       { screenshotFormat: "webp", screenshotMimeType: "image/webp" },
-      undefined,
-      fs,
+      { fileSystem: fs },
     );
     expect(delivery.image?.mimeType).toBe("image/webp");
     expect(delivery.screenshotImage).toEqual({
@@ -76,21 +75,20 @@ describe("inlineScreenshotImage", () => {
     const delivery = await inlineScreenshotImage(
       "/capture.png",
       { screenshotFormat: "jpeg" },
-      undefined,
-      fs,
+      { fileSystem: fs },
     );
     expect(delivery.image?.mimeType).toBe("image/jpeg");
   });
 
   test("uses the file extension when bytes do not identify the format", async () => {
     const fs = new FakeScreenshotFileSystem(Buffer.from("opaque bytes"));
-    const delivery = await inlineScreenshotImage("/capture.webp", {}, undefined, fs);
+    const delivery = await inlineScreenshotImage("/capture.webp", {}, { fileSystem: fs });
     expect(delivery.image?.mimeType).toBe("image/webp");
   });
 
   test("missing path returns status without file access", async () => {
     const fs = new FakeScreenshotFileSystem(png);
-    const delivery = await inlineScreenshotImage(undefined, {}, undefined, fs);
+    const delivery = await inlineScreenshotImage(undefined, {}, { fileSystem: fs });
     expect(delivery.screenshotImage).toMatchObject({
       included: false,
       reason: expect.stringContaining("no screenshot path"),
@@ -103,7 +101,7 @@ describe("inlineScreenshotImage", () => {
     const fs = new FakeScreenshotFileSystem(png);
     fs.size = MAX_INLINE_SCREENSHOT_BYTES + 1;
     expect(
-      (await inlineScreenshotImage("/capture", {}, undefined, fs)).screenshotImage,
+      (await inlineScreenshotImage("/capture", {}, { fileSystem: fs })).screenshotImage,
     ).toMatchObject({
       included: false,
       sizeBytes: fs.size,
@@ -117,7 +115,8 @@ describe("inlineScreenshotImage", () => {
     const fs = new FakeScreenshotFileSystem(bytes);
     fs.size = 4;
     expect(
-      (await inlineScreenshotImage("/capture", {}, undefined, fs, 8)).screenshotImage,
+      (await inlineScreenshotImage("/capture", {}, { fileSystem: fs, capBytes: 8 }))
+        .screenshotImage,
     ).toMatchObject({
       included: false,
       sizeBytes: bytes.length,
@@ -132,7 +131,7 @@ describe("inlineScreenshotImage", () => {
     } else {
       fs.readError = new Error("EACCES");
     }
-    const delivery = await inlineScreenshotImage("/capture", {}, undefined, fs);
+    const delivery = await inlineScreenshotImage("/capture", {}, { fileSystem: fs });
     expect(delivery.screenshotImage).toMatchObject({
       included: false,
       reason: expect.stringContaining("EACCES"),
@@ -144,14 +143,14 @@ describe("inlineScreenshotImage", () => {
     const fs = new FakeScreenshotFileSystem(Buffer.from("not an image"));
     fs.isFile = false;
     expect(
-      (await inlineScreenshotImage("/capture", {}, undefined, fs)).screenshotImage,
+      (await inlineScreenshotImage("/capture", {}, { fileSystem: fs })).screenshotImage,
     ).toMatchObject({
       included: false,
       reason: expect.stringContaining("not a file"),
     });
     fs.isFile = true;
     expect(
-      (await inlineScreenshotImage("/capture", {}, undefined, fs)).screenshotImage,
+      (await inlineScreenshotImage("/capture", {}, { fileSystem: fs })).screenshotImage,
     ).toMatchObject({
       included: false,
       reason: expect.stringContaining("not a supported"),
@@ -162,12 +161,16 @@ describe("inlineScreenshotImage", () => {
     const before = new AbortController();
     before.abort();
     const fs = new FakeScreenshotFileSystem(png);
-    await expect(inlineScreenshotImage("/capture", {}, before.signal, fs)).rejects.toThrow();
+    await expect(
+      inlineScreenshotImage("/capture", {}, { signal: before.signal, fileSystem: fs }),
+    ).rejects.toThrow();
     expect(fs.statCalls).toBe(0);
 
     const during = new AbortController();
     fs.onRead = () => during.abort();
-    await expect(inlineScreenshotImage("/capture", {}, during.signal, fs)).rejects.toThrow();
+    await expect(
+      inlineScreenshotImage("/capture", {}, { signal: during.signal, fileSystem: fs }),
+    ).rejects.toThrow();
     expect(fs.readCalls).toBe(1);
   });
 });

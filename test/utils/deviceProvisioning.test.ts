@@ -469,6 +469,85 @@ describe("pickAndroidSystemImage automotive selection (#15879)", () => {
     ).toThrow(/below API 24/);
   });
 
+  describe("SDK extension images (android-<api>-ext<N>, #15959)", () => {
+    const installed = (listing: string) => parseSystemImages(listing, undefined, "installed");
+    const AAOS_EXT = "system-images;android-34-ext9;android-automotive;arm64-v8a";
+
+    it("sees an installed android-34-ext9 car image and creates the AVD from it", async () => {
+      const images = installed(`Installed packages:
+ ${AAOS_EXT} | 1 | Android Automotive with Google Play arm64`);
+      expect(images.map((image) => image.packageName)).toEqual([AAOS_EXT]);
+      const avd = new FakeAndroidAvdCreator(images);
+      const provisioner = new DefaultDeviceProvisioner({
+        iosCreator: () => undefined,
+        androidCreator: () => avd,
+        idGenerator: new CountingIdGenerator("uuid"),
+        architecture: "arm64",
+      });
+
+      const created = await provisioner.provision({
+        platform: "android",
+        formFactor: "automotive",
+      });
+
+      expect(created.runtimeId).toBe(AAOS_EXT);
+      expect(avd.createCalls[0]).toMatchObject({ package: AAOS_EXT });
+    });
+
+    it("keeps API level ahead of extension and ranks a higher extension above the base image", () => {
+      const images = installed(`Installed packages:
+ system-images;android-34;android-automotive;arm64-v8a | 1 | base
+ system-images;android-34-ext8;android-automotive;arm64-v8a | 1 | ext8
+ system-images;android-34-ext9;android-automotive;arm64-v8a | 1 | ext9`);
+      // ext9 sorts after ext8 by package name, so only the extension rank can prefer it.
+      expect(
+        pickAndroidSystemImage(images, { formFactor: "automotive" }, "arm64").packageName,
+      ).toBe("system-images;android-34-ext9;android-automotive;arm64-v8a");
+      // And the base image loses to either extension, in whatever order they are listed.
+      expect(
+        pickAndroidSystemImage([...images].reverse(), { formFactor: "automotive" }, "arm64")
+          .extensionLevel,
+      ).toBe(9);
+
+      const withNewerApi = [
+        ...images,
+        ...installed(`Installed packages:
+ system-images;android-35;android-automotive;arm64-v8a | 1 | api35`),
+      ];
+      expect(
+        pickAndroidSystemImage(withNewerApi, { formFactor: "automotive" }, "arm64").apiLevel,
+      ).toBe(35);
+    });
+
+    it("applies the API range to the leading level of an extension image", () => {
+      const images = installed(`Installed packages:
+ ${AAOS_EXT} | 1 | ext9`);
+      expect(
+        pickAndroidSystemImage(images, { formFactor: "automotive", maxOsVersion: "14" }, "arm64")
+          .apiLevel,
+      ).toBe(34);
+      expect(() =>
+        pickAndroidSystemImage(images, { formFactor: "automotive", minOsVersion: "15" }, "arm64"),
+      ).toThrow(/No installed Android Automotive system image/);
+    });
+
+    it("lists extension images in the installed-images part of the missing-image error", () => {
+      const images = installed(`Installed packages:
+ system-images;android-34-ext9;google_apis;arm64-v8a | 1 | phone ext`);
+      expect(() => pickAndroidSystemImage(images, { formFactor: "automotive" }, "arm64")).toThrow(
+        /Installed images: system-images;android-34-ext9;google_apis;arm64-v8a/,
+      );
+    });
+
+    it("applies to handheld and TV extension images the same way", () => {
+      const images = installed(`Installed packages:
+ system-images;android-34-ext9;google_apis;arm64-v8a | 1 | phone
+ system-images;android-34-ext9;android-tv;arm64-v8a | 1 | tv`);
+      expect(pickAndroidSystemImage(images, {}, "arm64").tag).toBe("google_apis");
+      expect(pickAndroidSystemImage(images, { formFactor: "tv" }, "arm64").tag).toBe("android-tv");
+    });
+  });
+
   it("does not pick a distant-display or other non-car image for a car request", () => {
     const images = [
       systemImage(36, "android-automotive-distant-display-playstore", "x86_64"),

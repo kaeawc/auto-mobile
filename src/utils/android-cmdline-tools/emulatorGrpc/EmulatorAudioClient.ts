@@ -54,6 +54,8 @@ export interface InjectAudioOptions {
   startDelayMs?: number;
   /** Stop after this long even when looping. */
   maxDurationMs?: number;
+  /** Runs after authorization, immediately before opening the stream. Throw to refuse it. */
+  beforeStreamOpen?: () => void;
 }
 
 export interface InjectionResult {
@@ -163,7 +165,7 @@ export class EmulatorAudioClient {
 
   async injectAudio(source: PcmAudio, options: InjectAudioOptions = {}): Promise<AudioInjection> {
     const pcm = prepareForInjection(source);
-    const call = await this.open(INJECT_AUDIO_METHOD);
+    const call = await this.open(INJECT_AUDIO_METHOD, options.beforeStreamOpen);
     const control = createInjectionControl(call);
     const done = this.streamInjection(call, pcm, options, control);
     // Keep an unobserved failure from becoming an unhandled rejection; callers read it via done/stop.
@@ -292,8 +294,9 @@ export class EmulatorAudioClient {
     await this.authorizer.dispose();
   }
 
-  private async open(method: string): Promise<GrpcCall> {
+  private async open(method: string, beforeStreamOpen?: () => void): Promise<GrpcCall> {
     const authorization = await this.authorizer.authorization(method);
+    beforeStreamOpen?.();
     return this.transport.open(method, authorization ? { authorization } : {});
   }
 

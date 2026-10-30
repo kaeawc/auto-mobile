@@ -394,6 +394,9 @@ export class EmulatorAudioService {
     endpoint: EmulatorGrpcEndpoint,
     error: unknown,
   ): Promise<ActionableError> {
+    if (error instanceof EmulatorAudioError && error.code === "audio_host_microphone_unavailable") {
+      return error;
+    }
     try {
       const current = await this.deps.discovery.findByConsolePort(endpoint.consolePort);
       if (!current || current.pid !== endpoint.pid) {
@@ -442,6 +445,8 @@ export class EmulatorAudioService {
         loop: request.loop,
         startDelayMs: request.startDelayMs,
         maxDurationMs,
+        // This invocation already recorded its own start; only earlier starts are repeats.
+        beforeStreamOpen: () => this.assertInjectionSafe(deviceId, route.endpoint, 1),
       });
       return { session, injection, injectionId, guestCapture };
     } catch (error) {
@@ -453,6 +458,7 @@ export class EmulatorAudioService {
   }
 
   private recordInjectionStart(deviceId: string, endpoint: EmulatorGrpcEndpoint): void {
+    this.pruneInjectionHistory(deviceId, endpoint.pid);
     const key = `${deviceId}:${endpoint.pid}`;
     this.injectionStarts.set(key, (this.injectionStarts.get(key) ?? 0) + 1);
     while (this.injectionStarts.size > INJECTION_INCARNATIONS_KEPT) {
@@ -463,15 +469,30 @@ export class EmulatorAudioService {
     }
   }
 
-  private assertInjectionSafe(deviceId: string, endpoint?: EmulatorGrpcEndpoint): void {
+  private pruneInjectionHistory(deviceId: string, pid: number): void {
+    const prefix = `${deviceId}:`;
+    const current = `${prefix}${pid}`;
+    for (const key of this.injectionStarts.keys()) {
+      if (key.startsWith(prefix) && key !== current) {
+        this.injectionStarts.delete(key);
+      }
+    }
+  }
+
+  private assertInjectionSafe(
+    deviceId: string,
+    endpoint?: EmulatorGrpcEndpoint,
+    currentAttemptStarts = 0,
+  ): void {
     if (!endpoint) {
       return;
     }
+    this.pruneInjectionHistory(deviceId, endpoint.pid);
     if (this.deps.outputTail?.hostMicrophoneFailed(deviceId, endpoint.pid)) {
       throw hostMicrophoneUnavailable(deviceId);
     }
     // No reliable positive host-voice success line is known (#15902). Guest capture is not proof.
-    if ((this.injectionStarts.get(`${deviceId}:${endpoint.pid}`) ?? 0) > 0) {
+    if ((this.injectionStarts.get(`${deviceId}:${endpoint.pid}`) ?? 0) > currentAttemptStarts) {
       throw repeatInjectionUnsafe(deviceId);
     }
   }

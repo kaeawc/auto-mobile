@@ -62,7 +62,8 @@ cannot reach the gRPC port.
   endpoint PID incarnation with `audio_repeat_injection_unsafe`. Both host safety errors carry
   `retryable: false` and a remedy to grant macOS Microphone permission to the emulator's host app
   (System Settings > Privacy and Security > Microphone) or restart the emulator. Permission alone
-  does not clear repeat history: another injection requires a new emulator incarnation. No reliable
+  does not clear repeat history: a serial with a new PID starts with no repeat history. The host-voice
+  check also runs after authorization, immediately before the stream opens. No reliable
   positive host-voice success line is known, so repeats remain refused even after successful guest
   capture or a completed injection. Each broadcast uses
   no retries and at most two seconds of the remaining deadline. A missing receiver requires
@@ -78,7 +79,8 @@ cannot reach the gRPC port.
 - Injection history is local to the audio service lifetime and retains at most 128 serial + PID
   entries, evicting the oldest at capacity. An attempt is counted immediately before `injectAudio`,
   including attempts whose RPC fails, because it may already have opened a stream. Source or guest
-  capture failures before that point do not count. A new PID permits a first injection; stopping an
+  capture failures before that point do not count. Observing a new PID clears that serial's old PID
+  history and permits a first injection; stopping an
   injection does not clear history. Service restarts and capacity eviction forget older history.
 - Failure after start attempts best-effort stop with a separate two-second cleanup budget.
   Close runs once and accepts `stopped` or `absent`. Before cleanup the host verifies the

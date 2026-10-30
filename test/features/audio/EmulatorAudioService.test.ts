@@ -15,6 +15,8 @@ import { encodeWav, sineTone } from "../../../src/utils/audio/pcm";
 import { FakeEmulatorOutputTail } from "../../fakes/FakeEmulatorOutputTail";
 import { EmulatorOutputTailRegistry } from "../../../src/utils/android-cmdline-tools/EmulatorOutputTail";
 import { CountingIdGenerator } from "../../../src/utils/CountingIdGenerator";
+import type { InjectAudioOptions } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
+import { FakeGrpcTransport } from "../../fakes/FakeGrpcTransport";
 
 const ENDPOINT: EmulatorGrpcEndpoint = {
   pid: 1,
@@ -222,20 +224,74 @@ describe("EmulatorAudioService host microphone safety", () => {
     expect(sessions).toHaveLength(1);
   });
 
-  test("incarnation history evicts the oldest entry at its documented cap", async () => {
-    const { service, incarnation } = setup();
-    for (let pid = 1; pid <= INJECTION_INCARNATIONS_KEPT + 1; pid++) {
+  test.each([false, true])(
+    "refuses a host failure latched during authorization before transport opens (PID changed: %s)",
+    async (pidChanged) => {
+      const authorizationStarted = Promise.withResolvers<void>();
+      const authorized = Promise.withResolvers<void>();
+      const transport = new FakeGrpcTransport();
+      const { service, outputTail, guestCapture, sessions, incarnation } = setup({}, (session) => {
+        const injectAudio = session.injectAudio.bind(session);
+        session.injectAudio = async (source, options?: InjectAudioOptions) => {
+          authorizationStarted.resolve();
+          await authorized.promise;
+          options?.beforeStreamOpen?.();
+          transport.open("injectAudio", { authorization: "Bearer test" });
+          return injectAudio(source, options);
+        };
+      });
+      const outcome = service
+        .startInjection("emulator-5554", { source: { kind: "tone", durationMs: 1 } })
+        .catch((error: unknown) => error);
+      await authorizationStarted.promise;
+      expect(outputTail.text).toBeUndefined();
+      expect(transport.calls).toHaveLength(0);
+      outputTail.text = "Failed to create voice virtio-snd-mic0";
+      if (pidChanged) {
+        incarnation.pid++;
+      }
+      authorized.resolve();
+      const error = await outcome;
+      expect(error).toBeInstanceOf(EmulatorAudioError);
+      expect(error).toMatchObject({
+        code: "audio_host_microphone_unavailable",
+        retryable: false,
+        message: expect.stringMatching(/^\[audio_host_microphone_unavailable\]/),
+      });
+      expect(transport.calls).toHaveLength(0);
+      expect(guestCapture.closed).toEqual(["emulator-5554"]);
+      expect(sessions[0].closed).toBe(1);
+      expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
+    },
+  );
+
+  test("forgets old PIDs on a serial before a PID is reused, but refuses same-PID repeats", async () => {
+    const { service, incarnation, sessions } = setup();
+    for (const pid of [100, 200, 100]) {
       incarnation.pid = pid;
       const started = await service.startInjection("emulator-5554", {
         source: { kind: "tone", durationMs: 1 },
       });
       await service.stopInjection(started.injectionId);
+      await expect(
+        service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 1 } }),
+      ).rejects.toMatchObject({ code: "audio_repeat_injection_unsafe" });
     }
-    incarnation.pid = 2;
+    expect(sessions.map((session) => session.endpoint.pid)).toEqual([100, 200, 100]);
+  });
+
+  test("incarnation history evicts the oldest entry at its documented cap", async () => {
+    const ports = Array.from({ length: INJECTION_INCARNATIONS_KEPT + 1 }, (_, i) => 5554 + i * 2);
+    const { service } = setup({}, () => {}, ports);
+    for (const port of ports) {
+      const started = await service.startInjection(`emulator-${port}`, {
+        source: { kind: "tone", durationMs: 1 },
+      });
+      await service.stopInjection(started.injectionId);
+    }
     await expect(
-      service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 1 } }),
+      service.startInjection("emulator-5556", { source: { kind: "tone", durationMs: 1 } }),
     ).rejects.toMatchObject({ code: "audio_repeat_injection_unsafe" });
-    incarnation.pid = 1;
     const started = await service.startInjection("emulator-5554", {
       source: { kind: "tone", durationMs: 1 },
     });

@@ -22,6 +22,7 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
   constructor(readonly endpoint: EmulatorGrpcEndpoint) {}
 
   async injectAudio(source: PcmAudio, options?: InjectAudioOptions): Promise<AudioInjection> {
+    options?.beforeStreamOpen?.();
     this.injected.push(source);
     this.injectOptions.push(options);
     const done = new Promise<InjectionResult>((resolve, reject) => {

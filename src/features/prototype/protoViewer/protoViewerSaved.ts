@@ -14,6 +14,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import {
   PROTOVIEWER_DEFAULT_TIMEOUT_MS,
   ProtoViewerEntryPointMissingError,
+  ProtoViewerInboxUnsupportedError,
   ProtoViewerStorageError,
   type ProtoViewerDevice,
 } from "./protoViewerDevice";
@@ -264,6 +265,9 @@ async function deviceCall(
   try {
     result = await call();
   } catch (error) {
+    if (error instanceof ProtoViewerInboxUnsupportedError) {
+      return failure("unsupported_capability", error.message);
+    }
     if (
       error instanceof ProtoViewerEntryPointMissingError ||
       error instanceof ProtoViewerStorageError
@@ -326,7 +330,7 @@ function failure(errorCode: ProtoViewerErrorCode, error: string): ProtoViewerOut
 }
 
 /**
- * ProtoViewer opens on whichever panel is in front when the URL is handled, so a requested `display`
+ * ProtoViewer opens on whichever panel is in front when the request is handled, so a requested `display`
  * is honoured only by coincidence. Say so when the reported panel is not the requested one, or
  * cannot be told, instead of silently ignoring the argument.
  */

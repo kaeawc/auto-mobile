@@ -10,13 +10,19 @@ import { IosSdkTextRouting } from "../../../../src/features/action/sendkeys/IosS
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
 
 /** One merged DOM field of web view `checkout`, as observe produces it; none when `present` is false. */
-function observation(snapshotId: string, present = true): { viewHierarchy: ViewHierarchyResult } {
+function observation(
+  snapshotId: string,
+  present = true,
+  documentId = "d1",
+): { viewHierarchy: ViewHierarchyResult } {
   const field = {
     $: {
       class: "UITextField",
       "web-view-id": "checkout",
       "web-snapshot-id": snapshotId,
       "web-element-id": "email",
+      "web-document-id": documentId,
+      "web-role": "input",
     },
   };
   return {
@@ -62,7 +68,7 @@ function routing(
       text.observed(next);
     },
   });
-  text.setTarget({ webViewId: "checkout", snapshotId: "s1", elementId: "email" });
+  text.setTarget({ webViewId: "checkout", snapshotId: "s1", elementId: "email", documentId: "d1" });
   return { text, web };
 }
 
@@ -84,8 +90,16 @@ describe("IosSdkTextRouting on a web-view field (#5162)", () => {
     expect(calls).toEqual([]);
     expect(result).toEqual({ success: true, iosBackend: { backend: "sdk" } });
     expect(web.requests.map(({ action, text: value, target }) => [action, value, target])).toEqual([
-      ["clear", undefined, { webViewId: "checkout", snapshotId: "s2", elementId: "email" }],
-      ["setValue", "a@b.c", { webViewId: "checkout", snapshotId: "s2", elementId: "email" }],
+      [
+        "clear",
+        undefined,
+        { webViewId: "checkout", snapshotId: "s2", elementId: "email", documentId: "d1" },
+      ],
+      [
+        "setValue",
+        "a@b.c",
+        { webViewId: "checkout", snapshotId: "s2", elementId: "email", documentId: "d1" },
+      ],
     ]);
   });
 
@@ -143,5 +157,16 @@ describe("IosSdkTextRouting on a web-view field (#5162)", () => {
     const plain = await off.text.tracked(() => off.text.clear(undefined, xctest(calls)));
     expect(plain.iosBackend).toBeUndefined();
     expect(calls).toEqual(["xctest", "xctest"]);
+  });
+
+  test("a field whose page navigated since focus fails closed instead of acting on the new page", async () => {
+    // The new document reuses element id `email` for an unrelated element.
+    const { text, web } = routing([sdk], observation("s9", true, "d2"));
+    const calls: string[] = [];
+    await expect(text.tracked(() => text.clear(undefined, xctest(calls)))).rejects.toThrow(
+      "navigated",
+    );
+    expect(web.requests).toEqual([]);
+    expect(calls).toEqual([]);
   });
 });

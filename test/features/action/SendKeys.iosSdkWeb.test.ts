@@ -23,6 +23,8 @@ function webObservation(value: string, snapshotId: string): ObserveResult {
         attributes["web-view-id"] = "checkout";
         attributes["web-snapshot-id"] = snapshotId;
         attributes["web-element-id"] = "email";
+        attributes["web-document-id"] = "d1";
+        attributes["web-role"] = "input";
       }
     });
   }
@@ -72,7 +74,12 @@ function harness() {
     field.value = "";
     return { success: true };
   };
-  h.executor.setIosSdkTextTarget({ webViewId: "checkout", snapshotId: "s0", elementId: "email" });
+  h.executor.setIosSdkTextTarget({
+    webViewId: "checkout",
+    snapshotId: "s0",
+    elementId: "email",
+    documentId: "d1",
+  });
   return { h, web, field };
 }
 
@@ -124,12 +131,13 @@ describe("the focused field's bridge identity (#5162)", () => {
     "web-view-id": "checkout",
     "web-snapshot-id": "s4",
     "web-element-id": "email",
+    "web-document-id": "d1",
     bounds: { left: 0, top: 0, right: 10, bottom: 10 },
   } as Element;
 
   test("a merged DOM element yields its web identity on iOS", () => {
     expect(sdkTargetField(ios, webField)).toEqual({
-      sdkTarget: { webViewId: "checkout", snapshotId: "s4", elementId: "email" },
+      sdkTarget: { webViewId: "checkout", snapshotId: "s4", elementId: "email", documentId: "d1" },
     });
   });
 
@@ -178,10 +186,24 @@ describe("DOM editors the web view cannot edit (#5162)", () => {
       "web-view-id": "checkout",
       "web-snapshot-id": "s4",
       "web-element-id": "notes",
+      "web-document-id": "d1",
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     } as Element;
     expect(sdkTargetField(ios, textarea)).toEqual({
-      sdkTarget: { webViewId: "checkout", snapshotId: "s4", elementId: "notes" },
+      sdkTarget: { webViewId: "checkout", snapshotId: "s4", elementId: "notes", documentId: "d1" },
     });
+  });
+});
+
+describe("an SDK without page identity (#5162)", () => {
+  test("a web field without a document id stays on XCTest, since a navigation could not be told apart", () => {
+    const legacy = {
+      "web-role": "input",
+      "web-view-id": "checkout",
+      "web-snapshot-id": "s4",
+      "web-element-id": "email",
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+    } as Element;
+    expect(sdkTargetField(ios, legacy)).toEqual({});
   });
 });

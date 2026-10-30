@@ -568,3 +568,20 @@ describe("the DOM role (#5162)", () => {
     ]);
   });
 });
+
+describe("page identity (#5162)", () => {
+  test("each merged element carries its snapshot's document id, and its web target reads it", () => {
+    const hierarchy = screen(webView());
+    mergeIosSdkWebSnapshots(hierarchy, [
+      { webViewId: "checkout", snapshot: { ...snapshot([submit]), documentId: "d1" } },
+    ]);
+    const [element] = attached(findWebViewNodes(hierarchy)[0]);
+    expect(element["web-document-id"]).toBe("d1");
+    expect(iosSdkWebTarget(element)).toEqual({
+      webViewId: "checkout",
+      snapshotId: "s7",
+      elementId: "e0",
+      documentId: "d1",
+    });
+  });
+});

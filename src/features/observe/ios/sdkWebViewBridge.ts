@@ -43,6 +43,11 @@ export const iosSdkWebSnapshotSchema = z.object({
   elements: z.array(iosSdkWebElementSchema),
   /** Absent from an SDK that predates it; bounds are then taken as web-view points. */
   viewport: iosSdkWebViewportSchema.optional(),
+  /**
+   * The page document that posted the snapshot; a navigation starts a new one. Element ids restart
+   * for each document, so the same id in another document names an unrelated element.
+   */
+  documentId: z.string().optional(),
 });
 export type IosSdkWebSnapshot = z.infer<typeof iosSdkWebSnapshotSchema>;
 

@@ -20,6 +20,8 @@ export const WEB_VIEW_ID_ATTRIBUTE = "web-view-id";
 export { WEB_SNAPSHOT_ID_ATTRIBUTE };
 export const WEB_ELEMENT_ID_ATTRIBUTE = "web-element-id";
 export const WEB_ORIGIN_ATTRIBUTE = "web-origin";
+/** The page document the element's snapshot came from; element ids are unique only within one. */
+export const WEB_DOCUMENT_ID_ATTRIBUTE = "web-document-id";
 /** The element's DOM role (its ARIA role, else its tag), kept where a replaced leaf's class wins. */
 export const WEB_ROLE_ATTRIBUTE = "web-role";
 
@@ -32,9 +34,11 @@ const VALUE_FIELD_ROLES: ReadonlySet<string> = new Set(["input", "textarea"]);
  */
 export function iosSdkWebValueTarget(attributes: Record<string, unknown>): IosSdkWebTarget | null {
   const role = attributes[WEB_ROLE_ATTRIBUTE];
-  return typeof role === "string" && VALUE_FIELD_ROLES.has(role)
-    ? iosSdkWebTarget(attributes)
-    : null;
+  const target =
+    typeof role === "string" && VALUE_FIELD_ROLES.has(role) ? iosSdkWebTarget(attributes) : null;
+  // Without a document id a navigation cannot be told apart from the same page, so the field
+  // stays on XCTest rather than risk acting on an unrelated element of a new page.
+  return target?.documentId ? target : null;
 }
 
 /**
@@ -92,6 +96,8 @@ export interface IosSdkWebTarget {
   webViewId: string;
   snapshotId: string;
   elementId: string;
+  /** The page document, when the SDK reports one. */
+  documentId?: string;
 }
 
 export function iosSdkWebTarget(attributes: Record<string, unknown>): IosSdkWebTarget | null {
@@ -108,7 +114,10 @@ export function iosSdkWebTarget(attributes: Record<string, unknown>): IosSdkWebT
   ) {
     return null;
   }
-  return { webViewId, snapshotId, elementId };
+  const documentId = attributes[WEB_DOCUMENT_ID_ATTRIBUTE];
+  return typeof documentId === "string" && documentId
+    ? { webViewId, snapshotId, elementId, documentId }
+    : { webViewId, snapshotId, elementId };
 }
 
 /**
@@ -266,11 +275,17 @@ function valueAttributes(
   return typeof native?.value === "string" ? {} : { [VALUE_REDACTED_ATTRIBUTE]: "true" };
 }
 
+/** The web view and snapshot (and page document, when reported) a merged element came from. */
+interface WebSource {
+  webViewId: string;
+  snapshotId: string;
+  documentId?: string;
+}
+
 function convertElement(
   element: IosSdkWebElement,
   bounds: Box,
-  webViewId: string,
-  snapshotId: string,
+  source: WebSource,
   origin: string | undefined,
   native?: Record<string, unknown>,
 ): ViewHierarchyNode {
@@ -293,8 +308,9 @@ function convertElement(
       // detection and verification read, so each one wins over the snapshot's.
       ...native,
       bounds,
-      [WEB_VIEW_ID_ATTRIBUTE]: webViewId,
-      [WEB_SNAPSHOT_ID_ATTRIBUTE]: snapshotId,
+      [WEB_VIEW_ID_ATTRIBUTE]: source.webViewId,
+      [WEB_SNAPSHOT_ID_ATTRIBUTE]: source.snapshotId,
+      ...(source.documentId ? { [WEB_DOCUMENT_ID_ATTRIBUTE]: source.documentId } : {}),
       [WEB_ELEMENT_ID_ATTRIBUTE]: element.id,
       [WEB_ROLE_ATTRIBUTE]: role,
       ...(origin ? { [WEB_ORIGIN_ATTRIBUTE]: origin } : {}),
@@ -430,7 +446,12 @@ export function mergeIosSdkWebSnapshots(
     shared.forEach((signature) => covering.delete(signature));
     const build = (position: number, native?: Record<string, unknown>) => {
       const { element, bounds } = converted[position];
-      return convertElement(element, bounds, webViewId, snapshot.snapshotId, origin, native);
+      const source = {
+        webViewId,
+        snapshotId: snapshot.snapshotId,
+        documentId: snapshot.documentId,
+      };
+      return convertElement(element, bounds, source, origin, native);
     };
     const placed = new Set<number>();
     summary.deduplicated += replaceCoveredLeaves(webViewNode, covering, build, placed);

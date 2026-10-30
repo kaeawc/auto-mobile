@@ -73,6 +73,7 @@ interface Posted {
     height: number;
     scale: number;
   };
+  documentId?: string;
 }
 
 function page(options: { mainFrame?: boolean; visualViewport?: Record<string, number> } = {}) {
@@ -246,5 +247,18 @@ describe("WKWebView bridge page script (#15877)", () => {
     p.fireViewport("scroll");
     p.flushTimers();
     expect(p.snapshots()).toHaveLength(4);
+  });
+
+  test("every snapshot of a document carries the same document id, and a new document gets a new one", () => {
+    const first = page();
+    first.elements.push(element("button", "Pay"));
+    first.fire("load");
+    first.mutate();
+    const [a, b] = first.snapshots();
+    expect(typeof a.documentId).toBe("string");
+    expect(b.documentId).toBe(a.documentId);
+    const second = page();
+    second.fire("load");
+    expect(second.snapshots()[0].documentId).not.toBe(a.documentId);
   });
 });

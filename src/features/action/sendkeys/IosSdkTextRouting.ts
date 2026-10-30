@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { ActionableError } from "../../../models/ActionableError";
 import type { ObserveResult } from "../../../models";
 import type { ObservationBackend, ObservationFallbackReason } from "../../../models/ObserveResult";
 import {
@@ -57,6 +58,8 @@ export interface IosSdkTextRoutingDeps {
 export class IosSdkTextRouting {
   private target: IosSdkTextTarget | undefined;
   private current = false;
+  /** The web field's page navigated since focus, so its element id no longer names it. */
+  private navigated = false;
   private readonly outcomes = new AsyncLocalStorage<{
     outcome?: IosSdkTapOutcome;
     /** The command cleared the web field through the bridge, so `setValue` can type into it. */
@@ -69,6 +72,7 @@ export class IosSdkTextRouting {
   setTarget(target: IosSdkTextTarget | undefined): void {
     this.target = target;
     this.current = false;
+    this.navigated = false;
   }
 
   observed(observation: Pick<ObserveResult, "viewHierarchy">): void {
@@ -76,8 +80,14 @@ export class IosSdkTextRouting {
       return;
     }
     if (isWebTarget(this.target)) {
-      const { webViewId, elementId } = this.target;
+      const { webViewId, elementId, documentId } = this.target;
       const latest = findIosSdkWebTarget(observation.viewHierarchy, webViewId, elementId);
+      if (latest && latest.documentId !== documentId) {
+        // Element ids restart for each page document: the same id on a new page is another element.
+        this.navigated = true;
+        this.current = false;
+        return;
+      }
       // A web field missing from a read is not current, so its next action falls back to XCTest.
       this.current = latest !== null;
       this.target = latest ?? this.target;
@@ -189,6 +199,7 @@ export class IosSdkTextRouting {
     if (!this.current) {
       await this.deps.observe(signal);
     }
+    this.throwIfNavigated();
     const target = this.target;
     const standIn = this.webStandIn(action);
     if (standIn || !target || !isWebTarget(target)) {
@@ -213,6 +224,16 @@ export class IosSdkTextRouting {
       store.webCleared = true;
     }
     return { success: true };
+  }
+
+  /** A web field whose page navigated fails closed: its element id may name another element. */
+  private throwIfNavigated(): void {
+    if (this.navigated) {
+      throw new ActionableError(
+        "The page navigated since sendKeys focused the field, so its element id may name another " +
+          "element. Re-observe and retry; XCTest does not stand in, because the field may be gone.",
+      );
+    }
   }
 
   /** Why XCTest must stand in for this web action before it is sent, or null when it can be sent. */

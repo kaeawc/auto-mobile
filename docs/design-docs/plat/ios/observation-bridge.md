@@ -165,7 +165,7 @@ points as the runner truncates XCTest frames; one wholly outside the web view is
 (`label` → `content-desc`, `value` → `text`, `role` → `class`; a redacted value is not reported as text but as `value-redacted: "true"`, which text verification treats as unverifiable (unless the replaced XCTest leaf reports a readable `value`); `enabled` elements are `clickable`;
 text entry roles such as `textarea`, and an `input` whose reported `inputType` is text-like (`text`,
 `search`, `email`, `url`, `tel`, `password`, `number`, or none), report `role: textfield`, so focus
-and `sendKeys` targeting treat them as editable while a checkbox input does not) and carry `web-view-id`, `web-snapshot-id`, `web-element-id` and, when the page URL has one,
+and `sendKeys` targeting treat them as editable while a checkbox input does not) and carry `web-view-id`, `web-snapshot-id`, `web-element-id`, `web-document-id` (the page document that posted the snapshot; element ids restart for each document) when the SDK reports it, and, when the page URL has one,
 `web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with the same bounds and the same label, value or id as a DOM element are replaced by it in the leaf's place (so container-scoped selectors still find it), and every attribute the fresh leaf reports wins over the snapshot's (its `resource-id`, native `class`, input properties, focus and the rest), so native selectors, field detection and verification keep working; the DOM element adds its web identity and what the leaf does not report, but never its focus, since the snapshot can be older than the XCTest read. A leaf that two DOM elements both match (a wrapper and the control it wraps), or whose attributes match different DOM elements, is not replaced. A web view
 without a snapshot (none posted yet, a disallowed origin, a terminated process) keeps only its
 XCTest nodes. A merge reports `backend: sdk` unless the native bridge already set `backend`. The
@@ -212,9 +212,11 @@ role as `web-role`) routes the same way through the web view's bounded actions; 
 such as `contenteditable`, ignore an assigned `value` and stay on XCTest: a clear is `clear`, and IME `done` is `submit` (the field's form, if it has one). Text
 entry is `setValue`, which replaces the value, so it is used only after the command cleared the
 field through the web view (a replace); typing that appends at the caret stays on XCTest and
-reports `fallbackReason: unsupported`, as do the other IME actions. The field keeps its web view
-and element id (stable across the document's snapshots) and takes the snapshot id of every
-observation that shows it; when the fresh read before its first action no longer shows it (the
+reports `fallbackReason: unsupported`, as do the other IME actions. Only a field with a
+`web-document-id` routes this way, since without one a navigation cannot be told apart from the same
+page. The field keeps its web view, element id (stable across the document's snapshots) and document
+id, and takes the snapshot id of every observation that shows it in the same document; when that
+element id appears in a new document (the page navigated), its next action fails closed; when the fresh read before its first action no longer shows it (the
 element left, or no snapshot merged), XCTest stands in and the result reports
 `fallbackReason: unavailable`. A rejected web action fails closed. After Tab or any IME action,
 which can move focus or leave the page, the command forgets the field (native or web), and later

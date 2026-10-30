@@ -49,8 +49,10 @@ cannot reach the gRPC port.
   CR/LF in reasons become spaces). Only the held lease may stop the recording. Stop is
   idempotent; status and stop for another lease return `absent`.
 - A stopped record or read error releases the lease and reports `failed`; a read failure is
-  retained until the owner's next status or stop, or a new start. A monotonic 30-minute
-  timeout releases abandoned recordings and subsequent status returns `absent`. A CtrlProxy
+  retained until the owner's next status or stop, or a new start. Each start requests a monotonic
+  lease timeout (default 30 minutes, capped at 62 minutes); the host covers the injection and
+  start delay plus a one-minute margin and refuses requests exceeding the cap. Expiry releases
+  abandoned recordings and subsequent status returns `absent`. A CtrlProxy
   restart also loses the lease. No broadcast waits for PCM reads or joins the reader thread.
 - The host requires `running` from start and every status poll (100 ms by default) throughout
   a three-second settle window, within an eight-second total deadline. Any other answer

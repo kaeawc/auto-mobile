@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeGuestAudioCapture } from "../../fakes/FakeGuestAudioCapture";
 import {
@@ -459,7 +460,7 @@ describe("EmulatorAudioService session ownership and limits", () => {
   });
 
   test("a loop without its own limit is capped; a single pass is not", async () => {
-    const { service, sessions, incarnation } = setup();
+    const { service, sessions, incarnation, guestCapture } = setup();
     const first = await service.startInjection("emulator-5554", {
       source: { kind: "tone" },
       loop: true,
@@ -478,6 +479,11 @@ describe("EmulatorAudioService session ownership and limits", () => {
       DEFAULT_LOOP_MAX_DURATION_MS,
       undefined,
       5_000,
+    ]);
+    expect(guestCapture.openOptions).toEqual([
+      { leaseMs: DEFAULT_LOOP_MAX_DURATION_MS + 60_000 },
+      { leaseMs: 62_000 },
+      { leaseMs: 65_000 },
     ]);
   });
 });
@@ -537,6 +543,44 @@ describe("EmulatorAudioService capture", () => {
 });
 
 describe("verified guest capture guard", () => {
+  test("one hour loop leases capture through its start delay and margin", async () => {
+    const { service, guestCapture } = setup();
+    const started = await service.startInjection("emulator-5554", {
+      source: { kind: "tone", durationMs: 10 },
+      loop: true,
+      startDelayMs: 60_000,
+      maxDurationMs: 3_600_000,
+    });
+    expect(guestCapture.openOptions).toEqual([{ leaseMs: 3_720_000 }]);
+    await service.stopInjection(started.injectionId);
+  });
+
+  test("single pass lease derives duration from PCM sample rate and channels", async () => {
+    const wav = encodeWav({ sampleRate: 16_000, channels: 2, samples: new Int16Array(100) });
+    const { service, guestCapture } = setup({ "/clip.wav": wav });
+    const started = await service.startInjection("emulator-5554", {
+      source: { kind: "file", path: "/clip.wav" },
+      startDelayMs: 100,
+    });
+    expect(guestCapture.openOptions).toEqual([{ leaseMs: 60_104 }]);
+    await service.stopInjection(started.injectionId);
+  });
+
+  test("lease above the 3720000 ms limit is refused before capture or injection", async () => {
+    const { service, guestCapture, sessions } = setup();
+    const starting = service.startInjection("emulator-5554", {
+      source: { kind: "tone", durationMs: 10 },
+      loop: true,
+      startDelayMs: 60_001,
+      maxDurationMs: 3_600_000,
+    });
+    await expect(starting).rejects.toBeInstanceOf(ActionableError);
+    await expect(starting).rejects.toThrow("3720000");
+    expect(guestCapture.opened).toEqual([]);
+    expect(sessions).toEqual([]);
+    expect(service.activeInjectionIds("emulator-5554")).toEqual([]);
+  });
+
   test("refuses an unverified capture without calling injectAudio", async () => {
     const { service, sessions, guestCapture } = setup();
     guestCapture.failure = new EmulatorAudioError(

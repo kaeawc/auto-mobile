@@ -38,6 +38,7 @@ import {
   type InputOperation,
   type InputRequestContext,
   type InputTargetAction,
+  type InputTargetResolveOptions,
 } from "../socketServer/inputDeviceGating";
 
 import { IdeServerRouteHandler } from "./socketServerContracts";
@@ -124,11 +125,12 @@ export class SocketIdeRoutes {
     sessionId: string,
     ownerSocket: Socket,
     cancelSignal: AbortSignal,
-    receivedAtMs: number,
     {
+      receivedAtMs,
       onOwnerSignal,
       onInputDispatch,
     }: {
+      receivedAtMs: number;
       onOwnerSignal: (signal: AbortSignal) => void;
       onInputDispatch?: () => void;
     },
@@ -448,16 +450,14 @@ export class SocketIdeRoutes {
     deviceId: string | undefined,
     socketSessionId: string | undefined,
     action: InputTargetAction,
-    bypassAndroidDeviceListCache: boolean = false,
-    requester?: () => string | undefined,
+    options?: InputTargetResolveOptions,
   ): Promise<BootedDevice> {
     return await this.inputDeviceGating.resolveInputTargetDevice(
       platform,
       deviceId,
       socketSessionId,
       action,
-      bypassAndroidDeviceListCache,
-      requester,
+      options,
     );
   }
   assertBrokerConnectionInputTarget(

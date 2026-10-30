@@ -738,16 +738,14 @@ export class SessionManager extends SessionManagerForwarders {
     devicePool: Types.SessionDeviceAssigner,
     platform: Platform | undefined,
     persisted: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: Lifecycle.SharedSessionAssignment,
+    recovery: Lifecycle.PersistedSessionRecovery,
   ): Promise<Session> {
     return this.wiring.recoveryPublication.recoverPersistedRow(
       sessionId,
       devicePool,
       platform,
       persisted,
-      initialOwnership,
-      shared,
+      recovery,
     );
   }
 

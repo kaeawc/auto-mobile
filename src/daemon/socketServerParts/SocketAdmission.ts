@@ -122,6 +122,22 @@ interface AdmittedSocketRequest {
   onInputDispatch: () => void;
 }
 
+/** The admission hook and receipt context of one socket request. */
+export interface SocketRequestHandling {
+  onAdmitted?: (deadline: ProgressExtendableDeadline) => void;
+  /** Defaults to a context created from the request at `receivedAtMs`. */
+  context?: RequestContext;
+}
+
+function requestHandlingContext(
+  handling: SocketRequestHandling | undefined,
+  request: DaemonRequest,
+  sessionId: string,
+  receivedAtMs: number,
+): RequestContext {
+  return handling?.context ?? createRequestContext(request, sessionId, receivedAtMs);
+}
+
 /** Socket Admission over shared connection state and explicit callbacks. */
 export class SocketAdmission {
   constructor(
@@ -139,9 +155,9 @@ export class SocketAdmission {
     ownerSocket: Socket,
     request: DaemonRequest,
     receivedAtMs: number = this.state.timer.now(),
-    onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
-    context: RequestContext = createRequestContext(request, sessionId, receivedAtMs),
+    handling?: SocketRequestHandling,
   ): Promise<DaemonResponse | undefined> {
+    const context = requestHandlingContext(handling, request, sessionId, receivedAtMs);
     const session = this.state.sessions.get(sessionId);
     if (!session) {
       return {
@@ -228,7 +244,7 @@ export class SocketAdmission {
           if (!this.state.acceptingRequests) {
             return Promise.resolve(this.callbacks.shuttingDownBeforeStartResponse(request));
           }
-          onAdmitted?.(deadline);
+          handling?.onAdmitted?.(deadline);
           if (this.state.onFrameTrace) {
             this.callbacks.traceFrame("admission_granted", request.id, deviceId);
           }
@@ -699,9 +715,10 @@ export class SocketAdmission {
         sessionId,
         ownerSocket,
         cancellation.signal,
-        receivedAtMs,
         {
+          receivedAtMs,
           onOwnerSignal: (signal) => owner.adopt(signal),
+
           onInputDispatch: input.onInputDispatch,
         },
       );

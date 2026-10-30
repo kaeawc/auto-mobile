@@ -35,6 +35,7 @@ import { TerminalSessionError } from "../sessionErrors";
 import { SessionLivenessController } from "../sessionLivenessLease";
 import {
   getDefaultPreFirstHeartbeatGraceMs,
+  type RebindSessionOptions,
   RehydrationSummary,
   releaseWasForced,
   Session,
@@ -46,7 +47,7 @@ import {
 } from "../sessionManager";
 import {
   type RehydrationRowOutcome,
-  type SharedSessionAssignment,
+  type PersistedSessionRecovery,
 } from "../sessionManager/internalContracts";
 import { SessionRecoveryIdentityLossError } from "../sessionManager/SessionRecoveryIdentityLossError";
 import { type SessionRowWriter } from "../sessionRowWriter";
@@ -173,8 +174,7 @@ export class SessionRecoveryPublication {
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
     persisted: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    { initialOwnership, shared }: PersistedSessionRecovery,
   ): Promise<Session> {
     const recoveryTarget = await this.host.recoveryTargetFromPersisted(
       sessionId,
@@ -371,8 +371,7 @@ export class SessionRecoveryPublication {
     assignedDevice: string,
     platform: Platform,
     stableDeviceId: string | undefined,
-    deferCleanup?: (cleanup: DeferredRebindCleanup) => void,
-    recovery?: boolean,
+    { deferCleanup, recovery }: Pick<RebindSessionOptions, "deferCleanup" | "recovery">,
   ): Promise<Session> {
     const activeSetups = Array.from(this.host.sessionSetupPromises, (setup) =>
       setup.session === existing ? setup.promise : null,

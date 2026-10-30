@@ -24,8 +24,9 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     createFakeDaemonState(),
     new FakeTimer(),
   ).testHooks.input;
-  server.resolveInputTargetDevice = async (_platform, _deviceId, _session, action, bypass) => {
-    events.push(`resolve:${action}:${bypass === true}`);
+  server.resolveInputTargetDevice = async (_platform, _deviceId, _session, action, options) => {
+    events.push(`resolve:${action}:${options?.bypassAndroidDeviceListCache === true}`);
+
     return androidDevice;
   };
   server.runTrackedKeyedDeviceInput = async (method, _device, operation) => {

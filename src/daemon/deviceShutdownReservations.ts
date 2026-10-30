@@ -5,6 +5,7 @@ import { INCARNATION_ANY } from "./deviceDisconnectHandler";
 import type {
   PooledDevice,
   DeviceReadinessReservation,
+  ReadinessReservationOptions,
   ShutdownIdentityReservation,
 } from "./devicePool";
 import type { Session } from "./sessionManager";
@@ -98,8 +99,7 @@ export class DeviceShutdownReservations {
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
-    autolockClient?: AutolockClient,
-    enforceAndroidRecoveryExclusion = false,
+    { autolockClient, enforceAndroidRecoveryExclusion = false }: ReadinessReservationOptions = {},
   ): Promise<DeviceReadinessReservation> {
     // The stable-name reservation exists to bridge an Android emulator changing
     // serials across a reboot. iOS UDIDs are stable, so a name reservation there

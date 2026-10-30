@@ -118,8 +118,7 @@ export interface DevicePoolRefreshPort {
     refreshGeneration: number,
     bootedDeviceIds: Set<string>,
     bootedPlatforms: Set<Platform>,
-    succeededPlatforms: Set<Platform>,
-    succeededSources?: Set<DiscoverySource>,
+    discovery: Pick<BootedDeviceDiscovery, "succeededPlatforms" | "succeededSources">,
   ): Promise<number | undefined>;
   notifyDeviceReady(deviceId: string): void;
   /** Lift recovery reservations a fresh observation of this generation decides. */
@@ -214,8 +213,10 @@ export class DevicePoolRefresh {
         refreshGeneration,
         bootedDeviceIds,
         bootedPlatforms,
-        discovery.succeededPlatforms,
-        discovery.succeededSources,
+        {
+          succeededPlatforms: discovery.succeededPlatforms,
+          succeededSources: discovery.succeededSources,
+        },
       );
       if (removed === undefined) {
         logger.info("Discarding an out-of-date device discovery snapshot");

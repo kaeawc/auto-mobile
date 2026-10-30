@@ -266,8 +266,10 @@ export class SocketInput {
       args.deviceId,
       socketSessionId,
       route.action,
-      route.bypassAndroidDeviceListCache ?? false,
-      input?.requester,
+      {
+        bypassAndroidDeviceListCache: route.bypassAndroidDeviceListCache ?? false,
+        requester: input?.requester,
+      },
     );
     const keyed = () =>
       this.callbacks.runTrackedKeyedDeviceInput(

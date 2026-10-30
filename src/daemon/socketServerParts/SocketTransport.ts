@@ -8,6 +8,7 @@ import {
   broadcastSessionDeviceRebound as fanOutSessionDeviceRebound,
   pushProgressNotification as fanOutProgress,
   type NotificationTransport,
+  type ProgressTick,
 } from "../socketServer/notificationFanOut";
 
 import { Socket } from "node:net";
@@ -287,11 +288,13 @@ export class SocketTransport {
         socket,
         request,
         receivedAtMs,
-        (deadline) => {
-          tracked.admitted = true;
-          tracked.idleDeadline = controlFrame ? undefined : deadline;
+        {
+          onAdmitted: (deadline) => {
+            tracked.admitted = true;
+            tracked.idleDeadline = controlFrame ? undefined : deadline;
+          },
+          context,
         },
-        context,
       );
       if (response) {
         writeAnswer(response);
@@ -573,21 +576,8 @@ export class SocketTransport {
     );
   }
   /** Pushes one progress tick to the single socket that requested it (#6205); see the fan-out. */
-  pushProgressNotification(
-    sessionId: string,
-    requestId: string,
-    progressToken: string | number,
-    progress: number,
-    total?: number,
-    message?: string,
-  ): void {
-    fanOutProgress(this.notificationTransport, sessionId, {
-      requestId,
-      progressToken,
-      progress,
-      total,
-      message,
-    });
+  pushProgressNotification(sessionId: string, tick: ProgressTick): void {
+    fanOutProgress(this.notificationTransport, sessionId, tick);
   }
   /**
    * The client sized its backstop from its own environment (#13797); an opted-in client is told how

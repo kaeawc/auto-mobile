@@ -850,6 +850,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_map_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["map"] },
+      root: {
+        ...base.root,
+        children: [{ type: "map", camera: { lat: 0, lng: 0, zoom: 2 } }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
   prototype_platform_sensors_v1: {
     minimalSpec: {
       ...base,

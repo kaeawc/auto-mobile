@@ -40,6 +40,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
 import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
 import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
 import dev.jasonpearson.automobile.protocol.PrototypeListNode
+import dev.jasonpearson.automobile.protocol.PrototypeMapNode
 import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
 import dev.jasonpearson.automobile.protocol.PrototypeNode
@@ -734,6 +735,16 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     // Contract only (#14253): no renderer draws a video player yet.
     is PrototypeVideoPlayerNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
+    // Contract only (#14309): no renderer draws a map yet.
+    is PrototypeMapNode ->
       copy(
         semantics = semantics,
         onAppear = onAppear,

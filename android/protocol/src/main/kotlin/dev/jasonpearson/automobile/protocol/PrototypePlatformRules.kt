@@ -72,6 +72,7 @@ internal object PrototypePlatformRules {
       { root, _ -> PrototypeMedia.error(root) },
       { root, _ -> PrototypeMediaQueue.error(root) },
       PrototypeMedia::videoPlayerError,
+      PrototypeMap::error,
       PrototypeMediaCaptions::error,
       { root, _ -> requiresError(root) },
     )

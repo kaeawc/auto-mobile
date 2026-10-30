@@ -763,7 +763,8 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       device,
       timer,
       new CountingIdGenerator("geometry"),
-      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+      () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
     );
     gestures.onGesture?.({
       type: "tap",
@@ -791,7 +792,8 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       device,
       timer,
       new CountingIdGenerator("geometry-label"),
-      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+      () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
     );
     tracker.handleTransition({ change: "changed", displayId: 0, rotation: 1 });
     timer.advanceTime(100);
@@ -818,7 +820,8 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       device,
       timer,
       new CountingIdGenerator("geometry-clean"),
-      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+      () =>
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
     );
     timer.advanceTime(5_000);
     gestures.onGesture?.({

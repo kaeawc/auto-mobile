@@ -502,8 +502,7 @@ export class SwipeOn extends BaseVisualChange {
           viewHierarchy,
           searchCriteria,
           this.visionConfig,
-          errorMsg,
-          { visionAnalyzer: this.visionAnalyzer },
+          { baseError: errorMsg, visionAnalyzer: this.visionAnalyzer },
         );
       }
 

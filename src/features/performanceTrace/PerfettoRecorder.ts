@@ -55,9 +55,7 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
     }
     return this.recording(
       adb,
-      pid,
-      remotePath,
-      join(request.artifactDir, fileName),
+      { pid, remotePath, artifactPath: join(request.artifactDir, fileName) },
       request,
       warnings,
     );
@@ -65,9 +63,7 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
 
   private recording(
     adb: PerfettoAdb,
-    pid: number,
-    remotePath: string,
-    artifactPath: string,
+    { pid, remotePath, artifactPath }: { pid: number; remotePath: string; artifactPath: string },
     request: StartPerformanceTraceRequest,
     warnings: string[],
   ): RecordingPerformanceTrace {
@@ -75,8 +71,14 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
       artifactPath,
       warnings,
       stop: async (signal) => {
-        await stopPerfettoRecorder(adb, this.deps.timer, pid, warnings, this.deps, signal);
-        await awaitFlushedDeviceFile(adb, this.deps.timer, remotePath, this.deps, LOG_TAG, signal);
+        await stopPerfettoRecorder(adb, this.deps.timer, pid, warnings, {
+          poll: this.deps,
+          signal,
+        });
+        await awaitFlushedDeviceFile(adb, this.deps.timer, remotePath, LOG_TAG, {
+          poll: this.deps,
+          signal,
+        });
         await adb.execute(["pull", remotePath, artifactPath], {
           timeoutMs: PULL_TIMEOUT_MS,
           noRetry: true,

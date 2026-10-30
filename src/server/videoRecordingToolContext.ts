@@ -243,7 +243,10 @@ export function assertActiveRecordingOwner(
     deviceId,
     requesterSessionUuid,
     undefined,
-    `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
-      "another session. Only the session that started an active recording can stop it.",
+    {
+      message:
+        `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
+        "another session. Only the session that started an active recording can stop it.",
+    },
   );
 }

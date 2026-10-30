@@ -487,8 +487,7 @@ export class DragAndDrop extends BaseVisualChange {
             viewHierarchy,
             searchCriteria,
             this.visionConfig,
-            finalErrorMessage,
-            { signal, visionAnalyzer: this.visionAnalyzer },
+            { baseError: finalErrorMessage, signal, visionAnalyzer: this.visionAnalyzer },
           );
         }
       }

@@ -105,7 +105,7 @@ export function assertDeviceGestureRecordingStartHeldDevice(
       deviceId,
       requesterSessionUuid,
       TOOL_CALL_REMEDY,
-      message,
+      { message },
     );
   }
   throw new DeviceGestureRecordingStartUnheldError(message, payload);

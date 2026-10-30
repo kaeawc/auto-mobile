@@ -24508,7 +24508,9 @@
         },
         "blocked": {
           "platforms": ["android", "ios"],
-          "value": { "kind": "boolean" }
+          "value": {
+            "kind": "boolean"
+          }
         }
       }
     },

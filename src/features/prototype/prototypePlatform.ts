@@ -661,6 +661,7 @@ const ROOT_BLOCK_CHECKS: readonly ((
   prototypeVideoPlayerError,
   prototypeMapError,
   prototypeMediaCaptionsError,
+  prototypeCastButtonError,
   requiresError,
 ];
 
@@ -676,20 +677,6 @@ function rootBlockError(
     }
   }
   return undefined;
-  return (
-    prototypeChannelsError(root) ??
-    prototypeAuthBlockError(root) ??
-    prototypeSecureStorageError(root) ??
-    prototypeLocationBlockError(root) ??
-    prototypeNotificationsBlockError(root) ??
-    prototypeMediaError(root) ??
-    prototypeMediaQueueError(root, check) ??
-    prototypeVideoPlayerError(root) ??
-    prototypeMapError(root) ??
-    prototypeMediaCaptionsError(root, check) ??
-    prototypeCastButtonError(root) ??
-    requiresError(root)
-  );
 }
 
 /** The modules a use needs: its own for calls, handlers, reads and declarations. */

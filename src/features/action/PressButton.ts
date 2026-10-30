@@ -604,14 +604,11 @@ export class PressButton extends BaseVisualChange {
         signal,
         budget,
         (fenced, markDispatch) =>
-          client.requestGlobalAction(
-            action.wireAction,
-            budget,
-            undefined,
+          client.requestGlobalAction(action.wireAction, budget, undefined, {
             frameContext,
-            fenced,
-            markDispatch,
-          ),
+            signal: fenced,
+            onDispatch: markDispatch,
+          }),
         () => {
           dispatched = true;
           onDispatch?.();
@@ -677,14 +674,11 @@ export class PressButton extends BaseVisualChange {
         signal,
         globalActionTimeout,
         (fenced, markDispatch) =>
-          client.requestGlobalAction(
-            normalized,
-            globalActionTimeout,
-            undefined,
+          client.requestGlobalAction(normalized, globalActionTimeout, undefined, {
             frameContext,
-            fenced,
-            markDispatch,
-          ),
+            signal: fenced,
+            onDispatch: markDispatch,
+          }),
         () => {
           // HOME is idempotent; only latch presses that must not be replayed.
           dispatched = normalized !== "home";

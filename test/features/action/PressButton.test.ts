@@ -551,7 +551,7 @@ describe("PressButton", () => {
         ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
       ) => {
         const [action, timeoutMs = 5000] = args;
-        args[5]?.();
+        args[3]?.onDispatch?.();
         // Consume the entire budget after the request was sent.
         fakeTimer.advanceTime(timeoutMs);
         return {

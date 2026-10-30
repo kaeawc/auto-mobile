@@ -95,7 +95,7 @@ describe("prototype display together with assets", () => {
       return putAsset(asset, options);
     };
     client.requestShowPrototype = async (...args) => {
-      order.push(`show:${args[3]}`);
+      order.push(`show:${args[3]?.displayId}`);
       return show(...args);
     };
     const { response, payload } = await call({ action: "show", spec, assets, display: "inner" });

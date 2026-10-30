@@ -540,7 +540,7 @@ export class TakeScreenshot implements ScreenshotService {
       // (re)connection completes, burning the shared screenshot rate limit and
       // pushing a late observation-stream frame (#6605).
       const result = await awaitWhileRequestIsLive(
-        client.requestScreenshot(10000, undefined, false, signal, displayId, hidePrototypes),
+        client.requestScreenshot(10000, undefined, { signal, displayId, hidePrototypes }),
         signal,
       );
       return signal?.aborted ? null : result;

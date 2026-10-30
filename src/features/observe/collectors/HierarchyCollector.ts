@@ -244,8 +244,7 @@ export class HierarchyCollector {
           true, // disableAllFiltering
           signal,
           undefined,
-          undefined,
-          displayId,
+          { displayId },
         );
         // A read of a non-default display answers its caller only (#10106): it never wrote
         // the unfiltered tree into the shared default-display cache, so there is nothing to

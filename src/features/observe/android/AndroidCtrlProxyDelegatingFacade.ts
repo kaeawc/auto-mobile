@@ -2,12 +2,16 @@ import type WebSocket from "ws";
 import type { SendCommandOptions } from "../DeviceServiceUtils";
 import type {
   AndroidActionDispatcher,
+  AndroidActionRequestOptions,
   AndroidActivateAccessibilityLinkRequest,
   AndroidAccessibilityActionRequest,
 } from "./AndroidActionDispatcher";
 import type { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
 import type { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
-import type { AndroidScreenshotRequester } from "./AndroidScreenshotRequester";
+import type {
+  AndroidScreenshotRequester,
+  AndroidScreenshotRequestOptions,
+} from "./AndroidScreenshotRequester";
 import type { AndroidServiceReadinessVerifier } from "./AndroidServiceReadinessVerifier";
 import { type CertificateFileSystem } from "./CtrlProxyCertificates";
 import { CtrlProxyPackages } from "./CtrlProxyPackages";
@@ -21,7 +25,7 @@ import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { type PackageInfoOptions } from "./CtrlProxyPackages";
 // Import types
 import type { PinchRequest, TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
-import type { GestureStartRequest } from "./CtrlProxyGestures";
+import type { GestureEndOptions, GestureStartRequest } from "./CtrlProxyGestures";
 import type {
   A11yActionResult,
   A11yInstalledPackagesResult,
@@ -31,7 +35,7 @@ import type {
   AccessibilityHierarchyResponse,
   AccessibilityNodeSelector,
   AndroidPerfTiming,
-  HierarchySyncDiagnostics,
+  HierarchySyncRequestOptions,
   ScreenshotResult,
   TwoFingerSwipeRequest,
 } from "./types";
@@ -77,7 +81,6 @@ import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
 import type {
   InsertTextState,
-  PrototypeAppearanceOverride,
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
@@ -202,10 +205,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     x: number,
     y: number,
     cancel?: boolean,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
+    options?: GestureEndOptions,
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureEnd(gestureId, x, y, cancel, timeoutMs, perf);
+    return this.gestures.requestGestureEnd(gestureId, x, y, cancel, options);
   }
 
   // ===========================================================================
@@ -458,18 +460,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     spec: PrototypeSpec,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
+    overrides?: PrototypeShowOverrides,
   ): Promise<PrototypeResult> {
-    return this.prototypes.requestShowPrototype(
-      spec,
-      timeoutMs,
-      perf,
-      displayId,
-      reset,
-      appearance,
-    );
+    return this.prototypes.requestShowPrototype(spec, timeoutMs, perf, overrides);
   }
   requestDismissPrototype(
     target: PrototypeDismiss,
@@ -623,16 +616,14 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-    diagnostics?: HierarchySyncDiagnostics,
-    displayId?: number,
+    options?: HierarchySyncRequestOptions,
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     return this.hierarchy.requestHierarchySync(
       perf,
       disableAllFiltering,
       signal,
       timeoutMs,
-      diagnostics,
-      displayId,
+      options,
     );
   }
 
@@ -661,17 +652,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     resourceId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    selector?: AccessibilityNodeSelector,
-    signal?: AbortSignal,
+    options?: AndroidActionRequestOptions,
   ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestAction(
-      action,
-      resourceId,
-      timeoutMs,
-      perf,
-      selector,
-      signal,
-    );
+    return this.getActionDispatcher().requestAction(action, resourceId, timeoutMs, perf, options);
   }
 
   async requestClickFocusedInput(
@@ -780,26 +763,16 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    suppressObservationStreamPush: boolean = false,
-    signal?: AbortSignal,
-    displayId?: number,
-    hidePrototypes: boolean = false,
+    options: AndroidScreenshotRequestOptions = {},
   ): Promise<ScreenshotResult> {
-    return this.getScreenshotRequester().requestScreenshot(
-      timeoutMs,
-      perf,
-      suppressObservationStreamPush,
-      signal,
-      displayId,
-      hidePrototypes,
-    );
+    return this.getScreenshotRequester().requestScreenshot(timeoutMs, perf, options);
   }
 
   async requestScreenshotWithoutObservationStreamPush(
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<ScreenshotResult> {
-    return this.requestScreenshot(timeoutMs, perf, true);
+    return this.requestScreenshot(timeoutMs, perf, { suppressObservationStreamPush: true });
   }
 
   async verifyServiceReady(

@@ -323,7 +323,9 @@ export class InputStrokes {
       return started;
     }
     try {
-      await client.requestGestureEnd(args.gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
+      await client.requestGestureEnd(args.gestureId, 0, 0, true, {
+        timeoutMs: OWNED_GESTURE_CANCEL_TIMEOUT_MS,
+      });
     } catch (error) {
       logger.warn(
         `Failed to lift gesture ${args.gestureId} on ${admission.deviceId} whose holder left ` +
@@ -374,7 +376,9 @@ export class InputStrokes {
       async () => {
         const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
         // Coordinates are ignored for a cancel (the runner lifts in place), so 0,0 is fine.
-        return client.requestGestureEnd(gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
+        return client.requestGestureEnd(gestureId, 0, 0, true, {
+          timeoutMs: OWNED_GESTURE_CANCEL_TIMEOUT_MS,
+        });
       },
       `device:${targetDevice.deviceId}`,
     );
@@ -394,7 +398,7 @@ export class InputStrokes {
       case "move":
         return client.requestGestureMove(gestureId, x, y, timeoutMs);
       case "end":
-        return client.requestGestureEnd(gestureId, x, y, cancel, timeoutMs);
+        return client.requestGestureEnd(gestureId, x, y, cancel, { timeoutMs });
     }
   }
 }

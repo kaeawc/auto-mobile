@@ -29,16 +29,31 @@ import type { PooledDevice } from "../daemon/devicePoolTypes";
 export interface DeviceObservationAccess {
   /** Host-only metadata; injected readers keep custom access independent of host AVD files. */
   avdConfigReader?: AvdConfigReader;
-  listBooted(signal: AbortSignal | undefined): Promise<BootedDevice[]>;
-  listBootedWithStatus?(signal: AbortSignal | undefined): Promise<BootedResourceReadListing>;
+  /**
+   * Booted devices for a read. `scope` is "watchos" only for a read that names watchOS, which
+   * lists watches instead of Android and iOS (#14908); every other read lists Android and iOS.
+   */
+  listBooted(signal: AbortSignal | undefined, scope?: ReadListingScope): Promise<BootedDevice[]>;
+  listBootedWithStatus?(
+    signal: AbortSignal | undefined,
+    scope?: ReadListingScope,
+  ): Promise<BootedResourceReadListing>;
   isAuthorized(device: BootedDevice): boolean;
+}
+
+/** What a read lists: Android and iOS, or (only when the call names it) watchOS. */
+export type ReadListingScope = "either" | "watchos";
+
+function readListingScope(platform: SomePlatform): ReadListingScope {
+  return platform === "watchos" ? "watchos" : "either";
 }
 
 export const defaultDeviceObservationAccess: DeviceObservationAccess = {
   avdConfigReader: new FileAvdConfigReader(),
-  listBooted: (signal) =>
-    listBootedDevicesForResource("either", "observe", { signal, requireFresh: true }),
-  listBootedWithStatus: (signal) => listBootedDevicesForReadWithStatus("either", "observe", signal),
+  listBooted: (signal, scope = "either") =>
+    listBootedDevicesForResource(scope, "observe", { signal, requireFresh: true }),
+  listBootedWithStatus: (signal, scope = "either") =>
+    listBootedDevicesForReadWithStatus(scope, "observe", signal),
   // The local daemon socket admits observation reads regardless of pool ownership.
   isAuthorized: () => true,
 };
@@ -52,7 +67,9 @@ export interface DeviceReadRetryOptions {
 }
 
 function incompleteReadPlatform(listing: BootedResourceReadListing, platform: SomePlatform) {
-  return (["android", "ios"] as const).find(
+  // "either" never scans watches, so only a watchOS read can find watch discovery incomplete.
+  const platforms = platform === "watchos" ? (["watchos"] as const) : (["android", "ios"] as const);
+  return platforms.find(
     (p) =>
       (platform === "either" || platform === p) &&
       !listing.scanned[p] &&
@@ -81,12 +98,17 @@ async function findObservationReadTarget(
     return await new DefaultRetryExecutor(retry.timer).executeOrThrow(
       async () => {
         signal?.throwIfAborted();
-        // The plain listing scans Android and iOS only, so a watch never reads as freshly listed.
+        // A read that names watchOS lists watches; any other read lists Android and iOS only.
+        const scope = readListingScope(targetPlatform);
         const listing: BootedResourceReadListing = access.listBootedWithStatus
-          ? await access.listBootedWithStatus(signal)
+          ? await access.listBootedWithStatus(signal, scope)
           : {
-              devices: await access.listBooted(signal),
-              scanned: { android: true, ios: true, watchos: false },
+              devices: await access.listBooted(signal, scope),
+              scanned: {
+                android: scope === "either",
+                ios: scope === "either",
+                watchos: scope === "watchos",
+              },
             };
         signal?.throwIfAborted();
         const fresh = listing.devices.filter((device) => listing.scanned[device.platform]);

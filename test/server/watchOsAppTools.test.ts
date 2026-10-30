@@ -132,7 +132,10 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       env,
       displayInventory: new FakeDisplayInventoryProvider(),
       // The sessionless read path lists Android and iOS itself; never reach adb or simctl.
-      deviceReadAccess: { listBooted: async () => connected, isAuthorized: () => true },
+      deviceReadAccess: {
+        listBooted: async (_signal, scope) => (scope === "watchos" ? [watch] : connected),
+        isAuthorized: () => true,
+      },
     });
     setInstalledAppResourceRefresh({ invalidate: () => {}, notify: async () => {} });
     cleanups.push(() => {
@@ -341,6 +344,25 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
 
     expect(error).toMatchObject({ code: "device_owned_by_other_daemon" });
     expect(watchSimctl.commands).toEqual([]);
+  });
+
+  test("a sessionless watchOS read of a watch another session holds lists its apps", async () => {
+    await arrange();
+    await bindWatchSession();
+
+    const result = listAppsResultSchema.parse(
+      toolJson(
+        await ToolRegistry.getTool("listApps")!.handler({
+          __mcpSessionId: "client-b",
+          platform: "watchos",
+          deviceId: watch.deviceId,
+        }),
+      ),
+    );
+
+    expect(result.devices).toEqual([
+      expect.objectContaining({ deviceId: watch.deviceId, platform: "watchos" }),
+    ]);
   });
 
   test("sessionless listApps naming the watch id without platform never reaches the watch", async () => {

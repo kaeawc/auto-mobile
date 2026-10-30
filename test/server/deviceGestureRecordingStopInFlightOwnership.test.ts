@@ -44,7 +44,7 @@ describe("device gesture recording ownership while its stop is in flight", () =>
       timer,
       new CountingIdGenerator("recording"),
       () => recorder,
-      "session-a",
+      { ownerSessionUuid: "session-a" },
     );
     expect(isDeviceGestureRecordingOwnedBy("session-a", device.deviceId)).toBe(true);
 
@@ -87,7 +87,7 @@ describe("releasing a session whose device gesture recording stop is in flight (
       timer,
       new CountingIdGenerator("recording"),
       () => recorder,
-      "session-a",
+      { ownerSessionUuid: "session-a" },
     );
     const stopping = stopDeviceGestureRecording(undefined, undefined, timer);
     await Promise.resolve();
@@ -173,7 +173,7 @@ describe("joining the owner's in-flight recording stop", () => {
           return { steps: [step], stepCount: 1 };
         },
       }),
-      "base:pixel",
+      { ownerSessionUuid: "base:pixel" },
     );
     const stopped = stopDeviceGestureRecording(recordingId, undefined, timer);
     const base = (id: string) => id.split(":")[0];
@@ -204,7 +204,7 @@ describe("joining the owner's in-flight recording stop", () => {
         start: async () => undefined,
         stop: () => new Promise<{ steps: PlanStep[]; stepCount: number }>(() => {}),
       }),
-      "owner",
+      { ownerSessionUuid: "owner" },
     );
     const stopped = stopDeviceGestureRecording(recordingId);
     const joined = joinInFlightDeviceGestureRecordingStop(recordingId, "owner");

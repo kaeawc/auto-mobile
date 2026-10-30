@@ -353,13 +353,9 @@ export class DeviceGestureRecordingSocketServer extends RequestResponseSocketSer
       });
     }
     const device = await this.deviceResolution.readyDevice(selected, request.sessionUuid);
-    const result = await startDeviceGestureRecording(
-      device,
-      undefined,
-      undefined,
-      undefined,
-      request.sessionUuid,
-    );
+    const result = await startDeviceGestureRecording(device, undefined, undefined, undefined, {
+      ownerSessionUuid: request.sessionUuid,
+    });
     return {
       success: true,
       recordingId: result.recordingId,

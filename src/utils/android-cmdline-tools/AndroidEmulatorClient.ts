@@ -52,6 +52,7 @@ import {
   DefaultEmulatorReadinessPoller,
   type EmulatorReadinessHost,
   type EmulatorReadinessPoller,
+  type EmulatorReadyWait,
 } from "./EmulatorReadinessPoller";
 import {
   DefaultEmulatorLauncher,
@@ -88,7 +89,6 @@ import { DefaultEmulatorLaunchTargets, type EmulatorLaunchTargets } from "./Emul
 import type {
   AndroidEmulatorLaunchHandle,
   AndroidEmulatorLaunchRequest,
-  AndroidEmulatorReadinessOptions,
 } from "./AndroidEmulatorLaunchTypes";
 export type {
   AndroidEmulatorLaunchHandle,
@@ -232,6 +232,7 @@ export interface AndroidEmulator {
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
    * @param childProcess - Optional child process to monitor for early exit
    * @param targetDeviceId - Optional adb device id to require when waiting for an already-running device
+   * @param wait - Optional cancellation signal and post-readiness options
    * @returns Promise that resolves with device ID when emulator is ready
    */
   waitForEmulatorReady(
@@ -239,8 +240,7 @@ export interface AndroidEmulator {
     timeoutMs?: number,
     childProcess?: ChildProcess | null,
     targetDeviceId?: string,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    wait?: EmulatorReadyWait,
   ): Promise<BootedDevice>;
 }
 
@@ -536,8 +536,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
     targetDeviceId?: string,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    wait?: EmulatorReadyWait,
   ): Promise<BootedDevice> {
     // Not `async`: adopting the poller promise would add microtask turns the launch-exit timing tests pin.
     return this.readinessPoller.waitForEmulatorReady(
@@ -545,7 +544,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       timeoutMs,
       childProcess,
       targetDeviceId,
-      { signal, options },
+      wait,
     );
   }
 

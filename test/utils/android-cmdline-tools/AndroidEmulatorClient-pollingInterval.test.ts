@@ -40,13 +40,9 @@ async function observePollingInterval(value: string | undefined): Promise<number
     } as AdbClientFactory,
   });
   const controller = new AbortController();
-  const readiness = client.waitForEmulatorReady(
-    "Missing",
-    1_000,
-    null,
-    "emulator-5554",
-    controller.signal,
-  );
+  const readiness = client.waitForEmulatorReady("Missing", 1_000, null, "emulator-5554", {
+    signal: controller.signal,
+  });
 
   for (let attempt = 0; attempt < 10 && timer.getPendingTimeoutCount() < 2; attempt += 1) {
     await new Promise<void>((resolve) => setImmediate(resolve));

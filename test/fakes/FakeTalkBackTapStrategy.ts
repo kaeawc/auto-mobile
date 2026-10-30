@@ -1,4 +1,5 @@
 import type { Element } from "../../src/models/Element";
+import type { Point } from "../../src/models/Point";
 import type { DisplayFence } from "../../src/features/action/BaseVisualChange";
 import type {
   TalkBackTapResult,
@@ -131,8 +132,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
   }
 
   async executeCoordinateFallback(
-    x: number,
-    y: number,
+    { x, y }: Point,
     action: TalkBackFallbackAction,
     durationMs: number,
     _driver: TalkBackNavigationDriver,
@@ -156,8 +156,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
   }
 
   async executeLongPress(
-    x: number,
-    y: number,
+    { x, y }: Point,
     durationMs: number,
     element: Element,
     _driver: TalkBackNavigationDriver,

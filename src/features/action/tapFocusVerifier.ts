@@ -147,6 +147,14 @@ function findSoleExpandedNativeFocusField(
     : candidate;
 }
 
+/** What the tap selected, used to tell the target apart from other focused fields. */
+export interface FocusVerificationHints {
+  /** The matched label's text when the tap target is a different (input) element. */
+  labelText?: string;
+  selectedIndex?: number;
+  preTapHierarchy?: ViewHierarchyResult;
+}
+
 /** What the focus verifier needs from the owning tap action (kept narrow on purpose). */
 export interface FocusVerifierDeps {
   device: BootedDevice;
@@ -470,10 +478,9 @@ export class FocusVerifier {
     options: TapOnElementOptions,
     target: Element,
     observation?: ObserveResult,
-    labelText?: string,
-    selectedIndex?: number,
-    preTapHierarchy?: ViewHierarchyResult,
+    hints: FocusVerificationHints = {},
   ): boolean {
+    const { labelText, selectedIndex, preTapHierarchy } = hints;
     if (!observation?.viewHierarchy) {
       return false;
     }
@@ -488,9 +495,9 @@ export class FocusVerifier {
         options,
         this.deps.withObservationScreenSize(options, observation),
         target,
-        observation.viewHierarchy,
-        nodes,
         {
+          viewHierarchy: observation.viewHierarchy,
+          nodes,
           labelText,
           selectedIndex,
           preTapHierarchy,
@@ -579,14 +586,16 @@ export class FocusVerifier {
     options: TapOnElementOptions,
     scopedOptions: TapVerificationOptions,
     target: Element,
-    viewHierarchy: ViewHierarchyResult,
-    nodes: readonly SearchableEntry[],
     {
+      viewHierarchy,
+      nodes,
       labelText,
       selectedIndex,
       preTapHierarchy,
       screenHeight,
     }: {
+      viewHierarchy: ViewHierarchyResult;
+      nodes: readonly SearchableEntry[];
       labelText?: string;
       selectedIndex?: number;
       preTapHierarchy?: ViewHierarchyResult;

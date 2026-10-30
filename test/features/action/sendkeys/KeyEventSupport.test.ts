@@ -206,13 +206,15 @@ describe("KeyEventSupport", () => {
   test("reads case three times with two settle sleeps and skips all reads for passwords", async () => {
     const { support, host, timer, calls } = harness();
     const typed = { success: true };
-    const result = await support.verifyKeyEventLetterCase("a", typed, "eventOnly");
+    const result = await support.verifyKeyEventLetterCase("a", typed, { mode: "eventOnly" });
     expect(result.success).toBe(true);
     expect(result.warning).toContain('eventOnly typed "a"');
     expect(calls).toHaveLength(3);
     expect(timer.getSleepHistory()).toEqual([150, 150]);
     host.session.typingPasswordField = true;
-    expect(await support.verifyKeyEventLetterCase("secret", typed, "eventAll")).toBe(typed);
+    expect(await support.verifyKeyEventLetterCase("secret", typed, { mode: "eventAll" })).toBe(
+      typed,
+    );
     expect(calls).toHaveLength(3);
   });
 

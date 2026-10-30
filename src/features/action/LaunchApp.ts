@@ -3,6 +3,7 @@ import { ActionableError, BootedDevice, LaunchAppResult, ObserveResult } from ".
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
+import { resolveSetupUser } from "../../ctrlProxy/setupUser";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
@@ -413,6 +414,11 @@ export class LaunchApp extends BaseVisualChange {
     userId?: number,
     signal?: AbortSignal,
   ): Promise<number> {
+    const foregroundUser =
+      userId === undefined ? await resolveSetupUser(this.adb, this.device) : undefined;
+    if (foregroundUser !== undefined) {
+      return foregroundUser;
+    }
     const target = await new AndroidUserTargetResolver(this.adb).resolve({
       packageName,
       explicitUserId: userId,

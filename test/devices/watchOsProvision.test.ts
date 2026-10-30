@@ -238,4 +238,42 @@ describe("WatchSimulatorProvisioner", () => {
       error: "simctl delete: device is busy",
     });
   });
+
+  test("find returns a listed watch by UDID and nothing for an unknown one", async () => {
+    const { provisioner } = arrange();
+
+    expect((await provisioner.find(EXISTING.udid))?.name).toBe(NAME);
+    expect(await provisioner.find("00000000-0000-4000-8000-000000000000")).toBeUndefined();
+  });
+
+  test("deleteAndConfirmAbsent deletes the watch and proves it gone from a fresh listing", async () => {
+    const { simctl, provisioner } = arrange();
+
+    await provisioner.deleteAndConfirmAbsent(EXISTING.udid);
+
+    expect(simctl.commands).toEqual([`delete ${EXISTING.udid}`]);
+    expect(await provisioner.find(EXISTING.udid)).toBeUndefined();
+  });
+
+  test("a watch still listed after simctl delete is a failure, not a success", async () => {
+    const { simctl, provisioner } = arrange();
+    simctl.deleteSimulator = async (udid: string) => {
+      simctl.commands.push(`delete ${udid}`);
+    };
+
+    const error = await rejection(provisioner.deleteAndConfirmAbsent(EXISTING.udid));
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain(`still lists Apple Watch simulator ${EXISTING.udid}`);
+  });
+
+  test("a failed simctl delete is reported with the watch", async () => {
+    const { simctl, provisioner } = arrange();
+    simctl.deleteError = new Error("simctl delete: device is busy");
+
+    const error = await rejection(provisioner.deleteAndConfirmAbsent(EXISTING.udid));
+
+    expect(String(error)).toContain(`Failed to delete Apple Watch simulator ${EXISTING.udid}`);
+    expect(String(error)).toContain("device is busy");
+  });
 });

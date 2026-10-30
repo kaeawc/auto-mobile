@@ -368,7 +368,7 @@ test("ClearText first and retry requests preserve the signal and live text deadl
 });
 
 test("InputText on iOS types at the caret without requesting a clear", async () => {
-  const action = new InputText(ios, new FakeAdbExecutor(), undefined, timer);
+  const action = new InputText(ios, new FakeAdbExecutor(), { timer });
   const observer = new FakeObserveScreen();
   observer.setObserveResult(() =>
     typedObservation(proxy.getTextInputHistory().length ? "oldnew" : "old"),

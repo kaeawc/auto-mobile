@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type {
   Element,
   ObserveResult,
+  Point,
   TapOnElementOptions,
   ViewHierarchyResult,
 } from "../../../src/models";
@@ -90,7 +91,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+      tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
       screenSize: { width: 1080, height: 1920 },
@@ -112,7 +114,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+      tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
       screenSize: { width: 1080, height: 1920 },
@@ -134,7 +137,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(preHierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+      tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
       screenSize: { width: 1080, height: 1920 },
@@ -159,7 +163,8 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+    await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+      tapElement: makeElement(),
       options: { action: "tap" },
       isTalkBackEnabled: false,
       screenSize: { width: 1080, height: 1920 },
@@ -448,8 +453,7 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
       let capturedIsTalkBackEnabled: boolean | undefined;
       tap.executeAndroidTap = async (
         _action: string,
-        _x: number,
-        _y: number,
+        _point: Point,
         _dur: number,
         _el: Element,
         context,
@@ -459,7 +463,8 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
 
       const preTapHash = tap.testHooks.hashViewHierarchy(hierarchy);
 
-      await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, makeElement(), {
+      await tap.retryTapIfNoChange(preTapHash, { x: 60, y: 45 }, "tap", 0, {
+        tapElement: makeElement(),
         options: { action: "tap" },
         isTalkBackEnabled: talkBackEnabled,
         screenSize: { width: 1080, height: 1920 },

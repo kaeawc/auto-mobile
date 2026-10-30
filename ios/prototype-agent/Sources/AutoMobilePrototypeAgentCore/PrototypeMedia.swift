@@ -86,6 +86,15 @@ enum PrototypeMedia {
                 )
             }
         }
+        try validateFeedFields(node, path: path)
+    }
+
+    /// `visibleThreshold` and `resumePosition` tune `autoplay: "whenVisible"` only (#14258).
+    private static func validateFeedFields(_ node: [String: JSONValue], path: String) throws {
+        guard node["autoplay"] != .string("whenVisible") else { return }
+        if let field = ["visibleThreshold", "resumePosition"].first(where: { node[$0] != nil }) {
+            throw PrototypeLimits.violation("\(path).\(field)", "\(field) needs autoplay whenVisible")
+        }
     }
 
     /// A `/media/players/<id>/<key>` read of a declared player's state key.

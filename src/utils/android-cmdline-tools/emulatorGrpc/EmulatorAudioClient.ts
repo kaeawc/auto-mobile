@@ -125,6 +125,12 @@ export interface CaptureAudioOptions {
   sampleRate?: number;
 }
 
+/**
+ * Receives captured PCM. A returned promise is backpressure: the source delivers nothing more until
+ * it settles, so a slow consumer (a stalled disk) bounds memory instead of queueing audio.
+ */
+export type PcmSink = (pcm: Uint8Array) => void | Promise<void>;
+
 /** An open-ended capture; PCM is 16-bit little-endian mono at `sampleRate`. */
 export interface AudioStream {
   readonly sampleRate: number;
@@ -234,10 +240,7 @@ export class EmulatorAudioClient {
    * silent guest sends no packets, so its quiet stretches are filled with silence to keep the PCM
    * in step with the wall clock.
    */
-  async streamCapture(
-    sink: (pcm: Uint8Array) => void,
-    options: { sampleRate?: number } = {},
-  ): Promise<AudioStream> {
+  async streamCapture(sink: PcmSink, options: { sampleRate?: number } = {}): Promise<AudioStream> {
     const sampleRate = Math.min(
       options.sampleRate ?? EMULATOR_MAX_SAMPLING_RATE,
       EMULATOR_MAX_SAMPLING_RATE,
@@ -253,10 +256,11 @@ export class EmulatorAudioClient {
         for await (const message of call.messages()) {
           const packet = decodeAudioPacket(message);
           const silence = filler.before(packet);
+          // Awaiting the sink holds the next read, and HTTP/2 flow control the emulator.
           if (silence) {
-            sink(silence);
+            await sink(silence);
           }
-          sink(packet.audio);
+          await sink(packet.audio);
         }
       } catch (error) {
         // The call status, read at stop, says whether this was the cancel or a failure.

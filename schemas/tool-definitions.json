@@ -2685,7 +2685,7 @@
             "platform": {
               "description": "Platform reported by automobile:devices/booted",
               "type": "string",
-              "enum": ["android", "ios"]
+              "enum": ["android", "ios", "watchos"]
             },
             "isVirtual": {
               "description": "Virtual-device flag reported by automobile:devices/booted",
@@ -35036,6 +35036,14 @@
                     "positionKey": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onAppear/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                     },
+                    "visibleThreshold": {
+                      "type": "number",
+                      "minimum": 0.1,
+                      "maximum": 1
+                    },
+                    "resumePosition": {
+                      "type": "boolean"
+                    },
                     "captions": {
                       "type": "array",
                       "items": {
@@ -51203,7 +51211,7 @@
                 "nightMode": {
                   "type": "string",
                   "enum": ["on", "off", "unset"],
-                  "description": "Vehicle night-mode signal on an Android Automotive emulator, restored to its prior value; or unset."
+                  "description": "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override."
                 }
               },
               "additionalProperties": false,

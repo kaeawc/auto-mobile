@@ -736,14 +736,16 @@ export const createSendKeysHandler =
     await assertSendKeysRunnerCompatible(device);
     RecompositionTracker.getInstance().recordInteraction(device.deviceId);
     const sendKeys = (deps.sendKeysFactory ?? defaultSendKeysFactory)(device);
-    const result = await sendKeys.execute(
-      args.commands,
-      args.selector,
+    const result = await sendKeys.execute(args.commands, args.selector, {
       progress,
       signal,
-      args.display,
-      { container: args.container, selectionStrategy: args.selectionStrategy, layer: args.layer },
-    );
+      display: args.display,
+      focus: {
+        container: args.container,
+        selectionStrategy: args.selectionStrategy,
+        layer: args.layer,
+      },
+    });
     const dismissal = await dismissKeyboardAfterSendKeys(
       device,
       serverConfig.isDismissKeyboardAfterInputEnabled(),

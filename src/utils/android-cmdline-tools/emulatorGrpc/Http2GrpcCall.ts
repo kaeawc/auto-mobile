@@ -7,18 +7,26 @@ import {
   readGrpcStatus,
   type GrpcStatusResult,
 } from "./grpcFraming";
+import { BoundedMessageQueue } from "./BoundedMessageQueue";
 import type { GrpcCall } from "./grpcTransport";
 
-/** One gRPC call on an HTTP/2 stream: framed writes, a decoded message queue, and the final status. */
+/**
+ * One gRPC call on an HTTP/2 stream: framed writes, a decoded message queue, and the final status.
+ * A reader that falls behind pauses the stream, so HTTP/2 flow control holds the server back.
+ */
 export class Http2GrpcCall implements GrpcCall {
   private readonly decoder = new GrpcFrameDecoder();
-  private readonly queue: Uint8Array[] = [];
+  private readonly queue: BoundedMessageQueue;
   private wake: (() => void) | undefined;
   private finished = false;
   private headers: http2.IncomingHttpHeaders | undefined;
   private readonly finalStatus: Promise<GrpcStatusResult>;
 
   constructor(private readonly stream: http2.ClientHttp2Stream) {
+    this.queue = new BoundedMessageQueue({
+      pause: () => stream.pause(),
+      resume: () => stream.resume(),
+    });
     stream.on("response", (headers) => {
       this.headers = headers;
     });
@@ -91,7 +99,7 @@ export class Http2GrpcCall implements GrpcCall {
 
   private onData(chunk: Buffer): void {
     try {
-      this.queue.push(...this.decoder.push(chunk));
+      this.queue.push(this.decoder.push(chunk));
     } catch (error) {
       this.stream.destroy(error instanceof Error ? error : new Error(errorMessage(error)));
     }

@@ -112,10 +112,10 @@ export interface DeviceToolsDependencies {
   ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
   /** Apple Watch simulator lookup and boot for startDevice (#14908); defaults to simctl. */
   watchSimulatorLifecycleFactory?: () => Pick<WatchSimulatorLifecycle, "findWatch" | "boot">;
-  /** Apple Watch simulator adoption and creation for provisionDevice (#15882); defaults to simctl. */
+  /** Apple Watch simulator adoption, creation and deletion (#15882); defaults to simctl. */
   watchSimulatorProvisionerFactory?: () => Pick<
     WatchSimulatorProvisioner,
-    "provision" | "discardCreated"
+    "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
   >;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;

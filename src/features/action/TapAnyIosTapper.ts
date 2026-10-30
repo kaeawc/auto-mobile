@@ -5,7 +5,7 @@ import {
 } from "./gestureTransportTimeout";
 import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError, BootedDevice, Element } from "../../models";
+import { ActionableError, BootedDevice, Element, type Point } from "../../models";
 import { logger } from "../../utils/logger";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -38,8 +38,7 @@ export class TapAnyIosTapper {
    */
   async executeIosTap(
     action: string,
-    x: number,
-    y: number,
+    point: Point,
     longPressDuration: number,
     element?: Element,
     fenceOptions: DisplayFenceOption & {
@@ -69,7 +68,7 @@ export class TapAnyIosTapper {
       ));
 
     if (isVoiceOverEnabled && element) {
-      await this.executeIosTapWithVoiceOver(xcTestClient, action, element, x, y, {
+      await this.executeIosTapWithVoiceOver(xcTestClient, action, element, {
         durationMs: longPressDuration,
         scoped: fenceOptions.scoped,
         signal,
@@ -77,7 +76,7 @@ export class TapAnyIosTapper {
       return;
     }
 
-    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration, {
+    await this.executeIosTapWithCoordinates(xcTestClient, action, point, longPressDuration, {
       signal,
       displayFence: fence,
     });
@@ -99,8 +98,7 @@ export class TapAnyIosTapper {
   async executeIosTapWithCoordinates(
     xcTestClient: IosCtrlProxy,
     action: string,
-    x: number,
-    y: number,
+    point: Point,
     longPressDuration: number,
     fenceOptions: DisplayFenceOption & { signal?: AbortSignal } = {},
   ): Promise<void> {
@@ -122,7 +120,10 @@ export class TapAnyIosTapper {
     if (action === "doubleTap") {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence.assertCurrent();
-      await dispatchIosDoubleTap(xcTestClient, x, y, tapDuration, undefined, { signal, timeoutMs });
+      await dispatchIosDoubleTap(xcTestClient, point, tapDuration, undefined, {
+        signal,
+        timeoutMs,
+      });
       return;
     }
 
@@ -130,7 +131,7 @@ export class TapAnyIosTapper {
     fence.assertCurrent();
     throwIfAborted(signal);
     try {
-      await dispatchIosCoordinateTap(xcTestClient, x, y, tapDuration, undefined, {
+      await dispatchIosCoordinateTap(xcTestClient, point, tapDuration, undefined, {
         signal,
         timeoutMs,
       });
@@ -195,10 +196,9 @@ export class TapAnyIosTapper {
     xcTestClient: IosCtrlProxy,
     resourceId: string,
     voiceOverAction: "activate" | "long_press",
-    timeoutMs: number | undefined,
-    duration?: number,
-    signal?: AbortSignal,
+    request: { timeoutMs: number | undefined; duration?: number; signal?: AbortSignal },
   ): Promise<void> {
+    const { timeoutMs, duration, signal } = request;
     let dispatched = false;
     let result: Awaited<ReturnType<IosCtrlProxy["requestAction"]>>;
     try {
@@ -246,8 +246,6 @@ export class TapAnyIosTapper {
     xcTestClient: IosCtrlProxy,
     action: string,
     element: Element,
-    x: number,
-    y: number,
     pressOptions: { durationMs: number; scoped?: boolean; signal?: AbortSignal },
   ): Promise<void> {
     const longPressDuration = pressOptions.durationMs;
@@ -265,14 +263,11 @@ export class TapAnyIosTapper {
         : resolveTapAnyOrdinaryTapCtrlProxyTimeoutMs(ORDINARY_TAP_DURATION_MS);
 
     if (resourceId) {
-      await this.activateIosByResourceId(
-        xcTestClient,
-        resourceId,
-        voiceOverAction,
+      await this.activateIosByResourceId(xcTestClient, resourceId, voiceOverAction, {
         timeoutMs,
-        action === "longPress" ? longPressDuration : undefined,
-        pressOptions.signal,
-      );
+        duration: action === "longPress" ? longPressDuration : undefined,
+        signal: pressOptions.signal,
+      });
       return;
     }
 

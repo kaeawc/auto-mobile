@@ -88,7 +88,8 @@
     "MAX_PROTOTYPE_UPLOAD_BYTES": 10485760,
     "MAX_PROTOTYPE_UPLOAD_PARTS": 16,
     "MAX_PROTOTYPE_KEYFRAME_NODES": 16,
-    "MAX_PROTOTYPE_MEDIA_PLAYERS": 4
+    "MAX_PROTOTYPE_MEDIA_PLAYERS": 4,
+    "MAX_PROTOTYPE_ACTIVE_DECODERS": 3
   },
   "definitions": {
     "authAccount": {
@@ -15518,6 +15519,20 @@
             "positionKey": {
               "rule": {
                 "kind": "key"
+              },
+              "optional": true
+            },
+            "visibleThreshold": {
+              "rule": {
+                "kind": "number",
+                "min": 0.1,
+                "max": 1
+              },
+              "optional": true
+            },
+            "resumePosition": {
+              "rule": {
+                "kind": "boolean"
               },
               "optional": true
             },

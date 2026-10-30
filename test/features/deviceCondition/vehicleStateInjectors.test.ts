@@ -44,7 +44,12 @@ class VehicleAdb extends FakeAdbExecutor {
 /** The VHAL store stays unchanged by event injection; effective state is separate. */
 function vehicleAdb(
   initial: Record<string, string>,
-  options: { injectFails?: boolean; nightIgnored?: boolean; drivingStates?: string[] } = {},
+  options: {
+    injectFails?: boolean;
+    nightIgnored?: boolean;
+    sensorNight?: boolean;
+    drivingStates?: string[];
+  } = {},
 ) {
   const props = { ...initial };
   const log: string[] = [];
@@ -80,7 +85,8 @@ function vehicleAdb(
     const night = /^shell cmd car_service day-night-mode (night|day|sensor)$/.exec(command);
     if (night) {
       if (!options.nightIgnored) {
-        props[NIGHT] = night[1] === "sensor" ? initial[NIGHT] : night[1] === "night" ? "1" : "0";
+        const sensorNight = options.sensorNight ?? initial[NIGHT] === "1";
+        props[NIGHT] = (night[1] === "sensor" ? sensorNight : night[1] === "night") ? "1" : "0";
       }
       return Promise.resolve(execResult(`DayNightMode changed to: ${night[1]}`));
     }
@@ -189,6 +195,22 @@ describe("vehicle state injectors (#14919)", () => {
     expect(controller.hasActiveConditions()).toBe(false);
   });
 
+  test("restore clears night mode when sensor control differs from the baseline", async () => {
+    const car = vehicleAdb({ ...PARKED }, { sensorNight: true });
+    const injector = injectorFor(automotive, "vehicle.nightMode", car.adb);
+    const controller = new DeviceConditionController(() => injector);
+    const applied = await controller.apply({ vehicle: { nightMode: "on" } });
+    expect(applied.changes[0].status).toBe("applied");
+    expect(controller.hasActiveConditions()).toBe(true);
+
+    const report = await controller.restore();
+    expect(car.log).toContain("shell cmd car_service day-night-mode sensor");
+    expect(car.props[NIGHT]).toBe("1");
+    expect(report.verifiedClean).toBe(true);
+    expect(report.failures).toEqual([]);
+    expect(controller.hasActiveConditions()).toBe(false);
+  });
+
   test("a target equal to the current state registers nothing to restore", async () => {
     const car = vehicleAdb({ ...PARKED });
     const out = await injectorFor(automotive, "vehicle.nightMode", car.adb).apply("off");
@@ -208,7 +230,7 @@ describe("vehicle state injectors (#14919)", () => {
     await out.reset?.();
     expect(await injector.isClean()).toBe(true);
     car.props[NIGHT] = "1";
-    expect(await injector.isClean()).toBe(false);
+    expect(await injector.isClean()).toBe(true);
   });
 
   test("night on that leaves day mode throws a typed failure and retains cleanup", async () => {

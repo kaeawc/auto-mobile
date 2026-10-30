@@ -153,6 +153,8 @@ function createNightModeInjector(adb: AdbExecutor): DeviceConditionInjector {
       }
       await carCommand(adb, ["day-night-mode", "sensor"], signal);
       baseline = undefined;
+      // Sensor control can legitimately choose a different effective mode than the baseline.
+      expected = undefined;
     });
   return {
     key: "vehicle.nightMode",

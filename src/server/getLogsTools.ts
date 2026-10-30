@@ -92,9 +92,7 @@ export const defaultGetLogsDependencies: GetLogsDependencyFactory = (device, arg
           device,
           appId,
           { lastSeconds, level, processName },
-          SESSION_LOG_MAX_BYTES_LIMIT,
-          signal,
-          "tail",
+          { maxBytes: SESSION_LOG_MAX_BYTES_LIMIT, signal, retain: "tail" },
         ),
       resolveProcessName: async (appId, signal) => {
         const apps = await new SimCtlClient(device).listAppsOrThrow(device.deviceId, { signal });

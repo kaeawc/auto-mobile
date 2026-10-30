@@ -2640,6 +2640,12 @@
               },
               "optional": true
             },
+            "allowSecureInRequest": {
+              "rule": {
+                "kind": "boolean"
+              },
+              "optional": true
+            },
             "timeoutMs": {
               "rule": {
                 "kind": "number",

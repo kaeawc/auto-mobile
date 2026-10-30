@@ -264,6 +264,7 @@ data class PrototypeRequestAction(
   val into: String? = null,
   val statusKey: String? = null,
   val via: String? = null,
+  val allowSecureInRequest: Boolean? = null,
   val timeoutMs: Int? = null,
   val onSuccess: List<PrototypeAction>? = null,
   val onError: List<PrototypeAction>? = null,

@@ -396,8 +396,7 @@ describe("NativeAndroidSnapshotResetPort", () => {
         step.timeoutMs,
         null,
         ANDROID_RESET_DEVICE.deviceId,
-        expect.any(AbortSignal),
-        { skipWakeAndUnlock: true },
+        { signal: expect.any(AbortSignal), options: { skipWakeAndUnlock: true } },
       ],
     ]);
   });
@@ -408,7 +407,7 @@ describe("NativeAndroidSnapshotResetPort", () => {
       rig.step.timeoutMs = 600_000;
       const readinessSignals: AbortSignal[] = [];
       rig.dependencies.emulator.waitForEmulatorReady = (...args) => {
-        const signal = args[4];
+        const signal = args[4]?.signal;
         if (signal) {
           readinessSignals.push(signal);
         }

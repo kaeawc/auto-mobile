@@ -440,19 +440,23 @@ function pushInitialObservationScreenshot(
       screenshot.data,
       screenshot.width,
       screenshot.height,
-      screenshot.metadata,
       {
-        ...captureSequenceOptions(sequence, frame.frameContext, screenshot.frameContext),
-        ...canonicalPixelScreenshotOptions(frame.hierarchy),
-        initialFrameSubscriber: subscriber
-          ? {
-              ...subscriber,
-              liveFrameGeneration: frame.liveFrameGeneration,
-              deviceSessionUuid: frame.deviceSessionUuid,
-            }
-          : undefined,
-        rotation: screenshot.rotation,
-        ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
+        metadata: screenshot.metadata,
+        options: {
+          ...captureSequenceOptions(sequence, frame.frameContext, screenshot.frameContext),
+          ...canonicalPixelScreenshotOptions(frame.hierarchy),
+          initialFrameSubscriber: subscriber
+            ? {
+                ...subscriber,
+                liveFrameGeneration: frame.liveFrameGeneration,
+                deviceSessionUuid: frame.deviceSessionUuid,
+              }
+            : undefined,
+          rotation: screenshot.rotation,
+          ...(screenshot.frameContext === undefined
+            ? {}
+            : { frameContext: screenshot.frameContext }),
+        },
       },
     );
     if (sent) {

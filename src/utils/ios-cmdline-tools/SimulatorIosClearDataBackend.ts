@@ -21,7 +21,8 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
     private readonly deps: Pick<IosClearDataBackendDeps, "simctl" | "rm" | "containerOwnership">,
   ) {}
 
-  async clearAppData(bundleId: string): Promise<ClearAppDataResult> {
+  /** `signal` is checked once the container is resolved, so a cancelled call wipes nothing. */
+  async clearAppData(bundleId: string, signal?: AbortSignal): Promise<ClearAppDataResult> {
     logger.info(`[iOS] Clearing app data for ${bundleId} on simulator ${this.deviceId}`);
 
     // The container can't be safely wiped while the app holds open file handles.
@@ -48,6 +49,9 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
       };
     }
 
+    // The container lookup does not observe the signal, and an fs.rm that has started cannot be
+    // recalled, so this is the last point a cancellation can stop the wipe.
+    signal?.throwIfAborted();
     try {
       // Folders are independent — wipe them concurrently. force:true so a missing
       // folder (e.g. an app that never wrote Documents) is a no-op, not an error.

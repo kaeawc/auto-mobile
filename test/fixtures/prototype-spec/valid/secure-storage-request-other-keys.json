@@ -1,0 +1,67 @@
+{
+  "id": "secure-storage-request-other-keys",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "token": "",
+    "remember": false,
+    "tokenId": "abc"
+  },
+  "requires": {
+    "platform": ["secureStorage", "biometric"]
+  },
+  "storage": {
+    "version": 1,
+    "keys": ["state:remember"],
+    "secure": ["state:token"],
+    "secureAuth": {
+      "state:token": "biometric"
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "textField",
+        "stateKey": "token"
+      },
+      {
+        "type": "button",
+        "label": "Save",
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "save",
+            "context": {
+              "r": {
+                "state": "remember"
+              }
+            }
+          },
+          {
+            "type": "request",
+            "url": "https://example.com/{tokenId}",
+            "via": "device",
+            "headers": {
+              "X-Remember": {
+                "state": "remember"
+              },
+              "X-Id": "{tokenId}"
+            }
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "Locked",
+        "visibleWhen": {
+          "platform": "/secureStorage/locked",
+          "equals": true
+        }
+      }
+    ]
+  }
+}

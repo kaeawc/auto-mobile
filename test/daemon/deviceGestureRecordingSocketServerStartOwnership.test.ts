@@ -270,7 +270,7 @@ describe("device gesture recording start holder admission (#11665)", () => {
         stop: async () => ({ steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 }),
         stepCount: 1,
       }),
-      "holder",
+      { ownerSessionUuid: "holder" },
     );
     const response = await server.invoke({
       command: "start",
@@ -303,7 +303,7 @@ describe("device gesture recording start holder admission (#11665)", () => {
         stop: async () => ({ steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 }),
         stepCount: 1,
       }),
-      acquired,
+      { ownerSessionUuid: acquired },
     );
     const response = await server.invoke({
       command: "start",

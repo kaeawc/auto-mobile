@@ -88,8 +88,7 @@ describe("DeviceGestureRecordingSocketServer user-input capture contract (#11919
         },
         stepCount: 0,
       }),
-      sessionUuid,
-      (uuid) => uuid.split(":")[0],
+      { ownerSessionUuid: sessionUuid, baseSessionUuid: (uuid) => uuid.split(":")[0] },
     );
     const request = { command: "stop", recordingId: active.recordingId, sessionUuid } as const;
     stops.push(server.invoke(request));

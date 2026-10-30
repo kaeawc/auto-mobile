@@ -1,7 +1,16 @@
 import path from "path";
-import type { BootedDevice, InstallAppResult } from "../../../models";
+import type {
+  BootedDevice,
+  InstallAppResult,
+  LaunchAppResult,
+  TerminateAppResult,
+} from "../../../models";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
 import type { UninstallAppResult } from "../../../models/UninstallAppResult";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import type { IosClearDataBackendDeps } from "../../../utils/ios-cmdline-tools/IosDeviceBackend";
+import { isProcessAlreadyGoneError } from "../../../utils/ios-cmdline-tools/iosProcessErrors";
+import { logger } from "../../../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../../utils/workingDirectory";
 import { PlistClient, type PlistReader } from "../../../utils/ios-cmdline-tools/PlistClient";
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
@@ -9,11 +18,25 @@ import {
   getIosInstalledAppBundleId,
   type IosInstalledAppRecord,
 } from "../../../utils/ios-cmdline-tools/iosInstalledApp";
+import { SimulatorIosClearDataBackend } from "../../../utils/ios-cmdline-tools/SimulatorIosClearDataBackend";
 import type { InstallAppCall } from "../InstallAppTypes";
+import type { LaunchAppCall } from "../LaunchAppTypes";
+import { PACKAGE_NOT_INSTALLED_ERROR } from "../LaunchPackageRemovedError";
 import type { UninstallAppCall } from "../UninstallApp";
 
 /** The simctl calls a watch app manager makes; nothing else on the client is reachable. */
-export type WatchAppsSimctl = Pick<SimCtlClient, "installApp" | "uninstallApp" | "listAppsOrThrow">;
+export type WatchAppsSimctl = Pick<
+  SimCtlClient,
+  | "installApp"
+  | "uninstallApp"
+  | "listAppsOrThrow"
+  | "launchApp"
+  | "terminateApp"
+  | "executeCommandArgs"
+>;
+
+/** How clearAppData finds and removes the watch app's data container (tests inject both). */
+export type WatchDataWipe = Pick<IosClearDataBackendDeps, "rm" | "containerOwnership">;
 
 /** Reads `CFBundleIdentifier` from a `.app` bundle's Info.plist. */
 export type WatchBundleIdReader = Pick<PlistReader, "extractRawFile">;
@@ -30,6 +53,11 @@ function androidOnlyInstallOptions(call: InstallAppCall): string[] {
     ...set(call.guard, GUARD_INSTALL_OPTIONS),
     ...(call.userId === undefined ? [] : ["userId"]),
   ];
+}
+
+/** Names every launch option the caller set that only Android supports. */
+function androidOnlyLaunchOptions(call: LaunchAppCall): string[] {
+  return (["intent", "activityName", "userId"] as const).filter((key) => call[key] !== undefined);
 }
 
 /** A watch simulator installs only a `.app` bundle built for the watchOS simulator. */
@@ -56,6 +84,7 @@ export class WatchAppManager {
     /** The daemon chdirs at startup, so a relative path names the directory it was launched in. */
     private readonly resolveArtifactPath: (artifactPath: string) => string = (artifactPath) =>
       resolvePathFromDaemonLaunchWorkingDirectory(artifactPath),
+    private readonly dataWipe: WatchDataWipe = {},
   ) {}
 
   async install(artifactPath: string, call: InstallAppCall = {}): Promise<InstallAppResult> {
@@ -96,6 +125,120 @@ export class WatchAppManager {
       await this.simctl.uninstallApp(appId, this.device.deviceId, { signal: call.signal });
     }
     return { success: true, packageName: appId, keepData: false, wasInstalled };
+  }
+
+  /**
+   * `simctl launch` on the watch. coldBoot stops a running process first; clearAppData stops it
+   * and wipes the app's data container (Documents, Library, tmp) on this watch, and a failed
+   * wipe launches nothing. Android-only options are refused by name.
+   */
+  async launch(appId: string, call: LaunchAppCall): Promise<LaunchAppResult> {
+    const unsupported = androidOnlyLaunchOptions(call);
+    if (unsupported.length > 0) {
+      throw new ActionableError(
+        `launchApp on watchOS does not support: ${unsupported.join(", ")} (Android only).`,
+      );
+    }
+    if (!(await this.isInstalled(appId, call.signal))) {
+      return { success: false, packageName: appId, error: PACKAGE_NOT_INSTALLED_ERROR };
+    }
+    call.signal?.throwIfAborted();
+    const prepared = await this.prepareLaunch(appId, call);
+    if (prepared) {
+      return prepared;
+    }
+    call.signal?.throwIfAborted();
+    const launched = await this.simctl.launchApp(
+      appId,
+      { launchArguments: call.launchArguments },
+      this.device.deviceId,
+    );
+    return launched.success
+      ? { success: true, packageName: appId, pid: launched.pid }
+      : { success: false, packageName: appId, error: launched.error };
+  }
+
+  /** `simctl terminate` on the watch; an app with no running process is already terminated. */
+  async terminate(appId: string, call: { signal?: AbortSignal } = {}): Promise<TerminateAppResult> {
+    if (!(await this.isInstalled(appId, call.signal))) {
+      return {
+        success: true,
+        packageName: appId,
+        wasInstalled: false,
+        wasRunning: false,
+        wasForeground: false,
+      };
+    }
+    call.signal?.throwIfAborted();
+    try {
+      await this.simctl.terminateApp(appId, this.device.deviceId, { signal: call.signal });
+      return { success: true, packageName: appId, wasInstalled: true, wasRunning: true };
+    } catch (error) {
+      const message = errorMessage(error);
+      if (isProcessAlreadyGoneError(message)) {
+        return {
+          success: true,
+          packageName: appId,
+          wasInstalled: true,
+          wasRunning: false,
+          wasForeground: false,
+        };
+      }
+      logger.warn(
+        `[watchOS] simctl terminate ${appId} on ${this.device.deviceId} failed: ${message}`,
+      );
+      return { success: false, packageName: appId, error: message };
+    }
+  }
+
+  /** Runs clearAppData or coldBoot before a launch; a failed result stops the launch. */
+  private async prepareLaunch(
+    appId: string,
+    call: LaunchAppCall,
+  ): Promise<LaunchAppResult | undefined> {
+    if (!call.clearAppData && !call.coldBoot) {
+      return undefined;
+    }
+    const deviceId = this.device.deviceId;
+    // Both need the old process gone: a wipe under a running app, or a "cold" launch that reuses
+    // it, would be wrong. Only an already-gone process is tolerated; any other failure stops here.
+    const stopError = await this.stopForLaunch(appId);
+    if (stopError) {
+      return {
+        success: false,
+        packageName: appId,
+        error: `Could not stop ${appId} on watch ${deviceId} before launching: ${stopError}`,
+      };
+    }
+    if (!call.clearAppData) {
+      return undefined;
+    }
+    const cleared = await new SimulatorIosClearDataBackend(deviceId, {
+      ...this.dataWipe,
+      simctl: this.simctl,
+    }).clearAppData(appId, call.signal);
+    return cleared.success
+      ? undefined
+      : {
+          success: false,
+          packageName: appId,
+          error: `Could not clear app data for ${appId} on watch ${deviceId}: ${cleared.error}`,
+        };
+  }
+
+  /** `simctl terminate`; undefined when the app stopped or was already gone, else the failure. */
+  private async stopForLaunch(appId: string): Promise<string | undefined> {
+    try {
+      await this.simctl.terminateApp(appId, this.device.deviceId);
+      return undefined;
+    } catch (error) {
+      const message = errorMessage(error);
+      if (isProcessAlreadyGoneError(message)) {
+        return undefined;
+      }
+      logger.warn(`[watchOS] Could not stop ${appId} on ${this.device.deviceId}: ${message}`);
+      return message;
+    }
   }
 
   /** The raw `simctl listapps` records for the watch; a failed listing throws. */

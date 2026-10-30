@@ -177,8 +177,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
       120_000,
       null,
       "emulator-5554",
-      undefined,
-      { freshProvision: true },
+      { options: { freshProvision: true } },
     );
 
     expect(device.deviceId).toBe("emulator-5554");
@@ -197,14 +196,9 @@ describe("Android emulator fresh-provision offline recovery", () => {
     adb.setDevices([]);
     configureReadyProbes(adb);
     await expect(
-      clientWith(adb, timer).waitForEmulatorReady(
-        "Pixel_9_Pro",
-        30_000,
-        null,
-        "emulator-5556",
-        undefined,
-        { freshProvision: true },
-      ),
+      clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 30_000, null, "emulator-5556", {
+        options: { freshProvision: true },
+      }),
     ).rejects.toThrow("state=offline");
     expect(
       adb.getExecutedArgv().filter((argv) => argv.some((arg) => arg.includes("reconnect"))),
@@ -231,8 +225,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
       120_000,
       null,
       "emulator-5554",
-      undefined,
-      { freshProvision: true },
+      { options: { freshProvision: true } },
     );
 
     expect(device.deviceId).toBe("emulator-5554");
@@ -254,8 +247,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
       30_000,
       null,
       "emulator-5554",
-      undefined,
-      { freshProvision: true },
+      { options: { freshProvision: true } },
     );
 
     await expect(readiness).rejects.toThrow("state=offline");
@@ -282,8 +274,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
       30_000,
       null,
       "emulator-5554",
-      undefined,
-      { freshProvision: true },
+      { options: { freshProvision: true } },
     );
 
     expect(device.deviceId).toBe("emulator-5554");
@@ -338,8 +329,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
       30_000,
       null,
       "emulator-5554",
-      undefined,
-      { freshProvision: true },
+      { options: { freshProvision: true } },
     );
 
     await expect(readiness).rejects.toThrow();
@@ -366,8 +356,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
       30_000,
       null,
       "emulator-5554",
-      undefined,
-      { freshProvision: true },
+      { options: { freshProvision: true } },
     );
 
     await expect(readiness).rejects.toThrow("state=offline");
@@ -411,8 +400,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
       30_000,
       null,
       "emulator-5554",
-      undefined,
-      { freshProvision: true },
+      { options: { freshProvision: true } },
     );
 
     await expect(readiness).rejects.toThrow("state=offline");

@@ -37,7 +37,6 @@ import {
   type StreamSocketAuthenticator,
   streamAuthRefusalFields,
 } from "./streamSocketAuth";
-import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
 import { annotateHierarchyDiff } from "./hierarchyStreamDiff";
 import { readScreenScaleMetadata } from "../models/ScreenScaleMetadata";
 import { COORDINATE_SPACE_PX, convertHierarchyToCanonicalPixels } from "./canonicalPixels";
@@ -54,7 +53,7 @@ import type {
   OnNavigationGraphRequestedCallback,
   OnStorageSubscriptionRequestedCallback,
   DeviceDataStreamMessage,
-  PushScreenshotOptions,
+  ScreenshotPushDetails,
   DeviceDataPush,
 } from "./deviceDataStream/streamContracts";
 export type {
@@ -482,8 +481,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     screenshotBase64: string,
     screenWidth: number | undefined,
     screenHeight: number | undefined,
-    metadata: ScreenshotMetadata = {},
-    options: PushScreenshotOptions = {},
+    { metadata = {}, options = {} }: ScreenshotPushDetails = {},
   ): boolean {
     if (!this.acceptObservationFramePush(deviceId, options.initialFrameSubscriber)) {
       return false;

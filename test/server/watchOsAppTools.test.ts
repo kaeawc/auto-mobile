@@ -31,6 +31,8 @@ import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWatchAppsSimctl, FakeWatchBundleIds } from "../fakes/FakeWatchApps";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import * as path from "node:path";
+import { simulatorDataContainer, simulatorOwnership } from "../helpers/simulatorContainerFixture";
 import { toolJson } from "../helpers/toolResponse";
 import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -157,7 +159,16 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       ...(untypedListing ? {} : { ApplicationType: "System" }),
       CFBundleDisplayName: "Settings",
     });
-    registerAppTools({ watchApps: (device) => new WatchAppManager(device, watchSimctl, plist) });
+    const wiped: string[] = [];
+    const dataWipe = {
+      containerOwnership: simulatorOwnership,
+      rm: async (target: unknown) => {
+        wiped.push(String(target));
+      },
+    };
+    registerAppTools({
+      watchApps: (device) => new WatchAppManager(device, watchSimctl, plist, undefined, dataWipe),
+    });
     const resumed: string[] = [];
     ToolRegistry.register(
       "setActiveDevice",
@@ -172,7 +183,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       }),
       { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
     );
-    return { pool, sessions, readiness, watchSimctl, resumed };
+    return { pool, sessions, readiness, watchSimctl, resumed, wiped };
   }
 
   const call = (name: string, args: Record<string, unknown>) =>
@@ -282,10 +293,61 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     await arrange();
     await bindWatchSession();
 
-    const error = await failure(call("launchApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }));
+    const error = await failure(call("crashApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }));
 
     expect(error).toBeInstanceOf(ActionableError);
-    expect(error).toMatchObject({ message: watchOsUnsupportedToolMessage("launchApp") });
+    expect(error).toMatchObject({ message: watchOsUnsupportedToolMessage("crashApp") });
+  });
+
+  test("launch, relaunch with clearAppData, and terminate an app on the session-bound watch", async () => {
+    const { watchSimctl, wiped } = await arrange();
+    await bindWatchSession();
+    await call("installApp", { sessionUuid: WATCH_SESSION, artifactPath: APP });
+    watchSimctl.commands.length = 0;
+
+    const launched = toolJson(
+      await call("launchApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }),
+    );
+    expect(launched).toMatchObject({ success: true, packageName: BUNDLE });
+    expect(launched.pid).toBe(watchSimctl.pidOf(watch.deviceId, BUNDLE));
+
+    const cleared = toolJson(
+      await call("launchApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE, clearAppData: true }),
+    );
+    expect(cleared).toMatchObject({ success: true, packageName: BUNDLE });
+    expect(wiped.sort()).toEqual(
+      ["Documents", "Library", "tmp"].map((folder) =>
+        path.join(simulatorDataContainer(watch.deviceId), folder),
+      ),
+    );
+
+    const terminated = toolJson(
+      await call("terminateApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }),
+    );
+    expect(terminated).toMatchObject({ success: true, wasInstalled: true, wasRunning: true });
+    expect(watchSimctl.pidOf(watch.deviceId, BUNDLE)).toBeUndefined();
+    expect(watchSimctl.commands).toEqual([
+      `launch ${watch.deviceId} ${BUNDLE}`,
+      `terminate ${watch.deviceId} ${BUNDLE}`,
+      `terminate ${watch.deviceId} ${BUNDLE}`,
+      `get_app_container ${watch.deviceId} ${BUNDLE} data`,
+      `launch ${watch.deviceId} ${BUNDLE}`,
+      `terminate ${watch.deviceId} ${BUNDLE}`,
+    ]);
+  });
+
+  test("launchApp refuses prototype and a not-installed app on the watch", async () => {
+    const { watchSimctl } = await arrange();
+    await bindWatchSession();
+
+    const prototype = await failure(
+      call("launchApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE, prototype: true }),
+    );
+    const missing = await failure(call("launchApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }));
+
+    expect(String(prototype)).toContain("prototype agent runs only in iOS simulator apps");
+    expect(String(missing)).toContain("App is not installed");
+    expect(watchSimctl.commands.some((command) => command.startsWith("launch"))).toBe(false);
   });
 
   test("sessionless listApps with platform watchos and the watch deviceId lists the watch", async () => {

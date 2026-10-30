@@ -929,6 +929,7 @@
     "into": "/data/response",
     "statusKey": "status",
     "via": "host",
+    "allowSecureInRequest": false,
     "timeoutMs": 1000,
     "onSuccess": [
       {

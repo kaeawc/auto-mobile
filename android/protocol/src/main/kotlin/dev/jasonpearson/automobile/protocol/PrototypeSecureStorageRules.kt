@@ -8,12 +8,14 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /**
  * Secure storage rules (#14321) the contract cannot express, the twin of TypeScript's
  * `prototypeSecureStorage.ts`: `storage.secure` needs the `secureStorage` module, each key is a
  * declared string state key not also in `storage.keys`, a `secureAuth` entry names a secure key and
- * needs the `biometric` module, and no secure key may leave the device through an emit context.
+ * needs the `biometric` module, and no secure key may leave the device through an emit context or
+ * through a `request` that does not opt in with `allowSecureInRequest: true`.
  */
 internal object PrototypeSecureStorageRules {
   fun blockError(root: JsonObject): PrototypeSpecError? {
@@ -51,7 +53,11 @@ internal object PrototypeSecureStorageRules {
     return null
   }
 
-  fun emitError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
+  /** The first way [action] sends a secure key off the device: an emit context, then a request. */
+  fun actionError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? =
+    emitError(action, path, root) ?: requestError(action, path, root)
+
+  private fun emitError(action: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
     if (action.text("type") != "emit") return null
     val context = action.member("context") ?: return null
     val secure = root.member("storage")?.strings("secure") ?: return null
@@ -62,6 +68,69 @@ internal object PrototypeSecureStorageRules {
         keyPath("$path.context", name),
         "Secure storage key $leaked cannot be sent in an emit context",
       )
+    }
+    return null
+  }
+
+  /**
+   * A `request` that sends a secure key without `allowSecureInRequest: true`: a `{state}` binding
+   * in a header, query value or body (a whole body, a form entry or a multipart value), or a
+   * `{key}` placeholder in the URL, a header or a query value. Members are checked in sorted order.
+   */
+  private fun requestError(
+    action: JsonObject,
+    path: String,
+    root: JsonObject,
+  ): PrototypeSpecError? {
+    val secure = root.member("storage")?.strings("secure").orEmpty()
+    if (action.text("type") != "request" || secure.isEmpty()) return null
+    if ((action["allowSecureInRequest"] as? JsonPrimitive)?.booleanOrNull == true) return null
+    val body = action.member("body")
+    fun members(value: JsonObject?, at: String) =
+      value
+        .orEmpty()
+        .entries
+        .sortedBy { it.key }
+        .map { (name, member) -> member to keyPath(at, name) }
+    val candidates =
+      listOf(action["url"] to "$path.url") +
+        members(action.member("headers"), "$path.headers") +
+        members(action.member("query"), "$path.query") +
+        listOf(action["body"] to "$path.body") +
+        members(body?.member("form"), "$path.body.form") +
+        (body?.get("multipart") as? JsonArray).orEmpty().mapIndexed { index, part ->
+          (part as? JsonObject)?.get("value") to "$path.body.multipart[$index].value"
+        }
+    for ((value, at) in candidates) {
+      val key =
+        (value as? JsonPrimitive)
+          ?.takeIf { it.isString }
+          ?.let { placeholderKey(it.content, secure) }
+          ?: (value as? JsonObject)?.text("state")?.let { secureKeyFor(it, secure) }
+      if (key != null)
+        return fail(
+          at,
+          "Secure storage key $key cannot be sent in a request without allowSecureInRequest",
+        )
+    }
+    return null
+  }
+
+  /**
+   * The secure key a `{key}` text placeholder names. Every `{...}` group that closes is checked, at
+   * every depth: request text resolves an inner `{token}` even when an outer brace never closes
+   * (`{{token}`), and a group may hold repeat placeholders, as in `{tok{row.id}}`, which repeat
+   * binding turns into `{token}`, so a group is matched as a template whose inner groups may stand
+   * for any text.
+   */
+  private fun placeholderKey(text: String, secure: List<String>): String? {
+    val open = ArrayDeque<Int>()
+    for ((index, char) in text.withIndex()) {
+      if (char == '{') open.addLast(index + 1)
+      else if (char == '}' && open.isNotEmpty())
+        secureKeyFor(text.substring(open.removeLast(), index), secure)?.let {
+          return it
+        }
     }
     return null
   }

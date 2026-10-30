@@ -671,14 +671,10 @@ describe("DeviceDataStreamSocketServer", () => {
     );
     const hierarchy = { hierarchy: { node: {} }, updatedAt: 123, packageName: "app" };
     const sequence = server.pushHierarchyUpdate("device-1", hierarchy, "frame-a", targets[1]);
-    server.pushScreenshotUpdate(
-      "device-1",
-      "shot",
-      100,
-      200,
-      {},
-      { initialFrameSubscriber: targets[1] },
-    );
+    server.pushScreenshotUpdate("device-1", "shot", 100, 200, {
+      metadata: {},
+      options: { initialFrameSubscriber: targets[1] },
+    });
     expect(sequence).not.toBeNull();
     expect(
       first
@@ -701,14 +697,10 @@ describe("DeviceDataStreamSocketServer", () => {
         .filter((message) => message.type === "screenshot_update"),
     ).toHaveLength(1);
     expect(server.pushHierarchyUpdate("device-2", hierarchy, "foreign", targets[1])).toBeNull();
-    server.pushScreenshotUpdate(
-      "device-2",
-      "shot",
-      100,
-      200,
-      {},
-      { initialFrameSubscriber: targets[1] },
-    );
+    server.pushScreenshotUpdate("device-2", "shot", 100, 200, {
+      metadata: {},
+      options: { initialFrameSubscriber: targets[1] },
+    });
     expect(
       first
         .getWrittenMessages(deviceFrameSchema)
@@ -733,14 +725,10 @@ describe("DeviceDataStreamSocketServer", () => {
     // Rebinding the serial to a new session cannot give the old pane an initial frame.
     server.sessionResolver.bind("device-1", "new-epoch");
     expect(server.pushHierarchyUpdate("device-1", hierarchy, "new", targets[1])).toBeNull();
-    server.pushScreenshotUpdate(
-      "device-1",
-      "shot",
-      100,
-      200,
-      {},
-      { initialFrameSubscriber: targets[1] },
-    );
+    server.pushScreenshotUpdate("device-1", "shot", 100, 200, {
+      metadata: {},
+      options: { initialFrameSubscriber: targets[1] },
+    });
     expect(
       first
         .getWrittenMessages(deviceFrameSchema)
@@ -791,14 +779,10 @@ describe("DeviceDataStreamSocketServer", () => {
     expect(server.pushHierarchyUpdate("device", hierarchy, undefined, targets[0])).toBeNull();
     server.closeConnectionForTest(second);
     expect(targets[1].signal.aborted).toBe(true);
-    server.pushScreenshotUpdate(
-      "device",
-      "shot",
-      100,
-      200,
-      {},
-      { initialFrameSubscriber: targets[1] },
-    );
+    server.pushScreenshotUpdate("device", "shot", 100, 200, {
+      metadata: {},
+      options: { initialFrameSubscriber: targets[1] },
+    });
     expect(
       second
         .getWrittenMessages(deviceFrameSchema)
@@ -1631,7 +1615,10 @@ describe("DeviceDataStreamSocketServer", () => {
 
         socket.resetWrittenData();
         fromSpy.mockClear();
-        server.pushScreenshotUpdate("device-1", screenshotBase64, 1080, 2340, {}, { decodedImage });
+        server.pushScreenshotUpdate("device-1", screenshotBase64, 1080, 2340, {
+          metadata: {},
+          options: { decodedImage },
+        });
         expect(payloadDecodes()).toBe(0);
         const [decodedMessage] = socket.getWrittenMessages(deviceStreamFrameSchema);
 
@@ -1651,40 +1638,28 @@ describe("DeviceDataStreamSocketServer", () => {
       const jpegBase64 = encodedFrames.jpeg.toString("base64");
       const webpBase64 = encodedFrames.webp.toString("base64");
 
-      server.pushScreenshotUpdate(
-        "device-1",
-        jpegBase64,
-        1080,
-        2340,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", jpegBase64, 1080, 2340, {
+        metadata: {},
+        options: {
           decodedImage: encodedFrames.jpeg,
           captureSequence: 8,
         },
-      );
-      server.pushScreenshotUpdate(
-        "device-1",
-        webpBase64,
-        1080,
-        2340,
-        {},
-        {
+      });
+      server.pushScreenshotUpdate("device-1", webpBase64, 1080, 2340, {
+        metadata: {},
+        options: {
           decodedImage: encodedFrames.webp,
           captureSequence: 9,
         },
-      );
+      });
       const garbage = Buffer.from("not an image");
-      server.pushScreenshotUpdate(
-        "device-1",
-        garbage.toString("base64"),
-        undefined,
-        undefined,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", garbage.toString("base64"), undefined, undefined, {
+        metadata: {},
+        options: {
           decodedImage: garbage,
           captureSequence: 10,
         },
-      );
+      });
 
       const [jpegMessage, webpMessage, garbageMessage] =
         socket.getWrittenMessages(deviceStreamFrameSchema);
@@ -1713,7 +1688,7 @@ describe("DeviceDataStreamSocketServer", () => {
         screenshotBase64Length: 1600,
         checksum: "internal-checksum",
       } satisfies ScreenshotMetadata & { checksum: string };
-      server.pushScreenshotUpdate("device-1", "png-frame", 1080, 2340, metadata);
+      server.pushScreenshotUpdate("device-1", "png-frame", 1080, 2340, { metadata });
 
       const msgs = socket.getWrittenMessages(screenshotFrameSchema);
       expect(msgs).toHaveLength(1);
@@ -1740,10 +1715,12 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       server.pushScreenshotUpdate("device-1", "legacy-frame", 1080, 2340, {
-        screenshotMimeType: "image/jpeg",
-        screenshotFormat: "jpeg",
-        screenshotCaptureSource: "android_ctrlproxy_a11y",
-        screenshotFallback: false,
+        metadata: {
+          screenshotMimeType: "image/jpeg",
+          screenshotFormat: "jpeg",
+          screenshotCaptureSource: "android_ctrlproxy_a11y",
+          screenshotFallback: false,
+        },
       });
 
       const [message] = socket.getWrittenMessages(deviceStreamFrameSchema);
@@ -1839,29 +1816,21 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const first = server.pushHierarchyUpdate("device-1", frame("a", 0));
-      server.pushScreenshotUpdate(
-        "device-1",
-        pngFrame(1080, 2340),
-        1080,
-        2340,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {
+        metadata: {},
+        options: {
           captureSequence: first ?? undefined,
           rotation: 0,
         },
-      );
+      });
       const second = server.pushHierarchyUpdate("device-1", frame("b", 1));
-      server.pushScreenshotUpdate(
-        "device-1",
-        pngFrame(720, 1560),
-        720,
-        1560,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 720, 1560, {
+        metadata: {},
+        options: {
           captureSequence: second ?? undefined,
           rotation: 1,
         },
-      );
+      });
 
       const [h1, s1, h2, s2] = socket
         .getWrittenMessages(deviceStreamFrameSchema)
@@ -1887,16 +1856,12 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate(
-        "device-1",
-        pngFrame(720, 1560),
-        1080,
-        2340,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 1080, 2340, {
+        metadata: {},
+        options: {
           captureSequence: captureSequence ?? undefined,
         },
-      );
+      });
 
       const screenshot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
@@ -1930,16 +1895,12 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate(
-        "device-1",
-        pngFrame(1170, 2532),
-        2532,
-        1170,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", pngFrame(1170, 2532), 2532, 1170, {
+        metadata: {},
+        options: {
           captureSequence: captureSequence ?? undefined,
         },
-      );
+      });
 
       const screenshot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
@@ -1956,16 +1917,12 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate(
-        "device-1",
-        pngFrame(720, 1560),
-        1080,
-        2340,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", pngFrame(720, 1560), 1080, 2340, {
+        metadata: {},
+        options: {
           captureSequence: captureSequence ?? undefined,
         },
-      );
+      });
 
       const screenshot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
@@ -1977,16 +1934,12 @@ describe("DeviceDataStreamSocketServer", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate(
-        "device-1",
-        pngFrame(800, 600),
-        1080,
-        2340,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", pngFrame(800, 600), 1080, 2340, {
+        metadata: {},
+        options: {
           captureSequence: captureSequence ?? undefined,
         },
-      );
+      });
 
       const screenshot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
@@ -2003,16 +1956,12 @@ describe("DeviceDataStreamSocketServer", () => {
       malformed.write("IDAT", 12, "ascii");
 
       const captureSequence = server.pushHierarchyUpdate("device-1", frame("a"));
-      server.pushScreenshotUpdate(
-        "device-1",
-        malformed.toString("base64"),
-        1080,
-        2340,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", malformed.toString("base64"), 1080, 2340, {
+        metadata: {},
+        options: {
           captureSequence: captureSequence ?? undefined,
         },
-      );
+      });
 
       const screenshot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
@@ -2029,9 +1978,11 @@ describe("DeviceDataStreamSocketServer", () => {
         Buffer.from("not-an-image").toString("base64"),
         1080,
         2340,
-        {},
         {
-          captureSequence: captureSequence ?? undefined,
+          metadata: {},
+          options: {
+            captureSequence: captureSequence ?? undefined,
+          },
         },
       );
 
@@ -2066,16 +2017,12 @@ describe("DeviceDataStreamSocketServer", () => {
       const screenB = server.pushHierarchyUpdate("device-1", frame("screen-b"));
       expect(screenB).toBeGreaterThan(screenA!);
       // ... and only now does the in-flight frame arrive and get pushed.
-      server.pushScreenshotUpdate(
-        "device-1",
-        pngFrame(1080, 2340),
-        1080,
-        2340,
-        {},
-        {
+      server.pushScreenshotUpdate("device-1", pngFrame(1080, 2340), 1080, 2340, {
+        metadata: {},
+        options: {
           captureSequence: screenA ?? undefined,
         },
-      );
+      });
 
       const screenshot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
@@ -2942,18 +2889,14 @@ describe("DeviceDataStreamSocketServer", () => {
     it("stamps coordinateSpace:px on a screenshot when the caller declares px", () => {
       const { socket } = server.simulateSubscription({ deviceId: "ios-1" });
       const seq = server.pushHierarchyUpdate("ios-1", iosFrame());
-      server.pushScreenshotUpdate(
-        "ios-1",
-        pngFrame(1170, 2532),
-        1170,
-        2532,
-        {},
-        {
+      server.pushScreenshotUpdate("ios-1", pngFrame(1170, 2532), 1170, 2532, {
+        metadata: {},
+        options: {
           captureSequence: seq ?? undefined,
           coordinateSpace: "px",
           nativeScale: 3,
         },
-      );
+      });
       const shot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
@@ -2964,7 +2907,10 @@ describe("DeviceDataStreamSocketServer", () => {
 
     it("omits coordinateSpace on a screenshot from a legacy (non-px) caller", () => {
       const { socket } = server.simulateSubscription({ deviceId: "ios-legacy" });
-      server.pushScreenshotUpdate("ios-legacy", pngFrame(1170, 2532), 1170, 2532, {}, {});
+      server.pushScreenshotUpdate("ios-legacy", pngFrame(1170, 2532), 1170, 2532, {
+        metadata: {},
+        options: {},
+      });
       const shot = socket
         .getWrittenMessages(deviceStreamFrameSchema)
         .find((m) => m.type === "screenshot_update");
@@ -3000,8 +2946,7 @@ describe("DeviceDataStreamSocketServer", () => {
           screenshotBase64,
           vector.claimedWidth,
           vector.claimedHeight,
-          {},
-          { captureSequence: captureSequence ?? undefined },
+          { metadata: {}, options: { captureSequence: captureSequence ?? undefined } },
         );
 
         const screenshot = socket

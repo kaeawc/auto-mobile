@@ -545,8 +545,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       timeoutMs,
       childProcess,
       targetDeviceId,
-      signal,
-      options,
+      { signal, options },
     );
   }
 

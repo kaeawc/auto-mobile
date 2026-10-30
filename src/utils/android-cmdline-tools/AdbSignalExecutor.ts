@@ -11,6 +11,11 @@ import { getAdbAbortError } from "./adbTransportRecovery";
 import { type AdbExecuteOptions } from "./interfaces/AdbExecutor";
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 const PROCESS_SETTLEMENT_GRACE_MS = 1_000;
+/** Per-command buffer, deadline, cancellation and stdout observation for one ADB process. */
+export type AdbSignalExecOptions = Pick<
+  AdbExecuteOptions,
+  "maxBuffer" | "timeoutMs" | "signal" | "waitForProcessSettlementAfterAbort" | "onStdout"
+>;
 export class AdbSignalExecutor {
   constructor(
     private readonly context: {
@@ -24,12 +29,9 @@ export class AdbSignalExecutor {
   async execWithSignal(
     file: string,
     args: string[],
-    maxBuffer?: number,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    options: Pick<AdbExecuteOptions, "waitForProcessSettlementAfterAbort" | "onStdout"> = {},
+    options: AdbSignalExecOptions = {},
   ): Promise<ExecResult> {
-    const { waitForProcessSettlementAfterAbort, onStdout } = options;
+    const { maxBuffer, timeoutMs, signal, waitForProcessSettlementAfterAbort, onStdout } = options;
     if (signal?.aborted) {
       throw getAdbAbortError(signal);
     }

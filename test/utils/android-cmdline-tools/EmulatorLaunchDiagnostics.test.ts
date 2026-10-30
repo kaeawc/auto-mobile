@@ -87,9 +87,7 @@ describe("launch failure formatting", () => {
   test("formatEarlyExitError lists the header, diagnostic and accel-check sections", () => {
     const error = formatEarlyExitError(
       "Pixel",
-      1,
-      "SIGSEGV",
-      "hardware_acceleration_unavailable",
+      { code: 1, signal: "SIGSEGV", category: "hardware_acceleration_unavailable" },
       " boom ",
       " accel ",
     );
@@ -103,7 +101,12 @@ describe("launch failure formatting", () => {
   });
 
   test("formatEarlyExitError omits empty sections and the category", () => {
-    const error = formatEarlyExitError("Pixel", null, null, undefined, "", "");
+    const error = formatEarlyExitError(
+      "Pixel",
+      { code: null, signal: null, category: undefined },
+      "",
+      "",
+    );
     expect(error.message).toBe("Emulator process exited with code: null (AVD 'Pixel')");
   });
 

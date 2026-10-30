@@ -205,16 +205,10 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
     client.testHooks.isTestMode = false;
 
-    const result = client.testHooks.execWithSignal(
-      "adb",
-      ["shell", "getprop"],
-      undefined,
-      5,
-      undefined,
-      {
-        waitForProcessSettlementAfterAbort: true,
-      },
-    );
+    const result = client.testHooks.execWithSignal("adb", ["shell", "getprop"], {
+      timeoutMs: 5,
+      waitForProcessSettlementAfterAbort: true,
+    });
     timer.advanceTime(5);
 
     await expect(result).rejects.toBeInstanceOf(AdbCommandTimeoutError);
@@ -237,16 +231,10 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
     client.testHooks.isTestMode = false;
     let settled = false;
-    const result = client.testHooks.execWithSignal(
-      "adb",
-      ["shell", "getprop"],
-      undefined,
-      5,
-      undefined,
-      {
-        waitForProcessSettlementAfterAbort: true,
-      },
-    );
+    const result = client.testHooks.execWithSignal("adb", ["shell", "getprop"], {
+      timeoutMs: 5,
+      waitForProcessSettlementAfterAbort: true,
+    });
     void result.then(
       () => {
         settled = true;
@@ -286,14 +274,10 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     client.testHooks.isTestMode = false;
     const controller = new AbortController();
     let settled = false;
-    const result = client.testHooks.execWithSignal(
-      "adb",
-      ["shell", "getprop"],
-      undefined,
-      undefined,
-      controller.signal,
-      { waitForProcessSettlementAfterAbort: true },
-    );
+    const result = client.testHooks.execWithSignal("adb", ["shell", "getprop"], {
+      signal: controller.signal,
+      waitForProcessSettlementAfterAbort: true,
+    });
     void result.then(
       () => {
         settled = true;
@@ -328,14 +312,10 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     try {
       const client = new AdbClient(null, null, { retryExecutor: defaultRetryExecutor, timer });
       client.testHooks.isTestMode = false;
-      const result = client.testHooks.execWithSignal(
-        "adb",
-        ["shell", "getprop"],
-        undefined,
-        5,
-        undefined,
-        { waitForProcessSettlementAfterAbort: true },
-      );
+      const result = client.testHooks.execWithSignal("adb", ["shell", "getprop"], {
+        timeoutMs: 5,
+        waitForProcessSettlementAfterAbort: true,
+      });
 
       timer.advanceTime(5);
       timer.advanceTime(1_000);

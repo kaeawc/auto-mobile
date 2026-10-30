@@ -172,13 +172,10 @@ describe("Android emulator fresh-provision offline recovery", () => {
     configureReadyProbes(adb);
     adb.configureRecoveryFlipsOnline();
 
-    const device = await clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      120_000,
-      null,
-      "emulator-5554",
-      { options: { freshProvision: true } },
-    );
+    const device = await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 120_000, null, {
+      targetDeviceId: "emulator-5554",
+      options: { freshProvision: true },
+    });
 
     expect(device.deviceId).toBe("emulator-5554");
     expect(adb.reconnectCalls).toBeGreaterThanOrEqual(1);
@@ -196,7 +193,8 @@ describe("Android emulator fresh-provision offline recovery", () => {
     adb.setDevices([]);
     configureReadyProbes(adb);
     await expect(
-      clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 30_000, null, "emulator-5556", {
+      clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 30_000, null, {
+        targetDeviceId: "emulator-5556",
         options: { freshProvision: true },
       }),
     ).rejects.toThrow("state=offline");
@@ -220,13 +218,10 @@ describe("Android emulator fresh-provision offline recovery", () => {
     configureReadyProbes(adb);
     adb.configureRecoveryFlipsOnlineAt(timer, 25_000);
 
-    const device = await clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      120_000,
-      null,
-      "emulator-5554",
-      { options: { freshProvision: true } },
-    );
+    const device = await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 120_000, null, {
+      targetDeviceId: "emulator-5554",
+      options: { freshProvision: true },
+    });
 
     expect(device.deviceId).toBe("emulator-5554");
     expect(adb.reconnectCalls).toBe(1);
@@ -242,13 +237,10 @@ describe("Android emulator fresh-provision offline recovery", () => {
     adb.setDevices([]);
     configureReadyProbes(adb);
 
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      30_000,
-      null,
-      "emulator-5554",
-      { options: { freshProvision: true } },
-    );
+    const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 30_000, null, {
+      targetDeviceId: "emulator-5554",
+      options: { freshProvision: true },
+    });
 
     await expect(readiness).rejects.toThrow("state=offline");
     await expect(readiness).rejects.not.toThrow("adb -s emulator-5554 reconnect");
@@ -269,13 +261,10 @@ describe("Android emulator fresh-provision offline recovery", () => {
     adb.configureReadinessAfter(timer, 22_000);
     process.env.EMULATOR_POLLING_INTERVAL_MS = "60000";
 
-    const device = await clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      30_000,
-      null,
-      "emulator-5554",
-      { options: { freshProvision: true } },
-    );
+    const device = await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 30_000, null, {
+      targetDeviceId: "emulator-5554",
+      options: { freshProvision: true },
+    });
 
     expect(device.deviceId).toBe("emulator-5554");
     expect(adb.reconnectCalls).toBe(1);
@@ -292,12 +281,9 @@ describe("Android emulator fresh-provision offline recovery", () => {
     configureReadyProbes(adb);
     process.env.EMULATOR_POLLING_INTERVAL_MS = "500";
 
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      1_250,
-      null,
-      "emulator-5554",
-    );
+    const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 1_250, null, {
+      targetDeviceId: "emulator-5554",
+    });
 
     await expect(readiness).rejects.toThrow("target=emulator-5554; state=offline");
     await expect(readiness).rejects.not.toThrow("adb -s emulator-5554 reconnect");
@@ -324,13 +310,10 @@ describe("Android emulator fresh-provision offline recovery", () => {
 
     // The budget is comfortably past the recovery threshold. A run of failed
     // probes must never satisfy it from a stale offline observation.
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      30_000,
-      null,
-      "emulator-5554",
-      { options: { freshProvision: true } },
-    );
+    const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 30_000, null, {
+      targetDeviceId: "emulator-5554",
+      options: { freshProvision: true },
+    });
 
     await expect(readiness).rejects.toThrow();
     // A run of failed probes must never satisfy the offline-failure threshold.
@@ -351,13 +334,10 @@ describe("Android emulator fresh-provision offline recovery", () => {
     adb.setDevices([]);
     configureReadyProbes(adb);
 
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      30_000,
-      null,
-      "emulator-5554",
-      { options: { freshProvision: true } },
-    );
+    const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 30_000, null, {
+      targetDeviceId: "emulator-5554",
+      options: { freshProvision: true },
+    });
 
     await expect(readiness).rejects.toThrow("state=offline");
     await readiness.catch(() => undefined);
@@ -395,13 +375,10 @@ describe("Android emulator fresh-provision offline recovery", () => {
     // first reconnect rejects once before offline is re-reported.
     adb.configureRejectOnceAfterReconnect();
 
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      30_000,
-      null,
-      "emulator-5554",
-      { options: { freshProvision: true } },
-    );
+    const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 30_000, null, {
+      targetDeviceId: "emulator-5554",
+      options: { freshProvision: true },
+    });
 
     await expect(readiness).rejects.toThrow("state=offline");
     await expect(readiness).rejects.not.toThrow("adb -s emulator-5554 reconnect");
@@ -419,12 +396,9 @@ describe("Android emulator fresh-provision offline recovery", () => {
     adb.setDevices([]);
     configureReadyProbes(adb);
 
-    const readiness = clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      100,
-      null,
-      "emulator-5554",
-    );
+    const readiness = clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, {
+      targetDeviceId: "emulator-5554",
+    });
 
     await expect(readiness).rejects.toThrow("target=emulator-5554; state=offline");
     await expect(readiness).rejects.not.toThrow("adb -s emulator-5554 reconnect");

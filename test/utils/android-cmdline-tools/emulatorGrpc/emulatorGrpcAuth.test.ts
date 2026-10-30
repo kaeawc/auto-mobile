@@ -46,13 +46,10 @@ describe("JwtGrpcAuthorizer", () => {
     const fs = fakeJwksFs(true);
     const timer = new FakeTimer();
     timer.setCurrentTime(1_700_000_000_000);
-    const authorizer = new JwtGrpcAuthorizer(
-      "/jwks",
-      "/jwks/active.jwk",
-      fs,
-      new CountingIdGenerator("key"),
+    const authorizer = new JwtGrpcAuthorizer("/jwks", "/jwks/active.jwk", fs, {
+      ids: new CountingIdGenerator("key"),
       timer,
-    );
+    });
 
     const header = await authorizer.authorization(
       "/android.emulation.control.EmulatorController/injectAudio",
@@ -95,13 +92,10 @@ describe("JwtGrpcAuthorizer", () => {
     const fs = fakeJwksFs(false);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const authorizer = new JwtGrpcAuthorizer(
-      "/jwks",
-      "/jwks/active.jwk",
-      fs,
-      new CountingIdGenerator("key"),
+    const authorizer = new JwtGrpcAuthorizer("/jwks", "/jwks/active.jwk", fs, {
+      ids: new CountingIdGenerator("key"),
       timer,
-    );
+    });
 
     await expect(authorizer.authorization("/m")).rejects.toThrow(/-grpc-use-token/);
     expect(fs.files.has(KEY_FILE)).toBe(false);

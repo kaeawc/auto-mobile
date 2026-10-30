@@ -69,13 +69,21 @@ class AndroidCommandRun {
   private readonly stdoutDecoder = new StringDecoder("utf8");
   private readonly stderrDecoder = new StringDecoder("utf8");
 
+  private readonly resolve: (result: AndroidCommandResult) => void;
+  private readonly reject: (error: Error) => void;
+
   constructor(
     private readonly dependencies: AndroidCommandDependencies,
     private readonly request: AndroidCommandRequest,
     private readonly child: AndroidCommandChild,
-    private readonly resolve: (result: AndroidCommandResult) => void,
-    private readonly reject: (error: Error) => void,
-  ) {}
+    {
+      resolve,
+      reject,
+    }: { resolve: (result: AndroidCommandResult) => void; reject: (error: Error) => void },
+  ) {
+    this.resolve = resolve;
+    this.reject = reject;
+  }
 
   start(): void {
     const { request, child } = this;
@@ -219,6 +227,6 @@ export function runAndroidCommand(
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
     });
-    new AndroidCommandRun(dependencies, request, child, resolve, reject).start();
+    new AndroidCommandRun(dependencies, request, child, { resolve, reject }).start();
   });
 }

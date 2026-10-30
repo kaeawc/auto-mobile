@@ -357,13 +357,10 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
       return null;
     }
 
-    return this.imageUtils.crop(
-      buffer,
-      normalized.width,
-      normalized.height,
-      normalized.left,
-      normalized.top,
-    );
+    return this.imageUtils.crop(buffer, normalized.width, normalized.height, {
+      x: normalized.left,
+      y: normalized.top,
+    });
   }
 
   private normalizeBounds(

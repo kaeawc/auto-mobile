@@ -23,7 +23,12 @@ export class JimpImageUtils implements ImageUtilsInterface {
     return image.resize(width, height, maintainAspectRatio).toBuffer();
   }
 
-  public async crop(buffer: Buffer, width: number, height: number, x = 0, y = 0): Promise<Buffer> {
+  public async crop(
+    buffer: Buffer,
+    width: number,
+    height: number,
+    { x = 0, y = 0 }: { x?: number; y?: number } = {},
+  ): Promise<Buffer> {
     const image = Image.fromBuffer(buffer);
     return image.crop(width, height, x, y).toBuffer();
   }

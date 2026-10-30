@@ -68,8 +68,7 @@ export function isAdbPostDispatchTransportError(
   stderr: string,
   exitCode: number | undefined,
   expectedDeviceId: string,
-  expectedTransportId?: string,
-  stdout = "",
+  { expectedTransportId, stdout = "" }: { expectedTransportId?: string; stdout?: string } = {},
 ): boolean {
   const lines = stderr
     .trim()

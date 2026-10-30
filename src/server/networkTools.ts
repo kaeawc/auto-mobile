@@ -405,13 +405,10 @@ async function setIosErrorSimulation(
   if (config === null) {
     return;
   }
-  state.startSimulationUntil(
-    device.deviceId,
-    config.errorType,
-    expiresAtEpochMs!,
-    config.limit,
-    sessionUuid,
-  );
+  state.startSimulationUntil(device.deviceId, config.errorType, expiresAtEpochMs!, {
+    limit: config.limit,
+    ownerSessionUuid: sessionUuid,
+  });
 }
 
 function iosSimulationConfig(

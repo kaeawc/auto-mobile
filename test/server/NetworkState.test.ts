@@ -75,7 +75,7 @@ describe("NetworkState", () => {
 
     it("starts simulation with an absolute expiration", () => {
       timer.advanceTime(5_000);
-      state.startSimulationUntil(DEVICE, "http500", 30_000, null);
+      state.startSimulationUntil(DEVICE, "http500", 30_000, { limit: null });
       const sim = state.getSimulation(DEVICE);
       expect(sim).not.toBeNull();
       expect(sim!.expiresAt).toBe(30_000);
@@ -88,7 +88,7 @@ describe("NetworkState", () => {
 
     it("does not keep already-expired absolute simulations active", () => {
       timer.advanceTime(30_000);
-      state.startSimulationUntil(DEVICE, "http500", 30_000, null);
+      state.startSimulationUntil(DEVICE, "http500", 30_000, { limit: null });
 
       expect(state.getSimulation(DEVICE)).toBeNull();
     });

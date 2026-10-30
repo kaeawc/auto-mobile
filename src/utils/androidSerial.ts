@@ -262,7 +262,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     }
     const result = devices.filter((device) => device.platform !== "android");
     for (const [key, rows] of byIdentity) {
-      result.push(this.foldGroup(key, rows, evidence, pooledIds, completeSnapshot));
+      result.push(this.foldGroup(key, rows, evidence, { pooledIds, completeSnapshot }));
     }
     return result;
   }
@@ -361,8 +361,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     key: string,
     rows: BootedDevice[],
     evidence: ReadonlyMap<string, TransportIdentity>,
-    pooledIds: ReadonlySet<string>,
-    completeSnapshot: boolean,
+    { pooledIds, completeSnapshot }: { pooledIds: ReadonlySet<string>; completeSnapshot: boolean },
   ): BootedDevice {
     const previous = this.groups.get(key);
     const canonical = this.canonicalSerial(rows, previous, pooledIds);
@@ -457,7 +456,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     const identity = this.currentProvenIdentity(transport);
     const target = this.currentGroup(transport);
     const held = this.groupFor(heldDeviceId);
-    if (this.sharesHeldIdentity(serial, identity, target, heldDeviceId, held)) {
+    if (this.sharesHeldIdentity(serial, identity, target, { heldDeviceId, held })) {
       return true;
     }
     if (this.hasFoldedIdentity(target, serial) && target[1].canonical !== heldDeviceId) {
@@ -518,8 +517,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     serial: string,
     identity: TransportIdentity | undefined,
     target: KeyedTransportGroup | undefined,
-    heldDeviceId: string | undefined,
-    held: KeyedTransportGroup | undefined,
+    { heldDeviceId, held }: { heldDeviceId?: string; held?: KeyedTransportGroup } = {},
   ): boolean {
     // Same physical serial or fold key is never evidence that two devices differ.
     const physical = identity?.physicalSerial;

@@ -26,8 +26,7 @@ function* ownPublicationTmpCandidates(
   directory: string,
   prefix: string,
   pid: string,
-  fileSystem: LockFileSystem,
-  now: number,
+  { fileSystem, now }: { fileSystem: LockFileSystem; now: number },
 ): Steps<string[]> {
   const key = `${pid}:${directory}`;
   let directories = ownTmpSweeps.get(fileSystem);
@@ -68,13 +67,10 @@ export function* sweepOwnPublicationTmps(path: string, options: ExclusiveLockOpt
   const directory = dirname(path);
   const pid = String(options.pid ?? process.pid);
   const prefix = `${basename(path)}.`;
-  const candidates = yield* ownPublicationTmpCandidates(
-    directory,
-    prefix,
-    pid,
+  const candidates = yield* ownPublicationTmpCandidates(directory, prefix, pid, {
     fileSystem,
-    (options.now ?? Date.now)(),
-  );
+    now: (options.now ?? Date.now)(),
+  });
   let attempts = 0;
   // Walk a bounded snapshot so interleaved removals cannot skip a shifted candidate.
   for (const name of [...candidates]) {
@@ -394,14 +390,17 @@ export function* publishFile(
   path: string,
   content: string,
   pid: number,
-  fileSystem: LockFileSystem,
-  options: {
+  {
+    fileSystem,
+    idGenerator = defaultIdGenerator,
+    postPublish,
+  }: {
+    fileSystem: LockFileSystem;
     idGenerator?: IdGenerator;
     /** Runs after the exclusive link, while the private temp name still exists. */
     postPublish?: (tmp: string) => Steps<void>;
-  } = {},
+  },
 ): Steps<Publication> {
-  const { idGenerator = defaultIdGenerator, postPublish } = options;
   const tmp = `${path}.${pid}.${++lockState.publicationCounter}.${idGenerator.next()}.tmp`;
   let linking = false;
   try {
@@ -435,10 +434,12 @@ export function* publishReclaimGuard(
   path: string,
   content: string,
   pid: number,
-  fileSystem: LockFileSystem,
-  idGenerator: IdGenerator = defaultIdGenerator,
+  {
+    fileSystem,
+    idGenerator = defaultIdGenerator,
+  }: { fileSystem: LockFileSystem; idGenerator?: IdGenerator },
 ): Steps<"created" | "contended" | "failed"> {
-  const publication = yield* publishFile(path, content, pid, fileSystem, { idGenerator });
+  const publication = yield* publishFile(path, content, pid, { fileSystem, idGenerator });
   if (typeof publication === "string") {
     return publication;
   }

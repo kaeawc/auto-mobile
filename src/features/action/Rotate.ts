@@ -684,13 +684,10 @@ export class Rotate extends BaseVisualChange {
     };
     if (written) {
       written.restoreOnFailure = (result) =>
-        this.outcomes.restoreAutoRotateAfterFailedLock(
-          result,
-          plan,
-          settings,
+        this.outcomes.restoreAutoRotateAfterFailedLock(result, plan, settings, {
           cleanup,
-          slot !== undefined,
-        );
+          sessionMode: slot !== undefined,
+        });
     }
     await this.planDeviceStateLock(cleanup, {
       shouldRestoreAutoRotate: !slot && preserveLock && wasAutoRotateEnabled,
@@ -701,23 +698,22 @@ export class Rotate extends BaseVisualChange {
       orientation,
       value,
       currentOrientation,
-      autoRotateState,
       {
-        preserveLock,
-        restoreAutomaticRotation,
-        beforeWrite: settings.beforeWrite,
-        cleanup,
-        signal,
+        autoRotateState,
+        plan: {
+          preserveLock,
+          restoreAutomaticRotation,
+          beforeWrite: settings.beforeWrite,
+          cleanup,
+          signal,
+        },
       },
     );
     if (alreadyApplied.kind === "handled") {
-      await this.outcomes.restoreAutoRotateAfterFailedLock(
-        alreadyApplied.result,
-        plan,
-        settings,
+      await this.outcomes.restoreAutoRotateAfterFailedLock(alreadyApplied.result, plan, settings, {
         cleanup,
-        slot !== undefined,
-      );
+        sessionMode: slot !== undefined,
+      });
       return this.finishAndroidRotation(
         alreadyApplied.result,
         settings,
@@ -797,13 +793,10 @@ export class Rotate extends BaseVisualChange {
         wasAutoRotateEnabled,
         signal,
       });
-      await this.outcomes.restoreAutoRotateAfterFailedLock(
-        result,
-        plan,
-        settings,
+      await this.outcomes.restoreAutoRotateAfterFailedLock(result, plan, settings, {
         cleanup,
-        slot !== undefined,
-      );
+        sessionMode: slot !== undefined,
+      });
       return this.finishAndroidRotation(result, settings, { lockOrientation, signal }, slot);
     } catch (error) {
       return this.recoverAndroidRotation({
@@ -992,13 +985,10 @@ export class Rotate extends BaseVisualChange {
         wasAutoRotateEnabled,
         signal,
       });
-      await this.outcomes.restoreAutoRotateAfterFailedLock(
-        result,
-        plan,
-        settings,
+      await this.outcomes.restoreAutoRotateAfterFailedLock(result, plan, settings, {
         cleanup,
-        slot !== undefined,
-      );
+        sessionMode: slot !== undefined,
+      });
       return this.finishAndroidRotation(result, settings, { lockOrientation, signal }, slot);
     }
     if (achievedOrientation !== "unknown") {
@@ -1026,8 +1016,7 @@ export class Rotate extends BaseVisualChange {
       },
       plan,
       settings,
-      cleanup,
-      slot !== undefined,
+      { cleanup, sessionMode: slot !== undefined },
     );
   }
 }

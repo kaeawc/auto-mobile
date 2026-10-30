@@ -471,7 +471,8 @@ describe("tapOn visible matched element", () => {
     const refreshed = hierarchy(label, row);
     const { result, points, tap } = await run("android", refreshed);
     expect(result.success).toBe(true);
-    await tap.retryTapIfNoChange(hierarchyFingerprint(refreshed)!, { x: 141, y: 394 }, "tap", 0, {
+    await tap.retryTapIfNoChange(hierarchyFingerprint(refreshed)!, { x: 141, y: 394 }, "tap", {
+      longPressDuration: 0,
       tapElement: result.element!,
       options: { text: "Forms & Input", action: "tap" },
       isTalkBackEnabled: false,

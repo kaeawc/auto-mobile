@@ -67,8 +67,7 @@ export async function performIosSdkWebAction(
   client: IosSdkWebActionClient | null,
   target: IosSdkWebTarget,
   action: IosSdkWebAction,
-  verb: string,
-  signal?: AbortSignal,
+  { verb, signal }: { verb: string; signal?: AbortSignal },
 ): Promise<IosSdkTapOutcome> {
   if (!client) {
     return { backend: "xctest", fallbackReason: "unavailable" };

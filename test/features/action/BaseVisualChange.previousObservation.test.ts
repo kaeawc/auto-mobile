@@ -532,7 +532,10 @@ describe("BaseVisualChange previous observation with real ObserveScreen", () => 
       h.base.observedInteraction(
         async (previous) => {
           previousCaptureAttempted = previous.screenshotCaptureAttempted;
-          return tap["handleElementNotFound"]({ action: "tap", text: "Missing" }, previous, true);
+          return tap["handleElementNotFound"](
+            { action: "tap", text: "Missing" },
+            { observeResult: previous, containerFound: true },
+          );
         },
         { changeExpected: false },
       ),

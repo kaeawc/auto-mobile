@@ -56,9 +56,11 @@ interface ScrollSearchOperations {
   findElementInHierarchy(
     lookFor: NonNullable<SwipeOnOptions["lookFor"]>,
     viewHierarchy: ViewHierarchyResult,
-    container?: SwipeOnOptions["container"],
-    containerElement?: Element,
-    layer?: SwipeOnOptions["layer"],
+    options?: {
+      container?: SwipeOnOptions["container"];
+      containerElement?: Element;
+      layer?: SwipeOnOptions["layer"];
+    },
   ): Promise<Element | null>;
   isElementWithinContainer(
     element: Element,
@@ -334,9 +336,11 @@ export class ScrollSearchSession {
       this.host.findElementInHierarchy(
         this.request.options.lookFor!,
         this.lastObservation.viewHierarchy!,
-        this.request.options.container,
-        this.containerElement,
-        this.request.options.layer,
+        {
+          container: this.request.options.container,
+          containerElement: this.containerElement,
+          layer: this.request.options.layer,
+        },
       ),
     );
 

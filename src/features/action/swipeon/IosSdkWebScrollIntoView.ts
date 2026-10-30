@@ -91,8 +91,7 @@ export function createIosSdkWebScrollIntoView(
         options.client(),
         { webViewId: entry.webViewId, ...target },
         { scrollIntoView: target },
-        "scroll into view",
-        signal,
+        { verb: "scroll into view", signal },
       );
     },
   };

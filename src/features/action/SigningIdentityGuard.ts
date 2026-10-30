@@ -20,8 +20,7 @@ export async function checkSigningIdentity(
   inspector: PackageSigningInspector,
   appId: string,
   userId: number,
-  expectedSha256: readonly string[],
-  signal?: AbortSignal,
+  { expectedSha256, signal }: { expectedSha256: readonly string[]; signal?: AbortSignal },
 ): Promise<PackageSigningInspection> {
   const expected = normalizeSignerSet(expectedSha256);
   const inspection = await inspector.execute(appId, { userId, signal });

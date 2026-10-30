@@ -174,7 +174,7 @@ class BoundaryTap extends TapOnElement {
     _action: string,
     { x, y }: Point,
     _duration: number,
-    _element: Element,
+    _options: { element: Element },
   ) {
     this.gestures.push({ x, y });
     return undefined;

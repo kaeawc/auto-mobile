@@ -94,8 +94,7 @@ export async function waitForIosForegroundChange(
   expectedAppId: string,
   reader: ForegroundObservationReader,
   timer: Timer,
-  signal?: AbortSignal,
-  previousApp?: string,
+  { signal, previousApp }: { signal?: AbortSignal; previousApp?: string } = {},
 ): Promise<boolean> {
   const deadline = timer.now() + FOREGROUND_CHANGE_TIMEOUT_MS;
   for (let attempt = 1; timer.now() < deadline; attempt++) {
@@ -432,10 +431,12 @@ export class OpenURL extends BaseVisualChange {
               }),
           },
           this.timer,
-          signal,
-          // A universal link may open its owning app instead of Safari, so for
-          // http(s) any foreground app change counts as handled (#9978).
-          isHttpUrl(url) ? previousApp : undefined,
+          {
+            signal,
+            // A universal link may open its owning app instead of Safari, so for
+            // http(s) any foreground app change counts as handled (#9978).
+            previousApp: isHttpUrl(url) ? previousApp : undefined,
+          },
         )
       : true;
     return {

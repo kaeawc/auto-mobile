@@ -247,13 +247,10 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
 
     let failures: RestoreSnapshotFailure[] = [];
     if (shouldUseVmSnapshot) {
-      await this.restoreVmSnapshot(
-        snapshotName,
-        manifest,
-        vmSnapshotTimeoutMs,
+      await this.restoreVmSnapshot(snapshotName, manifest, vmSnapshotTimeoutMs, {
         onVmSnapshotLoaded,
         onBeforeVmSnapshotLoad,
-      );
+      });
     } else {
       failures = await this.restoreSettingsSnapshot(manifest);
     }
@@ -288,8 +285,13 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     snapshotName: string,
     manifest: DeviceSnapshotManifest,
     vmSnapshotTimeoutMs: number,
-    onVmSnapshotLoaded?: () => Promise<void> | void,
-    onBeforeVmSnapshotLoad?: () => Promise<void> | void,
+    {
+      onVmSnapshotLoaded,
+      onBeforeVmSnapshotLoad,
+    }: {
+      onVmSnapshotLoaded?: () => Promise<void> | void;
+      onBeforeVmSnapshotLoad?: () => Promise<void> | void;
+    } = {},
   ): Promise<void> {
     logger.info(`Restoring VM snapshot for emulator ${this.device.deviceId}`);
 

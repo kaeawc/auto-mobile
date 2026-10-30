@@ -25,9 +25,7 @@ for (const outcome of ["success", "refusal", "unanswered", "aborted"] as const) 
     const result = dispatchIosDoubleTap(
       { requestTapCoordinates: single, requestDoubleTapCoordinates: double },
       { x: 1, y: 2 },
-      50,
-      "frame",
-      { signal: controller.signal },
+      { durationMs: 50, frameContext: "frame", options: { signal: controller.signal } },
     );
     if (outcome === "success") {
       await result;

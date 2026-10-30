@@ -267,8 +267,7 @@ export async function refreshTargetDisplayHierarchy(
   target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
   capture: HierarchyCapture,
   timeoutMs: number,
-  stale: () => StaleDisplayError,
-  signal?: AbortSignal,
+  { stale, signal }: { stale: () => StaleDisplayError; signal?: AbortSignal },
 ) {
   throwIfAborted(signal);
   target.assertCurrent();

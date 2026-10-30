@@ -56,14 +56,20 @@ export async function addOrUpdateSuggestion(
   return result;
 }
 
+/** The build, device and session one provenance observation was made under. */
+export interface ObservationSource {
+  buildKeyId: number;
+  deviceId: string;
+  sessionUuid: string;
+}
+
 export async function recordSuggestionObservation(
   ctx: NavigationQueryContext,
   suggestionId: number,
-  buildKeyId: number,
-  deviceId: string,
-  sessionUuid: string,
+  source: ObservationSource,
   seenAt: number,
 ): Promise<void> {
+  const { buildKeyId, deviceId, sessionUuid } = source;
   const observation: NewNavigationSuggestionObservation = {
     suggestion_id: suggestionId,
     build_key_id: buildKeyId,
@@ -225,27 +231,19 @@ export async function getOrCreateBuildKey(
 export async function recordNodeObservation(
   ctx: NavigationQueryContext,
   nodeId: number,
-  buildKeyId: number,
-  deviceId: string,
-  sessionUuid: string,
+  source: ObservationSource,
   seenAt: number,
 ): Promise<void> {
-  await recordNodeObservationWindow(
-    ctx,
-    nodeId,
-    { buildKeyId, deviceId, sessionUuid },
-    { firstSeenAt: seenAt, lastSeenAt: seenAt },
-  );
+  await recordNodeObservationWindow(ctx, nodeId, source, {
+    firstSeenAt: seenAt,
+    lastSeenAt: seenAt,
+  });
 }
 
 async function recordNodeObservationWindow(
   ctx: NavigationQueryContext,
   nodeId: number,
-  {
-    buildKeyId,
-    deviceId,
-    sessionUuid,
-  }: { buildKeyId: number; deviceId: string; sessionUuid: string },
+  { buildKeyId, deviceId, sessionUuid }: ObservationSource,
   { firstSeenAt, lastSeenAt }: { firstSeenAt: number; lastSeenAt: number },
 ): Promise<void> {
   const db = ctx.getDb();
@@ -273,11 +271,10 @@ async function recordNodeObservationWindow(
 export async function recordEdgeObservation(
   ctx: NavigationQueryContext,
   edgeId: number,
-  buildKeyId: number,
-  deviceId: string,
-  sessionUuid: string,
+  source: ObservationSource,
   seenAt: number,
 ): Promise<void> {
+  const { buildKeyId, deviceId, sessionUuid } = source;
   const db = ctx.getDb();
   const observation: NewNavigationEdgeObservation = {
     edge_id: edgeId,

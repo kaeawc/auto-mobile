@@ -67,9 +67,7 @@ class FakeSystemClient implements SystemClient {
 function pressButton(device: BootedDevice, client: SystemClient, adb = new FakeAdbExecutor()) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const press = new PressButton(device, adb, timer, undefined, undefined, {
-    systemActionClient: client,
-  });
+  const press = new PressButton(device, adb, timer, { systemActionClient: client });
   return { press, adb };
 }
 

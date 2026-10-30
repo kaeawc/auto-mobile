@@ -21,6 +21,13 @@ function sdkPackage(observation: ObserveResult | undefined): string | undefined 
     : undefined;
 }
 
+/** When the swipe ended, where SDK routes come from, and how to reassess with a newer route. */
+export interface SdkRouteSettleOptions {
+  swipeEndedAtMs: number | undefined;
+  source: SdkRouteSource | undefined;
+  reassess: () => SwipeNavigationAssessment | undefined;
+}
+
 /**
  * A post-swipe observation can be captured before the SDK's route event for the screen the swipe
  * opened reaches the host, in which case both observations carry the old route and the swipe reads
@@ -32,10 +39,9 @@ export async function settleSdkRouteAssessment(
   assessment: SwipeNavigationAssessment | undefined,
   previous: ObserveResult | null,
   observation: ObserveResult | undefined,
-  swipeEndedAtMs: number | undefined,
-  source: SdkRouteSource | undefined,
-  reassess: () => SwipeNavigationAssessment | undefined,
+  settle: SdkRouteSettleOptions,
 ): Promise<SwipeNavigationAssessment | undefined> {
+  const { swipeEndedAtMs, source, reassess } = settle;
   const packageName = sdkPackage(observation);
   if (
     assessment?.navigated !== false ||

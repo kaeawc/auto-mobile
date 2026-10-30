@@ -175,8 +175,10 @@ export class DaemonMaintenance {
    */
   startNavigationRetentionMonitor(): void {
     const fileSystem = new DefaultFileSystem();
-    const retention = new NavigationRetention(getDatabase(), {}, (filePath) =>
-      fileSystem.unlink(filePath),
+    const retention = new NavigationRetention(
+      getDatabase(),
+      {},
+      { removeScreenshotFile: (filePath) => fileSystem.unlink(filePath) },
     );
     this.host.lifecycle.setNavigationRetentionMonitor(
       new NavigationRetentionMonitor(retention, this.host.services.timer()),

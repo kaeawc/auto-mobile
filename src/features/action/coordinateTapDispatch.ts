@@ -133,9 +133,9 @@ export async function dispatchAndroidCoordinateTap(
       ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`
       : `tap ${x} ${y}`,
     undefined,
-    signal,
-    assertCurrent,
     {
+      signal,
+      assertCurrent,
       timeoutMs:
         durationMs >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined,
     },
@@ -420,9 +420,9 @@ export async function androidDisplayTapDispatch(
         ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(duration)}`
         : `tap ${x} ${y}`,
       target.displayId,
-      signal,
-      target.assertCurrent,
       {
+        signal,
+        assertCurrent: target.assertCurrent,
         timeoutMs:
           options.action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
       },

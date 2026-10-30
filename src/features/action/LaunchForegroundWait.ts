@@ -3,10 +3,16 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { logger } from "../../utils/logger";
 import { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer } from "../../utils/SystemTimer";
+import type { ActionCall } from "./ActionCall";
 
 interface LaunchForegroundWaitDependencies {
   adb: Pick<AdbExecutor, "getForegroundApp" | "executeCommand">;
   timer: Timer;
+}
+/** Poll budget for the foreground wait, plus the request's tracker and abort signal. */
+export interface ForegroundWaitOptions extends Pick<ActionCall, "perf" | "signal"> {
+  timeoutMs: number;
+  pollIntervalMs: number;
 }
 /** Foreground readiness polling before launch observation reconciliation. */
 export class LaunchForegroundWait {
@@ -14,11 +20,9 @@ export class LaunchForegroundWait {
   async waitForAppForeground(
     packageName: string,
     userId: number,
-    timeoutMs: number,
-    pollIntervalMs: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    options: ForegroundWaitOptions,
   ): Promise<boolean> {
+    const { timeoutMs, pollIntervalMs, perf, signal } = options;
     const waitForForeground = async (): Promise<boolean> => {
       const startTime = this.deps.timer.now();
 

@@ -31,6 +31,7 @@ import {
   setEdgeModals,
   setNodeModals,
   setScrollPosition,
+  type ScrollPositionOptions,
 } from "./navigationModalScrollQueries";
 import {
   addOrUpdateSuggestion,
@@ -48,6 +49,7 @@ import {
 import type {
   NavigationEdgeProvenanceRow,
   NavigationEdgeTarget,
+  NavigationEdgeTool,
   NavigationNodeProvenanceRow,
   NavigationQueryContext,
 } from "./navigationRepositoryTypes";
@@ -56,6 +58,7 @@ export type {
   NavigationEdgeProvenanceRow,
   NavigationEdgeTarget,
   NavigationNodeProvenanceRow,
+  NavigationEdgeTool,
 } from "./navigationRepositoryTypes";
 
 /**
@@ -315,10 +318,10 @@ export class NavigationRepository {
     appId: string,
     fromScreen: string,
     toScreen: string,
-    toolName: string | null,
-    toolArgs: Record<string, any> | null,
+    tool: NavigationEdgeTool,
     timestamp: number,
   ): Promise<NavigationEdge> {
+    const { toolName, toolArgs } = tool;
     const db = this.getDb();
 
     const newEdge: NewNavigationEdge = {
@@ -617,15 +620,9 @@ export class NavigationRepository {
     edgeId: number,
     targetElementId: number,
     direction: string,
-    containerElementId?: number,
-    speed?: string,
-    swipeCount?: number,
+    options: ScrollPositionOptions = {},
   ): Promise<void> {
-    return setScrollPosition(this.ctx, edgeId, targetElementId, direction, {
-      containerElementId,
-      speed,
-      swipeCount,
-    });
+    return setScrollPosition(this.ctx, edgeId, targetElementId, direction, options);
   }
 
   /**
@@ -852,9 +849,7 @@ export class NavigationRepository {
     return recordSuggestionObservation(
       this.ctx,
       suggestionId,
-      buildKeyId,
-      deviceId,
-      sessionUuid,
+      { buildKeyId, deviceId, sessionUuid },
       seenAt,
     );
   }
@@ -928,7 +923,7 @@ export class NavigationRepository {
     sessionUuid: string,
     seenAt: number,
   ): Promise<void> {
-    return recordNodeObservation(this.ctx, nodeId, buildKeyId, deviceId, sessionUuid, seenAt);
+    return recordNodeObservation(this.ctx, nodeId, { buildKeyId, deviceId, sessionUuid }, seenAt);
   }
 
   /**
@@ -942,7 +937,7 @@ export class NavigationRepository {
     sessionUuid: string,
     seenAt: number,
   ): Promise<void> {
-    return recordEdgeObservation(this.ctx, edgeId, buildKeyId, deviceId, sessionUuid, seenAt);
+    return recordEdgeObservation(this.ctx, edgeId, { buildKeyId, deviceId, sessionUuid }, seenAt);
   }
 
   /**

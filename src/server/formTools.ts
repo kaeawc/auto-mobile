@@ -161,9 +161,7 @@ export function createSetUIStateHandler({
       },
       progress,
       signal,
-      transportDeadlineMs,
-      getLiveTransportDeadlineMs,
-      subscribeLiveTransportDeadline,
+      { transportDeadlineMs, getLiveTransportDeadlineMs, subscribeLiveTransportDeadline },
     );
 
     const response = createStructuredToolResponse({

@@ -707,10 +707,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      0,
-      1,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 0,
+        pollIntervalMs: 1,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.success).toBe(false);
@@ -729,10 +731,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      0,
-      1,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 0,
+        pollIntervalMs: 1,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.success).toBe(true);
@@ -776,10 +780,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      0,
-      1,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 0,
+        pollIntervalMs: 1,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.success).toBe(false);
@@ -798,10 +804,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: false, packageName, observation },
       packageName,
-      1000,
-      100,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 1000,
+        pollIntervalMs: 100,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.verifiedBy).toBeUndefined();
@@ -823,10 +831,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      1000,
-      100,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 1000,
+        pollIntervalMs: 100,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.verifiedBy).toBe("task-root");
@@ -842,10 +852,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      1,
-      1,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 1,
+        pollIntervalMs: 1,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(fakeTimer.getSleepHistory()).toEqual([1]);

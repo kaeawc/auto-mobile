@@ -177,3 +177,38 @@ release_download_base_exclude_pattern() {
   [[ ! "$releases" =~ $pattern ]]
   [[ ! "$other_repo" =~ $pattern ]]
 }
+
+# #15952: On Merge failed four runs in a row on a lone [TIMEOUT] for the README's
+# shields.io endpoint badge (lychee: 0 errors, 1 timeout, still exit 2).
+badge_endpoint_exclude_pattern() {
+  yq -p toml -oy '.exclude[] | select(test("img.*shields.*endpoint"))' "$CONFIG"
+}
+
+@test "shields.io endpoint badges backed by our own gh-pages JSON are excluded" {
+  requires_yq
+  run badge_endpoint_exclude_pattern
+  [ "$status" -eq 0 ]
+  # Exactly one entry.
+  [ "$(printf '%s\n' "$output" | wc -l)" -eq 1 ]
+  local pattern="$output"
+
+  local base="https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile"
+  [[ "$base/kotlin-tests-badge.json" =~ $pattern ]]
+  [[ "$base/typescript-tests-badge.json" =~ $pattern ]]
+  [[ "$base/swift-coverage-badge.json" =~ $pattern ]]
+}
+
+@test "badge exclude does not widen to static badges, other endpoints, other hosts or suffixes" {
+  requires_yq
+  run badge_endpoint_exclude_pattern
+  [ "$status" -eq 0 ]
+  local pattern="$output"
+
+  [[ ! "https://img.shields.io/badge/License-Apache_2.0-blue.svg" =~ $pattern ]]
+  [[ ! "https://img.shields.io/endpoint?url=https://example.org/x-badge.json" =~ $pattern ]]
+  [[ ! "https://img.shields.io/endpoint?url=https://kaeawc.github.io/other/x-badge.json" =~ $pattern ]]
+  [[ ! "https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile/x-badge.json.evil" =~ $pattern ]]
+  [[ ! "https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile/a/b-badge.json" =~ $pattern ]]
+  [[ ! "https://kaeawc.github.io/auto-mobile/kotlin-tests-badge.json" =~ $pattern ]]
+  [[ ! "https://img.shields.io.evil.com/endpoint?url=https://kaeawc.github.io/auto-mobile/x-badge.json" =~ $pattern ]]
+}

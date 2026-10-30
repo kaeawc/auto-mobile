@@ -18,7 +18,8 @@ export function isAlreadyStoppedDeviceError(
       isAdbMissingDeviceError(error, deviceId)
     );
   }
-  if (platform === "ios") {
+  // An Apple Watch simulator stops through the same simctl shutdown as an iPhone one.
+  if (platform === "ios" || platform === "watchos") {
     return isIosSimulatorAlreadyStoppedError(error);
   }
   return false;

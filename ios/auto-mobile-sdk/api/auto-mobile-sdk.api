@@ -1320,13 +1320,22 @@ public struct AutoMobileWebElement: Codable, Sendable, Equatable
   public let enabled: Bool
   public let visible: Bool
   public let focused: Bool
-  public init( id: String, role: String? = nil, label: String? = nil, value: String? = nil, bounds: [Double] = [], enabled: Bool = true, visible: Bool = true, focused: Bool = false )
+  public let inputType: String?
+  public init( id: String, role: String? = nil, label: String? = nil, value: String? = nil, bounds: [Double] = [], enabled: Bool = true, visible: Bool = true, focused: Bool = false, inputType: String? = nil )
+public struct AutoMobileWebViewport: Codable, Sendable, Equatable
+  public let offsetLeft: Double
+  public let offsetTop: Double
+  public let width: Double
+  public let height: Double
+  public let scale: Double
+  public init(offsetLeft: Double = 0, offsetTop: Double = 0, width: Double, height: Double, scale: Double = 1)
 public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable
   public let snapshotId: String
   public let url: String?
   public let title: String?
   public let elements: [AutoMobileWebElement]
-  public init( snapshotId: String = UUID().uuidString, url: String? = nil, title: String? = nil, elements: [AutoMobileWebElement] = [] )
+  public let viewport: AutoMobileWebViewport?
+  public init( snapshotId: String = UUID().uuidString, url: String? = nil, title: String? = nil, elements: [AutoMobileWebElement] = [], viewport: AutoMobileWebViewport? = nil )
 public struct AutoMobileWebSnapshotRequest: Codable, Equatable, Sendable
   public let webViewId: String?
   public init(webViewId: String? = nil)

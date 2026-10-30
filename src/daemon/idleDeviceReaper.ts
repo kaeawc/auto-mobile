@@ -123,7 +123,13 @@ export class IdleDeviceReaper {
     device: Pick<PooledDevice, "id" | "platform">,
     iosLiveness: IosLivenessSnapshot | undefined,
   ): IdleDeviceLivenessStatus {
-    if (device.platform !== "ios") {
+    if (device.platform === "android") {
+      return "assignable";
+    }
+    if (device.platform === "watchos") {
+      // A watch never has an iOS liveness snapshot: an exact bind confirms it in a fresh watchOS
+      // listing before it gets here, and the pool's refresh sweep retires a watch that stops
+      // (#14908), so the pool row itself is the evidence.
       return "assignable";
     }
 

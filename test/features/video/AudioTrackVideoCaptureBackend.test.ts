@@ -32,6 +32,8 @@ function config(audio: boolean): VideoCaptureConfig {
 }
 
 interface SetupOptions {
+  /** The video stop fails once, then succeeds. */
+  videoStopFailsOnce?: boolean;
   muxFails?: boolean;
   ffmpegMissing?: boolean;
   innerStartFails?: boolean;
@@ -69,6 +71,10 @@ function setup(options: SetupOptions = {}) {
       events.push("video-stop");
       if (options.holdVideoStop) {
         await videoStopHeld;
+      }
+      if (options.videoStopFailsOnce) {
+        options.videoStopFailsOnce = false;
+        throw new Error("adb pull failed");
       }
       return { recordingId: handle.recordingId, outputPath: handle.outputPath, sizeBytes: 42 };
     },
@@ -236,5 +242,46 @@ describe("AudioTrackVideoCaptureBackend", () => {
       "The recording has no audio track: it was force-stopped while stopping.",
     ]);
     expect(muxed).toEqual([]);
+  });
+
+  test("the audio file is reported as a sidecar the size cap counts", async () => {
+    const { backend } = setup();
+    const handle = await backend.start(config(true));
+    expect(handle.inProgressSidecarPaths).toEqual(["/rec/rec-1.mp4.audio.pcm"]);
+    expect(
+      (await backend.start({ ...config(false), recordingId: "rec-2" })).inProgressSidecarPaths,
+    ).toBeUndefined();
+  });
+
+  test("an Android recording longer than one segment is refused audio before any capture", async () => {
+    const { backend, events } = setup();
+    await expect(
+      backend.start({ ...config(true), maxDurationSeconds: 181 }),
+    ).rejects.toBeInstanceOf(ActionableError);
+    expect(events).toEqual([]);
+    await backend.start({ ...config(true), maxDurationSeconds: 180 });
+    expect(events[0]).toBe("audio-start:emulator-5554");
+  });
+
+  test("a stop retried after a failed video stop still reports the lost audio track", async () => {
+    const { backend, muxed } = setup({ videoStopFailsOnce: true });
+    const handle = await backend.start(config(true));
+    await expect(backend.stop(handle)).rejects.toThrow("adb pull failed");
+    const result = await backend.stop(handle);
+    expect(result.hasAudioTrack).toBe(false);
+    expect(result.warnings).toEqual([
+      "The recording has no audio track: an earlier stop failed and its audio was discarded.",
+    ]);
+    expect(muxed).toEqual([]);
+    // Reported once: a later stop of the same id is a plain pass-through.
+    expect((await backend.stop(handle)).hasAudioTrack).toBeUndefined();
+  });
+
+  test("a force stop clears the lost-audio state of a failed stop", async () => {
+    const { backend } = setup({ videoStopFailsOnce: true });
+    const handle = await backend.start(config(true));
+    await expect(backend.stop(handle)).rejects.toThrow("adb pull failed");
+    await backend.forceStop(handle);
+    expect((await backend.stop(handle)).hasAudioTrack).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 import { parsePrototypeFeedbackLog } from "../../src/features/prototype/prototypeFeedbackLog";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { toolStructured } from "../helpers/toolResponse";
 import {
   prototypeOutputSchema,
@@ -16,6 +16,7 @@ import {
   FakePrototypeAgentClient,
 } from "../fakes/FakePrototypeAgentClient";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { warmedTests } from "../helpers/warmedTests";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const android: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
@@ -23,11 +24,10 @@ const ios: BootedDevice = { deviceId: "SIM-1", platform: "ios", name: "iPhone" }
 describe("prototype simulate and timer reports", () => {
   let proxy: FakeCtrlProxy;
   let agent: FakePrototypeAgentClient;
-  let restore: () => void;
-  let unsubscribe: () => void;
+  let teardown: (() => void) | undefined;
 
-  beforeEach(() => {
-    restore = preserveToolRegistry();
+  function setUp(): void {
+    const restore = preserveToolRegistry();
     const timer = new FakeTimer();
     proxy = new FakeCtrlProxy(timer);
     proxy.setSupportedCommands(["prototype_persistence_replay_v1"]);
@@ -36,7 +36,7 @@ describe("prototype simulate and timer reports", () => {
       protocolVersion: 1,
       capabilities: [...FAKE_PROTOTYPE_AGENT_CAPABILITIES],
     });
-    unsubscribe = registerPrototypeTools({
+    const unsubscribe = registerPrototypeTools({
       clientFactory: () => proxy,
       agentConnections: { get: () => agent },
       adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
@@ -44,84 +44,101 @@ describe("prototype simulate and timer reports", () => {
       clock: timer,
       timer,
     });
+    teardown = () => {
+      unsubscribe();
+      restore();
+    };
+  }
+
+  function tearDown(): void {
+    teardown?.();
+    teardown = undefined;
+  }
+
+  // The first show pays one-time module and first-use compilation for both platforms' prototype
+  // paths: warmedTests runs it once in beforeAll, outside the per-test budget. Every test,
+  // warmed or not, starts from a fresh registration made by the reset after the one before it.
+  const warmed = warmedTests(() => {
+    tearDown();
+    setUp();
   });
-  afterEach(() => {
-    unsubscribe();
-    restore();
-  });
+  afterAll(tearDown);
 
   async function call(device: BootedDevice, input: Record<string, unknown>) {
     const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
     return prototypeOutputSchema.parse(toolStructured(response));
   }
 
-  test("splash onAppear reaches native show, simulate and timer inspection on both platforms", async () => {
-    const splash = {
-      id: "splash",
-      state: { loading: true },
-      window: { placement: { type: "fullscreen" } },
-      root: {
-        type: "column",
-        onAppear: [
-          {
-            type: "startTimer",
-            id: "splash",
-            afterMs: 2000,
-            actions: [{ type: "setState", key: "loading", value: false }],
-          },
-        ],
-        children: [
-          { type: "text", text: "Content", visibleWhen: { key: "loading", equals: false } },
-        ],
-      },
-    };
-    proxy.setSupportedCommands(["prototype_timers_v1", "prototype_persistence_replay_v1"]);
-    agent.handshake.capabilities.push("prototype_timers_v1");
-    for (const device of [android, ios]) {
-      expect((await call(device, { action: "show", spec: splash })).success).toBe(true);
-      const timers = [{ id: "splash", nextFireInMs: 2000, runs: 0 }];
-      const status = {
+  warmed(
+    "splash onAppear reaches native show, simulate and timer inspection on both platforms",
+    async () => {
+      const splash = {
         id: "splash",
-        persistent: false,
         state: { loading: true },
-        pages: {},
-        lastSequence: 0,
-        timers,
+        window: { placement: { type: "fullscreen" } },
+        root: {
+          type: "column",
+          onAppear: [
+            {
+              type: "startTimer",
+              id: "splash",
+              afterMs: 2000,
+              actions: [{ type: "setState", key: "loading", value: false }],
+            },
+          ],
+          children: [
+            { type: "text", text: "Content", visibleWhen: { key: "loading", equals: false } },
+          ],
+        },
       };
-      if (device.platform === "android") {
-        proxy.setInspectReply({ success: true, prototypes: [status] });
-      } else {
-        agent.queueReplies({ status: { ...status, shown: true } });
+      proxy.setSupportedCommands(["prototype_timers_v1", "prototype_persistence_replay_v1"]);
+      agent.handshake.capabilities.push("prototype_timers_v1");
+      for (const device of [android, ios]) {
+        expect((await call(device, { action: "show", spec: splash })).success).toBe(true);
+        const timers = [{ id: "splash", nextFireInMs: 2000, runs: 0 }];
+        const status = {
+          id: "splash",
+          persistent: false,
+          state: { loading: true },
+          pages: {},
+          lastSequence: 0,
+          timers,
+        };
+        if (device.platform === "android") {
+          proxy.setInspectReply({ success: true, prototypes: [status] });
+        } else {
+          agent.queueReplies({ status: { ...status, shown: true } });
+        }
+        expect((await call(device, { action: "inspect" })).prototypes?.[0]?.timers).toEqual(timers);
+        if (device.platform === "android") {
+          proxy.setAdvanceClockResult({ success: true, fired: 1 });
+        } else {
+          agent.queueReplies({ fired: 1 });
+        }
+        expect(
+          await call(device, { action: "simulate", id: "splash", advanceTimeMs: 2000 }),
+        ).toMatchObject({ success: true, fired: 1 });
+        const completed = { ...status, state: { loading: false }, timers: [] };
+        if (device.platform === "android") {
+          proxy.setInspectReply({ success: true, prototypes: [completed] });
+        } else {
+          agent.queueReplies({ status: { ...completed, shown: true } });
+        }
+        expect((await call(device, { action: "inspect" })).prototypes?.[0]).toMatchObject({
+          state: { loading: false },
+          timers: [],
+        });
       }
-      expect((await call(device, { action: "inspect" })).prototypes?.[0]?.timers).toEqual(timers);
-      if (device.platform === "android") {
-        proxy.setAdvanceClockResult({ success: true, fired: 1 });
-      } else {
-        agent.queueReplies({ fired: 1 });
-      }
-      expect(
-        await call(device, { action: "simulate", id: "splash", advanceTimeMs: 2000 }),
-      ).toMatchObject({ success: true, fired: 1 });
-      const completed = { ...status, state: { loading: false }, timers: [] };
-      if (device.platform === "android") {
-        proxy.setInspectReply({ success: true, prototypes: [completed] });
-      } else {
-        agent.queueReplies({ status: { ...completed, shown: true } });
-      }
-      expect((await call(device, { action: "inspect" })).prototypes?.[0]).toMatchObject({
-        state: { loading: false },
-        timers: [],
+      expect(proxy.getPrototypeHistory().find((entry) => entry.method === "show")).toMatchObject({
+        spec: { root: { onAppear: splash.root.onAppear } },
       });
-    }
-    expect(proxy.getPrototypeHistory().find((entry) => entry.method === "show")).toMatchObject({
-      spec: { root: { onAppear: splash.root.onAppear } },
-    });
-    expect(agent.requests.find((entry) => entry.type === "show_prototype")?.body).toMatchObject({
-      spec: { root: { onAppear: splash.root.onAppear } },
-    });
-    expect(proxy.advanceClockRequests).toEqual([{ id: "splash", advanceTimeMs: 2000 }]);
-    expect(agent.requests.some((entry) => entry.type === "advance_prototype_clock")).toBe(true);
-  });
+      expect(agent.requests.find((entry) => entry.type === "show_prototype")?.body).toMatchObject({
+        spec: { root: { onAppear: splash.root.onAppear } },
+      });
+      expect(proxy.advanceClockRequests).toEqual([{ id: "splash", advanceTimeMs: 2000 }]);
+      expect(agent.requests.some((entry) => entry.type === "advance_prototype_clock")).toBe(true);
+    },
+  );
 
   test("onAppear alone refuses show without timer capability before sending", async () => {
     const spec = {

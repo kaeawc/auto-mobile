@@ -19,7 +19,7 @@ import {
   getDeviceTeardownService,
   getDeviceToolsDependencies,
   provisionDeviceSchema,
-  startDeviceSchema,
+  startDeviceRegistrationSchema,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { registerDaemonDeviceDeletion } from "../daemon/daemonDeviceDeletion";
 import {
@@ -121,7 +121,7 @@ export function registerDeviceTools() {
   ToolRegistry.register(
     "startDevice",
     "Start device",
-    startDeviceSchema,
+    startDeviceRegistrationSchema,
     (args, progress, signal) =>
       acquireUndoneIfUndelivered(signal, () => startDeviceHandler(args, progress, signal)),
     {

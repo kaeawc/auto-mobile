@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
-import { androidProfileFormFactor, formFactorFrom } from "../../src/models/formFactor";
+import {
+  androidProfileFormFactor,
+  androidSystemImageTagsFor,
+  defaultAndroidProfileIdFor,
+  formFactorFrom,
+} from "../../src/models/formFactor";
+import { BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY } from "../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 
 describe("formFactorFrom", () => {
   test.each([
@@ -25,6 +32,7 @@ describe("formFactorFrom non-handheld form factors", () => {
   test.each([
     ["android-tv", "tv"],
     ["google-tv", "tv"],
+    ["google-tv-ps16k", "tv"],
     ["android-wear", "watch"],
     ["android-wear-cn", "watch"],
     ["android-automotive", "automotive"],
@@ -99,4 +107,36 @@ test.each(["pixel_fold", "pixel_9_pro_fold", "pixel_10_pro_fold"])(
 );
 test.each(["pixel_8", "pixel_tablet"])("does not classify %s as a fold", (profileId) => {
   expect(androidProfileFormFactor({ profileId })).not.toBe("foldable");
+});
+
+describe("non-handheld provisioning defaults", () => {
+  const avdmanagerDevices = readFileSync(
+    new URL("../fixtures/android-avdmanager/list-device.txt", import.meta.url),
+    "utf8",
+  );
+
+  test.each(["tv", "watch", "automotive"] as const)(
+    "the %s default profile is an avdmanager profile id of that form factor",
+    (formFactor) => {
+      const profileId = defaultAndroidProfileIdFor(formFactor);
+      expect(avdmanagerDevices).toContain(`or "${profileId}"`);
+      expect(formFactorFrom({ deviceType: profileId })).toBe(formFactor);
+    },
+  );
+
+  test("the broker's family defaults are the shared provisioning defaults", () => {
+    expect(BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY.tv).toBe("tv_1080p");
+    for (const formFactor of ["tv", "watch", "automotive"] as const) {
+      expect(BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY[formFactor]).toBe(
+        defaultAndroidProfileIdFor(formFactor),
+      );
+    }
+  });
+
+  test("TV image tags are listed best first and each classifies as tv", () => {
+    expect(androidSystemImageTagsFor("tv")).toEqual(["android-tv", "google-tv", "google-tv-ps16k"]);
+    for (const tag of androidSystemImageTagsFor("tv")) {
+      expect(formFactorFrom({ systemImageTag: tag })).toBe("tv");
+    }
+  });
 });

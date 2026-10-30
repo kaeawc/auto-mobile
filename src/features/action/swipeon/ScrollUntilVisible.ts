@@ -1,3 +1,4 @@
+import type { IosSdkWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { ScrollSearchSession } from "./ScrollSearchSession";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { withSwipeObservationReadScope } from "./freshSwipeHierarchy";
@@ -108,6 +109,8 @@ export interface ScrollUntilVisibleDependencies {
   overlayDetector: OverlayAnalyzer;
   talkBackExecutor: TalkBackSwipeRunner;
   voiceOverExecutor?: VoiceOverSwipeRunner;
+  /** Scrolls a WKWebView DOM element into view before any swipe (#5162); iOS only. */
+  webScrollIntoView?: IosSdkWebScrollIntoView;
   timer: Timer;
   getDuration: (options: SwipeOnResolvedOptions) => number;
   resolveBoomerangConfig: (options: SwipeOnResolvedOptions) => BoomerangConfig | undefined;

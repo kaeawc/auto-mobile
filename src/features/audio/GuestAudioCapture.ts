@@ -13,13 +13,13 @@ export interface GuestAudioCaptureHandle {
   close(): Promise<void>;
 }
 
-/** Resolves only after an owned guest capture has been observed RUNNING and settled. */
+/** Resolves only after an owned guest capture has been observed alive and settled. */
 export interface GuestAudioCapture {
   open(deviceId: string): Promise<GuestAudioCaptureHandle>;
 }
 
 export interface GuestAudioCaptureOptions {
-  /** Includes discovery, launch, RUNNING polling and settling. Default 8 seconds. */
+  /** Includes discovery, launch, liveness polling and settling. Default 8 seconds. */
   timeoutMs?: number;
   pollMs?: number;
   /** Default 3 seconds: a capture opened only 2.5 seconds earlier has crashed the emulator. */
@@ -31,8 +31,29 @@ function unavailable(deviceId: string, detail: string): EmulatorAudioError {
     "audio_guest_capture_unavailable",
     `Cannot verify an open guest microphone capture on ${deviceId}: ${detail}. ` +
       "Injection was refused to protect the emulator. Use an image with tinycap available to the " +
-      "ADB shell user and readable /proc/asound capture status; stop competing recordings and retry. " +
+      "ADB shell user; stop competing recordings and retry. " +
       "AutoMobile does not enable adb root.",
+  );
+}
+
+// The emulator virtio-snd capture device is card 0, device 0 (tinycap -D 0 -d 0).
+const CAPTURE_PCM = { card: 0, device: 0 };
+
+function matchesRecorder(pid: number, marker: string): string {
+  return (
+    `tr '\\000' '\\n' < /proc/${pid}/environ 2>/dev/null | ` + `grep -Fqx -- ${shellQuote(marker)}`
+  );
+}
+
+/** Check the marker and stat together; a zombie can retain its PID after tinycap exits. */
+function recorderProbe(pid: number, marker: string): string {
+  return (
+    `if ${matchesRecorder(pid, marker)} && stat=$(cat /proc/${pid}/stat 2>/dev/null); then ` +
+    // comm (field 2) can contain spaces and parentheses; strip through its final closing paren.
+    "fields=${stat##*) }; state=${fields%% *}; " +
+    'case "$state" in ""|Z|X) echo exited;; ?) ' +
+    `if ${matchesRecorder(pid, marker)}; then echo running; else echo exited; fi;; ` +
+    "*) echo exited;; esac; else echo exited; fi"
   );
 }
 
@@ -71,6 +92,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     const deadline = this.now() + this.timeoutMs;
     let pid: number | undefined;
     let emulatorPid: number | undefined;
+    let recorderLogPath: string | undefined;
     let recorderMarker: string;
     let closed = false;
     // The executor survives session release, but its serial can resolve to a replacement guest.
@@ -86,9 +108,12 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       }
       closed = true;
       // Never dispatch a kill to a replacement emulator or an unverified recorder PID.
-      const matchesRecorder =
-        `tr '\\000' '\\n' < /proc/${pid}/environ 2>/dev/null | ` +
-        `grep -Fqx -- ${shellQuote(recorderMarker)}`;
+      const identityCheck = matchesRecorder(pid, recorderMarker);
+      // Best-effort: the log name is unique to this lease, and it is removed only with the verified kill.
+      const logCleanup =
+        recorderLogPath === undefined
+          ? ""
+          : ` rm -f -- ${shellQuote(recorderLogPath)} 2>/dev/null;`;
       const cleanupOptions = {
         timeoutMs: 1_000,
         noRetry: true,
@@ -100,7 +125,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
           return;
         }
         const identity = await adb.execute(
-          ["shell", "sh", "-c", shellQuote(`if ${matchesRecorder}; then echo matched; fi`)],
+          ["shell", "sh", "-c", shellQuote(`if ${identityCheck}; then echo matched; fi`)],
           cleanupOptions,
         );
         if (identity.error || identity.stdout.trim() !== "matched") {
@@ -121,7 +146,9 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
             "shell",
             "sh",
             "-c",
-            shellQuote(`if ${matchesRecorder}; then kill ${pid}; else echo identity_changed; fi`),
+            shellQuote(
+              `if ${identityCheck}; then kill ${pid};${logCleanup} else echo identity_changed; fi`,
+            ),
           ],
           cleanupOptions,
         );
@@ -158,20 +185,14 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     };
     try {
       emulatorPid = await this.emulatorPidFor(deviceId);
-      recorderMarker = `AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=${this.ids.next()}`;
+      const recorderId = this.ids.next();
+      recorderMarker = `AUTOMOBILE_GUEST_AUDIO_CAPTURE_ID=${recorderId}`;
       if (/[\r\n\0]/.test(recorderMarker)) {
         throw unavailable(deviceId, "the recorder marker is invalid");
       }
-      const paths = await shell(
-        'for status in /proc/asound/card*/pcm*c/sub*/status; do if [ -r "$status" ]; then printf "%s\\n" "$status"; fi; done',
-      );
-      const path = paths
-        .split(/\r?\n/)
-        .find((value) => /^\/proc\/asound\/card\d+\/pcm\d+c\/sub\d+\/status$/.test(value));
-      const match = path?.match(/^\/proc\/asound\/card(\d+)\/pcm(\d+)c\/sub\d+\/status$/);
-      if (!path || !match) {
-        throw unavailable(deviceId, "no readable ALSA capture status");
-      }
+      // Keep lease logs for image temporary-file cleanup, including when identity is lost.
+      const logPath = `/data/local/tmp/automobile-guest-capture-${encodeURIComponent(recorderId)}.log`;
+      recorderLogPath = logPath;
       let launchOutput = "";
       const recordPid = (chunk: string) => {
         launchOutput += chunk;
@@ -182,7 +203,7 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       };
       // All streams are redirected so ADB can return while nohup keeps this exact PID alive.
       const output = await shell(
-        `env ${shellQuote(recorderMarker)} nohup tinycap /dev/null -D ${match[1]} -d ${match[2]} -c 1 -r 48000 -b 16 </dev/null >/dev/null 2>&1 & echo $!`,
+        `env ${shellQuote(recorderMarker)} nohup tinycap /dev/null -D ${CAPTURE_PCM.card} -d ${CAPTURE_PCM.device} -c 1 -r 48000 -b 16 </dev/null >/dev/null 2>${shellQuote(logPath)} & echo $!`,
         recordPid,
       );
       // Executors may not stream stdout; parse the completed output in that case.
@@ -193,7 +214,13 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
       if (pid === undefined) {
         throw unavailable(deviceId, "the recorder did not return a valid PID");
       }
-      await this.waitForRunning(deviceId, path, pid, deadline, shell);
+      await this.waitForRunning(
+        deviceId,
+        recorderProbe(pid, recorderMarker),
+        logPath,
+        deadline,
+        shell,
+      );
       return { close };
     } catch (error) {
       await close().catch((cleanupError: unknown) => {
@@ -220,27 +247,45 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
 
   private async waitForRunning(
     deviceId: string,
-    path: string,
-    pid: number,
+    probe: string,
+    logPath: string,
     deadline: number,
     shell: (script: string) => Promise<string>,
   ): Promise<void> {
     let runningSince: number | undefined;
     while (this.now() < deadline) {
-      const status = await shell(`cat ${path}`);
-      const running =
-        /^state:\s*RUNNING\s*$/m.test(status) &&
-        Number(/^owner_pid\s*:\s*(\d+)\s*$/m.exec(status)?.[1]) === pid;
+      const status = (await shell(probe)).trim();
+      if (status !== "running") {
+        // Any exit refuses outright: a recorder that stopped cannot be trusted to have stayed open.
+        const diagnostic = await this.recorderDiagnostic(deviceId, logPath, shell);
+        throw unavailable(
+          deviceId,
+          "the recorder exited before its capture stayed running through the settle window" +
+            (diagnostic ? `; tinycap stderr: ${diagnostic}` : ""),
+        );
+      }
       const now = this.now();
-      runningSince = running ? (runningSince ?? now) : undefined;
-      if (runningSince !== undefined && now - runningSince >= this.settleMs && now < deadline) {
+      runningSince = runningSince ?? now;
+      if (now - runningSince >= this.settleMs && now < deadline) {
         return;
       }
       await this.timer.sleep(Math.min(this.pollMs, Math.max(0, deadline - now)));
     }
-    throw unavailable(
-      deviceId,
-      "the recorder's capture did not stay RUNNING through the settle window",
-    );
+    throw unavailable(deviceId, "the recorder did not stay running through the settle window");
+  }
+
+  private async recorderDiagnostic(
+    deviceId: string,
+    logPath: string,
+    shell: (script: string) => Promise<string>,
+  ): Promise<string> {
+    try {
+      const tail = await shell(`tail -n 5 ${shellQuote(logPath)} 2>/dev/null | tail -c 2048`);
+      return tail.slice(-2_048).trim();
+    } catch (error) {
+      // Diagnostics are optional; unreadable logs must never permit capture verification.
+      logger.debug(`Cannot read guest capture log on ${deviceId}: ${errorMessage(error)}`);
+      return "";
+    }
   }
 }

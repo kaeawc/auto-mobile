@@ -14,7 +14,13 @@ import {
 } from "../../src/devices/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../../src/utils/deviceMatcher";
-import { pickAndroidSystemImage } from "../../src/devices/deviceProvisioning";
+import {
+  DefaultDeviceProvisioner,
+  pickAndroidSystemImage,
+} from "../../src/devices/deviceProvisioning";
+import { avdConfigFormFactor } from "../../src/utils/android-cmdline-tools/avdDeviceInfoEnrichment";
+import { FakeAndroidAvdCreator } from "../fakes/FakeDeviceProvisioner";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { ProvisionDeviceCreateRejectedError } from "../../src/devices/exactDeviceProvisioning";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
@@ -856,6 +862,91 @@ describe("DeviceBootService", () => {
       expect(second.sourceImage?.name).toBe(createdName);
     });
   }
+
+  it("creates a TV AVD for formFactor tv, reuses it, and keeps phone requests off it (#15881)", async () => {
+    const devices = new FakeDeviceUtils();
+    const avd = new FakeAndroidAvdCreator([
+      {
+        packageName: "system-images;android-34;android-tv;x86_64",
+        apiIdentifier: "34",
+        apiLevel: 34,
+        tag: "android-tv",
+        abi: "x86_64",
+        versionInfo: "",
+      },
+      {
+        packageName: "system-images;android-34;google_apis;x86_64",
+        apiIdentifier: "34",
+        apiLevel: 34,
+        tag: "google_apis",
+        abi: "x86_64",
+        versionInfo: "",
+      },
+    ]);
+    const createdImages: DeviceInfo[] = [];
+    const createAvd = avd.createAvd.bind(avd);
+    avd.createAvd = async (params) => {
+      const result = await createAvd(params);
+      // What AvdConfigReader reports for the new AVD on the next listing: the form factor is
+      // classified from config.ini's system image and hardware profile.
+      createdImages.push({
+        name: params.name,
+        platform: "android",
+        isRunning: false,
+        apiLevel: 34,
+        osVersion: "14",
+        formFactor: avdConfigFormFactor({
+          systemImagePackage: params.package,
+          deviceName: params.device,
+        }),
+      });
+      devices.setDeviceImages("android", [...createdImages]);
+      return result;
+    };
+    const boot = new DeviceBootService({
+      deviceManager: devices,
+      deviceMatcher: new DefaultDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: new DefaultDeviceProvisioner({
+        iosCreator: () => undefined,
+        androidCreator: () => avd,
+        idGenerator: new CountingIdGenerator("uuid"),
+        architecture: "x64",
+      }),
+      matchingStrategy: "LATEST",
+      timer: new FakeTimer(),
+    });
+    // preferRunning:false forces repeat calls through matchDeviceImage.
+    const tvRequest = {
+      platform: "android" as const,
+      formFactor: "tv" as const,
+      createIfMissing: true,
+      preferRunning: false,
+    };
+
+    const first = await boot.boot(tvRequest);
+    expect(first.provisioned).toBe(true);
+    expect(first.device.name).toBe("AutoMobile-android-tv-34-uuid1");
+    expect(createdImages[0]?.formFactor).toBe("tv");
+
+    const second = await boot.boot(tvRequest);
+    expect(second.provisioned).toBe(false);
+    expect(second.sourceImage?.name).toBe("AutoMobile-android-tv-34-uuid1");
+
+    const phone = await boot.boot({ ...tvRequest, formFactor: "phone" });
+    expect(phone.provisioned).toBe(true);
+    expect(avd.createCalls).toEqual([
+      {
+        name: "AutoMobile-android-tv-34-uuid1",
+        package: "system-images;android-34;android-tv;x86_64",
+        device: "tv_1080p",
+      },
+      {
+        name: "AutoMobile-android-34-uuid2",
+        package: "system-images;android-34;google_apis;x86_64",
+      },
+    ]);
+  });
 
   it("binds a generated Android AVD identity before provisioning creates it", async () => {
     const devices = new FakeDeviceUtils();

@@ -369,6 +369,12 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "Wear OS show only: whether the watch display is round, so content in the corners is clipped; absent on other devices or when unreadable",
     ),
+  formFactor: z
+    .literal("automotive")
+    .optional()
+    .describe(
+      "Android Automotive show only: the prototype is on a car display, where the phone-oriented layout renders wide and landscape; absent on other devices",
+    ),
   platformNotes: z
     .array(
       z.object({

@@ -225,6 +225,81 @@ describe("AndroidDeviceMutationResetPort", () => {
     ).rejects.toThrow("failed to confirm success");
   });
 
+  describe("setPreference systemProperty rows (#15792)", () => {
+    const propertyKey = (key: string, overrides: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        store: "preference",
+        scope: "systemProperty",
+        appId: null,
+        suite: null,
+        userId: null,
+        key,
+        ...overrides,
+      });
+    const recorded = (value: string): MutationValue => ({
+      state: "present",
+      value: { value, type: "string" },
+    });
+
+    test("sets the prior value back and reads it back", async () => {
+      adb.setCommandResponse(
+        "shell getprop debug.app.api_url",
+        createExecResult("https://prod.example\n", ""),
+      );
+      const row = mutation(
+        "preference",
+        propertyKey("debug.app.api_url"),
+        recorded("https://prod.example"),
+      );
+      expect(port.canRevert(row)).toBe(true);
+      await port.revert(row, context);
+      expect(adb.getExecutedCommands()).toEqual([
+        `shell setprop debug.app.api_url ${shellQuote("https://prod.example")}`,
+        "shell getprop debug.app.api_url",
+      ]);
+    });
+
+    test("restores an absent prior as an empty value that getprop reads back empty", async () => {
+      adb.setCommandResponse("shell getprop persist.app.flag", createExecResult("\n", ""));
+      await port.revert(mutation("preference", propertyKey("persist.app.flag"), ABSENT), context);
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell setprop persist.app.flag ''",
+        "shell getprop persist.app.flag",
+      ]);
+    });
+
+    test("a read-back that differs from the prior fails the revert", async () => {
+      adb.setCommandResponse(
+        "shell getprop debug.app.api_url",
+        createExecResult("https://staging.example\n", ""),
+      );
+      await expect(
+        port.revert(
+          mutation(
+            "preference",
+            propertyKey("debug.app.api_url"),
+            recorded("https://prod.example"),
+          ),
+          context,
+        ),
+      ).rejects.toThrow("failed to confirm success");
+    });
+
+    test.each([
+      ["read-only", propertyKey("ro.debuggable"), ABSENT],
+      ["init control", propertyKey("ctl.start"), ABSENT],
+      ["power control", propertyKey("sys.powerctl"), ABSENT],
+      ["shell metacharacters", propertyKey("debug.x;reboot"), ABSENT],
+      ["leading dash", propertyKey("-debug.x"), ABSENT],
+      ["an appId", propertyKey("debug.x", { appId: "com.example" }), ABSENT],
+      ["a different scope", propertyKey("debug.x", { scope: "sharedPreferences" }), ABSENT],
+      ["an unobservable prior", propertyKey("debug.x"), { state: "unobservable" } as const],
+      ["a multi-line prior", propertyKey("debug.x"), recorded("a\nb")],
+    ])("refuses %s", (_label, key, prior) => {
+      expect(port.canRevert(mutation("preference", key, prior))).toBe(false);
+    });
+  });
+
   test("removes a journaled mock provider and clears an originally empty clipboard", async () => {
     await port.revert(mutation("location", "provider:gps", ABSENT), context);
     await port.revert(mutation("clipboard", "device", present("")), context);

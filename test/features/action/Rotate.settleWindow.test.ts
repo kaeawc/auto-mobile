@@ -87,10 +87,7 @@ describe("Android rotation settle window", () => {
     });
     rotate = new Rotate(
       { name: "Test", platform: "android", deviceId: "test", source: "local" },
-      adb,
-      timer,
-      undefined,
-      { awaitIdle: idle, observeScreen: observe, window },
+      { adb, timer, collaborators: { awaitIdle: idle, observeScreen: observe, window } },
     );
   });
 
@@ -133,15 +130,17 @@ describe("Android rotation settle window", () => {
         });
         rotate = new Rotate(
           { name: "Test", platform: "android", deviceId: "test", source: "local" },
-          adb,
-          timer,
-          session
-            ? {
-                sessionRotation: async (mutation) =>
-                  mutation({ get: () => undefined, record: () => {}, clear: () => {} }),
-              }
-            : undefined,
-          { awaitIdle: idle, observeScreen: observe, window },
+          {
+            adb,
+            timer,
+            options: session
+              ? {
+                  sessionRotation: async (mutation) =>
+                    mutation({ get: () => undefined, record: () => {}, clear: () => {} }),
+                }
+              : undefined,
+            collaborators: { awaitIdle: idle, observeScreen: observe, window },
+          },
         );
         try {
           const result = await rotate.execute("landscape", { lockOrientation: true });
@@ -170,21 +169,23 @@ describe("Android rotation settle window", () => {
       let state: RotationRestoreState | undefined;
       rotate = new Rotate(
         { name: "Test", platform: "android", deviceId: "test", source: "local" },
-        adb,
-        timer,
         {
-          sessionRotation: async (mutation) =>
-            mutation({
-              get: () => state,
-              record: (original) => {
-                state = original;
-              },
-              clear: () => {
-                state = undefined;
-              },
-            }),
+          adb,
+          timer,
+          options: {
+            sessionRotation: async (mutation) =>
+              mutation({
+                get: () => state,
+                record: (original) => {
+                  state = original;
+                },
+                clear: () => {
+                  state = undefined;
+                },
+              }),
+          },
+          collaborators: { awaitIdle: idle, observeScreen: observe, window },
         },
-        { awaitIdle: idle, observeScreen: observe, window },
       );
       adb.setCommandResponse(
         "shell settings get secure device_state_rotation_lock",
@@ -356,13 +357,15 @@ describe("Android rotation settle window", () => {
   test("failed session lock leaves auto-rotate restoration to release", async () => {
     rotate = new Rotate(
       { name: "Test", platform: "android", deviceId: "test", source: "local" },
-      adb,
-      timer,
       {
-        sessionRotation: async (mutation) =>
-          mutation({ get: () => undefined, record: () => {}, clear: () => {} }),
+        adb,
+        timer,
+        options: {
+          sessionRotation: async (mutation) =>
+            mutation({ get: () => undefined, record: () => {}, clear: () => {} }),
+        },
+        collaborators: { awaitIdle: idle, observeScreen: observe, window },
       },
-      { awaitIdle: idle, observeScreen: observe, window },
     );
     spyOn(idle, "waitForRotation").mockRejectedValue(new Error("rotation wait failed"));
     const result = await rotate.execute("landscape", { lockOrientation: true });

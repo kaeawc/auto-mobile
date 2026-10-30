@@ -77,15 +77,32 @@ function assertAppBundle(artifactPath: string): void {
  * step runs, and every Android-only option is refused by name instead of being ignored.
  */
 export class WatchAppManager {
+  private readonly simctl: WatchAppsSimctl;
+  private readonly plist: WatchBundleIdReader;
+  /** The daemon chdirs at startup, so a relative path names the directory it was launched in. */
+  private readonly resolveArtifactPath: (artifactPath: string) => string;
+  private readonly dataWipe: WatchDataWipe;
+
   constructor(
     private readonly device: BootedDevice,
-    private readonly simctl: WatchAppsSimctl = new SimCtlClient(device),
-    private readonly plist: WatchBundleIdReader = new PlistClient(),
-    /** The daemon chdirs at startup, so a relative path names the directory it was launched in. */
-    private readonly resolveArtifactPath: (artifactPath: string) => string = (artifactPath) =>
-      resolvePathFromDaemonLaunchWorkingDirectory(artifactPath),
-    private readonly dataWipe: WatchDataWipe = {},
-  ) {}
+    {
+      simctl = new SimCtlClient(device),
+      plist = new PlistClient(),
+      resolveArtifactPath = (artifactPath) =>
+        resolvePathFromDaemonLaunchWorkingDirectory(artifactPath),
+      dataWipe = {},
+    }: {
+      simctl?: WatchAppsSimctl;
+      plist?: WatchBundleIdReader;
+      resolveArtifactPath?: (artifactPath: string) => string;
+      dataWipe?: WatchDataWipe;
+    } = {},
+  ) {
+    this.simctl = simctl;
+    this.plist = plist;
+    this.resolveArtifactPath = resolveArtifactPath;
+    this.dataWipe = dataWipe;
+  }
 
   async install(artifactPath: string, call: InstallAppCall = {}): Promise<InstallAppResult> {
     const unsupported = androidOnlyInstallOptions(call);

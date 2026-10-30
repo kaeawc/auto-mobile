@@ -21,8 +21,7 @@ describe("iOS observed rotation verification (#8778)", () => {
     const adb = new FakeAdbExecutor();
     const iosRotate = new Rotate(
       { deviceId: "ios-restore", name: "iPhone", platform: "ios" },
-      adb,
-      new FakeTimer(),
+      { adb, timer: new FakeTimer() },
     );
     await expect(iosRotate.getRestoreState()).rejects.toThrow(
       "iOS rotation restore state is unobservable",
@@ -70,7 +69,7 @@ describe("iOS observed rotation verification (#8778)", () => {
         runner.requestRotate(...args),
     });
     instanceSpy = spyOnIosClientInstance(client);
-    rotate = new Rotate(device, new FakeAdbExecutor(), timer);
+    rotate = new Rotate(device, { adb: new FakeAdbExecutor(), timer });
     Object.assign(rotate, {
       observeScreen: observe,
       awaitIdle: new FakeAwaitIdle(),

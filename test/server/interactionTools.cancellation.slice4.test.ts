@@ -284,7 +284,12 @@ test("physical iOS openLink forwards cancellation to devicectl", async () => {
   );
   restores.push(() => launch.mockRestore());
   interactionDeps.openUrlFactory = () =>
-    new UnobservedOpenURL(ios, new FakeAdbExecutor(), null, launcher, timer);
+    new UnobservedOpenURL(ios, {
+      adb: new FakeAdbExecutor(),
+      simctl: null,
+      devicectl: launcher,
+      timer,
+    });
   await expect(
     handler("openLink")(ios, { url: "https://example.com" }, undefined, controller.signal),
   ).rejects.toThrow("Operation cancelled");

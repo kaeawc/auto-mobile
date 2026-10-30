@@ -86,7 +86,7 @@ describe("registered interaction handlers honor cancellation", () => {
         }));
       interactionDeps.pressButtonFactory = () => new PressButton(device, adb, timer);
       interactionDeps.rotateFactory = () => {
-        const rotate = new Rotate(device, adb, timer);
+        const rotate = new Rotate(device, { adb, timer });
         rotate.awaitIdle = new AwaitIdle(device, { create: () => adb }, timer);
         return rotate;
       };
@@ -191,7 +191,7 @@ describe("registered interaction handlers honor cancellation", () => {
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",
     ).mockResolvedValue({ success: false, totalTimeMs: 0 });
-    const rotate = new Rotate(device, adb, timer);
+    const rotate = new Rotate(device, { adb, timer });
     rotate.awaitIdle = new AwaitIdle(device, { create: () => adb }, timer);
     interactionDeps.rotateFactory = () => rotate;
     const observed = bypassObservation();
@@ -280,7 +280,7 @@ describe("registered interaction handlers honor cancellation", () => {
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",
     ).mockResolvedValue({ success: false, totalTimeMs: 0 });
-    interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
+    interactionDeps.rotateFactory = () => new Rotate(device, { adb, timer });
     const observed = bypassObservation();
     try {
       await expect(
@@ -317,7 +317,7 @@ describe("registered interaction handlers honor cancellation", () => {
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",
     ).mockResolvedValue({ success: false, totalTimeMs: 0 });
-    interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
+    interactionDeps.rotateFactory = () => new Rotate(device, { adb, timer });
     const observed = bypassObservation();
     try {
       await expect(
@@ -355,7 +355,7 @@ describe("registered interaction handlers honor cancellation", () => {
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
       ).mockResolvedValue({ success: false, totalTimeMs: 0 });
-      interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
+      interactionDeps.rotateFactory = () => new Rotate(device, { adb, timer });
       const observed = bypassObservation();
       try {
         await expect(
@@ -418,7 +418,7 @@ describe("registered interaction handlers honor cancellation", () => {
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
       ).mockResolvedValue({ success: false, totalTimeMs: 0 });
-      const rotate = new Rotate(device, adb, timer);
+      const rotate = new Rotate(device, { adb, timer });
       rotate.awaitIdle = new FakeAwaitIdle();
       interactionDeps.rotateFactory = () => rotate;
       const observed = bypassObservation();
@@ -489,7 +489,7 @@ describe("registered interaction handlers honor cancellation", () => {
         restoreStarted.resolve();
         return { success: true, totalTimeMs: 0 };
       });
-      interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
+      interactionDeps.rotateFactory = () => new Rotate(device, { adb, timer });
       const observed = bypassObservation();
       try {
         const pending = handler("rotate")(
@@ -568,7 +568,7 @@ describe("registered interaction handlers honor cancellation", () => {
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
       ).mockResolvedValue({ success: false, totalTimeMs: 0 });
-      interactionDeps.rotateFactory = () => new Rotate(device, adb, timer);
+      interactionDeps.rotateFactory = () => new Rotate(device, { adb, timer });
       const observed = bypassObservation();
       try {
         const pending = handler("rotate")(
@@ -616,7 +616,7 @@ describe("registered interaction handlers honor cancellation", () => {
       }
       return { success: false, totalTimeMs: 0 };
     });
-    const rotate = new Rotate(device, adb, timer);
+    const rotate = new Rotate(device, { adb, timer });
     rotate.awaitIdle = new FakeAwaitIdle();
     interactionDeps.rotateFactory = () => rotate;
     const observed = bypassObservation();

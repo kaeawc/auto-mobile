@@ -221,7 +221,8 @@ describe("explicit-display pre-dispatch read", () => {
     async (key) => {
       const observe = new CountingObserveScreen();
       observe.setObserveResult(screen(key));
-      await prepareTargetDisplayAction(device, key, observe, adb(), {
+      await prepareTargetDisplayAction(device, key, observe, {
+        adb: adb(),
         lastRenderedObservation: rendered(key),
       });
       expect(observe.captures).toEqual([]);
@@ -282,7 +283,8 @@ describe("explicit-display pre-dispatch read", () => {
         timer,
       );
       try {
-        const prepared = await prepareTargetDisplayAction(target, key, screen, adb(), {
+        const prepared = await prepareTargetDisplayAction(target, key, screen, {
+          adb: adb(),
           lastRenderedObservation: rendered(key),
         });
         expect(prepared.observation.display.key).toBe(key);

@@ -95,7 +95,7 @@ describe("openLink does not let a URL escape the Android device shell (issue #42
 
   test.each(hostileUrls)("android argv: %s", async (_label, url, quoted) => {
     const fakeAdb = new FakeAdbExecutor();
-    const openURL = new OpenURL(ANDROID_DEVICE, fakeAdb);
+    const openURL = new OpenURL(ANDROID_DEVICE, { adb: fakeAdb });
 
     const result = await openURL.execute(url);
 
@@ -114,7 +114,7 @@ describe("openLink does not let a URL escape the Android device shell (issue #42
     // i.e. a second shell command (`id`) executed on the device.
     const payload = 'https://x/" ; id ; echo "';
 
-    await new OpenURL(ANDROID_DEVICE, fakeAdb).execute(payload);
+    await new OpenURL(ANDROID_DEVICE, { adb: fakeAdb }).execute(payload);
 
     const [argv] = fakeAdb.getExecutedArgv();
     const shellCommand = argv[1];
@@ -147,12 +147,11 @@ describe("openLink passes the URL to simctl as its own argv element (issue #4213
 
   test.each(hostileUrls)("ios simulator argv: %s", async (_label, url) => {
     const simctl = new FakeSimctl();
-    const openURL = new OpenURL(
-      iosSimulator,
-      new FakeAdbExecutor(),
+    const openURL = new OpenURL(iosSimulator, {
+      adb: new FakeAdbExecutor(),
       simctl,
-      new FakeDeviceUrlLauncher(),
-    );
+      devicectl: new FakeDeviceUrlLauncher(),
+    });
 
     const result = await openURL.execute(url);
 

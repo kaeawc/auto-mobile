@@ -121,33 +121,11 @@ export class UninstallApp {
   /**
    * Uninstall an app - routes to platform-specific implementation
    * @param packageName - The package name or bundle identifier to uninstall
-   * @param keepData - Whether to keep app data (Android only, ignored on iOS)
-   * @param userId - Optional Android user ID (auto-detected if not provided)
+   * @param call - `keepData` (Android only, ignored on iOS), optional Android `userId`
+   *   (auto-detected if not provided), cancellation `signal`, and uninstall `guard`
    */
-  async execute(packageName: string, call?: UninstallAppCall): Promise<UninstallAppResult>;
-  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
-  async execute(
-    packageName: string,
-    keepData?: boolean,
-    userId?: number,
-    signal?: AbortSignal,
-    guard?: UninstallGuardOptions,
-  ): Promise<UninstallAppResult>;
-  async execute(
-    packageName: string,
-    keepDataOrCall?: boolean | UninstallAppCall,
-    userIdArg?: number,
-    signalArg?: AbortSignal,
-    guardArg?: UninstallGuardOptions,
-  ): Promise<UninstallAppResult> {
-    const {
-      keepData = false,
-      userId,
-      signal,
-      guard,
-    } = typeof keepDataOrCall === "object"
-      ? keepDataOrCall
-      : { keepData: keepDataOrCall, userId: userIdArg, signal: signalArg, guard: guardArg };
+  async execute(packageName: string, call: UninstallAppCall = {}): Promise<UninstallAppResult> {
+    const { keepData = false, userId, signal, guard } = call;
     const nested = hasAmbientPerfTracker();
     const perf = nested ? getPerfTracker() : this.createPerformanceTracker();
     const result = await runWithNestedPerfTracker(perf, () =>

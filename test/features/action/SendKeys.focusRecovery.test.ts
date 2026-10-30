@@ -286,7 +286,7 @@ describe("sendKeys selector focus recovery", () => {
         expect((await action.execute(commands, selector, { display })).error).toBe(
           `${missing.error} ${hint}`,
         );
-        expect(tap.mock.calls[0][3]).toEqual({ throwOnKeyboardOcclusion: true });
+        expect(tap.mock.calls[0][1]?.recovery).toEqual({ throwOnKeyboardOcclusion: true });
         expect(tap).toHaveBeenCalledTimes(1);
       } finally {
         tap.mockRestore();

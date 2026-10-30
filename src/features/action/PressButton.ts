@@ -840,7 +840,11 @@ export class PressButton extends BaseVisualChange {
         ) {
           if (!this.holdRequest) {
             await awaitWhileRequestIsLive(
-              new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation({
+              new HomeScreen(this.device, {
+                adb: null,
+                timer: this.timer,
+                simctl: this.simctl,
+              }).executeIosHomeNavigation({
                 frameContext,
                 timeoutMs,
                 signal,
@@ -868,7 +872,11 @@ export class PressButton extends BaseVisualChange {
           };
           try {
             // Verification uses the caller signal; only the launch wait is fenced.
-            await new HomeScreen(this.device, null, this.timer, simctl).executeIosHomeNavigation({
+            await new HomeScreen(this.device, {
+              adb: null,
+              timer: this.timer,
+              simctl,
+            }).executeIosHomeNavigation({
               frameContext,
               timeoutMs,
               signal,

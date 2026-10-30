@@ -52,7 +52,12 @@ describe("Clipboard iOS paste into an empty field (#9078)", () => {
     hierarchy = new FakeKeyboardHierarchyProvider();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
-    clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => proxy, hierarchy, timer);
+    clipboard = new Clipboard(device, {
+      adbFactory: new FakeAdbClientFactory(),
+      ctrlProxyFactory: () => proxy,
+      hierarchyProvider: hierarchy,
+      timer,
+    });
   });
 
   test("the captured empty field has no readable value by default but an empty baseline for paste", () => {

@@ -598,7 +598,8 @@ test("explicit-display helper throws an indeterminate ActionableError after disp
     supportsDisplay: true,
     display: "external",
   });
-  const target = await prepareTargetDisplayAction(device, "external", observe, adb, {
+  const target = await prepareTargetDisplayAction(device, "external", observe, {
+    adb,
     lastRenderedObservation: () => observation,
   });
   drag.mockImplementation(async (request) => {

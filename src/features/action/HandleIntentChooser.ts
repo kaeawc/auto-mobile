@@ -16,17 +16,24 @@ export class HandleIntentChooser extends BaseVisualChange {
   /**
    * Create an TerminateApp instance
    * @param device - Optional device
-   * @param adb - Optional AdbExecutor instance for testing
+   * @param options - Optional AdbExecutor, DeepLinkManager factory, Timer and collaborators for testing
    */
   constructor(
     device: BootedDevice,
-    adb: AdbExecutor | null = null,
-    deepLinkManagerFactory: (
-      signal?: AbortSignal,
-    ) => Pick<DeepLinkManager, "handleIntentChooser"> = (signal) =>
-      new DeepLinkManager(device, undefined, { timer, chooserSignal: signal }),
-    timer: Timer = defaultTimer,
-    collaborators: DisplayFenceDependencies = {},
+    {
+      adb = null,
+      deepLinkManagerFactory = (signal) =>
+        new DeepLinkManager(device, undefined, { timer, chooserSignal: signal }),
+      timer = defaultTimer,
+      collaborators = {},
+    }: {
+      adb?: AdbExecutor | null;
+      deepLinkManagerFactory?: (
+        signal?: AbortSignal,
+      ) => Pick<DeepLinkManager, "handleIntentChooser">;
+      timer?: Timer;
+      collaborators?: DisplayFenceDependencies;
+    } = {},
   ) {
     super(device, adb, timer, undefined, collaborators);
     this.device = device;

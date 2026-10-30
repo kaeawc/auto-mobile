@@ -126,10 +126,17 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   constructor(
     repository?: NavigationRepository,
-    testCoverageRepository?: TestCoverageRepository,
-    timer: Timer = defaultTimer,
-    sessionUuid: string | null = null,
-    writeTimeoutMs: number = NAVIGATION_WRITE_TIMEOUT_MS,
+    {
+      testCoverageRepository,
+      timer = defaultTimer,
+      sessionUuid = null,
+      writeTimeoutMs = NAVIGATION_WRITE_TIMEOUT_MS,
+    }: {
+      testCoverageRepository?: TestCoverageRepository;
+      timer?: Timer;
+      sessionUuid?: string | null;
+      writeTimeoutMs?: number;
+    } = {},
   ) {
     this.repository = repository ?? new NavigationRepository();
     this.testCoverageRepository = testCoverageRepository ?? new TestCoverageRepository();
@@ -141,8 +148,8 @@ export class NavigationGraphManager implements NavigationGraphService {
       this.repository,
       this.testCoverageRepository,
       this.timer,
-      this.recordingState,
       {
+        state: this.recordingState,
         navigationWriteState: this.navigationWriteState,
         context: {
           setCurrentApp: (appId, epoch, options) =>
@@ -268,7 +275,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       if (NavigationGraphManager.releasedSessions.has(sessionId)) {
         return NavigationGraphManager.getInstance();
       }
-      instance = new NavigationGraphManager(undefined, undefined, undefined, sessionId);
+      instance = new NavigationGraphManager(undefined, { sessionUuid: sessionId });
       // Attach the resource-layer notify callback so session-scoped writes refresh
       // the navigation resources, not only writes on the global instance (#4932).
       NavigationGraphManager.attachSessionGraphUpdateListener(sessionId, instance);
@@ -388,18 +395,24 @@ export class NavigationGraphManager implements NavigationGraphService {
    */
   public static createForTesting(
     repository?: NavigationRepository,
-    testCoverageRepository?: TestCoverageRepository,
-    timer?: Timer,
-    sessionUuid?: string,
-    writeTimeoutMs?: number,
-  ): NavigationGraphManager {
-    return new NavigationGraphManager(
-      repository,
+    {
       testCoverageRepository,
       timer,
-      sessionUuid ?? null,
+      sessionUuid,
       writeTimeoutMs,
-    );
+    }: {
+      testCoverageRepository?: TestCoverageRepository;
+      timer?: Timer;
+      sessionUuid?: string;
+      writeTimeoutMs?: number;
+    } = {},
+  ): NavigationGraphManager {
+    return new NavigationGraphManager(repository, {
+      testCoverageRepository,
+      timer,
+      sessionUuid: sessionUuid ?? null,
+      writeTimeoutMs,
+    });
   }
 
   /**
@@ -953,7 +966,7 @@ export class NavigationGraphManager implements NavigationGraphService {
         fingerprint.app_id === appId &&
         (await repository.transferSuggestionObservations(suggestionId, node.id));
       if (!transferred) {
-        await recordNodeProvenance(repository, appId, node.id, timestamp, provenance);
+        await recordNodeProvenance(repository, appId, node.id, { timestamp, provenance });
       }
 
       // #4931: touch navigation_apps.updated_at atomically with the promotion.

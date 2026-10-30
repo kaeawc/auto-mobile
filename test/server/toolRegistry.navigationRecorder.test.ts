@@ -62,8 +62,7 @@ describe("navigation recorder handler outcomes", () => {
     timer = new FakeTimer();
     harness.manager = NavigationGraphManager.createForTesting(
       new NavigationRepository(harness.db),
-      new TestCoverageRepository(harness.db),
-      timer,
+      { testCoverageRepository: new TestCoverageRepository(harness.db), timer },
     );
     NavigationGraphManager.setInstanceForTesting(harness.manager);
     registry = new ToolRegistryClass(timer);
@@ -325,9 +324,11 @@ describe("navigation recorder handler outcomes", () => {
     const sessionDb = await createTestDatabase();
     const sessionManager = NavigationGraphManager.createForTesting(
       new NavigationRepository(sessionDb),
-      new TestCoverageRepository(sessionDb),
-      timer,
-      sessionId,
+      {
+        testCoverageRepository: new TestCoverageRepository(sessionDb),
+        timer,
+        sessionUuid: sessionId,
+      },
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionManager);
     // The execution target names the session the call ran under, as a real session-bound call does.

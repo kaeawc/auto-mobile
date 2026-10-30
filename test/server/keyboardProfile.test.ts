@@ -307,9 +307,11 @@ describe("keyboard setProfile in a daemon session (#14705)", () => {
 
   test("an acquisition-time manufacturer-profile write is restored by the same release path", async () => {
     await manager.createSession("session-1", androidDevice.deviceId, "android");
-    await setKeyboardProfileRecorded(androidDevice, "samsung", proxy, undefined, {
-      owner: "session-1",
-      registry,
+    await setKeyboardProfileRecorded(androidDevice, "samsung", proxy, {
+      record: {
+        owner: "session-1",
+        registry,
+      },
     });
     expect(proxy.active).toBe("samsung");
 

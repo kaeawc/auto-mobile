@@ -74,7 +74,7 @@ export abstract class AndroidCtrlProxyObservationClient extends AndroidCtrlProxy
           const appId = info.packageName;
           const screenName = `screen_${info.screenFingerprint.substring(0, 12)}`;
           NavigationScreenshotManager.getInstance()
-            .captureAndStore(this.device, this.adb, appId, screenName)
+            .captureAndStore(this.device, this.adb, appId, { screenName })
             .then((screenshotPath) => {
               if (screenshotPath) {
                 this.getNavigationGraphManager()

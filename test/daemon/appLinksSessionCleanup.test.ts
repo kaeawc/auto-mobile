@@ -26,7 +26,7 @@ describe("registerAppLinksSessionCleanup (#14110)", () => {
       verification: new Map([["shop.example.com", "verified"]]),
       user: { userId: 0, domains: ["shop.example.com", "promo.example.net"], enabled: [] },
     };
-    registry.record(device, PKG, before, { verification: true, userId: 0 }, "s1");
+    registry.record(device, PKG, before, { scope: { verification: true, userId: 0 }, owner: "s1" });
   });
 
   test("release restores the session's recorded state as pending device cleanup", async () => {

@@ -45,11 +45,10 @@ describe("navigation recording source state and routing", () => {
     await repository.clearAppGraph(APP);
     timer = new FakeTimer();
     timer.setCurrentTime(100_000);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository(harness.db),
       timer,
-    );
+    });
     NavigationGraphManager.setInstanceForTesting(manager);
     await navigate("Home");
   });
@@ -103,11 +102,10 @@ describe("navigation recording source state and routing", () => {
 
   for (const knownApp of [false, true]) {
     test(`unknown start screen preserves selections on dispatch, known app=${knownApp}`, async () => {
-      manager = NavigationGraphManager.createForTesting(
-        repository,
-        new TestCoverageRepository(harness.db),
+      manager = NavigationGraphManager.createForTesting(repository, {
+        testCoverageRepository: new TestCoverageRepository(harness.db),
         timer,
-      );
+      });
       if (knownApp) {
         await manager.setCurrentApp(APP);
       }

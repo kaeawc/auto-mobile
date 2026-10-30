@@ -84,11 +84,10 @@ describe("NavigateTo replay through navigation recording", () => {
     await repository.clearAppGraph(APP);
     timer = new FakeTimer();
     timer.setCurrentTime(100_000);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository(harness.db),
       timer,
-    );
+    });
     NavigationGraphManager.setInstanceForTesting(manager);
     dispatchedArgs = [];
     await navigate("HomeDestination");

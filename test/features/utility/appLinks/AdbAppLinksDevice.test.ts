@@ -64,7 +64,7 @@ describe("AdbAppLinksDevice (#14110)", () => {
     const device = new AdbAppLinksDevice(adb);
     await device.setVerificationState(PKG, "approved", ["shop.example.com", "*.example.com"]);
     await device.setVerificationState(PKG, "none", "all");
-    await device.setUserSelection(PKG, 10, false, "all");
+    await device.setUserSelection(PKG, 10, false, { domains: "all" });
     await device.reverify(PKG);
     expect(adb.getExecutedCommands()).toEqual([
       "shell pm set-app-links --package 'com.example.shop' 2 'shop.example.com' '*.example.com'",

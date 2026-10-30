@@ -149,8 +149,13 @@ export function setKeyboardProfileRecorded(
   device: BootedDevice,
   profile: KeyboardProfileId,
   client: KeyboardProfileWriteClient | undefined,
-  signal: AbortSignal | undefined,
-  record: { owner?: string; registry?: KeyboardProfileRestoreRegistry } = {},
+  {
+    signal,
+    record = {},
+  }: {
+    signal?: AbortSignal;
+    record?: { owner?: string; registry?: KeyboardProfileRestoreRegistry };
+  } = {},
 ): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
   const registry = record.registry ?? defaultKeyboardProfileRestoreRegistry;
   return setKeyboardProfile(device, profile, {

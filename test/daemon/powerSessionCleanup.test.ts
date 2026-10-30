@@ -30,12 +30,14 @@ function setup() {
     () => ({ name: "emu", platform: "android", deviceId: DEVICE }),
     () => new FakeAdbClientFactory(adb),
     () => defaultDeviceTraits,
-    () => timer,
     {
-      clientFactory: options.clientFactory,
-      registry,
-      target: async () => ({ isEmulator: true, sdk: 34 }),
-      mutation: (run) => run("s-1"),
+      timer: () => timer,
+      seams: {
+        clientFactory: options.clientFactory,
+        registry,
+        target: async () => ({ isEmulator: true, sdk: 34 }),
+        mutation: (run) => run("s-1"),
+      },
     },
   );
   const mutating = () =>
@@ -381,17 +383,19 @@ describe("createSessionPowerMutation", () => {
       () => ({ name: "emu", platform: "android", deviceId: DEVICE }),
       () => new FakeAdbClientFactory(adb),
       () => defaultDeviceTraits,
-      () => timer,
       {
-        clientFactory: options.clientFactory,
-        registry,
-        target: async () => ({ isEmulator: true, sdk: 34 }),
-        mutation: (run) =>
-          late(async (owner) => {
-            const state = await run(owner);
-            live.value = false;
-            return state;
-          }),
+        timer: () => timer,
+        seams: {
+          clientFactory: options.clientFactory,
+          registry,
+          target: async () => ({ isEmulator: true, sdk: 34 }),
+          mutation: (run) =>
+            late(async (owner) => {
+              const state = await run(owner);
+              live.value = false;
+              return state;
+            }),
+        },
       },
     );
     const state = await lateOps.write({ dataSaver: true });

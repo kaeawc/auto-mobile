@@ -389,7 +389,12 @@ test("openLink chooser cancels during handler metadata resolution before any cho
         expect(signal).toBe(controller.signal);
         const manager = new DeepLinkManager(device, adb, {
           chooserMetadata: {
-            getActivityLabel: async (_device, _package, _url, _adb, metadataSignal) => {
+            getActivityLabel: async (
+              _device,
+              _package,
+              _url,
+              { adb: _adb, signal: metadataSignal },
+            ) => {
               expect(metadataSignal).toBe(signal);
               controller.abort();
               return { kind: "none" };

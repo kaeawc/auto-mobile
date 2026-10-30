@@ -307,13 +307,10 @@ export function registerNavigationTools({
               );
         }
       }
-      const explore = new Explore(
-        device,
-        null,
-        undefined,
-        navigationManagerFactory(args.sessionUuid),
-        { sessionUuid: args.sessionUuid },
-      );
+      const explore = new Explore(device, null, undefined, {
+        navigationManager: navigationManagerFactory(args.sessionUuid),
+        sessionUuid: args.sessionUuid,
+      });
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
         timeoutMs: args.timeoutMs,

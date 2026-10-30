@@ -417,8 +417,7 @@ export async function handlePermissionDialog(
   elements: Element[],
   viewHierarchy: ViewHierarchyResult,
   device: BootedDevice,
-  adb: AdbExecutor | null,
-  options: BlockerHandlerOptions = {},
+  { adb, options = {} }: { adb: AdbExecutor | null; options?: BlockerHandlerOptions },
 ): Promise<boolean> {
   const { progress } = options;
   const tapActionFactory = options.tapActionFactory ?? defaultTapActionFactory;
@@ -465,8 +464,7 @@ async function dismissDialog(
   elements: Element[],
   viewHierarchy: ViewHierarchyResult,
   device: BootedDevice,
-  adb: AdbExecutor | null,
-  options: BlockerHandlerOptions = {},
+  { adb, options = {} }: { adb: AdbExecutor | null; options?: BlockerHandlerOptions },
 ): Promise<boolean> {
   const { progress } = options;
   const tapActionFactory = options.tapActionFactory ?? defaultTapActionFactory;
@@ -509,8 +507,10 @@ export async function detectAndHandleBlockers(
   observation: ObserveResult,
   device: BootedDevice,
   adb: AdbExecutor | null,
-  elementParser: ElementParser,
-  options: BlockerHandlerOptions = {},
+  {
+    elementParser,
+    options = {},
+  }: { elementParser: ElementParser; options?: BlockerHandlerOptions },
 ): Promise<boolean> {
   const viewHierarchy = observation.viewHierarchy;
   if (!viewHierarchy || viewHierarchy.hierarchy.error) {
@@ -523,7 +523,7 @@ export async function detectAndHandleBlockers(
   // Check for permission dialogs
   if (isPermissionDialog(elements)) {
     logger.info("[Explore] Detected permission dialog, attempting to dismiss");
-    return await handlePermissionDialog(elements, viewHierarchy, device, adb, options);
+    return await handlePermissionDialog(elements, viewHierarchy, device, { adb, options });
   }
 
   // Check for login/signup screens
@@ -537,7 +537,7 @@ export async function detectAndHandleBlockers(
   // Check for app rating/review dialogs
   if (isRatingDialog(elements)) {
     logger.info("[Explore] Detected rating dialog, attempting to dismiss");
-    return await dismissDialog(elements, viewHierarchy, device, adb, options);
+    return await dismissDialog(elements, viewHierarchy, device, { adb, options });
   }
 
   return false;

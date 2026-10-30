@@ -52,7 +52,8 @@ test.each([undefined, "frame-1"])(
     try {
       const result = await handler.handleInputKey(keyRequest(frameContext));
 
-      expect(press).toHaveBeenCalledWith("enter", 1234, frameContext, [], {
+      expect(press).toHaveBeenCalledWith("enter", 1234, frameContext, {
+        modifiers: [],
         signal: expect.any(AbortSignal),
         onDispatch: expect.any(Function),
       });

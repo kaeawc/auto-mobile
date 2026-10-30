@@ -230,7 +230,7 @@ export function createSendKeysHarness(
     supportsImeInsertedText: async () => true,
     supportsKeyboardProfiles: async () => true,
     setKeyboardProfile: async () => ({ success: true, previousProfileId: "direct" }),
-    commitViaIme: async (text, _prior, _signal, delivery) => {
+    commitViaIme: async (text, _prior, _signal, { delivery } = {}) => {
       if (delivery === "clearField") {
         clientCalls.push("clearField");
         return { success: true };

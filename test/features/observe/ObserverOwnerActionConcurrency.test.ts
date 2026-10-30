@@ -176,8 +176,7 @@ test.each(ownerCommands)(
                     "enter",
                     undefined,
                     undefined,
-                    [],
-                    { signal: owner.signal },
+                    { modifiers: [], signal: owner.signal },
                   )
                 : adb.executeCommand(command, { signal: owner.signal });
       await adb.started;

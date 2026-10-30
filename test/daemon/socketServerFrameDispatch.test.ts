@@ -67,8 +67,8 @@ test.each(["returned failure", "thrown cancellation"])(
     const fakePress = new PressButton(device, adb, timer);
     // The parent returned this typed failure; the committed cancellation slice throws.
     const press = spyOn(PressButton.prototype, "press").mockImplementation(
-      async (button, timeout, frame, signal): Promise<PressButtonResult> => {
-        expect(signal).toBe(controller.signal);
+      async (button, options = {}): Promise<PressButtonResult> => {
+        expect(options.signal).toBe(controller.signal);
         if (contract === "returned failure") {
           return {
             success: false,
@@ -77,7 +77,7 @@ test.each(["returned failure", "thrown cancellation"])(
             error: "Failed to press button: Operation cancelled",
           };
         }
-        return realPress.call(fakePress, button, timeout, frame, signal);
+        return realPress.call(fakePress, button, options);
       },
     );
     const socket = new FakeSocket();

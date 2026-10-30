@@ -52,7 +52,10 @@ describe("clearTextWithKeyEvents", () => {
     async (count) => {
       const adb = new FakeAdbExecutor();
       let completedDeletes = 0;
-      await clearTextWithKeyEvents(adb, count, undefined, () => completedDeletes++, true);
+      await clearTextWithKeyEvents(adb, count, {
+        onDelete: () => completedDeletes++,
+        supportsKeyCombination: true,
+      });
       expect(adb.getExecutedCommands()).toEqual([
         "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
         "shell input keyevent KEYCODE_DEL",
@@ -72,7 +75,11 @@ describe("clearTextWithKeyEvents", () => {
       let completedDeletes = 0;
 
       await expect(
-        clearTextWithKeyEvents(adb, 51, controller.signal, () => completedDeletes++, true),
+        clearTextWithKeyEvents(adb, 51, {
+          signal: controller.signal,
+          onDelete: () => completedDeletes++,
+          supportsKeyCombination: true,
+        }),
       ).rejects.toMatchObject({ name: "AbortError" });
       expect(adb.getExecutedCommands()).toEqual(step === "select" ? [select] : [select, del]);
       expect(completedDeletes).toBe(step === "select" ? 0 : 1);
@@ -90,7 +97,10 @@ describe("clearTextWithKeyEvents", () => {
       let completedDeletes = 0;
 
       await expect(
-        clearTextWithKeyEvents(adb, 51, undefined, () => completedDeletes++, true),
+        clearTextWithKeyEvents(adb, 51, {
+          onDelete: () => completedDeletes++,
+          supportsKeyCombination: true,
+        }),
       ).rejects.toBe(error);
       expect(adb.getExecutedCommands()).toEqual(step === "select" ? [select] : [select, del]);
       expect(completedDeletes).toBe(0);
@@ -123,8 +133,11 @@ describe("clearTextWithKeyEvents", () => {
     };
 
     await expect(
-      clearTextWithKeyEvents(adb, DELETE_KEYEVENT_CHUNK_SIZE + 1, controller.signal, () => {
-        completedChunks.push(1);
+      clearTextWithKeyEvents(adb, DELETE_KEYEVENT_CHUNK_SIZE + 1, {
+        signal: controller.signal,
+        onDelete: () => {
+          completedChunks.push(1);
+        },
       }),
     ).rejects.toMatchObject({ name: "AbortError" });
 
@@ -140,7 +153,9 @@ describe("clearTextWithKeyEvents", () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(clearTextWithKeyEvents(adb, 1, controller.signal)).rejects.toMatchObject({
+    await expect(
+      clearTextWithKeyEvents(adb, 1, { signal: controller.signal }),
+    ).rejects.toMatchObject({
       name: "AbortError",
     });
 
@@ -151,12 +166,9 @@ describe("clearTextWithKeyEvents", () => {
     const adb = new FakeAdbExecutor();
     let completedChunks = 0;
 
-    await clearTextWithKeyEvents(
-      adb,
-      DELETE_KEYEVENT_CHUNK_SIZE * 2 + 1,
-      undefined,
-      () => completedChunks++,
-    );
+    await clearTextWithKeyEvents(adb, DELETE_KEYEVENT_CHUNK_SIZE * 2 + 1, {
+      onDelete: () => completedChunks++,
+    });
 
     expect(completedChunks).toBe(3);
   });
@@ -417,7 +429,10 @@ describe("ClearText Android ADB fallback", () => {
     const controller = new AbortController();
     const reason = new Error("cancel deletes");
     await expect(
-      clearTextWithKeyEvents(fakeAdb, 20, controller.signal, () => controller.abort(reason)),
+      clearTextWithKeyEvents(fakeAdb, 20, {
+        signal: controller.signal,
+        onDelete: () => controller.abort(reason),
+      }),
     ).rejects.toBe(reason);
     expect(fakeAdb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",

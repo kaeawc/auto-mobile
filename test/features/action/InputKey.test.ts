@@ -50,7 +50,8 @@ describe("InputKey", () => {
         },
       };
       const key = new InputKey(androidDevice, createAdbFactory(adb), validator, timer);
-      const pending = key.press("enter", 500, "frame", ["ctrl"], {
+      const pending = key.press("enter", 500, "frame", {
+        modifiers: ["ctrl"],
         signal: controller.signal,
         onDispatch: () => {
           expect(adb.getExecutedArgv()).toEqual([]);
@@ -89,7 +90,8 @@ describe("InputKey", () => {
         undefined,
         new FakeTimer(),
       );
-      const result = inputKey.press("enter", 500, undefined, [], {
+      const result = inputKey.press("enter", 500, undefined, {
+        modifiers: [],
         signal: controller.signal,
         onDispatch,
       });
@@ -130,7 +132,8 @@ describe("InputKey", () => {
         undefined,
         new FakeTimer(),
       );
-      const result = inputKey.press("enter", 500, undefined, [], {
+      const result = inputKey.press("enter", 500, undefined, {
+        modifiers: [],
         signal: controller.signal,
         onDispatch,
       });
@@ -166,7 +169,11 @@ describe("InputKey", () => {
       );
 
       await expect(
-        inputKey.press("enter", 500, "frame-1", [], { signal: controller.signal, onDispatch }),
+        inputKey.press("enter", 500, "frame-1", {
+          modifiers: [],
+          signal: controller.signal,
+          onDispatch,
+        }),
       ).rejects.toThrow("Operation cancelled");
       expect(onDispatch).not.toHaveBeenCalled();
       expect(fakeAdb.getExecutedCommands()).toEqual([]);
@@ -184,7 +191,10 @@ describe("InputKey", () => {
       new FakeTimer(),
     );
 
-    const result = inputKey.press("enter", 500, undefined, [], { signal: controller.signal });
+    const result = inputKey.press("enter", 500, undefined, {
+      modifiers: [],
+      signal: controller.signal,
+    });
     await expect(result).rejects.toThrow("Key outcome is indeterminate");
     await expect(result).rejects.toThrow("Do not retry automatically");
     await expect(result).rejects.not.toThrow("no result was confirmed");
@@ -207,7 +217,7 @@ describe("InputKey", () => {
     );
 
     await expect(
-      inputKey.press("enter", 500, undefined, [], { signal: controller.signal }),
+      inputKey.press("enter", 500, undefined, { modifiers: [], signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
     expect(execute).toHaveBeenCalledTimes(1);
   });
@@ -378,7 +388,7 @@ describe("InputKey", () => {
     fakeAdb.setAndroidApiLevel(31);
     const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
 
-    const result = await inputKey.press("tab", 500, undefined, ["shift", "ctrl"]);
+    const result = await inputKey.press("tab", 500, undefined, { modifiers: ["shift", "ctrl"] });
 
     expect(result.success).toBe(true);
     expect(fakeAdb.getExecutedCommands()).toEqual([
@@ -391,7 +401,7 @@ describe("InputKey", () => {
     fakeAdb.setAndroidApiLevel(30);
     const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb));
 
-    const result = await inputKey.press("tab", 500, undefined, ["shift"]);
+    const result = await inputKey.press("tab", 500, undefined, { modifiers: ["shift"] });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Android API 31+");
@@ -536,7 +546,8 @@ describe("InputKey", () => {
       new FakeTimer(),
     );
 
-    const result = await inputKey.press("tab", 500, undefined, [], {
+    const result = await inputKey.press("tab", 500, undefined, {
+      modifiers: [],
       signal: new AbortController().signal,
       onDispatch,
     });
@@ -565,7 +576,10 @@ describe("InputKey", () => {
       new FakeTimer(),
     );
 
-    const result = inputKey.press("tab", 500, undefined, [], { signal: controller.signal });
+    const result = inputKey.press("tab", 500, undefined, {
+      modifiers: [],
+      signal: controller.signal,
+    });
     await expect(result).rejects.toThrow("Operation cancelled");
     await expect(result).rejects.not.toThrow("Key outcome is indeterminate");
   });
@@ -608,7 +622,7 @@ describe("InputKey", () => {
       () => ({ requestPressKey }),
     );
 
-    const result = await inputKey.press("enter", 500, undefined, ["meta"]);
+    const result = await inputKey.press("enter", 500, undefined, { modifiers: ["meta"] });
 
     expect(result).toEqual({
       success: true,

@@ -45,7 +45,7 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
       { getDeadlineMs: () => undefined, textState: state },
       async () =>
         await (path === "InputText"
-          ? input.testHooks.executeKeyEventPlan(plan, undefined, true, undefined, controller.signal)
+          ? input.testHooks.executeKeyEventPlan(plan, { noRetry: true, signal: controller.signal })
           : path === "SendKeys plan"
             ? executor.testHooks.executeKeyEventPlan(plan, controller.signal)
             : executor.type({ action: "type", text: "abcd", mode: "eventAll" }, controller.signal)),

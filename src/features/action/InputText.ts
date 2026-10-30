@@ -69,6 +69,28 @@ export type AppendKeyEventValidator = (
   timeoutMs?: number,
 ) => Promise<{ success: boolean; error?: string; failureSource?: AppendTextFailureSource }>;
 
+/** Bounds and hooks for {@link InputText.appendText}. */
+export interface AppendTextOptions {
+  timeoutMs?: number;
+  beforeKeyEvents?: AppendKeyEventValidator;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
+interface AndroidTextInputOptions {
+  imeAction?: ImeAction;
+  dismissKeyboard?: boolean;
+  mode?: InputTextMode;
+  signal?: AbortSignal;
+}
+
+interface KeyEventPlanOptions {
+  timeoutMs?: number;
+  noRetry?: boolean;
+  beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>;
+  signal?: AbortSignal;
+}
+
 interface KeyboardCloser {
   close(signal?: AbortSignal): Promise<KeyboardResult>;
 }
@@ -91,18 +113,9 @@ type KeyboardDismissalOutcome = Pick<SendTextResult, "keyboardDismissed" | "warn
 export interface InputTextTestHooks {
   executeAndroidTextInput: (
     text: string,
-    imeAction?: ImeAction,
-    dismissKeyboard?: boolean,
-    mode?: InputTextMode,
-    signal?: AbortSignal,
+    options?: AndroidTextInputOptions,
   ) => Promise<SendTextResult & { method?: InputTextMode }>;
-  executeKeyEventPlan: (
-    plan: KeyEventPlan,
-    timeoutMs?: number,
-    noRetry?: boolean,
-    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>,
-    signal?: AbortSignal,
-  ) => Promise<void>;
+  executeKeyEventPlan: (plan: KeyEventPlan, options?: KeyEventPlanOptions) => Promise<void>;
   executeiOSTextInput: (
     text: string,
     imeAction?: ImeAction,
@@ -143,10 +156,8 @@ export class InputText extends BaseVisualChange {
   /** Typed view of the internals unit tests drive directly; not a production API. */
   get testHooks(): InputTextTestHooks {
     return {
-      executeAndroidTextInput: (text, imeAction, dismissKeyboard, mode, signal) =>
-        this.executeAndroidTextInput(text, { imeAction, dismissKeyboard, mode, signal }),
-      executeKeyEventPlan: (plan, timeoutMs, noRetry, beforeDispatch, signal) =>
-        this.executeKeyEventPlan(plan, { timeoutMs, noRetry, beforeDispatch, signal }),
+      executeAndroidTextInput: (text, options) => this.executeAndroidTextInput(text, options),
+      executeKeyEventPlan: (plan, options) => this.executeKeyEventPlan(plan, options),
       executeiOSTextInput: (text, imeAction, signal) =>
         executeIosTextInput(this.iosTextDeps(), text, imeAction, signal),
     };
@@ -279,12 +290,7 @@ export class InputText extends BaseVisualChange {
    */
   private async executeAndroidTextInput(
     text: string,
-    options: {
-      imeAction?: ImeAction;
-      dismissKeyboard?: boolean;
-      mode?: InputTextMode;
-      signal?: AbortSignal;
-    } = {},
+    options: AndroidTextInputOptions = {},
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const { imeAction, dismissKeyboard = false, mode = "a11y", signal } = options;
     assertInputNotAborted(signal);
@@ -565,17 +571,9 @@ export class InputText extends BaseVisualChange {
    */
   async appendText(
     text: string,
-    timeoutMs?: number,
-    beforeKeyEvents?: AppendKeyEventValidator,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options: AppendTextOptions = {},
   ): Promise<SendTextResult & { method?: InputTextMode }> {
-    return this.executeAndroidAppendTextInput(text, {
-      timeoutMs,
-      beforeKeyEvents,
-      signal,
-      onDispatch,
-    });
+    return this.executeAndroidAppendTextInput(text, options);
   }
 
   /**
@@ -603,14 +601,7 @@ export class InputText extends BaseVisualChange {
    */
   private async executeAndroidAppendTextInput(
     text: string,
-    options: {
-      imeAction?: ImeAction;
-      dismissKeyboard?: boolean;
-      timeoutMs?: number;
-      beforeKeyEvents?: AppendKeyEventValidator;
-      signal?: AbortSignal;
-      onDispatch?: () => void;
-    } = {},
+    options: AppendTextOptions & { imeAction?: ImeAction; dismissKeyboard?: boolean } = {},
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const { imeAction, timeoutMs, beforeKeyEvents, signal, onDispatch } = options;
     assertInputNotAborted(signal);
@@ -998,12 +989,7 @@ export class InputText extends BaseVisualChange {
 
   private async executeKeyEventPlan(
     plan: KeyEventPlan,
-    options: {
-      timeoutMs?: number;
-      noRetry?: boolean;
-      beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>;
-      signal?: AbortSignal;
-    } = {},
+    options: KeyEventPlanOptions = {},
   ): Promise<void> {
     const { timeoutMs, noRetry = false, beforeDispatch, signal } = options;
     for (const [index, command] of plan.commands.entries()) {

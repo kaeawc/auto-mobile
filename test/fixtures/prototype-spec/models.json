@@ -518,6 +518,19 @@
   "nodeProgress": {
     "type": "progress"
   },
+  "nodeMap": {
+    "type": "map",
+    "camera": { "lat": 37.77, "lng": -122.42, "zoom": 12 },
+    "markers": {
+      "path": "/stops",
+      "as": "stop",
+      "id": "{stop.id}",
+      "lat": "{stop.lat}",
+      "lng": "{stop.lng}",
+      "title": "{stop.name}"
+    },
+    "onMarkerTap": [{ "type": "setState", "key": "text", "value": "{stop.id}" }]
+  },
   "nodeVideoPlayer": { "type": "videoPlayer", "id": "clip", "source": { "sample": "countdown" } },
   "nodeDialog": {
     "type": "dialog",

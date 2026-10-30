@@ -223,12 +223,12 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     // crash) or a pipe still open after the drain wait means the tail may be missing (#15860).
     const stop = async (): Promise<void> => {
       helper.process.stdin.end();
-      const kill = this.timer.setTimeout(
-        () => helper.process.kill("SIGTERM"),
-        STREAM_STOP_GRACE_MS,
+      // A helper blocked writing to a pipe a busy sink has not drained cannot exit yet; it is not hung.
+      const cancelKill = this.idleDeadline(helper, STREAM_STOP_GRACE_MS, () =>
+        helper.process.kill("SIGTERM"),
       );
       const exitCode = await helper.exited;
-      this.timer.clearTimeout(kill);
+      cancelKill();
       const ended = await this.untilOutputEnded(helper);
       if (exitCode !== 0) {
         throw helper.failure();
@@ -258,19 +258,25 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
    */
   private untilOutputEnded(helper: RunningLoopbackHelper): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      let handle: ReturnType<Timer["setTimeout"]>;
-      const arm = () => {
-        handle = this.timer.setTimeout(
-          () => (helper.sinkBusy() ? arm() : resolve(false)),
-          CAPTURE_DRAIN_MS,
-        );
-      };
-      arm();
+      const cancel = this.idleDeadline(helper, CAPTURE_DRAIN_MS, () => resolve(false));
       void helper.outputEnded.then(() => {
-        this.timer.clearTimeout(handle);
+        cancel();
         resolve(true);
       });
     });
+  }
+
+  /**
+   * Runs `expire` after `ms`, re-arming instead while the helper's sink is busy, so time spent
+   * waiting on a slow consumer never counts against the helper. Returns a cancel function.
+   */
+  private idleDeadline(helper: RunningLoopbackHelper, ms: number, expire: () => void): () => void {
+    let handle: ReturnType<Timer["setTimeout"]>;
+    const arm = () => {
+      handle = this.timer.setTimeout(() => (helper.sinkBusy() ? arm() : expire()), ms);
+    };
+    arm();
+    return () => this.timer.clearTimeout(handle);
   }
 
   async close(): Promise<void> {

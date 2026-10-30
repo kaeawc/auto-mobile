@@ -28,9 +28,10 @@ through `AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER`; there is no released build yet.
   the duration. Reading an input device needs Microphone permission for the helper's process.
 - `capture --until-stopped --sample-rate N`: the same, until stdin closes; the helper then writes
   its last buffer and exits 0. Recordings with audio use this. The capture counts as complete only
-  on exit 0 with stdout closed within 1 s (time the recording is still writing earlier audio to disk
-  does not count): a helper still running 2 s after stdin closes is sent `SIGTERM`, and that, a
-  crash, or a pipe left open fails the capture so its tail is never silently lost.
+  on exit 0 with stdout closed within 1 s: a helper still running 2 s after stdin closes is sent
+  `SIGTERM`, and that, a crash, or a pipe left open fails the capture so its tail is never silently
+  lost. Neither deadline counts time the recording is still writing earlier audio to disk, since a
+  helper whose stdout is not being read cannot finish.
 - Stderr carries one marker per line: `audio-loopback-ready: <device name>` once the device is
   open, or `audio-loopback-error: <code> <message>` before a non-zero exit.
 

@@ -291,6 +291,27 @@ describe("HostLoopbackAudioSession capture", () => {
     await expect(stopping).resolves.toBeUndefined();
   });
 
+  test("a helper held back by a busy sink is not killed at the stop grace", async () => {
+    const { session, helpers, timer } = setup();
+    let release: () => void = () => {};
+    const stream = await session.streamCapture(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    helpers[0].stdout.write(pcmBytes([1]));
+    await turns(1);
+    const stopping = stream.stop();
+    // Well past the 2 s grace while the disk is slow: the helper is waiting on us, not hung.
+    timer.advanceTime(6_000);
+    await turns(1);
+    expect(helpers[0].signals).toEqual([]);
+    release();
+    helpers[0].exit(0);
+    await expect(stopping).resolves.toBeUndefined();
+  });
+
   test("less audio than asked for is timedOut, not an error", async () => {
     const { session } = setup((helper) => {
       helper.ready();

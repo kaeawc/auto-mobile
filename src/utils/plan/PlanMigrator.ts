@@ -253,8 +253,7 @@ const migrateToolName = (
   toolName: string,
   mergedParams: Record<string, any>,
   stepIndex: number,
-  warnings: MigrationWarning[],
-  context: StepMigrationContext,
+  { warnings, context }: { warnings: MigrationWarning[]; context: StepMigrationContext },
 ): { normalizedTool: string; changed: boolean } => {
   let changed = false;
   let normalizedTool = toolName;
@@ -599,7 +598,7 @@ const migrateStepFields = (
   }
   const mergedParams = { ...inlineParams, ...paramsFromStep };
 
-  const migratedTool = migrateToolName(toolName, mergedParams, stepIndex, warnings, context);
+  const migratedTool = migrateToolName(toolName, mergedParams, stepIndex, { warnings, context });
   const normalizedTool = migratedTool.normalizedTool;
   changed = migratedTool.changed || changed;
 

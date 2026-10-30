@@ -95,7 +95,7 @@ async function resolveAndroidAppFileUser(
     }
     let candidates: number[] = [];
     for (const user of users) {
-      if (await isPackageInstalledForUser(adb, appId, user.userId, undefined, signal)) {
+      if (await isPackageInstalledForUser(adb, appId, user.userId, { signal })) {
         candidates.push(user.userId);
       }
     }

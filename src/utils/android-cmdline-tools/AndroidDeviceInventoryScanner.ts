@@ -187,8 +187,7 @@ export interface AndroidDeviceInventoryScanner {
     foundDeviceModel: string | undefined,
     foundDeviceId: string,
     avdName: string,
-    timeoutMs: number,
-    signal?: AbortSignal,
+    options: { timeoutMs: number; signal?: AbortSignal },
   ): Promise<string | undefined>;
   foundBootedDevice(
     avdName: string,
@@ -199,8 +198,7 @@ export interface AndroidDeviceInventoryScanner {
     requestedName: string,
     deviceId: string,
     scannedName: string,
-    timeoutMs: number,
-    signal?: AbortSignal,
+    options: { timeoutMs: number; signal?: AbortSignal },
   ): Promise<string>;
 }
 
@@ -295,13 +293,10 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
             modelRemainingMs > 0 &&
             !options.skipProfileEnrichment &&
             !(options.readinessOnly && options.coalesceInventoryEnrichment)
-              ? await this.modelForBootedEmulator(
-                  device,
-                  avdName,
-                  modelRemainingMs,
-                  options.skipNameEnrichment === true,
+              ? await this.modelForBootedEmulator(device, avdName, modelRemainingMs, {
+                  skipNameEnrichment: options.skipNameEnrichment === true,
                   signal,
-                )
+                })
               : undefined;
           const architectureRemainingMs = Math.min(
             deadlineMs - this.deps.timer().now(),
@@ -309,13 +304,10 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
           );
           const architecture =
             architectureRemainingMs > 0 && this.includesFullMetadata(options)
-              ? await this.resolveEmulatorArchitecture(
-                  device,
-                  avdName,
-                  architectureRemainingMs,
-                  options.skipNameEnrichment === true,
+              ? await this.resolveEmulatorArchitecture(device, avdName, architectureRemainingMs, {
+                  skipNameEnrichment: options.skipNameEnrichment === true,
                   signal,
-                )
+                })
               : undefined;
 
           return {
@@ -332,13 +324,10 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       }
 
       runningDevices.push(
-        ...(await this.scanPhysicalDevices(
-          physicalDevices,
-          options,
-          foreignSerials,
+        ...(await this.scanPhysicalDevices(physicalDevices, options, foreignSerials, {
           remainingScanMs,
           signal,
-        )),
+        })),
       );
       if (this.includesFullMetadata(options)) {
         await Promise.all(
@@ -383,8 +372,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     physicalDevices: BootedDevice[],
     options: BootedDeviceScanOptions,
     foreignSerials: ReadonlySet<string> | undefined,
-    remainingScanMs: () => number,
-    signal?: AbortSignal,
+    { remainingScanMs, signal }: { remainingScanMs: () => number; signal?: AbortSignal },
   ): Promise<BootedDevice[]> {
     const runningDevices: BootedDevice[] = [];
     for (const device of physicalDevices) {
@@ -398,17 +386,14 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         continue;
       }
       const [model, architecture] = await Promise.all([
-        this.resolveDeviceModel(
-          device,
-          physicalTimeoutMs,
-          options.skipNameEnrichment === true,
+        this.resolveDeviceModel(device, physicalTimeoutMs, options.skipNameEnrichment === true, {
           signal,
-        ),
+        }),
         this.resolvePhysicalDeviceArchitecture(
           device,
           physicalTimeoutMs,
           options.skipNameEnrichment === true,
-          signal,
+          { signal },
         ),
       ]);
       runningDevices.push(this.discoveredPhysicalDevice(device, model, architecture));
@@ -690,8 +675,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     device: BootedDevice,
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
-    signal?: AbortSignal,
-    avdName?: string,
+    { signal, avdName }: { signal?: AbortSignal; avdName?: string } = {},
   ): Promise<string | undefined> {
     const cacheKey = this.deviceInfoCacheKey(device.deviceId, avdName);
     const cachedModel = cacheKey ? this.modelNameCache.get(cacheKey) : undefined;
@@ -733,8 +717,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     foundDeviceModel: string | undefined,
     foundDeviceId: string,
     avdName: string,
-    timeoutMs: number,
-    signal?: AbortSignal,
+    { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal },
   ): Promise<string | undefined> {
     if (foundDeviceModel || timeoutMs <= 0) {
       return foundDeviceModel;
@@ -745,8 +728,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         { name: avdName, platform: "android", deviceId: foundDeviceId },
         timeoutMs,
         false,
-        signal,
-        avdName,
+        { signal, avdName },
       ))
     );
   }
@@ -768,8 +750,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     requestedName: string,
     deviceId: string,
     scannedName: string,
-    timeoutMs: number,
-    signal?: AbortSignal,
+    { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal },
   ): Promise<string> {
     if (!deviceId.startsWith("emulator-")) {
       return scannedName;
@@ -809,29 +790,24 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     device: BootedDevice,
     avdName: { name: string; consoleBusyDuringProbe?: boolean; nameProbeTimedOut?: boolean },
     infoTimeoutMs: number,
-    skipNameEnrichment: boolean,
-    signal?: AbortSignal,
+    { skipNameEnrichment, signal }: { skipNameEnrichment: boolean; signal?: AbortSignal },
   ): Promise<string | undefined> {
     if (avdName.consoleBusyDuringProbe) {
       // The AVD identity is unresolved, so model metadata is not worth
       // contending with the destructive console operation.
       return undefined;
     }
-    return await this.resolveDeviceModel(
-      device,
-      infoTimeoutMs,
-      skipNameEnrichment,
+    return await this.resolveDeviceModel(device, infoTimeoutMs, skipNameEnrichment, {
       signal,
-      avdName.name,
-    );
+      avdName: avdName.name,
+    });
   }
 
   private async resolveEmulatorArchitecture(
     device: BootedDevice,
     avdName: { name: string; consoleBusyDuringProbe?: boolean; nameProbeTimedOut?: boolean },
     infoTimeoutMs: number,
-    skipNameEnrichment: boolean,
-    signal?: AbortSignal,
+    { skipNameEnrichment, signal }: { skipNameEnrichment: boolean; signal?: AbortSignal },
   ): Promise<string | undefined> {
     if (skipNameEnrichment || avdName.consoleBusyDuringProbe || !avdName.name) {
       return undefined;
@@ -849,13 +825,10 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       logger.debug(`Failed to read AVD config for ${avdName.name}: ${error}`);
     }
 
-    return this.resolvePhysicalDeviceArchitecture(
-      device,
-      infoTimeoutMs,
-      skipNameEnrichment,
+    return this.resolvePhysicalDeviceArchitecture(device, infoTimeoutMs, skipNameEnrichment, {
       signal,
-      avdName.name,
-    );
+      avdName: avdName.name,
+    });
   }
 
   private discoveredEmulatorDevice(
@@ -910,8 +883,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     device: BootedDevice,
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
-    signal?: AbortSignal,
-    avdName?: string,
+    { signal, avdName }: { signal?: AbortSignal; avdName?: string } = {},
   ): Promise<string | undefined> {
     const cacheKey = this.deviceInfoCacheKey(device.deviceId, avdName);
     const cachedArchitecture = cacheKey ? this.architectureCache.get(cacheKey) : undefined;

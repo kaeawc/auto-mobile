@@ -324,6 +324,41 @@ describe("DefaultExactDeviceProvisioner", () => {
     ]);
   });
 
+  test.each(["tv_1080p", "tv_4k", "tv_720p"])(
+    "creates an explicit TV spec with the requested %s profile (#15881)",
+    async (deviceType) => {
+      const calls: unknown[] = [];
+      const provisioner = new DefaultExactDeviceProvisioner({
+        listDeviceImages: async () => [],
+        isCreationAllowed: () => true,
+        avdManager: {
+          createAvd: async (params) => {
+            calls.push(params);
+            return { success: true, message: "created", avdName: params.name };
+          },
+        },
+        androidConfigReader: { readConfig: async () => null },
+        androidConfigWriter: { setMemoryMb: async () => {} },
+        iosSimulator: {} as ExactIosSimulatorClient,
+      });
+
+      const result = await provisioner.provision({
+        platform: "android",
+        name: "tv-34",
+        spec: { runtime: "system-images;android-34;android-tv;x86_64", deviceType },
+      });
+
+      expect(result.created).toBe(true);
+      expect(calls).toEqual([
+        {
+          name: "tv-34",
+          package: "system-images;android-34;android-tv;x86_64",
+          device: deviceType,
+        },
+      ]);
+    },
+  );
+
   test("adopts an existing iOS simulator only when its exact runtime and device type match", async () => {
     let created = false;
     const iosSimulator: ExactIosSimulatorClient = {

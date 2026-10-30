@@ -16,8 +16,10 @@ export function createTapStrategy(
   device: BootedDevice,
   adb: AdbExecutor,
   accessibilityDetector: AccessibilityDetector,
-  iosVoiceOverDetector: IosVoiceOverDetector,
-  featureFlags?: FeatureFlagReader,
+  {
+    iosVoiceOverDetector,
+    featureFlags,
+  }: { iosVoiceOverDetector: IosVoiceOverDetector; featureFlags?: FeatureFlagReader },
 ): TapStrategy {
   if (device.platform === "ios") {
     return new IosTapStrategy(device, iosVoiceOverDetector, featureFlags);

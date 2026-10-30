@@ -749,19 +749,14 @@ describe("tapOn (Android default display)", () => {
     const warnings: string[] = [];
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      await createTap(timer, client).executeAndroidTap(
-        "doubleTap",
-        { x: 540, y: 380 },
-        0,
-        { ...plainElement, "hierarchy-source": "uiautomator" },
-        {
-          options: {
-            action: "doubleTap",
-            onActivationWarning: (warning) => warnings.push(warning),
-          },
-          isTalkBackEnabled: false,
+      await createTap(timer, client).executeAndroidTap("doubleTap", { x: 540, y: 380 }, 0, {
+        element: { ...plainElement, "hierarchy-source": "uiautomator" },
+        options: {
+          action: "doubleTap",
+          onActivationWarning: (warning) => warnings.push(warning),
         },
-      );
+        isTalkBackEnabled: false,
+      });
       expect(warnings.join("\n")).toContain("double-tap timeout");
     } finally {
       warn.mockRestore();

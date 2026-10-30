@@ -28,24 +28,10 @@ import type {
 import { REBIND_BIND_WAIT_BUDGET_MS } from "./AndroidCtrlProxyRebind";
 import type { CtrlProxyCompatibilityInspection } from "./CtrlProxyManager";
 
-// Install failures that an in-place `install -r -d` cannot fix but a fresh uninstall + reinstall can.
-// VERSION_DOWNGRADE: `-d` only permits downgrades of debuggable apps/builds, so a user-build device
-// with a newer non-debuggable CtrlProxy than the pinned APK needs the uninstall. INSTALL_FAILED_DEXOPT
-// and INSTALL_FAILED_INVALID_APK are deliberately excluded: an invalid APK fails identically on a
-// fresh install, and dexopt failures are storage/runtime faults a wipe rarely clears while it does
-// discard the user's accessibility enablement; both stay installed and surface the failure.
-const SIGNATURE_MISMATCH_FAILURE_CODES = new Set([
-  "INSTALL_FAILED_UPDATE_INCOMPATIBLE",
-  "INSTALL_FAILED_VERSION_DOWNGRADE",
-  "INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES",
-  "INSTALL_FAILED_SHARED_USER_INCOMPATIBLE",
-]);
-
-/** Extracts the `INSTALL_*` failure token from `adb install` output, if present. */
-function extractInstallFailureCode(message: string): string | undefined {
-  const anchored = /Failure \[(INSTALL_[A-Z_]+)/.exec(message)?.[1];
-  return anchored ?? /INSTALL_[A-Z_]+/.exec(message)?.[0];
-}
+import {
+  extractInstallFailureCode,
+  SIGNATURE_MISMATCH_FAILURE_CODES,
+} from "./androidInstallFailure";
 
 /** Live manager dependencies; callbacks preserve manager overrides and test spies. */
 export interface AndroidCtrlProxyCompatibilityHost {

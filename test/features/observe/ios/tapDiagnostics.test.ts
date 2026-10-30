@@ -136,7 +136,11 @@ describe("iOS opt-in tap diagnostics", () => {
       logger.setLogLevel(LogLevel.DEBUG);
       const { sent, gestures } = gestureHarness();
       expect(
-        await dispatchIosCoordinateTap(gestures, { x: 443, y: 202 }, 50, "frame"),
+        await dispatchIosCoordinateTap(
+          gestures,
+          { x: 443, y: 202 },
+          { durationMs: 50, frameContext: "frame" },
+        ),
       ).toBeUndefined();
       expect(JSON.parse(sent[0])).toEqual({
         type: "request_tap_coordinates",

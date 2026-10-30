@@ -40,11 +40,16 @@ export class TapAnyIosTapper {
     action: string,
     point: Point,
     longPressDuration: number,
-    element?: Element,
-    fenceOptions: DisplayFenceOption & {
-      signal?: AbortSignal;
-      scoped?: boolean;
-      voiceOverEnabled?: boolean;
+    {
+      element,
+      fenceOptions = {},
+    }: {
+      element?: Element;
+      fenceOptions?: DisplayFenceOption & {
+        signal?: AbortSignal;
+        scoped?: boolean;
+        voiceOverEnabled?: boolean;
+      };
     } = {},
   ): Promise<void> {
     const { signal } = fenceOptions;
@@ -76,9 +81,12 @@ export class TapAnyIosTapper {
       return;
     }
 
-    await this.executeIosTapWithCoordinates(xcTestClient, action, point, longPressDuration, {
-      signal,
-      displayFence: fence,
+    await this.executeIosTapWithCoordinates(xcTestClient, action, point, {
+      longPressDuration,
+      fenceOptions: {
+        signal,
+        displayFence: fence,
+      },
     });
   }
 
@@ -99,8 +107,10 @@ export class TapAnyIosTapper {
     xcTestClient: IosCtrlProxy,
     action: string,
     point: Point,
-    longPressDuration: number,
-    fenceOptions: DisplayFenceOption & { signal?: AbortSignal } = {},
+    {
+      longPressDuration,
+      fenceOptions = {},
+    }: { longPressDuration: number; fenceOptions?: DisplayFenceOption & { signal?: AbortSignal } },
   ): Promise<void> {
     const { signal } = fenceOptions;
     const fence = resolveDisplayFence(fenceOptions);
@@ -120,9 +130,12 @@ export class TapAnyIosTapper {
     if (action === "doubleTap") {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence.assertCurrent();
-      await dispatchIosDoubleTap(xcTestClient, point, tapDuration, undefined, {
-        signal,
-        timeoutMs,
+      await dispatchIosDoubleTap(xcTestClient, point, {
+        durationMs: tapDuration,
+        options: {
+          signal,
+          timeoutMs,
+        },
       });
       return;
     }
@@ -131,9 +144,12 @@ export class TapAnyIosTapper {
     fence.assertCurrent();
     throwIfAborted(signal);
     try {
-      await dispatchIosCoordinateTap(xcTestClient, point, tapDuration, undefined, {
-        signal,
-        timeoutMs,
+      await dispatchIosCoordinateTap(xcTestClient, point, {
+        durationMs: tapDuration,
+        options: {
+          signal,
+          timeoutMs,
+        },
       });
     } catch (error) {
       logger.warn(`[TapAnyElement] CtrlProxy iOS tap failed: ${errorMessage(error)}`, error);

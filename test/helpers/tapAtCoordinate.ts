@@ -84,10 +84,19 @@ export function createTapAt(
       ...unusedClient,
       requestDoubleTapCoordinates: async () => ({ success: true }),
     } satisfies IosCoordinateTapClient,
-    dispatchAndroidCoordinateTap: async (_client, _adb, { x, y }, duration, options) => {
+    dispatchAndroidCoordinateTap: async (
+      _client,
+      _adb,
+      { x, y },
+      { durationMs: duration, options },
+    ) => {
       androidDispatches.push({ x, y, duration, frameContext: options?.frameContext });
     },
-    dispatchIosDoubleTap: async (_client, { x, y }, _duration, frameContext) => {
+    dispatchIosDoubleTap: async (
+      _client,
+      { x, y },
+      { durationMs: _duration, frameContext } = {},
+    ) => {
       iosDispatches.push({ kind: "double", x, y, duration: 50, frameContext });
       iosDispatchCount++;
       onIosDispatch?.(timer);
@@ -95,7 +104,7 @@ export function createTapAt(
         throw new Error("Synthetic iOS tap rejection");
       }
     },
-    dispatchIosCoordinateTap: async (_client, { x, y }, duration, frameContext) => {
+    dispatchIosCoordinateTap: async (_client, { x, y }, { durationMs: duration, frameContext }) => {
       iosDispatches.push({ kind: "tap", x, y, duration, frameContext });
       iosDispatchCount++;
       onIosDispatch?.(timer);

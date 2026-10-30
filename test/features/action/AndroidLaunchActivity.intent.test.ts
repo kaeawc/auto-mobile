@@ -32,7 +32,7 @@ describe("Android explicit intent launch (#14080)", () => {
       throw new Error("CtrlProxy unavailable in this fake-only fallback test");
     });
     try {
-      const result = await launcher(adb).performLaunch(APP, undefined, 10, perf());
+      const result = await launcher(adb).performLaunch(APP, undefined, 10, { perf: perf() });
       expect(result).toMatchObject({ success: true, userId: 10 });
       const commands = adb.getExecutedCommands();
       expect(commands.some((command) => command.startsWith("shell monkey"))).toBe(false);
@@ -55,10 +55,13 @@ describe("Android explicit intent launch (#14080)", () => {
       ),
     );
 
-    const result = await launcher(adb).performLaunch(APP, undefined, 10, perf(), {
-      intent: {
-        component: ".DebugActivity",
-        extras: [{ key: "screen", type: "string", value: "settings" }],
+    const result = await launcher(adb).performLaunch(APP, undefined, 10, {
+      perf: perf(),
+      options: {
+        intent: {
+          component: ".DebugActivity",
+          extras: [{ key: "screen", type: "string", value: "settings" }],
+        },
       },
     });
 
@@ -84,7 +87,10 @@ describe("Android explicit intent launch (#14080)", () => {
     );
 
     const thrown = await launcher(adb)
-      .performLaunch(APP, undefined, 0, perf(), { intent: { component: ".Secret" } })
+      .performLaunch(APP, undefined, 0, {
+        perf: perf(),
+        options: { intent: { component: ".Secret" } },
+      })
       .then(
         () => undefined,
         (error: unknown) => error,
@@ -99,8 +105,11 @@ describe("Android explicit intent launch (#14080)", () => {
   test("a component in another package is refused before any adb command", async () => {
     const adb = new FakeAdbExecutor();
     await expect(
-      launcher(adb).performLaunch(APP, undefined, 0, perf(), {
-        intent: { component: "com.android.settings/.Settings" },
+      launcher(adb).performLaunch(APP, undefined, 0, {
+        perf: perf(),
+        options: {
+          intent: { component: "com.android.settings/.Settings" },
+        },
       }),
     ).rejects.toBeInstanceOf(AndroidLaunchIntentError);
     expect(adb.getExecutedCommands()).toEqual([]);
@@ -112,7 +121,7 @@ describe("Android launcher discovery categories", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("resolve-activity", createExecResult(`${APP}/.PhoneHome`, ""));
     adb.setCommandResponse("am start", createExecResult("Starting: Intent", ""));
-    expect(await launcher(adb).performLaunch(APP, undefined, 0, perf())).toEqual({
+    expect(await launcher(adb).performLaunch(APP, undefined, 0, { perf: perf() })).toEqual({
       success: true,
       packageName: APP,
       activityName: "intent_launch",
@@ -145,7 +154,7 @@ describe("Android launcher discovery categories", () => {
       throw new Error("CtrlProxy unavailable in fake discovery test");
     });
     try {
-      const result = await launcher(adb).performLaunch(app, undefined, 10, perf());
+      const result = await launcher(adb).performLaunch(app, undefined, 10, { perf: perf() });
       expect(result).toEqual({
         success: true,
         packageName: app,

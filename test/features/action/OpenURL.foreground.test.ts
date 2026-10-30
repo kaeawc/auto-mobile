@@ -155,8 +155,7 @@ test("any other verified app confirms when a previous app is given", async () =>
     safari,
     { read: async () => observation(playground) },
     timer,
-    undefined,
-    "com.example.Other",
+    { previousApp: "com.example.Other" },
   );
   expect(confirmed).toBe(true);
   expect(timer.now()).toBe(0);
@@ -169,8 +168,7 @@ test("an unchanged previous app is not a confirmation", async () => {
     safari,
     { read: async () => observation(playground) },
     timer,
-    undefined,
-    playground,
+    { previousApp: playground },
   );
   expect(confirmed).toBe(false);
   expect(timer.now()).toBe(5_000);
@@ -185,8 +183,7 @@ test("a stale other-app snapshot does not confirm even with a previous app", asy
     safari,
     { read: async () => snapshots[reads++]! },
     timer,
-    undefined,
-    "com.example.Other",
+    { previousApp: "com.example.Other" },
   );
   expect(confirmed).toBe(true);
   expect(reads).toBe(2);

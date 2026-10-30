@@ -74,7 +74,8 @@ describe("TalkBack selected target safety", () => {
       const result =
         caller === "strategy"
           ? strategy.executeTap(device.deviceId, target, driver)
-          : tap.executeAndroidTap("tap", { x: 50, y: 450 }, 500, target, {
+          : tap.executeAndroidTap("tap", { x: 50, y: 450 }, 500, {
+              element: target,
               options: {
                 action: "tap",
                 screenReaderNavigation: true,
@@ -149,7 +150,8 @@ describe("TalkBack selected target safety", () => {
         0,
       );
     await expect(
-      tap.executeAndroidTap("tap", { x: 50, y: 450 }, 500, target, {
+      tap.executeAndroidTap("tap", { x: 50, y: 450 }, 500, {
+        element: target,
         options: {
           action: "tap",
           screenReaderNavigation: true,
@@ -364,7 +366,7 @@ describe("TalkBack selected target safety", () => {
       const bounds = element.bounds!;
       const x = Math.round((bounds.left + bounds.right) / 2);
       const y = Math.round((bounds.top + bounds.bottom) / 2);
-      await tap.executeAndroidTap(action, { x, y }, 800, element);
+      await tap.executeAndroidTap(action, { x, y }, 800, { element });
       expect(driver.actionHistory).toEqual([]);
       expect(driver.tapHistory).toEqual([{ x, y, durationMs: action === "tap" ? 50 : 800 }]);
       expect(driver.doubleTapHistory).toEqual(action === "tap" ? [{ x, y }] : []);
@@ -412,7 +414,8 @@ describe("TalkBack selected target safety", () => {
       0,
     );
     const navigation = spyOn(strategy, "executeTap");
-    await tap.executeAndroidTap("tap", { x: 50, y: 250 }, 500, target, {
+    await tap.executeAndroidTap("tap", { x: 50, y: 250 }, 500, {
+      element: target,
       options: {
         action: "tap",
         screenReaderNavigation: true,
@@ -497,7 +500,10 @@ describe("TalkBack newer full hierarchy contradicts selected target", () => {
         },
       ]);
       await expect(
-        tap.executeAndroidTap(action, { x: 150, y: 1550 }, 500, selected, { options: { action } }),
+        tap.executeAndroidTap(action, { x: 150, y: 1550 }, 500, {
+          element: selected,
+          options: { action },
+        }),
       ).rejects.toThrow("Selected element moved or is gone");
       expect(driver.tapHistory).toEqual([]);
       expect(driver.doubleTapHistory).toEqual([]);
@@ -544,7 +550,8 @@ describe("TalkBack re-resolution before native dispatch", () => {
         bounds: { ...old.bounds!, top: old.bounds!.top + 1, bottom: old.bounds!.bottom + 1 },
       };
       driver.setElements([notificationRows[1], live]);
-      const result = await tap.executeAndroidTap(action, { x: 1, y: 1 }, 500, old, {
+      const result = await tap.executeAndroidTap(action, { x: 1, y: 1 }, 500, {
+        element: old,
         options: {
           elementId: old["resource-id"],
           index: 1,
@@ -566,7 +573,8 @@ describe("TalkBack re-resolution before native dispatch", () => {
     const old = { ...notificationRows[2], text: "Selected notification" };
     driver.setElements([old, { ...notificationRows[1], text: "Another notification" }]);
     await expect(
-      tap.executeAndroidTap("longPress", { x: 1, y: 1 }, 500, old, {
+      tap.executeAndroidTap("longPress", { x: 1, y: 1 }, 500, {
+        element: old,
         options: {
           elementId: old["resource-id"],
           index: 1,
@@ -613,7 +621,8 @@ describe("TalkBack resolved result and fallback coordinates", () => {
       });
       let reported: Element | undefined;
       let reportedMatches: number | undefined;
-      await tap.executeAndroidTap("tap", { x: 150, y: 350 }, 500, selected, {
+      await tap.executeAndroidTap("tap", { x: 150, y: 350 }, 500, {
+        element: selected,
         options: {
           action: "tap",
           text: "Apps",

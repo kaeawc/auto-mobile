@@ -16,11 +16,19 @@ import { SwipeResult } from "../../../models/SwipeResult";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
-import type { DisplayFenceDependencies } from "../BaseVisualChange";
+import type { DisplayFenceDependencies, ProgressCallback } from "../BaseVisualChange";
 import type { RenderedObservationReader } from "../TargetDisplayAction";
 import type { AccessibilityHierarchyRequest } from "../../observe/hierarchyReadArgs";
 
 export type SwipeOnResolvedOptions = SwipeOnOptions & { direction: SwipeDirection };
+
+/** Call context for an element/container swipe; `selected` reuses an already-resolved target. */
+export interface ElementSwipeCall {
+  progress?: ProgressCallback;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  selected?: { element?: Element; observation: ObserveResult };
+}
 
 export type SwipeInterval = { start: number; end: number; length: number };
 

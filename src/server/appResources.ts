@@ -1,7 +1,8 @@
 import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
-import type { AppResourceDependencies } from "../features/deviceLifecycle/deviceLifecycleServerHost";
+import * as traitsProbe from "./bootedDeviceTraits";
+import type { AppResourceDependencies as LifecycleAppResourceDependencies } from "../features/deviceLifecycle/deviceLifecycleServerHost";
 import { GetAppMetadata } from "../features/observe/GetAppMetadata";
 import { createIosMetadataSource } from "../utils/iosAppMetadataSource";
 import { BootedDevice, Platform } from "../models";
@@ -182,7 +183,8 @@ const defaultListInstalledAppsFactory: NonNullable<
   AppResourceDependencies["listInstalledAppsFactory"]
 > = (device) => new ListInstalledApps(device);
 
-export type { AppResourceDependencies };
+export interface AppResourceDependencies
+  extends LifecycleAppResourceDependencies, traitsProbe.Dependencies {}
 
 async function fetchAppsForDevice(
   device: BootedDevice,
@@ -190,6 +192,8 @@ async function fetchAppsForDevice(
   signal?: AbortSignal,
   deps: AppResourceDependencies = {},
 ): Promise<FetchedAppsCacheEntry> {
+  device = await traitsProbe.resolveFormFactor(device, timer, deps);
+  signal?.throwIfAborted();
   const listInstalledApps = (deps.listInstalledAppsFactory ?? defaultListInstalledAppsFactory)(
     device,
   );

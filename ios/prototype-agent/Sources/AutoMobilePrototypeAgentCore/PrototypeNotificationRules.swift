@@ -44,7 +44,7 @@ enum PrototypeNotificationRules {
                     "\(path).args", "notifications.cancel takes exactly one of id, group or all"
                 )
             }
-        case "notifications.post":
+        case "notifications.post", "notifications.schedule":
             // A bound channel or action list is checked by the runtime once it resolves.
             if case let .string(channel)? = args["channel"]?.objectFields?["value"], !channels.contains(channel) {
                 throw PrototypeContractValidator.invalid(

@@ -751,11 +751,13 @@ export const createSendKeysHandler =
       device,
       serverConfig.isDismissKeyboardAfterInputEnabled(),
       result.success,
-      async (closeSignal) =>
-        (deps.keyboardFactory ?? defaultKeyboardFactory)(device).execute("close", {
-          signal: closeSignal,
-        }),
-      signal,
+      {
+        close: async (closeSignal) =>
+          (deps.keyboardFactory ?? defaultKeyboardFactory)(device).execute("close", {
+            signal: closeSignal,
+          }),
+        signal,
+      },
     );
     const response = createStructuredToolResponse({
       message: result.success

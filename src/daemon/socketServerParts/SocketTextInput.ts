@@ -277,12 +277,16 @@ export class SocketTextInput {
     });
     const input = new InputText(device, factory, { timer: this.state.timer });
     return {
-      appendText: (...args) => {
-        deadline = this.state.timer.now() + (args[1] ?? 0);
+      appendText: (text, options = {}) => {
+        deadline = this.state.timer.now() + (options.timeoutMs ?? 0);
         // Latch dispatch only after the original validation and final abort check,
         // not inside InputText's earlier asynchronous beforeDispatch callback.
-        onDispatch = args[4];
-        return input.appendText(args[0], args[1], args[2], args[3]);
+        onDispatch = options.onDispatch;
+        return input.appendText(text, {
+          timeoutMs: options.timeoutMs,
+          beforeKeyEvents: options.beforeKeyEvents,
+          signal: options.signal,
+        });
       },
     };
   }
@@ -427,7 +431,13 @@ export class SocketTextInput {
       pending: string,
       timeoutMs: number,
       validate: typeof beforeKeyEvent,
-    ) => await input.appendText(pending, timeoutMs, validate, signal, onDispatch);
+    ) =>
+      await input.appendText(pending, {
+        timeoutMs,
+        beforeKeyEvents: validate,
+        signal,
+        onDispatch,
+      });
     const result = await run(cached.input, text, appendTimeoutMs, beforeKeyEvent);
     if (
       result.success ||

@@ -50,7 +50,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
       // press() skips execute()'s observedInteraction, but simulator Home still
       // verifies foreground through a runner hierarchy read.
       pressHome: (timeoutMs, signal) =>
-        new PressButton(device).press("home", timeoutMs, undefined, signal),
+        new PressButton(device).press("home", { timeoutMs, signal }),
       swipeUp: (timeoutMs, options) => {
         const deadline = this.timer.now() + timeoutMs;
         return createSwipe(device, {

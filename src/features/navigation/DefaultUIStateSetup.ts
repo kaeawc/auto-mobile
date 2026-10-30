@@ -863,12 +863,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // Modal recovery belongs to this instance's injected ADB/timer boundary.
       // Calling press() avoids a nested observed interaction while preserving
       // the accessibility-service then ADB fallback behavior.
-      const result = await new PressButton(this.device, this.adb, this.timer).press(
-        "back",
-        undefined,
-        undefined,
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back", {
         signal,
-      );
+      });
       throwIfAborted(signal);
       if (!result.success) {
         throw new Error(result.error ?? "Android back navigation failed");

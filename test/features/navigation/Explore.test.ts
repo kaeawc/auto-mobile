@@ -1038,7 +1038,7 @@ describe("Explore", () => {
       const back = spyOn(PressButton.prototype, "press").mockResolvedValue(pressResult());
       try {
         await runExplore(explore, { timeoutMs: 1000 }, undefined, controller.signal);
-        expect(back).toHaveBeenCalledWith("back", undefined, undefined, controller.signal);
+        expect(back).toHaveBeenCalledWith("back", { signal: controller.signal });
       } finally {
         back.mockRestore();
       }

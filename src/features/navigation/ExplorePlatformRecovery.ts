@@ -29,12 +29,9 @@ export class ExplorePlatformRecovery {
     if (this.device.platform === "android") {
       // Preserve the Explore instance's injected transport and timer. Calling
       // press() avoids nested observed-interaction progress on this operation.
-      const result = await new PressButton(this.device, this.adb, this.timer).press(
-        "back",
-        undefined,
-        undefined,
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back", {
         signal,
-      );
+      });
       if (!result.success) {
         throw new Error(result.error ?? "Android back navigation failed");
       }
@@ -93,12 +90,9 @@ export class ExplorePlatformRecovery {
       // Explore's AbortSignal (not just a remaining timeout) so a cancelled
       // exploration aborts the home dispatch and foreground-verification reads
       // rather than running them to completion (issue #6289).
-      const result = await new PressButton(this.device, this.adb, this.timer).press(
-        "home",
-        undefined,
-        undefined,
+      const result = await new PressButton(this.device, this.adb, this.timer).press("home", {
         signal,
-      );
+      });
       if (!result.success) {
         throw new Error(result.error ?? "Android home navigation failed");
       }

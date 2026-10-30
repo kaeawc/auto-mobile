@@ -335,7 +335,7 @@ test("IME, clear, IME uses the active input connection", async () => {
   const commit = h.client.commitViaIme;
   let selectionsAtClear: string[] = [];
   h.client.commitViaIme = async (...args) => {
-    if (args[3] === "clearField") {
+    if (args[3]?.delivery === "clearField") {
       selectionsAtClear = h.selections();
     }
     return commit(...args);
@@ -364,7 +364,7 @@ function fieldHarness(initial = "old", attributes: Record<string, string> = {}) 
   });
   const commit = h.client.commitViaIme;
   h.client.commitViaIme = async (...args) => {
-    field = args[3] === "clearField" ? "" : field + args[0];
+    field = args[3]?.delivery === "clearField" ? "" : field + args[0];
     return commit(...args);
   };
   const execute = h.adb.executeCommand.bind(h.adb);
@@ -468,7 +468,7 @@ test.each(["ime", "auto", "imeKeyEvents"] as const)(
     expect((await h.action.execute([{ action: "clear" }, { ...type("a"), mode }])).success).toBe(
       true,
     );
-    expect(calls[0]).toEqual(["", null, undefined, "clearField"]);
+    expect(calls[0]).toEqual(["", null, undefined, { delivery: "clearField" }]);
     expect(h.clientCalls).toEqual(["clearField", "commit:a"]);
     expect(h.selections()).toEqual([activate, restore]);
   },
@@ -1114,7 +1114,7 @@ test.each(["", "hint-only"])("IME clear verifies the field after it becomes %j",
   const h = harness(read);
   const commit = h.client.commitViaIme;
   h.client.commitViaIme = async (...args) => {
-    if (args[3] === "clearField") {
+    if (args[3]?.delivery === "clearField") {
       value = after;
     } else {
       value = args[0];
@@ -1166,7 +1166,7 @@ test("IME clear retains unchanged-field warning with fake settling", async () =>
 
 test("failed IME clear stops replace before text delivery and restores once", async () => {
   const h = harness();
-  h.client.commitViaIme = async (_text, _prior, _signal, delivery) => {
+  h.client.commitViaIme = async (_text, _prior, _signal, { delivery } = {}) => {
     expect(delivery).toBe("clearField");
     return { success: false, partialApplication: true, error: "IME clear failed" };
   };
@@ -1181,7 +1181,7 @@ test("failed IME clear stops replace before text delivery and restores once", as
 
 test("unacknowledged IME clear quarantines the span and skips restoration", async () => {
   const h = harness();
-  h.client.commitViaIme = async (_text, _prior, _signal, delivery) => {
+  h.client.commitViaIme = async (_text, _prior, _signal, { delivery } = {}) => {
     expect(delivery).toBe("clearField");
     return {
       success: false,

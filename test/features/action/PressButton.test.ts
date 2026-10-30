@@ -121,7 +121,7 @@ describe("PressButton", () => {
     });
     let answered = false;
     const pending = action
-      .press("home", 500, undefined, controller.signal, () => marks++)
+      .press("home", { timeoutMs: 500, signal: controller.signal, onDispatch: () => marks++ })
       .finally(() => {
         answered = true;
       });
@@ -192,7 +192,7 @@ describe("PressButton", () => {
       });
       let answered = false;
       const pending = action
-        .press("home", 500, undefined, controller.signal, () => marks++)
+        .press("home", { timeoutMs: 500, signal: controller.signal, onDispatch: () => marks++ })
         .finally(() => {
           answered = true;
         });
@@ -285,9 +285,13 @@ describe("PressButton", () => {
       if (aborted) {
         controller.abort();
       }
-      const pending = action.press("home", 500, undefined, controller.signal, () => {
-        expect(launches).toBe(0);
-        marks++;
+      const pending = action.press("home", {
+        timeoutMs: 500,
+        signal: controller.signal,
+        onDispatch: () => {
+          expect(launches).toBe(0);
+          marks++;
+        },
       });
       if (aborted) {
         await expect(pending).rejects.toThrow();
@@ -330,13 +334,10 @@ describe("PressButton", () => {
       try {
         expect(
           (
-            await new PressButton(iosDevice, null, new FakeTimer()).press(
-              button,
-              500,
-              undefined,
-              undefined,
-              () => marks++,
-            )
+            await new PressButton(iosDevice, null, new FakeTimer()).press(button, {
+              timeoutMs: 500,
+              onDispatch: () => marks++,
+            })
           ).success,
         ).toBe(true);
         expect(marks).toBe(1);
@@ -446,10 +447,10 @@ describe("PressButton", () => {
 
     try {
       const pressButton = new PressButton(iosDevice);
-      await pressButton.press("home", undefined, "desktop-frame");
-      await pressButton.press("back", undefined, "desktop-frame");
-      await pressButton.press("recent", undefined, "desktop-frame");
-      await pressButton.press("volume_up", undefined, "desktop-frame");
+      await pressButton.press("home", { frameContext: "desktop-frame" });
+      await pressButton.press("back", { frameContext: "desktop-frame" });
+      await pressButton.press("recent", { frameContext: "desktop-frame" });
+      await pressButton.press("volume_up", { frameContext: "desktop-frame" });
 
       expect(contexts).toEqual([
         "desktop-frame",
@@ -474,7 +475,7 @@ describe("PressButton", () => {
 
     // "menu" is not a global-action button, so it goes straight to the ADB keyevent path.
     const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
-    const result = await pressButton.press("menu", 500);
+    const result = await pressButton.press("menu", { timeoutMs: 500 });
 
     expect(result.success).toBe(true);
     expect(fakeAdb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([500]);
@@ -521,7 +522,7 @@ describe("PressButton", () => {
     const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, { globalActionClient });
 
     // "back" is a global-action button, so this exercises the two-call path.
-    const result = await pressButton.press("back", 500);
+    const result = await pressButton.press("back", { timeoutMs: 500 });
 
     expect(result.success).toBe(true);
     // Global action capped at min(3000, 500).
@@ -563,7 +564,7 @@ describe("PressButton", () => {
 
     const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, { globalActionClient });
 
-    const result = await pressButton.press("back", 500);
+    const result = await pressButton.press("back", { timeoutMs: 500 });
 
     // A lost reply after dispatch is indeterminate even when the deadline is exhausted.
     expect(result.success).toBe(false);
@@ -797,8 +798,8 @@ describe("PressButton", () => {
     try {
       const pressButton = new PressButton(iosDevice);
 
-      await pressButton.press("home", 500);
-      await pressButton.press("volume_up", 750);
+      await pressButton.press("home", { timeoutMs: 500 });
+      await pressButton.press("volume_up", { timeoutMs: 750 });
 
       expect(homeTimeouts).toEqual([500]);
       expect(buttonTimeouts).toEqual([750]);

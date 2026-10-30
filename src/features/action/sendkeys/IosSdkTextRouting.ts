@@ -132,7 +132,7 @@ export class IosSdkTextRouting {
       return xctest();
     }
     if (isWebTarget(this.target) && key === "done") {
-      return this.routeWeb("submit", signal, xctest, undefined, onDispatch);
+      return this.routeWeb("submit", signal, xctest, { onDispatch });
     }
     this.record({ backend: "xctest", fallbackReason: "unsupported" });
     return xctest();
@@ -160,12 +160,9 @@ export class IosSdkTextRouting {
       return xctest();
     }
     if (isWebTarget(this.target)) {
-      return this.routeWeb(
-        action === "insertText" ? "setValue" : "clear",
-        options.signal,
-        xctest,
+      return this.routeWeb(action === "insertText" ? "setValue" : "clear", options.signal, xctest, {
         text,
-      );
+      });
     }
     if (!this.current) {
       await this.deps.observe(options.signal);
@@ -192,9 +189,7 @@ export class IosSdkTextRouting {
     action: IosSdkWebTextAction,
     signal: AbortSignal | undefined,
     xctest: () => Promise<TextActionResult>,
-    text?: string,
-    /** Marks the command dispatched once the action is sent, so it is not replayed. */
-    onDispatch?: () => void,
+    { text, onDispatch }: { text?: string; onDispatch?: () => void },
   ): Promise<TextActionResult> {
     if (!this.current) {
       await this.deps.observe(signal);

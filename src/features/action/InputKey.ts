@@ -198,21 +198,27 @@ export class InputKey {
     key: InputKeyName,
     timeoutMs?: number,
     frameContext?: string,
-    modifiers: readonly InputKeyModifier[] = [],
-    routing: InputKeyRouting = {},
+    {
+      modifiers = [],
+      ...routing
+    }: InputKeyRouting & { modifiers?: readonly InputKeyModifier[] } = {},
   ): Promise<InputKeyResult> {
     if (this.device.platform === "ios") {
       return this.pressIos(key, modifiers, timeoutMs, routing);
     }
-    return this.pressAndroid(key, modifiers, timeoutMs, frameContext, routing);
+    return this.pressAndroid(key, modifiers, timeoutMs, { frameContext, ...routing });
   }
 
   private async pressAndroid(
     key: InputKeyName,
     modifiers: readonly InputKeyModifier[],
     timeoutMs?: number,
-    frameContext?: string,
-    { displayId, signal, onDispatch }: InputKeyRouting = {},
+    {
+      frameContext,
+      displayId,
+      signal,
+      onDispatch,
+    }: InputKeyRouting & { frameContext?: string } = {},
   ): Promise<InputKeyResult> {
     const keyCode = INPUT_KEY_CODE_MAP[key];
     let dispatched = false;

@@ -96,7 +96,7 @@ describe("shared foreground cache invalidation", () => {
       timer.enableAutoAdvance();
       const action = new PressButton(device, new FakeAdbExecutor(), timer);
       const invalidator = wire(action);
-      await action.press(button, 100);
+      await action.press(button, { timeoutMs: 100 });
       expect(invalidator.calls).toEqual([device]);
     },
   );

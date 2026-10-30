@@ -55,6 +55,7 @@ internal object PrototypePlatformRules {
     val channels = root.member("channels") ?: JsonObject(emptyMap())
     val players = PrototypeMedia.players(root, nodes)
     val notificationChannels = PrototypeNotificationRules.channels(root)
+    val previews = PrototypeCameraPreview.ids(nodes)
     val background = requires.strings("background").toSet()
     val sensors = root.member("sensors")
   }
@@ -77,6 +78,7 @@ internal object PrototypePlatformRules {
       PrototypeMap::error,
       PrototypeMediaCaptions::error,
       PrototypeMedia::castButtonError,
+      PrototypeCameraPreview::error,
       { root, _ -> requiresError(root) },
     )
 
@@ -88,6 +90,9 @@ internal object PrototypePlatformRules {
       { action, path, root, _ -> PrototypeCommerceRules.callError(action, path, root) },
       { action, path, root, _ -> PrototypeNotificationRules.callError(action, path, root) },
       { action, path, _, declared -> PrototypeMedia.callError(action, path, declared.players) },
+      { action, path, _, declared ->
+        PrototypeCameraPreview.callError(action, path, declared.previews)
+      },
     )
 
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {

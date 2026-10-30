@@ -11,6 +11,10 @@ import {
   EMULATOR_GRPC_PORT_LAST,
 } from "./emulatorGrpc/emulatorGrpcPorts";
 import { EmulatorConsolePortExcludedError } from "./EmulatorConsolePortExcludedError";
+import {
+  FileEmulatorGrpcPortRegistry,
+  type EmulatorGrpcPortRegistry,
+} from "./emulatorGrpc/EmulatorGrpcPortRegistry";
 
 const MIN_EMULATOR_CONSOLE_PORT = 5554;
 const MAX_EMULATOR_CONSOLE_PORT = 5682;
@@ -233,8 +237,6 @@ interface ReservationState {
    */
   readonly unreservedLaunchAvdNames: Map<ChildProcess, string>;
   terminalReservationGeneration: number;
-  /** gRPC ports handed to live or starting emulator launches; see `reserveEmulatorGrpcPort`. */
-  readonly leasedEmulatorGrpcPorts: Set<number>;
   /** gRPC leases held by a running emulator child, released with its launch reservation. */
   readonly grpcLeasesByChild: Map<ChildProcess, EmulatorGrpcPortLease>;
 }
@@ -248,7 +250,6 @@ const state: ReservationState = {
   inFlightAvdLaunches: new Set(),
   unreservedLaunchAvdNames: new Map(),
   terminalReservationGeneration: 0,
-  leasedEmulatorGrpcPorts: new Set(),
   grpcLeasesByChild: new Map(),
 };
 
@@ -260,7 +261,6 @@ export function resetEmulatorLaunchReservations(): void {
   state.inFlightAvdLaunches.clear();
   state.unreservedLaunchAvdNames.clear();
   state.terminalReservationGeneration = 0;
-  state.leasedEmulatorGrpcPorts.clear();
   state.grpcLeasesByChild.clear();
 }
 
@@ -275,6 +275,7 @@ export interface EmulatorPortReservationDeps {
   adbFactory: () => AdbClientFactory;
   hostPortAvailabilityChecker: () => PortAvailabilityChecker;
   excludedConsolePorts?: () => ReadonlySet<number>;
+  grpcPortRegistry?: EmulatorGrpcPortRegistry;
 }
 
 /**
@@ -325,30 +326,31 @@ export interface EmulatorPortReservations {
 }
 
 export class DefaultEmulatorPortReservations implements EmulatorPortReservations {
-  constructor(private readonly deps: EmulatorPortReservationDeps) {}
+  private readonly grpcPortRegistry: EmulatorGrpcPortRegistry;
+
+  constructor(private readonly deps: EmulatorPortReservationDeps) {
+    this.grpcPortRegistry = deps.grpcPortRegistry ?? new FileEmulatorGrpcPortRegistry();
+  }
 
   async reserveEmulatorGrpcPort(): Promise<EmulatorGrpcPortLease> {
     const checker = this.deps.hostPortAvailabilityChecker();
+    const owner = { pid: process.pid, launchedAt: this.deps.timer().now() };
     for (let port = EMULATOR_GRPC_PORT_FIRST; port <= EMULATOR_GRPC_PORT_LAST; port += 1) {
-      if (state.leasedEmulatorGrpcPorts.has(port) || !PortManager.isPortAvailable(port, checker)) {
-        continue;
+      let lease: EmulatorGrpcPortLease | undefined;
+      try {
+        lease = this.grpcPortRegistry.claim(port, owner);
+        if (lease && PortManager.isPortAvailable(port, checker)) {
+          return lease;
+        }
+      } catch (error) {
+        logger.warn(`Could not claim emulator gRPC port ${port}`, error);
       }
-      state.leasedEmulatorGrpcPorts.add(port);
-      let released = false;
-      return {
-        port,
-        release: () => {
-          if (!released) {
-            released = true;
-            state.leasedEmulatorGrpcPorts.delete(port);
-          }
-        },
-      };
+      lease?.release();
     }
     throw new ActionableError(
       `Cannot start an Android emulator with gRPC audio: all gRPC ports ` +
         `${EMULATOR_GRPC_PORT_FIRST}-${EMULATOR_GRPC_PORT_LAST} are in use on this host. ` +
-        `Stop an emulator that is holding one, or pass an explicit -grpc <port> in extra emulator arguments.`,
+        `Stop an emulator holding one, or check that daemons sharing this ADB server can write their gRPC lease directory.`,
     );
   }
 

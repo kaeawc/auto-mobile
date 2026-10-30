@@ -84,6 +84,11 @@ and targets that user when it installs, enables and rebinds CtrlProxy and grants
 when it reads the accessibility state to check the binding. Other devices issue exactly the commands they
 always did. If the foreground user cannot be read you get an error that names the user problem.
 
+Right after boot the system user can still be in the foreground for a moment before the driver user takes
+over. Device readiness waits for that switch before setting CtrlProxy up. If the driver user never comes
+to the foreground, readiness times out with an error naming the headless system user; start the driver
+user with `adb shell am switch-user <id>` and retry.
+
 The gate uses the AVD's form factor, so a physical head unit is not covered.
 
 ## Simulating driving and night mode
@@ -113,10 +118,12 @@ injection. Other devices refuse these buttons. Unverified on an emulator.
 
 ## Prototypes
 
-The `prototype` tool's Android renderer is phone-oriented. On an AAOS emulator it may render in a wide
-landscape layout that was not designed for it, may be limited while driving restrictions are on, and
-`save` relies on pinned launcher shortcuts that the car launcher may not support. The goal is a working
-smoke path with truthful results, not a car design system (#14922).
+The `prototype` tool's Android renderer is phone-oriented, so on a car display a prototype renders in a
+wide landscape layout that was not designed for it. A successful `show` on a car reports
+`formFactor: "automotive"` so you can tell why. `save` with `pin: true` keeps the saved prototype and
+reports `pinned: "unsupported"` when the car launcher cannot pin shortcuts. Whether the dismiss button
+clears the car system bars and whether a prototype stays visible while driving restrictions are on is
+unverified.
 
 ## Not supported
 

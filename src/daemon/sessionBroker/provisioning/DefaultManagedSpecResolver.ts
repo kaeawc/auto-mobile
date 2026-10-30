@@ -10,12 +10,8 @@ import {
   type ExactIosRuntimeCatalog,
   type ResolvedExactDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
-import { androidProfileFormFactor } from "../../../models/formFactor";
-import {
-  BINDING_DEFAULT_ANDROID_DEVICE_TYPE,
-  BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY,
-  type BindingDeviceFamily,
-} from "../../../utils/provisionDeviceSpecSchemas";
+import { androidProfileFormFactor, defaultAndroidProfileIdFor } from "../../../models/formFactor";
+import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
 import {
   inferIosFormFactor,
   isIosDuoDeviceType,
@@ -74,6 +70,22 @@ export interface BindingSpecFingerprint {
   version: typeof BINDING_SPEC_FINGERPRINT_VERSION;
   hash: string;
 }
+
+/**
+ * The Android hardware profile created for a spec that omits `deviceType` (a current Pixel with a
+ * known cutout class). Override per resolver.
+ */
+export const BINDING_DEFAULT_ANDROID_DEVICE_TYPE = "pixel_8";
+
+export const BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
+  phone: BINDING_DEFAULT_ANDROID_DEVICE_TYPE,
+  tablet: "pixel_tablet",
+  foldable: "pixel_fold",
+  // Shared with default provisioning (models/formFactor.ts), so the two paths create one profile.
+  tv: defaultAndroidProfileIdFor("tv"),
+  watch: defaultAndroidProfileIdFor("watch"),
+  automotive: defaultAndroidProfileIdFor("automotive"),
+} as const satisfies Record<BindingDeviceFamily, string>;
 
 export type ManagedSpecResolution =
   | {

@@ -18,23 +18,6 @@ export const BINDING_DEVICE_FAMILIES = [
 ] as const;
 export type BindingDeviceFamily = (typeof BINDING_DEVICE_FAMILIES)[number];
 
-/**
- * The Android hardware profile created for a spec that omits `deviceType` (a current Pixel with a
- * known cutout class). Override per resolver.
- */
-export const BINDING_DEFAULT_ANDROID_DEVICE_TYPE = "pixel_8";
-
-export const BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
-  phone: BINDING_DEFAULT_ANDROID_DEVICE_TYPE,
-  tablet: "pixel_tablet",
-  foldable: "pixel_fold",
-  // Names from avdmanager listings; confirm with `avdmanager list device` (form-factors.md row 10).
-  tv: "tv_1080p",
-  watch: "wearos_small_round",
-  // Also the profile `startDevice` creates for `formFactor: "automotive"` (#15879).
-  automotive: "automotive_1024p_landscape",
-} as const satisfies Record<BindingDeviceFamily, string>;
-
 const bindingDeviceFamilySchema = z
   .enum(BINDING_DEVICE_FAMILIES)
   .optional()

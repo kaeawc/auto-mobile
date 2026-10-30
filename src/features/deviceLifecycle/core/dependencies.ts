@@ -1,3 +1,4 @@
+import type { WatchSimulatorLifecycle } from "../../../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { getDefaultSimulatorCreationService } from "../../iosTemplates/defaultSimulatorCreationService";
 import { type DevicePool } from "../../../daemon/devicePool";
 import { defaultDaemonContext, daemonStateLikeFrom } from "../../../daemon/daemonContext";
@@ -108,6 +109,8 @@ export interface DeviceToolsDependencies {
   notifyDeviceInventoryResourcesChanged: (installedAppResourcesChanged: boolean) => Promise<void>;
   syncInstalledAppResourceRegistry: () => Promise<boolean>;
   ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
+  /** Apple Watch simulator lookup and boot for startDevice (#14908); defaults to simctl. */
+  watchSimulatorLifecycleFactory?: () => Pick<WatchSimulatorLifecycle, "findWatch" | "boot">;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
   exactDeviceProvisionerFactory: (

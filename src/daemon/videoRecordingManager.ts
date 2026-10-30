@@ -922,13 +922,14 @@ async function runRetentionSweepWithDependencies(
  * eviction — which only ever considers *other completed* recordings — could run.
  * `capBytes <= 0` disables the monitor for that recording.
  *
- * `filePath` is the file the capture is writing right now: the backend's
+ * `filePaths` are the files the capture is growing right now: the backend's
  * `liveCapturePath` when it reports one (iOS Simulator's raw `.mov`, since the
- * final `.mp4` only exists after stop's post-process), else the output path.
+ * final `.mp4` only exists after stop's post-process), else the output path, plus
+ * any sidecar such as an audio track's PCM; their sizes are summed.
  */
 function scheduleInProgressSizeCap(
   recordingId: string,
-  filePath: string,
+  filePaths: string[],
   capBytes: number,
   deps: VideoRecordingManagerDependencies,
 ): void {
@@ -937,7 +938,7 @@ function scheduleInProgressSizeCap(
   }
   const { timer, retentionPolicy } = deps;
   const handle = timer.setInterval(() => {
-    void enforceInProgressSizeCap(recordingId, filePath, capBytes, deps).catch((error) => {
+    void enforceInProgressSizeCap(recordingId, filePaths, capBytes, deps).catch((error) => {
       logger.warn(`[VideoRecording] In-progress size check failed for ${recordingId}: ${error}`);
     });
   }, retentionPolicy.inProgressCheckIntervalMs);
@@ -994,20 +995,15 @@ async function rearmRetainedRecordingSafety(
   clearInProgressSizeCap(recordingId);
   scheduleInProgressSizeCap(
     recordingId,
-    sizeMonitorPath(deps.videoRecorderService.getLiveCapturePath(recordingId), record.filePath),
+    deps.videoRecorderService.getInProgressFiles(recordingId),
     capBytes,
     deps,
   );
 }
 
-/** The file to stat for the size cap: the live capture file if reported, else the output. */
-function sizeMonitorPath(liveCapturePath: string | undefined, outputPath: string): string {
-  return liveCapturePath ?? outputPath;
-}
-
 async function enforceInProgressSizeCap(
   recordingId: string,
-  filePath: string,
+  filePaths: string[],
   capBytes: number,
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
@@ -1019,9 +1015,10 @@ async function enforceInProgressSizeCap(
   // Host output can be absent during capture (Android pulls it only at stop).
   // Keep injected size probes intact; only the default probe's expected missing
   // file diagnostic should be quiet on recurring monitor ticks.
-  const sizeBytes = await (statFileSize === getFileSize
-    ? getFileSize(filePath, true)
-    : statFileSize(filePath));
+  const stat = (filePath: string) =>
+    statFileSize === getFileSize ? getFileSize(filePath, true) : statFileSize(filePath);
+  const sizes = await Promise.all(filePaths.map(stat));
+  const sizeBytes = sizes.reduce((total, size) => total + size, 0);
   if (moduleDependencies !== deps || sizeBytes < capBytes) {
     return;
   }
@@ -1434,7 +1431,7 @@ export async function startVideoRecording(
     const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
     scheduleInProgressSizeCap(
       active.recordingId,
-      sizeMonitorPath(active.liveCapturePath, active.outputPath),
+      videoRecorderService.getInProgressFiles(active.recordingId),
       capBytes,
       deps,
     );

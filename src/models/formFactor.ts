@@ -1,41 +1,52 @@
 import type { FormFactor } from "./DeviceMatchCriteria";
 
-type NonGeometricFormFactor = "tv" | "watch" | "automotive";
+const NON_GEOMETRIC_KINDS = ["tv", "watch", "automotive"] as const;
+export type NonGeometricFormFactor = (typeof NON_GEOMETRIC_KINDS)[number];
 
 /**
  * Non-handheld form factors, keyed by system-image tag and avdmanager profile id.
  * Names are from sdkmanager/avdmanager listings; confirm with `sdkmanager --list` and
  * `avdmanager list device` (docs/design-docs/plat/android/form-factors.md, checklist row 10).
- * A wrong name is a one-line fix here.
+ * A wrong name is a one-line fix here. `systemImageTags` is in provisioning preference order,
+ * and `defaultProfileId` is the hardware profile created when a request names none.
  */
-const NON_GEOMETRIC_FORM_FACTORS: ReadonlyArray<{
-  formFactor: NonGeometricFormFactor;
-  systemImageTags: readonly string[];
-  profileIdPattern: RegExp;
-}> = [
-  { formFactor: "tv", systemImageTags: ["android-tv", "google-tv"], profileIdPattern: /^tv_/i },
-  {
-    formFactor: "watch",
+const NON_GEOMETRIC_FORM_FACTORS: Readonly<
+  Record<
+    NonGeometricFormFactor,
+    { systemImageTags: readonly string[]; profileIdPattern: RegExp; defaultProfileId: string }
+  >
+> = {
+  tv: {
+    systemImageTags: ["android-tv", "google-tv", "google-tv-ps16k"],
+    profileIdPattern: /^tv_/i,
+    defaultProfileId: "tv_1080p",
+  },
+  watch: {
     systemImageTags: ["android-wear", "android-wear-cn"],
     profileIdPattern: /^wear(?:os)?_/i,
+    defaultProfileId: "wearos_small_round",
   },
-  {
-    formFactor: "automotive",
-    systemImageTags: ["android-automotive", "android-automotive-playstore"],
+  automotive: {
+    // Play first: it is the tag of the default `automotive_1024p_landscape` profile (#15879).
+    systemImageTags: ["android-automotive-playstore", "android-automotive"],
     profileIdPattern: /^automotive_/i,
+    defaultProfileId: "automotive_1024p_landscape",
   },
-];
+};
 
-/**
- * The system-image tags that classify a device as `formFactor`. Provisioning creates a device of
- * that form factor only from these tags, so inventory reports the created device as the requested
- * form factor and a repeated request reuses it.
- */
+const NON_GEOMETRIC_ENTRIES = NON_GEOMETRIC_KINDS.map((formFactor) => ({
+  formFactor,
+  ...NON_GEOMETRIC_FORM_FACTORS[formFactor],
+}));
+
+/** The system-image tags of a non-handheld form factor, best first for provisioning. */
 export function androidSystemImageTagsFor(formFactor: NonGeometricFormFactor): readonly string[] {
-  return (
-    NON_GEOMETRIC_FORM_FACTORS.find((entry) => entry.formFactor === formFactor)?.systemImageTags ??
-    []
-  );
+  return NON_GEOMETRIC_FORM_FACTORS[formFactor].systemImageTags;
+}
+
+/** The avdmanager profile id created for a non-handheld form factor that names no profile. */
+export function defaultAndroidProfileIdFor(formFactor: NonGeometricFormFactor): string {
+  return NON_GEOMETRIC_FORM_FACTORS[formFactor].defaultProfileId;
 }
 
 function nonGeometricFormFactor(input: {
@@ -44,13 +55,13 @@ function nonGeometricFormFactor(input: {
 }): NonGeometricFormFactor | undefined {
   const tag = input.systemImageTag?.trim().toLowerCase();
   const profileId = input.profileId?.trim();
-  const byTag = NON_GEOMETRIC_FORM_FACTORS.find((entry) =>
+  const byTag = NON_GEOMETRIC_ENTRIES.find((entry) =>
     tag ? entry.systemImageTags.includes(tag) : false,
   );
   if (byTag) {
     return byTag.formFactor;
   }
-  return NON_GEOMETRIC_FORM_FACTORS.find((entry) =>
+  return NON_GEOMETRIC_ENTRIES.find((entry) =>
     profileId ? entry.profileIdPattern.test(profileId) : false,
   )?.formFactor;
 }

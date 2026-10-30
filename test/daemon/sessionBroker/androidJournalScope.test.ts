@@ -237,6 +237,30 @@ describe("Android journal writer/reset scope", () => {
     },
   );
 
+  test("a systemProperty setPreference row is reverted in place and stays clean (#15792)", async () => {
+    const r = await rig();
+    const rows = deviceToolMutations(
+      "setPreference",
+      {
+        scope: "systemProperty",
+        key: "debug.app.api_url",
+        value: "https://staging",
+        type: "string",
+      },
+      "android",
+    );
+    for (const row of rows ?? []) {
+      await r.recorder.record({
+        ...row,
+        toolName: "setPreference",
+        priorValue: { state: "absent" },
+      });
+    }
+    expect(await r.reset()).toMatchObject({ outcome: "clean" });
+    expect(r.port.reverted).toMatchObject([{ kind: "preference", toolName: "setPreference" }]);
+    expect(r.fallbacks()).toBe(0);
+  });
+
   const adapterCases: {
     name: string;
     args: Record<string, unknown>;

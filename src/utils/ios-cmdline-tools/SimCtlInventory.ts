@@ -1,6 +1,6 @@
 import { SimCtlCreation } from "./SimCtlCreation";
 import { isTemplateSimName } from "./SimulatorTemplateKey";
-import { isWatchOsSimulatorRuntime } from "./simulatorRuntimeFamily";
+import { isIosSimulatorRuntime } from "./simulatorRuntimeFamily";
 import {
   type SimCtlCatalog,
   AppleDevice,
@@ -472,9 +472,10 @@ export class SimCtlInventory {
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
-    // Apple Watch simulators share this listing but are not iOS devices (#14901).
-    const iosRuntimes = Object.entries(simulatorList.devices).filter(
-      ([runtimeId]) => !isWatchOsSimulatorRuntime(runtimeId),
+    // Watch, Apple TV and Vision Pro simulators share this listing but are not iOS devices
+    // (#14901, #15885), so only iOS runtimes are kept.
+    const iosRuntimes = Object.entries(simulatorList.devices).filter(([runtimeId]) =>
+      isIosSimulatorRuntime(runtimeId),
     );
     const listedDevices = iosRuntimes.flatMap(([, runtimeDevices]) => runtimeDevices);
     const signature = JSON.stringify(

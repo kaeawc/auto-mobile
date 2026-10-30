@@ -1,3 +1,4 @@
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../src/models";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
@@ -74,6 +75,29 @@ describe("Apple Watch simulator lifecycle", () => {
       expect.objectContaining({ udid: WATCH_UDID, reason: "restart", timeoutMs: 30_000 }),
     ]);
     expect(simctl.commands).toEqual([`boot ${WATCH_UDID} 30000`]);
+  });
+
+  test("a watch boot's admission follows the caller's signal, else the ambient request signal", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const signals: Array<AbortSignal | undefined> = [];
+    const lifecycle = new WatchSimulatorLifecycle(
+      simctl,
+      new WatchSimulatorInventory(simctl, "arm64"),
+      {
+        run: async (request, boot) => {
+          signals.push(request.signal);
+          return await boot(request.timeoutMs);
+        },
+      },
+    );
+    const explicit = new AbortController().signal;
+    const ambient = new AbortController().signal;
+    const watch = await lifecycle.findWatch({ deviceId: WATCH_UDID });
+
+    await lifecycle.boot(watch, { timeoutMs: 30_000, signal: explicit });
+    await runWithAbortSignal(ambient, () => lifecycle.boot(watch, { timeoutMs: 30_000 }));
+
+    expect(signals).toEqual([explicit, ambient]);
   });
 
   test("a watch boot refused at the simulator limit never runs simctl boot", async () => {

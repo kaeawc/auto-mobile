@@ -1,5 +1,6 @@
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../models";
 import type { IosBootInstrumentation } from "../../models/IosBootInstrumentation";
+import { getAbortSignal } from "../AbortContext";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 import { logger } from "../logger";
 import type { SimCtl } from "./SimCtlClient";
@@ -79,7 +80,10 @@ export class WatchSimulatorLifecycle {
     return watch;
   }
 
-  async boot(watch: ListedWatch, options: { timeoutMs?: number } = {}): Promise<WatchBootResult> {
+  async boot(
+    watch: ListedWatch,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<WatchBootResult> {
     const udid = watch.deviceId;
     if (watch.isRunning) {
       return {
@@ -96,6 +100,8 @@ export class WatchSimulatorLifecycle {
             reason: "restart",
             runtime: watch.runtimeId,
             timeoutMs: options.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS,
+            // A cancelled or expired request must leave the admission queue, not hold its place.
+            signal: options.signal ?? getAbortSignal(),
           },
           bootWatch,
         )

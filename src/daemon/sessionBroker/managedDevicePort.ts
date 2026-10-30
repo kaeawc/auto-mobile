@@ -79,11 +79,13 @@ export interface ManagedDevicePortDependencies {
       device: BootedDevice,
       profile: Extract<BrokerNativeProfile, { platform: "ios" }>,
       assertOwned: () => Promise<void>,
-      signal?: AbortSignal,
-      context?: {
-        resource: BrokerResourceRecord;
-        scope: DeviceIncarnationScope;
-        runResetBoot?: ResetBootRunner;
+      options?: {
+        signal?: AbortSignal;
+        context?: {
+          resource: BrokerResourceRecord;
+          scope: DeviceIncarnationScope;
+          runResetBoot?: ResetBootRunner;
+        };
       },
     ) => Promise<"clean" | ResetOutcome>;
     android?: Pick<AndroidBaselineReset, "canCapture" | "capture" | "reset" | "forget">;
@@ -172,7 +174,8 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     }
     const sessionId = await this.readySessionId(result, resource, profile);
-    await this.captureBaselinesHoldingLease(resource, result, profile, sessionId, {
+    await this.captureBaselinesHoldingLease(resource, result, profile, {
+      sessionId,
       signal: options.signal,
       deadlineMs,
       deviceProfileOptions: options,
@@ -216,20 +219,21 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     resource: BrokerResourceRecord,
     result: BrokerDeviceAcquisitionResult,
     profile: BrokerNativeProfile,
-    sessionId: string,
     options: {
+      sessionId: string;
       signal?: AbortSignal;
       deadlineMs: number;
       deviceProfileOptions: SessionDevicePreparationOptions;
     },
   ): Promise<void> {
+    const { sessionId } = options;
     const release = this.dependencies.leaseKeepalive?.hold({
       taskId: resource.requestId!,
       ownerKey: "session-broker",
       sessionUuid: sessionId,
     });
     try {
-      await this.captureAndroidBaseline(resource, result, profile, sessionId, options);
+      await this.captureAndroidBaseline(resource, result, profile, options);
       if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
         await this.capturePoolEntryBaseline(resource, sessionId, options);
       }
@@ -244,9 +248,9 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     resource: BrokerResourceRecord,
     result: BrokerDeviceAcquisitionResult,
     profile: BrokerNativeProfile,
-    sessionId: string,
-    options: { signal?: AbortSignal; deadlineMs: number },
+    options: { sessionId: string; signal?: AbortSignal; deadlineMs: number },
   ): Promise<void> {
+    const { sessionId } = options;
     const android = this.dependencies.resetBaseline?.android;
     if (profile.platform !== "android" || !android || !android.canCapture) {
       return;
@@ -269,7 +273,8 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         stableDeviceId: binding.stableId,
       });
       const captured = await runAsBindingReconciler(this.key(resource), () =>
-        android.capture(resource.resourceId, device, profile, sessionId, {
+        android.capture(resource.resourceId, device, profile, {
+          sessionId,
           fresh: entry.disposition === "created" || entry.disposition === "replaced",
           signal: options.signal,
           timeoutMs: Math.max(
@@ -601,8 +606,10 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
           { platform: "ios", deviceId: expected.stableDeviceId, name },
           profile,
           assertOwned,
-          signal,
-          { resource, scope: this.mutationScope(resource, assignment), runResetBoot },
+          {
+            signal,
+            context: { resource, scope: this.mutationScope(resource, assignment), runResetBoot },
+          },
         );
       }
       if (!android || profile.platform !== "android") {
@@ -616,7 +623,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         );
       }
       const device = this.androidResetTarget(resource, assignment, name);
-      return android.reset(resource.resourceId, device, profile, assertOwned, signal);
+      return android.reset(resource.resourceId, device, profile, { assertOwned, signal });
     });
     await assertOwned();
     return result;

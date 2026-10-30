@@ -121,7 +121,8 @@ describe("AndroidSnapshotReset", () => {
     host.timer = timer;
     host.resetTimeoutMs = 10;
     const baseline = new AndroidBaselineReset(host);
-    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+    await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: "session-a",
       stableDeviceId: "stable-avd",
       timer,
       fresh: true,
@@ -135,12 +136,9 @@ describe("AndroidSnapshotReset", () => {
         timer.advanceTime(2);
       }
     };
-    const result = baseline.reset(
-      "resource-a",
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      async () => {},
-    );
+    const result = baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      assertOwned: async () => {},
+    });
     const failure = result.catch((error: unknown) => error);
     await drainUntil(() => port.calls.at(-1) === "load", { description: "snapshot load" });
     timer.advanceTime(8);
@@ -434,7 +432,8 @@ test("full snapshot strategy restores added packages only when the activity veto
   host.strategy = strategy;
   host.timer = timer;
   const baseline = new AndroidBaselineReset(host);
-  await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+  await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+    sessionId: "session-a",
     stableDeviceId: "stable-avd",
     timer,
     fresh: true,
@@ -449,7 +448,9 @@ test("full snapshot strategy restores added packages only when the activity veto
     }
   };
   await expect(
-    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      assertOwned: async () => {},
+    }),
   ).resolves.toMatchObject({ outcome: "clean", mode: "snapshot" });
   expect(host.closed).toBe(1);
 });
@@ -460,7 +461,8 @@ async function capturedSnapshotRig() {
   host.strategy = strategy;
   host.timer = timer;
   const baseline = new AndroidBaselineReset(host);
-  await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+  await baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+    sessionId: "session-a",
     stableDeviceId: "stable-avd",
     timer,
     fresh: true,
@@ -468,7 +470,9 @@ async function capturedSnapshotRig() {
     assertOwned: async () => {},
   });
   const reset = () =>
-    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {});
+    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      assertOwned: async () => {},
+    });
   return { host, port, reset };
 }
 
@@ -508,7 +512,8 @@ test("successful wipe-data reset leaves the replacement launch signal live and c
   host.timer = timer;
   const baseline = new AndroidBaselineReset(host);
   const capture = () =>
-    baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, "session-a", {
+    baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: "session-a",
       stableDeviceId: "stable-avd",
       timer,
       fresh: true,
@@ -518,7 +523,9 @@ test("successful wipe-data reset leaves the replacement launch signal live and c
   await capture();
   port.failures.add("load");
   await expect(
-    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      assertOwned: async () => {},
+    }),
   ).resolves.toMatchObject({
     outcome: "fallback:wipe-data",
     mode: "wipe-data",

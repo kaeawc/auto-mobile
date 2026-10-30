@@ -133,6 +133,7 @@ export interface AndroidBaselineResetDependencies {
 }
 
 interface AndroidBaselineCaptureOptions {
+  sessionId: string;
   stableDeviceId: string;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -172,9 +173,9 @@ export class AndroidBaselineReset {
     resourceId: string,
     device: BootedDevice,
     profile: AndroidResetProfile,
-    sessionId: string,
     options: AndroidBaselineCaptureOptions,
   ): Promise<{ bootId: string | null } | undefined> {
+    const { sessionId } = options;
     this.closeBaseline(resourceId);
     if (!this.dependencies.strategy) {
       return;
@@ -251,7 +252,7 @@ export class AndroidBaselineReset {
     };
     try {
       await runStep(
-        (timeoutMs) => this.assertTarget(device, profile, signal, timeoutMs),
+        (timeoutMs) => this.assertTarget(device, profile, signal, { timeoutMs }),
         "Android reset baseline target verification",
         true,
       );
@@ -286,13 +287,10 @@ export class AndroidBaselineReset {
           timeoutMs: Math.max(0, deadlineMs - timer.now()),
           assertOwned: async () => {
             await options.assertOwned?.();
-            await this.assertTarget(
-              device,
-              profile,
-              signal,
-              Math.max(1, deadlineMs - timer.now()),
-              { allowPendingName: true },
-            );
+            await this.assertTarget(device, profile, signal, {
+              timeoutMs: Math.max(1, deadlineMs - timer.now()),
+              allowPendingName: true,
+            });
             if (bootId) {
               await this.assertBootIdentity(device, bootId, signal);
             }
@@ -339,8 +337,7 @@ export class AndroidBaselineReset {
     resourceId: string,
     device: BootedDevice,
     profile: AndroidResetProfile,
-    assertOwned: () => Promise<void>,
-    signal?: AbortSignal,
+    { assertOwned, signal }: { assertOwned: () => Promise<void>; signal?: AbortSignal },
   ): Promise<"clean" | ResetOutcome> {
     const timing: ResetOutcome = { outcome: "pending", mode: "none", phases: {} };
     const timer = this.dependencies.timer ?? this.baselines.get(resourceId)?.timer ?? defaultTimer;
@@ -359,7 +356,8 @@ export class AndroidBaselineReset {
     try {
       return await raceWithDeadline(
         () =>
-          this.resetWithinDeadline(resourceId, device, profile, owned, {
+          this.resetWithinDeadline(resourceId, device, profile, {
+            assertOwned: owned,
             signal: resetSignal,
             deadlineMs,
             timing,
@@ -434,8 +432,8 @@ export class AndroidBaselineReset {
     resourceId: string,
     device: BootedDevice,
     profile: AndroidResetProfile,
-    assertOwned: () => Promise<void>,
     {
+      assertOwned,
       signal,
       deadlineMs,
       timing,
@@ -445,7 +443,7 @@ export class AndroidBaselineReset {
       deadlineMs: number;
       timing: ResetOutcome;
       timer: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
-    },
+    } & { assertOwned: () => Promise<void> },
   ): Promise<"clean" | ResetOutcome> {
     const strategy = this.dependencies.strategy;
     if (!strategy) {
@@ -459,7 +457,8 @@ export class AndroidBaselineReset {
       if (!strategy.handlesSessionMutations && !activityAllowsReset(strategy, baseline.activity)) {
         throw new ActionableError("Android session mutations cannot be restored by this reset");
       }
-      await this.assertTarget(device, profile, signal, Math.max(1, deadlineMs - timer.now()), {
+      await this.assertTarget(device, profile, signal, {
+        timeoutMs: Math.max(1, deadlineMs - timer.now()),
         requireBoot: !strategy.handlesSessionMutations,
         allowPendingName: true,
         budget,
@@ -476,8 +475,7 @@ export class AndroidBaselineReset {
           device,
           baseline.packages,
           "Android reset detected untracked package inventory changes",
-          signal,
-          budget,
+          { signal, budget },
         );
       }
       const healthCheck = (context?: DeviceMutationResetContext) =>
@@ -517,13 +515,11 @@ export class AndroidBaselineReset {
           assertBindingOwned: assertOwned,
           rebindIncarnation: async () => {
             await assertOwned();
-            await this.assertTarget(
-              device,
-              profile,
-              signal,
-              Math.max(1, deadlineMs - timer.now()),
-              { allowPendingName: true, budget },
-            );
+            await this.assertTarget(device, profile, signal, {
+              timeoutMs: Math.max(1, deadlineMs - timer.now()),
+              allowPendingName: true,
+              budget,
+            });
             const bootId = await this.bootIdentity(device, signal, undefined, budget);
             await assertOwned();
             baseline.bootId = bootId;
@@ -548,8 +544,7 @@ export class AndroidBaselineReset {
           device,
           baseline.packages,
           "Android reset did not restore the original package inventory",
-          signal,
-          budget,
+          { signal, budget },
         );
       }
       await healthCheck();
@@ -567,13 +562,11 @@ export class AndroidBaselineReset {
     budget: ResetReadBudget,
   ): Promise<void> {
     await budget.assertOwned();
-    await this.assertTarget(
-      device,
-      profile,
-      signal,
-      Math.max(1, budget.deadlineMs - budget.timer.now()),
-      { allowPendingName: true, budget },
-    );
+    await this.assertTarget(device, profile, signal, {
+      timeoutMs: Math.max(1, budget.deadlineMs - budget.timer.now()),
+      allowPendingName: true,
+      budget,
+    });
     await budget.assertOwned();
     await this.packages(device, signal, undefined, budget);
     await budget.assertOwned();
@@ -588,12 +581,14 @@ export class AndroidBaselineReset {
     profile: AndroidResetProfile,
     signal?: AbortSignal,
     // Capture-only default; reset callers always supply an absolute read budget.
-    timeoutMs = 2000,
     {
+      timeoutMs = 2000,
       requireBoot = true,
       allowPendingName = false,
       budget,
-    }: { requireBoot?: boolean; allowPendingName?: boolean; budget?: ResetReadBudget } = {},
+    }: { requireBoot?: boolean; allowPendingName?: boolean; budget?: ResetReadBudget } & {
+      timeoutMs?: number;
+    } = {},
   ): Promise<void> {
     const runtime = parseAndroidSystemImageRuntime(profile.systemImagePackage);
     const validInput = [
@@ -763,8 +758,7 @@ export class AndroidBaselineReset {
     device: BootedDevice,
     baseline: ReadonlySet<string>,
     message: string,
-    signal?: AbortSignal,
-    budget?: ResetReadBudget,
+    { signal, budget }: { signal?: AbortSignal; budget?: ResetReadBudget } = {},
   ): Promise<void> {
     const packages = await this.packages(device, signal, undefined, budget);
     if (

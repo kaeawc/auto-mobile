@@ -101,8 +101,8 @@ describe("Android journal writer/reset scope", () => {
       resourceId,
       ANDROID_RESET_DEVICE,
       ANDROID_RESET_PROFILE,
-      "session-a",
       {
+        sessionId: "session-a",
         timer,
         timeoutMs: 60_000,
         assertOwned: async () => {},
@@ -124,7 +124,9 @@ describe("Android journal writer/reset scope", () => {
       scope,
       recorder: new SessionMutationRecorder(journal, scope),
       reset: () =>
-        baseline.reset(resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+        baseline.reset(resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+          assertOwned: async () => {},
+        }),
       fallbacks: () => fallbacks,
     };
   }

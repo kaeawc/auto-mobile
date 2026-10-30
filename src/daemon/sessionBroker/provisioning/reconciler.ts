@@ -125,8 +125,8 @@ export class BindingReconciler {
         releaseSession: (sessionUuid) => this.releaseSession(sessionUuid),
         readyOrReleaseOnBusy: (provisioned, publish) =>
           this.readyOrReleaseOnBusy(provisioned, publish),
-        claimAndReady: (context, disposition, assignment, provisioned, reservation) =>
-          this.claimAndReady(context, disposition, assignment, provisioned, reservation),
+        claimAndReady: (context, disposition, assignment, { provisioned, reservation }) =>
+          this.claimAndReady(context, disposition, assignment, { provisioned, reservation }),
       },
     );
   }
@@ -572,13 +572,10 @@ export class BindingReconciler {
         await this.releaseSession(provisioned.sessionUuid);
         throw new ReconcileAbort(claimFailure(committed, "reuse"));
       }
-      return await this.claimAndReady(
-        context,
-        "reused",
-        committed.assignment,
+      return await this.claimAndReady(context, "reused", committed.assignment, {
         provisioned,
         reservation,
-      );
+      });
     });
   }
 
@@ -723,12 +720,17 @@ export class BindingReconciler {
     context: ReconcileContext,
     assignment: BindingAssignmentRecord,
     disposition: "created" | "replaced",
-    replacing?: BindingJournalEntry,
-    options: {
+    {
+      replacing,
+      ...options
+    }: {
       bootReservation?: BootSlotReservation;
-    } = {},
+    } & { replacing?: BindingJournalEntry } = {},
   ): Promise<ReadyResult> {
-    return this.creation.createAndCommit(context, assignment, disposition, replacing, options);
+    return this.creation.createAndCommit(context, assignment, disposition, {
+      replacing,
+      ...options,
+    });
   }
 
   private async withEmptyBindingCleanup<T>(
@@ -889,8 +891,7 @@ export class BindingReconciler {
     context: ReconcileContext,
     disposition: BindingDisposition,
     assignment: BindingAssignmentRecord,
-    provisioned: BindingProvisionedDevice,
-    reservation: string | undefined,
+    { provisioned, reservation }: { provisioned: BindingProvisionedDevice; reservation?: string },
   ): Promise<ReadyResult> {
     const { owner, key } = context.request;
     if (!owner) {

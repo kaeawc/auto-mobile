@@ -254,8 +254,7 @@ describe("durable broker timing", () => {
         { deviceId: scope.deviceId, platform: "ios", name: "phone" },
         profile,
         async () => {},
-        scope,
-        { reuseCount: resource.reuseCount ?? 0 },
+        { scope, reuseCount: resource.reuseCount ?? 0 },
       );
     };
     for (let use = 1; use <= 3; use++) {
@@ -329,8 +328,7 @@ describe("durable broker timing", () => {
         { deviceId: scope.deviceId, platform: "ios", name: "phone" },
         profile,
         async () => {},
-        scope,
-        { reuseCount: resource.reuseCount ?? 0 },
+        { scope, reuseCount: resource.reuseCount ?? 0 },
       );
     };
     const resourceIds: string[] = [];

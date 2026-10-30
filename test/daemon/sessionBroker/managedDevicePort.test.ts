@@ -718,7 +718,7 @@ describe("ManagedDevicePort clean-reset ownership", () => {
   }
 
   test("qualified reset is bound to the private native identity and async ownership scope", async () => {
-    const rig = await resetRig(async (device, profile, assertOwned, _signal, context) => {
+    const rig = await resetRig(async (device, profile, assertOwned, { context } = {}) => {
       expect(device.deviceId).toBe("UDID-1");
       expect(profile.runtimeId).toBe(IOS.profile.runtimeId);
       expect(currentBindingReconciler()).toEqual({ scopeKey: SCOPE_KEY, bindingIndex: 7 });
@@ -838,7 +838,7 @@ describe("ManagedDevicePort clean-reset ownership", () => {
       },
       isCurrentReset: async () => true,
       resetBaseline: {
-        ios: async (_device, _profile, assertOwned, _signal, context) => {
+        ios: async (_device, _profile, assertOwned, { context } = {}) => {
           await assertOwned();
           resets++;
           expect(await journal.getBaseline(context!.scope)).toEqual(resets === 1 ? baseline : null);

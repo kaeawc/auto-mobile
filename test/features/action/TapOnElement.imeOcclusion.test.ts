@@ -318,7 +318,7 @@ async function executeAt(
       throw error;
     }
   };
-  tap.executeAndroidTap = async (_action, x, y) => {
+  tap.executeAndroidTap = async (_action, { x, y }) => {
     points.push({ x, y });
   };
   tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {

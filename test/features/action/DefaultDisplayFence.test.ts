@@ -1016,17 +1016,16 @@ describe("display fence options preserve public call shapes", () => {
               ? () =>
                   Reflect.apply(tap.executeAndroidTap, tap, [
                     "tap",
-                    50,
-                    70,
+                    { x: 50, y: 70 },
                     50,
                     element,
                     { isTalkBackEnabled: false },
                     [],
                   ])
               : shape === "legacy"
-                ? () => tap.executeAndroidTap("tap", 50, 70, 50, element)
+                ? () => tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element)
                 : () =>
-                    tap.executeAndroidTap("tap", 50, 70, 50, element, {
+                    tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element, {
                       options: { action: "tap", ...options },
                       isTalkBackEnabled: false,
                     });

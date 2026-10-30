@@ -105,7 +105,7 @@ function harness(
   tap.awaitIdle = new FakeAwaitIdle();
   tap.window = new FakeWindow();
   const points: { x: number; y: number }[] = [];
-  tap.executeAndroidTap = async (_action, x, y) => {
+  tap.executeAndroidTap = async (_action, { x, y }) => {
     points.push({ x, y });
   };
   tap.deriveTapEffectAfterPostTapObservation = async (before, current) => {

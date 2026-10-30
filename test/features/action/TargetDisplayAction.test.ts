@@ -1212,7 +1212,7 @@ describe("explicit action display", () => {
       const defaultPoints: Array<{ x: number; y: number }> = [];
       defaultAction.observedInteraction = runBlockWithEnvelope(observation, { observation });
       defaultAction.refreshViewHierarchy = async () => observation.viewHierarchy ?? null;
-      defaultAction.executeAndroidTap = async (_action, x, y) => {
+      defaultAction.executeAndroidTap = async (_action, { x, y }) => {
         defaultPoints.push({ x, y });
       };
       defaultAction.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({

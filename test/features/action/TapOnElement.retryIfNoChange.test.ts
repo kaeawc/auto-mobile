@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type {
   Element,
   ObserveResult,
+  Point,
   TapOnElementOptions,
   ViewHierarchyResult,
 } from "../../../src/models";
@@ -452,8 +453,7 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
       let capturedIsTalkBackEnabled: boolean | undefined;
       tap.executeAndroidTap = async (
         _action: string,
-        _x: number,
-        _y: number,
+        _point: Point,
         _dur: number,
         _el: Element,
         context,

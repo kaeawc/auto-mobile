@@ -1,11 +1,11 @@
-import type { LifecycleRequester } from "../../features/deviceLifecycle/lifecycleRequester";
-import type { InternalTeardownOptions } from "../../features/deviceLifecycle/teardown/teardownContracts";
+import type { DeleteDeviceOptions } from "../../features/deviceLifecycle/teardown/teardownContracts";
 import type { DeviceResourceConfigurationResult } from "../../models/DeviceResourceConfiguration";
 import { BootedDevice, DeviceInfo } from "../../models";
 import { createPerformanceTracker } from "../../utils/PerformanceTracker";
 import { type AcquisitionReceipt } from "../../daemon/acquisitionReceipt";
 import type { DeviceReadinessLevel } from "../../daemon/readiness/DeviceReadiness";
 import type { DeviceReadinessReservation } from "../../daemon/devicePool";
+import { type DeviceCreationGate } from "../../devices/deviceCreationGate";
 import { type ExactDeviceProvisioner } from "../../devices/exactDeviceProvisioning";
 import { type VirtualDeviceLifecycleLease } from "../../devices/virtualDeviceLifecycleCoordinator";
 import { DeviceTeardownService } from "../../devices/deviceTeardownService";
@@ -42,8 +42,7 @@ export type ProvisioningHooks = {
     deps: DeviceToolsDependencies,
     callerSignal: AbortSignal | undefined,
     teardownService: DeviceTeardownService,
-    lifecycleLease?: VirtualDeviceLifecycleLease,
-    ...options: [requester?: LifecycleRequester, internal?: InternalTeardownOptions]
+    options?: DeleteDeviceOptions,
   ) => Promise<TeardownToolResponse>;
 };
 
@@ -79,6 +78,7 @@ export type ProvisionBootOptions = {
   ) => Promise<void>;
   /** Records that an adopted device's undone request left nothing of its own behind. */
   recordUndeliveredAdoption?: (reason: unknown) => void;
+  deviceCreationGate: DeviceCreationGate;
   provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>;
   perf: ReturnType<typeof createPerformanceTracker>;
   totalDeadlineMs: number;

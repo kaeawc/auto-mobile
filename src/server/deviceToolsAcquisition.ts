@@ -518,11 +518,13 @@ async function prepareDevice(
         deviceUtils,
         bootDeadlineMs,
         deps.timer,
-        coordinatedSignal,
-        (settlement) => {
-          if (settlement) {
-            state.coldBootSettlements.push(settlement);
-          }
+        {
+          signal: coordinatedSignal,
+          collectPendingSettlement: (settlement) => {
+            if (settlement) {
+              state.coldBootSettlements.push(settlement);
+            }
+          },
         },
       ),
     );

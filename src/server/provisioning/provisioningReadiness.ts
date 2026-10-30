@@ -188,12 +188,13 @@ export async function ensureProvisionDeviceReadiness(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   device: BootedDevice,
-  requestedIdentity: string,
   {
+    requestedIdentity,
     totalDeadlineMs,
     perf,
     signal,
   }: {
+    requestedIdentity: string;
     totalDeadlineMs: number;
     perf: ReturnType<typeof createPerformanceTracker>;
     signal: AbortSignal | undefined;

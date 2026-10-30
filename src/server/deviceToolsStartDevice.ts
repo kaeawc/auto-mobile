@@ -470,12 +470,6 @@ async function bindPreparedDevice(
             deps.timer,
             budgets.automationDeadlineMs,
             signal,
-            () =>
-              acquisitionLifecycleTimeoutError(
-                budgets,
-                requestedIdentity,
-                "binding the device session",
-              ),
             bindUndoneIfUndelivered(
               async (receipt, bindSignal) => {
                 return await bindBootedDeviceSession(
@@ -503,8 +497,16 @@ async function bindPreparedDevice(
               },
               () => state.boot,
             ),
-            (settlement) => {
-              state.bindingSettlements.push(settlement);
+            {
+              timeoutError: () =>
+                acquisitionLifecycleTimeoutError(
+                  budgets,
+                  requestedIdentity,
+                  "binding the device session",
+                ),
+              onOrphan: (settlement) => {
+                state.bindingSettlements.push(settlement);
+              },
             },
           );
     if (readinessResult.preservedSessionId && !autolockEnabled) {

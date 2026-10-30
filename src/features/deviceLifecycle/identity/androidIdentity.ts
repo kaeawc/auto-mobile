@@ -342,8 +342,7 @@ export async function confirmPooledAvdIdentity(
   capture: PooledAvdCapture,
   devicePool: DevicePool | undefined,
   resolveRunningAvdName: DeviceToolsDependencies["resolveRunningAndroidAvdName"],
-  budget: PooledAvdNameProbeBudget,
-  force: boolean,
+  { budget, force }: { budget: PooledAvdNameProbeBudget; force: boolean },
 ): Promise<PooledAvdConfirmation> {
   const pooledAvdName = capture.avdName;
   const pooled = devicePool?.getDevice(device.deviceId);

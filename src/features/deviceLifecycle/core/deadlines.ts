@@ -299,13 +299,18 @@ export type DeadlineBoundOperation<T> = (
   onDelivered: (commit: () => void) => void,
 ) => Promise<T>;
 
+/** How a deadline-bound operation fails on its deadline, and who settles it if it is orphaned. */
+export interface DeadlineBoundOperationOptions {
+  timeoutError: () => Error;
+  onOrphan?: (pending: Promise<unknown>) => void;
+}
+
 export async function runOperationWithinDeadline<T>(
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   totalDeadlineMs: number,
   requestSignal: AbortSignal | undefined,
-  timeoutError: () => Error,
   operation: DeadlineBoundOperation<T>,
-  onOrphan?: (pending: Promise<unknown>) => void,
+  { timeoutError, onOrphan }: DeadlineBoundOperationOptions,
 ): Promise<T> {
   const remainingMs = Math.floor(totalDeadlineMs - timer.now());
   if (remainingMs <= 0) {
@@ -387,16 +392,14 @@ export async function runProvisionDeviceWithinDeadline<T>(
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   totalDeadlineMs: number,
   requestSignal: AbortSignal | undefined,
-  phase: string,
   operation: DeadlineBoundOperation<T>,
-  onPendingSettlement?: (settlement: Promise<unknown>) => void,
-): Promise<T> {
-  return await runOperationWithinDeadline(
-    timer,
-    totalDeadlineMs,
-    requestSignal,
-    () => provisionDeviceTimeoutError(phase),
-    operation,
+  {
+    phase,
     onPendingSettlement,
-  );
+  }: { phase: string; onPendingSettlement?: (settlement: Promise<unknown>) => void },
+): Promise<T> {
+  return await runOperationWithinDeadline(timer, totalDeadlineMs, requestSignal, operation, {
+    timeoutError: () => provisionDeviceTimeoutError(phase),
+    onOrphan: onPendingSettlement,
+  });
 }

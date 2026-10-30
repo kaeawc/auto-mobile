@@ -15,6 +15,7 @@ import {
   isUnknownAndroidRuntimeName,
 } from "../identity/androidIdentity";
 import { type TeardownDeviceArgs } from "../core/contracts";
+import { type LifecycleRequester } from "../lifecycleRequester";
 import {
   type DeviceToolsDependencies,
   POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
@@ -94,8 +95,7 @@ export function createTeardownResponse(
   state: "destroyed" | "already_absent",
   command: { stop: "accepted" | "not_required"; destroy: "accepted" | "not_required" },
   verification: { notRunning: "confirmed"; inventory: "complete_absence_confirmed" },
-  resolved?: DeviceInfo,
-  timing?: unknown,
+  { resolved, timing }: { resolved?: DeviceInfo; timing?: unknown } = {},
 ) {
   return createStructuredToolResponse({
     mode: args.mode,
@@ -117,9 +117,14 @@ export function createTeardownFailureResponse(
   phase: TeardownFailurePhase,
   code: string,
   message: string,
-  resolved?: DeviceInfo,
-  /** Typed refusal evidence carried beside the code (e.g. the broker binding holding the device). */
-  details?: Record<string, unknown>,
+  {
+    resolved,
+    details,
+  }: {
+    resolved?: DeviceInfo;
+    /** Typed refusal evidence carried beside the code (e.g. the broker binding holding the device). */
+    details?: Record<string, unknown>;
+  } = {},
 ) {
   return {
     isError: true,
@@ -275,6 +280,15 @@ export interface TeardownInitialAndroidScan {
 /** Private lifecycle evidence; never accepted by the public deleteDevice schema. */
 export interface InternalTeardownOptions {
   unlaunchedCreatedAvd?: { stableId: string };
+}
+
+/** The optional trailing inputs of a deleteDevice run. */
+export interface DeleteDeviceOptions {
+  /** A lease the caller already holds for the target; the delete releases it. */
+  lifecycleLease?: VirtualDeviceLifecycleLease;
+  /** The deleteDevice caller; omitted by internal rollbacks of a device the caller created. */
+  requester?: LifecycleRequester;
+  internal?: InternalTeardownOptions;
 }
 
 export interface TeardownContext {

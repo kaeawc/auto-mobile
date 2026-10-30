@@ -311,14 +311,13 @@ export function createListingHandlers() {
     );
     // Refresh the broker binding snapshot so held devices are not reported as free.
     await pool?.refreshInventoryOwnership();
-    const devices = listDevicePayloads(
-      matchingBooted,
-      pool,
-      configured.images,
-      (deviceId) => pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
-      (deviceId) => pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
+    const devices = listDevicePayloads(matchingBooted, pool, configured.images, {
+      aliasesForDevice: (deviceId) =>
+        pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
+      transportAvdNameForDevice: (deviceId) =>
+        pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
       transitionalHolds,
-    );
+    });
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createStructuredToolResponse({

@@ -31,8 +31,8 @@ export interface ImageUtils {
    * @param buffer Image buffer
    * @param width Crop width
    * @param height Crop height
-   * @param x X coordinate to start crop (default 0)
-   * @param y Y coordinate to start crop (default 0)
+   * @param options.x X coordinate to start crop (default 0)
+   * @param options.y Y coordinate to start crop (default 0)
    * @returns Promise with cropped buffer
    */
   crop(

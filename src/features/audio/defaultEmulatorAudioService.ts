@@ -2,7 +2,9 @@ import { constants } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { ENV } from "../../config/env";
 import { ActionableError } from "../../models/ActionableError";
+import { resolveSetupUser } from "../../ctrlProxy/setupUser";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultDeviceTraits, isAutomotive } from "../../utils/android-cmdline-tools/deviceTraits";
 import { EmulatorAudioClient } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { createGrpcAuthorizer } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcAuth";
 import { FileEmulatorGrpcDiscovery } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
@@ -73,6 +75,20 @@ export function createEmulatorAudioService(): EmulatorAudioService {
         }),
       discovery,
       defaultIdGenerator,
+      undefined,
+      {
+        resolveSetupUser: async (deviceId) => {
+          const adb = defaultAdbClientFactory.create({
+            deviceId,
+            name: deviceId,
+            platform: "android",
+          });
+          const traits = await defaultDeviceTraits.read(adb, deviceId);
+          return resolveSetupUser(adb, {
+            formFactor: isAutomotive(traits) ? "automotive" : undefined,
+          });
+        },
+      },
     ),
     createSession: (endpoint) =>
       new EmulatorAudioClient(

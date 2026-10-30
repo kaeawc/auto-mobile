@@ -43,6 +43,55 @@ final class PrototypeDrawersTests: XCTestCase {
     func testTooltipDrawerUnknownField() throws { try assertInvalidFixture("tooltip-drawer-unknown-field") }
     func testTooltipDrawerWriteStateType() throws { try assertInvalidFixture("tooltip-drawer-write-state-type") }
 
+    private static let keyedRepeatInDrawer = """
+    {"id":"keyed-drawer","window":{"placement":{"type":"fullscreen"}},"state":{"open":true},
+     "data":{"groups":[{"id":"g1","name":"Garden club"},{"id":"g2","name":"Book swap"}]},
+     "root":{"type":"column","children":[
+      {"type":"text","text":"Home"},
+      {"type":"drawer","edge":"start","openWhen":{"key":"open","equals":true},
+       "child":{"type":"column","repeat":{"items":{"path":"/groups"},"as":"group","key":"id"},
+        "children":[{"type":"text","text":"{group.name}"}]}}]}}
+    """
+
+    /// #15815: expansion stamps `_repeatKey` on keyed rows; the post-expansion drawer check must not refuse it.
+    func testKeyedRepeatInsideDrawerLoads() throws {
+        let data = Data(Self.keyedRepeatInDrawer.utf8)
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data))
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: data)
+        XCTAssertNoThrow(try PrototypeEmbeddedSpec.load(data: data))
+        let rows = spec.root.children?.last?.child?.children ?? []
+        XCTAssertEqual(rows.compactMap(\.repeatKey), ["g1", "g2"])
+    }
+
+    /// Only the expansion-added key is ignored: an authored `_repeatKey` is still an unknown property.
+    func testAuthoredRepeatKeyInsideDrawerIsStillRefused() {
+        let authored = Data("""
+        {"id":"authored","window":{"placement":{"type":"fullscreen"}},"state":{"open":true},
+         "root":{"type":"column","children":[
+          {"type":"drawer","edge":"start","openWhen":{"key":"open","equals":true},
+           "child":{"type":"text","text":"Panel","_repeatKey":"x"}}]}}
+        """.utf8)
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: authored)) { error in
+            guard case let .invalidSpec(path, message)? = error as? PrototypeLoadError else {
+                return XCTFail("unexpected error \(error)")
+            }
+            XCTAssertTrue(path.hasSuffix("._repeatKey"), path)
+            XCTAssertEqual(message, "Unknown property")
+        }
+    }
+
+    func testWithoutRowKeysStripsNestedRowKeysOnly() {
+        let value: JSONValue = .object([
+            "type": .string("column"),
+            PrototypeRepeat.rowKeyField: .string("a"),
+            "children": .array([.object(["type": .string("text"), PrototypeRepeat.rowKeyField: .string("b")])]),
+        ])
+        XCTAssertEqual(
+            PrototypeRepeat.withoutRowKeys(value),
+            .object(["type": .string("column"), "children": .array([.object(["type": .string("text")])])])
+        )
+    }
+
     func testBackClosesDrawerBeforePoppingStack() throws {
         let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
         {"id":"back","window":{"placement":{"type":"fullscreen"}},"state":{"open":true},

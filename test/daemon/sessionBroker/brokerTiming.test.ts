@@ -255,7 +255,7 @@ describe("durable broker timing", () => {
         profile,
         async () => {},
         scope,
-        resource.reuseCount ?? 0,
+        { reuseCount: resource.reuseCount ?? 0 },
       );
     };
     for (let use = 1; use <= 3; use++) {
@@ -330,7 +330,7 @@ describe("durable broker timing", () => {
         profile,
         async () => {},
         scope,
-        resource.reuseCount ?? 0,
+        { reuseCount: resource.reuseCount ?? 0 },
       );
     };
     const resourceIds: string[] = [];
@@ -614,9 +614,7 @@ describe("durable broker timing", () => {
       },
       { ...request, timing: undefined },
       { ...resource, reuseCount: 7 },
-      "evict",
-      harness.timer.now(),
-      target,
+      { kind: "evict", now: harness.timer.now(), creationProfile: target },
     );
     expect(JSON.parse(fields.timing_profile_json!)).toMatchObject({ runtimeId: "new-runtime" });
     expect(JSON.parse(fields.timing_json!).acquisition.reuseCount).toBe(0);
@@ -648,8 +646,7 @@ describe("durable broker timing", () => {
         },
       },
       { ...resource, reuseCount: 8 },
-      "reuse",
-      30,
+      { kind: "reuse", now: 30 },
     );
     expect(JSON.parse(fields.timing_json!).acquisition).toMatchObject({
       admission: "reuse",
@@ -687,8 +684,7 @@ describe("durable broker timing", () => {
         },
       },
       resource,
-      "create",
-      30,
+      { kind: "create", now: 30 },
     );
     expect(JSON.parse(fields.timing_json!).acquisition).toMatchObject({
       admission: "create",

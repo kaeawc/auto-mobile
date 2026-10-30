@@ -223,7 +223,7 @@ describe("session broker daemon handlers", () => {
       SCOPE,
       { acquire: () => {}, release: () => {} },
       new FakeTimer(),
-      new InMemoryMutationRecordingGaps(),
+      { recordingGaps: new InMemoryMutationRecordingGaps() },
     );
     state = {
       isInitialized: () => true,

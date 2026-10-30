@@ -12,6 +12,13 @@ import type {
   SessionBrokerReleaseResult,
 } from "../../devices/sessionBrokerResult";
 
+/** Broker callbacks a reset release drives: destruction cleanup and reset readiness. */
+export interface BrokerResetReleaseHooks {
+  tryCleanup: (ticket: DestructionTicket, signal?: AbortSignal) => Promise<void>;
+  notifyReady?: (resourceId: string) => void;
+  setResetActive?: (resourceId: string, active: boolean) => void;
+}
+
 export class BrokerResetRelease {
   private readonly resetBoots: ResetBootQueue;
   async releaseStatus(
@@ -46,9 +53,7 @@ export class BrokerResetRelease {
     >,
     private readonly timing: BrokerTimingRecorder,
     private readonly now: () => number,
-    private readonly tryCleanup: (ticket: DestructionTicket, signal?: AbortSignal) => Promise<void>,
-    private readonly notifyReady: (resourceId: string) => void = () => {},
-    private readonly setResetActive: (resourceId: string, active: boolean) => void = () => {},
+    private readonly hooks: BrokerResetReleaseHooks,
   ) {
     this.resetBoots = new ResetBootQueue(
       options.limits.maxConcurrentResetBoots,
@@ -90,16 +95,16 @@ export class BrokerResetRelease {
         timing.phases.bootQueue = (timing.phases.bootQueue ?? 0) + waitMs;
       };
       const resetDevice = async () => {
-        this.setResetActive(resource.resourceId, true);
+        this.hooks.setResetActive?.(resource.resourceId, true);
         try {
           // Shutdown cancels queued erase work, not a started native reset, so reset gets no signal.
           const runResetBoot: ResetBootRunner | undefined = this.options.devices
             .managesResetBootSlots
             ? async <Result>(operation: () => Promise<Result>) => {
-                this.setResetActive(resource.resourceId, false);
+                this.hooks.setResetActive?.(resource.resourceId, false);
                 return this.resetBoots.run(
                   async () => {
-                    this.setResetActive(resource.resourceId, true);
+                    this.hooks.setResetActive?.(resource.resourceId, true);
                     return operation();
                   },
                   signal,
@@ -109,7 +114,7 @@ export class BrokerResetRelease {
             : undefined;
           return await this.options.devices.reset!(resource, undefined, runResetBoot);
         } finally {
-          this.setResetActive(resource.resourceId, false);
+          this.hooks.setResetActive?.(resource.resourceId, false);
         }
       };
       const reset = await (this.needsResetBootSlot(resource)
@@ -162,7 +167,7 @@ export class BrokerResetRelease {
       this.options.owner,
       this.options.limits,
     );
-    this.notifyReady(resource.resourceId);
+    this.hooks.notifyReady?.(resource.resourceId);
     if (tickets.some((ticket) => ticket.resourceId === resource.resourceId)) {
       timing.outcome = "pending";
       timing.retired = true;
@@ -170,7 +175,7 @@ export class BrokerResetRelease {
     }
     for (const ticket of tickets) {
       signal?.throwIfAborted();
-      await this.tryCleanup(ticket, signal);
+      await this.hooks.tryCleanup(ticket, signal);
     }
     const current = await this.options.store.getResource(resource.resourceId);
     if (current?.state === "destroyed") {

@@ -516,7 +516,7 @@ describe("iOS mutation reset adapter", () => {
           profile,
           rig.context.assertOwned,
           rig.context.scope,
-          0,
+          { reuseCount: 0 },
         ),
       ).toMatchObject({
         outcome: "clean",
@@ -1458,7 +1458,7 @@ describe("iOS out-of-band residue guard", () => {
         profile,
         rig.context.assertOwned,
         rig.context.scope,
-        0,
+        { reuseCount: 0 },
       );
       if (erased) {
         expect(outcome).toMatchObject({ outcome: "fallback:erase", mode: "erase" });

@@ -441,7 +441,7 @@ describe("broker background recovery", () => {
       "scope",
       { acquire: () => {}, release: () => {} },
       timer,
-      new InMemoryMutationRecordingGaps(),
+      { recordingGaps: new InMemoryMutationRecordingGaps() },
     );
     try {
       service.start();

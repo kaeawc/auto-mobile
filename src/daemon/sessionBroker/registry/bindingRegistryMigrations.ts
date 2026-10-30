@@ -62,9 +62,45 @@ export interface BindingRegistrySchemaDescription {
   writerVersion: string | null;
 }
 
-export const bindingRegistryMigrationProvider: MigrationProvider = {
-  getMigrations: async () => ({ ...BINDING_REGISTRY_MIGRATIONS }),
-};
+/** Record provenance on the migrator's handle so schema and writer identity commit together. */
+export function withBindingRegistryMigrationWriters(
+  migrations: Readonly<Record<string, Migration>>,
+  writerVersion: () => string = getMcpServerVersion,
+): Record<string, Migration> {
+  return Object.fromEntries(
+    Object.entries(migrations).map(([name, migration]) => {
+      if (name < "2026_10_28_016_binding_registry_writers") {
+        return [name, migration];
+      }
+      const wrapped: Migration = {
+        async up(db) {
+          await migration.up(db);
+          await sql`INSERT OR IGNORE INTO binding_registry_migration_writers
+            (migration_name, writer_version, recorded_at)
+            VALUES (${name}, ${writerVersion()}, ${new Date().toISOString()})`.execute(db);
+        },
+        async down(db) {
+          await sql`DELETE FROM binding_registry_migration_writers
+            WHERE migration_name = ${name}`.execute(db);
+          await migration.down?.(db);
+        },
+      };
+      return [name, wrapped];
+    }),
+  );
+}
+
+export function bindingRegistryMigrationProviderFor(writerVersion?: string): MigrationProvider {
+  return {
+    getMigrations: async () =>
+      withBindingRegistryMigrationWriters(
+        BINDING_REGISTRY_MIGRATIONS,
+        () => writerVersion ?? getMcpServerVersion(),
+      ),
+  };
+}
+
+export const bindingRegistryMigrationProvider = bindingRegistryMigrationProviderFor();
 
 /** One read-only probe, implemented on the already-open registry connection. */
 export interface BindingRegistrySchemaProbe {
@@ -188,7 +224,10 @@ export async function migrateBindingRegistry<DB>(
   options: { writerVersion?: string } = {},
 ): Promise<void> {
   await assertSupportedRegistryOnOpen(db, dbPath);
-  const migrator = new Migrator({ db, provider: bindingRegistryMigrationProvider });
+  const migrator = new Migrator({
+    db,
+    provider: bindingRegistryMigrationProviderFor(options.writerVersion),
+  });
   if ((await migrator.getMigrations()).every((migration) => migration.executedAt !== undefined)) {
     return;
   }
@@ -204,21 +243,11 @@ export async function migrateBindingRegistry<DB>(
     if (pending) {
       await beforeMigrate?.();
     }
-    const { error, results } = await migrator.migrateToLatest();
+    const { error } = await migrator.migrateToLatest();
     if (error) {
       throw new ActionableError(
         `Failed to migrate the binding registry at ${dbPath}: ${errorMessage(error)}`,
       );
-    }
-    const executed = (results ?? [])
-      .filter((result) => result.direction === "Up" && result.status === "Success")
-      .map((result) => result.migrationName);
-    if (executed.length > 0) {
-      // Use Kysely's timestamp; never invent provenance for migrations executed by an older build.
-      await sql`INSERT OR IGNORE INTO binding_registry_migration_writers
-        (migration_name, writer_version, recorded_at)
-        SELECT name, ${options.writerVersion ?? getMcpServerVersion()}, timestamp FROM kysely_migration
-        WHERE name IN (${sql.join(executed)})`.execute(db);
     }
   } finally {
     await lock.release();

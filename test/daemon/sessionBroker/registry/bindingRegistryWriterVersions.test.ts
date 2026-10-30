@@ -1,9 +1,9 @@
 import * as registryDatabase from "../../../../src/daemon/sessionBroker/registry/RegistryDatabase";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
-import { Kysely } from "kysely";
+import { Kysely, sql } from "kysely";
 import { Migrator } from "kysely/migration";
-import { BunSqliteDialect } from "../../../../src/db/bunSqliteDialect";
+import { RegistrySqliteDialect } from "../../../../src/daemon/sessionBroker/registry/RegistrySqliteDialect";
 import { NoOpMigrationLock } from "../../../../src/db/NoOpMigrationLock";
 import { logger } from "../../../../src/utils/logger";
 import * as migrations from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
@@ -18,14 +18,16 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 const WRITERS = "2026_10_28_016_binding_registry_writers";
 const PREVIOUS = "2026_10_27_015_device_claims_metadata";
 const FUTURE = "2099_01_01_017_future";
-const VERSION = "1.0.0+gtest";
+const VERSION = "9.9.9-test";
 
 describe("binding registry writer versions", () => {
   let raw: Sqlite;
   let db: Kysely<BindingRegistryDatabase>;
   beforeEach(() => {
     raw = new Sqlite(":memory:");
-    db = new Kysely<BindingRegistryDatabase>({ dialect: new BunSqliteDialect({ database: raw }) });
+    db = new Kysely<BindingRegistryDatabase>({
+      dialect: new RegistrySqliteDialect({ database: raw }),
+    });
   });
   afterEach(async () => {
     await db.destroy();
@@ -35,7 +37,114 @@ describe("binding registry writer versions", () => {
   const rows = () =>
     raw.query("SELECT * FROM binding_registry_migration_writers ORDER BY migration_name").all();
   const migrator = () =>
-    new Migrator({ db, provider: migrations.bindingRegistryMigrationProvider });
+    new Migrator({ db, provider: migrations.bindingRegistryMigrationProviderFor(VERSION) });
+  // Simulate an older build that knows the schema but does not record writer identities.
+  const legacyMigrator = () =>
+    new Migrator({
+      db,
+      provider: { getMigrations: async () => ({ ...migrations.BINDING_REGISTRY_MIGRATIONS }) },
+    });
+
+  test("wrapped provenance rolls back with every pending migration on failure", async () => {
+    const wrapped = migrations.withBindingRegistryMigrationWriters(
+      { ...migrations.BINDING_REGISTRY_MIGRATIONS, [FUTURE]: { up: async () => {} } },
+      () => VERSION,
+    );
+    const failure = new Error("fail after provenance insert");
+    let inserted = false;
+    const result = await new Migrator({
+      db,
+      provider: {
+        getMigrations: async () => ({
+          ...wrapped,
+          [FUTURE]: {
+            up: async (trx) => {
+              await wrapped[FUTURE]!.up(trx);
+              expect(trx.isTransaction).toBe(true);
+              const writer = await sql<{ writer_version: string }>`
+                SELECT writer_version FROM binding_registry_migration_writers
+                WHERE migration_name = ${FUTURE}
+              `.execute(trx);
+              expect(writer.rows).toEqual([{ writer_version: VERSION }]);
+              inserted = true;
+              throw failure;
+            },
+          },
+        }),
+      },
+    }).migrateToLatest();
+    expect(inserted).toBe(true);
+    expect(result.error).toBe(failure);
+    expect(raw.query("SELECT name FROM kysely_migration").all()).toEqual([]);
+    // Migration 016's table and every provenance row roll back along with its DDL.
+    expect(
+      raw
+        .query("SELECT name FROM sqlite_master WHERE name = 'binding_registry_migration_writers'")
+        .all(),
+    ).toEqual([]);
+  });
+
+  test("wrapped provider records only migrations from 016 onward", async () => {
+    expect((await migrator().migrateToLatest()).error).toBeUndefined();
+    expect(rows()).toEqual(
+      Object.keys(migrations.BINDING_REGISTRY_MIGRATIONS)
+        .filter((name) => name >= WRITERS)
+        .sort()
+        .map((migration_name) => ({
+          migration_name,
+          writer_version: VERSION,
+          recorded_at: expect.any(String),
+        })),
+    );
+  });
+
+  test("later migrations resolve writers lazily and delete provenance before down", async () => {
+    let resolutions = 0;
+    let reverted = false;
+    const wrapped = migrations.withBindingRegistryMigrationWriters(
+      {
+        ...migrations.BINDING_REGISTRY_MIGRATIONS,
+        [FUTURE]: {
+          up: async () => {
+            // Only 016 has resolved its writer so far; this migration's resolver runs after up.
+            expect(resolutions).toBe(1);
+          },
+          down: async (trx) => {
+            expect(trx.isTransaction).toBe(true);
+            const writers = await sql`
+              SELECT migration_name FROM binding_registry_migration_writers
+              WHERE migration_name = ${FUTURE}
+            `.execute(trx);
+            expect(writers.rows).toEqual([]);
+            reverted = true;
+          },
+        },
+      },
+      () => {
+        resolutions++;
+        return VERSION;
+      },
+    );
+    expect(wrapped[PREVIOUS]).toBe(migrations.BINDING_REGISTRY_MIGRATIONS[PREVIOUS]);
+    const runner = new Migrator({ db, provider: { getMigrations: async () => wrapped } });
+    await runner.getMigrations();
+    expect(resolutions).toBe(0);
+    expect((await runner.migrateToLatest()).error).toBeUndefined();
+    expect(resolutions).toBe(2);
+    expect(rows()).toEqual(
+      [WRITERS, FUTURE].map((migration_name) => ({
+        migration_name,
+        writer_version: VERSION,
+        recorded_at: expect.any(String),
+      })),
+    );
+    expect((await runner.migrateDown()).error).toBeUndefined();
+    expect(reverted).toBe(true);
+    expect(rows()).toEqual([
+      { migration_name: WRITERS, writer_version: VERSION, recorded_at: expect.any(String) },
+    ]);
+    expect(resolutions).toBe(2);
+  });
 
   test("derives the known schema version from the last registered key", () => {
     expect(migrations.KNOWN_BINDING_REGISTRY_SCHEMA_VERSION).toBe(
@@ -44,11 +153,12 @@ describe("binding registry writer versions", () => {
     expect(migrations.KNOWN_BINDING_REGISTRY_SCHEMA_VERSION).toBe(WRITERS);
   });
 
-  test("fresh migration records every executed migration and a no-op writes nothing", async () => {
+  test("fresh migration records writers from 016 onward and a no-op writes nothing", async () => {
     await migrate();
     const recorded = rows();
     expect(recorded).toEqual(
       Object.keys(migrations.BINDING_REGISTRY_MIGRATIONS)
+        .filter((name) => name >= WRITERS)
         .sort()
         .map((migration_name) => ({
           migration_name,
@@ -79,7 +189,7 @@ describe("binding registry writer versions", () => {
   test("a peer completing migrations under the lock causes no writer backfill", async () => {
     expect((await migrator().migrateTo(PREVIOUS)).error).toBeUndefined();
     const acquire = spyOn(NoOpMigrationLock.prototype, "acquire").mockImplementation(async () => {
-      expect((await migrator().migrateToLatest()).error).toBeUndefined();
+      expect((await legacyMigrator().migrateToLatest()).error).toBeUndefined();
     });
     try {
       await migrate();
@@ -183,7 +293,7 @@ describe("binding registry writer versions", () => {
     } finally {
       await registry.close();
     }
-    expect((await migrator().migrateToLatest()).error).toBeUndefined();
+    expect((await legacyMigrator().migrateToLatest()).error).toBeUndefined();
     const before = raw.query("SELECT total_changes() AS count").get();
     const create = spyOn(registryDatabase, "createRegistryDatabase").mockImplementation(() => ({
       prepare: (statement) => raw.prepare(statement),

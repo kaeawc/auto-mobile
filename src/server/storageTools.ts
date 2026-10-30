@@ -348,8 +348,13 @@ function withSharedPreferencesInspectionFallback(
   device: BootedDevice,
   { appId, fileName }: AndroidKeyValueFileTarget,
   viaSdk: () => Promise<void>,
-  viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
-  deps: StorageToolsDependencies,
+  {
+    viaDirectFile,
+    deps,
+  }: {
+    viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
+    deps: StorageToolsDependencies;
+  },
 ): Promise<SharedPreferencesInspectionFallbackResult> {
   return withAndroidSharedPreferencesInspectionFallback(
     appId,
@@ -391,15 +396,17 @@ async function setKeyValueHandler(
                 value,
                 type: args.type,
               }),
-        (adb) =>
-          value === null
-            ? removeAndroidKeyValueDirect(adb, device.deviceId, target, args.key)
-            : setAndroidKeyValueDirect(adb, device.deviceId, target, {
-                key: args.key,
-                value,
-                type: args.type,
-              }),
-        deps,
+        {
+          viaDirectFile: (adb) =>
+            value === null
+              ? removeAndroidKeyValueDirect(adb, device.deviceId, target, args.key)
+              : setAndroidKeyValueDirect(adb, device.deviceId, target, {
+                  key: args.key,
+                  value,
+                  type: args.type,
+                }),
+          deps,
+        },
       ));
     } else if (device.platform === "ios") {
       const client = deps.iosClientFactory(device);
@@ -466,8 +473,11 @@ async function removeKeyValueHandler(
         device,
         target,
         () => client.removePreference(args.appId, storageName, args.key),
-        (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, target, args.key),
-        deps,
+        {
+          viaDirectFile: (adb) =>
+            removeAndroidKeyValueDirect(adb, device.deviceId, target, args.key),
+          deps,
+        },
       ));
     } else if (device.platform === "ios") {
       const client = deps.iosClientFactory(device);
@@ -518,15 +528,17 @@ async function clearKeyValueFileHandler(
         device,
         { appId: args.appId, fileName: storageName },
         () => client.clearPreferenceStore(args.appId, storageName),
-        (adb) =>
-          clearAndroidKeyValueFileDirect(
-            adb,
-            device.deviceId,
-            args.appId,
-            storageName,
-            args.userId,
-          ),
-        deps,
+        {
+          viaDirectFile: (adb) =>
+            clearAndroidKeyValueFileDirect(
+              adb,
+              device.deviceId,
+              args.appId,
+              storageName,
+              args.userId,
+            ),
+          deps,
+        },
       ));
     } else if (device.platform === "ios") {
       const client = deps.iosClientFactory(device);

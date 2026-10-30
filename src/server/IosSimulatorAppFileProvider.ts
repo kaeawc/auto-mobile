@@ -278,13 +278,9 @@ export class IosSimulatorAppFileProvider
   }
 
   async listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult> {
-    const root = await this.resolvePath(
-      request.device,
-      request.appId,
-      request.container,
-      undefined,
-      "listFiles",
-    );
+    const root = await this.resolvePath(request.device, request.appId, request.container, {
+      operation: "listFiles",
+    });
     const files = await listLocalFiles(root, this.fileSystem);
     return {
       deviceId: request.device.deviceId,
@@ -304,13 +300,10 @@ export class IosSimulatorAppFileProvider
   }
 
   async readFile(request: AppFileProviderReadRequest): Promise<AppFileReadResult> {
-    const target = await this.resolvePath(
-      request.device,
-      request.appId,
-      request.container,
-      request.path,
-      "readFile",
-    );
+    const target = await this.resolvePath(request.device, request.appId, request.container, {
+      path: request.path,
+      operation: "readFile",
+    });
     const buffer = await this.fileSystem.readFileBuffer(target);
     const text = decodeUtf8Text(buffer);
     return {
@@ -330,8 +323,7 @@ export class IosSimulatorAppFileProvider
     device: BootedDevice,
     appId: string,
     container: AppFileContainer,
-    path: string | undefined,
-    operation: string,
+    { path, operation }: { path?: string; operation: string },
   ): Promise<string> {
     const containerRoot = await this.resolveContainerRoot(device, appId, container, operation);
     return path === undefined
@@ -346,13 +338,10 @@ export class IosSimulatorAppFileProvider
     operation: string,
   ): Promise<string> {
     if (container === "externalFiles") {
-      throw unsupportedAppFileOperation(
-        operation,
-        device.platform,
-        appId,
+      throw unsupportedAppFileOperation(operation, device.platform, appId, {
         container,
-        "externalFiles is not available for iOS app containers",
-      );
+        reason: "externalFiles is not available for iOS app containers",
+      });
     }
 
     if (resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator") {

@@ -157,13 +157,10 @@ async function recoverAfterShutdownFailure(
   ) {
     await releaseShutdownReservation();
   }
-  await resumeCtrlProxyAfterUnconfirmedFailure(
-    device,
-    error,
-    requestAbortSignal,
+  await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal, {
     daemonState,
     shutdownWasConfirmed,
-  );
+  });
 }
 
 function rethrowShutdownFailure(
@@ -238,11 +235,13 @@ async function resolvePooledAvdKillTarget(
   dependencies: DeviceToolsDependencies,
   device: BootedDevice,
   devicePool: DevicePool | undefined,
-  budget: Pick<ShutdownEntryContext, "deadlineMs" | "requestAbortSignal">,
   {
+    budget,
     pooledAvdIdentity,
     assertHolder: assertStopIdentity,
-  }: Pick<ShutdownDeviceOptions, "pooledAvdIdentity" | "assertHolder">,
+  }: Pick<ShutdownDeviceOptions, "pooledAvdIdentity" | "assertHolder"> & {
+    budget: Pick<ShutdownEntryContext, "deadlineMs" | "requestAbortSignal">;
+  },
 ): Promise<BootedDevice> {
   if (!pooledAvdIdentity?.capture) {
     return device;
@@ -402,7 +401,7 @@ async function handleUnconfirmedKillCommandError(
     devicePool?.clearIntentionalShutdown(device.deviceId);
     await releaseShutdownReservation();
   }
-  await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal, daemonState);
+  await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal, { daemonState });
   await restoreAndroidObserverAfterCommandFailure(
     { deviceManager, device, timer, shutdownDeadlineMs: deadlineMs, requestAbortSignal, timeoutMs },
     androidObserverState,
@@ -501,8 +500,10 @@ async function killProcessAndRetireOwnership(
     >,
   dependencies: DeviceToolsDependencies,
   perf: ReturnType<typeof createPerformanceTracker>,
-  devicePool: DevicePool | undefined,
-  options: KillProcessAndRetireOwnershipOptions,
+  {
+    devicePool,
+    options,
+  }: { devicePool?: DevicePool; options: KillProcessAndRetireOwnershipOptions },
 ): Promise<string | undefined> {
   const { device, expectedPooledDevice, requestAbortSignal } = context;
   const {
@@ -763,13 +764,10 @@ async function resolveRestartStopKillTarget(
   devicePool: DevicePool | undefined,
 ): Promise<{ killTarget: BootedDevice; stopIdentity: RestartStopIdentity | undefined }> {
   const { device } = context;
-  const pooledKillTarget = await resolvePooledAvdKillTarget(
-    dependencies,
-    device,
-    devicePool,
-    context,
-    options,
-  );
+  const pooledKillTarget = await resolvePooledAvdKillTarget(dependencies, device, devicePool, {
+    budget: context,
+    ...options,
+  });
   // A kill-time re-probe supersedes entry evidence before any destructive preparation.
   const stopIdentity =
     pooledKillTarget !== device ? { confirmed: pooledKillTarget.name } : options.stopIdentity;
@@ -901,20 +899,22 @@ export async function shutdownDevice(
             },
             dependencies,
             perf,
-            devicePool,
             {
-              androidObserverState,
-              stoppingSessionUuid: options.stoppingSessionUuid,
-              stoppingMcpSessionId: options.stoppingMcpSessionId,
-              stableIds: options.stableIds,
-              stopIdentity,
-              releaseShutdownReservation,
-              retainReservationUntil: retainShutdownUntil,
-              strictDeadline,
-              timeoutMs,
-              killTarget,
-              force: pooledAvdIdentity?.force ?? false,
-              processStop: androidKillProcessStop(dependencies, device, pooledAvdIdentity),
+              devicePool,
+              options: {
+                androidObserverState,
+                stoppingSessionUuid: options.stoppingSessionUuid,
+                stoppingMcpSessionId: options.stoppingMcpSessionId,
+                stableIds: options.stableIds,
+                stopIdentity,
+                releaseShutdownReservation,
+                retainReservationUntil: retainShutdownUntil,
+                strictDeadline,
+                timeoutMs,
+                killTarget,
+                force: pooledAvdIdentity?.force ?? false,
+                processStop: androidKillProcessStop(dependencies, device, pooledAvdIdentity),
+              },
             },
           );
 

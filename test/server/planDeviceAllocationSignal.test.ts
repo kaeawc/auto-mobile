@@ -65,8 +65,7 @@ describe("plan device allocation signal", () => {
         pool as DevicePool,
         normalizePlanDevices(devices),
         ["A", "B"],
-        LABEL_SESSIONS,
-        Object.values(LABEL_SESSIONS),
+        { labelToSessionMap: LABEL_SESSIONS, sessionIds: Object.values(LABEL_SESSIONS) },
       );
       expect(signals).toHaveLength(1);
       expect(signals[0]).toBe(controller.signal);
@@ -78,8 +77,7 @@ describe("plan device allocation signal", () => {
         pool as DevicePool,
         normalizePlanDevices(devices),
         ["A", "B"],
-        LABEL_SESSIONS,
-        Object.values(LABEL_SESSIONS),
+        { labelToSessionMap: LABEL_SESSIONS, sessionIds: Object.values(LABEL_SESSIONS) },
       );
       expect(signals).toEqual([undefined]);
     });

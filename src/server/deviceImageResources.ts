@@ -301,13 +301,10 @@ export function createDeviceImageResourcesHandler(
     for (const platform of platforms) {
       platformResults.push(
         platform === "android"
-          ? await generateAndroidResource(
-              androidCacheState,
-              deviceManager,
-              avdManager,
+          ? await generateAndroidResource(androidCacheState, deviceManager, avdManager, {
               timer,
-              androidCatalogBudgetMs,
-            )
+              budgetMs: androidCatalogBudgetMs,
+            })
           : await buildSimulatorResourceResult(platform, deviceManager, simctl, watchInventory),
       );
     }
@@ -561,8 +558,7 @@ async function generateAndroidResource(
   state: AndroidImageCacheState,
   deviceManager: DeviceImageDiscoveryManager,
   avdManager: DeviceImageAvdManager,
-  timer: Timer,
-  budgetMs: number,
+  { timer, budgetMs }: { timer: Timer; budgetMs: number },
 ): Promise<PlatformResourceResult> {
   const cacheKey = "android";
   const cached = getAndroidDeviceImageResourceCache(state, timer).get(cacheKey);

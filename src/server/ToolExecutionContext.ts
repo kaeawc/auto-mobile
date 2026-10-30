@@ -73,13 +73,14 @@ export async function createToolExecutionContext(
   sessionUuid: string | undefined,
   sessionManager: SessionManager,
   devicePool: DevicePool,
-  sessionOptions: SessionOptions = {},
   {
+    sessionOptions = {},
     execution,
     admittedSession,
     requireIssuedSession = false,
     signal,
   }: {
+    sessionOptions?: SessionOptions;
     execution?: SessionExecutionMetadata;
     admittedSession?: Session;
     // #6069: device-tool admission must not mint a session for a never-issued UUID.
@@ -120,13 +121,18 @@ export async function createToolExecutionContext(
   // retry if a new acquisition begins while setup is being admitted.
   const timer = sessionManager.getTimer();
   const deadline = timer.now() + DEVICE_ACQUISITION_SETUP_DEADLINE_MS;
-  await runDeviceAcquisitionSetupLoop(session, signal, timer, deadline, () =>
-    sessionManager.trackSessionSetup(session, () =>
-      runWithAbortSignal(signal, () =>
-        setupSession(session, existingSession === session, sessionManager, sessionOptions, signal),
+  await runDeviceAcquisitionSetupLoop(session, signal, timer, {
+    deadline,
+    setup: () =>
+      sessionManager.trackSessionSetup(session, () =>
+        runWithAbortSignal(signal, () =>
+          setupSession(session, existingSession === session, sessionManager, {
+            sessionOptions,
+            signal,
+          }),
+        ),
       ),
-    ),
-  );
+  });
   ensureSessionIsCurrent(session, sessionManager);
 
   return {
@@ -142,8 +148,7 @@ async function runDeviceAcquisitionSetupLoop(
   session: Session,
   signal: AbortSignal | undefined,
   timer: Timer,
-  deadline: number,
-  setup: () => Promise<void>,
+  { deadline, setup }: { deadline: number; setup: () => Promise<void> },
 ): Promise<void> {
   const deviceId = session.assignedDevice;
   let iteration = 0;
@@ -341,7 +346,7 @@ async function ensureReadinessUpgraded(
       // executes synchronously up to (and including) the
       // `setDeviceReadiness` write, so it can't race a concurrent
       // automationReady flight's own write.
-      await runDeviceReadinessSetup(session, sessionManager, "booted", signal);
+      await runDeviceReadinessSetup(session, sessionManager, "booted", { signal });
       return;
     }
 
@@ -381,18 +386,15 @@ async function ensureReadinessUpgraded(
       waiters: 0,
       devicePreparationStarted: false,
     };
-    flight.work = runDeviceReadinessSetup(
-      session,
-      sessionManager,
-      requiredReadiness,
-      controller.signal,
-      {
+    flight.work = runDeviceReadinessSetup(session, sessionManager, requiredReadiness, {
+      signal: controller.signal,
+      flightHooks: {
         onDevicePreparationStart: () => {
           flight.devicePreparationStarted = true;
         },
         noWaiters: flight.noWaiters.signal,
       },
-    ).finally(() => {
+    }).finally(() => {
       flight.settled = true;
       if (readinessUpgradeInFlight.get(session) === flight) {
         readinessUpgradeInFlight.delete(session);
@@ -436,8 +438,7 @@ async function setupSession(
   session: Session,
   existingSession: boolean,
   sessionManager: SessionManager,
-  sessionOptions: SessionOptions,
-  signal?: AbortSignal,
+  { sessionOptions, signal }: { sessionOptions: SessionOptions; signal?: AbortSignal },
 ): Promise<void> {
   await ensureKeepScreenAwake(session, sessionManager, sessionOptions);
   const requiredReadiness: DeviceReadinessLevel =
@@ -491,8 +492,7 @@ async function runDeviceReadinessSetup(
   session: Session,
   sessionManager: SessionManager,
   requiredReadiness: DeviceReadinessLevel,
-  signal?: AbortSignal,
-  flightHooks?: ReadinessFlightHooks,
+  { signal, flightHooks }: { signal?: AbortSignal; flightHooks?: ReadinessFlightHooks } = {},
 ): Promise<ReadinessSetupOutcome> {
   signal?.throwIfAborted();
   let outcome = READINESS_READY;
@@ -520,8 +520,12 @@ async function runDeviceReadinessSetup(
             session.assignedDevice,
             session.sessionId,
             session.platform,
-            sessionManager.getTimer(),
-            { signal, noWaiters: flightHooks?.noWaiters, sessionManager },
+            {
+              timer: sessionManager.getTimer(),
+              signal,
+              noWaiters: flightHooks?.noWaiters,
+              sessionManager,
+            },
           ),
         );
       },
@@ -775,8 +779,12 @@ async function ensureAccessibilityServiceReady(
   deviceId: string,
   sessionId: string,
   platform: Platform,
-  timer: Timer = defaultTimer,
-  { signal, noWaiters, sessionManager }: A11yReadinessOptions = {},
+  {
+    timer = defaultTimer,
+    signal,
+    noWaiters,
+    sessionManager,
+  }: A11yReadinessOptions & { timer?: Timer } = {},
 ): Promise<ReadinessSetupOutcome> {
   const device: BootedDevice = {
     name: deviceId,

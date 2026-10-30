@@ -368,25 +368,21 @@ describe("Android journal writer/reset scope", () => {
     "production $tool keepData=$keepData held=$held through app filtering and reset",
     async ({ tool, keepData, held, clean }) => {
       const r = await rig(held ? "a.b" : undefined);
-      const recording = new SessionDeviceMutationRecording(
-        () => r.recorder,
-        new FamilyMutationPriorReader([]),
-        { appId: async () => "a.b" },
-      );
+      const recording = new SessionDeviceMutationRecording(() => r.recorder, {
+        reader: new FamilyMutationPriorReader([]),
+        artifactReader: { appId: async () => "a.b" },
+      });
       // The production recording layer calls adapters, withoutSessionCoveredFallbacks and recorder.
       // After uninstall, pm list packages -3 cannot see a removed package with data kept.
       await recording.beforeToolCall(
         "installApp",
         { artifactPath: "/fixture.apk" },
         ANDROID_RESET_DEVICE,
-        r.scope.sessionUuid,
+        { sessionUuid: r.scope.sessionUuid },
       );
-      await recording.beforeToolCall(
-        tool,
-        { appId: "a.b", keepData },
-        ANDROID_RESET_DEVICE,
-        r.scope.sessionUuid,
-      );
+      await recording.beforeToolCall(tool, { appId: "a.b", keepData }, ANDROID_RESET_DEVICE, {
+        sessionUuid: r.scope.sessionUuid,
+      });
       const rows = await r.journal.list(r.scope);
       expect(rows.some((row) => row.kind === "opaque")).toBe(!clean);
       if (keepData) {

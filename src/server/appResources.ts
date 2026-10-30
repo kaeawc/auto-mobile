@@ -743,10 +743,17 @@ export function invalidateInstalledAppsCache(deviceId?: string): void {
 
 export function createInstalledAppsDeviceIncarnationListener(
   repository: InstalledAppsStore = new InstalledAppsRepository(),
-  coordinator: InstalledAppsCacheWriteCoordinator = getInstalledAppsCacheWriteCoordinator(),
-  barrier: DbWriteBarrier = getDbWriteBarrier(),
-  invalidateCache: (deviceId: string) => void = invalidateInstalledAppsCache,
-  notifyResourcesUpdated: (deviceId: string) => Promise<void> = notifyInstalledAppResourceUpdated,
+  {
+    coordinator = getInstalledAppsCacheWriteCoordinator(),
+    barrier = getDbWriteBarrier(),
+    invalidateCache = invalidateInstalledAppsCache,
+    notifyResourcesUpdated = notifyInstalledAppResourceUpdated,
+  }: {
+    coordinator?: InstalledAppsCacheWriteCoordinator;
+    barrier?: DbWriteBarrier;
+    invalidateCache?: (deviceId: string) => void;
+    notifyResourcesUpdated?: (deviceId: string) => Promise<void>;
+  } = {},
 ): DeviceIncarnationListener {
   return {
     name: "installed-apps",

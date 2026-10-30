@@ -67,13 +67,10 @@ async function resolveAndroidStartupLeaseAvdName({
   // is not running yet is unknown to it. Name the lease after the image rather
   // than taking the wildcard, which would make this exact acquisition wait on —
   // and defer — every unrelated reset cohort.
-  return await resolveAndroidStartupLeaseImageName(
-    args.deviceId,
-    deviceUtils,
-    bootDeadlineMs,
+  return await resolveAndroidStartupLeaseImageName(args.deviceId, deviceUtils, bootDeadlineMs, {
     timer,
     signal,
-  );
+  });
 }
 
 /**
@@ -87,8 +84,7 @@ async function resolveAndroidStartupLeaseImageName(
   deviceId: string,
   deviceUtils: PlatformDeviceManager,
   bootDeadlineMs: number,
-  timer: Timer,
-  signal: AbortSignal | undefined,
+  { timer, signal }: { timer: Timer; signal?: AbortSignal },
 ): Promise<string | undefined> {
   try {
     // This optional hint must leave time to reserve the non-owning lease and

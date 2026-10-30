@@ -370,19 +370,17 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       prepareObserveOptions(device.platform, args);
     try {
       const observeScreen = screenForObserve(device, args, dependencies);
-      const screenshotOptions = await observeScreenshotOptions(
-        args,
-        device,
-        deviceRead,
+      const screenshotOptions = await observeScreenshotOptions(args, device, deviceRead, {
         screenshotMode,
         dependencies,
-      );
+      });
       // ObserveScreen.execute() rejects stale cross-platform hierarchies at the
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
       const waitOutcome = observeWaitRequested(deviceRead, args)
         ? await waitForObservation(
-            ...observeWaitParameters(observeScreen, args, signal, dependencies, {
+            ...observeWaitParameters(observeScreen, args, signal, {
+              dependencies,
               device,
               screenshot: { mode: screenshotMode, options: screenshotOptions },
             }),
@@ -629,11 +627,12 @@ function observeWaitParameters(
   observeScreen: ObserveScreen,
   args: ObserveArgs & { waitFor: NonNullable<ObserveArgs["waitFor"]> },
   signal: AbortSignal | undefined,
-  dependencies: ObserveToolDependencies,
   {
+    dependencies,
     device,
     screenshot,
   }: {
+    dependencies: ObserveToolDependencies;
     device: BootedDevice;
     screenshot: { mode: ScreenshotMode | undefined; options: ObserveScreenshotOptions | undefined };
   },

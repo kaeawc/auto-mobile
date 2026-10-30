@@ -460,13 +460,9 @@ describe("openLink iOS app-open alert acceptance", () => {
       noAlertHierarchy,
     ]);
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      makeObservation("home"),
-      undefined,
-      undefined,
-      { tapOnElementFactory: okTap(taps), refreshHierarchy: frames.refresh, timer },
-    );
+    const result = await acceptIosAppOpenAlert(iosDevice, makeObservation("home"), {
+      options: { tapOnElementFactory: okTap(taps), refreshHierarchy: frames.refresh, timer },
+    });
 
     expect(result?.success).toBe(true);
     expect(taps).toEqual([{ text: "Open", action: "tap" }]);
@@ -477,13 +473,9 @@ describe("openLink iOS app-open alert acceptance", () => {
     const timer = autoTimer();
     const frames = framesOf([noAlertHierarchy]);
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      makeObservation("home"),
-      undefined,
-      undefined,
-      { refreshHierarchy: frames.refresh, timer, waitTimeoutMs: 1000 },
-    );
+    const result = await acceptIosAppOpenAlert(iosDevice, makeObservation("home"), {
+      options: { refreshHierarchy: frames.refresh, timer, waitTimeoutMs: 1000 },
+    });
 
     expect(result).toBeNull();
     expect(frames.calls()).toBe(5);
@@ -494,10 +486,12 @@ describe("openLink iOS app-open alert acceptance", () => {
     const timer = autoTimer();
     const frames = framesOf([noAlertHierarchy]);
 
-    await acceptIosAppOpenAlert(iosDevice, makeObservation("home"), undefined, undefined, {
-      refreshHierarchy: frames.refresh,
-      timer,
-      waitTimeoutMs: 12_000,
+    await acceptIosAppOpenAlert(iosDevice, makeObservation("home"), {
+      options: {
+        refreshHierarchy: frames.refresh,
+        timer,
+        waitTimeoutMs: 12_000,
+      },
     });
 
     expect(timer.now()).toBe(12_000);
@@ -506,13 +500,9 @@ describe("openLink iOS app-open alert acceptance", () => {
   test("taps the captured alert's last button by role when its label is not Open", async () => {
     const taps: unknown[] = [];
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      spanishAppOpenAlertObservation,
-      undefined,
-      undefined,
-      { tapOnElementFactory: okTap(taps) },
-    );
+    const result = await acceptIosAppOpenAlert(iosDevice, spanishAppOpenAlertObservation, {
+      options: { tapOnElementFactory: okTap(taps) },
+    });
 
     expect(result?.success).toBe(true);
     expect(taps).toEqual([{ text: "Abrir", action: "tap" }]);
@@ -525,13 +515,13 @@ describe("openLink iOS app-open alert acceptance", () => {
       afterAcceptObservation.viewHierarchy ?? null,
     ]);
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      makeObservation("home"),
-      undefined,
-      undefined,
-      { tapOnElementFactory: okTap(taps), refreshHierarchy: frames.refresh, timer: autoTimer() },
-    );
+    const result = await acceptIosAppOpenAlert(iosDevice, makeObservation("home"), {
+      options: {
+        tapOnElementFactory: okTap(taps),
+        refreshHierarchy: frames.refresh,
+        timer: autoTimer(),
+      },
+    });
 
     expect(result?.success).toBe(true);
     expect(taps).toEqual([{ text: "Open", action: "tap" }]);
@@ -558,9 +548,7 @@ describe("openLink iOS app-open alert acceptance", () => {
     await acceptIosAppOpenAlert(
       iosDevice,
       { ...makeObservation("sb"), viewHierarchy: springboardOnly },
-      undefined,
-      undefined,
-      { tapOnElementFactory: okTap(taps) },
+      { options: { tapOnElementFactory: okTap(taps) } },
     );
 
     expect(taps).toEqual([{ elementId: "default-action", action: "tap" }]);
@@ -579,9 +567,7 @@ describe("openLink iOS app-open alert acceptance", () => {
     await acceptIosAppOpenAlert(
       iosDevice,
       { ...makeObservation("sib"), viewHierarchy: sibling },
-      undefined,
-      undefined,
-      { tapOnElementFactory: okTap(taps) },
+      { options: { tapOnElementFactory: okTap(taps) } },
     );
 
     expect(taps).toEqual([{ text: "Open", action: "tap" }]);
@@ -592,13 +578,9 @@ describe("openLink iOS app-open alert acceptance", () => {
     const alert = appOpenAlertObservation.viewHierarchy ?? null;
     const frames = framesOf([alert, alert, alert, alert, noAlertHierarchy]);
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      makeObservation("home"),
-      undefined,
-      undefined,
-      { tapOnElementFactory: okTap([]), refreshHierarchy: frames.refresh, timer },
-    );
+    const result = await acceptIosAppOpenAlert(iosDevice, makeObservation("home"), {
+      options: { tapOnElementFactory: okTap([]), refreshHierarchy: frames.refresh, timer },
+    });
 
     expect(result?.success).toBe(true);
     expect(frames.calls()).toBe(5);
@@ -608,18 +590,14 @@ describe("openLink iOS app-open alert acceptance", () => {
     const alert = appOpenAlertObservation.viewHierarchy ?? null;
     const frames = framesOf([alert]);
 
-    const failure = await acceptIosAppOpenAlert(
-      iosDevice,
-      makeObservation("home"),
-      undefined,
-      undefined,
-      {
+    const failure = await acceptIosAppOpenAlert(iosDevice, makeObservation("home"), {
+      options: {
         tapOnElementFactory: okTap([]),
         refreshHierarchy: frames.refresh,
         timer: autoTimer(),
         verifyTimeoutMs: 500,
       },
-    ).catch((error: unknown) => error);
+    }).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(IosOpenAlertError);
     expect((failure as IosOpenAlertError).phase).toBe("verify");
@@ -641,9 +619,7 @@ describe("openLink iOS app-open alert acceptance", () => {
     const failure = await acceptIosAppOpenAlert(
       iosDevice,
       { ...makeObservation("nobutton"), viewHierarchy: unbuttoned },
-      undefined,
-      undefined,
-      { tapOnElementFactory: interactionDeps.tapOnElementFactory },
+      { options: { tapOnElementFactory: interactionDeps.tapOnElementFactory } },
     ).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(IosOpenAlertError);
@@ -663,18 +639,14 @@ describe("openLink iOS app-open alert acceptance", () => {
     });
     let liveTaps = 0;
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      appOpenAlertObservation,
-      undefined,
-      undefined,
-      {
+    const result = await acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, {
+      options: {
         tapOnElementFactory: interactionDeps.tapOnElementFactory,
         // The first live tap (during the wait) misses; the post-failure one lands.
         tapSystemAlert: async () => ({ success: ++liveTaps > 1 }),
         timer: autoTimer(),
       },
-    );
+    });
 
     expect(result?.success).toBe(true);
     expect(liveTaps).toBe(2);
@@ -704,13 +676,9 @@ describe("openLink iOS app-open alert acceptance", () => {
       },
     });
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      appOpenAlertObservation,
-      undefined,
-      undefined,
-      { tapOnElementFactory: interactionDeps.tapOnElementFactory },
-    );
+    const result = await acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, {
+      options: { tapOnElementFactory: interactionDeps.tapOnElementFactory },
+    });
 
     expect(result?.success).toBe(true);
     expect(options).toEqual([{ text: "Open", action: "tap" }]);
@@ -730,12 +698,8 @@ describe("openLink iOS app-open alert acceptance", () => {
       },
     });
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      makeObservation("stale-welcome"),
-      undefined,
-      undefined,
-      {
+    const result = await acceptIosAppOpenAlert(iosDevice, makeObservation("stale-welcome"), {
+      options: {
         tapOnElementFactory: interactionDeps.tapOnElementFactory,
         timer: autoTimer(),
         refreshHierarchy: async () => {
@@ -745,7 +709,7 @@ describe("openLink iOS app-open alert acceptance", () => {
             : noAlertHierarchy;
         },
       },
-    );
+    });
 
     expect(result?.success).toBe(true);
     expect(refreshCalls).toBe(2);
@@ -755,19 +719,15 @@ describe("openLink iOS app-open alert acceptance", () => {
   test("falls back to the live SpringBoard button when snapshots omit the alert", async () => {
     let systemTapCalls = 0;
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      makeObservation("stale-welcome"),
-      undefined,
-      undefined,
-      {
+    const result = await acceptIosAppOpenAlert(iosDevice, makeObservation("stale-welcome"), {
+      options: {
         tapOnElementFactory: interactionDeps.tapOnElementFactory,
         tapSystemAlert: async () => {
           systemTapCalls += 1;
           return { success: true };
         },
       },
-    );
+    });
 
     expect(result?.success).toBe(true);
     expect(result?.element.text).toBe("Open");
@@ -786,12 +746,8 @@ describe("openLink iOS app-open alert acceptance", () => {
         }) as TapOnElementResult,
     });
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      appOpenAlertObservation,
-      undefined,
-      undefined,
-      {
+    const result = await acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, {
+      options: {
         tapOnElementFactory: interactionDeps.tapOnElementFactory,
         timer: autoTimer(),
         refreshHierarchy: async () => {
@@ -805,7 +761,7 @@ describe("openLink iOS app-open alert acceptance", () => {
           return { success: true };
         },
       },
-    );
+    });
 
     expect(result?.success).toBe(true);
     expect(refreshCalls).toBe(2);
@@ -823,10 +779,12 @@ describe("openLink iOS app-open alert acceptance", () => {
     });
 
     await expect(
-      acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, undefined, undefined, {
-        tapOnElementFactory: interactionDeps.tapOnElementFactory,
-        timer: autoTimer(),
-        refreshHierarchy: async () => null,
+      acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, {
+        options: {
+          tapOnElementFactory: interactionDeps.tapOnElementFactory,
+          timer: autoTimer(),
+          refreshHierarchy: async () => null,
+        },
       }),
     ).rejects.toThrow("dialog remained visible");
   });
@@ -836,12 +794,8 @@ describe("openLink iOS app-open alert acceptance", () => {
     let systemTapCalls = 0;
     const localizedObservation = spanishAppOpenAlertObservation;
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      localizedObservation,
-      undefined,
-      undefined,
-      {
+    const result = await acceptIosAppOpenAlert(iosDevice, localizedObservation, {
+      options: {
         tapOnElementFactory: interactionDeps.tapOnElementFactory,
         timer: autoTimer(),
         refreshHierarchy: async () => {
@@ -855,7 +809,7 @@ describe("openLink iOS app-open alert acceptance", () => {
           return { success: true };
         },
       },
-    );
+    });
 
     expect(result?.success).toBe(true);
     expect(refreshCalls).toBe(2);
@@ -879,17 +833,17 @@ describe("openLink iOS app-open alert acceptance", () => {
           ...makeObservation("localized-system-sheet"),
           viewHierarchy: localizedHierarchy,
         },
-        undefined,
-        undefined,
         {
-          tapOnElementFactory: interactionDeps.tapOnElementFactory,
-          timer: autoTimer(),
-          refreshHierarchy: async () => {
-            refreshCalls += 1;
-            return localizedHierarchy;
+          options: {
+            tapOnElementFactory: interactionDeps.tapOnElementFactory,
+            timer: autoTimer(),
+            refreshHierarchy: async () => {
+              refreshCalls += 1;
+              return localizedHierarchy;
+            },
+            tapSystemAlert: async () => ({ success: true }),
+            verifyTimeoutMs: 1000,
           },
-          tapSystemAlert: async () => ({ success: true }),
-          verifyTimeoutMs: 1000,
         },
       ),
     ).rejects.toThrow("dialog remained visible");
@@ -905,13 +859,9 @@ describe("openLink iOS app-open alert acceptance", () => {
       },
     });
 
-    const result = await acceptIosAppOpenAlert(
-      iosDevice,
-      makeObservation("home"),
-      undefined,
-      undefined,
-      { tapOnElementFactory: interactionDeps.tapOnElementFactory },
-    );
+    const result = await acceptIosAppOpenAlert(iosDevice, makeObservation("home"), {
+      options: { tapOnElementFactory: interactionDeps.tapOnElementFactory },
+    });
 
     expect(result).toBeNull();
     expect(calls).toBe(0);
@@ -929,8 +879,10 @@ describe("openLink iOS app-open alert acceptance", () => {
     });
 
     await expect(
-      acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, undefined, undefined, {
-        tapOnElementFactory: interactionDeps.tapOnElementFactory,
+      acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, {
+        options: {
+          tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        },
       }),
     ).rejects.toThrow("Failed to accept iOS app-open alert: Open was no longer hittable");
   });

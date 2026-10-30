@@ -8,12 +8,10 @@ const TEMPLATE_URI = "automobile:config/feature-flags/{key}";
 export function registerFeatureFlagResources(): void {
   const validKeys = new Set(FEATURE_FLAG_DEFINITIONS.map((d) => d.key));
 
-  ResourceRegistry.registerTemplate(
-    TEMPLATE_URI,
-    "Feature flag configuration",
-    "Read feature flag state and configuration by key",
-    "application/json",
-    async (params: Record<string, string>) => {
+  ResourceRegistry.registerTemplate(TEMPLATE_URI, "Feature flag configuration", {
+    description: "Read feature flag state and configuration by key",
+    mimeType: "application/json",
+    handler: async (params: Record<string, string>) => {
       const key = params.key;
       if (!key || !validKeys.has(key as FeatureFlagKey)) {
         throw new Error(`Unknown feature flag: ${key}`);
@@ -39,5 +37,5 @@ export function registerFeatureFlagResources(): void {
         text: JSON.stringify(body),
       };
     },
-  );
+  });
 }

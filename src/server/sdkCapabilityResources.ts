@@ -127,12 +127,11 @@ export async function getSdkCapabilitiesResource(
 export function registerSdkCapabilityResources(
   dependencies: SdkCapabilityResourceDependencies = {},
 ): void {
-  ResourceRegistry.registerTemplate(
-    SDK_CAPABILITIES_TEMPLATE,
-    "SDK Capabilities",
-    "Versioned SDK capability states and capture policy (headers, bodies, mutations) for the bound device's app, read through CtrlProxy. An older SDK, CtrlProxy, or a release build yields status 'unavailable' with a reason, never an empty capability set.",
-    "application/json",
-    (params) => getSdkCapabilitiesResource(params, dependencies),
-  );
+  ResourceRegistry.registerTemplate(SDK_CAPABILITIES_TEMPLATE, "SDK Capabilities", {
+    description:
+      "Versioned SDK capability states and capture policy (headers, bodies, mutations) for the bound device's app, read through CtrlProxy. An older SDK, CtrlProxy, or a release build yields status 'unavailable' with a reason, never an empty capability set.",
+    mimeType: "application/json",
+    handler: (params) => getSdkCapabilitiesResource(params, dependencies),
+  });
   logger.info("[SdkCapabilityResources] Registered SDK capability resources");
 }

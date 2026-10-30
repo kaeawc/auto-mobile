@@ -927,39 +927,51 @@ export function registerObservationResources(deps: ObservationResourceDependenci
   ResourceRegistry.registerTemplate(
     RESOURCE_URIS.OBSERVATION_SCREENSHOT,
     "Observation Screenshot",
-    "Screen capture paired with one immutable device observation identity. Readable by any client and unavailable after that observation is superseded or evicted. Failures are application/json with code, retryable, error. SCREENSHOT_NOT_READY: read the same URI again; OBSERVATION_NOT_RETAINED: observe again.",
-    "image/png",
-    (params: Record<string, string>) => getObservationScreenshot(params, deps),
+    {
+      description:
+        "Screen capture paired with one immutable device observation identity. Readable by any client and unavailable after that observation is superseded or evicted. Failures are application/json with code, retryable, error. SCREENSHOT_NOT_READY: read the same URI again; OBSERVATION_NOT_RETAINED: observe again.",
+      mimeType: "image/png",
+      handler: (params: Record<string, string>) => getObservationScreenshot(params, deps),
+    },
   );
 
   // Register session-scoped observation template
   ResourceRegistry.registerTemplateWithReadContext(
     RESOURCE_URIS.SESSION_OBSERVATION,
     "Session Observation",
-    "Cached screen observation for an active device session. Failures are application/json with code, retryable, error.",
-    "application/json",
-    (params: Record<string, string>, context: ResourceReadContext) =>
-      getSessionObservation(params, context, deps),
+    {
+      description:
+        "Cached screen observation for an active device session. Failures are application/json with code, retryable, error.",
+      mimeType: "application/json",
+      handler: (params: Record<string, string>, context: ResourceReadContext) =>
+        getSessionObservation(params, context, deps),
+    },
   );
 
   // Register session-scoped cached screenshot template
   ResourceRegistry.registerTemplateWithReadContext(
     RESOURCE_URIS.SESSION_SCREENSHOT,
     "Session Screenshot",
-    "Cached screen capture for an active device session. Failures are application/json with code, retryable, error.",
-    "image/png",
-    (params: Record<string, string>, context: ResourceReadContext) =>
-      getSessionScreenshot(params, context, deps),
+    {
+      description:
+        "Cached screen capture for an active device session. Failures are application/json with code, retryable, error.",
+      mimeType: "image/png",
+      handler: (params: Record<string, string>, context: ResourceReadContext) =>
+        getSessionScreenshot(params, context, deps),
+    },
   );
 
   // Register fresh session screenshot template
   ResourceRegistry.registerTemplateWithReadContext(
     RESOURCE_URIS.FRESH_SESSION_SCREENSHOT,
     "Fresh Session Screenshot",
-    "Fresh PNG screen capture for an active device session. Every read captures the current screen. Failures are application/json with code, retryable, error.",
-    "image/png",
-    (params: Record<string, string>, context: ResourceReadContext) =>
-      getFreshSessionScreenshot(params, context, deps),
+    {
+      description:
+        "Fresh PNG screen capture for an active device session. Every read captures the current screen. Failures are application/json with code, retryable, error.",
+      mimeType: "image/png",
+      handler: (params: Record<string, string>, context: ResourceReadContext) =>
+        getFreshSessionScreenshot(params, context, deps),
+    },
   );
 
   logger.info("[ObservationResources] Registered observation resources");

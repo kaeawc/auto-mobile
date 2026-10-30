@@ -194,6 +194,16 @@ export interface WebSocketMessage {
   supportedTriggers?: string[];
   bundleId?: string;
   capabilities?: string[];
+  /** sdk_capabilities_result: the app's observation-bridge state (#5159), parsed by the probe. */
+  observationBridge?: unknown;
+  /** sdk_observation_result / sdk_action_result (#5159): the relayed bridge values and failure code. */
+  observation?: unknown;
+  result?: unknown;
+  failure?: string;
+  /** sdk_web_snapshot_result (#5162): the relayed web snapshot, its web view and the registered web views. */
+  snapshot?: unknown;
+  webViewId?: string;
+  webViews?: unknown;
   data?: XCTestHierarchy;
   /** True when a hierarchy response contains a previous runner capture. */
   servedFromCache?: boolean;
@@ -390,6 +400,14 @@ export interface CtrlProxyLocationResult {
   totalTimeMs: number;
 }
 
+/** `request_siri` result (#14109); `unsupported` marks a runner that predates the command. */
+export interface CtrlProxySiriResult {
+  success: boolean;
+  unsupported?: boolean;
+  error?: string;
+  totalTimeMs: number;
+}
+
 /** System light/dark appearance read back by the runner (`XCUIDevice.appearance`, #14092). */
 export type CtrlProxyAppearance = "light" | "dark" | "unspecified";
 
@@ -529,6 +547,51 @@ export interface CtrlProxySdkTriggerResult extends BaseResult {
   reason?: string;
   registeredModules?: string[];
   supportedTriggers?: string[];
+}
+
+/** `request_sdk_observation` (#5159): the foreground app's observation-bridge snapshot. */
+export interface CtrlProxySdkObservationResult extends BaseResult {
+  /** False when no bridge answered; a runner that predates the command also sets `unsupported`. */
+  available: boolean;
+  observation?: import("./sdkObservationBridge").IosSdkObservation;
+  failure?: import("./sdkObservationBridge").IosSdkBridgeFailure;
+  unsupported?: boolean;
+}
+
+/**
+ * `request_sdk_action` (#5159): the bridge's result for one action. A bridge rejection (stale
+ * observation, element not actionable, unsupported action, overload, cancellation) is a `result`
+ * with `success: false`, never a `failure`.
+ */
+export interface CtrlProxySdkActionResult extends BaseResult {
+  available: boolean;
+  result?: import("./sdkObservationBridge").IosSdkActionResult;
+  failure?: import("./sdkObservationBridge").IosSdkBridgeFailure;
+  unsupported?: boolean;
+}
+
+/** `request_sdk_web_snapshot` (#5162): an opted-in web view's latest bounded, redacted snapshot. */
+export interface CtrlProxySdkWebSnapshotResult extends BaseResult {
+  /** False when no web view answered; a runner that predates the command also sets `unsupported`. */
+  available: boolean;
+  webViewId?: string;
+  snapshot?: import("./sdkWebViewBridge").IosSdkWebSnapshot;
+  /** The app's registered web views, when the runner read its SDK's `/health`. */
+  webViews?: import("./sdkWebViewBridge").IosSdkWebViewEntry[];
+  failure?: import("./sdkWebViewBridge").IosSdkWebFailure;
+  unsupported?: boolean;
+}
+
+/**
+ * `request_sdk_web_action` (#5162): the web view's result for one bounded action. A stale snapshot,
+ * unactionable element, disallowed origin or dead content process is a `result` with
+ * `success: false`, never a `failure`.
+ */
+export interface CtrlProxySdkWebActionResult extends BaseResult {
+  available: boolean;
+  result?: import("./sdkWebViewBridge").IosSdkWebActionResult;
+  failure?: import("./sdkWebViewBridge").IosSdkWebFailure;
+  unsupported?: boolean;
 }
 
 /** Direct SDK responder call; no VoiceOver gesture or enabled-state requirement. */

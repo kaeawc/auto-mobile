@@ -323,141 +323,155 @@ class FakeForeignDeviceOwnership implements ForeignDeviceOwnership {
  * The kill now consults the peer's claim at entry, and publishes its own claim under the shutdown
  * reservation so a peer cannot bind the device while it is stopped (#11200).
  */
-describe("killDevice on a device another daemon holds (#11200)", () => {
-  const phone: BootedDevice = { name: "Pixel", deviceId: "R58M11200", platform: "android" };
-  const PEER_PID = 4242;
+// #14908: an Apple Watch simulator is claimed by UDID in its own store and gets the same guard.
+const FOREIGN_HELD_TARGETS: readonly BootedDevice[] = [
+  { name: "Pixel", deviceId: "R58M11200", platform: "android" },
+  { name: "Apple Watch", deviceId: "6A7B8C9D-0E1F-4A2B-9C3D-4E5F60718293", platform: "watchos" },
+];
 
-  let manager: RecordingKillDeviceManager;
-  let ownership: FakeForeignDeviceOwnership;
-  let pool: DevicePool;
-  let sessionManager: SessionManager;
+describe.each(FOREIGN_HELD_TARGETS.map((target) => [target.platform, target] as const))(
+  "killDevice on a %s device another daemon holds (#11200)",
+  (_platform, phone) => {
+    const PEER_PID = 4242;
 
-  const outcome = async (args: Record<string, unknown>) => {
-    try {
-      await ToolRegistry.getTool("killDevice")!.handler(args);
-    } catch (error) {
-      return error;
-    }
-    return undefined;
-  };
+    let manager: RecordingKillDeviceManager;
+    let ownership: FakeForeignDeviceOwnership;
+    let pool: DevicePool;
+    let sessionManager: SessionManager;
 
-  async function arrangeHarness2(): Promise<void> {
-    ToolRegistry.clearTools();
-    const timer = new FakeTimer();
-    manager = new RecordingKillDeviceManager();
-    ownership = new FakeForeignDeviceOwnership();
-    await setVideoRecordingManagerDependencies({
-      videoRecorderService: {} as never,
-      recordingRepository: { listRecordings: async () => [] } as never,
-      configRepository: {} as never,
-      highlightClient: {} as never,
-      timer,
-      now: () => new Date(0),
-    });
-    manager.setBootedDevices("android", [phone]);
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => manager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    sessionManager.stopCleanupTimer();
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "lifecycle-foreign-daemon", {
+    const outcome = async (args: Record<string, unknown>) => {
+      try {
+        await ToolRegistry.getTool("killDevice")!.handler(args);
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    };
+
+    async function arrangeHarness2(): Promise<void> {
+      ToolRegistry.clearTools();
+      const timer = new FakeTimer();
+      manager = new RecordingKillDeviceManager();
+      ownership = new FakeForeignDeviceOwnership();
+      await setVideoRecordingManagerDependencies({
+        videoRecorderService: {} as never,
+        recordingRepository: { listRecordings: async () => [] } as never,
+        configRepository: {} as never,
+        highlightClient: {} as never,
         timer,
-        deviceManager: manager,
-        foreignDeviceOwnership: ownership,
-      }),
-    );
-    await pool.initializeWithDevices([phone]);
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    registerDeviceTools();
-  }
-
-  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
-  function arranged2(name: string, fn: () => void | Promise<void>, timeout?: number): void {
-    test(
-      name,
-      async () => {
-        await arrangeHarness2();
-        await fn();
-      },
-      timeout,
-    );
-  }
-
-  afterEach(() => {
-    ToolRegistry.clearTools();
-    resetDeviceToolsDependencies();
-    resetVideoRecordingManagerDependencies();
-    DaemonState.getInstance().reset();
-    sessionManager.stopCleanupTimer();
-  });
-
-  arranged2(
-    "a sessionless kill of a device a live peer daemon holds is refused with the typed code",
-    async () => {
-      ownership.owners.set(phone.deviceId, PEER_PID);
-
-      const error = await outcome({ device: phone });
-
-      expect(error).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
-      expect((error as DeviceOwnedByOtherDaemonError).code).toBe(DEVICE_OWNED_BY_OTHER_DAEMON_CODE);
-      expect((error as Error).message).toBe(
-        `Device '${phone.deviceId}' is claimed by another AutoMobile daemon (PID ${PEER_PID}) ` +
-          `(code ${DEVICE_OWNED_BY_OTHER_DAEMON_CODE}); two daemons must never drive the same device. ` +
-          "Stop it through the daemon that holds it, wait for that daemon to release it, or pass " +
-          "force: true to stop it anyway.",
+        now: () => new Date(0),
+      });
+      manager.setBootedDevices(phone.platform, [phone]);
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      sessionManager.stopCleanupTimer();
+      pool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "lifecycle-foreign-daemon", {
+          timer,
+          deviceManager: manager,
+          ...(phone.platform === "watchos"
+            ? { watchForeignDeviceOwnership: ownership }
+            : { foreignDeviceOwnership: ownership }),
+        }),
       );
-      expect(manager.killed).toEqual([]);
-      expect(ownership.claims).toEqual([]);
-    },
-  );
-
-  arranged2("force: true stops it anyway and logs the override", async () => {
-    ownership.owners.set(phone.deviceId, PEER_PID);
-    const warn = spyOn(logger, "warn");
-    try {
-      await outcome({ device: phone, force: true });
-
-      expect(manager.killed).toEqual([phone.deviceId]);
-      expect(warn.mock.calls.map(([message]) => String(message))).toContain(
-        `[DeviceTools] killDevice force-stopping device '${phone.deviceId}' held by another ` +
-          `AutoMobile daemon (PID ${PEER_PID}).`,
-      );
-    } finally {
-      warn.mockRestore();
+      await pool.initializeWithDevices([phone]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      registerDeviceTools();
     }
-  });
 
-  arranged2(
-    "a peer that claims the device after the entry check wins it: the kill is refused",
-    async () => {
-      // The entry check sees no claim; the peer's claim is in place by the time the kill claims.
-      ownership.claimRefused.add(phone.deviceId);
+    // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+    function arranged2(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+      test(
+        name,
+        async () => {
+          await arrangeHarness2();
+          await fn();
+        },
+        timeout,
+      );
+    }
 
-      const error = await outcome({ device: phone });
+    afterEach(() => {
+      ToolRegistry.clearTools();
+      resetDeviceToolsDependencies();
+      resetVideoRecordingManagerDependencies();
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    });
 
-      expect((error as DeviceOwnedByOtherDaemonError).code).toBe(DEVICE_OWNED_BY_OTHER_DAEMON_CODE);
-      expect(manager.killed).toEqual([]);
-      expect(pool.isUnderShutdownReservation(phone.deviceId)).toBe(false);
-      expect(ownership.releases).toEqual([]);
-    },
-  );
+    arranged2(
+      "a sessionless kill of a device a live peer daemon holds is refused with the typed code",
+      async () => {
+        ownership.owners.set(phone.deviceId, PEER_PID);
 
-  arranged2(
-    "an unheld device is claimed for the stop and the claim is withdrawn after",
-    async () => {
-      await outcome({ device: phone });
+        const error = await outcome({ device: phone });
 
-      expect(manager.killed).toEqual([phone.deviceId]);
-      expect(ownership.claims).toEqual([phone.deviceId]);
-      expect(ownership.releases).toEqual([phone.deviceId]);
-    },
-  );
-});
+        expect(error).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+        expect((error as DeviceOwnedByOtherDaemonError).code).toBe(
+          DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+        );
+        expect((error as Error).message).toBe(
+          `Device '${phone.deviceId}' is claimed by another AutoMobile daemon (PID ${PEER_PID}) ` +
+            `(code ${DEVICE_OWNED_BY_OTHER_DAEMON_CODE}); two daemons must never drive the same device. ` +
+            "Stop it through the daemon that holds it, wait for that daemon to release it, or pass " +
+            "force: true to stop it anyway.",
+        );
+        expect(manager.killed).toEqual([]);
+        expect(ownership.claims).toEqual([]);
+      },
+    );
+
+    arranged2("force: true stops it anyway and logs the override", async () => {
+      ownership.owners.set(phone.deviceId, PEER_PID);
+      const warn = spyOn(logger, "warn");
+      try {
+        await outcome({ device: phone, force: true });
+
+        expect(manager.killed).toEqual([phone.deviceId]);
+        expect(warn.mock.calls.map(([message]) => String(message))).toContain(
+          `[DeviceTools] killDevice force-stopping device '${phone.deviceId}' held by another ` +
+            `AutoMobile daemon (PID ${PEER_PID}).`,
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    arranged2(
+      "a peer that claims the device after the entry check wins it: the kill is refused",
+      async () => {
+        // The entry check sees no claim; the peer's claim is in place by the time the kill claims.
+        ownership.claimRefused.add(phone.deviceId);
+
+        const error = await outcome({ device: phone });
+
+        expect((error as DeviceOwnedByOtherDaemonError).code).toBe(
+          DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+        );
+        expect(manager.killed).toEqual([]);
+        expect(pool.isUnderShutdownReservation(phone.deviceId)).toBe(false);
+        expect(ownership.releases).toEqual([]);
+      },
+    );
+
+    arranged2(
+      "an unheld device is claimed for the stop and the claim is withdrawn after",
+      async () => {
+        await outcome({ device: phone });
+
+        expect(manager.killed).toEqual([phone.deviceId]);
+        expect(ownership.claims).toEqual([phone.deviceId]);
+        expect(ownership.releases).toEqual([phone.deviceId]);
+      },
+    );
+  },
+);
 
 describe("already-dead Android shutdown ownership", () => {
   const device: BootedDevice = {
@@ -524,7 +538,7 @@ describe("already-dead Android shutdown ownership", () => {
     expect(pool.getDevice(device.deviceId)?.sessionId).toBe("holder");
     const reserve = pool.reserveDeviceForShutdown.bind(pool);
     const reserveSpy = spyOn(pool, "reserveDeviceForShutdown").mockImplementation(
-      (id, signal, client, assertHolder, foreignClaim) =>
+      (id, signal, client, assertHolder, options) =>
         reserve(
           id,
           signal,
@@ -535,7 +549,7 @@ describe("already-dead Android shutdown ownership", () => {
             expect(assertHolder).toBeDefined();
             assertHolder!();
           },
-          foreignClaim,
+          options,
         ),
     );
     const release = sessions.releaseSession.bind(sessions);

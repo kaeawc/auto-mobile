@@ -8,6 +8,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/lib/spotlight-exclude.sh
 source "${repo_root}/scripts/lib/spotlight-exclude.sh"
+# shellcheck source=scripts/lib/lipo-verify-arch.sh
+source "${repo_root}/scripts/lib/lipo-verify-arch.sh"
 out_dir="${1:-${repo_root}/scratch/protoviewer}"
 mkdir_spotlight_excluded_within "${repo_root}" "${out_dir}"
 out_dir="$(cd "${out_dir}" && pwd)"
@@ -34,6 +36,8 @@ while IFS= read -r -d '' file; do
   swift_sources+=("${file}")
 done < <(find "${sources_root}/AutoMobilePrototypeAgentCore" \
   "${sources_root}/AutoMobilePrototypeAgent" "${viewer_root}" -name '*.swift' -print0 | sort -z)
+# The effect presets are compiled to a metallib and embedded as bytes (#15130).
+swift_sources+=("$("${repo_root}/scripts/ios/prototype-effects-metallib.sh" "${out_dir}/effects")")
 slices=()
 for arch in "${archs[@]}"; do
   case "${arch}" in
@@ -50,10 +54,19 @@ for arch in "${archs[@]}"; do
   slices+=("${slice}")
 done
 lipo -create ${slices[@]+"${slices[@]}"} -output "${app}/ProtoViewer"
-lipo "${app}/ProtoViewer" -verify_arch "${archs[@]}"
+lipo_verify_archs "${app}/ProtoViewer" "${archs[@]}"
 cp "${viewer_root}/Info.plist" "${app}/Info.plist"
 plutil -replace MinimumOSVersion -string "${min_ios}" "${app}/Info.plist"
 plutil -lint "${app}/Info.plist"
+# Required-reason API declarations ship at the bundle root (#14151); the privacy-manifest guard
+# (scripts/ios/check-privacy-manifests.ts) keeps them equal to the APIs these sources use.
+cp "${viewer_root}/PrivacyInfo.xcprivacy" "${app}/PrivacyInfo.xcprivacy"
+plutil -lint "${app}/PrivacyInfo.xcprivacy"
+
+# Compile both app chrome and system permission/display-name translations.
+for catalog in Localizable InfoPlist; do
+  xcrun xcstringstool compile "${viewer_root}/${catalog}.xcstrings" --output-directory "${app}"
+done
 
 # Native host APIs generate loose placeholder PNGs, with no committed binary assets.
 # Also inspect the plist structurally: a CFBundleIconName anywhere would break stamping.
@@ -102,8 +115,9 @@ for (scale, size) in [(2, 120), (3, 180)] {
 }
 SWIFT
 xcrun --sdk macosx swift -swift-version 6 -warnings-as-errors "${out_dir}/viewer-icons.swift" "${app}"
-if [[ -n "$(find "${app}" \( -name Assets.car -o -name InfoPlist.strings \) -print -quit)" ]]; then
-  echo "Viewer template must not contain Assets.car or InfoPlist.strings" >&2
+if [[ -n "$(find "${app}" \( -name Assets.car -o \
+  \( -name InfoPlist.strings ! -path "${app}/*.lproj/InfoPlist.strings" \) \) -print -quit)" ]]; then
+  echo "Viewer template must not contain Assets.car or unlocalized InfoPlist.strings" >&2
   exit 1
 fi
 codesign --force --sign - "${app}" > /dev/null

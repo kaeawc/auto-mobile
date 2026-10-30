@@ -6,7 +6,7 @@ import {
   createObservationOnlyConnectAttempt,
   DaemonSocketReachability,
   type SocketReachability,
-} from "../../src/daemon/daemonSocketReachability";
+} from "../../src/daemon/client/daemonSocketReachability";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("classifySocketConnectError", () => {

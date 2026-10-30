@@ -1,0 +1,34 @@
+{
+  "id": "motion3",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "on": false
+  },
+  "root": {
+    "type": "text",
+    "text": "Hi",
+    "animate": {},
+    "styleWhen": [
+      {
+        "when": {
+          "key": "on",
+          "equals": true
+        },
+        "style": {
+          "cornerRadius": 12,
+          "elevation": 4,
+          "padding": {
+            "top": 8
+          },
+          "width": {
+            "dp": 80
+          }
+        }
+      }
+    ]
+  }
+}

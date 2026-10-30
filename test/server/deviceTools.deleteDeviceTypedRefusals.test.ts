@@ -106,7 +106,10 @@ describe("lifecycle: deleteDevice typed refusals match killDevice's", () => {
           if (!registryReadable) {
             throw new Error("binding registry locked");
           }
-          return { snapshotManagedDevices: async () => [] } as never;
+          return {
+            assertSupportedSchema: async () => undefined,
+            snapshotManagedDevices: async () => [],
+          } as never;
         }, timer),
       }),
     );

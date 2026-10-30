@@ -6,19 +6,29 @@ import kotlinx.serialization.json.*
 internal object PrototypeBundleNodeCapabilities {
   fun collect(n: JsonObject): Set<String> {
     val caps = linkedSetOf<String>()
+    caps.addAll(PrototypeGlassRules.capabilities(n))
+    if (PrototypeStylePolishV2Rules.required(n)) caps.add(PrototypeStylePolishV2Rules.CAPABILITY)
     val type = text(n["type"])
     val typed =
       mapOf(
+        "adaptive" to "adaptive_v1",
         "carousel" to "carousel_v1",
         "searchBar" to "search_bar_v1",
         "chart" to "chart_v1",
+        "list" to "lazy_list_v1",
         "stack" to "stack_v1",
         "menu" to "menus_v1",
+        "tooltip" to "tooltip_v1",
+        "drawer" to "drawer_v1",
         "select" to "menus_v1",
         "flow" to "flow_grid_v1",
         "grid" to "flow_grid_v1",
       )
     typed[type]?.let { caps.add("prototype_$it") }
+    if (PrototypeGlassRules.needsNamespace(n)) caps.add("prototype_platform_namespace_v1")
+    if (type == "icon" && "effect" in n) caps.add("prototype_icon_effects_v1")
+    val trigger = (n["effect"] as? JsonObject)?.get("trigger") as? JsonObject
+    if (type == "icon" && trigger?.containsKey("data") == true) caps.add("prototype_data_model_v1")
     general(n, type, caps)
     controls(n, type, caps)
     appearance(n, type, caps)
@@ -29,12 +39,33 @@ internal object PrototypeBundleNodeCapabilities {
     fun mark(name: String, used: Boolean) {
       if (used) caps.add("prototype_$name")
     }
+    mark("motion_tokens_v1", (n["animate"] as? JsonObject)?.containsKey("tempo") == true)
+    mark("keyframes_v1", "keyframes" in n)
+    mark("semantics_v1", "semantics" in n)
+    mark("platform_namespace_v1", PrototypeGlassRules.needsNamespace(n))
+    mark("window_motion_v1", (n["repeat"] as? JsonObject)?.get("stagger") != null)
+    mark("platform_media_items_v1", PrototypeMediaItemBindings.usedBy(n))
+    mark("shared_element_v1", "sharedKey" in n)
+    mark("shared_element_v2", "shared" in n)
     mark("flow_grid_v1", "span" in n)
     mark("gestures_v1", n.keys.any { it in setOf("onLongPress", "onDoubleTap") })
     mark("swipe_actions_v1", type in setOf("row", "listItem") && "swipeActions" in n)
     mark("rich_text_v1", type == "text" && "spans" in n)
+    mark(
+      "content_transition_v1",
+      type == "text" && text(n["contentTransition"])?.let { it != "none" } == true,
+    )
     mark("linkify_v1", type == "text" && "linkify" in n)
-    val transition = n["transition"]
+    mark("stack_patterns_v1", PrototypeStackPatternRules.required(n))
+    mark("stack_transitions_v1", type == "stack" && "transition" in n)
+    motion(n, type, caps)
+  }
+
+  private fun motion(n: JsonObject, type: String?, caps: MutableSet<String>) {
+    fun mark(name: String, used: Boolean) {
+      if (used) caps.add("prototype_$name")
+    }
+    val transition = if (type == "stack") null else n["transition"]
     val transitionType = (transition as? JsonObject)?.let { text(it["type"]) } ?: text(transition)
     mark("motion_v2", "animate" in n || transitionType in setOf("slideStart", "slideEnd", "scale"))
     mark(
@@ -63,12 +94,17 @@ internal object PrototypeBundleNodeCapabilities {
               ),
             "text_field_actions_v1" to setOf("trailingIcon", "imeAction", "onSubmit"),
             "text_field_leading_icon_v1" to setOf("leadingIcon"),
+            "string_conditions_v1" to setOf("errorWhen", "errorText"),
           )
+        "topAppBar",
+        "bottomNav",
+        "tabBar" -> mapOf("bar_scroll_v1" to setOf("onScroll", "scroll"))
         "pager" ->
           mapOf(
             "carousel_v1" to setOf("indicator"),
             "pager_options_v1" to setOf("axis", "pageSpacing", "peek", "pageSize"),
           )
+        "list" -> mapOf("refresh_v1" to setOf("refresh"))
         "scroll" ->
           mapOf(
             "refresh_v1" to setOf("refresh"),
@@ -80,29 +116,51 @@ internal object PrototypeBundleNodeCapabilities {
       caps.add("prototype_$capability")
   }
 
+  /** `{data: "/pointer"}` is a media item binding (#14192), not a per-mode pair. */
+  private fun pair(value: JsonElement?) = value is JsonObject && !value.containsKey("data")
+
+  private fun pairedImages(n: JsonObject, type: String?): Boolean =
+    (type == "image" && pair(n["asset"])) ||
+      (n["items"] as? JsonArray).orEmpty().any { pair((it as? JsonObject)?.get("image")) }
+
   private fun appearance(n: JsonObject, type: String?, caps: MutableSet<String>) {
-    val pairedImage = type == "image" && n["asset"] is JsonObject
-    val scrim = type == "bottomSheet" && themed(n["scrim"])
-    val items =
-      (n["items"] as? JsonArray).orEmpty().any { (it as? JsonObject)?.get("image") is JsonObject }
-    if (pairedImage || scrim || items) caps.add("prototype_theme_modes_v1")
+    if ((n["filter"] as? JsonObject)?.get("tint") is JsonObject)
+      caps.add("prototype_theme_modes_v1")
+    val scrim = type in setOf("bottomSheet", "drawer") && themed(n["scrim"])
+    if (pairedImages(n, type) || scrim) caps.add("prototype_theme_modes_v1")
     val styles =
       listOfNotNull(n["style"] as? JsonObject) +
         (n["styleWhen"] as? JsonArray).orEmpty().mapNotNull {
           (it as? JsonObject)?.get("style") as? JsonObject
         }
     for (style in styles) {
+      if ("shader" in style) caps.add("prototype_custom_shaders_v1")
       if ("runSpacing" in style) caps.add("prototype_flow_grid_v1")
       if ("scale" in style || "rotation" in style) caps.add("prototype_motion_v2")
+      if ("effects" in style) caps.add("prototype_effects_v1")
       if (themedStyle(style)) caps.add("prototype_theme_modes_v1")
     }
   }
 
   private fun themedStyle(style: JsonObject): Boolean {
     val paired = listOf("background", "color", "shadowColor").any { style[it] is JsonObject }
+    val glass = (style["glass"] as? JsonObject)?.get("tint") is JsonObject
     val border = (style["border"] as? JsonObject)?.get("color") is JsonObject
     val stops = ((style["gradient"] as? JsonObject)?.get("stops") as? JsonArray).orEmpty()
-    return paired || border || stops.any { themed((it as? JsonObject)?.get("color")) }
+    val shadows =
+      (style["shadows"] as? JsonArray).orEmpty().any {
+        (it as? JsonObject)?.get("color") is JsonObject
+      }
+    val borderStops =
+      (((style["border"] as? JsonObject)?.get("gradient") as? JsonObject)?.get("stops")
+          as? JsonArray)
+        .orEmpty()
+    return glass ||
+      shadows ||
+      borderStops.any { themed((it as? JsonObject)?.get("color")) } ||
+      paired ||
+      border ||
+      stops.any { themed((it as? JsonObject)?.get("color")) }
   }
 
   fun themed(value: JsonElement?) = value is JsonObject || (text(value)?.startsWith('#') == false)

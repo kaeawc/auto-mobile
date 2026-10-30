@@ -88,6 +88,7 @@ wiring_requires_yq() {
     'test/fixtures/prototype-capabilities/**' \
     'test/fixtures/prototype-embedded-routing/**' \
     'test/fixtures/prototype-spec/**' \
+    'test/fixtures/prototype-concepts/**' \
     'test/fixtures/prototype/**' \
     'test/fixtures/prototype-saved-layout/**' \
     'test/fixtures/desktop-wire/**' \
@@ -117,6 +118,7 @@ wiring_requires_yq() {
     'test/fixtures/prototype-capabilities/**' \
     'test/fixtures/prototype-embedded-routing/**' \
     'test/fixtures/prototype-spec/**' \
+    'test/fixtures/prototype-concepts/**' \
     'test/fixtures/prototype/**' \
     'test/fixtures/refusal-wire/**' \
     'test/fixtures/refusal-wire-hints/**' \
@@ -411,8 +413,9 @@ wiring_requires_yq() {
 @test "PR WebRTC device jobs and merge Android device job remain" {
   local workflow android ios
   for workflow in "$WF" ".github/workflows/merge.yml"; do
-    android="$(job_block android-device-webrtc "$workflow")"
-    [[ -n "$android" ]]
+    # The job's steps live in the shared composite action (#11872).
+    android="$(job_block android-device-webrtc "$workflow")$(cat .github/actions/ci-android-device-whep/action.yml)"
+    [[ -n "$(job_block android-device-webrtc "$workflow")" ]]
     [[ "$android" == *"AUTOMOBILE_WEBRTC_DEVICE_PLATFORM=android"* ]]
     [[ "$android" == *"bun run test:integration:webrtc-device"* ]]
   done

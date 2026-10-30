@@ -20,7 +20,7 @@ describe("error-handling convention lint backstop", () => {
   }
 }
 `,
-      "src/daemon/client.ts",
+      "src/daemon/client/client.ts",
     );
 
     expect(messages).toContain(

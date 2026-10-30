@@ -7,7 +7,19 @@
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ],
-    "rejected": ["", "0", "é", "a-b", " a", "a\n", "a\r", "a\r\n", "a", "a ", "a "]
+    "rejected": [
+      "",
+      "0",
+      "\u00e9",
+      "a-b",
+      " a",
+      "a\n",
+      "a\r",
+      "a\r\n",
+      "a\u0085",
+      "a\u2028",
+      "a\u2029"
+    ]
   },
   "stateKey": {
     "accepted": [
@@ -20,15 +32,15 @@
       "",
       "0",
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "é",
+      "\u00e9",
       "a-b",
       " a",
       "a\n",
       "a\r",
       "a\r\n",
-      "a",
-      "a ",
-      "a "
+      "a\u0085",
+      "a\u2028",
+      "a\u2029"
     ]
   },
   "boundKey": {
@@ -40,7 +52,10 @@
       "_{item.id}",
       "{item.id}{index}",
       "{aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{index}"
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{index}",
+      "draft_{route.postId}",
+      "{route.ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp}",
+      "{route.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
     ],
     "rejected": [
       "",
@@ -54,13 +69,14 @@
       "{}",
       "{index",
       "{index}}",
-      "é{index}",
+      "\u00e9{index}",
       "{index}\n",
       "{index}\r",
       "{index}\r\n",
-      "{index}",
-      "{index} ",
-      "{index} "
+      "{index}\u0085",
+      "{index}\u2028",
+      "{index}\u2029",
+      "{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}{route.a}-"
     ]
   },
   "color": {
@@ -75,9 +91,9 @@
       "#000000\n",
       "#000000\r",
       "#000000\r\n",
-      "#000000",
-      "#000000 ",
-      "#000000 "
+      "#000000\u0085",
+      "#000000\u2028",
+      "#000000\u2029"
     ]
   },
   "blankText": {
@@ -89,28 +105,40 @@
       "\f",
       "\r",
       " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      " ",
-      "　",
-      "﻿",
-      "\t\n\u000b\f\r                  　﻿"
+      "\u00a0",
+      "\u1680",
+      "\u2000",
+      "\u2001",
+      "\u2002",
+      "\u2003",
+      "\u2004",
+      "\u2005",
+      "\u2006",
+      "\u2007",
+      "\u2008",
+      "\u2009",
+      "\u200a",
+      "\u2028",
+      "\u2029",
+      "\u202f",
+      "\u205f",
+      "\u3000",
+      "\ufeff",
+      "\t\n\u000b\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
     ],
-    "rejected": ["a", "", "᠎", "​", " ​", "\u0000", "\u001c", "\u001f", "�", "😀", " a\n"]
+    "rejected": [
+      "a",
+      "\u0085",
+      "\u180e",
+      "\u200b",
+      " \u200b",
+      "\u0000",
+      "\u001c",
+      "\u001f",
+      "\ufffd",
+      "\ud83d\ude00",
+      " a\n"
+    ]
   },
   "numberToken": {
     "accepted": [
@@ -136,17 +164,161 @@
       "NaN",
       "Infinity",
       " 1",
-      "١",
+      "\u0661",
       "1\n",
       "1\r",
       "1\r\n",
-      "1",
-      "1 ",
-      "1 "
+      "1\u0085",
+      "1\u2028",
+      "1\u2029"
     ]
   },
   "pointer": {
-    "accepted": ["/", "//", "/a", "/a~0b/~1", "/~01", "/é/😀", "/a\n", "/a\r\n", "/a"],
+    "accepted": [
+      "/",
+      "//",
+      "/a",
+      "/a~0b/~1",
+      "/~01",
+      "/\u00e9/\ud83d\ude00",
+      "/a\n",
+      "/a\r\n",
+      "/a\u0085"
+    ],
     "rejected": ["", "a", "a/b", "/~", "/~2", "/~10~", "/a~\n"]
+  },
+  "currencyCode": {
+    "accepted": ["USD", "EUR", "JPY"],
+    "rejected": ["usd", "US", "USDD", "USD\n"]
+  },
+  "formatLocale": {
+    "accepted": ["en", "en-US", "zh-Hant-TW"],
+    "rejected": ["en_US", "e", "english", "en-US\n"]
+  },
+  "formatTimeZone": {
+    "accepted": ["UTC", "America/New_York", "Asia/Kolkata", "Etc/GMT+5"],
+    "rejected": ["bad zone", "/UTC", "UTC\n", "America//New_York"]
+  },
+  "stringKey": {
+    "accepted": ["title", "cart.items", "_name", "a-b"],
+    "rejected": [
+      "",
+      "1key",
+      "a b",
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ]
+  },
+  "localeTag": {
+    "accepted": ["en", "pt-BR", "zh-Hant-TW", "EN-us"],
+    "rejected": ["default", "en_US", "e", "abcd", "en-", "en-a"]
+  },
+  "uploadDisposition": {
+    "accepted": [
+      "photo",
+      "photo.png",
+      "r\u00e9sum\u00e9 \ud83d\uddc2.txt",
+      "space name",
+      "back\\slash"
+    ],
+    "rejected": ["", "bad\"name", "a\r", "a\n", "a\t", "a\u0000", "a\u007f", "a\u0085", "a\u009f"]
+  },
+  "uploadContentType": {
+    "accepted": [
+      "image/png",
+      "application/vnd.example+json",
+      "TEXT/PLAIN",
+      "!#$%&'*+.^_`|~012-/token"
+    ],
+    "rejected": [
+      "",
+      "image",
+      "/png",
+      "image/",
+      "image /png",
+      "image/png; charset=utf-8",
+      "image/png\r",
+      "image/png\n",
+      "image/p\u00f1g",
+      "image/png/extra"
+    ]
+  },
+  "openUrl": {
+    "accepted": [
+      "https://example.com/a?b=1",
+      "http://example.com",
+      "mailto:ada@example.test?subject=Hi%20there",
+      "tel:+15551234567",
+      "sms:+15551234567",
+      "geo:37.78,-122.41",
+      "maps://?q=coffee",
+      "https://example.com/{id}"
+    ],
+    "rejected": [
+      "intent://scan/#Intent;scheme=zxing;end",
+      "file:///etc/passwd",
+      "content://com.android.contacts/contacts",
+      "javascript:alert(1)",
+      "data:text/html,hello",
+      "myapp://open",
+      "HTTPS://example.com",
+      "example.com",
+      "https://example.com/a b",
+      "https://example.com/\u0000",
+      "https://example.com/\u0085",
+      "https://example.com/\n",
+      "https:",
+      ""
+    ]
+  },
+  "reservedEmail": {
+    "accepted": [
+      "ada@example.test",
+      "grace.hopper@example.com",
+      "u+1@mail.example.test",
+      "x@sub.example.com",
+      "ada@anything.invalid"
+    ],
+    "rejected": [
+      "ada@gmail.com",
+      "ada@example.org",
+      "ada@example.test.evil.com",
+      "ada@EXAMPLE.TEST",
+      "@example.test",
+      "ada example.test",
+      "ada@example.test\n",
+      "ada@invalid",
+      "ada@example.testx",
+      ""
+    ]
+  },
+  "mediaUrl": {
+    "accepted": [
+      "https://example.com/clip.mp4",
+      "http://10.0.2.2:8080/live/master.m3u8",
+      "https://cdn.example.com/a/b.webm?token=x%20y"
+    ],
+    "rejected": [
+      "ftp://example.com/a.mp4",
+      "file:///sdcard/a.mp4",
+      "content://media/external/video/1",
+      "data:video/mp4;base64,AAAA",
+      "HTTPS://example.com/a.mp4",
+      "https://",
+      "https:",
+      "example.com/a.mp4",
+      "https://example.com/a b.mp4",
+      "https://example.com/\u0000",
+      "https://example.com/\u0085",
+      "https://example.com/\n",
+      ""
+    ]
+  },
+  "decimalAmount": {
+    "accepted": ["0", "4.99", "0.5", "100", "999999999.99"],
+    "rejected": ["", "04.99", "4.999", ".99", "4.", "-1", "1e3", "4,99", "4.99\n"]
+  },
+  "isoPeriod": {
+    "accepted": ["P1M", "P7D", "P2W", "P1Y", "P999D"],
+    "rejected": ["P0D", "P1H", "PT1H", "P1M2D", "1M", "P1000D", "P1M\n"]
   }
 }

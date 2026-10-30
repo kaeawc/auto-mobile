@@ -447,7 +447,11 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     prototypes: "optional",
     droppedEvents: "optional",
     appearance: "optional",
+    screenRound: "optional",
+    backdrop: "optional",
     cleared: "optional",
+    fired: "optional",
+    degradedEffects: "optional",
   },
   remove_preference_result: {
     packageName: "optional",

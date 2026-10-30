@@ -259,6 +259,13 @@ export interface ViewHierarchyWindowInfo {
    * window and only from an APK advertising `prototype_appearance_v1`; absent otherwise.
    */
   prototypeAppearance?: PrototypeWindowAppearance;
+  /**
+   * The animations running in that prototype window (#15114). `active` settles (fades, slides,
+   * style animations, page scrolls) and `observe(waitFor: stable)` waits for it to reach zero;
+   * `loops` are intentional infinite animations and are ignored. Only on the prototype window and
+   * only from an APK advertising `prototype_window_metadata_v1`; absent reads as settled.
+   */
+  prototypeMotion?: { active: number; loops: number };
   hierarchy?: ViewHierarchyNode;
   /** Per-window truncation attribution; absent from older runners and complete windows. */
   truncationReasons?: string[] | null;
@@ -307,6 +314,9 @@ export type ViewHierarchyNode = {
   enabled?: boolean | string;
   scrollable?: boolean | string;
   "pane-title"?: string;
+  /** Android extractor semantics: heading is the string "true"; live-region is polite/assertive. iOS snapshots expose neither. */
+  heading?: string;
+  "live-region"?: string;
   /**
    * Captured on real nodes: iOS `role` and `hint-text` (`test/fixtures/observe-output/ios-keyboard-tabbar/observe-keyboard-up.json`)
    * and the Android collection column index (`test/fixtures/identify-interactions/playground-text-fields.json`).

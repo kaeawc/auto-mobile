@@ -8,6 +8,10 @@ test/fixtures/macos-profiles/*.txt text eol=lf
 test/fixtures/bats-joblog/*.tsv text eol=lf
 test/fixtures/ci-time-to-green/*.json text eol=lf
 test/fixtures/prototype-capabilities/*.json text eol=lf
+# ProtoViewer iOS notices are compared byte-for-byte against the generator output.
+test/fixtures/protoviewer-notices/*.json text eol=lf
+ios/prototype-agent/ProtoViewer/Acknowledgements.generated.swift text eol=lf
+ios/prototype-agent/ProtoViewer/third-party-licenses/*.txt text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.
@@ -220,6 +224,8 @@ android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeS
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSpecModels.generated.swift text eol=lf
 test/fixtures/android-sdkmanager/*.txt text eol=lf
 test/fixtures/ios-safari-url-field/*.json text eol=lf
+test/fixtures/ios-system-alert/*.json text eol=lf
+test/fixtures/ios-messages-compose/*.json text eol=lf
 # Generated prototype embedding samples are compared byte-for-byte with the
 # native resource output (#13732), so a Windows CRLF checkout must not rewrite them.
 samples/prototype-embedding/** text eol=lf
@@ -229,3 +235,15 @@ ios/prototype-agent/Fixtures/EmbedConsumer/Sources/EmbedConsumer/EmbeddingSample
 test/fixtures/ios-runner-progress/*.txt text eol=lf
 test/fixtures/ios-runner-launch-failure/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.txt text eol=lf
+
+# Captured Android Settings search clear evidence.
+test/fixtures/android-setuistate-hint/*.txt text eol=lf
+test/fixtures/android-setuistate-hint/*.json text eol=lf
+test/fixtures/android-setuistate-hint/*.md text eol=lf
+test/fixtures/ios-templates/*.csv text eol=lf
+test/fixtures/performanceTrace/*.xml text eol=lf
+test/fixtures/performanceTrace/*.txt text eol=lf
+test/fixtures/protoviewer-artifact-policy/** text eol=lf
+fastlane/metadata/** text eol=lf
+test/fixtures/android-avd-effective-ram/* text eol=lf
+test/fixtures/prototype-a11y/*.json text eol=lf

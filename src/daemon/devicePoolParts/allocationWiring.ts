@@ -8,7 +8,6 @@ import { DeviceAutoStart } from "../deviceAutoStart";
 import { DeviceReservations } from "../deviceReservations";
 import { waitForDeviceReadyOrCancel } from "../../devices/deviceUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { getAbortSignal } from "../../utils/AbortContext";
 import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
 
@@ -29,6 +28,7 @@ type AllocationWiringState = Pick<
   | "criteriaMatcher"
   | "foreignDeviceOwnership"
   | "iosForeignDeviceOwnership"
+  | "watchForeignDeviceOwnership"
   | "devices"
   | "DEVICE_WAIT_TIMEOUT_MS"
   | "RECOVERY_RESPONSE_MARGIN_MS"
@@ -159,7 +159,6 @@ export class DevicePoolAllocationWiring {
       get timer() {
         return pool.timer;
       },
-      getAbortSignal,
       raceWithDeadline,
       get DEVICE_WAIT_INTERVAL_MS() {
         return pool.DEVICE_WAIT_INTERVAL_MS;
@@ -188,6 +187,9 @@ export class DevicePoolAllocationWiring {
       },
       get iosForeignDeviceOwnership() {
         return pool.iosForeignDeviceOwnership;
+      },
+      get watchForeignDeviceOwnership() {
+        return pool.watchForeignDeviceOwnership;
       },
       get timer() {
         return pool.timer;
@@ -274,6 +276,8 @@ export class DevicePoolAllocationWiring {
       foreignOwnershipFor: (platform) => this.callbacks.foreignOwnershipFor(platform),
       isDrivenByForeignDaemon: (device) => this.callbacks.isDrivenByForeignDaemon(device),
       publishDeviceClaim: (deviceId) => this.callbacks.publishDeviceClaim(deviceId),
+      assertNotClaimedByForeignDaemon: (deviceId, platform) =>
+        this.callbacks.assertNotClaimedByForeignDaemon(deviceId, platform),
       rollbackAssignments: (assignments, releaseReason) =>
         this.callbacks.rollbackAssignments(assignments, releaseReason),
       refreshForeignOwnership: (requireCurrent) =>
@@ -577,20 +581,8 @@ export class DevicePoolAllocationWiring {
         this.callbacks.deviceHeldByExistingSession(sessionId),
       addDevice: (device, sourceImage, awaitSessionTracking, identityEvidence) =>
         this.callbacks.addDevice(device, sourceImage, awaitSessionTracking, identityEvidence),
-      waitForDeviceReadyOrCancel: (
-        device,
-        childProcess,
-        timeoutMs,
-        signal,
-        timer,
-        cancelOwnedBoot,
-      ) =>
-        waitForDeviceReadyOrCancel(this.state.deviceManager, device, childProcess, {
-          timeoutMs,
-          signal,
-          timer,
-          cancelOwnedBoot,
-        }),
+      waitForDeviceReadyOrCancel: (device, childProcess, options) =>
+        waitForDeviceReadyOrCancel(this.state.deviceManager, device, childProcess, options),
     });
   }
 }

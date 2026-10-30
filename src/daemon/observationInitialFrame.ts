@@ -9,6 +9,7 @@ import type {
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
 } from "../features/observe/android";
+import type { LatestHierarchyOptions } from "../features/observe/android/types";
 import type { ScreenshotCaptureResult } from "../features/observe/ScreenshotBackoffScheduler";
 import type {
   CtrlProxyHierarchy,
@@ -62,7 +63,7 @@ export interface ObservationStreamAndroidClient {
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number,
+    options?: LatestHierarchyOptions,
   ): Promise<AccessibilityHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
@@ -85,7 +86,7 @@ export interface ObservationStreamIosClient {
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number,
+    options?: LatestHierarchyOptions,
   ): Promise<CtrlProxyHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
@@ -439,19 +440,23 @@ function pushInitialObservationScreenshot(
       screenshot.data,
       screenshot.width,
       screenshot.height,
-      screenshot.metadata,
       {
-        ...captureSequenceOptions(sequence, frame.frameContext, screenshot.frameContext),
-        ...canonicalPixelScreenshotOptions(frame.hierarchy),
-        initialFrameSubscriber: subscriber
-          ? {
-              ...subscriber,
-              liveFrameGeneration: frame.liveFrameGeneration,
-              deviceSessionUuid: frame.deviceSessionUuid,
-            }
-          : undefined,
-        rotation: screenshot.rotation,
-        ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
+        metadata: screenshot.metadata,
+        options: {
+          ...captureSequenceOptions(sequence, frame.frameContext, screenshot.frameContext),
+          ...canonicalPixelScreenshotOptions(frame.hierarchy),
+          initialFrameSubscriber: subscriber
+            ? {
+                ...subscriber,
+                liveFrameGeneration: frame.liveFrameGeneration,
+                deviceSessionUuid: frame.deviceSessionUuid,
+              }
+            : undefined,
+          rotation: screenshot.rotation,
+          ...(screenshot.frameContext === undefined
+            ? {}
+            : { frameContext: screenshot.frameContext }),
+        },
       },
     );
     if (sent) {

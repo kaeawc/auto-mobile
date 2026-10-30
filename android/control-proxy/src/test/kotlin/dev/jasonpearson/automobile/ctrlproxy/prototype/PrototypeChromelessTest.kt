@@ -131,7 +131,7 @@ class PrototypeChromelessTest {
   @Test
   fun `bar keeps content below its reserved dismiss row`() {
     show(PrototypeWindowChrome.BAR)
-    pill().assertIsDisplayed()
+    compose.onNodeWithTag(PROTOTYPE_DISMISS_TEST_TAG).assertIsDisplayed()
     assertTrue(compose.onNodeWithTag("authored").fetchSemanticsNode().boundsInRoot.top > 0f)
   }
 
@@ -143,6 +143,18 @@ class PrototypeChromelessTest {
     compose.runOnIdle { assertEquals(1, dismissals) }
     compose.mainClock.advanceTimeBy(PROTOTYPE_ESCAPE_PILL_MILLIS)
     pill().assertDoesNotExist()
+  }
+
+  @Test
+  fun `revealed pill carries the shared dismiss id as its resource id`() {
+    show()
+    reveal()
+    val node = compose.onNodeWithTag(PROTOTYPE_DISMISS_TEST_TAG).assertIsDisplayed()
+    node.assertTextEquals(PROTOTYPE_DISMISS_LABEL)
+    assertEquals(
+      PROTOTYPE_DISMISS_TEST_TAG,
+      pill().fetchSemanticsNode().config[SemanticsProperties.TestTag],
+    )
   }
 
   @Test

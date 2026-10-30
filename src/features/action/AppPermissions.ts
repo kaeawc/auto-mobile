@@ -9,7 +9,7 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import type { BootedDevice, AndroidDeviceShellToolResult } from "../../models";
-import { GrantAndroidPermissions } from "./GrantAndroidPermissions";
+import { GrantAndroidPermissions, normalizeAndroidPermissionName } from "./GrantAndroidPermissions";
 import { SetAndroidNotificationsEnabled } from "./SetAndroidNotificationsEnabled";
 import { NotificationPolicy, type NotificationPolicyResult } from "../utility/NotificationPolicy";
 import {
@@ -29,6 +29,12 @@ import { CtrlProxyIosPhysicalPrivacyClient } from "./CtrlProxyIosPhysicalPrivacy
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
+import { tccServiceForPermission } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
+import {
+  defaultAudioInputDiagnostic,
+  type AudioInputDiagnosticResolver,
+} from "../../utils/audio/audioInputDiagnostic";
+import type { AudioInputDiagnostic } from "../../models/AudioInputDiagnostic";
 
 /**
  * Map requested permission names onto the runner-reported grant map.
@@ -65,6 +71,15 @@ function operationWarnings(operations: AppPermissionOperationResult[]): { warnin
     operation.warning ? [operation.warning] : [],
   );
   return warnings.length > 0 ? { warnings } : {};
+}
+
+/** True when the request names the microphone: `microphone` on iOS, RECORD_AUDIO on Android. */
+function requestsMicrophone(platform: BootedDevice["platform"], permissions: string[]): boolean {
+  return permissions.some((permission) =>
+    platform === "ios"
+      ? tccServiceForPermission(permission) === "kTCCServiceMicrophone"
+      : normalizeAndroidPermissionName(permission) === "android.permission.RECORD_AUDIO",
+  );
 }
 
 export type AppPermissionAction = IosSimulatorPermissionAction;
@@ -122,6 +137,11 @@ export interface SetAppPermissionsResult {
   error?: string;
   /** Operation warnings (e.g. an unverified outcome); present on Android or iOS simulator Photos grants when any exist. */
   warnings?: string[];
+  /**
+   * Environment conditions that make the grant ineffective, e.g. `audio_input_unavailable` when
+   * a microphone grant lands on a device whose host has no audio input (#13627).
+   */
+  diagnostics?: AudioInputDiagnostic[];
 }
 
 export interface GetAppPermissionsResult {
@@ -139,6 +159,7 @@ export interface AppPermissionsDependencies {
   tccReader?: TccPermissionReader | null;
   photosVerifier?: PhotosAuthorizationVerifier;
   iosPhysicalClient?: IosPhysicalPrivacyClient | null;
+  audioInputDiagnostic?: AudioInputDiagnosticResolver;
 }
 
 export class AppPermissions {
@@ -154,6 +175,8 @@ export class AppPermissions {
 
   private iosPhysicalClient: IosPhysicalPrivacyClient | null;
 
+  private audioInputDiagnostic: AudioInputDiagnosticResolver;
+
   constructor(device: BootedDevice, dependencies: AppPermissionsDependencies = {}) {
     this.device = device;
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
@@ -161,6 +184,7 @@ export class AppPermissions {
     this.tccReader = dependencies.tccReader ?? null;
     this.photosVerifier = dependencies.photosVerifier;
     this.iosPhysicalClient = dependencies.iosPhysicalClient ?? null;
+    this.audioInputDiagnostic = dependencies.audioInputDiagnostic ?? defaultAudioInputDiagnostic;
   }
 
   async setPermissions(
@@ -168,9 +192,28 @@ export class AppPermissions {
     input: SetAppPermissionsInput,
   ): Promise<SetAppPermissionsResult> {
     const action = input.action ?? "grant";
-    return this.device.platform === "ios"
-      ? this.setIosPermissions(appId, action, input)
-      : this.setAndroidPermissions(appId, action, input);
+    const result =
+      this.device.platform === "ios"
+        ? await this.setIosPermissions(appId, action, input)
+        : await this.setAndroidPermissions(appId, action, input);
+    return await this.withAudioInputDiagnostic(
+      result,
+      action,
+      normalizePermissions(input.permissions),
+    );
+  }
+
+  /** A microphone grant still succeeds on a device with no audio input, but says so (#13627). */
+  private async withAudioInputDiagnostic(
+    result: SetAppPermissionsResult,
+    action: AppPermissionAction,
+    permissions: string[],
+  ): Promise<SetAppPermissionsResult> {
+    if (action !== "grant" || !requestsMicrophone(this.device.platform, permissions)) {
+      return result;
+    }
+    const diagnostic = await this.audioInputDiagnostic(this.device);
+    return diagnostic ? { ...result, diagnostics: [diagnostic] } : result;
   }
 
   async getPermissions(

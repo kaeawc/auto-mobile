@@ -128,8 +128,7 @@ describe("DevicePool", () => {
         replacement,
         recoveringImage.name,
         undefined,
-        undefined,
-        true,
+        { enforceAndroidRecoveryExclusion: true },
       ),
     ).rejects.toThrow("entered recovery while awaiting its readiness reservation");
   });
@@ -151,8 +150,7 @@ describe("DevicePool", () => {
       replacement,
       replacement.name,
       undefined,
-      undefined,
-      true,
+      { enforceAndroidRecoveryExclusion: true },
     );
 
     await release();
@@ -165,7 +163,7 @@ describe("DevicePool", () => {
 
     await expect(
       devicePool.reserveDeviceForReadiness(device.deviceId, device, device.name, undefined, {
-        mcpSessionId: "other-mcp-session",
+        autolockClient: { mcpSessionId: "other-mcp-session" },
       }),
     ).rejects.toMatchObject({
       // Typed so the JUnit held-device wait and the CLI hint recognize it (#11071).
@@ -178,7 +176,7 @@ describe("DevicePool", () => {
       device,
       device.name,
       undefined,
-      { mcpSessionId: "owner-mcp-session" },
+      { autolockClient: { mcpSessionId: "owner-mcp-session" } },
     );
     await release();
   });

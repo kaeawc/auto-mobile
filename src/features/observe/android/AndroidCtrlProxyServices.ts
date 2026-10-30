@@ -5,7 +5,7 @@ import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { FailureEventRepository } from "../../../db/failureEventRepository";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
-import { BootedDevice } from "../../../models";
+import { BootedDevice, requireAndroidOrIosPlatform } from "../../../models";
 import type { ScreenIdentity } from "../../../models/ObserveResult";
 import type { StackTraceElement } from "../../../models/failureAnalytics";
 import type { ContentHashProvider } from "../../../utils/ContentHashProvider";
@@ -524,7 +524,7 @@ export abstract class AndroidCtrlProxyServices extends AndroidCtrlProxyDelegatin
     if (!this.appEventRecorder) {
       this.appEventRecorder = new AndroidAppEventRecorder({
         deviceId: this.device.deviceId,
-        platform: this.device.platform,
+        platform: requireAndroidOrIosPlatform(this.device.platform, "Recording app events"),
         timer: this.timer,
         crashEventSink: this.crashEventSink,
         getSdkEventIngestor: () => this.getSdkEventIngestor(),
@@ -649,13 +649,9 @@ export abstract class AndroidCtrlProxyServices extends AndroidCtrlProxyDelegatin
           return client.loggerInstance;
         },
         requestHierarchySync: (signal, timeoutMs, diagnostics) =>
-          client.requestHierarchySync(
-            new NoOpPerformanceTracker(),
-            false,
-            signal,
-            timeoutMs,
+          client.requestHierarchySync(new NoOpPerformanceTracker(), false, signal, timeoutMs, {
             diagnostics,
-          ),
+          }),
       });
     }
     return this.serviceReadinessVerifierInstance;

@@ -12,6 +12,7 @@ import type { BootedDevice } from "../models";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer } from "../utils/SystemTimer";
+import { resourceLinkField } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { nodeAppFileFileSystem } from "./appFileSupport";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
@@ -58,6 +59,7 @@ const getLogsInput = z.object({
     .max(GET_LOGS_MAX_LINES)
     .optional()
     .describe("Newest lines kept (default 1000)"),
+  resourceLink: resourceLinkField(),
 });
 
 export type GetLogsArgs = z.output<DeviceToolSchema<typeof getLogsInput>>;
@@ -85,16 +87,13 @@ export const defaultGetLogsDependencies: GetLogsDependencyFactory = (device, arg
       UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
     );
     return {
-      collect: async (appId, lastSeconds, level, signal, processName) =>
-        (
-          await provider.collectUnifiedLog(
-            device,
-            appId,
-            { lastSeconds, level, processName },
-            SESSION_LOG_MAX_BYTES_LIMIT,
-            signal,
-          )
-        ).text,
+      collect: (appId, lastSeconds, level, signal, processName) =>
+        provider.collectUnifiedLog(
+          device,
+          appId,
+          { lastSeconds, level, processName },
+          { maxBytes: SESSION_LOG_MAX_BYTES_LIMIT, signal, retain: "tail" },
+        ),
       resolveProcessName: async (appId, signal) => {
         const apps = await new SimCtlClient(device).listAppsOrThrow(device.deviceId, { signal });
         return executableOfApp(apps, appId);

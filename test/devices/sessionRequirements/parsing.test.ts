@@ -44,7 +44,7 @@ describe("session requirement parsing", () => {
       modelType: { family: "iphone", variant: "pro" },
     },
     { kind: "archetype", archetype: "duo" },
-    { kind: "archetype", archetype: "foldable" },
+    { kind: "archetype", archetype: "watch" },
   ])("rejects unsupported Android hardware selector %#", (hardware) => {
     const parsed = parseSessionDeviceRequirement({
       schemaVersion: 1,

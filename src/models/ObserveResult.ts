@@ -17,6 +17,7 @@ import { SelectedElement } from "./SelectedElement";
 import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
 import type { MediaView } from "./MediaView";
 import type { ObserveError } from "./ObserveError";
+import type { AudioInputDiagnostic } from "./AudioInputDiagnostic";
 import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
 import type { SemanticLink } from "./SemanticLink";
@@ -164,7 +165,14 @@ export interface ScreenIdentity {
 /**
  * Represents the result of observing the device state
  */
+/** Which backend produced an iOS observation or action (#5159). */
+export type ObservationBackend = "sdk" | "xctest";
+/** Why XCTest stood in for the SDK observation bridge (#5159). */
+export type ObservationFallbackReason = "unavailable" | "unsupported";
+
 export type ObserveResult = {
+  /** Applies to all UI content in this payload, including raw trees and projected labels. */
+  importedPrototypeContent?: import("./ImportedPrototypeContent").ImportedPrototypeContent;
   /** Physical panel represented by this capture; always present on emitted observations. */
   display: DisplayRef;
   /** Opt-in Android display:"all" aggregate; the proposed additive shape (#8256). */
@@ -280,6 +288,12 @@ export type ObserveResult = {
    * with a `total`), or `scoped` (narrowed to the returned hierarchy).
    */
   layoutWarnings?: LayoutWarnings;
+  /**
+   * Device-level environment conditions, present only on the `observe` tool's own result, so an
+   * agent sees them before it acts: `audio_input_unavailable` when recordings on this device will
+   * contain no audio (#13627).
+   */
+  diagnostics?: AudioInputDiagnostic[];
 
   /**
    * Rotation: 0 portrait; 1 landscape with device top toward the left (counter-clockwise,
@@ -346,6 +360,14 @@ export type ObserveResult = {
 
   /** Best-effort stable identity for the currently visible screen. */
   screenIdentity?: ScreenIdentity;
+
+  /**
+   * iOS only, when the app registered an SDK observation bridge (#5159): `sdk` when its nodes are
+   * merged under the app node, `xctest` when the bridge did not answer and only XCTest ran.
+   */
+  backend?: ObservationBackend;
+  /** Why XCTest stood in for a registered bridge. */
+  fallbackReason?: ObservationFallbackReason;
 
   /**
    * Categorized elements from the view hierarchy
@@ -624,6 +646,7 @@ export type DisplayObservation = Pick<ObserveResult, "display" | "screenSize"> &
   Pick<
     ObserveResult,
     | "viewHierarchy"
+    | "importedPrototypeContent"
     | "skeleton"
     | "context"
     | "keyboard"

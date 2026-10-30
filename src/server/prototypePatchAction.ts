@@ -1,3 +1,5 @@
+import { prototypeDegradedEffectsOutput } from "../features/prototype/prototypeDegradedEffects";
+import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import {
@@ -21,6 +23,10 @@ import {
   prototypeAccessibilityOutput,
   type PrototypeAccessibilityFinding,
 } from "../features/prototype/prototypeAccessibilityLint";
+import {
+  prototypePlaceholderOutput,
+  type PrototypePlaceholderFinding,
+} from "../features/prototype/prototypePlaceholderLint";
 import type { ShownSpecJson } from "../features/prototype/PrototypeShownSpecs";
 
 export interface PrototypePatchQueue {
@@ -73,6 +79,8 @@ export interface PrototypePatchOutput {
   warning?: string;
   accessibilityFindings?: PrototypeAccessibilityFinding[];
   accessibilityFindingsTotal?: number;
+  placeholderFindings?: PrototypePlaceholderFinding[];
+  placeholderFindingsTotal?: number;
 }
 const failure = (error: string): PrototypePatchOutput => ({ success: false, error });
 
@@ -185,9 +193,17 @@ async function finishPatch(
     deps.store.recordPatchedData(deviceId, args.id, applied.validated.data);
   }
   deps.retire(result);
+  const output = successfulPatchOutput(fields.revision, committed, args.id);
+  const degraded = prototypeDegradedEffectsOutput(result.degradedEffects);
+  const warning = [output.warning, degraded.warning, ...prototypeTimerWarnings(applied.spec)]
+    .filter(Boolean)
+    .join(" ");
   return {
-    ...successfulPatchOutput(fields.revision, committed, args.id),
+    ...output,
+    ...degraded,
+    ...(warning ? { warning } : {}),
     ...prototypeAccessibilityOutput(applied.spec),
+    ...prototypePlaceholderOutput(applied.spec),
   };
 }
 
@@ -216,7 +232,7 @@ function dataWriteGuard(
   );
   if (guard.kind === "baseRevisionRequired") {
     return failure(
-      "Invalid patch at baseRevision: required for /data ops once the device has written this prototype's data (setData, appendData, removeData); use the revision from the latest change event or patch result",
+      "Invalid patch at baseRevision: required for /data ops once the device has written this prototype's data (setData, appendData, prependData, removeData); use the revision from the latest change event or patch result",
     );
   }
   return guard.kind === "conflict"

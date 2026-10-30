@@ -34,6 +34,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -113,25 +114,30 @@ internal object PrototypeSpecInput {
 
   private fun nodeVocabularyErrors(value: JsonElement, context: Context): PrototypeSpecError? =
     platformErrors(value, context)
+      ?: PrototypeTimerRules.error(context)
+      ?: PrototypeScrollMotion.error(context)
       ?: motionErrors(context)
       ?: choreographyErrors(context)
       ?: shimmerErrors(context)
+      ?: PrototypeStringsRules.semanticError(value, context)
       ?: chartErrors(value, context)
       ?: linkifyErrors(value, context)
       ?: chatScrollErrors(context)
+      ?: PrototypeTooltipRules.tooltipErrors(value, context)
 
   fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
     context.root = value
     val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
     val error =
-      walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
-        ?: gridSpanErrors(context)
+      structuralError(value, context)
+        ?: PrototypeKeyframesRules.validate(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: PrototypeStorageValidation.error(value.jsonObject)
         ?: dataActionErrors(context, value)
         ?: requestActionErrors(context)
         ?: nodeVocabularyErrors(value, context)
         ?: swipeActionsErrors(context)
+        ?: PrototypeBarScrollRules.error(context)
         ?: pagerErrors(context)
         ?: stackErrors(context)
         ?: stateTypeErrors(value, context, repeats)
@@ -139,12 +145,41 @@ internal object PrototypeSpecInput {
     return try {
       PrototypeSpecValidation.Success(
         json.decodeFromJsonElement<PrototypeSpec>(
-          normalizeIntegers(value, definitions.getValue("spec").jsonObject),
+          stripPlatformNamespaces(
+            normalizeIntegers(value, definitions.getValue("spec").jsonObject),
+          ),
         ),
       )
     } catch (_: SerializationException) {
       PrototypeSpecValidation.Failure(fail("", "Internal model/contract mismatch"))
     }
+  }
+
+  private fun structuralError(value: JsonElement, context: Context): PrototypeSpecError? =
+    PrototypeLazyListRules.limitError(value)
+      ?: walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+      ?: excludeAccessoryReferences(context)
+      ?: PrototypeRouteRules.error(value.jsonObject, context)
+      ?: PrototypeSharedElementRules.error(context)
+      ?: gridSpanErrors(context)
+      ?: PrototypeDerivedRules.error(value, context)
+      ?: PrototypeContainerRules.pagerStateKeyErrors(context)
+      ?: PrototypeLazyListRules.error(context)
+
+  /** Drops nodes and actions under `ios.bottomAccessory`, which neither renderer draws. */
+  fun excludeAccessoryReferences(context: Context): PrototypeSpecError? {
+    val ignored =
+      context.nodes
+        .filter {
+          (it.value["ios"] as? JsonObject)?.get("bottomAccessory") is JsonObject
+        }
+        .map { "${it.path}.ios.bottomAccessory" }
+    fun ignoredPath(path: String): Boolean = ignored.any {
+      path == it || path.startsWith("$it.") || path.startsWith("$it[")
+    }
+    context.nodes.removeAll { ignoredPath(it.path) }
+    context.actions.removeAll { ignoredPath(it.path) }
+    return null
   }
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder
@@ -170,6 +205,8 @@ internal object PrototypeSpecInput {
           },
         )
       }
+      "map",
+      "record",
       "screenMap" ->
         JsonObject(
           (value as JsonObject).mapValues { (_, child) ->
@@ -180,6 +217,13 @@ internal object PrototypeSpecInput {
         JsonArray(
           (value as JsonArray).map { normalizeIntegers(it, rule.getValue("item").jsonObject) },
         )
+      "choice" -> {
+        val option =
+          rule.getValue("options").jsonArray.first {
+            walk(value, it.jsonObject, "", Context(), 0) == null
+          }
+        normalizeIntegers(value, option.jsonObject)
+      }
       "number" ->
         if (rule.flag("integer")) JsonPrimitive(value.jsonPrimitive.double.toInt()) else value
       else -> value

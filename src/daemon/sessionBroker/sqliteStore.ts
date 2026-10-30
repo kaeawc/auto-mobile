@@ -36,6 +36,7 @@ import {
 } from "./requestIdentity";
 import {
   destructionTicket,
+  drainableIdle,
   type BrokerExportIdentity,
   type BrokerExportRecord,
   type BrokerAbandonment,
@@ -624,6 +625,23 @@ export class SqliteSessionBrokerStore {
   }
 
   /**
+   * Drain of the idle pool (operator, or idle expiry with its observed revisions): each claimed
+   * resource leaves the reusable set in one transaction, so no acquisition can reserve it.
+   */
+  async drainIdle(observed?: readonly DestructionTicket[]): Promise<DestructionTicket[]> {
+    return this.db.transaction().execute(async (trx) => {
+      const resources = await this.readResources(trx, true);
+      const tickets: DestructionTicket[] = [];
+      for (const resource of resources.filter((entry) => drainableIdle(entry, observed))) {
+        tickets.push(
+          destructionTicket(await this.updateResource(trx, resource, { state: "destroying" })),
+        );
+      }
+      return tickets;
+    });
+  }
+
+  /**
    * The existing native journal must have confirmed authoritative absence and cleared the
    * physical binding. An old deletion receipt cannot free a new incarnation of a resource.
    */
@@ -813,7 +831,10 @@ export class SqliteSessionBrokerStore {
       return {
         ...decision,
         request: await this.updateRequest(trx, request.requestId, {
-          ...pendingAcquisitionTiming(input, request, resetting, "wait", this.clock.now()),
+          ...pendingAcquisitionTiming(input, request, resetting, {
+            kind: "wait",
+            now: this.clock.now(),
+          }),
         }),
       };
     }
@@ -865,14 +886,11 @@ export class SqliteSessionBrokerStore {
       resource,
       request: await this.updateRequest(trx, request.requestId, {
         resource_id: resource.resourceId,
-        ...pendingAcquisitionTiming(
-          input,
-          request,
-          resource,
-          decision.kind,
-          this.clock.now(),
+        ...pendingAcquisitionTiming(input, request, resource, {
+          kind: decision.kind,
+          now: this.clock.now(),
           creationProfile,
-        ),
+        }),
       }),
     };
   }

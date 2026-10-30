@@ -1,3 +1,7 @@
+import type {
+  PrototypeChannelHost,
+  PrototypeChannelSender,
+} from "../../../../src/features/prototype/prototypeChannelHost";
 import type { PrototypeSpec } from "../../../../src/features/prototype/prototypeSpec";
 import {
   CtrlProxyPrototypes,
@@ -562,7 +566,9 @@ describe("CtrlProxy prototypes", () => {
         sent.push(JSON.parse(String(data)));
       });
       try {
-        void client.requestShowPrototype(spec, 5000, undefined, displayId).catch(() => undefined);
+        void client
+          .requestShowPrototype(spec, 5000, undefined, { displayId })
+          .catch(() => undefined);
         for (let turn = 0; turn < 10; turn++) {
           await Promise.resolve();
         }
@@ -595,12 +601,12 @@ describe("CtrlProxy prototypes", () => {
       const { client, socket } = await harness(commands ? [...commands] : null);
       const send = spyOn(socket, "send");
       try {
-        await expect(client.requestShowPrototype(spec, 5000, undefined, 2)).rejects.toBeInstanceOf(
-          ActionableError,
-        );
-        await expect(client.requestShowPrototype(spec, 5000, undefined, 2)).rejects.toThrow(
-          "prototype_display_id_v2",
-        );
+        await expect(
+          client.requestShowPrototype(spec, 5000, undefined, { displayId: 2 }),
+        ).rejects.toBeInstanceOf(ActionableError);
+        await expect(
+          client.requestShowPrototype(spec, 5000, undefined, { displayId: 2 }),
+        ).rejects.toThrow("prototype_display_id_v2");
         expect(send).not.toHaveBeenCalled();
       } finally {
         send.mockRestore();
@@ -657,6 +663,75 @@ describe("CtrlProxy prototypes", () => {
       }
     });
 
+    test.each([true, false, "true", 1, null, undefined])(
+      "a prototype_result forwards only boolean screenRound: %s",
+      async (screenRound) => {
+        const { client, socket, receive } = await harness(inspectable);
+        let finish!: (value: { requestId: string }) => void;
+        const sent = new Promise<{ requestId: string }>((resolve) => {
+          finish = resolve;
+        });
+        const send = spyOn(socket, "send").mockImplementation((data) =>
+          finish(JSON.parse(String(data))),
+        );
+        try {
+          const pending = client.requestInspectPrototypes();
+          const message = await sent;
+          await receive({
+            type: "prototype_result",
+            timestamp: 1,
+            requestId: message.requestId,
+            success: true,
+            screenRound,
+          });
+          const result = await pending;
+          if (typeof screenRound === "boolean") {
+            expect(result.screenRound).toBe(screenRound);
+          } else {
+            expect(result).not.toHaveProperty("screenRound");
+          }
+        } finally {
+          send.mockRestore();
+        }
+      },
+    );
+
+    test("a reply's backdrop outcome is kept when blur or fallback and dropped otherwise (#15126)", async () => {
+      for (const [reported, expected] of [
+        ["blur", { backdrop: "blur" }],
+        ["fallback", { backdrop: "fallback" }],
+        ["frosted", {}],
+      ] as const) {
+        const { client, socket, receive } = await harness(inspectable);
+        let finish!: (value: Record<string, unknown>) => void;
+        const sent = new Promise<Record<string, unknown>>((resolve) => {
+          finish = resolve;
+        });
+        const send = spyOn(socket, "send").mockImplementation((data) =>
+          finish(JSON.parse(String(data))),
+        );
+        try {
+          const pending = client.requestInspectPrototypes();
+          const message = await sent;
+          await receive({
+            type: "prototype_result",
+            timestamp: 1,
+            requestId: message.requestId as string,
+            success: true,
+            backdrop: reported,
+          });
+          const result = await pending;
+          if (expected.backdrop) {
+            expect(result).toMatchObject(expected);
+          } else {
+            expect(result).not.toHaveProperty("backdrop");
+          }
+        } finally {
+          send.mockRestore();
+        }
+      }
+    });
+
     test.each([
       ["without the flag", ["full_command_set_v1", "inspect_prototypes"]],
       ["on a legacy handshake", ["inspect_prototypes"]],
@@ -674,6 +749,38 @@ describe("CtrlProxy prototypes", () => {
     });
   });
 
+  test("show preserves the typed first-render failure from the device", async () => {
+    const { client, socket, receive } = await harness();
+    let finish!: (value: Record<string, unknown>) => void;
+    const sent = new Promise<Record<string, unknown>>((resolve) => {
+      finish = resolve;
+    });
+    const send = spyOn(socket, "send").mockImplementation((data) =>
+      finish(JSON.parse(String(data))),
+    );
+    try {
+      const pending = client.requestShowPrototype(spec);
+      const message = await sent;
+      if (typeof message.requestId !== "string") {
+        throw new Error("Expected request ID");
+      }
+      await receive({
+        type: "prototype_result",
+        timestamp: 42,
+        requestId: message.requestId,
+        success: false,
+        errorCode: "render_failed",
+        error: "First composition timed out",
+      });
+      expect(await pending).toMatchObject({
+        success: false,
+        errorCode: "render_failed",
+        error: "First composition timed out",
+      });
+    } finally {
+      send.mockRestore();
+    }
+  });
   test.each(["show_prototype"])(
     "%s surfaces missingAssets as a warning on a successful result",
     async () => {
@@ -872,9 +979,9 @@ describe("CtrlProxy prototypes", () => {
       });
     });
     try {
-      expect(
-        await client.requestShowPrototype(spec, 5000, undefined, undefined, reset),
-      ).toMatchObject({ success: true });
+      expect(await client.requestShowPrototype(spec, 5000, undefined, { reset })).toMatchObject({
+        success: true,
+      });
       expect(frames).toHaveLength(1);
       expect(frames[0].reset).toBe(wire);
       expect(Object.hasOwn(frames[0], "reset")).toBe(wire !== undefined);
@@ -905,9 +1012,7 @@ describe("CtrlProxy prototypes", () => {
       });
       try {
         expect(
-          await client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
-            replaceOthers,
-          }),
+          await client.requestShowPrototype(spec, 5000, undefined, { replaceOthers }),
         ).toMatchObject({ success: true });
         expect(frames).toHaveLength(1);
         expect(Object.hasOwn(frames[0], "replaceOthers")).toBe(replaceOthers === false);
@@ -927,9 +1032,7 @@ describe("CtrlProxy prototypes", () => {
       const send = spyOn(socket, "send");
       try {
         await expectRefusal(
-          client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
-            replaceOthers: false,
-          }),
+          client.requestShowPrototype(spec, 5000, undefined, { replaceOthers: false }),
           "replaceOthers:false",
         );
         expect(send).not.toHaveBeenCalled();
@@ -1028,7 +1131,7 @@ describe("CtrlProxy prototypes", () => {
       });
       try {
         void client
-          .requestShowPrototype(spec, 5000, undefined, undefined, undefined, appearance)
+          .requestShowPrototype(spec, 5000, undefined, { appearance })
           .catch(() => undefined);
         for (let turn = 0; turn < 10; turn++) {
           await Promise.resolve();
@@ -1570,9 +1673,12 @@ describe("saved shortcut reply validation", () => {
       expect(prototypeSavedReplyFields({ pin: { ...pin, shortcut } })).toEqual({ pin });
     },
   );
-  test.each(["pin_unsupported", "device_locked", "pin_failed"])("accepts %s", (errorCode) => {
-    expect(prototypeSavedReplyFields({ errorCode })).toEqual({ errorCode });
-  });
+  test.each(["pin_unsupported", "device_locked", "pin_failed", "render_failed"])(
+    "accepts %s",
+    (errorCode) => {
+      expect(prototypeSavedReplyFields({ errorCode })).toEqual({ errorCode });
+    },
+  );
   test.each([
     { id: "", icon: undefined },
     { id: "panel", icon: "" },
@@ -1674,5 +1780,199 @@ describe("CtrlProxy clear_prototype_storage (#12522)", () => {
     } finally {
       send.mockRestore();
     }
+  });
+});
+
+describe("custom AGSL host boundary", () => {
+  const asset = {
+    id: "effect",
+    mimeType: "application/vnd.automobile.agsl" as const,
+    bytes: Buffer.from("uniform float strength;"),
+  };
+  const shaderSpec = {
+    ...spec,
+    root: { ...spec.root, style: { shader: { asset: "effect", uniforms: { strength: 1 } } } },
+  };
+  test("disabled shaders refuse put, show and replaceNode before socket dispatch", async () => {
+    const { client, socket } = await harness([
+      "show_prototype",
+      "put_prototype_asset",
+      "prototype_patch_v1",
+      "prototype_custom_shaders_v1",
+    ]);
+    const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext(), {});
+    const send = spyOn(socket, "send");
+    await expect(delegate.requestPutPrototypeAsset(asset)).rejects.toThrow(
+      "AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1",
+    );
+    await expect(delegate.requestShowPrototype(shaderSpec)).rejects.toThrow(
+      "AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1",
+    );
+    expect(
+      await delegate.requestPatchPrototype({
+        id: spec.id,
+        ops: [{ op: "replaceNode", id: "node", node: shaderSpec.root }],
+      }),
+    ).toMatchObject({
+      success: false,
+      delivery: "unsent",
+      error: expect.stringContaining("AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1"),
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+  test("available cached assets must match shader uniforms on show and patch", async () => {
+    const cache = new FakePrototypeAssetCache();
+    await cache.put("prototype-test", { ...asset, bytes: Buffer.from("uniform float other;") });
+    const { client, socket } = await harness(
+      ["show_prototype", "prototype_patch_v1", "prototype_custom_shaders_v1"],
+      undefined,
+      cache,
+    );
+    const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext(), {
+      AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS: "1",
+    });
+    const send = spyOn(socket, "send");
+    await expect(delegate.requestShowPrototype(shaderSpec)).rejects.toThrow("not declared");
+    expect(
+      await delegate.requestPatchPrototype({
+        id: spec.id,
+        ops: [{ op: "replaceNode", id: "node", node: shaderSpec.root }],
+      }),
+    ).toMatchObject({
+      success: false,
+      delivery: "unsent",
+      error: expect.stringContaining("not declared"),
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+test.each([
+  { commands: null },
+  { commands: ["put_prototype_asset"] },
+  { commands: ["full_command_set_v1", "put_prototype_asset"] },
+])(
+  "AGSL put requires an explicit capability even on legacy or unconfirmed handshakes: %j",
+  async ({ commands }) => {
+    const { client, socket } = await harness(commands ? [...commands] : null);
+    const context = client.testHooks.createDelegateContext();
+    expect(context.isCommandSupported?.("prototype_custom_shaders_v1")).toBe(false);
+    const delegate = new CtrlProxyPrototypes(context, { AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS: "1" });
+    const send = spyOn(socket, "send");
+    await expect(
+      delegate.requestPutPrototypeAsset({
+        id: "effect",
+        mimeType: "application/vnd.automobile.agsl",
+        bytes: Buffer.from("uniform float strength;"),
+      }),
+    ).rejects.toThrow("prototype_custom_shaders_v1");
+    expect(send).not.toHaveBeenCalled();
+  },
+);
+
+test("enabled AGSL uploads forward exact source bytes and cap compile replies", async () => {
+  const { client, socket } = await harness([
+    "full_command_set_v1",
+    "request_id_echo_v1",
+    "put_prototype_asset",
+    "prototype_custom_shaders_v1",
+  ]);
+  const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext(), {
+    AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS: "1",
+  });
+  const bytes = Buffer.from("uniform float strength;");
+  const send = spyOn(socket, "send").mockImplementation((data) => {
+    const message = JSON.parse(String(data));
+    expect(message.mimeType).toBe("application/vnd.automobile.agsl");
+    expect(Buffer.from(message.dataBase64, "base64")).toEqual(bytes);
+    client.connectionTestHooks.requestManager.resolve(message.requestId, {
+      success: false,
+      error: "😀".repeat(2000),
+    });
+  });
+  const result = await delegate.requestPutPrototypeAsset({
+    id: "effect",
+    mimeType: "application/vnd.automobile.agsl",
+    bytes,
+  });
+  expect(result).toMatchObject({ success: false, dispatched: true, acknowledged: true });
+  expect(Buffer.byteLength(result.error!)).toBe(2048);
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+test("enabled shader specs still require the advertised capability before dispatch", async () => {
+  const { client, socket } = await harness(["full_command_set_v1", "show_prototype"]);
+  const delegate = new CtrlProxyPrototypes(client.testHooks.createDelegateContext(), {
+    AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS: "1",
+  });
+  const send = spyOn(socket, "send");
+  await expect(
+    delegate.requestShowPrototype({
+      ...spec,
+      root: { ...spec.root, style: { shader: { asset: "effect" } } },
+    }),
+  ).rejects.toThrow("prototype_custom_shaders_v1");
+  expect(send).not.toHaveBeenCalled();
+});
+
+describe("host channel frames (#14268)", () => {
+  class ChannelHost implements PrototypeChannelHost {
+    readonly frames: [string, unknown][] = [];
+    disconnects = 0;
+    handleOpen(frame: unknown, send: PrototypeChannelSender): void {
+      this.frames.push(["open", frame]);
+      send({ type: "prototype_channel_opened", connectionId: "c1", protocol: "chat.v1" });
+    }
+    handleSend(frame: unknown): void {
+      this.frames.push(["send", frame]);
+    }
+    handleClose(frame: unknown): void {
+      this.frames.push(["close", frame]);
+    }
+    handleDisconnect(): void {
+      this.disconnects++;
+    }
+  }
+  const open = { type: "prototype_channel_open", connectionId: "c1", url: "wss://chat.test/x" };
+
+  test("a channel frame from the device reaches the attached host, which answers on the same socket", async () => {
+    const { client, socket, receive } = await harness();
+    const sent = spyOn(socket, "send").mockImplementation(() => {});
+    const host = new ChannelHost();
+    client.attachPrototypeChannelHost(host);
+    await receive(open);
+    await receive({ type: "prototype_channel_send", connectionId: "c1", data: "hi" });
+    await receive({ type: "prototype_channel_close", connectionId: "c1" });
+    expect(host.frames.map(([name]) => name)).toEqual(["open", "send", "close"]);
+    expect(sent.mock.calls.map(([data]) => JSON.parse(String(data)))).toEqual([
+      { type: "prototype_channel_opened", connectionId: "c1", protocol: "chat.v1" },
+    ]);
+  });
+
+  test("with no host attached an open is answered with a closed frame", async () => {
+    const { socket, receive } = await harness();
+    const sent = spyOn(socket, "send").mockImplementation(() => {});
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    await receive(open);
+    warn.mockRestore();
+    expect(sent.mock.calls.map(([data]) => JSON.parse(String(data)))).toEqual([
+      {
+        type: "prototype_channel_closed",
+        connectionId: "c1",
+        error: { code: "network", message: "The host channel proxy is not available." },
+      },
+    ]);
+  });
+
+  test("closing the client ends the channels the host holds, and a later attach replaces the host", async () => {
+    const { client, receive } = await harness();
+    const first = new ChannelHost();
+    const second = new ChannelHost();
+    client.attachPrototypeChannelHost(first);
+    client.attachPrototypeChannelHost(second);
+    await receive({ type: "prototype_channel_send", connectionId: "c1", data: "x" });
+    expect([first.frames.length, second.frames.length]).toEqual([0, 1]);
+    await client.close();
+    expect([first.disconnects, second.disconnects]).toEqual([0, 1]);
   });
 });

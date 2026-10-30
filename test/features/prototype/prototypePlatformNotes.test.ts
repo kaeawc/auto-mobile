@@ -144,7 +144,6 @@ describe("prototype platform notes", () => {
       "alarm_add",
     ]);
     const exactly = specFor({
-      ...many.root,
       type: "column",
       children: (many.root as Extract<PrototypeNode, { type: "column" }>).children.slice(0, 20),
     });
@@ -402,4 +401,39 @@ test("stack back gesture remains a platform difference on capable devices", () =
       detail: expect.stringContaining("left-edge swipe"),
     }),
   ]);
+});
+
+import { prototypeStringsFallbackNotes } from "../../../src/features/prototype/prototypePlatformNotes";
+test("fallback notes use referenced keys, region chain, opacity and a twenty-key cap", () => {
+  const value = {
+    ...specFor({ type: "text", text: "{t:title} {t:missing} {t:missing}" }),
+    strings: {
+      default: { title: "Title", missing: "Fallback", unused: "Unused" },
+      fr: { title: "Titre" },
+    },
+  };
+  expect(prototypeStringsFallbackNotes(value, "fr-CA")).toMatchObject([
+    {
+      platform: "all",
+      construct: "strings.fallback",
+      paths: ["strings.default.missing"],
+      values: ["missing"],
+    },
+  ]);
+  expect(prototypeStringsFallbackNotes(value)).toEqual([]);
+  expect(
+    prototypeStringsFallbackNotes({ ...value, root: { type: "text", text: "{t:title}" } }, "FR-ca"),
+  ).toEqual([]);
+  const keys = Array.from({ length: 25 }, (_, i) => `key${i}`);
+  const capped = prototypeStringsFallbackNotes(
+    {
+      ...value,
+      strings: { default: Object.fromEntries(keys.map((key) => [key, "Text"])) },
+      root: { type: "text", text: keys.map((key) => `{t:${key}}`).join(" ") },
+    },
+    "de",
+  );
+  expect(capped[0]?.paths).toHaveLength(20);
+  expect(capped[0]?.values).toHaveLength(20);
+  expect(capped[0]?.total).toBe(25);
 });

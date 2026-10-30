@@ -2,6 +2,8 @@ import { z } from "zod/v4";
 import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
 
 const appPlatformOutputSchema = z.enum(["android", "ios"]);
+/** listApps also answers for an Apple Watch simulator (#14908). */
+const listAppsPlatformOutputSchema = z.enum(["android", "ios", "watchos"]);
 
 const listAppsAppOutputSchema = z
   .object({
@@ -24,7 +26,7 @@ export const listAppsResultSchema = z
     message: z.string(),
     query: z
       .object({
-        platform: appPlatformOutputSchema.optional(),
+        platform: listAppsPlatformOutputSchema.optional(),
         search: z.string().optional(),
         type: z.enum(["user", "system", "all", "launchable"]).optional(),
         profile: z.number().optional(),
@@ -40,7 +42,7 @@ export const listAppsResultSchema = z
       z
         .object({
           deviceId: z.string(),
-          platform: appPlatformOutputSchema,
+          platform: listAppsPlatformOutputSchema,
           totalCount: z.number(),
           lastUpdated: z.string(),
           apps: z.array(listAppsAppOutputSchema),
@@ -279,3 +281,100 @@ export const crashAppResultSchema = z.object({
   userId: z.number().int().nonnegative().optional(),
   error: z.string().optional(),
 });
+
+/**
+ * Each field builds its own schema instance: a schema reused across fields is emitted
+ * as a `$ref` the advertised tool schema cannot resolve.
+ */
+const sha256ListOutputSchema = () => z.array(z.string());
+
+/** Partial failure keeps `isError` unset; the handler marks only a change-free failure. */
+export const setAppPermissionsResultSchema = z
+  .object({
+    message: z.string(),
+    success: z.boolean(),
+    appId: z.string(),
+    deviceId: z.string(),
+    platform: z.enum(["android", "ios"]),
+    action: z.enum(["grant", "revoke", "reset"]),
+    changedCount: z.number().int().nonnegative(),
+    failedCount: z.number().int().nonnegative(),
+    operations: z.array(
+      z
+        .object({
+          stepId: z.string(),
+          success: z.boolean(),
+          changedCount: z.number().int().nonnegative(),
+          failedCount: z.number().int().nonnegative(),
+          skipped: z.boolean().optional(),
+          result: z.unknown().optional(),
+          error: z.string().optional(),
+          code: z.string().optional(),
+          warning: z.string().optional(),
+        })
+        .passthrough(),
+    ),
+    error: z.string().optional(),
+    warnings: z.array(z.string()).optional(),
+    diagnostics: z
+      .array(
+        z
+          .object({
+            code: z.literal("audio_input_unavailable"),
+            message: z.string(),
+            retryable: z.literal(false),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough();
+
+/** Install failures throw, so a returned result always reports success. */
+export const installAppResultSchema = z
+  .object({
+    message: z.string(),
+    success: z.literal(true),
+    artifactPath: z.string().optional(),
+    userId: z.number().int().nonnegative().optional(),
+    packageName: z.string().optional(),
+    upgrade: z.boolean().optional(),
+    warning: z.string().optional(),
+    signingGuard: z
+      .discriminatedUnion("status", [
+        z
+          .object({ status: z.literal("matched"), matchedSha256: sha256ListOutputSchema() })
+          .passthrough(),
+        z.object({ status: z.literal("no-existing-package") }).passthrough(),
+      ])
+      .optional(),
+    installRoute: z.enum(["split-apks", "apk-set", "bundle"]).optional(),
+  })
+  .passthrough();
+
+/** Uninstall failures throw; `wasInstalled` is omitted when the prior state is unknown. */
+export const uninstallAppResultSchema = z
+  .object({
+    message: z.string(),
+    success: z.literal(true),
+    packageName: z.string(),
+    keepData: z.boolean(),
+    wasInstalled: z.boolean().optional(),
+    userId: z.number().int().nonnegative().optional(),
+    signingGuard: z.object({ matchedSha256: sha256ListOutputSchema() }).passthrough().optional(),
+    removalVerification: z.enum(["absent", "installed", "unknown"]).optional(),
+  })
+  .passthrough();
+
+/** Refusals and reset failures throw; iOS Simulator reports its device-wide over-reset. */
+export const resetKeychainResultSchema = z
+  .object({
+    success: z.literal(true),
+    deviceId: z.string(),
+    platform: z.enum(["ios", "android"]),
+    requestedAppId: z.string(),
+    scope: z.enum(["app", "all-apps"]),
+    exceededRequestedScope: z.boolean(),
+    message: z.string(),
+  })
+  .passthrough();

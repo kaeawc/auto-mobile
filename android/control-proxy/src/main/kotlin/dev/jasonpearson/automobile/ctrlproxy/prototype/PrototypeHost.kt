@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,14 +40,19 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.dismiss
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -62,6 +68,31 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+
+/** The window blur-behind radius a request asks for; only a real-blur plan has one. */
+internal fun backdropBlurPx(request: PrototypeRequest, density: Float): Int =
+  request.backdrop
+    ?.takeIf { it.mode == PrototypeBackdropMode.BLUR }
+    ?.let { (it.radiusDp * density).toInt() } ?: 0
+
+/** A show failed before its first composition was applied. */
+class PrototypeRenderFailedException(val reason: String, cause: Throwable? = null) :
+  IllegalStateException(reason, cause)
+
+/** Awaiting is injected so host tests never need a real Compose frame or wall-clock delay. */
+fun interface PrototypeFirstRenderWaiter {
+  /** Returns false when the composition marker does not arrive within [timeoutMillis]. */
+  suspend fun await(applied: CompletableDeferred<Unit>, timeoutMillis: Long): Boolean
+}
+
+/** Waits on the caller coroutine, leaving main free to apply the composition. */
+object CoroutinePrototypeFirstRenderWaiter : PrototypeFirstRenderWaiter {
+  override suspend fun await(applied: CompletableDeferred<Unit>, timeoutMillis: Long): Boolean =
+    withTimeoutOrNull(timeoutMillis) {
+      applied.await()
+      true
+    } ?: false
+}
 
 const val MIN_TOUCH_THROUGH_SETTLE_MILLIS = 100L
 const val DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS = MIN_TOUCH_THROUGH_SETTLE_MILLIS
@@ -124,8 +155,16 @@ data class PrototypeRequest(
   val bringToFront: Boolean = false,
   val onHostDismiss: suspend () -> Unit = {},
   /** Navigation takes Back even without an editable field; IME handling stays separate. */
+  val transition: String = "none",
+  val animateEnter: Boolean = true,
+  val exitResources: PrototypeExitResources? = null,
+  val exitMetadata: () -> PrototypeWindowMetadata? = { null },
+  val motion: String? = null,
+  val motionActivity: PrototypeMotionActivity? = null,
   val hasStackBack: Boolean = false,
   val onHostBack: (suspend () -> Unit)? = null,
+  /** `window.backdrop` as resolved for this show (#15126); null without one. */
+  val backdrop: PrototypeBackdropPlan? = null,
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
   val focusable: Boolean
@@ -137,12 +176,25 @@ data class PrototypeRequest(
   }
 }
 
+/** The clipboard read seam, split out so [PrototypeHost] stays within the function-count limit. */
+interface PrototypeClipboardHost {
+  /** Runs [read] while the host owns input focus; the default reads directly. */
+  suspend fun <T> readClipboard(read: () -> T): T = read()
+}
+
 /**
- * Mutations suspend until executed on main (inline if already there, posted otherwise). Boolean
- * results report platform success; show/replace return false after destroy. Replace without a
- * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
+ * Mutations execute on main (inline if already there, posted otherwise). Show/replace then await
+ * the first applied composition, throwing [PrototypeRenderFailedException] if it fails or times
+ * out. Boolean results report platform acceptance; show/replace return false after destroy. Replace
+ * without a window behaves as show. Read state is a snapshot, not a cross-thread compound
+ * transaction.
  */
-interface PrototypeHost {
+interface PrototypeHost : PrototypeHostLifecycle, PrototypeClipboardHost {
+  /** Best synchronous baseline; the Compose window size corrects it after attachment. */
+  @InternalAutoMobilePrototypeApi
+  fun initialDeviceState(request: PrototypeRequest): kotlinx.serialization.json.JsonObject =
+    kotlinx.serialization.json.JsonObject(emptyMap())
+
   /** True only during a temporary screenshot hide. */
   val isHiddenForCapture: Boolean
     get() = false
@@ -171,18 +223,6 @@ interface PrototypeHost {
 
   /** Changes Back focusability without changing text-field or keyboard state. */
   suspend fun setStackBackEnabled(enabled: Boolean): Boolean
-
-  /**
-   * Removes immediately, allowing the app to regain focus. A window already detached counts as
-   * removed; other failed removals are retryable.
-   */
-  suspend fun dismiss(): Boolean
-
-  /**
-   * Terminal for show/replace; dismiss may still retry a failed platform removal. Invalidates
-   * pending restores, but does not cancel caller-owned gesture blocks.
-   */
-  suspend fun destroy(): Boolean
 
   /** Changes whole-view alpha in place; throws IllegalArgumentException outside 0..100. */
   suspend fun setOpacity(percent: Int)
@@ -242,6 +282,9 @@ interface PrototypeHost {
  * the window's own display. All other platform access is constructor-injected. No permission probe
  * occurs.
  */
+@Suppress(
+  "LargeClass",
+) // One host owns the window, its show transaction and rollback; split when a second owner appears.
 class DefaultPrototypeHost(
   private val context: Context,
   private val windowManager: WindowManager =
@@ -267,6 +310,10 @@ class DefaultPrototypeHost(
   private val escapeTouchSlop: (Context) -> Int = { ViewConfiguration.get(it).scaledTouchSlop },
   private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
   private val isViewAttached: (View) -> Boolean = { it.isAttachedToWindow },
+  /** Must finish before the transport's 5000ms request timeout. */
+  private val firstRenderTimeoutMillis: Long = 2_000L,
+  /** Tests supply a deterministic waiter instead of driving real Compose frames. */
+  private val firstRenderWaiter: PrototypeFirstRenderWaiter = CoroutinePrototypeFirstRenderWaiter,
 ) : PrototypeHost {
   private class Window(
     val view: PrototypeComposeView,
@@ -279,6 +326,9 @@ class DefaultPrototypeHost(
   ) {
     /** A floating window's screen position as its anchored root last placed it (#9316). */
     var anchoredOrigin: IntOffset? = null
+    val visible = androidx.compose.runtime.mutableStateOf(true)
+    /** A new marker for every content revision, including in-place replacements. */
+    var firstComposition = CompletableDeferred<Unit>()
   }
 
   @Volatile private var window: Window? = null
@@ -287,6 +337,7 @@ class DefaultPrototypeHost(
   private var destroyed = false
   private val gestureMutex = Mutex()
   private val captureMutex = Mutex()
+  private val clipboardMutex = Mutex()
 
   override val isHiddenForCapture: Boolean
     get() = window?.view?.visibility == View.INVISIBLE
@@ -300,8 +351,68 @@ class DefaultPrototypeHost(
   override val isTouchThroughActive: Boolean
     get() = touchThroughToken != null
 
-  override suspend fun show(request: PrototypeRequest): Boolean = mainThread.onMain {
-    showOnMain(request)
+  /** Serializes content revisions while main remains available to apply composition. */
+  private val showMutex = Mutex()
+
+  /** The last accepted revision, retained until the replacement's first composition applies. */
+  private class ShowSnapshot(val window: Window?) {
+    val request = window?.request
+    val params = window?.params
+    val origin = window?.anchoredOrigin
+    val composition = window?.firstComposition
+  }
+
+  override suspend fun show(request: PrototypeRequest): Boolean = showMutex.withLock {
+    var previous: ShowSnapshot? = null
+    var candidate: Window? = null
+    try {
+      val accepted = mainThread.onMain {
+        previous = ShowSnapshot(window)
+        showOnMain(request).also { if (it) candidate = window }
+      }
+      if (!accepted) return@withLock false
+      val added = checkNotNull(candidate)
+      // Never await inside onMain: its dispatcher must remain free to apply Compose changes.
+      if (!firstRenderWaiter.await(added.firstComposition, firstRenderTimeoutMillis)) {
+        throw PrototypeRenderFailedException(
+          "Prototype first composition did not complete within ${firstRenderTimeoutMillis}ms. " +
+            "Check the prototype content and retry.",
+        )
+      }
+      mainThread.onMain {
+        check(window === added) { "Prototype was dismissed before its first composition" }
+        previous
+          ?.window
+          ?.takeIf { it !== added }
+          ?.let {
+            if (!windowMotionEnabled(it) || !beginExit(it)) retire(it)
+          }
+        if (added !== previous?.window) onWindowAttached()
+      }
+      true
+    } catch (error: Exception) {
+      withContext(NonCancellable) {
+        mainThread.onMain { previous?.let { rollbackShow(it, candidate) } }
+      }
+      throw error
+    }
+  }
+
+  /** Restores the previous content revision, or removes a failed freshly attached window. */
+  private fun rollbackShow(previous: ShowSnapshot, candidate: Window?) {
+    val old = previous.window
+    val failed = candidate ?: window
+    if (old != null && failed === old && old.firstComposition !== previous.composition) {
+      old.request = checkNotNull(previous.request)
+      old.anchoredOrigin = previous.origin
+      update(old, checkNotNull(previous.params))
+      applyContent(old)
+      old.back.sync(old.request.focusable)
+    } else if (failed != null && failed !== old && window === failed) {
+      retire(failed)
+      window = old
+    }
+    placement = window?.request?.placement
   }
 
   override suspend fun replace(request: PrototypeRequest): Boolean = show(request)
@@ -328,6 +439,12 @@ class DefaultPrototypeHost(
       }
     }
 
+  @InternalAutoMobilePrototypeApi
+  override fun initialDeviceState(
+    request: PrototypeRequest,
+  ): kotlinx.serialization.json.JsonObject =
+    prototypeInitialDeviceState(windowFor(request.displayId, request.layer).context)
+
   private fun showOnMain(request: PrototypeRequest): Boolean =
     PrototypeTrace.section(PrototypeTrace.HOST_SHOW) {
       if (destroyed || isBlocked() || request.isSuspended()) return@section false
@@ -353,15 +470,18 @@ class DefaultPrototypeHost(
           hasStackBack = request.hasStackBack,
           opaque = prototypeWindowOpaque(request),
           surfaceId = request.surfaceId,
+          blurBehindRadiusPx = backdropBlurPx(request, target.density()),
         )
+      target.constrainDismissWindow(params, request)
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
       }
       // New content places its own anchored root again, so a replaced spec starts from its
       // placement.
       inPlace?.anchoredOrigin = null
-      if (inPlace != null && !request.bringToFront) updateInPlace(inPlace, request, params)
-      else addWindow(target, request, params, replacing = current)
+      if (inPlace != null && (!request.bringToFront || !windowMotionEnabled(request, target)))
+        updateInPlace(inPlace, request, params)
+      else addWindow(target, request, params)
     }
 
   /** The keyboard's reach for a bottom sheet; other placements never read it. */
@@ -384,20 +504,27 @@ class DefaultPrototypeHost(
     if (!update(current, params)) return false
     current.request = request
     placement = request.placement
-    applyContent(current)
+    try {
+      applyContent(current)
+    } catch (error: Exception) {
+      throw PrototypeRenderFailedException(
+        "Prototype first composition failed: ${error.message}",
+        error,
+      )
+    }
     current.back.sync(request.focusable)
     return true
   }
 
   /**
    * Attaches a new window on the request's display. A window being replaced on another display is
-   * removed only after the new one is attached, so a failed add leaves the old prototype in place.
+   * retired only after the new content applies its first composition, so a failed show leaves the
+   * old prototype in place.
    */
   private fun addWindow(
     target: PrototypeDisplayWindow,
     request: PrototypeRequest,
     params: WindowManager.LayoutParams,
-    replacing: Window?,
   ): Boolean {
     val owner = PrototypeWindowOwner()
     val view =
@@ -425,22 +552,28 @@ class DefaultPrototypeHost(
         params,
         request,
       )
-    applyContent(added)
     try {
+      applyContent(added)
       target.windowManager.addView(view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to add prototype", error)
-      view.releaseEscape()
-      owner.destroy()
-      view.disposeComposition()
-      return false
+      // addView may throw after partially attaching the view/composition.
+      if (isViewAttached(view)) retire(added)
+      else {
+        view.releaseEscape()
+        added.back.release()
+        owner.destroy()
+        view.disposeComposition()
+      }
+      throw PrototypeRenderFailedException(
+        "Prototype window attach or first composition failed: ${error.message}. Check the content and retry.",
+        error,
+      )
     }
     window = added
     placement = request.placement
     owner.resume()
-    replacing?.let(::retire)
     added.back.sync(request.focusable)
-    onWindowAttached()
     return true
   }
 
@@ -456,10 +589,14 @@ class DefaultPrototypeHost(
     old.back.release()
     old.owner.destroy()
     old.view.disposeComposition()
+    old.request.motionActivity?.release(old)
+    old.request.exitResources?.release(old.view)
   }
 
   private fun applyContent(current: Window) {
     val request = current.request
+    val applied = CompletableDeferred<Unit>()
+    current.firstComposition = applied
     // Fullscreen chrome never inherits spec opacity, styles, clipping or modal sheets.
     val chrome = prototypeHostChrome(request)
     current.view.alpha = chrome.windowAlpha
@@ -467,9 +604,26 @@ class DefaultPrototypeHost(
     val target = current.target
     val geometry = windowGeometry(current)
     current.view.setContent {
+      SideEffect { applied.complete(Unit) }
       CompositionLocalProvider(LocalPrototypeWindowGeometry provides geometry) {
-        PrototypeWindowContent(request, current.view.escapeState) {
-          prototypeInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+        PrototypeWindowMotion(
+          current.visible.value,
+          PrototypeWindowMotionSpec(
+            request.transition,
+            when (request.placement) {
+              is PrototypePlacement.Sheet -> "sheet"
+              is PrototypePlacement.Floating -> "floating"
+              else -> "fullscreen"
+            },
+            (request.placement as? PrototypePlacement.Sheet)?.edge?.name?.lowercase() ?: "bottom",
+            request.motion,
+            request.animateEnter,
+          ),
+          request.motionActivity,
+        ) {
+          PrototypeWindowContent(request, current.view.escapeState) {
+            prototypeInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+          }
         }
       }
     }
@@ -504,6 +658,7 @@ class DefaultPrototypeHost(
       if (window !== current || current.anchoredOrigin != origin) return@post
       val params = copyParams(current.params)
       applyAnchoredOrigin(params, origin)
+      current.target.constrainDismissWindow(params, current.request)
       update(current, params)
     }
   }
@@ -526,8 +681,10 @@ class DefaultPrototypeHost(
         hasStackBack = current.request.hasStackBack,
         opaque = prototypeWindowOpaque(current.request),
         surfaceId = current.request.surfaceId,
+        blurBehindRadiusPx = backdropBlurPx(current.request, current.target.density()),
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
+    current.target.constrainDismissWindow(params, current.request)
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     if (copyParams(current.params).copyFrom(params) == 0 && isViewAttached(current.view))
@@ -554,6 +711,33 @@ class DefaultPrototypeHost(
     val applied = relayoutOnMain(current)
     if (applied) current.back.sync(current.request.focusable) else current.request = previous
     applied
+  }
+
+  override suspend fun <T> readClipboard(read: () -> T): T = clipboardMutex.withLock {
+    val current = mainThread.onMain { window } ?: throw SecurityException("No foreground prototype")
+    val previous = current.request.hasStackBack
+    val wasFocusable = mainThread.onMain { current.view.isFocusableInTouchMode }
+    try {
+      if (!setStackBackEnabled(true)) throw SecurityException("Clipboard focus unavailable")
+      mainThread.onMain {
+        if (!current.view.hasWindowFocus()) {
+          current.view.isFocusableInTouchMode = true
+          current.view.requestFocus()
+        }
+      }
+      frames.awaitFrames(2)
+      mainThread.onMain {
+        if (!current.view.hasWindowFocus()) throw SecurityException("Clipboard focus unavailable")
+        read()
+      }
+    } finally {
+      kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+        if (mainThread.onMain { window === current }) {
+          setStackBackEnabled(previous)
+          mainThread.onMain { current.view.isFocusableInTouchMode = wasFocusable }
+        }
+      }
+    }
   }
 
   /** Still focused here: ask the keyboard to go before the window stops being focusable. */
@@ -591,7 +775,70 @@ class DefaultPrototypeHost(
     }
   }
 
-  override suspend fun dismiss(): Boolean = mainThread.onMain { dismissOnMain() }
+  override suspend fun dismiss(): Boolean = mainThread.onMain {
+    val current = window ?: return@onMain true
+    if (!windowMotionEnabled(current)) return@onMain dismissOnMain()
+    if (!beginExit(current)) return@onMain window == null
+    touchThroughToken = null
+    window = null
+    placement = null
+    true
+  }
+
+  override suspend fun dismissImmediately(): Boolean = mainThread.onMain {
+    finishExits()
+    dismissOnMain()
+  }
+
+  private fun finishExits() {
+    exiting.toList().forEach(::retire)
+    exiting.clear()
+  }
+
+  private fun windowMotionEnabled(current: Window): Boolean =
+    windowMotionEnabled(current.request, current.target)
+
+  private fun windowMotionEnabled(
+    request: PrototypeRequest,
+    target: PrototypeDisplayWindow,
+  ): Boolean {
+    val resolver = target.context.contentResolver
+    return request.transition != "none" &&
+      request.motion != "none" &&
+      android.provider.Settings.Global.getFloat(
+        resolver,
+        android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+        1f,
+      ) != 0f &&
+      android.provider.Settings.Global.getFloat(
+        resolver,
+        android.provider.Settings.Global.TRANSITION_ANIMATION_SCALE,
+        1f,
+      ) != 0f
+  }
+
+  private val exiting = mutableSetOf<Window>()
+
+  private fun beginExit(current: Window): Boolean {
+    val params = WindowManager.LayoutParams().apply { copyFrom(current.params) }
+    params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    if (!update(current, params)) return false
+    current.visible.value = false
+    current.back.release()
+    exiting.add(current)
+    current.request.motionActivity?.report(current, true)
+    current.request.exitResources?.retain(
+      current.view,
+      { if (exiting.remove(current)) retire(current) },
+      current.request.surfaceId,
+      current.request.exitMetadata,
+    )
+    backScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+      settleTimer.awaitSettle(400)
+      mainThread.onMain { if (exiting.remove(current)) retire(current) }
+    }
+    return true
+  }
 
   private fun dismissOnMain(): Boolean {
     val current = window ?: return true
@@ -621,6 +868,7 @@ class DefaultPrototypeHost(
 
   override suspend fun destroy(): Boolean = mainThread.onMain {
     destroyed = true
+    finishExits()
     touchThroughToken = null
     dismissOnMain()
   }
@@ -686,6 +934,7 @@ class DefaultPrototypeHost(
   /** The view hidden for a capture, or null when no window is showing. */
   private fun hideForCaptureOnMain(): View? {
     val current = window ?: return null
+    current.owner.pause()
     current.view.visibility = View.INVISIBLE
     return current.view
   }
@@ -710,9 +959,10 @@ class DefaultPrototypeHost(
   private suspend fun restoreAfterCapture(view: View) {
     try {
       mainThread.onMain {
-        if (!isBlocked() && window?.request?.isSuspended?.invoke() != true)
+        if (!isBlocked() && window?.request?.isSuspended?.invoke() != true) {
           view.visibility = View.VISIBLE
-        else if (window?.view === view) dismissOnMain()
+          if (window?.view === view) window?.owner?.resume()
+        } else if (window?.view === view) dismissOnMain()
       }
     } catch (error: Exception) {
       Log.e(TAG, "Failed to restore prototype after capture", error)
@@ -724,7 +974,7 @@ class DefaultPrototypeHost(
       current.target.windowManager.updateViewLayout(current.view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to update prototype", error)
-      if (isNotAttached(error)) {
+      if (isNotAttached(error) && window === current) {
         clearWindow(current)
         onWindowLost()
       }
@@ -1015,6 +1265,22 @@ internal fun PrototypeWindowContent(
   }
 }
 
+/** Only host dismiss chrome is inset; fullscreen authored content keeps its viewport. */
+@Composable
+private fun prototypeRoundDismissPadding(): PaddingValues {
+  val configuration = LocalConfiguration.current
+  if (!configuration.isScreenRound) return PaddingValues(0.dp)
+  val size = LocalWindowInfo.current.containerSize
+  val safe = prototypeRoundSafeArea(size.width, size.height, true)
+  return with(LocalDensity.current) {
+    PaddingValues(
+      start = safe.horizontal.toDp(),
+      top = safe.vertical.toDp(),
+      end = safe.horizontal.toDp(),
+    )
+  }
+}
+
 @Composable
 private fun PrototypeChrome(
   request: PrototypeRequest,
@@ -1027,7 +1293,8 @@ private fun PrototypeChrome(
   if (chrome.dismissVisible) {
     Column(Modifier.fillMaxSize()) {
       // Reserve inset-aware space and clip the spec below it. Modal scrims cannot cover it. The
-      // bar is translucent, themed like the spec, and only as tall as its small button (#10437).
+      // bar is translucent, themed like the spec, and only as tall as its close chip's hit target
+      // (#10437, #15119).
       val dismissColors = prototypeDismissColors(MaterialTheme.colorScheme)
       Box(
         Modifier.fillMaxWidth()
@@ -1036,16 +1303,13 @@ private fun PrototypeChrome(
             WindowInsets.systemBars
               .union(WindowInsets.displayCutout)
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-          ),
+          )
+          .padding(prototypeRoundDismissPadding()),
       ) {
-        TextButton(
+        PrototypeCloseChip(
           onClick = { scope.launch { request.onHostDismiss() } },
-          modifier = Modifier.align(Alignment.CenterEnd).height(32.dp),
-          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-          colors = ButtonDefaults.textButtonColors(contentColor = dismissColors.content),
-        ) {
-          Text("Dismiss AutoMobile prototype", style = MaterialTheme.typography.labelMedium)
-        }
+          modifier = Modifier.align(Alignment.CenterEnd),
+        )
       }
       Box(
         Modifier.weight(1f)
@@ -1073,14 +1337,16 @@ private fun PrototypeChrome(
         CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) { request.content() }
       }
       // Drawn after the content so authored nodes cannot cover it.
-      val closeColors = prototypeCloseColors(MaterialTheme.colorScheme)
-      TextButton(
+      PrototypeCloseChip(
         onClick = { scope.launch { request.onHostDismiss() } },
-        modifier = Modifier.align(Alignment.TopEnd).background(closeColors.background),
-        colors = ButtonDefaults.textButtonColors(contentColor = closeColors.content),
-      ) {
-        Text("Close")
-      }
+        modifier =
+          Modifier.align(Alignment.TopEnd)
+            .windowInsetsPadding(
+              WindowInsets.systemBars
+                .union(WindowInsets.displayCutout)
+                .only(WindowInsetsSides.Top + WindowInsetsSides.End),
+            ),
+      )
     }
   } else
     Box { CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) { request.content() } }
@@ -1116,6 +1382,8 @@ private fun PrototypeChromelessContent(
   // Keep dismiss semantics on an unfaded host wrapper, accessible even at opacity zero.
   Box(
     Modifier.fillMaxSize().semantics {
+      // The escape pill's tag is the resource id observe and tapOn see (#15120).
+      testTagsAsResourceId = true
       dismiss(label = "Dismiss AutoMobile prototype") {
         scope.launch { request.onHostDismiss() }
         true
@@ -1145,12 +1413,14 @@ private fun PrototypeChromelessContent(
               .union(WindowInsets.displayCutout)
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
           )
-          .padding(top = ESCAPE_PILL_TOP_PADDING_DP.dp),
+          .padding(top = ESCAPE_PILL_TOP_PADDING_DP.dp)
+          .padding(prototypeRoundDismissPadding()),
       ) {
         val colors = prototypeCloseColors(MaterialTheme.colorScheme)
         TextButton(
           onClick = { scope.launch { request.onHostDismiss() } },
-          modifier = Modifier.background(colors.background, CircleShape),
+          modifier =
+            Modifier.testTag(PROTOTYPE_DISMISS_TEST_TAG).background(colors.background, CircleShape),
           colors = ButtonDefaults.textButtonColors(contentColor = colors.content),
         ) {
           Text("Dismiss AutoMobile prototype", style = MaterialTheme.typography.labelMedium)

@@ -37,6 +37,8 @@ struct ProtoViewerApp: App {
                     libraryLog
                         .warning("Cannot create MCP directories: \(error.localizedDescription, privacy: .private)")
                 }
+                // Drop results and pushed bundles whose host request is long over (#13621).
+                await mcp.sweepOrphans()
             }
             return (store, imports, mcp)
         }
@@ -59,7 +61,7 @@ struct LibraryErrorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Unable to open prototype").font(.headline)
+                Text("Unable to open prototype").font(.headline).accessibilityAddTraits(.isHeader)
                 if let failure = error as? PrototypeLibraryFailure {
                     Text(failure.path).font(.system(.body, design: .monospaced))
                     Text(failure.message)
@@ -70,6 +72,7 @@ struct LibraryErrorView: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
+            .readableContentWidth()
         }
     }
 }

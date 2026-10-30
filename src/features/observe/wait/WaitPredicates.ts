@@ -1,7 +1,14 @@
 import { type DisplayInventoryClassification } from "../../../utils/deviceMatcher";
 import type { ConditionEvaluation } from "../interfaces/WaitForCondition";
 import { waitCaptureUnavailableReason } from "../ConditionPredicates";
-import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../models";
+import {
+  type AndroidOrIosPlatform,
+  BootedDevice,
+  Element,
+  ObserveResult,
+  requireAndroidOrIosPlatform,
+  ViewHierarchyResult,
+} from "../../../models";
 import { scopeHierarchyToLayer } from "../hierarchyLayer";
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import { type MatchMode, type ContainerFailure } from "../../utility/ElementResolver";
@@ -51,7 +58,7 @@ export function trackContainerFailure(
 const matchesActiveWindow = (
   observation: ObserveResult,
   waitFor: ObserveWaitForOptions,
-  platform?: BootedDevice["platform"],
+  platform?: AndroidOrIosPlatform,
 ): boolean => {
   if (!waitFor.activeWindow) {
     return true;
@@ -96,8 +103,7 @@ const matchesAbsent = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
-  platform: BootedDevice["platform"] | undefined,
-  sizeOptions: ScreenSizeForOffscreenCheckOptions,
+  sizeOptions: ScreenSizeForOffscreenCheckOptions & { platform: AndroidOrIosPlatform | undefined },
   evaluation: ConditionEvaluation,
 ): boolean => {
   if (!waitFor.absent) {
@@ -109,7 +115,7 @@ const matchesAbsent = (
     selectionStrategy: waitFor.absent.selectionStrategy ?? waitFor.selectionStrategy,
   } as ObserveWaitForOptions;
   return (
-    findWaitForElement(finder, absentAsWaitFor, viewHierarchy, platform, new Map(), {
+    findWaitForElement(finder, absentAsWaitFor, viewHierarchy, sizeOptions.platform, {
       ...sizeOptions,
       negative: true,
       evaluation,
@@ -155,10 +161,21 @@ export const evaluateWaitForObservation = (
   finder: ConditionResolver,
   waitFor: WaitForWithSettled,
   observation: ObserveResult,
-  platform: BootedDevice["platform"] | undefined,
-  displayInventory: DisplayInventoryClassification,
-  { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
+  devicePlatform: BootedDevice["platform"] | undefined,
+  {
+    displayInventory,
+    modes,
+    iosMultiPanel,
+  }: {
+    displayInventory: DisplayInventoryClassification;
+    modes: Map<string, MatchMode>;
+    iosMultiPanel: boolean;
+  },
 ): ObserveConditionEvaluation & { awaitedElement?: Element } => {
+  const platform =
+    devicePlatform === undefined
+      ? undefined
+      : requireAndroidOrIosPlatform(devicePlatform, "Waiting for an observe condition");
   observation = layerScopedObservation(observation, waitFor.layer);
   const sizeOptions = {
     platform,
@@ -180,9 +197,10 @@ export const evaluateWaitForObservation = (
   const needsElementMatch = hasElementPredicate(waitFor);
   const awaitedElement =
     needsElementMatch && observation.viewHierarchy
-      ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform, modes, {
+      ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform, {
           ...sizeOptions,
           evaluation,
+          modes,
         })
       : null;
   // The shared admission guard above ensures absence is evaluated only on a
@@ -191,14 +209,7 @@ export const evaluateWaitForObservation = (
     waitFor.absent === undefined
       ? true
       : observation.viewHierarchy
-        ? matchesAbsent(
-            finder,
-            waitFor,
-            observation.viewHierarchy,
-            platform,
-            sizeOptions,
-            evaluation,
-          )
+        ? matchesAbsent(finder, waitFor, observation.viewHierarchy, sizeOptions, evaluation)
         : false;
 
   const matched = [

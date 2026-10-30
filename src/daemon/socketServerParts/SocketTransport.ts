@@ -1,11 +1,14 @@
+import type { SessionDeviceRebound } from "../sessionDeviceReboundBroadcast";
 import { serializeControlFrame } from "../socketServer/controlRoutes";
 import {
   applyResourceSubscription,
   broadcastListChanged as fanOutListChanged,
   broadcastResourceUpdated as fanOutResourceUpdated,
   broadcastSessionReleased as fanOutSessionReleased,
+  broadcastSessionDeviceRebound as fanOutSessionDeviceRebound,
   pushProgressNotification as fanOutProgress,
   type NotificationTransport,
+  type ProgressTick,
 } from "../socketServer/notificationFanOut";
 
 import { Socket } from "node:net";
@@ -103,6 +106,7 @@ type Callbacks = Pick<
   | "forgetLateSessionToolBindings"
   | "abortRequestControllers"
   | "writeFrameData"
+  | "holdsSession"
 >;
 /** Socket Transport over shared connection state and explicit callbacks. */
 export class SocketTransport {
@@ -284,11 +288,13 @@ export class SocketTransport {
         socket,
         request,
         receivedAtMs,
-        (deadline) => {
-          tracked.admitted = true;
-          tracked.idleDeadline = controlFrame ? undefined : deadline;
+        {
+          onAdmitted: (deadline) => {
+            tracked.admitted = true;
+            tracked.idleDeadline = controlFrame ? undefined : deadline;
+          },
+          context,
         },
-        context,
       );
       if (response) {
         writeAnswer(response);
@@ -543,6 +549,19 @@ export class SocketTransport {
    * {@link broadcastListChanged}. Note `sessionId` here is the socket-client id,
    * distinct from the released daemon session carried in the frame.
    */
+  broadcastSessionDeviceRebound(event: SessionDeviceRebound): void {
+    // Only sockets that hold the session learn its serial and AVD name (#15456).
+    const holders = Array.from(this.state.notificationSubscribers).filter((socketSessionId) =>
+      this.callbacks.holdsSession(socketSessionId, event.sessionId),
+    );
+    fanOutSessionDeviceRebound(
+      holders,
+      this.notificationTransport,
+      this.state.pendingSessionReleaseWrites,
+      event,
+    );
+  }
+
   broadcastSessionReleased(
     releasedSessionId: string,
     reason?: string,
@@ -557,21 +576,8 @@ export class SocketTransport {
     );
   }
   /** Pushes one progress tick to the single socket that requested it (#6205); see the fan-out. */
-  pushProgressNotification(
-    sessionId: string,
-    requestId: string,
-    progressToken: string | number,
-    progress: number,
-    total?: number,
-    message?: string,
-  ): void {
-    fanOutProgress(this.notificationTransport, sessionId, {
-      requestId,
-      progressToken,
-      progress,
-      total,
-      message,
-    });
+  pushProgressNotification(sessionId: string, tick: ProgressTick): void {
+    fanOutProgress(this.notificationTransport, sessionId, tick);
   }
   /**
    * The client sized its backstop from its own environment (#13797); an opted-in client is told how

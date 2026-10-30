@@ -11,6 +11,7 @@ import type { DisplayTransitionReader } from "../../observe/DisplayTransition";
 import { tapFocusFailure } from "../TapOnElement";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
 import type { TargetState } from "./TargetState";
+import type { IosSdkTextTarget } from "./IosSdkTextRouting";
 import type {
   SendKeysCommand,
   SendKeysFailure,
@@ -39,6 +40,7 @@ export interface TargetFocusDeps {
   ) => ReturnType<SendKeysTargetFocuser["focus"]>;
   setTargetLayer(layer: TargetState["effectiveLayer"]): void;
   setTargetPasswordField(passwordField: boolean): void;
+  setIosSdkTextTarget(target: IosSdkTextTarget | undefined): void;
 }
 
 /**
@@ -95,8 +97,7 @@ export class TargetFocus {
           this.deps.device,
           this.deps.adb(),
           focusedWindow.displayId,
-          signal,
-          focusedWindow.panelUniqueId,
+          { signal, identity: focusedWindow.panelUniqueId },
         )
       : undefined;
     if (focusedPanel?.key === observation.display.key) {
@@ -124,7 +125,7 @@ export class TargetFocus {
         this.deps.device,
         adb,
         displayId,
-        signal,
+        { signal },
       );
     } catch (error) {
       signal?.throwIfAborted();
@@ -168,6 +169,7 @@ export class TargetFocus {
     this.deps.setTargetLayer(this.deps.target.effectiveLayer);
     this.deps.target.focusedPassword ||= result.passwordField === true;
     this.deps.setTargetPasswordField(this.deps.target.focusedPassword);
+    this.deps.setIosSdkTextTarget(result.sdkTarget);
     this.deps.target.prototypeIdentifiers = [
       ...this.deps.target.prototypeIdentifiers,
       ...(result.identifiers ?? []),

@@ -1,6 +1,6 @@
 import * as acquisitionRefusals from "../../src/models/deviceAcquisitionRefusals";
 import { expect, test } from "bun:test";
-import { daemonResponseError } from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/client/client";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
@@ -17,6 +17,26 @@ import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaust
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
 import { shutdownTimeoutError } from "../../src/server/deviceToolsShutdown";
+import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionBroker/provisioning/refusal";
+
+test.each(["getApple", "getAndroid"] as const)(
+  "strict registry refusal is shaped for %s",
+  (toolName) => {
+    const error = new BindingRegistrySchemaUnsupportedError("/registry/slots.sqlite", [
+      "2099_01_01_016_future_schema",
+    ]);
+    const result = shapeToolCallError(error, { toolName, source: "MCP" });
+    const payload: Record<string, unknown> = JSON.parse(result.content[0].text);
+
+    expect(payload).toMatchObject({
+      code: "registry_schema_unsupported",
+      retryable: false,
+      dbPath: "/registry/slots.sqlite",
+      unknownMigrations: ["2099_01_01_016_future_schema"],
+    });
+    expect(payload).not.toHaveProperty("retryAfterMs");
+  },
+);
 
 // #11548: boot and shutdown timeouts are the retryable `timeout`, the same on the MCP result and
 // the socket frame as provisionDevice's.

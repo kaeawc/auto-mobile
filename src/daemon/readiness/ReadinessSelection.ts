@@ -47,6 +47,7 @@ import {
   isScanAuthoritativeFor,
   lifecycleIdentityForDevice,
 } from "./readinessLifecycleIdentity";
+import { resolveBootedWatchForCall } from "./watchReadiness";
 import {
   explicitReadTargetPlatform,
   matchRunningReadTarget,
@@ -103,6 +104,16 @@ interface ReadinessSelectionDependencies {
   clearExplicitDevicePin(deviceId: string): void;
   readonly admissionGate: DeviceAdmissionGate;
 }
+/** Describe only the candidate platforms; selection and I/O stay with the caller. */
+function ambiguousReadinessMessage(candidates: readonly BootedDevice[]): string {
+  const platforms = new Set(candidates.map((device) => device.platform));
+  const leading =
+    platforms.size > 1
+      ? "Both Android and iOS devices are connected."
+      : `Multiple ${platforms.has("android") ? "Android" : "iOS"} devices are connected.`;
+  return `${leading} For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.`;
+}
+
 /** Selects and verifies readiness targets without owning boot or runner setup. */
 export class ReadinessSelection {
   constructor(private readonly dependencies: ReadinessSelectionDependencies) {}
@@ -116,6 +127,8 @@ export class ReadinessSelection {
       android: false,
       "ios-simulator": false,
       "ios-physical": false,
+      // Readiness scans never list watches; a watch is resolved only on request (#14908).
+      "watchos-simulator": false,
     };
     const perf = createGlobalPerformanceTracker();
 
@@ -163,6 +176,7 @@ export class ReadinessSelection {
       scanned: {
         android: scannedSources.android,
         ios: scannedSources["ios-simulator"] || scannedSources["ios-physical"],
+        watchos: false,
       },
       scannedSources,
     };
@@ -230,6 +244,15 @@ export class ReadinessSelection {
     logger.info(
       `[DeviceReadiness] ensureDeviceReady called with platform=${platform}, providedDeviceId=${providedDeviceId}`,
     );
+    if (platform === "watchos") {
+      const pin = this.dependencies.selection.getPin(options?.connectionId);
+      return resolveBootedWatchForCall(
+        this.dependencies.deviceUtils,
+        providedDeviceId,
+        pin,
+        options,
+      );
+    }
     providedDeviceId = await this.resolveProvidedReadinessId(providedDeviceId);
 
     // Detect all connected devices
@@ -473,10 +496,7 @@ export class ReadinessSelection {
   ): Promise<BootedDevice> {
     const candidates = scan.devices.filter((device) => device.platform === platform);
     if (candidates.length > 1) {
-      throw new AmbiguousDeviceTargetError(
-        `Multiple ${platform} devices connected. Specify deviceId or select a device for this connection.`,
-        candidates,
-      );
+      throw new AmbiguousDeviceTargetError(ambiguousReadinessMessage(candidates), candidates);
     }
     if (options?.intent !== "read") {
       return await this.dependencies.findOrStartDevice(platform, options);
@@ -804,9 +824,10 @@ export class ReadinessSelection {
         };
       }
     }
-    // With no matching deviceId, fall back to the platform setActiveDevice selected.
+    // With no matching deviceId, fall back to the platform setActiveDevice selected. A watch pin
+    // never decides a call that did not name watchOS (#14908).
     const pin = this.dependencies.selection.getPin(options?.connectionId);
-    const selectedPlatform = pin?.platform;
+    const selectedPlatform = pin?.platform === "watchos" ? undefined : pin?.platform;
     if (selectedPlatform) {
       return {
         platformDevices: selectedPlatform === "android" ? androidDevices : iosDevices,
@@ -815,7 +836,7 @@ export class ReadinessSelection {
     }
     // #15020: typed, so a client branches on the code and reads the candidates it may choose from.
     throw new AmbiguousDeviceTargetError(
-      "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
+      ambiguousReadinessMessage([...androidDevices, ...iosDevices]),
       [...androidDevices, ...iosDevices],
     );
   }
@@ -904,7 +925,7 @@ export class ReadinessSelection {
     result: BootedDevice[] | ConnectedPlatformScan,
   ): ConnectedPlatformScan {
     return Array.isArray(result)
-      ? { devices: result, scanned: { android: true, ios: true } }
+      ? { devices: result, scanned: { android: true, ios: true, watchos: false } }
       : result;
   }
 }

@@ -1,0 +1,66 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "row",
+          "ios": {
+            "glassGroup": {
+              "spacing": 8
+            }
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "Glass",
+              "style": {
+                "surface": "glass"
+              },
+              "shared": {
+                "key": "a",
+                "as": "bounds"
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Pair",
+          "shared": {
+            "key": "a",
+            "as": "bounds"
+          },
+          "visibleWhen": {
+            "key": "on",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Pair",
+          "shared": {
+            "key": "a",
+            "as": "bounds"
+          },
+          "visibleWhen": {
+            "key": "on",
+            "equals": false
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].shared.key",
+  "expectedMessage": "glass shared key \"a\" cannot also be used by a visibility pair"
+}

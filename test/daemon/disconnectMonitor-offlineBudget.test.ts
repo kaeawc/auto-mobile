@@ -14,6 +14,8 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createMonitorDaemon, heldAndroidDevice } from "../helpers/disconnectMonitorDaemon";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
+import { seededMisses } from "./helpers/seededMisses";
 
 const EMULATOR = "emulator-5554";
 const PHONE = "57281FDCH00462";
@@ -252,7 +254,7 @@ describe("adb transitional states share the offline budget (#11592)", () => {
 describe("evaluateDeviceDisconnects offline episodes", () => {
   const platforms = new Map<string, Platform>([[EMULATOR, "android"]]);
   const evaluate = (
-    misses: Map<string, number>,
+    misses: DeviceLossMisses,
     episodes: Map<string, OfflineEpisode>,
     nowMs: number,
     offline: boolean,
@@ -270,7 +272,7 @@ describe("evaluateDeviceDisconnects offline episodes", () => {
     });
 
   test("offline sweeps hold the absent miss streak instead of advancing or resetting it", () => {
-    const misses = new Map([[EMULATOR, 2]]);
+    const misses = seededMisses([[EMULATOR, 2]]);
     const episodes = new Map<string, OfflineEpisode>();
     const result = evaluate(misses, episodes, 0, true);
     expect(result.disconnected).toEqual([]);
@@ -280,11 +282,11 @@ describe("evaluateDeviceDisconnects offline episodes", () => {
   });
 
   test("the episode survives interleaved absent sweeps so flapping stays bounded", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const episodes = new Map<string, OfflineEpisode>();
     evaluate(misses, episodes, 0, true);
     evaluate(misses, episodes, 5_000, false);
-    misses.clear();
+    misses.reset(EMULATOR);
     const result = evaluate(misses, episodes, OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, true);
     expect(result.disconnected).toEqual([EMULATOR]);
   });

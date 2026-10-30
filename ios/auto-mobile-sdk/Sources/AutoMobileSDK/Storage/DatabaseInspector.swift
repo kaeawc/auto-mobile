@@ -40,9 +40,18 @@ public final class DatabaseInspector: Sendable {
         state.withLock { $0.configuration = configuration }
     }
 
-    /// Register an app-group suite for host-coordinated inspection.
-    public func registerAppGroupSuite(_ suiteName: String) {
-        state.withLock { _ = $0.configuration.registeredAppGroupSuites.insert(suiteName) }
+    /// Register an app-group suite for inspection. Other processes in the app group can
+    /// write it; `coordination` declares whether the host coordinates that access, and the
+    /// storage capability response reports it.
+    public func registerAppGroupSuite(_ suiteName: String, coordination: StoreCoordination = .uncoordinated) {
+        state.withLock { state in
+            state.configuration.registeredAppGroupSuites.insert(suiteName)
+            if coordination == .hostCoordinated {
+                state.configuration.hostCoordinatedAppGroupSuites.insert(suiteName)
+            } else {
+                state.configuration.hostCoordinatedAppGroupSuites.remove(suiteName)
+            }
+        }
     }
 
     /// Register Core Data metadata supplied by the host.

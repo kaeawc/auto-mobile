@@ -1,0 +1,51 @@
+{
+  "spec": {
+    "id": "c",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["haptics"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Louder",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "cast.setVolume",
+              "args": {
+                "volume": {
+                  "value": 0.8
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Stop",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "cast.disconnect",
+              "args": {}
+            },
+            {
+              "type": "platform",
+              "call": "cast.stop",
+              "args": {}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].call",
+  "expectedMessage": "Platform module cast is not declared in requires.platform"
+}

@@ -238,6 +238,52 @@ describe("LaunchApp", () => {
     expect(detectorSpy).toHaveBeenCalledTimes(1);
   });
 
+  test.each([
+    ["automotive", 10, undefined, 10],
+    ["automotive", 10, 0, 0],
+    ["automotive", 10, 11, 11],
+    ["automotive", 0, undefined, 0],
+    ["phone", 10, undefined, 0],
+    ["tablet", 10, undefined, 0],
+  ] as const)(
+    "%s current user %i with explicit user %s launches as user %i",
+    async (formFactor, currentUser, explicitUser, expectedUser) => {
+      fakeTimer.enableAutoAdvance();
+      device = { ...device, formFactor };
+      fakeAdb.setCommandResponse(
+        "shell am get-current-user",
+        createExecResult(String(currentUser), ""),
+      );
+      fakeAdb.setCommandResponse("shell am start", createExecResult("Starting: Intent", ""));
+      fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: expectedUser });
+      fakeObserveScreen.setObserveResult(createObserveResult(packageName));
+      launchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+        installedAppsProvider: {
+          listInstalledApps: async () => ({ apps: [packageName], successful: true }),
+        },
+        cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+      });
+      launchApp.awaitIdle = fakeAwaitIdle;
+      launchApp.observeScreen = fakeObserveScreen;
+      launchApp.window = fakeWindow;
+
+      const result = await launchApp.execute(packageName, {
+        userId: explicitUser,
+        clearAppData: false,
+        coldBoot: false,
+      });
+
+      expect(result).toMatchObject({ success: true, userId: expectedUser });
+      const commands = fakeAdb.getExecutedCommands();
+      expect(
+        commands.some((command) => command.startsWith(`shell am start --user ${expectedUser} `)),
+      ).toBe(true);
+      expect(commands.filter((command) => command === "shell am get-current-user")).toHaveLength(
+        formFactor === "automotive" && explicitUser === undefined ? 1 : 0,
+      );
+    },
+  );
+
   test("returns observation when app is already in foreground", async () => {
     const controller = new AbortController();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -661,10 +707,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      0,
-      1,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 0,
+        pollIntervalMs: 1,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.success).toBe(false);
@@ -683,10 +731,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      0,
-      1,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 0,
+        pollIntervalMs: 1,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.success).toBe(true);
@@ -730,10 +780,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      0,
-      1,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 0,
+        pollIntervalMs: 1,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.success).toBe(false);
@@ -752,10 +804,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: false, packageName, observation },
       packageName,
-      1000,
-      100,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 1000,
+        pollIntervalMs: 100,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.verifiedBy).toBeUndefined();
@@ -777,10 +831,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      1000,
-      100,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 1000,
+        pollIntervalMs: 100,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(result.verifiedBy).toBe("task-root");
@@ -796,10 +852,12 @@ describe("LaunchApp", () => {
     const result = await launchApp.ensureLaunchObservationMatchesPackage(
       { success: true, packageName, observation },
       packageName,
-      1,
-      1,
-      undefined,
-      { coldBoot: false, expectedUserId: 0 },
+      {
+        timeoutMs: 1,
+        pollIntervalMs: 1,
+        coldBoot: false,
+        expectedUserId: 0,
+      },
     );
 
     expect(fakeTimer.getSleepHistory()).toEqual([1]);
@@ -2037,6 +2095,36 @@ describe("LaunchApp", () => {
     ).toBe(true);
     expect(commands.some((command) => command.includes("shell monkey"))).toBe(false);
     expect(commands.some((command) => command.includes("pm list packages"))).toBe(false);
+  });
+
+  test("a TV-only app with only a LEANBACK_LAUNCHER activity launches that activity (#15957)", async () => {
+    const tvSettings = "com.android.tv.settings";
+    fakeAdb.setCommandResponse(
+      `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LAUNCHER '${tvSettings}'`,
+      createExecResult("No activity found", ""),
+    );
+    fakeAdb.setCommandResponse(
+      `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LEANBACK_LAUNCHER '${tvSettings}'`,
+      createExecResult(
+        "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false\ncom.android.tv.settings/.MainSettings",
+        "",
+      ),
+    );
+    fakeAdb.setCommandResponse(
+      "shell am start --user 0 -a android.intent.action.MAIN",
+      createExecResult(
+        "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LEANBACK_LAUNCHER] cmp=com.android.tv.settings/.MainSettings }",
+        "",
+      ),
+    );
+
+    const result = await performFallbackLaunch(tvSettings);
+    const commands = fakeAdb.getExecutedCommands();
+    expect(result).toMatchObject({ success: true, activityName: "intent_launch" });
+    expect(commands).toContain(
+      "shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER -n 'com.android.tv.settings/.MainSettings'",
+    );
+    expect(commands.some((command) => command.includes("shell monkey"))).toBe(false);
   });
 
   test("unresolved launcher keeps bare intent and preserves fail-fast then monkey", async () => {

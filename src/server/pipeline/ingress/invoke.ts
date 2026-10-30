@@ -57,10 +57,10 @@ export interface InvocationPlan {
  * place a parsed {@link CallContext} is written back in-band.
  */
 export function buildHandlerParams(plan: InvocationPlan): Record<string, unknown> {
-  const { parsedParams, context, execution, name } = plan;
+  const { parsedParams, context, execution } = plan;
   return {
     ...parsedParams,
-    ...(name === "setActiveDevice" && plan.routingSessionUuid
+    ...(plan.tool.selectsActiveDevice === true && plan.routingSessionUuid
       ? { sessionUuid: plan.routingSessionUuid }
       : {}),
     ...(plan.implicitAutolockMcpSessionId

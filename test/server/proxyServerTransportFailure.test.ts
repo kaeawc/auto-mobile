@@ -22,7 +22,7 @@ import {
   mcpOverloadError,
   mcpOverloadResult,
 } from "../../src/server/proxyServer";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { DaemonRestartDeferredError } from "../../src/daemon/daemonMcpProxy";
 import { McpOverloadError } from "../../src/daemon/wire/McpTimeoutError";

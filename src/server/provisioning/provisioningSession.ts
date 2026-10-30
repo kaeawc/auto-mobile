@@ -1,3 +1,11 @@
+import {
+  adoptRestartResumeSessionUuid,
+  adoptRestartResumeTargets,
+  internalMcpSessionId,
+  internalOneShotCli,
+  internalRestartResumeSessionUuid,
+  internalRestartResumeTargets,
+} from "../internalToolParams";
 import { captureAutolockPolicy } from "../../daemon/deviceAutolockPolicy";
 import { DeviceInfo } from "../../models";
 import { logger } from "../../utils/logger";
@@ -21,19 +29,19 @@ export function provisionSessionArgs(args: ProvisionDeviceArgs): StartDeviceArgs
     platform: args.device.platform,
     name: args.device.name,
     matchExactName: true,
-    __restartResumeTargets: args.__restartResumeTargets,
+    __restartResumeTargets: internalRestartResumeTargets(args),
     timeoutMs: args.timeoutMs,
-    __mcpSessionId: args.__mcpSessionId,
-    __restartResumeSessionUuid: args.__restartResumeSessionUuid,
-    ...(args.__oneShotCli ? { __oneShotCli: true } : {}),
+    __mcpSessionId: internalMcpSessionId(args),
+    __restartResumeSessionUuid: internalRestartResumeSessionUuid(args),
+    ...(internalOneShotCli(args) ? { __oneShotCli: true } : {}),
   };
 }
 
 export function admitRestartReservedProvision(args: ProvisionDeviceArgs, deviceId?: string): void {
   const start = { ...provisionSessionArgs(args), deviceId };
   admitRestartReservedStart(start);
-  args.__restartResumeSessionUuid ??= start.__restartResumeSessionUuid;
-  args.__restartResumeTargets ??= start.__restartResumeTargets;
+  adoptRestartResumeSessionUuid(args, internalRestartResumeSessionUuid(start));
+  adoptRestartResumeTargets(args, internalRestartResumeTargets(start));
 }
 
 /**
@@ -58,9 +66,8 @@ export async function bindProvisionedDeviceSession(
     binding.timer,
     binding.totalDeadlineMs,
     binding.signal,
-    "binding the device session",
     bindUndoneIfUndelivered(
-      async (receipt) =>
+      async (receipt, bindSignal) =>
         ctx.bindBootedDeviceSession(
           boot.device,
           provisionSessionArgs(args),
@@ -68,12 +75,21 @@ export async function bindProvisionedDeviceSession(
           boot.processHandle,
           // Our own stable-name readiness reservation must not deny our
           // own bind when the pooled incarnation changed during readiness.
-          provisionSessionBindingOptions(args, readinessReservation, settlementState, receipt),
+          provisionSessionBindingOptions(
+            args,
+            readinessReservation,
+            settlementState,
+            receipt,
+            bindSignal,
+          ),
         ),
       () => boot,
     ),
-    (settlement) => {
-      settlementState.bindingSettlements.push(settlement);
+    {
+      phase: "binding the device session",
+      onPendingSettlement: (settlement) => {
+        settlementState.bindingSettlements.push(settlement);
+      },
     },
   );
 }
@@ -83,9 +99,11 @@ function provisionSessionBindingOptions(
   readinessReservation: DeviceReadinessReservation | undefined,
   settlementState: ProvisionSettlementState,
   receipt: AcquisitionReceipt,
+  signal: AbortSignal,
 ) {
   return {
     receipt,
+    signal,
     readinessReservationOwners: readinessReservation
       ? new Set([readinessReservation.owner])
       : undefined,

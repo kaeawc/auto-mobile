@@ -7,6 +7,7 @@ import { DispatchedObservationError } from "../../models/DispatchedObservationEr
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import { StaleDisplayError, withStaleDisplay } from "../observe/StaleDisplayError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
+import { requireAndroidOrIosPlatform } from "../../models/Platform";
 import { isFocusEditableElement } from "../utility/ElementResolver";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { type DisplayTransitionReader } from "../observe/DisplayTransition";
@@ -185,7 +186,11 @@ export class TapDisplayRouter {
       throw new TapTargetUnavailableError("Element not found on selected display", "not-found");
     }
     const selectedElement = this.host.buildSelectedElementMetadata(selection);
-    const resolvedLayer = resolvedElementLayer(hierarchy, element, this.host.device().platform);
+    const resolvedLayer = resolvedElementLayer(
+      hierarchy,
+      element,
+      requireAndroidOrIosPlatform(this.host.device().platform, "tapOn"),
+    );
     if (options.action === "focus") {
       if (!isFocusEditableElement(element)) {
         return {
@@ -249,8 +254,8 @@ export class TapDisplayRouter {
         point,
         options.action,
         this.host.strategy().longPressDurationMs,
-        element,
         {
+          tapElement: element,
           options: {
             ...this.host.withObservationScreenSize(options, target.observation),
             verification: { refresh: options.verification.refresh, dispatch: dispatchAction },
@@ -506,9 +511,11 @@ export class TapDisplayRouter {
       options,
       result.element,
       result.observation,
-      labelText,
-      result.selectedElement?.indexInMatches,
-      previousObservation.viewHierarchy,
+      {
+        labelText,
+        selectedIndex: result.selectedElement?.indexInMatches,
+        preTapHierarchy: previousObservation.viewHierarchy,
+      },
     );
     if (!result.focusVerified) {
       result.success = false;

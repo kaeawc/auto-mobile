@@ -19,15 +19,78 @@ export type ArtifactCapabilities = Record<ArtifactId, string[]>;
 export interface CapabilityManifest {
   description: string;
   releases: Record<string, ArtifactCapabilities>;
+  /**
+   * Capability names the host (`src/`) gated on at each release's git ref, recorded beside what the
+   * artifacts advertise. The pinned-release check only holds a release to gates that already
+   * existed when it was cut (#12996).
+   */
+  hostGates?: Record<string, ArtifactCapabilities>;
 }
 
-/** Source files (relative to the repo root) that advertise each artifact's capabilities. */
-export const ADVERTISING_SOURCES: Record<ArtifactId, string> = {
-  "android-ctrlproxy-apk":
+/**
+ * Source files (relative to the repo root) that advertise each artifact's capabilities. An
+ * artifact's parser reads their concatenation, so a capability advertised from a second file is
+ * not missed (#15347).
+ */
+// Both prototype artifacts advertise prototype_content_transition_v1 from the sources below.
+export const ADVERTISING_SOURCES: Record<ArtifactId, string[]> = {
+  "android-ctrlproxy-apk": [
     "android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/WebSocketServer.kt",
-  "ios-runner": "ios/control-proxy/Sources/CtrlProxy/Models/RunnerFeature.swift",
-  "prototype-agent-dylib":
+    // The `global_action_<name>_v1` flags are generated here from the action table, then added by
+    // WebSocketServer through `addAll(SystemGlobalActions.advertisedFlags(sdk))`.
+    "android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/SystemGlobalActions.kt",
+  ],
+  "ios-runner": ["ios/control-proxy/Sources/CtrlProxy/Models/RunnerFeature.swift"],
+  "prototype-agent-dylib": [
     "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
+    // Standalone mode appends `prototype_persistence_replay_v1` to the handshake list.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeStandalone.swift",
+  ],
+};
+
+/**
+ * Capabilities the host gates on but an artifact deliberately does not implement, with the reason.
+ * The host gate stays: it fails closed (preflight refuses the spec feature against an agent that
+ * does not advertise the name), which is the right degradation. A gate is exempt only while the
+ * artifact really lacks the feature; once the artifact advertises it, the stale entry fails the
+ * check (see {@link findStaleExemptions}) so it cannot hide a later regression.
+ */
+export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string>> = {
+  "android-ctrlproxy-apk": {
+    prototype_platform_share_v1:
+      "Share has a validated contract only; Android does not implement the system share sheet yet",
+  },
+  "ios-runner": {},
+  "prototype-agent-dylib": {
+    prototype_platform_share_v1:
+      "Share has a validated contract only; the iOS agent does not implement the system share sheet yet",
+    prototype_chat_scroll_v1:
+      "iOS agent only derives the bundle requirement; it does not implement chat scroll options or scrollTo",
+    prototype_choreography_v1:
+      "iOS agent keeps the transition type only; the host refuses delays, stagger and blurReplace (#15247)",
+    prototype_custom_shaders_v1:
+      "AGSL shaders are Android-only by owner decision; the iOS agent and ProtoViewer refuse them (#15131)",
+    prototype_motion_v3: "Expressive, press and layout animate are Android only until #14684",
+    prototype_window_motion_v1: "Android window and repeat motion; iOS does not implement it",
+    prototype_hide_keyboard_v1:
+      "hideKeyboard has a validated contract only; the iOS agent does not run it yet (#14320)",
+    prototype_platform_window_controls_v1:
+      "Window controls have a validated contract only; the iOS agent does not apply them yet (#14320)",
+    prototype_motion_v2:
+      "iOS agent does not advertise it; the host refuses motion v2 features against it",
+    prototype_network_upload_v1:
+      "Upload bodies have a validated contract only; no transport builds multipart or file bodies yet, so the host refuses them (#14272)",
+    prototype_platform_media_items_v1:
+      "imageAsset {data} has a validated contract only; no device media store yet, so the host refuses it (#14192)",
+    prototype_platform_realtime_v1:
+      "Realtime channels have a validated contract only; the iOS agent does not implement transport, routing or lifecycle yet",
+    prototype_platform_realtime_device_v1:
+      "Device realtime channels are contract-only; the iOS agent does not implement device transport yet",
+    prototype_platform_v1:
+      "iOS agent validates platform specs but has no module registry yet (#14296)",
+    prototype_routes_v1:
+      "Navigation routes are contract-only: no runtime applies params, onEnter, onBack or setStack yet (#14188)",
+  },
 };
 
 /**
@@ -63,7 +126,20 @@ function matchAll(source: string, pattern: RegExp): string[] {
 
 /** `add("name")` flags in WebSocketServer.supportedCommands(), conditional ones included. */
 export function parseAndroidAdvertised(kotlinSource: string): string[] {
-  return matchAll(kotlinSource, new RegExp(`\\badd\\("(${CAPABILITY_NAME})"\\)`, "g"));
+  // `addAll(listOf("a_v1", "b_v1"))` advertises each literal in the collection (#15816).
+  const collectionLiterals = [
+    ...kotlinSource.matchAll(
+      /\baddAll\(\s*(?:listOf|setOf|arrayOf|mutableListOf|mutableSetOf)\(([^()]*)\)\s*,?\s*\)/g,
+    ),
+  ].flatMap((call) => matchAll(call[1], new RegExp(`"(${CAPABILITY_NAME})"`, "g")));
+  return uniqueSorted([
+    ...matchAll(kotlinSource, new RegExp(`\\badd\\("(${CAPABILITY_NAME})"\\)`, "g")),
+    ...collectionLiterals,
+    // SystemGlobalActions: `flagFor("lock_screen")` expands to `global_action_lock_screen_v1`.
+    ...matchAll(kotlinSource, /\bflagFor\("([a-z][a-z0-9_]*)"\)/g).map(
+      (name) => `global_action_${name}_v1`,
+    ),
+  ]);
 }
 
 /** Raw values of the `RunnerFeature` enum cases. */
@@ -153,6 +229,60 @@ export function gatedByScans(scans: HostGateScan[], declared: Record<string, str
   );
 }
 
+/**
+ * Gated names per artifact from the contents of that artifact's host sources. A constant declared
+ * in one source counts as a gate for every artifact whose sources reference it.
+ */
+export function gatedBySources(
+  sourcesByArtifact: Record<ArtifactId, string[]>,
+): Record<ArtifactId, string[]> {
+  const declared: Record<string, string> = {};
+  const scansByArtifact = Object.fromEntries(
+    ARTIFACTS.map((artifact) => [
+      artifact,
+      sourcesByArtifact[artifact].map((source) => {
+        const scan = scanHostGates(source);
+        Object.assign(declared, scan.declared);
+        return scan;
+      }),
+    ]),
+  ) as Record<ArtifactId, HostGateScan[]>;
+  return Object.fromEntries(
+    ARTIFACTS.map((artifact) => [artifact, gatedByScans(scansByArtifact[artifact], declared)]),
+  ) as Record<ArtifactId, string[]>;
+}
+
+/**
+ * Narrows the current host gates to those that already existed at a release's ref. A capability
+ * gated only after the release was cut is expected to be missing from that release's artifacts
+ * until the next release: the host gate fails closed, and the release-candidate check (which
+ * compares every gate with what the sources will advertise) enforces it before the next release.
+ */
+export function gatesExistingAt(
+  current: Record<ArtifactId, string[]>,
+  atRelease: ArtifactCapabilities,
+): Record<ArtifactId, string[]> {
+  return Object.fromEntries(
+    ARTIFACTS.map((artifact) => {
+      const existing = new Set(atRelease[artifact]);
+      return [artifact, current[artifact].filter((capability) => existing.has(capability))];
+    }),
+  ) as Record<ArtifactId, string[]>;
+}
+
+/** Current gates the release's ref did not have: they wait for the next release. */
+export function gatesAddedAfter(
+  current: Record<ArtifactId, string[]>,
+  atRelease: ArtifactCapabilities,
+): CapabilityGap[] {
+  return ARTIFACTS.flatMap((artifact) => {
+    const existing = new Set(atRelease[artifact]);
+    return uniqueSorted(current[artifact])
+      .filter((capability) => !existing.has(capability))
+      .map((capability) => ({ artifact, capability }));
+  });
+}
+
 export interface CapabilityGap {
   artifact: ArtifactId;
   capability: string;
@@ -162,36 +292,76 @@ export interface CapabilityGap {
 export function findGaps(
   advertised: ArtifactCapabilities,
   gated: Record<ArtifactId, string[]>,
+  exempt: Record<ArtifactId, Record<string, string>> = {
+    "android-ctrlproxy-apk": {},
+    "ios-runner": {},
+    "prototype-agent-dylib": {},
+  },
 ): CapabilityGap[] {
   return ARTIFACTS.flatMap((artifact) => {
     const have = new Set(advertised[artifact]);
     return uniqueSorted(gated[artifact])
-      .filter((capability) => !have.has(capability))
+      .filter((capability) => !have.has(capability) && !Object.hasOwn(exempt[artifact], capability))
       .map((capability) => ({ artifact, capability }));
   });
 }
 
-export function formatGaps(version: string, gaps: CapabilityGap[]): string {
+/** Exempt names the artifact now advertises: the exemption is stale and must be removed. */
+export function findStaleExemptions(
+  advertised: ArtifactCapabilities,
+  exempt: Record<ArtifactId, Record<string, string>>,
+): CapabilityGap[] {
+  return ARTIFACTS.flatMap((artifact) => {
+    const have = new Set(advertised[artifact]);
+    return Object.keys(exempt[artifact])
+      .filter((capability) => have.has(capability))
+      .sort()
+      .map((capability) => ({ artifact, capability }));
+  });
+}
+
+/** `label` names what was checked, e.g. "Pinned release 0.0.88" or "Release candidate". */
+export function formatGaps(label: string, gaps: CapabilityGap[]): string {
   const lines = gaps.map((gap) => `  - ${gap.artifact}: ${gap.capability}`);
   return [
-    `Pinned release ${version} does not advertise ${gaps.length} capability name(s) the host gates on:`,
+    `${label} does not advertise ${gaps.length} capability name(s) the host gates on:`,
     ...lines,
-    "Re-cut the artifacts so they advertise these capabilities (or drop the host gate),",
+    "Make the artifacts advertise these capabilities, list them in UNIMPLEMENTED_BY_ARTIFACT if an",
+    "artifact deliberately lacks them, or drop the host gate,",
     "then record the new release with: bun scripts/release/check-artifact-capabilities.ts --record <version> --ref <git ref>",
   ].join("\n");
 }
 
-/** Throws a readable error when a manifest is not the expected shape. */
-/** Records `version` first; re-recording an existing version replaces its entry. */
+/**
+ * Records `version` first, with the host gates that existed at its ref; re-recording an existing
+ * version replaces its entries.
+ */
 export function recordRelease(
   manifest: CapabilityManifest,
   version: string,
   advertised: ArtifactCapabilities,
+  hostGated: ArtifactCapabilities,
 ): CapabilityManifest {
   const others = Object.entries(manifest.releases).filter(([existing]) => existing !== version);
-  return { ...manifest, releases: { [version]: advertised, ...Object.fromEntries(others) } };
+  const otherGates = Object.entries(manifest.hostGates ?? {}).filter(
+    ([existing]) => existing !== version,
+  );
+  return {
+    ...manifest,
+    releases: { [version]: advertised, ...Object.fromEntries(others) },
+    hostGates: { [version]: hostGated, ...Object.fromEntries(otherGates) },
+  };
 }
 
+function assertArtifactShape(kind: string, version: string, entry: ArtifactCapabilities): void {
+  for (const artifact of ARTIFACTS) {
+    if (!Array.isArray(entry[artifact])) {
+      throw new Error(`manifest ${kind} ${version} is missing artifact ${artifact}`);
+    }
+  }
+}
+
+/** Throws a readable error when a manifest is not the expected shape. */
 export function parseManifest(raw: string): CapabilityManifest {
   const value: unknown = JSON.parse(raw);
   if (typeof value !== "object" || value === null || !("releases" in value)) {
@@ -199,11 +369,10 @@ export function parseManifest(raw: string): CapabilityManifest {
   }
   const manifest = value as CapabilityManifest;
   for (const [version, entry] of Object.entries(manifest.releases)) {
-    for (const artifact of ARTIFACTS) {
-      if (!Array.isArray(entry[artifact])) {
-        throw new Error(`manifest release ${version} is missing artifact ${artifact}`);
-      }
-    }
+    assertArtifactShape("release", version, entry);
+  }
+  for (const [version, entry] of Object.entries(manifest.hostGates ?? {})) {
+    assertArtifactShape("host gates for", version, entry);
   }
   return manifest;
 }

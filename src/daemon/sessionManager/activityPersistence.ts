@@ -23,6 +23,7 @@ import {
   type SessionLifecycleSlots,
 } from "./internalContracts";
 import { SessionActivityPersistenceError } from "./SessionActivityPersistenceError";
+import type { RefusedRowWriteRelease } from "./supersededRows";
 
 export interface SessionActivityPersistenceHost {
   readonly rowWriter: Pick<
@@ -38,27 +39,19 @@ export interface SessionActivityPersistenceHost {
     write: (
       guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
     ) => Promise<T>,
-    releaseReason?: string,
-    releaseOptions?: {
-      unlessDaemonShutdown?: boolean;
-      resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
-      incarnation?: Session;
-    },
+    release?: RefusedRowWriteRelease,
   ): Promise<T>;
   isAdmittedForAutomation(session: Session): boolean;
   trackReleaseDrainWrite(write: Promise<void>): void;
-  guardedRowRewriteOptions(
-    supersededReasons: readonly string[],
-    expectedRowGeneration?: number,
-  ): UpsertActiveSessionOptions;
+  guardedRowRewriteOptions(expectedRowGeneration?: number): UpsertActiveSessionOptions;
   isCurrentSession(session: Session): boolean;
   isRebindUnderWay(session: Session): boolean;
-  oweSupersededRowReassert(session: Session, supersededReasons: readonly string[]): void;
+  oweSupersededRowReassert(session: Session): void;
   readonly sessions: Pick<Map<string, Session>, "get">;
   readonly sessionSlots: Pick<SessionLifecycleSlots, "hasTerminalSnapshot" | "getTerminalSnapshot">;
   restoreNonTerminalRowAfterReassert(session: Session): Promise<void>;
   reassertOwedLiveRowForActivity(session: Session): Promise<boolean>;
-  readonly superseded: Pick<SupersededRowReasserts, "isReassertPending" | "isOwedFor">;
+  readonly superseded: Pick<SupersededRowReasserts, "isReassertPending">;
   getPersistedTerminalRelease(sessionId: string): Promise<SessionReleaseSnapshot | undefined>;
   cancelExecutionsCutByRelease(
     sessionId: string,
@@ -288,7 +281,7 @@ export class SessionActivityPersistence {
           {
             unlessTerminal: true,
             rewriteOverSupersededRelease: {
-              ...this.host.guardedRowRewriteOptions([], this.persistedRowGenerations.get(session))
+              ...this.host.guardedRowRewriteOptions(this.persistedRowGenerations.get(session))
                 .rewriteOverSupersededRelease!,
               unlessReleased: true,
             },
@@ -302,7 +295,7 @@ export class SessionActivityPersistence {
       ) {
         // A rebind began while the write was in flight, so the write may have landed over the
         // rebind's row with the binding from before it: owe the row for the binding now held.
-        this.host.oweSupersededRowReassert(session, []);
+        this.host.oweSupersededRowReassert(session);
       } else if (
         this.host.sessions.get(session.sessionId) !== session &&
         !this.host.sessionSlots.hasTerminalSnapshot(session.sessionId)
@@ -353,19 +346,14 @@ export class SessionActivityPersistence {
   async endSessionTerminallyReleasedInRow(session: Session): Promise<Error> {
     const sessionId = session.sessionId;
     if (this.host.superseded.isReassertPending(sessionId)) {
-      // The terminal row is this daemon's own superseded release's, about to be rewritten live
-      // (#11206): the session lives on, and only this activity write did not persist.
+      // This daemon is rewriting the live row after an overlapping row write (#11557): the
+      // session lives on, and only this activity write did not persist.
       return new DeviceSessionNotActiveError(sessionId);
     }
     const persistedRelease = await this.host.getPersistedTerminalRelease(sessionId);
-    if (
-      !persistedRelease ||
-      this.host.superseded.isReassertPending(sessionId) ||
-      this.host.superseded.isOwedFor(session, persistedRelease.releaseReason)
-    ) {
+    if (!persistedRelease || this.host.superseded.isReassertPending(sessionId)) {
       // The refused row is gone or unreadable (pruned, or a store without lookup), or is being
-      // rewritten live, or that rewrite failed and is still owed (#11557): there is no release to
-      // adopt, and the activity still did not persist.
+      // rewritten live: there is no release to adopt, and the activity still did not persist.
       return new DeviceSessionNotActiveError(sessionId);
     }
     const releaseReason = persistedRelease.releaseReason;

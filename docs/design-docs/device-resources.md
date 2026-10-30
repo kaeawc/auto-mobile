@@ -14,6 +14,14 @@ virtual devices started outside AutoMobile keep unavailable image-only facts as 
 `null`. `runtime.orientation` comes from a bounded live orientation probe (Android) and remains
 `null` where no safe read signal exists (currently iOS).
 
+Apple Watch simulators are `platform: "watchos"` ([decision](../decisions/watchos-platform.md)).
+`simctl list devices` returns them beside iPhone simulators, so the iOS simulator listing skips
+watchOS runtimes and no iOS resource, tool or readiness path sees a watch. Watches, installed
+watchOS runtimes and Apple Watch device types appear only in
+`automobile:devices/images/watchos` (`watchosCount`, a `watchos` catalog and inventory
+observation); the iOS provisioning catalog excludes them. `automobile:devices/images` stays
+Android and iOS.
+
 Read-only Android inventory shares successful AVD-name and display probes, plus configured
 AVD listings, for `ANDROID_INVENTORY_ENRICHMENT_TTL_MS` (2,500 ms). Device enrichment keys
 include the serial and the ADB list observation; a fresh list or bypass cannot reuse a prior
@@ -592,3 +600,43 @@ skip the read; cancellation remains cancellation.
 
 Tools for Siri (#14892), dictation, HealthKit, widgets and Spotlight lookups
 register a dependency and a scoped preflight call when they ship.
+
+## Audio capabilities (#13626)
+
+The `capabilityInventory` of a device reports whether it can record or play audio, so a scheduler can
+keep audio tests off hosts that can never pass them.
+
+| id                                 | `supported` when                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `ios.simulator.audioInput`         | the host's CoreAudio default input has at least one input stream                                  |
+| `ios.simulator.audioOutput`        | the host's CoreAudio default output has at least one output stream                                |
+| `ios.simulator.audioOutputCapture` | the default output is virtual or a known loopback driver, so its signal can be read back (#13629) |
+| `android.emulator.audioInput`      | `hw.audioInput=yes`, no `-no-audio` (`AUTOMOBILE_EMULATOR_AUDIO=false`), and a host input exists  |
+| `android.emulator.audioOutput`     | `hw.audioOutput=yes` and no `-no-audio`                                                           |
+
+An unsupported entry carries an actionable `reason`, for example "No host audio input device;
+install a virtual loopback device and make it the default input". A supported host entry names the
+default device and its transport (`built-in`, `virtual`, `usb`, ...) in its `reason`, so "real mic"
+and "virtual loopback" can be told apart.
+
+- **`audio_input_unavailable` (#13627).** `src/utils/audio/audioInputDiagnostic.ts` derives the
+  diagnostic from a non-available `*.audioInput` entry, so there is no second detection path. An iOS
+  simulator reads the live cached host probe (not an inventory captured at discovery); an Android
+  emulator uses its inventory, read from its AVD config by name when the device arrives without one
+  (the daemon session path builds a bare device). Physical devices never
+  get it. `observe` adds it to its own served copy only, so cached observations reused by action
+  tools never carry it; a microphone grant keeps `success` and adds it under `diagnostics`.
+- **Probe.** `src/utils/audio/coreAudioHal.ts` reads the CoreAudio HAL through `bun:ffi`
+  (`AudioObjectGetPropertyData` on the system object, then the default device's streams, name and
+  transport). HAL property queries need no GUI session, so the probe runs the same from a LaunchDaemon
+  service user or an SSH session; it never uses `system_profiler` or ScreenCaptureKit.
+- **Cache.** The answer is cached for the daemon's lifetime and re-probed whenever either default
+  device id changes (one cheap HAL query each per read); `refreshHostAudio()` forces a re-probe.
+- **Not probed.** On a host without a probe (Linux; ALSA/PulseAudio/PipeWire is not implemented) iOS
+  audio entries are left out and Android input follows the AVD config alone, so the inventory never
+  over-claims. Under `bun test` the default probe reports "not probed"; tests inject a fake HAL.
+- **Evidence.** The unit tests run the interpretation over a CoreAudio capture from a MacBook Pro
+  (`test/fixtures/host-audio/coreaudio-macbook-pro.json`) and an Android `config.ini` capture
+  (`test/fixtures/android-avd-audio/config.ini`). A host with no input or a loopback default is a fake
+  HAL scenario, not a capture, and a LaunchDaemon run with no Aqua session is an owed manual check,
+  so the PR is `needs-device-verify`.

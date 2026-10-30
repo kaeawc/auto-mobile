@@ -24,6 +24,7 @@ import { Timer } from "../../utils/SystemTimer";
 import { IdGenerator } from "../../utils/IdGenerator";
 import { type DaemonDeviceSessionStore } from "../daemonDependencies";
 import type { DaemonStateWrites } from "../daemonContext";
+import type { DeviceLossMisses } from "../deviceLossMisses";
 
 /** Live views of daemon-owned services and lifetime state; collaborators receive only named Picks. */
 export interface DaemonCoreServices {
@@ -74,7 +75,7 @@ export interface DaemonLifecycleState {
   deviceDisconnectMonitor: () => SingleFlightInterval | null;
   setDeviceDisconnectMonitor: (value: SingleFlightInterval | null) => void;
   deferredSessionRecoverySweeps: () => Set<Promise<void>>;
-  deviceDisconnectMisses: () => Map<string, number>;
+  deviceDisconnectMisses: () => DeviceLossMisses;
   sessionBrokerConfigPath: () => string | undefined;
   managedExecutionReowner: () => ManagedExecutionReowner | undefined;
   setManagedExecutionReowner: (value: ManagedExecutionReowner | undefined) => void;

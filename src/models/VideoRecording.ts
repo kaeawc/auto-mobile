@@ -115,4 +115,6 @@ export interface VideoRecordingMetadata {
   recordedPanel?: VideoRecordingPanel;
   transitions?: VideoRecordingDisplayTransition[];
   warnings?: string[];
+  /** Set when the recording asked for audio: whether the file has an audio track. */
+  hasAudioTrack?: boolean;
 }

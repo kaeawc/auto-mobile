@@ -37,13 +37,13 @@ internal object PrototypeDataRules {
         fail("data", "Data byte limit exceeded")
       else null
 
-  val dataActionTypes = setOf("setData", "appendData", "removeData")
+  val dataActionTypes = setOf("setData", "appendData", "prependData", "upsertData", "removeData")
 
   /**
-   * Static checks for `setData`, `appendData` and `removeData` (#12519) that the contract cannot
-   * express: the `/data/<pointer>` path, a literal value data can hold, and an `appendData` target
-   * the spec's own data already defines as something other than an array. A target under `{index}`
-   * or one only an earlier write creates is the device's to check.
+   * Static checks for `setData`, `appendData`, `prependData` and `removeData` (#12519) that the
+   * contract cannot express: the `/data/<pointer>` path, a literal value data can hold, and an
+   * `appendData` target the spec's own data already defines as something other than an array. A
+   * target under `{index}` or one only an earlier write creates is the device's to check.
    */
   fun dataActionErrors(context: Context, root: JsonElement): PrototypeSpecError? {
     val data = (root as? JsonObject)?.get("data") as? JsonObject
@@ -57,19 +57,38 @@ internal object PrototypeDataRules {
             "$path.path",
             "Data action paths are /data/<RFC 6901 pointer> and address a member of data",
           )
-      val literal = (value["value"] as? JsonObject)?.get("value")
-      if (literal != null && dataError(JsonObject(mapOf("value" to literal))) != null) {
-        return fail(
-          "$path.value.value",
-          "A data write value must be a string, boolean, finite number, array or object",
-        )
+      dataLiteralError(value, path)?.let {
+        return it
       }
-      if (type == "appendData" && !PrototypeRepeatTemplate.dataPathHasIndex(actionPath)) {
+      if (
+        type in setOf("appendData", "prependData", "upsertData") &&
+          !PrototypeRepeatTemplate.dataPathHasIndex(actionPath)
+      ) {
         val target = PrototypeDataPointer.resolve(data, pointer)
         if (target != null && target !is JsonArray) {
-          return fail("$path.path", "appendData target is not an array")
+          return fail("$path.path", "$type target is not an array")
         }
       }
+    }
+    return null
+  }
+
+  private fun dataLiteralError(value: JsonObject, path: String): PrototypeSpecError? {
+    val type = value.text("type")
+    val literal = (value["value"] as? JsonObject)?.get("value")
+    if (type == "upsertData" && literal != null) {
+      val identity = PrototypeDataPointer.resolve(literal, value.text("key").orEmpty())
+      if (identity == null || identity is JsonNull)
+        return fail(
+          "$path.value.value",
+          "upsertData key pointer must be present and non-null in the literal value",
+        )
+    }
+    if (literal != null && dataError(JsonObject(mapOf("value" to literal))) != null) {
+      return fail(
+        "$path.value.value",
+        "A data write value must be a string, boolean, finite number, array or object",
+      )
     }
     return null
   }

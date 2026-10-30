@@ -1,5 +1,8 @@
 import type { PinchRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
-import type { TwoFingerSwipeRequest } from "../../src/features/observe/android/types";
+import type {
+  LatestHierarchyOptions,
+  TwoFingerSwipeRequest,
+} from "../../src/features/observe/android/types";
 import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import type {
   AndroidAccessibilityActionRequest,
@@ -27,9 +30,11 @@ import {
   AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
 import type { PrototypeSpec } from "../../src/features/prototype/prototypeSpec";
+import type { PrototypeChannelHost } from "../../src/features/prototype/prototypeChannelHost";
 import type { PrototypeRequestHost } from "../../src/features/prototype/prototypeRequestHandler";
 import type { PrototypeAssetUpload } from "../../src/features/prototype/prototypeAssets";
 import type { PrototypeAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyPrototypes";
+import type { AndroidScreenshotRequestOptions } from "../../src/features/observe/android/AndroidScreenshotRequester";
 import type {
   PrototypeAppearanceOverride,
   PrototypeAssetResult,
@@ -55,6 +60,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   constructor(private readonly timer: Timer = defaultTimer) {}
 
   private prototypeRequestHost: PrototypeRequestHost | undefined;
+  private prototypeChannelHost: PrototypeChannelHost | undefined;
   private nodeActionSelectorsSupported = true;
   private nodeActionHistory: Array<{
     action: string;
@@ -192,6 +198,21 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.deleteResult;
   }
 
+  readonly advanceClockRequests: { id: string; advanceTimeMs: number }[] = [];
+  private advanceClockResult: PrototypeResult = { success: true, fired: 0 };
+  setAdvanceClockResult(result: PrototypeResult): void {
+    this.advanceClockResult = result;
+  }
+  async requestAdvancePrototypeClock(
+    id: string,
+    advanceTimeMs: number,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.advanceClockRequests.push({ id, advanceTimeMs });
+    this.checkFailure("requestAdvancePrototypeClock");
+    return this.advanceClockResult;
+  }
   readonly clearStorageRequests: string[] = [];
   private clearStorageResult: PrototypeResult = { success: true, cleared: 0 };
   setClearStorageResult(result: PrototypeResult): void {
@@ -245,6 +266,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         reset?: boolean;
         replaceOthers?: boolean;
         appearance?: PrototypeAppearanceOverride;
+        locale?: string;
       }
     | { method: "dismiss"; target: PrototypeDismiss; timeoutMs: number; perf?: PerformanceTracker }
   > = [];
@@ -273,12 +295,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     spec: PrototypeSpec,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
+    overrides: PrototypeShowOverrides = {},
   ): Promise<PrototypeResult> {
     this.checkFailure("requestShowPrototype");
-    const overrides = typeof appearance === "string" ? { appearance } : appearance;
+    const { displayId, reset } = overrides;
     this.prototypeHistory.push({
       method: "show",
       spec,
@@ -286,8 +306,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       ...(displayId === undefined ? {} : { displayId }),
       ...(reset === undefined ? {} : { reset }),
-      ...(overrides?.appearance === undefined ? {} : { appearance: overrides.appearance }),
-      ...(overrides?.replaceOthers === false ? { replaceOthers: false } : {}),
+      ...(overrides.locale === undefined ? {} : { locale: overrides.locale }),
+      ...(overrides.appearance === undefined ? {} : { appearance: overrides.appearance }),
+      ...(overrides.replaceOthers === false ? { replaceOthers: false } : {}),
     });
     const hold = this.showHold;
     this.showHold = undefined;
@@ -811,7 +832,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     timeout: number = 100,
     perf?: PerformanceTracker,
     skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
+    _options?: LatestHierarchyOptions,
   ): Promise<AccessibilityHierarchyResponse> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getLatestHierarchy");
@@ -1110,6 +1131,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    _options?: AndroidScreenshotRequestOptions,
   ): Promise<ScreenshotResult> {
     this.screenshotRequestCount++;
     await this.applyDelay("screenshot");
@@ -1579,6 +1601,14 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   attachPrototypeRequestHost(host: PrototypeRequestHost | undefined): void {
     this.prototypeRequestHost = host;
+  }
+
+  attachPrototypeChannelHost(host: PrototypeChannelHost | undefined): void {
+    this.prototypeChannelHost = host;
+  }
+
+  getPrototypeChannelHost(): PrototypeChannelHost | undefined {
+    return this.prototypeChannelHost;
   }
 
   getPrototypeRequestHost(): PrototypeRequestHost | undefined {

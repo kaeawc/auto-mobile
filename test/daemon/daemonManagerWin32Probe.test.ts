@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { useScratchRoot } from "../helpers/scratchRoot";
 import { join } from "node:path";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import { DAEMON_SOCKET_PATH_FLAG, parseDaemonSocketPath } from "../../src/daemon/processTable";
 import type { DaemonStatus } from "../../src/daemon/types";

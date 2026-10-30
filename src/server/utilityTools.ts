@@ -1,4 +1,4 @@
-import { PLAN_RELEVANT } from "./toolRegistryTypes";
+import { PLAN_RELEVANT, SELECTS_ACTIVE_DEVICE } from "./toolRegistryTypes";
 import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import type { NetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
 import { createSetActiveDeviceHandler, type SetActiveDeviceSeams } from "./setActiveDevice";
@@ -49,7 +49,7 @@ import {
   displayConfigToolOptions,
 } from "./displayConfigTool";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { BootedDevice, Platform } from "../models";
+import { BootedDevice, Platform, requireAndroidOrIosPlatform } from "../models";
 import {
   addDeviceTargetingToSchema,
   addSessionUuidToSchema,
@@ -107,7 +107,13 @@ export const setActiveDeviceSchema = addSessionUuidToSchema(
         ),
       // #5870: the platform is inferred from the resolved device (or the session),
       // so callers targeting a concrete `deviceId` need not also send `platform`.
-      platform: platformSchema.optional(),
+      // A watch is the exception (#14908): it is selected only when "watchos" is named.
+      platform: z
+        .enum(["android", "ios", "watchos"])
+        .optional()
+        .describe(
+          'Inferred from the device; "watchos" is required to select an Apple Watch simulator',
+        ),
     })
     .strict(),
 );
@@ -540,7 +546,7 @@ async function captureBiometricEnrollment(
       failure: {
         success: false,
         deviceId: device.deviceId,
-        platform: device.platform,
+        platform: requireAndroidOrIosPlatform(device.platform, "Biometric enrollment"),
         biometrics: state,
         ...(state.error ? { error: state.error } : {}),
       },
@@ -842,8 +848,7 @@ export function registerUtilityTools(
       input.networkCondition
         ? runSessionNetworkMutation(
             sessionManager,
-            args.sessionUuid,
-            device.deviceId,
+            { sessionUuid: args.sessionUuid, deviceId: device.deviceId },
             registerNetworkRestore,
             (rule) => {
               useIosAppNetworkRule(rule);
@@ -910,7 +915,7 @@ export function registerUtilityTools(
     "Set active device using existing session binding or a sessionless per-MCP-connection device pin that lasts for that connection (cleared when the connection disconnects or the device is released). With a daemon session, display pins a display key or role (inner/cover/rear/external); null clears, omission preserves. Explicit display arguments (including active) bypass the pin; otherwise pin beats focus/posture. On single-display devices, active resolves to the sole key; on multi-display devices active cannot be pinned. all cannot be pinned. Missing or inactive pinned panels fail without dispatch; clear with display: null. Pins clear on release/rebind and are unsupported in direct mode. Returns a text JSON result with message, deviceId, optional sessionUuid, and displayPin (string or null) when display was passed or a pin is present/cleared; never-pinned calls omit displayPin.",
     setActiveDeviceSchema,
     setActiveDeviceHandler,
-    { defaultEnabled: true, outputSchema: setActiveDeviceResultSchema },
+    { defaultEnabled: true, outputSchema: setActiveDeviceResultSchema, ...SELECTS_ACTIVE_DEVICE },
   );
 
   ToolRegistry.registerDeviceAware(

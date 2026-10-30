@@ -1,0 +1,56 @@
+{
+  "spec": {
+    "id": "s2",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "shakes": 0
+    },
+    "requires": {
+      "platform": ["sensors"]
+    },
+    "platform": {
+      "on": {
+        "sensors.tilt": [
+          {
+            "type": "increment",
+            "key": "shakes"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Shakes {shakes}, heading {platform:/sensors/headingDeg}"
+        },
+        {
+          "type": "text",
+          "text": "Steps {platform:/sensors/steps}"
+        },
+        {
+          "type": "text",
+          "text": "Too close",
+          "visibleWhen": {
+            "platform": "/sensors/proximityNear",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Dark here",
+          "visibleWhen": {
+            "platform": "/sensors/lightLux",
+            "equals": 0
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "platform.on[\"sensors.tilt\"]"
+}

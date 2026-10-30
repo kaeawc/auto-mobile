@@ -181,9 +181,15 @@ export async function bootSystemUiAnrReplacement(
   bootService: DeviceBootService,
   args: StartDeviceArgs,
   sourceImage: DeviceInfo,
-  totalDeadlineMs: number,
-  signal: AbortSignal | undefined,
-  progress: { report: ProgressCallback } | undefined,
+  {
+    totalDeadlineMs,
+    signal,
+    progress,
+  }: {
+    totalDeadlineMs: number;
+    signal: AbortSignal | undefined;
+    progress: { report: ProgressCallback } | undefined;
+  },
 ): Promise<DeviceBootResult> {
   const replacement = await bootService.boot(
     {
@@ -249,8 +255,10 @@ export async function handoffSystemUiAnrReplacement(
     replacementBoot.device,
     sourceImage,
     replacementBoot.processHandle,
-    () => publishReplacementReadinessMarker?.(replacementBoot.device),
-    getShutdownInitiatingExecutionId(),
+    {
+      beforeReplacementPublishes: () => publishReplacementReadinessMarker?.(replacementBoot.device),
+      excludeExecutionId: getShutdownInitiatingExecutionId(),
+    },
   );
 }
 
@@ -259,10 +267,15 @@ export async function retireSystemUiAnrReplacement(
   expectedReplacement: PooledDevice | undefined,
   replacementBoot: DeviceBootResult,
   collectColdBootSettlement: ColdBootSettlementCollector,
-  operations: SystemUiAnrRecoveryOperations,
-  preservedSession: {
-    sessionId: string | undefined;
-    release: (replacement: PooledDevice) => Promise<void>;
+  {
+    operations,
+    preservedSession,
+  }: {
+    operations: SystemUiAnrRecoveryOperations;
+    preservedSession: {
+      sessionId: string | undefined;
+      release: (replacement: PooledDevice) => Promise<void>;
+    };
   },
 ): Promise<void> {
   const currentReplacement = devicePool?.getDevice(replacementBoot.device.deviceId);
@@ -307,14 +320,11 @@ export async function restartAndroidForSystemUiAnr(
   );
   state.shutdownWasConfirmed = true;
   state.replacementBoot = carryCreatedByCall(
-    await bootSystemUiAnrReplacement(
-      bootService,
-      args,
-      state.sourceImage,
+    await bootSystemUiAnrReplacement(bootService, args, state.sourceImage, {
       totalDeadlineMs,
       signal,
       progress,
-    ),
+    }),
     boot,
   );
   assertSystemUiAnrReplacementIdentity(state.replacementBoot, state.sourceImage);
@@ -340,11 +350,13 @@ export async function restartAndroidForSystemUiAnr(
         handoff?.replacementDevice,
         adoptedReplacementBoot,
         context.collectColdBootSettlement,
-        context.operations,
         {
-          sessionId: handoff?.preservedSessionId,
-          release: async (replacement) =>
-            await context.releasePreservedSession(replacement, handoff?.preservedSessionId),
+          operations: context.operations,
+          preservedSession: {
+            sessionId: handoff?.preservedSessionId,
+            release: async (replacement) =>
+              await context.releasePreservedSession(replacement, handoff?.preservedSessionId),
+          },
         },
       ),
     validatePreservedSession: handoff?.validatePreservedSession,
@@ -517,7 +529,7 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
         boot.device,
         sourceImage.name,
         sourceImage.name,
-        recoveryAutolockClient,
+        { autolockClient: recoveryAutolockClient },
       )
     : undefined;
   const state: SystemUiAnrRestartState = {

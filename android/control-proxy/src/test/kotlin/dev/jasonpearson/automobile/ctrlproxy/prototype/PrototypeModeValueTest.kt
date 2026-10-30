@@ -187,7 +187,7 @@ class PrototypeModeValueTest {
   fun `a fullscreen scrim keeps its authored slot beside the single hex literal`() {
     assertEquals(
       PrototypePlacement.Fullscreen(Color(0x66000000), PrototypeModeValue.Single("#66000000")),
-      mapPrototypePlacement(PrototypeFullscreenPlacement("#66000000")),
+      mapPrototypePlacement(PrototypeFullscreenPlacement(PrototypeModeValue.Single("#66000000"))),
     )
     assertNull(fullscreen(PrototypeModeValue.Single("scrim")).scrim)
     assertNull(fullscreen(hexPair).scrim)

@@ -19,14 +19,11 @@ export async function resolveVideoStreamDevice(
   timer: Timer = defaultTimer,
   signal?: AbortSignal,
 ): Promise<BootedDevice> {
-  return resolveStreamDevice(
-    deviceManager,
-    deviceId,
-    platform,
+  return resolveStreamDevice(deviceManager, deviceId, platform, {
     timer,
     signal,
-    "video-stream-resolve",
-  );
+    source: "video-stream-resolve",
+  });
 }
 
 export async function defaultResolveDevice(

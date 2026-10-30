@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "m7",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "draft": {
+        "picked": [],
+        "photo": {}
+      }
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["mediaLibrary"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "mediaLibrary.pick",
+          "args": {
+            "media": {
+              "value": "images"
+            }
+          },
+          "into": "/draft/picked",
+          "statusKey": "pickStatus"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].into"
+}

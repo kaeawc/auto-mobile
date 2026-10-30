@@ -42,10 +42,31 @@ final class PrototypeMotionTests: XCTestCase {
         XCTAssertTrue(PrototypeMotion(specMotion: "standard", reduceMotion: false).enabled)
     }
 
-    func testSpecMotionNoneOrReduceMotionTurnsItOff() {
-        XCTAssertFalse(PrototypeMotion(specMotion: "none", reduceMotion: false).enabled)
-        XCTAssertFalse(PrototypeMotion(specMotion: nil, reduceMotion: true).enabled)
-        XCTAssertFalse(PrototypeMotion(specMotion: "standard", reduceMotion: true).enabled)
+    func testProfilesAndAnimationKinds() {
+        for spec in [nil, "standard", "reduced", "none"] as [String?] {
+            for reduced in [false, true] {
+                let motion = PrototypeMotion(specMotion: spec, reduceMotion: reduced)
+                let expected: PrototypeMotionProfile = spec == "none" ? .off :
+                    (spec == "reduced" || reduced ? .reduced : .full)
+                XCTAssertEqual(motion.profile, expected)
+                XCTAssertEqual(motion.enabled, expected != .off)
+                XCTAssertEqual(motion.spatial, expected == .full)
+                XCTAssertEqual(motion.fadeOnly, expected == .reduced)
+                XCTAssertEqual(motion.fadeDuration, expected == .off ? nil : 0.25)
+                XCTAssertEqual(motion.containerSizeDuration, expected == .full ? 0.25 : nil)
+                XCTAssertEqual(motion.pressScaleDuration, expected == .full ? 0.2 : nil)
+                for transition in [nil, "none", "fade", "slide", "expand"] as [String?] {
+                    if expected == .reduced {
+                        XCTAssertEqual(
+                            motion.visibility(transition: transition),
+                            transition == "none" ? .instant : .fade
+                        )
+                    } else if expected == .off {
+                        XCTAssertEqual(motion.visibility(transition: transition), .instant)
+                    }
+                }
+            }
+        }
     }
 
     func testNodeTransitionPicksTheVisibilityAnimation() {
@@ -55,6 +76,19 @@ final class PrototypeMotionTests: XCTestCase {
         XCTAssertEqual(motion.visibility(transition: "fade"), .fade)
         XCTAssertEqual(motion.visibility(transition: "expand"), .expand)
         XCTAssertEqual(motion.visibility(transition: "slide"), .slide)
+    }
+
+    func testStackTransitionOnlyControlsNavigation() {
+        let motion = PrototypeMotion(specMotion: nil, reduceMotion: false)
+        for transition in PrototypeStackTransition.allCases {
+            XCTAssertEqual(motion.visibility(transition: transition.rawValue, nodeType: "stack"), .standard)
+        }
+        XCTAssertEqual(motion.visibility(transition: "slide", nodeType: "column"), .slide)
+        XCTAssertEqual(
+            PrototypeMotion(specMotion: "none", reduceMotion: false)
+                .visibility(transition: "slide", nodeType: "stack"),
+            .instant
+        )
     }
 
     func testDisabledMotionIsInstantWhateverTheTransition() {
@@ -289,7 +323,31 @@ final class PrototypeMotionTests: XCTestCase {
             column.drawnChildren { $0.holds(state) }.map(\.offset)
         }
         XCTAssertEqual(offsets([:]), [0])
-        XCTAssertEqual(offsets(["on": .bool(true)]), [0, 1, 4])
+        XCTAssertEqual(offsets(["on": .bool(true)]), [0, 1])
         XCTAssertEqual(offsets(["on": .bool(false)]), [0, 5])
+    }
+
+    private struct FakeAccessibility: PrototypeAccessibilityProviding {
+        var isReduceMotionEnabled = false
+        var prefersCrossFadeTransitions = false
+    }
+
+    func testReduceMotionAndCrossFadePreferenceSelectReducedNeverOff() {
+        let cases: [(FakeAccessibility, PrototypeMotionProfile)] = [
+            (FakeAccessibility(), .full),
+            (FakeAccessibility(isReduceMotionEnabled: true), .reduced),
+            (FakeAccessibility(prefersCrossFadeTransitions: true), .reduced),
+            (FakeAccessibility(isReduceMotionEnabled: true, prefersCrossFadeTransitions: true), .reduced),
+        ]
+        for (accessibility, expected) in cases {
+            let motion = PrototypeMotion(specMotion: nil, reduceMotion: false, accessibility: accessibility)
+            XCTAssertEqual(motion.profile, expected)
+            XCTAssertTrue(motion.enabled)
+        }
+        let none = PrototypeMotion(
+            specMotion: "none", reduceMotion: false,
+            accessibility: FakeAccessibility(isReduceMotionEnabled: true, prefersCrossFadeTransitions: true)
+        )
+        XCTAssertEqual(none.profile, .off)
     }
 }

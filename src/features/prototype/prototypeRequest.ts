@@ -1,3 +1,4 @@
+import { prototypeRequestAppendError } from "./prototypeRequestAppend";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { forbiddenHeaderOf } from "./prototypeEgressPolicy";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -97,7 +98,7 @@ export function prototypeRequestMetaPath(into: string): string {
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const PLACEHOLDER_URL_SCHEME = /^https?:\/\//i;
 
-function urlError(url: string): string | undefined {
+export function prototypeRequestUrlError(url: string): string | undefined {
   if (url.includes("{")) {
     return PLACEHOLDER_URL_SCHEME.test(url)
       ? undefined
@@ -157,7 +158,7 @@ function headerLineProblem(field: string, value: unknown, literal: unknown): boo
   return field === "headers" && typeof text === "string" && /[\r\n]/.test(text);
 }
 
-function literalEntryError(
+export function prototypeRequestEntryError(
   entries: unknown,
   at: string,
   field: "headers" | "query",
@@ -195,7 +196,7 @@ function requestActionError(
   action: Record<string, unknown>,
   at: string,
 ): PrototypeRequestActionError | undefined {
-  const url = typeof action.url === "string" ? urlError(action.url) : undefined;
+  const url = typeof action.url === "string" ? prototypeRequestUrlError(action.url) : undefined;
   if (url !== undefined) {
     return { path: `${at}.url`, message: url };
   }
@@ -210,7 +211,9 @@ function requestActionError(
     return { path: `${at}.into`, message: into };
   }
   return (
-    literalEntryError(action.headers, at, "headers") ?? literalEntryError(action.query, at, "query")
+    prototypeRequestAppendError(action, at) ??
+    prototypeRequestEntryError(action.headers, at, "headers") ??
+    prototypeRequestEntryError(action.query, at, "query")
   );
 }
 
@@ -231,9 +234,12 @@ export function prototypeRequestError(
 /** The first request-related static error among the structurally valid `actions`. */
 export function prototypeRequestsError(
   actions: readonly { value: Record<string, unknown>; path: string }[],
+  data?: unknown,
 ): PrototypeRequestActionError | undefined {
   for (const { value, path } of actions) {
-    const error = prototypeRequestError(value, path);
+    const error =
+      prototypeRequestError(value, path) ??
+      (value.type === "request" ? prototypeRequestAppendError(value, path, data ?? {}) : undefined);
     if (error) {
       return error;
     }
@@ -251,6 +257,10 @@ export function prototypeRequestStatusKeyError(
   at: string,
   state: Record<string, unknown>,
 ): PrototypeRequestActionError | undefined {
+  const progress = prototypeRequestProgressKeyError(action, at, state);
+  if (progress) {
+    return progress;
+  }
   const key =
     action.type === "request" || action.type === "platform" ? action.statusKey : undefined;
   if (typeof key !== "string") {
@@ -262,6 +272,31 @@ export function prototypeRequestStatusKeyError(
   return typeof state[key] === "string"
     ? undefined
     : { path: `${at}.statusKey`, message: "statusKey requires a string state key" };
+}
+
+function prototypeRequestProgressKeyError(
+  action: Record<string, unknown>,
+  at: string,
+  state: Record<string, unknown>,
+): PrototypeRequestActionError | undefined {
+  if (action.type !== "request" || typeof action.progressKey !== "string") {
+    return undefined;
+  }
+  const body = typeof action.body === "object" && action.body !== null ? action.body : undefined;
+  if (!body || !["multipart", "form", "file"].some((key) => Object.hasOwn(body, key))) {
+    return { path: `${at}.progressKey`, message: "progressKey requires an upload body" };
+  }
+  const value = state[action.progressKey];
+  return Object.hasOwn(state, action.progressKey) &&
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 100
+    ? undefined
+    : {
+        path: `${at}.progressKey`,
+        message: "progressKey requires a declared number state key from 0 to 100",
+      };
 }
 
 export interface ResolvedPrototypeRequest {

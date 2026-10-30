@@ -22,6 +22,7 @@ import {
   ObserveResult,
   PinchOnOptions,
   PinchOnResult,
+  requireAndroidOrIosPlatform,
 } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ElementResolver } from "../utility/ElementResolver";
@@ -303,8 +304,7 @@ export class PinchOn extends BaseVisualChange {
         viewHierarchy,
         searchCriteria,
         this.visionConfig,
-        finalErrorMessage,
-        { visionAnalyzer: this.visionAnalyzer },
+        { baseError: finalErrorMessage, visionAnalyzer: this.visionAnalyzer },
       );
     }
 
@@ -658,12 +658,11 @@ export class PinchOn extends BaseVisualChange {
     return scoped === snapshot.hierarchy
       ? snapshot
       : identifyObservedHierarchy(
-          this.device.platform,
+          requireAndroidOrIosPlatform(this.device.platform, "pinchOn"),
           scoped,
           snapshot.requestedFreshness,
           this.timer,
-          undefined,
-          snapshot.captureId,
+          { captureId: snapshot.captureId },
         );
   }
 

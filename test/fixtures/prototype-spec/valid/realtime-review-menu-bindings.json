@@ -1,0 +1,64 @@
+{
+  "id": "menu",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["device"]
+  },
+  "data": {
+    "rows": []
+  },
+  "state": {
+    "open": true,
+    "s": ""
+  },
+  "root": {
+    "type": "menu",
+    "openWhen": {
+      "key": "open",
+      "equals": true
+    },
+    "items": [
+      {
+        "label": "Write",
+        "onTap": [
+          {
+            "type": "upsertData",
+            "path": "/data/rows",
+            "key": "/id",
+            "value": {
+              "value": {
+                "id": 1
+              }
+            }
+          },
+          {
+            "type": "setState",
+            "key": "s",
+            "value": {
+              "platform": "/device/os"
+            }
+          },
+          {
+            "type": "appendData",
+            "path": "/data/rows",
+            "maxItems": 2,
+            "value": {
+              "platform": "/device/windowWidth"
+            }
+          },
+          {
+            "type": "setData",
+            "path": "/data/os",
+            "value": {
+              "platform": "/device/os"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

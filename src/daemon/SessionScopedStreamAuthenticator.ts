@@ -236,14 +236,11 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     }
     const ownerBase = resolveToolSelectionBaseSessionUuid(owner, sessionManager) ?? owner;
     if (ownerBase !== baseSessionUuid) {
-      throw new InputDeviceOwnedError(
-        this.operation,
-        deviceId,
-        baseSessionUuid,
-        undefined,
-        `${this.operation} rejected: device ${deviceId} is bound to a different daemon session; ` +
+      throw new InputDeviceOwnedError(this.operation, deviceId, baseSessionUuid, undefined, {
+        message:
+          `${this.operation} rejected: device ${deviceId} is bound to a different daemon session; ` +
           `a subscriber cannot attach to another session's capture without authorization.`,
-      );
+      });
     }
   }
 }

@@ -168,6 +168,25 @@ export const DAEMON_ENV = {
     internal: true,
     doc: "Acceptance harness discovery ordering.",
   },
+  MCP_MODERN_ERA: {
+    name: "AUTOMOBILE_MCP_MODERN_ERA",
+    kind: "bool",
+    default: "off",
+    doc: "Serve MCP 2026-07-28 envelope requests on the daemon HTTP endpoint (1/true/yes/on).",
+  },
+  ELICITATION: {
+    name: "AUTOMOBILE_ELICITATION",
+    kind: "enum",
+    values: ["on", "off"],
+    default: "on",
+    doc: "`off` never asks the client which device to use for an ambiguous call; the call returns the ambiguous_device_target refusal (CI and benchmarks).",
+  },
+  SERVER_INSTRUCTIONS: {
+    name: "AUTOMOBILE_SERVER_INSTRUCTIONS",
+    kind: "bool",
+    default: "off",
+    doc: "Return a short usage instructions block in the MCP initialize result (agent benchmark A/B).",
+  },
   TOOL_RESULTS_NO_STRUCTURED_CONTENT: {
     name: "AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT",
     kind: "bool",

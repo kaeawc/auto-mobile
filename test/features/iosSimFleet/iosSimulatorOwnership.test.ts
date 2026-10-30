@@ -12,7 +12,10 @@ import {
   FleetBootInstrumentation,
   bootProfileId,
 } from "../../../src/features/iosSimFleet/IosBootInstrumentation";
-import { BindingDiscoveryIncompleteError } from "../../../src/daemon/sessionBroker/provisioning/refusal";
+import {
+  BindingRegistrySchemaUnsupportedError,
+  BindingDiscoveryIncompleteError,
+} from "../../../src/daemon/sessionBroker/provisioning/refusal";
 import { BindingRegistryUpgradePendingError } from "../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeLogger } from "../../fakes/FakeLogger";
@@ -73,6 +76,27 @@ function setup(limit = 3, ownership?: IosSimulatorOwnershipReader) {
 }
 
 describe("iOS simulator ownership", () => {
+  test("ownership readers preserve the non-retryable refusal after generic acquisition degrades", async () => {
+    const timer = new FakeTimer();
+    const error = new BindingRegistrySchemaUnsupportedError("/fake/ios-ownership.sqlite", [
+      "future",
+    ]);
+    const bindings = new RegistryBindingExclusion(async () => {
+      throw error;
+    }, timer);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await bindings.refresh();
+      expect(bindings.degraded()?.mode).toBe("files_only");
+      const reader = createIosSimulatorOwnershipReader(bindings, () => ({
+        getAssignedDevices: () => new Set<string>(),
+      }));
+      await expect(reader.refresh()).rejects.toBe(error);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("restart: a new gate classifies persisted S1/S2 as held and a foreign simulator as external", async () => {
     const ownership = new Ownership();
     const { gate } = setup(3, ownership);

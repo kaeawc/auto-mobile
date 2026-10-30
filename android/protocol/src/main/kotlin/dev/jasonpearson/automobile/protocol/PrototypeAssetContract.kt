@@ -34,6 +34,9 @@ object PrototypeAssetContract {
   /** Largest single font asset (`font/ttf`, `font/otf`), in decoded bytes. */
   val MAX_PROTOTYPE_FONT_ASSET_BYTES: Int = limit("MAX_PROTOTYPE_FONT_ASSET_BYTES")
 
+  /** Largest UTF-8 AGSL source, in decoded bytes; rendering is Android-only and opt-in. */
+  val MAX_PROTOTYPE_SHADER_ASSET_BYTES: Int = limit("MAX_PROTOTYPE_SHADER_ASSET_BYTES")
+
   /** Most assets held at once. */
   val MAX_PROTOTYPE_ASSET_COUNT: Int = limit("MAX_PROTOTYPE_ASSET_COUNT")
 
@@ -46,6 +49,11 @@ object PrototypeAssetContract {
   /** Accepted MIME types, exact lowercase match. */
   val MIME_TYPES: Set<String> =
     contract.getValue("mimeTypes").jsonArray.map { it.jsonPrimitive.content }.toSet()
+
+  /** Ids the device mints for its own media items (#14192); a host asset id may not start so. */
+  const val MEDIA_ID_PREFIX = "media:"
+
+  fun isMediaId(id: String): Boolean = id.startsWith(MEDIA_ID_PREFIX)
 
   private fun limit(name: String) = limits.getValue(name).jsonPrimitive.int
 }

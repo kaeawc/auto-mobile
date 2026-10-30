@@ -30,8 +30,29 @@ portable test/doctor/iosExecResultConsolidation.test.ts                  # AST s
 portable test/utils/coreSimulatorDeviceSetEnvConstant.test.ts            # source scan of one environment-name constant
 portable test/utils/ios-cmdline-tools/DeviceAppManagerLaunchPreconditions.drift.test.ts # drift guard that reads source
 portable test/features/observe/ios/ctrlProxyWireScan.test.ts             # repo wire scanner plus a Windows path-separator guard
+portable test/features/observe/ios/observationBridgeState.test.ts        # pure parser plus the capability probe over fakes
+portable test/features/observe/ios/CtrlProxySdkObservation.test.ts      # delegate and decoder over the delegate harness
+portable test/features/observe/ios/CtrlProxySdkWebView.test.ts          # delegate and decoder over the delegate harness
+portable test/features/observe/ios/webViewBridgeScript.test.ts        # runs the SDK page script against a fake DOM
+portable test/features/observe/ios/iosSdkObservationMerge.test.ts       # pure hierarchy merge over fixtures
+portable test/features/observe/ios/IosSdkBridgeReader.test.ts           # bridge reader over a fake client
+portable test/features/observe/ios/iosSdkWebMerge.test.ts               # pure web-view hierarchy merge over fixtures
+portable test/features/observe/ios/IosSdkWebReader.test.ts              # web snapshot reader over a fake client
+portable test/features/observe/ios/iosSdkBridgeSnapshotRefresh.test.ts  # merge + snapshot/hash helpers over fixtures
+portable test/features/action/IosSdkBridgeTapRouter.test.ts             # tap routing over a fake client
+portable test/features/action/IosSdkWebActionRouter.test.ts          # web tap routing over a fake client
+portable test/features/action/TapOnElement.iosSdkBridge.test.ts          # tapOn routing over FakeIOSCtrlProxy
+portable test/features/action/TapOnElement.iosSdkWeb.test.ts             # tapOn web routing over FakeIOSCtrlProxy
+portable test/features/action/IosSdkBridgeSwipeRouter.test.ts           # swipe routing over a fake client
+portable test/features/action/swipeon/SwipeOn.iosSdkBridge.test.ts       # swipeOn routing over a fake client
+portable test/features/action/IosSdkBridgeTextRouter.test.ts            # text routing over a fake client
+portable test/features/action/sendkeys/IosSdkTextRouting.test.ts        # sendKeys bridge routing over a fake router
+portable test/features/action/SendKeys.iosSdkBridge.test.ts              # sendKeys executor over a fake router
+portable test/features/observe/collectors/IosObservationCollector.sdkBridge.test.ts # collector merge over fakes
+portable test/features/observe/collectors/IosObservationCollector.sdkWeb.test.ts # collector web merge over fakes
 portable test/features/prototype/prototypeIosSpecContract.test.ts        # generator output equals the embedded Swift contract file
 portable test/features/prototype/prototypeIosIconSymbols.test.ts         # schema table equals generated Swift symbols
+portable test/features/storage/iosStorageDiscovery.test.ts           # pure parsing of the SDK storage capability payload
 
 portable test/utils/iosDeviceResourceHazards.test.ts                    # pure hazard matching, no iOS host
 portable test/utils/iosDeviceResourceImpact.test.ts                     # pure catalog metadata and documentation parity, no iOS host
@@ -49,6 +70,11 @@ portable test/devices/physicalIosDeviceResolution.test.ts                # Multi
 portable test/features/navigation/iosNavigationGraphWorkflow.test.ts     # shared NavigateTo and ToolRegistry wiring
 portable test/server/toolRegistry.iosSessionContext.test.ts              # shared ToolRegistry session routing
 portable test/server/inventoryIdeIosPhysicalSource.test.ts               # discovery_incomplete rule shared with Android
+portable test/devices/watchOsSimctlListingExclusion.test.ts             # keeps watchOS rows out of the iOS listing; pure fakes
+portable test/devices/watchOsInventory.test.ts                          # watchOS listing and catalog filters over a fake simctl
+portable test/devices/watchOsProvision.test.ts                          # watch adopt/create/delete over a fake simctl
+portable test/devices/nonIosSimctlListingExclusion.test.ts             # keeps tvOS/xrOS rows out of the iOS listing; pure fakes
+portable test/server/resources/nonIosDeviceImageCatalog.test.ts         # iOS catalog family filter over a fake simctl and captures
 
 # Tests that pin Android behavior beside the iOS case in code both platforms share.
 portable test/features/action/DragAndDropIos.test.ts                     # routes drag by platform; asserts the Android accessibility path

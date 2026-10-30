@@ -120,7 +120,9 @@ test.each([
     const result = await handler({ method: "tools/call", params: { name: "observe" } }, extra);
     expect(readToolResponse(result).isError).toBe(true);
     expect(JSON.stringify(readToolResponse(result).content)).toContain(expected);
-    expect(call).toHaveBeenCalledWith("observe", {}, undefined, undefined, extra.mcpReq.signal);
+    expect(call).toHaveBeenCalledWith("observe", {}, undefined, undefined, {
+      signal: extra.mcpReq.signal,
+    });
   } finally {
     call.mockRestore();
     await server.close();
@@ -292,6 +294,36 @@ test("missing resource URI rejects before forwarding", async () => {
     ).rejects.toThrow("Resource URI is missing in the request");
     expect(read).not.toHaveBeenCalled();
   } finally {
+    read.mockRestore();
+    await server.close();
+    await proxy.close();
+  }
+});
+
+test("resource read forwards only the initialize UI extension", async () => {
+  const { server, proxy, registrations } = createHarness();
+  const ui = { mimeTypes: ["text/html;profile=mcp-app"] };
+  const capabilities = spyOn(server.server, "getClientCapabilities").mockReturnValue({
+    roots: {},
+    extensions: { "io.modelcontextprotocol/ui": ui, other: {} },
+  });
+  const read = spyOn(proxy, "readResource").mockResolvedValue({ contents: [] });
+  try {
+    const handler = registrations.findLast(([schema]) => schema === "resources/read")?.[1];
+    if (typeof handler !== "function") {
+      throw new Error("Missing handler");
+    }
+    await handler({ method: "resources/read", params: { uri: "ui://automobile/observe" } }, extra);
+    expect(read).toHaveBeenCalledWith("ui://automobile/observe", {
+      signal: extra.mcpReq.signal,
+      _meta: {
+        "io.modelcontextprotocol/clientCapabilities": {
+          extensions: { "io.modelcontextprotocol/ui": ui },
+        },
+      },
+    });
+  } finally {
+    capabilities.mockRestore();
     read.mockRestore();
     await server.close();
     await proxy.close();

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DaemonRequestNotDeliveredError } from "../../../src/daemon/DaemonRequestNotDeliveredError";
 import { DaemonShuttingDownError } from "../../../src/daemon/DaemonShuttingDownError";
-import { DaemonUnavailableError, type DaemonClientLike } from "../../../src/daemon/client";
+import { DaemonUnavailableError, type DaemonClientLike } from "../../../src/daemon/client/client";
 import {
   ConnectionRecovery,
   type ConnectionRecoveryPort,
@@ -81,7 +81,7 @@ describe("ConnectionRecovery", () => {
       undefined,
       false,
       true,
-      "tapOn",
+      { nonIdempotentToolName: "tapOn" },
     );
     expect(result).toBe("second");
     expect(events).toEqual(["connect", "reset", "connect"]);
@@ -98,7 +98,7 @@ describe("ConnectionRecovery", () => {
       undefined,
       false,
       true,
-      "tapOn",
+      { nonIdempotentToolName: "tapOn" },
     );
     await expect(attempt).rejects.toBeInstanceOf(DaemonToolOutcomeUnknownError);
     expect(calls).toBe(1);

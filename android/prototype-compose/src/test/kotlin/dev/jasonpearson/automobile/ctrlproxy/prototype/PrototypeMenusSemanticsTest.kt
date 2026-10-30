@@ -4,7 +4,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import dev.jasonpearson.automobile.protocol.*
@@ -168,5 +174,39 @@ class PrototypeMenusSemanticsTest {
     compose.onNodeWithTag("choice:outside").performClick()
     compose.onNodeWithTag("choice.b").assertDoesNotExist()
     assertTrue(interactions.isEmpty())
+  }
+
+  @Test
+  fun `menu flips above an anchor near the window bottom`() {
+    compose.setContent {
+      val layers = remember { PrototypeMenuLayers() }
+      val root =
+        mapPrototypeSpec(
+            PrototypeSpec(
+              "flip",
+              PrototypeWindow(PrototypeFullscreenPlacement()),
+              mapOf("open" to PrototypeScalar.BooleanValue(true)),
+              menu(),
+            ),
+          )
+          .root
+      CompositionLocalProvider(LocalPrototypeMenuLayers provides layers) {
+        Box(
+          Modifier.fillMaxSize().onGloballyPositioned { layers.windowBounds = it.boundsInRoot() },
+        ) {
+          val window = layers.windowBounds
+          if (window.height > 0f)
+            RenderPrototypeMenu(
+              root,
+              Modifier.semantics { testTag = "surface" },
+              Rect(100f, window.bottom - 20f, 200f, window.bottom),
+              { interactions += it },
+            )
+        }
+      }
+    }
+    val menuBounds = compose.onNodeWithTag("surface").fetchSemanticsNode().boundsInRoot
+    val windowBottom = compose.onRoot().fetchSemanticsNode().boundsInRoot.bottom
+    assertTrue(menuBounds.bottom <= windowBottom - 20f)
   }
 }

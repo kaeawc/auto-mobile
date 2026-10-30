@@ -1,0 +1,293 @@
+{
+  "id": "template-settings",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "notifications": true,
+    "darkMode": false,
+    "sync": "wifi",
+    "volume": 60,
+    "resetOpen": false,
+    "saved": false
+  },
+  "storage": {
+    "version": 1,
+    "keys": ["state:notifications", "state:darkMode", "state:sync", "state:volume"]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "main",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "main": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "settings_bar",
+            "title": "Settings"
+          },
+          {
+            "type": "scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "children": [
+                {
+                  "type": "listItem",
+                  "testTag": "notifications_row",
+                  "headline": "Notifications",
+                  "supporting": "Alerts and reminders",
+                  "leadingIcon": "notifications",
+                  "trailing": {
+                    "type": "switch",
+                    "stateKey": "notifications"
+                  }
+                },
+                {
+                  "type": "listItem",
+                  "testTag": "dark_mode_row",
+                  "headline": "Dark mode",
+                  "leadingIcon": "dark_mode",
+                  "trailing": {
+                    "type": "switch",
+                    "stateKey": "darkMode"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "column",
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Sync over",
+                      "style": {
+                        "textStyle": "titleSmall"
+                      }
+                    },
+                    {
+                      "type": "radioGroup",
+                      "testTag": "sync_group",
+                      "stateKey": "sync",
+                      "options": [
+                        {
+                          "value": "wifi",
+                          "label": "Wi-Fi only"
+                        },
+                        {
+                          "value": "any",
+                          "label": "Any network"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "text": "Volume {volume}",
+                      "style": {
+                        "textStyle": "titleSmall"
+                      },
+                      "testTag": "volume_label"
+                    },
+                    {
+                      "type": "slider",
+                      "testTag": "volume_slider",
+                      "contentDescription": "Volume",
+                      "stateKey": "volume",
+                      "min": 0,
+                      "max": 100,
+                      "step": 5
+                    }
+                  ],
+                  "style": {
+                    "padding": {
+                      "start": 16,
+                      "end": 16,
+                      "top": 16,
+                      "bottom": 16
+                    },
+                    "spacing": 12
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "listItem",
+                  "testTag": "about_row",
+                  "headline": "About",
+                  "trailing": {
+                    "type": "icon",
+                    "name": "chevron_right"
+                  },
+                  "onTap": [
+                    {
+                      "type": "push",
+                      "stack": "nav",
+                      "screen": "about"
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "children": [
+                    {
+                      "type": "button",
+                      "label": "Save",
+                      "testTag": "save_button",
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "saved",
+                          "value": true
+                        }
+                      ]
+                    },
+                    {
+                      "type": "button",
+                      "label": "Reset to defaults",
+                      "testTag": "reset_button",
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "resetOpen",
+                          "value": true
+                        }
+                      ],
+                      "variant": "outlined"
+                    }
+                  ],
+                  "style": {
+                    "padding": {
+                      "start": 16,
+                      "end": 16,
+                      "top": 16,
+                      "bottom": 16
+                    },
+                    "spacing": 12
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "dialog",
+            "testTag": "reset_dialog",
+            "openWhen": {
+              "key": "resetOpen",
+              "equals": true
+            },
+            "title": "Reset settings?",
+            "text": "Every setting returns to its default.",
+            "confirm": {
+              "label": "Reset",
+              "onTap": [
+                {
+                  "type": "setState",
+                  "key": "notifications",
+                  "value": true
+                },
+                {
+                  "type": "setState",
+                  "key": "darkMode",
+                  "value": false
+                },
+                {
+                  "type": "setState",
+                  "key": "sync",
+                  "value": "wifi"
+                },
+                {
+                  "type": "setState",
+                  "key": "volume",
+                  "value": 60
+                }
+              ]
+            },
+            "dismiss": {
+              "label": "Cancel"
+            }
+          },
+          {
+            "type": "snackbar",
+            "testTag": "saved_snackbar",
+            "openWhen": {
+              "key": "saved",
+              "equals": true
+            },
+            "text": "Settings saved",
+            "durationMs": 3000,
+            "action": {
+              "label": "Dismiss",
+              "onTap": [
+                {
+                  "type": "setState",
+                  "key": "saved",
+                  "value": false
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "about": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "about_bar",
+            "title": "About",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "children": [
+              {
+                "type": "text",
+                "text": "Demo app 1.0",
+                "style": {
+                  "textStyle": "titleMedium"
+                }
+              },
+              {
+                "type": "text",
+                "text": "Built at the hackathon.",
+                "style": {
+                  "textStyle": "bodyMedium"
+                }
+              }
+            ],
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            }
+          }
+        ]
+      }
+    }
+  }
+}

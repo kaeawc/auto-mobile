@@ -1,0 +1,1 @@
+sdk_gwear_arm64

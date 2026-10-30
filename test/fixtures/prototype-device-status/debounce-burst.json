@@ -1,0 +1,43 @@
+{
+  "description": "The first reading only sets the state. A burst of changes is one battery.changed event, 500 ms after the last change, with the values current then.",
+  "module": "battery",
+  "updates": [
+    {
+      "timestampMs": 0,
+      "values": {
+        "level": 80,
+        "state": "unplugged"
+      }
+    },
+    {
+      "timestampMs": 100,
+      "values": {
+        "level": 80,
+        "state": "charging"
+      }
+    },
+    {
+      "timestampMs": 300,
+      "values": {
+        "level": 81,
+        "state": "charging"
+      }
+    },
+    {
+      "timestampMs": 700,
+      "values": {
+        "level": 82,
+        "state": "charging"
+      }
+    }
+  ],
+  "expectedEvents": [
+    {
+      "timestampMs": 1200,
+      "values": {
+        "level": 82,
+        "state": "charging"
+      }
+    }
+  ]
+}

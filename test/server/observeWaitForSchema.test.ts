@@ -2814,12 +2814,12 @@ test("rich wait mode stays locked and negative text is exact", () => {
     { bounds: bounds(0, 0, 20, 20), text: "Account settings", class: "Button" },
   ]);
   expect(
-    findWaitForElement(finder, { text: "Account", className: "Button" }, initial, undefined, modes),
+    findWaitForElement(finder, { text: "Account", className: "Button" }, initial, undefined, {
+      modes,
+    }),
   ).not.toBeNull();
   expect(modes.values().toArray()).toContain("contains");
-  expect(
-    findWaitForElement(finder, { text: "Account" }, initial, undefined, new Map(), true),
-  ).toBeNull();
+  expect(findWaitForElement(finder, { text: "Account" }, initial, undefined, true)).toBeNull();
 });
 
 test("compound waits intersect original node identity before text promotion", () => {
@@ -2845,19 +2845,13 @@ test("textAny chooses and locks contains when exact source is offscreen", () => 
   hierarchy.screenWidth = 100;
   hierarchy.screenHeight = 100;
   expect(
-    findWaitForElement(
-      new ElementResolver(),
-      { textAny: ["Ready"] },
-      hierarchy,
-      undefined,
-      new Map(),
-      true,
-    ),
+    findWaitForElement(new ElementResolver(), { textAny: ["Ready"] }, hierarchy, undefined, true),
   ).toMatchObject({ text: "Ready" });
   const modes = new Map<string, "exact" | "contains" | "regex">();
   expect(
-    findWaitForElement(new ElementResolver(), { textAny: ["Ready"] }, hierarchy, undefined, modes)
-      ?.text,
+    findWaitForElement(new ElementResolver(), { textAny: ["Ready"] }, hierarchy, undefined, {
+      modes,
+    })?.text,
   ).toBe("Ready now");
   expect([...modes.values()]).toEqual(["contains"]);
   expect(
@@ -2866,7 +2860,7 @@ test("textAny chooses and locks contains when exact source is offscreen", () => 
       { textAny: ["Ready"] },
       makeHierarchy([{ text: "Ready later", bounds: bounds(0, 0, 20, 20) }]),
       undefined,
-      modes,
+      { modes },
     )?.text,
   ).toBe("Ready later");
 });
@@ -2878,16 +2872,16 @@ test("textAny waits for a visible candidate before locking its match mode", () =
   const modes = new Map<string, "exact" | "contains" | "regex">();
   const finder = new ElementResolver();
   expect(
-    findWaitForElement(finder, { textAny: ["Ready"] }, hierarchy, undefined, modes),
+    findWaitForElement(finder, { textAny: ["Ready"] }, hierarchy, undefined, { modes }),
   ).toBeNull();
   expect(modes.size).toBe(0);
   const visible = makeHierarchy([
     { text: "Ready soon", bounds: bounds(0, 0, 20, 20) },
     { text: "Ready", bounds: bounds(0, 30, 20, 50) },
   ]);
-  expect(findWaitForElement(finder, { textAny: ["Ready"] }, visible, undefined, modes)?.text).toBe(
-    "Ready",
-  );
+  expect(
+    findWaitForElement(finder, { textAny: ["Ready"] }, visible, undefined, { modes })?.text,
+  ).toBe("Ready");
   expect([...modes.values()]).toEqual(["exact"]);
 });
 

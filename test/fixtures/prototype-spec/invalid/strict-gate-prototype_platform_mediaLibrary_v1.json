@@ -1,0 +1,54 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "draft": {
+        "picked": [],
+        "photo": {}
+      }
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["mediaLibrary"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "mediaLibrary.pick",
+          "args": {
+            "media": {
+              "value": "imagesAndVideos"
+            },
+            "maxItems": {
+              "value": 4
+            }
+          },
+          "into": "/data/draft/picked",
+          "statusKey": "pickStatus",
+          "onError": [
+            {
+              "type": "setState",
+              "key": "pickStatus",
+              "value": "cancelled"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_data_model_v1, prototype_platform_mediaLibrary_v1"
+}

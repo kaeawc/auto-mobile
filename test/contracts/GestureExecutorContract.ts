@@ -22,7 +22,7 @@ export function runGestureExecutorContract(
   describe(`GestureExecutor contract: ${name}`, () => {
     test("a swipe succeeds and echoes the coordinates and requested duration", async () => {
       const { executor, dispatchedSwipes } = make();
-      const result = await executor.swipe(10, 20, 30, 40, { duration: 250 });
+      const result = await executor.swipe({ x1: 10, y1: 20, x2: 30, y2: 40 }, { duration: 250 });
       expect(result).toMatchObject({
         success: true,
         x1: 10,
@@ -36,20 +36,22 @@ export function runGestureExecutorContract(
 
     test("a swipe without a duration reports the 300ms default", async () => {
       const { executor } = make();
-      const result = await executor.swipe(0, 0, 100, 100);
+      const result = await executor.swipe({ x1: 0, y1: 0, x2: 100, y2: 100 });
       expect(result.success).toBe(true);
       expect(result.duration).toBe(300);
     });
 
     test("an explicit zero duration is kept, not defaulted", async () => {
       const { executor } = make();
-      expect((await executor.swipe(0, 0, 100, 100, { duration: 0 })).duration).toBe(0);
+      expect(
+        (await executor.swipe({ x1: 0, y1: 0, x2: 100, y2: 100 }, { duration: 0 })).duration,
+      ).toBe(0);
     });
 
     test("a device failure resolves as an unsuccessful result carrying the error", async () => {
       const { executor, failDevice } = make();
       failDevice("device offline");
-      const result = await executor.swipe(1, 2, 3, 4, { duration: 100 });
+      const result = await executor.swipe({ x1: 1, y1: 2, x2: 3, y2: 4 }, { duration: 100 });
       expect(result).toMatchObject({ success: false, x1: 1, y1: 2, x2: 3, y2: 4, duration: 100 });
       expect(result.error).toContain("device offline");
     });
@@ -59,7 +61,11 @@ export function runGestureExecutorContract(
       const controller = new AbortController();
       controller.abort();
       await expect(
-        executor.swipe(1, 2, 3, 4, { duration: 100 }, { signal: controller.signal }),
+        executor.swipe(
+          { x1: 1, y1: 2, x2: 3, y2: 4 },
+          { duration: 100 },
+          { signal: controller.signal },
+        ),
       ).rejects.toBeDefined();
       expect(dispatchedSwipes()).toBe(0);
     });

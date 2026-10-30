@@ -343,6 +343,8 @@ jobs:
               - 'test/fixtures/prototype-embedded-routing/**'
               # Shared fixtures read by renderer, protocol, runner, and CtrlProxy tests.
               - 'test/fixtures/prototype-spec/**'
+              # Concept slices read by PrototypeConceptCorpusTest.
+              - 'test/fixtures/prototype-concepts/**'
               - 'test/fixtures/prototype/**'
               - 'test/fixtures/refusal-wire/**'
               - 'test/fixtures/refusal-wire-hints/**'
@@ -417,6 +419,8 @@ jobs:
               - 'test/fixtures/prototype-capabilities/**'
               - 'test/fixtures/prototype-embedded-routing/**'
               - 'test/fixtures/prototype-spec/**'
+              # Concept slices read by PrototypeConceptCorpusTests.
+              - 'test/fixtures/prototype-concepts/**'
               - 'test/fixtures/prototype/**'
               - 'test/fixtures/prototype-saved-layout/**'
               - 'test/fixtures/desktop-wire/**'
@@ -574,14 +578,30 @@ jobs:
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # The advisory XCTestRunner simulator lane is label opt-in on PRs (#10895);
-      # it runs every night on CircleCI (nightly-macos) regardless.
+      # The advisory XCTestRunner simulator lane runs on PRs with the `run-ios-sim`
+      # label (#10895) and on PRs that touch a layer the iOS SDK contract suite
+      # crosses (#5164); it runs every night on CircleCI (nightly-macos) regardless.
+      - name: "Check for iOS SDK contract inputs"
+        id: filter-ios-sdk-contract
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ios_sdk_contract:
+              - 'ios/auto-mobile-sdk/Sources/**'
+              - 'ios/control-proxy/Sources/**'
+              - 'ios/sdk-wire/Sources/**'
+              - 'ios/Playground/Sources/SdkContract/**'
+              - 'src/features/observe/ios/**'
+              - 'scripts/ios/sdk-contract/**'
+              - 'scripts/ios/sdk-contract-integration.sh'
+
       - name: "Decide if XCTestRunner simulator tests should run"
         id: ios_sim_tests_should_run
         env:
           OPT_IN: ${{ contains(github.event.pull_request.labels.*.name, 'run-ios-sim') }}
+          CONTRACT_INPUTS: ${{ steps.filter-ios-sdk-contract.outputs.ios_sdk_contract }}
         run: |
-          if [[ "$OPT_IN" == "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
+          if [[ ( "$OPT_IN" == "true" || "$CONTRACT_INPUTS" == "true" ) && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -652,6 +672,9 @@ jobs:
               # exercise the job rather than being silently skipped.
               - '.github/workflows/pull_request.yml'
               - '.github/workflows/merge.yml'
+              # The shared bodies of the WebRTC jobs (#11872).
+              - '.github/actions/ci-android-device-whep/**'
+              - '.github/actions/ci-webrtc-publisher-integration/**'
 
       # Run the WebRTC integration jobs when the streaming surface is touched, OR
       # when a human explicitly opts in by labelling the PR `webrtc` or mentioning
@@ -1007,7 +1030,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
+            --only yaml,lfs-pointers,scripts-referenced,schema-copy-drift,tool-definitions,prototype-spec-models,protoviewer-notices,privacy-manifests,store-listing,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -2688,7 +2711,7 @@ jobs:
       - name: "Resolve Swift package dependencies"
         shell: bash
         run: |
-          for package in ios/screen-capture ios/network-filter ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+          for package in ios/screen-capture ios/network-filter ios/audio-loopback ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
             (cd "${package}" && swift package resolve)
           done
 
@@ -3420,6 +3443,15 @@ jobs:
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
+      # Artifact policy (#14154): judge the built release APK, not the source manifest, so a
+      # library manifest merge cannot carry CtrlProxy's posture into ProtoViewer. PR builds keep
+      # the development -SNAPSHOT versionName; the release workflow runs without --allow-snapshot.
+      - name: "Check the ProtoViewer release APK against the artifact policy"
+        working-directory: .
+        run: >-
+          bun scripts/release/check-protoviewer-artifact-policy.ts android
+          android/protoviewer/build/outputs/apk/release/protoviewer-release.apk --allow-snapshot
+
       - name: "Store AAR"
         uses: actions/upload-artifact@v6
         with:
@@ -3608,44 +3640,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-
-      # FFmpeg generates the synthetic H.264 the publisher ingests. Chrome
-      # (google-chrome) is preinstalled on ubuntu-latest and resolved by the test;
-      # fail early with a clear message if the image ever drops it.
-      - name: "Install FFmpeg and verify a browser is present"
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          ffmpeg -version | head -1
-          if ! command -v google-chrome >/dev/null 2>&1 \
-            && ! command -v chromium >/dev/null 2>&1 \
-            && ! command -v chromium-browser >/dev/null 2>&1; then
-            echo "::error::No Chrome/Chromium found on the runner; the WHEP decode step needs one"
-            exit 1
-          fi
-
-      - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
-
-      # Stays in the foreground: it appends node_modules/.bin to $GITHUB_PATH.
-      - name: "Install Bun dependencies"
-        shell: bash
-        run: scripts/ci/install-bun-deps.sh
-
-      # Cache the checksum-pinned MediaMTX release so only the first run downloads
-      # it. Keyed on the runner script, so a version bump there invalidates it.
-      - name: "Cache MediaMTX binary"
-        uses: actions/cache@v4
-        with:
-          path: scratch/mediamtx
-          key: mediamtx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/webrtc/run-mediamtx-publisher-integration.sh') }}
-
-      - name: "Run MediaMTX WebRTC publisher integration test"
-        shell: bash
-        run: bun run test:integration:webrtc-mediamtx
+      - uses: ./.github/actions/ci-webrtc-publisher-integration
 
   android-device-webrtc:
     name: "Android Device Capture to WHEP"
@@ -3658,53 +3653,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@v7
-        with:
-          name: control-proxy-apk
-          path: android/control-proxy/build/outputs/apk/debug
-
-      - name: "Download video-server jar"
-        uses: actions/download-artifact@v7
-        with:
-          name: video-server-jar
-          path: android/video-server/build/libs
-
-      - name: "Install Chrome for WHEP decoding"
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes google-chrome-stable || sudo apt-get install --yes chromium-browser
-
-      - uses: ./.github/actions/android-emulator
-        with:
-          script: |
-            cd "$GITHUB_WORKSPACE"
-            AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION=1 \
-            AUTOMOBILE_WEBRTC_DEVICE_PLATFORM=android \
-            AUTOMOBILE_ANDROID_H264_DEVICE_ID=emulator-5554 \
-            AUTOMOBILE_VIDEO_SERVER_JAR="$GITHUB_WORKSPACE/android/video-server/build/libs/automobile-video.jar" \
-            AUTOMOBILE_REQUIRE_VIDEO_SERVER=1 \
-              bun run test:integration:webrtc-device
-          working-directory: "./android/"
-          accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
-
-      - name: "Explain WebRTC device results"
-        if: always()
-        continue-on-error: true
-        run: bash scripts/webrtc/explain-device-results.sh android
-
-      - name: "Upload WebRTC device artifacts"
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v6
-        with:
-          name: android-webrtc-device-artifacts-${{ github.run_attempt }}
-          path: scratch/webrtc-device-integration/
-          if-no-files-found: ignore
-          retention-days: 7
+      - uses: ./.github/actions/ci-android-device-whep
 
   ios-device-webrtc:
     name: "iOS Device Capture to WHEP"

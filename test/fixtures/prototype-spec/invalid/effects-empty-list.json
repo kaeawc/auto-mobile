@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": []
+      }
+    }
+  },
+  "expectedPath": "root.style.effects",
+  "expectedMessage": "Array length out of range"
+}

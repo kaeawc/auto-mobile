@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "draft": ""
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "draft"
+        },
+        {
+          "type": "button",
+          "label": "Done",
+          "onTap": [
+            {
+              "type": "hideKeyboard"
+            },
+            {
+              "type": "emit",
+              "name": "done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_hide_keyboard_v1"
+}

@@ -11,7 +11,7 @@ import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import compactCapture from "../../fixtures/ios-safari-url-field/hierarchy-compact.json";
 import editingCapture from "../../fixtures/ios-safari-url-field/hierarchy-editing.json";
 import typedCapture from "../../fixtures/ios-safari-url-field/runner-typed-keyboard-up.json";
-import { observationFromRunnerCapture } from "../../helpers/iosSafariRunnerCapture";
+import { observationFromRunnerCapture } from "../../helpers/iosRunnerCapture";
 import { buildObserveResult, viewHierarchyFromFixture } from "../../helpers/observeFixture";
 
 function verifier(platform: BootedDevice["platform"] = "ios"): FocusVerifier {
@@ -187,7 +187,9 @@ describe("FocusVerifier Safari expanded URL field", () => {
   test.each([options, { elementId: "URL", action: "focus" } as const])(
     "confirms re-targeted settled native editor with %j",
     (selector) => {
-      expect(verifier().verify(selector, settledTarget, settled, "Address")).toBe(true);
+      expect(verifier().verify(selector, settledTarget, settled, { labelText: "Address" })).toBe(
+        true,
+      );
     },
   );
 
@@ -196,26 +198,36 @@ describe("FocusVerifier Safari expanded URL field", () => {
   });
 
   test("rejects re-targeted captured URL with an off-screen preview keyboard", () => {
-    expect(verifier().verify(options, editingTarget, editing, "Address")).toBe(false);
+    expect(verifier().verify(options, editingTarget, editing, { labelText: "Address" })).toBe(
+      false,
+    );
   });
 
   test("rejects settled editor with the keyboard moved off-screen", () => {
     expect(verifier().verify(options, target, offscreenKeyboard)).toBe(false);
-    expect(verifier().verify(options, settledTarget, offscreenKeyboard, "Address")).toBe(false);
+    expect(
+      verifier().verify(options, settledTarget, offscreenKeyboard, { labelText: "Address" }),
+    ).toBe(false);
   });
 
   test("rejects native editor overlapping the settled keyboard", () => {
-    expect(verifier().verify(options, editingTarget, overlappingEditor, "Address")).toBe(false);
+    expect(
+      verifier().verify(options, editingTarget, overlappingEditor, { labelText: "Address" }),
+    ).toBe(false);
   });
 
   test("rejects settled editor without a keyboard", () => {
     expect(verifier().verify(options, target, noKeyboard)).toBe(false);
-    expect(verifier().verify(options, settledTarget, noKeyboard, "Address")).toBe(false);
+    expect(verifier().verify(options, settledTarget, noKeyboard, { labelText: "Address" })).toBe(
+      false,
+    );
   });
 
   test("rejects settled editor on Android", () => {
     expect(verifier("android").verify(options, target, settled)).toBe(false);
-    expect(verifier("android").verify(options, settledTarget, settled, "Address")).toBe(false);
+    expect(
+      verifier("android").verify(options, settledTarget, settled, { labelText: "Address" }),
+    ).toBe(false);
   });
 
   test("confirms the captured compact target in the expanded editing capture", () => {

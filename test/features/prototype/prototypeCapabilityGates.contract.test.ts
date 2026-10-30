@@ -2,10 +2,12 @@ import { expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
+  PROTOTYPE_ZOOM_TRANSITION_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
   PROTOTYPE_NETWORK_CAPABILITY,
   PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+  PROTOTYPE_DEAD_TAP_CAPABILITY,
 } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
@@ -17,11 +19,16 @@ const validFixtureDirectory = join(fixtures, "prototype-spec/valid");
 // List once and sample every fourth sorted fixture: the full corpus's node-limit case
 // exceeds the 100 ms unit budget. Keep sampled fixtures in separate tests as well.
 const validFixtureFiles = readdirSync(validFixtureDirectory).sort();
-const sampledValidFixtureFiles = validFixtureFiles.filter((_, index) => index % 4 === 0);
+// The sample is by index, so adding fixtures shifts it; the node-limit case is excluded by name
+// so it can never land in the sample again.
+const sampledValidFixtureFiles = validFixtureFiles.filter(
+  (file, index) => index % 4 === 0 && file !== "exact-node-limit.json",
+);
 const knownCapabilities = new Set([
   ...PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability),
   PROTOTYPE_ANCHOR_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
+  PROTOTYPE_DEAD_TAP_CAPABILITY,
 ]);
 const deviceRequestSpec = {
   root: {
@@ -111,6 +118,7 @@ test("shared capability fixture matches the sorted gate capability set", () => {
   );
   const expected = [
     ...new Set(PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability)),
+    PROTOTYPE_ZOOM_TRANSITION_CAPABILITY,
   ].sort();
   expect(fixture).toEqual(expected);
 });

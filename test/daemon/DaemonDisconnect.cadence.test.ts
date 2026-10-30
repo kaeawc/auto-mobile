@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { executionTracker } from "../../src/daemon/executionTracker";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { deviceHold, genericAvailabilityOf } from "../../src/daemon/deviceHold";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/models/VideoRecordingConfigParsing";
 import type { Session } from "../../src/daemon/sessionManager";
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
 import type { DisconnectMonitorCadence } from "../../src/daemon/daemonCore/DaemonDisconnect";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, SomePlatform } from "../../src/models";
 import type {
   BootedDeviceDiscoveryOptions,
   BootedDeviceDiscovery,
@@ -50,10 +51,10 @@ function monitor(
   let androidListedReads = 0;
   let recovered = 0;
   const requests: BootedDeviceDiscoveryOptions[] = [];
-  const scopes: ("ios" | "android" | "either" | undefined)[] = [];
+  const scopes: (SomePlatform | undefined)[] = [];
   const manager = {
     getBootedDevicesDetailed: async (
-      scope?: "ios" | "android" | "either",
+      scope?: SomePlatform,
       options: BootedDeviceDiscoveryOptions = {},
     ): Promise<BootedDeviceDiscovery> => {
       scopes.push(scope);
@@ -177,7 +178,10 @@ describe("DaemonDisconnect adaptive discovery cadence", () => {
     previousPlanActive = serverConfig.isPlanExecutionActive();
     serverConfig.setPlanExecutionActive(false);
   });
-  afterEach(() => serverConfig.setPlanExecutionActive(previousPlanActive));
+  afterEach(() => {
+    serverConfig.setPlanExecutionActive(previousPlanActive);
+    DaemonState.getInstance().reset();
+  });
 
   test("unchanged idle pool makes exactly seven reads in ten minutes", async () => {
     const rig = monitor();

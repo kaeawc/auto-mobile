@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "motion3",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "on": false
+    },
+    "root": {
+      "type": "text",
+      "text": "Hi",
+      "press": {
+        "alpha": 0.7
+      }
+    }
+  },
+  "expectedPath": "root.press",
+  "expectedMessage": "press requires a pressable node"
+}

@@ -1,3 +1,36 @@
+import { prototypeChannelHandlers } from "./prototypeChannelHandlers";
+import {
+  prototypeChannelsError,
+  prototypeChannelCallError,
+  prototypeRealtimeFields,
+} from "./prototypeChannels";
+import { prototypeLinksArgumentsError } from "./prototypeLinks";
+import { prototypeMediaCaptionsError } from "./prototypeMediaCaptions";
+import { prototypeMediaQueueError, prototypeMediaQueueFields } from "./prototypeMediaQueue";
+import {
+  prototypeCastButtonError,
+  prototypeMediaCallError,
+  prototypeMediaError,
+  prototypeMediaPlayers,
+  prototypeMediaReadValid,
+  prototypeVideoPlayerError,
+} from "./prototypeMedia";
+import { prototypeMapError } from "./prototypeMap";
+import { prototypeShareArgumentsError } from "./prototypeShare";
+import { prototypeAuthBlockError, prototypeAuthCallError } from "./prototypeAuth";
+import { prototypeCommerceBlockError, prototypeCommerceCallError } from "./prototypeCommerce";
+import {
+  prototypeNotificationsBlockError,
+  prototypeNotificationsReadValid,
+  prototypeNotificationsCallError,
+} from "./prototypeNotifications";
+import {
+  prototypeSecureStorageEmitError,
+  prototypeSecureStorageRequestError,
+  prototypeSecureStorageError,
+} from "./prototypeSecureStorage";
+import { prototypeLocationBlockError } from "./prototypeLocationBlock";
+import { prototypeSensorsBlockError, prototypeSensorUseError } from "./prototypeSensorsBlock";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -18,12 +51,18 @@ import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
  * per module). Runtime dispatch lives on the devices (#14295, #14296).
  */
 
+/** Maximum UTF-8 bytes copied to or returned from the clipboard. */
+export const MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES =
+  contract.limits.MAX_PROTOTYPE_CLIPBOARD_TEXT_BYTES;
+
 /** The emit-kind event name a finished platform call is reported under. */
 export const PROTOTYPE_PLATFORM_EVENT_NAME = "prototype_platform";
 /** The emit-kind event name a delivered platform event is reported under. */
 export const PROTOTYPE_PLATFORM_DELIVERED_EVENT_NAME = "prototype_platform_event";
 /** Authored emit names cannot start with this; the runtime reports its own events under it. */
 export const PROTOTYPE_RESERVED_EMIT_PREFIX = "prototype_";
+/** Authored `testTag`s cannot start with this; host controls own the namespace (#15120). */
+export const PROTOTYPE_RESERVED_TEST_TAG_PREFIX = "automobile-";
 /** Typed outcomes a call writes to `<into>__meta.error` and reports in `prototype_platform`. */
 export const PROTOTYPE_PLATFORM_ERROR_CODES = [
   "unsupported",
@@ -48,13 +87,36 @@ export interface PrototypePlatformCall {
   background: string[];
   /** Calls and events touching personal data, for the threat model (#14293). */
   sensitive: boolean;
+  /**
+   * A capability the call needs on top of its module's, so a runtime can offer a module but
+   * refuse one of its operations (camera recording, media queues).
+   */
+  capability?: string;
+}
+/** One key of a module's read-only `/platform/<module>` state (#15245). */
+export interface PrototypePlatformStateEntry {
+  /** The platforms that report the key; elsewhere it is absent and compares as missing. */
+  platforms: string[];
+  /** The default contract rule; valueByPlatform overrides it on a named platform. */
+  value: Rule;
+  /** Platform overrides; portable spec comparisons accept the union with value. */
+  valueByPlatform?: Record<string, Rule>;
+  /** Android-only ascending lower bounds of the second and later Material classes, in dp. */
+  breakpoints?: number[];
 }
 export interface PrototypePlatformModule {
   capability: string;
+  deviceCapability?: string;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
   calls: Record<string, PrototypePlatformCall>;
-  events: Record<string, { sensitive: boolean }>;
+  /** `debounceMs` coalesces bursts of the event into one delivery. */
+  events: Record<string, { sensitive: boolean; debounceMs?: number }>;
+  /**
+   * The keys `/platform/<module>/<key>` can read. A module without this table (the placeholder
+   * `test`) accepts any pointer; one with it refuses a pointer that is not exactly one listed key.
+   */
+  state?: Record<string, PrototypePlatformStateEntry>;
 }
 
 /** The shared `platformModules` table: each module's calls, events and capability. */
@@ -105,6 +167,14 @@ export function prototypePlatformEventModule(event: unknown): string | undefined
   return name && owner && Object.hasOwn(owner.events, name.member) ? name.module : undefined;
 }
 
+/** The state key a `/platform` pointer reads when it is exactly `/<module>/<key>`, else undefined. */
+export function prototypePlatformPointerKey(pointer: string): string | undefined {
+  const tokens = pointer.slice(1).split("/");
+  return tokens.length === 2 && tokens[1]
+    ? tokens[1].replaceAll("~1", "/").replaceAll("~0", "~")
+    : undefined;
+}
+
 /** The module a `/platform` pointer reads: its first segment. */
 export function prototypePlatformPointerModule(pointer: string): string {
   const segment = pointer.slice(1).split("/", 1)[0] ?? "";
@@ -125,10 +195,11 @@ const sortedKeys = (value: Raw): string[] =>
 export type PrototypePlatformUse =
   | { kind: "requires"; path: string }
   | { kind: "declared"; path: string; module: string }
+  | { kind: "node"; path: string; module: string }
   | { kind: "handlers"; path: string }
   | { kind: "handler"; path: string; event: string }
   | { kind: "call"; path: string; action: Raw }
-  | { kind: "read"; path: string; pointer: string }
+  | { kind: "read"; path: string; pointer: string; condition?: Raw }
   | { kind: "event"; path: string; inHandler: boolean };
 
 // Opaque JSON: an emit payload, literal repeat items and a literal binding's value are data.
@@ -136,6 +207,13 @@ const OPAQUE_KEYS = new Set(["payload", "repeat"]);
 
 /** The constructs `object` is itself: a call, a `{platform}` read or an `{event}` binding. */
 function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypePlatformUse[]) {
+  if (object.type === "pasteButton") {
+    uses.push({
+      kind: "call",
+      path,
+      action: { type: "platform", call: "clipboard.paste", into: object.into },
+    });
+  }
   if (object.type === "platform" && typeof object.call === "string") {
     uses.push({ kind: "call", path, action: object });
   }
@@ -143,7 +221,12 @@ function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypeP
     return;
   }
   if (typeof object.platform === "string") {
-    uses.push({ kind: "read", path: `${path}.platform`, pointer: object.platform });
+    uses.push({
+      kind: "read",
+      path: `${path}.platform`,
+      pointer: object.platform,
+      condition: object,
+    });
   }
   if (typeof object.event === "string") {
     uses.push({ kind: "event", path: `${path}.event`, inHandler });
@@ -219,10 +302,20 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
     uses.push({ kind: "handler", path: at, event });
     scanValue(handlers![event], at, true, uses);
   }
+  for (const handler of prototypeChannelHandlers(root)) {
+    scanValue(handler.value, handler.path, true, uses);
+  }
   for (const { node, path } of prototypeSpecNodeRoots(root)) {
     scanValue(node, path, false, uses);
   }
   placeholderUses(root, uses);
+  // A map node draws through the map module (#14309), so its gate names the node. Only node
+  // positions count: a map-shaped value in a request field or payload is data.
+  walkPrototypeNodes(root, (node, path) => {
+    if (node.type === "map") {
+      uses.push({ kind: "node", path, module: "map" });
+    }
+  });
   return uses;
 }
 
@@ -262,7 +355,13 @@ function argumentsError(
     const at = memberPath(`${path}.args`, name);
     const declared = Object.hasOwn(definition.args, name) ? definition.args[name] : undefined;
     if (!declared) {
-      return { path: at, message: "Unknown argument" };
+      return {
+        path: at,
+        message:
+          action.call === "share.open" && name === "title"
+            ? "Unknown argument: use subject"
+            : "Unknown argument",
+      };
     }
     if (!Object.hasOwn(args, name)) {
       if (!declared.optional) {
@@ -270,21 +369,33 @@ function argumentsError(
       }
       continue;
     }
-    const binding = record(args[name]);
-    if (binding && Object.hasOwn(binding, "value")) {
-      const error = check(binding.value, declared.value, `${at}.value`);
-      if (error) {
-        return error;
-      }
+    const error = argumentValueError(
+      action,
+      { name, value: args[name], at },
+      declared.value,
+      check,
+    );
+    if (error) {
+      return error;
     }
   }
   return undefined;
 }
 
+/** What a spec declares that platform uses are checked against. */
+interface PlatformContext {
+  declared: Set<string>;
+  permissions: Set<string>;
+  background: Set<string>;
+  channels: Raw;
+  players: ReadonlySet<string>;
+  root: Raw;
+}
+
 function callError(
   action: Raw,
   path: string,
-  context: { declared: Set<string>; permissions: Set<string>; background: Set<string> },
+  context: PlatformContext,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
   const call = prototypePlatformCall(action.call);
@@ -312,8 +423,29 @@ function callError(
   if (args) {
     return args;
   }
+  const crossArgs = crossArgumentsError(action, path);
+  if (crossArgs) {
+    return crossArgs;
+  }
   const into = typeof action.into === "string" ? intoError(action.into) : undefined;
   return into ? { path: `${path}.into`, message: into } : undefined;
+}
+
+/** Rules that relate one call's arguments to each other, beyond the per-argument contract table. */
+const crossArgumentRules: Record<
+  string,
+  (args: Raw, path: string) => PrototypePlatformError | undefined
+> = {
+  "share.open": (args, path) => prototypeShareArgumentsError(args, path),
+  "links.open": prototypeLinksArgumentsError,
+};
+
+function crossArgumentsError(action: Raw, path: string): PrototypePlatformError | undefined {
+  const rule =
+    typeof action.call === "string" && Object.hasOwn(crossArgumentRules, action.call)
+      ? crossArgumentRules[action.call]
+      : undefined;
+  return rule?.(record(action.args) ?? {}, `${path}.args`);
 }
 
 function intoError(into: string): string | undefined {
@@ -326,9 +458,90 @@ function strings(value: unknown): Set<string> {
   return new Set(Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : []);
 }
 
+function readError(
+  use: { path: string; pointer: string },
+  {
+    declared,
+    channels,
+    players,
+    root,
+  }: Pick<PlatformContext, "declared" | "channels" | "players" | "root">,
+): PrototypePlatformError | undefined {
+  const name = prototypePlatformPointerModule(use.pointer);
+  if (!module(name)) {
+    return { path: use.path, message: `Unknown platform module ${name}` };
+  }
+  if (!declared.has(name)) {
+    return notDeclared(use.path, name);
+  }
+  if (!stateKnown(name, use.pointer, { channels, players, root })) {
+    return { path: use.path, message: `Unknown platform state ${use.pointer}` };
+  }
+  const key = prototypePlatformPointerKey(use.pointer);
+  return name === "sensors" && key ? prototypeSensorUseError(key, use.path, root) : undefined;
+}
+
+/**
+ * Whether a declared module's read names one of its state keys: realtime keys sit under a
+ * declared channel and media keys under a declared player; a module without a table reads anything.
+ */
+function stateKnown(
+  name: string,
+  pointer: string,
+  { channels, players, root }: Pick<PlatformContext, "channels" | "players" | "root">,
+): boolean {
+  const state = module(name)?.state;
+  const tokens = pointer
+    .slice(1)
+    .split("/")
+    .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
+  if (name === "media") {
+    return prototypeMediaReadValid(tokens, players, state ?? {});
+  }
+  if (name === "notifications") {
+    return prototypeNotificationsReadValid(tokens, root, state ?? {});
+  }
+  if (name === "realtime") {
+    return (
+      tokens.length === 3 &&
+      Object.hasOwn(channels, tokens[1]) &&
+      (!state || Object.hasOwn(state, tokens[2]))
+    );
+  }
+  const key = prototypePlatformPointerKey(pointer);
+  return !state || (key !== undefined && Object.hasOwn(state, key));
+}
+
+/** Check portable comparisons against the union of platform-native state rules. */
+function comparisonError(
+  use: Extract<PrototypePlatformUse, { kind: "read" }>,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
+  const entry = module(prototypePlatformPointerModule(use.pointer))?.state?.[
+    prototypePlatformPointerKey(use.pointer) ?? ""
+  ];
+  // Specs have no target platform and can branch on device.os: accept every native rule.
+  if (!entry?.valueByPlatform || !use.condition) {
+    return undefined;
+  }
+  const rule: Rule = {
+    kind: "choice",
+    options: [entry.value, ...Object.values(entry.valueByPlatform)],
+  };
+  for (const op of ["equals", "notEquals"]) {
+    if (Object.hasOwn(use.condition, op)) {
+      const found = check(use.condition[op], rule, use.path.replace(/\.platform$/, `.${op}`));
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return undefined;
+}
+
 function useError(
   use: PrototypePlatformUse,
-  context: { declared: Set<string>; permissions: Set<string>; background: Set<string> },
+  context: PlatformContext,
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
   switch (use.kind) {
@@ -337,17 +550,17 @@ function useError(
       if (!owner) {
         return { path: use.path, message: "Unknown platform event" };
       }
-      return context.declared.has(owner) ? undefined : notDeclared(use.path, owner);
+      if (!context.declared.has(owner)) {
+        return notDeclared(use.path, owner);
+      }
+      return owner === "sensors"
+        ? prototypeSensorUseError(use.event.slice("sensors.".length), use.path, context.root)
+        : undefined;
     }
     case "call":
       return callError(use.action, use.path, context, check);
-    case "read": {
-      const name = prototypePlatformPointerModule(use.pointer);
-      if (!module(name)) {
-        return { path: use.path, message: `Unknown platform module ${name}` };
-      }
-      return context.declared.has(name) ? undefined : notDeclared(use.path, name);
-    }
+    case "read":
+      return readError(use, context) ?? comparisonError(use, check);
     case "event":
       return use.inHandler
         ? undefined
@@ -370,6 +583,39 @@ function emitNameError(action: Raw, path: string): PrototypePlatformError | unde
     : undefined;
 }
 
+/** The first authored node whose `testTag` takes the host-reserved `automobile-` namespace. */
+export function prototypeReservedTestTagError(
+  nodes: readonly { value: Raw; path: string }[],
+): PrototypePlatformError | undefined {
+  const node = nodes.find(
+    ({ value }) =>
+      typeof value.testTag === "string" &&
+      value.testTag.startsWith(PROTOTYPE_RESERVED_TEST_TAG_PREFIX),
+  );
+  return node === undefined
+    ? undefined
+    : {
+        path: `${node.path}.testTag`,
+        message: `testTag values starting with ${PROTOTYPE_RESERVED_TEST_TAG_PREFIX} are reserved for host controls`,
+      };
+}
+
+function platformContext(root: Raw): PlatformContext {
+  const requires = record(root.requires) ?? {};
+  return {
+    channels: record(root.channels) ?? {},
+    players: prototypeMediaPlayers(root),
+    root,
+    declared: strings(requires.platform),
+    permissions: new Set(
+      (Array.isArray(requires.permissions) ? requires.permissions : []).map(
+        (permission) => record(permission)?.name as string,
+      ),
+    ),
+    background: strings(requires.background),
+  };
+}
+
 /**
  * The first platform-vocabulary error in a structurally valid spec: `requires`, then handlers,
  * calls, reads and `{event}` bindings in scan order, then reserved emit names among `actions`.
@@ -380,30 +626,63 @@ export function prototypePlatformError(
   check: PrototypePlatformValueCheck,
 ): PrototypePlatformError | undefined {
   const root = record(spec) ?? {};
-  const requires = record(root.requires) ?? {};
-  const context = {
-    declared: strings(requires.platform),
-    permissions: new Set(
-      (Array.isArray(requires.permissions) ? requires.permissions : []).map(
-        (permission) => record(permission)?.name as string,
-      ),
-    ),
-    background: strings(requires.background),
-  };
-  const error = requiresError(root);
+  const context = platformContext(root);
+  const error = rootBlockError(root, check);
   if (error) {
     return error;
   }
   for (const use of prototypePlatformUses(root)) {
-    const found = useError(use, context, check);
+    const found = useError(use, context, check) ?? channelUseError(use, root, context.players);
     if (found) {
       return found;
     }
   }
   for (const { value, path } of actions) {
-    const found = emitNameError(value, path);
+    const found =
+      emitNameError(value, path) ??
+      prototypeSecureStorageEmitError(value, path, root) ??
+      prototypeSecureStorageRequestError(value, path, root);
     if (found) {
       return found;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The root-level checks, in order: realtime channels, the auth, commerce, secure storage, location,
+ * sensors and notifications blocks, media players and nodes, then `requires`. Kotlin's
+ * `rootChecks` keeps the same order.
+ */
+const ROOT_BLOCK_CHECKS: readonly ((
+  root: Raw,
+  check: PrototypePlatformValueCheck,
+) => PrototypePlatformError | undefined)[] = [
+  prototypeChannelsError,
+  prototypeAuthBlockError,
+  prototypeCommerceBlockError,
+  prototypeSecureStorageError,
+  prototypeLocationBlockError,
+  prototypeSensorsBlockError,
+  prototypeNotificationsBlockError,
+  prototypeMediaError,
+  prototypeMediaQueueError,
+  prototypeVideoPlayerError,
+  prototypeMapError,
+  prototypeMediaCaptionsError,
+  prototypeCastButtonError,
+  requiresError,
+];
+
+/** The first error in the root-level blocks. */
+function rootBlockError(
+  root: Raw,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
+  for (const rootCheck of ROOT_BLOCK_CHECKS) {
+    const error = rootCheck(root, check);
+    if (error) {
+      return error;
     }
   }
   return undefined;
@@ -413,6 +692,7 @@ export function prototypePlatformError(
 function usedModule(use: PrototypePlatformUse): string | undefined {
   switch (use.kind) {
     case "declared":
+    case "node":
       return use.module;
     case "handler":
       return prototypePlatformEventModule(use.event);
@@ -458,7 +738,16 @@ export function prototypePlatformFields(spec: unknown): string[] {
 /** Authored paths needing one module's capability. */
 export function prototypePlatformModuleFields(spec: unknown, name: string): string[] {
   return unique(
-    authoredUses(spec)
+    [
+      ...(name === "realtime"
+        ? prototypeRealtimeFields(spec).map((path) => ({
+            kind: "declared" as const,
+            path,
+            module: name,
+          }))
+        : []),
+      ...authoredUses(spec),
+    ]
       .filter((use) => usedModule(use) === name)
       .map((use) => use.path),
   );
@@ -486,12 +775,133 @@ export function prototypePlatformUnsupportedMessage(
   return unsupported(fields, platform, PROTOTYPE_PLATFORM_CAPABILITY, "the platform vocabulary");
 }
 
-/** One generated gate per module in the `platformModules` table. */
-export const PROTOTYPE_PLATFORM_MODULE_GATES = Object.entries(PROTOTYPE_PLATFORM_MODULES).map(
-  ([name, definition]) => ({
-    capability: definition.capability,
-    fields: (spec: unknown) => prototypePlatformModuleFields(spec, name),
-    unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
-      unsupported(fields, platform, definition.capability, `the ${name} platform module`),
-  }),
+/** Authored paths of calls whose definition names `capability` on top of its module's. */
+export function prototypePlatformCallCapabilityFields(spec: unknown, capability: string): string[] {
+  return unique(
+    authoredUses(spec)
+      .filter(
+        (use) =>
+          use.kind === "call" &&
+          prototypePlatformCall(use.action.call)?.definition.capability === capability,
+      )
+      .map((use) => use.path),
+  );
+}
+
+/** The per-call capabilities in module order, each with the calls that need it. */
+const callCapabilities = (): { capability: string; calls: string[] }[] => {
+  const byCapability = new Map<string, string[]>();
+  for (const [name, definition] of Object.entries(PROTOTYPE_PLATFORM_MODULES)) {
+    for (const [op, call] of Object.entries(definition.calls)) {
+      if (call.capability) {
+        byCapability.set(call.capability, [
+          ...(byCapability.get(call.capability) ?? []),
+          `${name}.${op}`,
+        ]);
+      }
+    }
+  }
+  return [...byCapability].map(([capability, calls]) => ({ capability, calls }));
+};
+
+/** Spec fields beyond its calls that a per-call capability also gates: a queued player (#14249). */
+const CALL_CAPABILITY_FIELDS: Record<
+  string,
+  { fields: (spec: unknown) => string[]; name: string }
+> = {
+  prototype_platform_media_queue_v1: {
+    fields: prototypeMediaQueueFields,
+    name: "a media player `queue`",
+  },
+};
+
+/** One generated gate per per-call capability, after the module gates. */
+const PROTOTYPE_PLATFORM_CALL_GATES = callCapabilities().map(({ capability, calls }) => ({
+  capability,
+  fields: (spec: unknown) => [
+    ...(CALL_CAPABILITY_FIELDS[capability]?.fields(spec) ?? []),
+    ...prototypePlatformCallCapabilityFields(spec, capability),
+  ],
+  unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+    unsupported(
+      fields,
+      platform,
+      capability,
+      [
+        ...calls.map((call) => `\`${call}\``),
+        ...(CALL_CAPABILITY_FIELDS[capability] ? [CALL_CAPABILITY_FIELDS[capability].name] : []),
+      ].join(" or "),
+    ),
+}));
+
+/** One generated gate per module in the `platformModules` table, then one per call capability. */
+const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(
+  ([name, definition]) => [
+    {
+      capability: definition.capability,
+      fields: (spec: unknown) => prototypePlatformModuleFields(spec, name),
+      unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+        unsupported(fields, platform, definition.capability, `the ${name} platform module`),
+    },
+    ...(definition.deviceCapability
+      ? [
+          {
+            capability: definition.deviceCapability,
+            fields: (spec: unknown) => prototypeRealtimeFields(spec, true),
+            unsupportedMessage: (fields: readonly string[], platform: "android" | "ios") =>
+              unsupported(
+                fields,
+                platform,
+                definition.deviceCapability!,
+                "device realtime channels",
+              ),
+          },
+        ]
+      : []),
+  ],
 );
+
+export const PROTOTYPE_PLATFORM_MODULE_GATES = [
+  ...PROTOTYPE_PLATFORM_MODULE_ONLY_GATES,
+  ...PROTOTYPE_PLATFORM_CALL_GATES,
+];
+
+function argumentValueError(
+  action: Raw,
+  { name, value, at }: { name: string; value: unknown; at: string },
+  rule: Rule,
+  check: PrototypePlatformValueCheck,
+): PrototypePlatformError | undefined {
+  if (typeof value === "string") {
+    if (String(action.call).startsWith("realtime.") && name === "channel") {
+      return undefined;
+    }
+    return { path: at, message: "Invalid union value" };
+  }
+  const binding = record(value);
+  if (binding && Object.hasOwn(binding, "value")) {
+    // Share retains its portable string diagnostics; JSON envelopes still use the contract walk.
+    const error =
+      action.call === "share.open" && rule.kind === "string"
+        ? undefined
+        : check(binding.value, rule, `${at}.value`);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+
+function channelUseError(
+  use: PrototypePlatformUse,
+  root: Raw,
+  players: ReadonlySet<string>,
+): PrototypePlatformError | undefined {
+  return use.kind === "call"
+    ? (prototypeChannelCallError(use.action, use.path, root) ??
+        prototypeAuthCallError(use.action, use.path, root) ??
+        prototypeCommerceCallError(use.action, use.path, root) ??
+        prototypeNotificationsCallError(use.action, use.path, root) ??
+        prototypeMediaCallError(use.action, use.path, players))
+    : undefined;
+}

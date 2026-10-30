@@ -33,12 +33,15 @@ const EXCLUDED_FILES = new Set([
   "design-docs/plat/android/android17-playground-audit.md",
   "design-docs/plat/android/dependency-injection.md",
   "release/ios-simulator-continuity.md",
+  "release/device-claims-registry-migration.md",
   "design-docs/plat/ios/xctestrunner/ci-integration.md",
   "decisions/ios-user-files-provider.md",
   "decisions/mcp-sdk-v2-split-packages.md",
   "decisions/prototype-embedded-request-routing.md",
+  "decisions/prototype-mock-backend.md",
   "decisions/prototype-request-retrofit.md",
   "decisions/types-bun-test-typecheck.md",
+  "decisions/watchos-platform.md",
 ]);
 // Copied files mirror root documents (lychee/deploy copy CHANGELOG.md into
 // docs/), so their release-note text, which can legitimately mention "TODOs",

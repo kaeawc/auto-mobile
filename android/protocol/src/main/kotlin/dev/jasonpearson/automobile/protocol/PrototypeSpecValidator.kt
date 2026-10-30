@@ -45,6 +45,9 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_PAGER_DP: Int = limit("MAX_PROTOTYPE_PAGER_DP")
   val MAX_PROTOTYPE_DEPTH: Int = limit("MAX_PROTOTYPE_DEPTH")
   val MAX_PROTOTYPE_IMAGES: Int = limit("MAX_PROTOTYPE_IMAGES")
+  val MAX_PROTOTYPE_KEYFRAME_NODES: Int = limit("MAX_PROTOTYPE_KEYFRAME_NODES")
+  val MAX_PROTOTYPE_EFFECTS: Int = limit("MAX_PROTOTYPE_EFFECTS")
+  val MAX_PROTOTYPE_ANIMATED_EFFECTS: Int = limit("MAX_PROTOTYPE_ANIMATED_EFFECTS")
   val MAX_PROTOTYPE_SPEC_BYTES: Int = limit("MAX_PROTOTYPE_SPEC_BYTES")
   val MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES: Int = limit("MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES")
   val MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES: Int = limit("MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES")
@@ -57,6 +60,7 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_STORAGE_BYTES: Int = limit("MAX_PROTOTYPE_STORAGE_BYTES")
   val MAX_PROTOTYPE_STORAGE_KEYS: Int = limit("MAX_PROTOTYPE_STORAGE_KEYS")
   val MAX_PROTOTYPE_DATA_DEPTH: Int = limit("MAX_PROTOTYPE_DATA_DEPTH")
+  val MAX_PROTOTYPE_LIST_ITEMS: Int = limit("MAX_PROTOTYPE_LIST_ITEMS")
   val MAX_PROTOTYPE_DATA_ARRAY_ITEMS: Int = limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
   val MAX_PROTOTYPE_REPEAT_PATH_CELLS: Int = limit("MAX_PROTOTYPE_REPEAT_PATH_CELLS")
   val MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH: Int = limit("MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH")
@@ -66,9 +70,14 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_STACK_DEPTH: Int = limit("MAX_PROTOTYPE_STACK_DEPTH")
   val DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS: Int = limit("DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS")
   val MAX_PROTOTYPE_REQUEST_TIMEOUT_MS: Int = limit("MAX_PROTOTYPE_REQUEST_TIMEOUT_MS")
+  val MAX_PROTOTYPE_UPLOAD_BYTES: Int = limit("MAX_PROTOTYPE_UPLOAD_BYTES")
+  val MAX_PROTOTYPE_UPLOAD_PARTS: Int = limit("MAX_PROTOTYPE_UPLOAD_PARTS")
   val MAX_PROTOTYPE_RESPONSE_BYTES: Int = limit("MAX_PROTOTYPE_RESPONSE_BYTES")
   val MAX_PROTOTYPE_REQUESTS_IN_FLIGHT: Int = limit("MAX_PROTOTYPE_REQUESTS_IN_FLIGHT")
   val MAX_PROTOTYPE_ACTION_DEPTH: Int = limit("MAX_PROTOTYPE_ACTION_DEPTH")
+  val MAX_PROTOTYPE_TIMERS: Int = limit("MAX_PROTOTYPE_TIMERS")
+  val MAX_PROTOTYPE_TIMER_RUNS: Int = limit("MAX_PROTOTYPE_TIMER_RUNS")
+  val MAX_PROTOTYPE_TIMER_MS: Int = limit("MAX_PROTOTYPE_TIMER_MS")
   internal val maxRepeatItems: Int =
     definitions
       .getValue("repeat")
@@ -99,6 +108,7 @@ object PrototypeSpecValidator {
     input: String,
     supportedCapabilities: Set<String>? = null,
     library: Boolean = false,
+    shareAssetIds: Set<String>? = null,
   ): PrototypeSpecValidation {
     val context = Context()
     val result = PrototypeSpecInput.validateInput(input, context)
@@ -109,6 +119,7 @@ object PrototypeSpecValidator {
         supportedCapabilities,
         library,
         context,
+        shareAssetIds,
       )
     return if (error == null) result else PrototypeSpecValidation.Failure(error)
   }
@@ -117,6 +128,7 @@ object PrototypeSpecValidator {
     input: ByteArray,
     supportedCapabilities: Set<String>? = null,
     library: Boolean = false,
+    shareAssetIds: Set<String>? = null,
   ): PrototypeSpecValidation =
     if (input.size > MAX_PROTOTYPE_SPEC_BYTES)
       PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Spec byte limit exceeded"))
@@ -128,6 +140,7 @@ object PrototypeSpecValidator {
           },
           supportedCapabilities,
           library,
+          shareAssetIds,
         )
       } catch (_: IllegalArgumentException) {
         PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Invalid UTF-8"))
@@ -149,6 +162,8 @@ object PrototypeSpecValidator {
     }
     val value = checkNotNull(context.root).jsonObject
     val checked = checkNotNull(context.stateBindings)
+    // A state write can break a videoPlayer's number-typed positionKey.
+    val videoPlayers = context.nodes.filter { it.value.text("type") == "videoPlayer" }
     // Only bindings can change their verdict. Static-only nodes/actions passed full validation.
     checked.nodes.removeAll {
       boundKeys(it.value).isEmpty() &&
@@ -159,6 +174,8 @@ object PrototypeSpecValidator {
     checked.actions.removeAll {
       it.value.text("type") !in stateWriteActionTypes && it.value["requireValid"] == null
     }
+    // A keyframes trigger names a declared state key, so a state write can change that verdict.
+    val keyframeKeys = PrototypeKeyframesRules.stateKeyTriggers(context)
     val serializer = MapSerializer(String.serializer(), PrototypeScalar.serializer())
     // An omitted state adds its field name and comma; a present state replaces only its value.
     // Compact serialization preserves all non-state bytes, including UTF-8 and escaped strings.
@@ -185,18 +202,36 @@ object PrototypeSpecValidator {
           val stored = json.parseToJsonElement(PrototypeStrictJson.prepare(encodedState))
           if (!validNumberTokens(stored)) fail("", "Invalid JSON")
           else
-            walk(stored, stateRule, "state", Context(), 0)
-              ?: PrototypeStorageValidation.error(
+            storedStateError(stored, stateRule, value, checked, keyframeKeys)
+              ?: PrototypeMedia.videoPlayerError(
                 JsonObject(value + ("state" to stored)),
-                enforceBytes = false,
+                videoPlayers,
               )
-              ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
         } catch (_: IllegalArgumentException) {
           fail("", "Invalid JSON")
         }
       }
     }
   }
+
+  /** The verdict for a decoded state write against the spec it replaces the state of. */
+  private fun storedStateError(
+    stored: JsonElement,
+    stateRule: JsonObject,
+    value: JsonObject,
+    checked: Context,
+    keyframeKeys: List<Pair<String, String>>,
+  ): PrototypeSpecError? =
+    walk(stored, stateRule, "state", Context(), 0)
+      ?: PrototypeKeyframesRules.unknownTriggerKey(keyframeKeys, stored as? JsonObject)
+      ?: PrototypeStorageValidation.error(
+        JsonObject(value + ("state" to stored)),
+        enforceBytes = false,
+      )
+      ?: PrototypeChannels.error(JsonObject(value + ("state" to stored)))
+      // A secure key must keep holding a string after the write.
+      ?: PrototypeSecureStorageRules.blockError(JsonObject(value + ("state" to stored)))
+      ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
 
   private val stateWriteActionTypes =
     setOf("setState", "toggle", "increment", "decrement", "request", "platform")

@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "strict",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "keepScreenOn": true,
+      "brightness": 100,
+      "orientation": "portrait",
+      "statusBar": "light"
+    },
+    "root": {
+      "type": "text",
+      "text": "Boarding pass"
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_window_controls_v1"
+}

@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "style": {
+        "surface": "glass",
+        "glass": {
+          "tint": 1
+        }
+      },
+      "children": []
+    }
+  },
+  "expectedPath": "root.style.glass.tint",
+  "expectedMessage": "Invalid union value"
+}

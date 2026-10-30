@@ -23,10 +23,17 @@ import {
 } from "../DeviceConnectionLostNotifier";
 import type { SetTextOptions } from "../DeviceService";
 import { WebSocketFactory } from "../DeviceServiceClient";
+import type { LatestHierarchyOptions } from "../android/types";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import type { PinchRequest, TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
-import type { BaseResult, DragRequest, GestureTimingResult, SwipeRequest } from "../shared/types";
-import { type IOSDispatchResult } from "./CtrlProxyDispatch";
+import type {
+  BaseResult,
+  DispatchOptions,
+  DragRequest,
+  GestureTimingResult,
+  SwipeRequest,
+} from "../shared/types";
+import { type IOSDispatchResult, type IosFrameDispatchOptions } from "./CtrlProxyDispatch";
 import { type IosNetworkErrorSimulationConfig } from "./CtrlProxyNetworkSync";
 import { type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
 import type { IosActivateAccessibilityLinkRequest } from "./CtrlProxyVoiceOver";
@@ -47,6 +54,7 @@ import type {
   CtrlProxyLocationRequest,
   CtrlProxyLocationResult,
   CtrlProxyAppearanceResult,
+  CtrlProxySiriResult,
   CtrlProxyImeActionResult,
   CtrlProxyKeyboardResult,
   CtrlProxyLaunchAppResult,
@@ -139,8 +147,7 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    signal?: AbortSignal,
+    options?: LatestHierarchyOptions,
   ): Promise<CtrlProxyHierarchyResponse>;
 
   requestHierarchySync(
@@ -187,9 +194,7 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     x: number,
     y: number,
     timeoutMs?: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: IosFrameDispatchOptions,
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>>;
 
   requestTapCoordinates(
@@ -253,8 +258,7 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: DispatchOptions,
   ): Promise<IOSDispatchResult<CtrlProxyPressKeyResult>>;
 
   requestClipboard(
@@ -262,8 +266,7 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     text?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: DispatchOptions,
   ): Promise<CtrlProxyClipboardResult & { acknowledged?: boolean }>;
 
   requestPressHome(
@@ -292,9 +295,7 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     button: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: IosFrameDispatchOptions,
   ): Promise<IOSDispatchResult<CtrlProxyPressButtonResult>>;
 
   requestRecentApps(
@@ -318,6 +319,8 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<CtrlProxyLocationResult>;
+
+  requestSiri(text: string, timeoutMs?: number, signal?: AbortSignal): Promise<CtrlProxySiriResult>;
 
   requestAppearance(
     appearance?: "light" | "dark",
@@ -375,7 +378,6 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     resourceId?: string,
     label?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult>;
 

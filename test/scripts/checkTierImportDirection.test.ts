@@ -35,7 +35,7 @@ describe("tier import direction rules (#11789)", () => {
   });
 
   test("the daemon client side may not import the session, pool or socket-server runtime", () => {
-    for (const tier of ["daemon/proxy", "daemon/mcpProxy"]) {
+    for (const tier of ["daemon/proxy", "daemon/mcpProxy", "daemon/client"]) {
       const client = rule(tier);
       expect(isViolation(client, "src/daemon/sessionManager")).toBe(true);
       expect(isViolation(client, "src/daemon/sessionManager/sessionTypes")).toBe(true);
@@ -43,7 +43,7 @@ describe("tier import direction rules (#11789)", () => {
       expect(isViolation(client, "src\\daemon\\socketServer")).toBe(true);
       expect(isViolation(client, "src/daemon/sessionManager/releaseTypes")).toBe(false);
       expect(isViolation(client, "src/daemon/sessionManager/sessionConstants")).toBe(false);
-      expect(isViolation(client, "src/daemon/client")).toBe(false);
+      expect(isViolation(client, "src/daemon/client/client")).toBe(false);
       expect(isViolation(client, "src/server/toolRegistry")).toBe(false);
     }
   });

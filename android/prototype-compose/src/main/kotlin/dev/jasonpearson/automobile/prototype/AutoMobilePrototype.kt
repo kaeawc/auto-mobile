@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.prototype
 
+import android.annotation.SuppressLint
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -12,20 +14,28 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
+import dev.jasonpearson.automobile.ctrlproxy.prototype.InternalAutoMobilePrototypeApi
+import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeBackSeek
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackSeek
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDismissReason as InternalPrototypeDismissReason
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeInteraction
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntime
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRuntimeContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
+import dev.jasonpearson.automobile.ctrlproxy.prototype.collectStackBackProgress
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeInitialDeviceState
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import java.io.File
 import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -36,19 +46,21 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * Embeds a validated prototype. The composition owns its runtime and cancels requests when [spec]
  * changes or it leaves composition. Declared storage keys restore before drawing and flush on
- * lifecycle stop and disposal. Keep [assets], [storage] and [network] stable; replacing one reloads
- * the runtime. Callback changes do not reload it. No daemon or HTTP stack is required. After
- * dismissal, content stays removed until [spec] changes or the caller uses `key()` to create a new
- * composition identity.
+ * lifecycle stop and disposal. Keep [assets], [storage], [network] and [platform] stable; replacing
+ * one reloads the runtime. Callback changes do not reload it. No daemon or HTTP stack is required.
+ * After dismissal, content stays removed until [spec] changes or the caller uses `key()` to create
+ * a new composition identity.
  *
  * @param spec Complete prototype JSON; invalid/unsupported input draws only [onError].
  * @param modifier Applied to the embedded content, including error content.
  * @param assets Custom image and font bytes, addressed by asset id.
  * @param storage Persistence for declared storage keys; disabled by default.
  * @param network App-owned request transports; disabled by default.
+ * @param platform App-owned platform modules; empty by default.
  * @param onEvent Receives typed runtime events on the main thread.
  * @param onDismiss Receives the reason for an authored or user dismissal, once.
- * @param handleBack Opt in to dismissing active content on back; false leaves back to the app.
+ * @param handleBack Opt in to popping stacks, then dismissing at their root; false leaves back to
+ *   the app.
  * @param onError Content for load failures. Validation has no separate capability-requirement list.
  */
 @Composable
@@ -60,11 +72,22 @@ fun AutoMobilePrototype(
   assets: PrototypeAssets = PrototypeAssets.None,
   storage: PrototypeStorage = PrototypeStorage.None,
   network: PrototypeNetwork = remember { PrototypeNetwork() },
+  platform: PrototypePlatform = PrototypePlatform.None,
   onEvent: (PrototypeEvent) -> Unit = {},
   onDismiss: (PrototypeDismissReason) -> Unit = {},
   handleBack: Boolean = false,
   onError: @Composable (PrototypeLoadError) -> Unit = { DefaultPrototypeError(it) },
 ) {
+  val clipboardContext = androidx.compose.ui.platform.LocalContext.current
+  val runtimePlatform =
+    remember(platform, clipboardContext) {
+      if (platform.registry.modules.any { it.name == "clipboard" }) platform
+      else
+        PrototypePlatform(
+          platform.registry.modules +
+            PrototypeClipboardModule(AndroidPrototypeClipboard(clipboardContext)),
+        )
+    }
   val validation = remember(spec) { PrototypeSpecValidator.validate(spec) }
   Box(modifier) {
     when (validation) {
@@ -72,7 +95,7 @@ fun AutoMobilePrototype(
         onError(PrototypeLoadError.Invalid(validation.error.path, validation.error.message))
       is PrototypeSpecValidation.Success ->
         EmbeddedPrototype(
-          EmbeddedInput(spec, validation.spec, assets, storage, network),
+          EmbeddedInput(spec, validation.spec, assets, storage, network, runtimePlatform),
           EmbeddedCallbacks(onEvent, onDismiss),
           handleBack,
           onError,
@@ -121,7 +144,34 @@ private data class EmbeddedInput(
   val assets: PrototypeAssets,
   val storage: PrototypeStorage,
   val network: PrototypeNetwork,
+  val platform: PrototypePlatform,
 )
+
+// The progress flow is collected inside collectStackBackProgress, which lint cannot see through.
+@SuppressLint("NoCollectCallFound")
+@Composable
+private fun EmbeddedBackHandling(
+  runtime: PrototypeRuntime,
+  seek: PrototypeBackSeek,
+  enabled: Boolean,
+  dispatch: suspend (PrototypeInteraction) -> Unit,
+  scope: CoroutineScope,
+) {
+  // Keep the predictive handler alive through commit delivery and settling at the root.
+  if (runtime.hasPoppableStack() || seek.preview != null) {
+    PredictiveBackHandler(enabled = enabled) { events ->
+      val preview = runtime.backPreview()
+      if (preview != null) {
+        seek.start(preview)
+        val committed = collectStackBackProgress(events.map { it.progress }) { seek.progress = it }
+        if (committed) dispatch(PrototypeInteraction.Back)
+        seek.result = committed
+      }
+    }
+  } else {
+    BackHandler(enabled = enabled) { scope.launch { dispatch(PrototypeInteraction.Back) } }
+  }
+}
 
 @Composable
 private fun EmbeddedPrototype(
@@ -131,6 +181,10 @@ private fun EmbeddedPrototype(
   onError: @Composable (PrototypeLoadError) -> Unit,
 ) {
   val context = LocalContext.current.applicationContext
+  val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+  val locales =
+    (0 until configuration.locales.size()).map { configuration.locales[it].toLanguageTag() }
+  val latestLocales by rememberUpdatedState(locales)
   val lifecycle = LocalLifecycleOwner.current.lifecycle
   val environment = LocalEmbeddedPrototypeEnvironment.current
   val compositionScope = rememberCoroutineScope()
@@ -144,14 +198,7 @@ private fun EmbeddedPrototype(
   LaunchedEffect(owner) {
     interactions.withLock {
       owner.open(
-        EmbeddedConfiguration(
-          input.spec,
-          input.storage,
-          input.network,
-          scope,
-          environment,
-          context.cacheDir,
-        ),
+        EmbeddedConfiguration(input, scope, environment, context, locales = { latestLocales }),
       ) {
         environment.host?.eventSink?.send(it)
         latestCallbacks.send(it)
@@ -159,26 +206,57 @@ private fun EmbeddedPrototype(
     }
   }
   if (host == null) EmbeddedLifetime(owner, lifecycle, scope, interactions)
-  else EmbeddedHostLifetime(owner, host)
+  else EmbeddedHostLifetime(owner, host, lifecycle)
   val session = owner.session
   if (session != null) {
-    val active by session.runtime.snapshots.collectAsState()
-    if (handleBack) {
-      BackHandler(enabled = active.active) {
-        scope.launch { interactions.withLock { session.runtime.dismiss() } }
-      }
+    LaunchedEffect(session, locales) {
+      interactions.withLock { session.runtime.updateLocales(locales) }
     }
-    PrototypeRuntimeContent(session.runtime, session.images, session.fonts) {
+    val active by session.runtime.snapshots.collectAsState()
+    val seek = remember(session.runtime) { PrototypeBackSeek() }
+    val dispatch: suspend (PrototypeInteraction) -> Unit = {
       if (host == null) interactions.withLock { session.runtime.handle(it) }
       else host.onInteraction(it, session.runtime)
+    }
+    if (handleBack) EmbeddedBackHandling(session.runtime, seek, active.active, dispatch, scope)
+    CompositionLocalProvider(LocalPrototypeBackSeek provides if (handleBack) seek else null) {
+      PrototypeRuntimeContent(session.runtime, session.images, session.fonts, dispatch)
     }
     SideEffect { if (host?.isCurrent?.invoke() == true) host.onReady() }
   }
   owner.error?.let { onError(it) }
 }
 
+@InternalAutoMobilePrototypeApi
+internal object PrototypeTimerLifecycle {
+  fun observer(
+    scope: CoroutineScope,
+    interactions: Mutex,
+    runtime: () -> PrototypeRuntime?,
+  ): LifecycleEventObserver = LifecycleEventObserver { _, event ->
+    if (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_STOP) {
+      scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
+        interactions.withLock {
+          if (event == Lifecycle.Event.ON_STOP) runtime()?.pauseTimers()
+          else runtime()?.resumeTimers()
+        }
+      }
+    }
+  }
+}
+
 @Composable
-private fun EmbeddedHostLifetime(owner: EmbeddedOwner, host: EmbeddedPrototypeHost) {
+private fun EmbeddedHostLifetime(
+  owner: EmbeddedOwner,
+  host: EmbeddedPrototypeHost,
+  lifecycle: Lifecycle,
+) {
+  DisposableEffect(owner, host, lifecycle) {
+    val observer =
+      PrototypeTimerLifecycle.observer(host.scope, host.interactions) { owner.session?.runtime }
+    lifecycle.addObserver(observer)
+    onDispose { lifecycle.removeObserver(observer) }
+  }
   // The host performs its own flush before reload and on stop, and closes on destroy. Only the
   // composition's temporary assets belong to this disposal path.
   DisposableEffect(owner) {
@@ -200,9 +278,15 @@ private fun EmbeddedLifetime(
 ) {
   DisposableEffect(owner, lifecycle) {
     val observer = LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_START) {
+        scope.launch { interactions.withLock { owner.session?.runtime?.resumeTimers() } }
+      }
       if (event == Lifecycle.Event.ON_STOP) {
         scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) {
-          interactions.withLock { owner.session?.runtime?.flushStorage() }
+          interactions.withLock {
+            owner.session?.runtime?.pauseTimers()
+            owner.session?.runtime?.flushStorage()
+          }
         }
       }
     }
@@ -220,13 +304,19 @@ private fun EmbeddedLifetime(
 }
 
 private class EmbeddedConfiguration(
-  val spec: PrototypeSpec,
-  val storage: PrototypeStorage,
-  val network: PrototypeNetwork,
+  input: EmbeddedInput,
   val scope: CoroutineScope,
   val environment: EmbeddedPrototypeEnvironment,
-  val cacheDir: java.io.File,
-)
+  context: android.content.Context,
+  val locales: () -> List<String>,
+) {
+  val spec = input.spec
+  val storage = input.storage
+  val network = input.network
+  val platform = input.platform
+  val cacheDir: File = context.cacheDir
+  val initialDeviceState = prototypeInitialDeviceState(context)
+}
 
 private class EmbeddedOwner(
   assets: PrototypeAssets,
@@ -282,23 +372,30 @@ private class EmbeddedOwner(
         requestDismiss = config.environment.host?.requestDismiss ?: { true },
         storage = opened.session,
         httpClients = config.network.clients(),
+        platform = config.platform,
         requestScope = config.scope,
         exclusively = { block -> interactions.withLock { block() } },
         newRequestId = config.environment.requestId,
+        initialPlatformState = config.initialDeviceState,
       )
+    // Seed before publishing the session, so its first rendered frame is already localized.
+    runtime.updateLocales(config.locales())
     config.environment.host?.onRuntime?.invoke(runtime)
+    runtime.shown()
     session =
       EmbeddedSession(
         runtime,
         PrototypeImageCache(source, BitmapPrototypeImageDecoder(), dispatcher = io),
         PrototypeFontCache(source, ComposePrototypeFontLoader()),
       )
+    runtime.startPlatformModules()
   }
 
   suspend fun close() {
     try {
       session?.runtime?.flushStorage()
     } finally {
+      session?.runtime?.cancelPlatformCalls()
       session?.runtime?.close()
       releaseAssets()
     }

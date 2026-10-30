@@ -17,10 +17,169 @@ const platformCall = {
   ...label,
   onTap: [{ type: "platform", call: "test.echo", args: { message: { value: "hi" } } }],
 };
+const biometricCall = {
+  ...label,
+  onTap: [
+    { type: "platform", call: "biometric.authenticate", args: { title: { value: "Unlock" } } },
+  ],
+};
+const settingsCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "settings.open", args: { page: { value: "app" } } }],
+};
+const mediaPickCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.pick", args: { media: { value: "images" } } }],
+};
+const libraryQueryCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.query", args: { media: { value: "images" } } }],
+};
+const librarySaveCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.save", args: { media: { data: "/data/code" } } }],
+};
+const cameraCaptureCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "camera.capture", args: { media: { value: "image" } } }],
+};
+const recorderCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "audioRecorder.start", args: {} }],
+};
+const notificationsCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "notifications.cancel", args: { all: { value: true } } }],
+};
+const scheduleCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "notifications.schedule",
+      args: {
+        id: { value: "eta" },
+        channel: { value: "reminders" },
+        title: { value: "Soon" },
+        delaySeconds: { value: 60 },
+      },
+    },
+  ],
+};
+const mediaCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "media.play", args: { player: { value: "main" } } }],
+};
+const recordCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "camera.startRecording", args: { preview: { value: "vf" } } }],
+};
+const queueCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "media.next", args: { player: { value: "main" } } }],
+};
+const castCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "cast.stop", args: {} }],
+};
+const contactsCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "contacts.pick", args: {} }],
+};
+const calendarCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "calendar.insert",
+      args: { title: { value: "Dinner" }, start: { value: 1 }, end: { value: 2 } },
+    },
+  ],
+};
+const authCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "auth.signOut", args: {} }],
+};
+const locationCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "location.request", args: {} }],
+};
+const commerceCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "commerce.restore", args: {} }],
+};
+const openUrlCall = {
+  ...label,
+  onTap: [
+    { type: "platform", call: "links.open", args: { url: { value: "https://example.com" } } },
+  ],
+};
+const hapticsCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "haptics.perform",
+      args: { effect: { value: "click" } },
+    },
+  ],
+};
+const soundCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "sound.play",
+      args: { sound: { value: "send" }, volume: { value: 80 } },
+    },
+  ],
+};
+const mediaImage = { type: "image", asset: { data: "/photo" }, contentDescription: "Photo" };
+const deviceRead = { ...label, visibleWhen: { platform: "/device/os", equals: "android" } };
+const statusRead = (module: string, key: string, equals: string | boolean | number) => ({
+  ...label,
+  visibleWhen: { platform: `/${module}/${key}`, equals },
+});
 // Minimal feature nodes mirrored from the server parity fixtures. Keeping them here avoids
 // editing the server test outside this lane's permitted paths. No gate/container exceptions:
 // every current gate can be activated by a node, including theme and data via inline values.
 const fixtures: Record<string, Node> = {
+  prototype_glass_v1: { ...label, style: { surface: "glass" } },
+  prototype_scroll_edge_effect_v1: { type: "scroll", edgeEffect: "soft", child: label },
+  prototype_icon_effects_v1: { type: "icon", name: "home", effect: { type: "bounce" } },
+  prototype_routes_v1: { ...label, onTap: [{ type: "pop", stack: "nav", force: true }] },
+  prototype_style_polish_v2: { ...label, style: { cornerStyle: "continuous" } },
+  prototype_tooltip_v1: {
+    type: "tooltip",
+    text: "Tip",
+    anchorTo: "target",
+    openWhen: { key: "liked", equals: true },
+  },
+  prototype_adaptive_v1: {
+    type: "adaptive",
+    kind: "listDetail",
+    selectionKey: "selection",
+    list: label,
+    detail: label,
+  },
+  prototype_drawer_v1: {
+    type: "drawer",
+    edge: "start",
+    openWhen: { key: "liked", equals: true },
+    child: { type: "spacer" },
+  },
+  prototype_strings_v1: { ...label, text: "{t:title}" },
+  prototype_semantics_v1: { ...label, semantics: { heading: true } },
+  prototype_format_v1: {
+    type: "column",
+    repeat: {
+      items: [{ n: 1 }],
+      as: "item",
+      derive: { nText: { of: { item: "n" }, format: { number: {} } } },
+    },
+    children: [label],
+  },
+  prototype_platform_namespace_v1: { ...label, ios: { hover: "lift" } },
   prototype_theme_modes_v1: {
     ...label,
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
@@ -38,8 +197,15 @@ const fixtures: Record<string, Node> = {
     stateKey: "name",
     leadingIcon: "search",
   },
+  prototype_custom_shaders_v1: { ...label, style: { shader: { asset: "effect" } } },
   prototype_flow_grid_v1: { type: "flow", children: [label] },
+  prototype_pager_state_key_v1: { type: "pager", stateKey: "page", children: [label] },
+  prototype_bar_scroll_v1: { type: "topAppBar", title: "Feed", onScroll: "pinned" },
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
+  prototype_scroll_motion_v1: {
+    ...label,
+    scrollLinked: { source: "feed", range: [0, 160], alpha: [1, 0] },
+  },
   prototype_gestures_v1: { ...label, onLongPress: [{ type: "emit", name: "long" }] },
   prototype_carousel_v1: { type: "carousel", itemWidth: 120, children: [label] },
   prototype_refresh_v1: {
@@ -58,9 +224,42 @@ const fixtures: Record<string, Node> = {
     activeKey: "active",
     child: label,
   },
+  prototype_string_conditions_v1: { ...label, visibleWhen: { key: "name", contains: "A" } },
   prototype_loading_states_v1: { type: "box", style: { shimmer: true }, children: [label] },
+  prototype_keyframes_v1: {
+    ...label,
+    keyframes: {
+      trigger: { key: "liked" },
+      durationMs: 600,
+      tracks: {
+        scale: [
+          [0, 1],
+          [1, 1],
+        ],
+      },
+    },
+  },
+  prototype_effects_v1: { ...label, style: { effects: [{ type: "noise" }] } },
+  prototype_motion_v3: { ...label, animate: {}, style: { cornerRadius: 8 } },
+  prototype_motion_tokens_v1: { ...label, animate: { tempo: "fast" } },
   prototype_motion_v2: { ...label, animate: { durationMs: 300 } },
+  prototype_shared_element_v2: { ...label, shared: { key: "hero", as: "bounds" } },
+  prototype_shared_element_v1: { ...label, sharedKey: "hero" },
+  prototype_stack_patterns_v1: {
+    ...label,
+    onTap: [{ type: "push", stack: "nav", screen: "home", transition: "sharedAxisX" }],
+  },
+  prototype_stack_transitions_v1: {
+    ...label,
+    onTap: [{ type: "push", stack: "nav", screen: "home", transition: "slide" }],
+  },
+  prototype_content_transition_v1: { ...label, contentTransition: "numeric" },
   prototype_choreography_v1: { ...label, transition: { type: "fade", delayMs: 100 } },
+  prototype_lazy_list_v1: {
+    type: "list",
+    repeat: { items: { path: "/rows" }, as: "row", key: "id" },
+    children: [label],
+  },
   prototype_chart_v1: {
     type: "chart",
     variant: "line",
@@ -72,7 +271,14 @@ const fixtures: Record<string, Node> = {
     text: "@ana",
     linkify: { kinds: ["mention"], onTap: [{ type: "emit", name: "link" }] },
   },
+  prototype_timers_v1: {
+    ...label,
+    onTap: [
+      { type: "startTimer", id: "tick", afterMs: 100, actions: [{ type: "emit", name: "tick" }] },
+    ],
+  },
   prototype_chat_scroll_v1: { type: "scroll", reverse: true, child: label },
+  prototype_hide_keyboard_v1: { ...label, onTap: [{ type: "hideKeyboard" }] },
   prototype_menus_v1: {
     type: "menu",
     openWhen: { key: "liked", equals: true },
@@ -96,12 +302,63 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
   },
+  prototype_network_upload_v1: {
+    ...label,
+    onTap: [
+      {
+        type: "request",
+        method: "POST",
+        url: "https://example.com/upload",
+        body: { form: { q: { value: "hello" } } },
+      },
+    ],
+  },
   prototype_network_device_v1: {
     ...label,
     onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
   },
+  prototype_platform_realtime_v1: {
+    ...label,
+    onTap: [{ type: "upsertData", path: "/data/rows", key: "/id", value: { value: { id: 1 } } }],
+  },
+  prototype_platform_sensors_v1: statusRead("sensors", "proximityNear", true),
+  prototype_platform_map_v1: { type: "map" },
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
+  prototype_platform_device_v1: deviceRead,
+  prototype_platform_battery_v1: statusRead("battery", "state", "charging"),
+  prototype_platform_power_v1: statusRead("power", "thermal", "serious"),
+  prototype_platform_secureStorage_v1: statusRead("secureStorage", "locked", true),
+  prototype_platform_audio_v1: statusRead("audio", "muted", true),
+  prototype_platform_connectivity_v1: statusRead("connectivity", "online", false),
+  prototype_platform_biometric_v1: biometricCall,
+  prototype_platform_settings_v1: settingsCall,
+  prototype_platform_links_v1: openUrlCall,
+  prototype_platform_contacts_v1: contactsCall,
+  prototype_platform_mediaLibrary_v1: mediaPickCall,
+  prototype_platform_location_v1: locationCall,
+  prototype_platform_camera_v1: cameraCaptureCall,
+  prototype_platform_audioRecorder_v1: recorderCall,
+  prototype_platform_notifications_v1: notificationsCall,
+  prototype_platform_notifications_scheduled_v1: scheduleCall,
+  prototype_platform_media_v1: mediaCall,
+  prototype_platform_camera_capture_v1: cameraCaptureCall,
+  prototype_platform_camera_video_v1: recordCall,
+  prototype_platform_cast_v1: castCall,
+  prototype_platform_media_queue_v1: queueCall,
+  prototype_platform_mediaLibrary_query_v1: libraryQueryCall,
+  prototype_platform_mediaLibrary_save_v1: librarySaveCall,
+  prototype_platform_calendar_v1: calendarCall,
+  prototype_platform_commerce_v1: commerceCall,
+  prototype_platform_auth_v1: authCall,
+  prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
+  prototype_platform_haptics_v1: hapticsCall,
+  prototype_platform_sound_v1: soundCall,
+  prototype_platform_media_items_v1: mediaImage,
+  prototype_platform_share_v1: {
+    ...label,
+    onTap: [{ type: "platform", call: "share.open", args: { text: { value: "Hi" } } }],
+  },
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.
@@ -112,17 +369,29 @@ const containers: {
   wrap: (node: Node) => Node;
 }[] = [
   { name: "root", prefix: "root", wrap: (root) => ({ root }) },
-  ...["scroll", "dialog", "bottomSheet", "searchBar"].map((type) => ({
+  ...["list", "detail", "content", "main", "supporting"].map((field) => ({
+    name: "adaptive",
+    field,
+    prefix: `root.${field}`,
+    wrap: (node: Node) => ({ root: { type: "adaptive", [field]: node } }),
+  })),
+  ...["scroll", "dialog", "bottomSheet", "searchBar", "drawer"].map((type) => ({
     name: type,
     field: "child",
     prefix: "root.child",
     wrap: (child: Node) => ({ root: { type, child } }),
   })),
-  ...["box", "row", "column", "flow", "grid", "carousel", "card", "pager"].map((type) => ({
+  ...["box", "row", "column", "flow", "grid", "carousel", "card", "pager", "list"].map((type) => ({
     name: type,
     field: "children",
     prefix: "root.children[0]",
     wrap: (node: Node) => ({ root: { type, children: [node] } }),
+  })),
+  ...["header", "footer"].map((field) => ({
+    name: "list",
+    field,
+    prefix: `root.${field}`,
+    wrap: (node: Node) => ({ root: { type: "list", [field]: node } }),
   })),
   {
     name: "stack",
@@ -139,12 +408,84 @@ const containers: {
 
 // Gates on a root-level spec field, not a node: no container can hold them, so they get a
 // dedicated test below instead of a container fixture.
-const ROOT_LEVEL_GATES = ["prototype_storage_v1"];
+const ROOT_LEVEL_GATES = [
+  "prototype_platform_realtime_device_v1",
+  "prototype_storage_v1",
+  "prototype_backdrop_v1",
+  "prototype_design_platform_v1",
+  "prototype_reduced_motion_v1",
+  "prototype_window_motion_v1",
+  "prototype_platform_window_controls_v1",
+];
 
 test("every capability gate has a container fixture or is a root-level gate", () => {
   expect([...Object.keys(fixtures), ...ROOT_LEVEL_GATES].sort()).toEqual(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.capability).sort(),
   );
+});
+
+test("the backdrop gate reports the window-level backdrop", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_backdrop_v1",
+  )!;
+  const spec = { window: { backdrop: { material: "thin" } }, root: label };
+  expect(gate.fields(spec)).toEqual(["window.backdrop"]);
+  expect(gate.fields({ window: {}, root: label })).toEqual([]);
+});
+
+test("the design gate reports only explicit root-level platform design", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_design_platform_v1",
+  )!;
+  expect(gate.fields({ root: label, theme: { design: "platform" } })).toEqual(["theme.design"]);
+  expect(gate.fields({ root: label, theme: { design: "material" } })).toEqual([]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+test("the window motion gate reports window.transition and a repeat stagger", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_window_motion_v1",
+  )!;
+  expect(gate.fields({ window: { transition: "fade" }, root: label })).toEqual([
+    "window.transition",
+  ]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+test("the window controls gate reports each window control the spec sets", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_platform_window_controls_v1",
+  )!;
+  const window = {
+    keepScreenOn: false,
+    brightness: "system",
+    orientation: "portrait",
+    statusBar: "auto",
+  };
+  expect(gate.fields({ window, root: label })).toEqual([
+    "window.keepScreenOn",
+    "window.brightness",
+    "window.orientation",
+    "window.statusBar",
+  ]);
+  expect(gate.fields({ window: { brightness: 0 }, root: label })).toEqual(["window.brightness"]);
+  expect(gate.fields({ window: { transition: "fade" }, root: label })).toEqual([]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+test("the hide keyboard gate reports every hideKeyboard action and nothing else", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_hide_keyboard_v1",
+  )!;
+  const root = {
+    type: "column",
+    children: [
+      { ...label, onTap: [{ type: "emit", name: "done" }, { type: "hideKeyboard" }] },
+      { ...label, onTap: [{ type: "dismiss" }] },
+    ],
+  };
+  expect(gate.fields({ root })).toEqual(["root.children[0].onTap[1]"]);
+  expect(gate.fields({ root: label })).toEqual([]);
 });
 
 test("the storage gate reports the root-level storage block", () => {
@@ -196,8 +537,23 @@ function referencesNode(rule: unknown): boolean {
 
 test("contract node-reference fields are covered by both the iterator and container matrix", () => {
   const node = { type: "text" };
-  const actual = prototypeNodeChildren({ child: node, children: [node], screens: { home: node } });
-  const suffixes = actual.map(({ suffix }) => suffix);
+  const actual = prototypeNodeChildren({
+    type: "list",
+    child: node,
+    children: [node],
+    screens: { home: node },
+    header: node,
+    footer: node,
+  });
+  const adaptive = prototypeNodeChildren({
+    type: "adaptive",
+    list: node,
+    detail: node,
+    content: node,
+    main: node,
+    supporting: node,
+  });
+  const suffixes = [...actual, ...adaptive].map(({ suffix }) => suffix);
   for (const [variant, definition] of Object.entries(contract.definitions.node.variants)) {
     for (const [field, definitionField] of Object.entries(definition.fields)) {
       if (!referencesNode(definitionField.rule)) {
@@ -282,3 +638,49 @@ test("input checks on a textField do not trip any other capability gate", () => 
     "prototype_checks_v1",
   ]);
 });
+
+for (const container of containers) {
+  test(`prependData lazy-list gate covers ${container.name} ${container.field ?? ""}`, () => {
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (g) => g.capability === "prototype_lazy_list_v1",
+    )!;
+    const candidate = container.wrap({
+      ...label,
+      onTap: [{ type: "prependData", path: "/data/rows", value: { value: 1 } }],
+    });
+    expect(gate.fields(candidate)).toContain(`${container.prefix}.onTap[0]`);
+  });
+}
+
+test("reduced motion gate reports only spec.motion", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_reduced_motion_v1",
+  )!;
+  expect(gate.fields({ motion: "reduced", root: label })).toEqual(["motion"]);
+  expect(gate.fields({ motion: "standard", root: { motion: "reduced" } })).toEqual([]);
+});
+
+for (const container of containers) {
+  test(`window motion repeat.stagger covers ${container.name}`, () => {
+    const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (entry) => entry.capability === "prototype_window_motion_v1",
+    )!;
+    expect(gate.fields(container.wrap({ ...label, repeat: { stagger: { ms: 20 } } }))).toEqual([
+      `${container.prefix}.repeat.stagger`,
+    ]);
+  });
+}
+
+// Native rendering is advisory; reuse the complete container matrix without adding an authoring refusal.
+import { PROTOTYPE_ZOOM_RENDERING_GATE } from "../../../src/features/prototype/prototypeZoomTransition";
+for (const container of containers) {
+  test(`zoom rendering capability covers ${container.name} ${container.field ?? ""}`, () => {
+    const spec = container.wrap({
+      ...label,
+      onTap: [{ type: "push", stack: "nav", screen: "detail", transition: "zoom", source: "hero" }],
+    });
+    expect(PROTOTYPE_ZOOM_RENDERING_GATE.fields(spec)).toContain(
+      `${container.prefix}.onTap[0].transition`,
+    );
+  });
+}

@@ -1,8 +1,17 @@
+import { isAndroidHintText } from "./androidHintText";
+import { VALUE_REDACTED_ATTRIBUTE } from "../../models/Element";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
+import type { ActionCall } from "./ActionCall";
+import {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
+} from "../../models";
 import { FieldSpec, SetUIStateElementSelector } from "../../models/SetUIStateOptions";
 import { FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector, type FieldTypeDetection } from "./FieldTypeDetector";
@@ -63,6 +72,11 @@ interface TextFocusRecovery {
   occlusionError?: KeyboardOcclusionError;
 }
 
+/** `ActionCall` for applying one field value; carries the per-field IME recovery state. */
+interface FieldApplyCall extends ActionCall {
+  focusRecovery?: TextFocusRecovery;
+}
+
 type FieldApplicationResult = {
   success: boolean;
   error?: string;
@@ -95,7 +109,7 @@ export class SetUIStateFields {
     },
   ) {
     this.selector = new ResolverElementSelector(undefined, this.hierarchy, {
-      platform: options.device.platform,
+      platform: requireAndroidOrIosPlatform(options.device.platform, "setUIState"),
       iosMultiPanel:
         options.device.platform === "ios" && (options.device.displays?.panels.length ?? 0) > 1,
     });
@@ -158,14 +172,11 @@ export class SetUIStateFields {
         }
 
         // Apply the value based on field type
-        const applyResult = await this.applyFieldValue(
-          element,
-          fieldSpec,
-          fieldType,
+        const applyResult = await this.applyFieldValue(element, fieldSpec, fieldType, {
           progress,
           signal,
           focusRecovery,
-        );
+        });
 
         // An unclassified field or exhausted IME recovery cannot benefit from
         // repeating the same operation (#4242, #9258).
@@ -484,9 +495,14 @@ export class SetUIStateFields {
   ): boolean {
     switch (fieldType) {
       case "text":
-        if (fieldSpec.value !== undefined) {
+        // A redacted value is unknown, not empty, so it is never already correct.
+        if (fieldSpec.value !== undefined && element[VALUE_REDACTED_ATTRIBUTE] !== "true") {
           const currentValue = this.fieldTypeDetector.getTextValue(element);
-          return currentValue === fieldSpec.value;
+          return (
+            currentValue === fieldSpec.value ||
+            (fieldSpec.value === "" &&
+              isAndroidHintText(element.class, element["hint-text"], currentValue))
+          );
         }
         return false;
 
@@ -585,10 +601,9 @@ export class SetUIStateFields {
     element: Element,
     fieldSpec: FieldSpec,
     fieldType: FieldType,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    focusRecovery: TextFocusRecovery = {},
+    call: FieldApplyCall = {},
   ): Promise<FieldApplicationResult> {
+    const { progress, signal, focusRecovery = {} } = call;
     const tapOnElement = this.getTapOnElement();
     const inputText = this.getInputText();
     const clearText = this.getClearText();
@@ -898,7 +913,14 @@ export class SetUIStateFields {
             return { verified: false, observation, unverifiable: true };
           }
           const observedValue = this.fieldTypeDetector.getTextValue(element);
-          return { verified: observedValue === fieldSpec.value, observation, observedValue };
+          return {
+            verified:
+              observedValue === fieldSpec.value ||
+              (fieldSpec.value === "" &&
+                isAndroidHintText(element.class, element["hint-text"], observedValue)),
+            observation,
+            observedValue,
+          };
         }
         return { verified: true, observation };
 

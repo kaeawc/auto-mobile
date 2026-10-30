@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "appear",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "show": true
+    },
+    "root": {
+      "type": "text",
+      "text": "Hello",
+      "onAppear": [
+        {
+          "type": "emit",
+          "name": "appeared"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

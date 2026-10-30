@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "string-conditions",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": "hello"
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "value",
+      "errorText": "Error"
+    }
+  },
+  "expectedPath": "root.errorText",
+  "expectedMessage": "Requires errorWhen"
+}

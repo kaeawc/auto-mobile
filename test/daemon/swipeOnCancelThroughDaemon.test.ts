@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -203,7 +203,7 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
   test("a cancel frame sent while the search is between swipes reaches the loopback signal and no swipe follows", async () => {
     const controller = new AbortController();
     const call = daemonClient
-      .callTool("swipeOn", lookForArgs, undefined, undefined, controller.signal)
+      .callTool("swipeOn", lookForArgs, undefined, undefined, { signal: controller.signal })
       .then(
         () => undefined,
         (error: unknown) => error,
@@ -280,16 +280,12 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     const first = new AbortController();
     const second = new AbortController();
     const firstCall = daemonClient
-      .callTool("swipeOn", lookForArgs, undefined, undefined, first.signal)
+      .callTool("swipeOn", lookForArgs, undefined, undefined, { signal: first.signal })
       .catch(() => undefined);
     const secondCall = daemonClient
-      .callTool(
-        "swipeOn",
-        { ...lookForArgs, direction: "down" },
-        undefined,
-        undefined,
-        second.signal,
-      )
+      .callTool("swipeOn", { ...lookForArgs, direction: "down" }, undefined, undefined, {
+        signal: second.signal,
+      })
       .catch(() => undefined);
     await settle();
     // Same-device calls are admitted one at a time; the second waits behind the first.

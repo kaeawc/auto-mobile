@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Share",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "share.open",
+          "args": {
+            "text": {
+              "value": "Hello"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_platform_share_v1",
+  "options": {
+    "supportedCapabilities": ["prototype_platform_v1"]
+  }
+}

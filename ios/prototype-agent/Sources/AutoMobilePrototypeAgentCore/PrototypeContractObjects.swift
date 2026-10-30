@@ -31,6 +31,10 @@ extension PrototypeContractValidator {
             if let child = data[key] { try walk(child, rule: childRule, path: childPath, depth: depth) }
             else if field["optional"] != .bool(true) { throw Self.invalid(childPath, "Required property") }
         }
+        let kind = ["style", "fadeEdges", "imageFilter"].first { rule == definitions[$0]?.objectFields } ?? ""
+        try PrototypeGlass.validateObject(data, kind: kind, path: path)
+        try PrototypeStylePolishV2.validateObject(data, kind: kind, path: path)
+        if rule == definitions["animate"]?.objectFields { try PrototypeMotionTokens.validate(data, path: path) }
         try Self.constraints(data, rule: rule, path: path)
     }
 
@@ -42,9 +46,16 @@ extension PrototypeContractValidator {
         if let first = exclusive.first, exclusive.filter({ data[$0] != nil }).count != 1 {
             throw invalid(keyPath(path, first), "Exactly one container selector is required")
         }
+        let atMostOne = strings(rule["atMostOne"])
+        if let first = atMostOne.first, atMostOne.filter({ data[$0] != nil }).count > 1 {
+            throw invalid(keyPath(path, first), "At most one of \(atMostOne.joined(separator: ", ")) is allowed")
+        }
         let exactlyOne = strings(rule["exactlyOne"])
         if let first = exactlyOne.first, exactlyOne.filter({ data[$0] != nil }).count != 1 {
-            throw invalid(keyPath(path, first), "Exactly one of \(exactlyOne.joined(separator: ", ")) is required")
+            throw invalid(
+                rule["exactlyOneAtObject"] == .bool(true) ? path : keyPath(path, first),
+                "Exactly one of \(exactlyOne.joined(separator: ", ")) is required"
+            )
         }
         for trigger in sorted(rule["dependents"]?.objectFields?.keys ?? [String: JSONValue]().keys) {
             let names = strings(rule["dependents"]?.objectFields?[trigger])
@@ -54,7 +65,7 @@ extension PrototypeContractValidator {
                 if let first = present.first {
                     throw invalid(keyPath(path, first), "Requires \(triggers.joined(separator: " or "))")
                 }
-            } else if present.count != 1, let first = names.first {
+            } else if trigger.contains("|"), present.count != 1, let first = names.first {
                 throw invalid(
                     keyPath(path, present.dropFirst().first ?? first),
                     "Exactly one of \(names.joined(separator: ", ")) is required"
@@ -62,7 +73,12 @@ extension PrototypeContractValidator {
             }
         }
         if rule["atLeastOne"] == .bool(true), data.isEmpty {
-            throw invalid(path, "At least one selector field is required")
+            throw invalid(
+                path,
+                path
+                    .hasSuffix(".semantics") ? "Expected at least one semantics field" :
+                    "At least one selector field is required"
+            )
         }
     }
 

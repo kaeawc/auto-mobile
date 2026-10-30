@@ -8,6 +8,7 @@ private struct McpFiles: PrototypeLibraryFileSystem, Sendable {
     let state = OSAllocatedUnfairLock(uncheckedState: PrototypeLibraryFakeFileSystem())
     let writes = OSAllocatedUnfairLock(initialState: 0)
     func exists(_ p: URL) -> Bool { state.withLock { $0.exists(p) } }
+    func modifiedAt(_ p: URL) -> Date? { state.withLock { $0.modifiedAt(p) } }
     func children(_ p: URL) throws -> [String] { try state.withLock { try $0.children(p) } }
     func read(_ p: URL, cap: Int) throws -> Data { try state.withLock { try $0.read(p, cap: cap) } }
     func byteCount(_ p: URL) throws -> Int { try state.withLock { try $0.byteCount(p) } }
@@ -77,6 +78,32 @@ final class PrototypeMcpInboxTests: XCTestCase {
                 XCTAssertEqual(String(decoding: bytes, as: UTF8.self), expected)
             }
         }
+    }
+
+    @MainActor
+    func testResultsCarryTheScreenTheAppWasOn() async throws {
+        let files = McpFiles(); let entry = entry
+        files.state.withLock { $0.data["/mcp/inbox/imp.automobile-proto"] = Data([1]) }
+        let inbox = PrototypeMcpInbox(
+            root: root, makeFiles: { files }, importBundle: { _, _ in entry },
+            entries: { [entry] }, warning: { _ in }
+        )
+        _ = await inbox.handle(.importBundle(request: "imp", label: nil), screen: "1902x1338")
+        XCTAssertEqual(try result(files, request: "imp")["screen"], "1902x1338")
+        let command = PrototypeMcpRequest.open(request: "opn", libraryId: id)
+        _ = await inbox.handle(command)
+        await inbox.reportOpened(command, entry: entry, screen: "1206x2622")
+        XCTAssertEqual(try result(files, request: "opn")["screen"], "1206x2622")
+        XCTAssertEqual(try result(files, request: "opn")["status"], "opened")
+    }
+
+    func testScreenFormatRejectsUnusableSizes() {
+        XCTAssertEqual(PrototypeMcpScreen.format(widthPx: 1902, heightPx: 1338), "1902x1338")
+        XCTAssertEqual(PrototypeMcpScreen.format(widthPx: 1205.6, heightPx: 2622), "1206x2622")
+        XCTAssertNil(PrototypeMcpScreen.format(widthPx: 0, heightPx: 1338))
+        XCTAssertNil(PrototypeMcpScreen.format(widthPx: .nan, heightPx: 1338))
+        XCTAssertNil(PrototypeMcpScreen.format(widthPx: 1902, heightPx: .infinity))
+        XCTAssertNil(PrototypeMcpScreen.format(widthPx: 200_000, heightPx: 1338))
     }
 
     @MainActor
@@ -175,6 +202,63 @@ final class PrototypeMcpInboxTests: XCTestCase {
         _ = await inbox.handle(.unsupported(request: "r", reason: "Unknown action"))
         XCTAssertEqual(warnings.withLock { $0.count }, 1)
         XCTAssertTrue(warnings.withLock { $0[0].contains("Cannot publish MCP result") })
+    }
+
+    @MainActor
+    func testSweepRemovesOldResultsAndBundlesButKeepsFreshUnknownAndFolders() async throws {
+        let files = McpFiles()
+        let now = Date(timeIntervalSince1970: 10_000_000)
+        let old = now.addingTimeInterval(-prototypeMcpOrphanMaxAge - 60)
+        let fresh = now.addingTimeInterval(-prototypeMcpOrphanMaxAge + 60)
+        let paths = [
+            "/mcp/results/old.json": old, "/mcp/inbox/stray.automobile-proto": old,
+            "/mcp/results/fresh.json": fresh, "/mcp/inbox/inflight.automobile-proto": now,
+        ]
+        files.state.withLock { fake in
+            for (path, date) in paths {
+                fake.data[path] = Data([1]); fake.modified[path] = date
+            }
+            fake.data["/mcp/results/unknown.json"] = Data([1])
+            fake.directories.formUnion(["/mcp/results/nested", "/mcp/inbox", "/mcp/results"])
+        }
+        let entry = entry
+        let inbox = PrototypeMcpInbox(
+            root: root, makeFiles: { files }, importBundle: { _, _ in entry }, entries: { [] },
+            now: { now }, warning: { _ in }
+        )
+        let removed = await inbox.sweepOrphans()
+        XCTAssertEqual(removed, 2)
+        XCTAssertFalse(files.exists(URL(fileURLWithPath: "/mcp/results/old.json")))
+        XCTAssertFalse(files.exists(URL(fileURLWithPath: "/mcp/inbox/stray.automobile-proto")))
+        for kept in [
+            "results/fresh.json",
+            "inbox/inflight.automobile-proto",
+            "results/unknown.json",
+            "results/nested",
+        ] {
+            XCTAssertTrue(files.exists(root.appendingPathComponent(kept)), kept)
+        }
+    }
+
+    @MainActor
+    func testSweepBeforeFoldersExistIsANoOpAndHandleSweepsFirst() async throws {
+        let files = McpFiles()
+        let now = Date(timeIntervalSince1970: 10_000_000)
+        let entry = entry
+        let inbox = PrototypeMcpInbox(
+            root: root, makeFiles: { files }, importBundle: { _, _ in entry }, entries: { [] },
+            now: { now }, warning: { _ in }
+        )
+        let none = await inbox.sweepOrphans()
+        XCTAssertEqual(none, 0)
+        files.state.withLock {
+            $0.directories.formUnion(["/mcp/results"])
+            $0.data["/mcp/results/gone.json"] = Data([1])
+            $0.modified["/mcp/results/gone.json"] = now.addingTimeInterval(-prototypeMcpOrphanMaxAge * 2)
+        }
+        _ = await inbox.handle(.unsupported(request: "r", reason: "Unknown action"))
+        XCTAssertFalse(files.exists(URL(fileURLWithPath: "/mcp/results/gone.json")))
+        XCTAssertEqual(try result(files)["status"], "rejected")
     }
 
     func testImporterChoosesMcpSourceAndLabelOverride() throws {

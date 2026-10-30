@@ -1,3 +1,5 @@
+import type { WatchSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/WatchSimulatorProvisioner";
+import type { WatchSimulatorLifecycle } from "../../../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { getDefaultSimulatorCreationService } from "../../iosTemplates/defaultSimulatorCreationService";
 import { type DevicePool } from "../../../daemon/devicePool";
 import { defaultDaemonContext, daemonStateLikeFrom } from "../../../daemon/daemonContext";
@@ -108,6 +110,13 @@ export interface DeviceToolsDependencies {
   notifyDeviceInventoryResourcesChanged: (installedAppResourcesChanged: boolean) => Promise<void>;
   syncInstalledAppResourceRegistry: () => Promise<boolean>;
   ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
+  /** Apple Watch simulator lookup and boot for startDevice (#14908); defaults to simctl. */
+  watchSimulatorLifecycleFactory?: () => Pick<WatchSimulatorLifecycle, "findWatch" | "boot">;
+  /** Apple Watch simulator adoption, creation and deletion (#15882); defaults to simctl. */
+  watchSimulatorProvisionerFactory?: () => Pick<
+    WatchSimulatorProvisioner,
+    "provision" | "discardCreated" | "find" | "deleteAndConfirmAbsent"
+  >;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
   exactDeviceProvisionerFactory: (
@@ -292,7 +301,7 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       androidAdbFactory: unadmittedAdbClientFactory,
       daemonState: daemonStateLikeFrom(defaultDaemonContext),
       deviceResourceControllerFactory: () =>
-        new DefaultDeviceResourceController(undefined, undefined, undefined, undefined, undefined, {
+        new DefaultDeviceResourceController(undefined, undefined, undefined, undefined, {
           applications: new DeviceResourceApplicationRepository(),
         }),
       deviceResourceObserverFactory: () =>
@@ -309,15 +318,7 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       },
       // The shared manager keeps devicectl caching/coalescing/last-good retention
       // and the Android model/arch caches across calls (#11063).
-      deviceManagerFactory: () => {
-        const manager = PlatformDeviceManagerFactory.getInstance();
-        manager.withForeignAndroidSerialSource?.({
-          foreignSerials: (serials, signal) =>
-            defaultDaemonContext.fullDevicePool()?.foreignSerials(serials, signal) ??
-            Promise.resolve(new Set<string>()),
-        });
-        return manager;
-      },
+      deviceManagerFactory: () => PlatformDeviceManagerFactory.getInstance(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
       displayInventory: defaultDisplayInventoryProvider,
@@ -331,13 +332,10 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceProvisionerFactory: () =>
         createDefaultDeviceProvisioner(undefined, undefined, getDefaultSimulatorCreationService()),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
-        createDefaultExactDeviceProvisioner(
-          deviceManager,
-          deviceCreationGate,
-          undefined,
-          assertNotBindingDeviceForAdoption,
-          getDefaultSimulatorCreationService(),
-        ),
+        createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate, {
+          assertAdoptable: assertNotBindingDeviceForAdoption,
+          simulatorCreation: getDefaultSimulatorCreationService(),
+        }),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
       stopAndroidObservers: defaultStopAndroidObservers,

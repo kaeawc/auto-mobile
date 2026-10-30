@@ -11,7 +11,7 @@ import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ImeAction } from "../../../models";
 import type { ActionTimingResult, BaseResult } from "../shared/types";
-import type { A11ySetTextResult, DelegateContext } from "./types";
+import type { A11ySetTextResult, DelegateContext, ImeCommitOptions } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import {
   KEYBOARD_PROFILE_CATALOG_VERSIONS,
@@ -490,7 +490,9 @@ function imeCodePointSubsequenceMatches(
 export const IME_COMMIT_TIMEOUT = {
   baseMs: 10_000,
   perSegmentMs: 750,
-  perCharMs: 20,
+  // A rich-text editor on a loaded emulator can take well over 100 ms to apply each committed
+  // unit. A 20 ms allowance ran out partway through an 80-character URL and left it split.
+  perCharMs: 150,
   capMs: 25_000,
 } as const;
 
@@ -627,9 +629,9 @@ export class CtrlProxyText extends SharedTextDelegate {
     priorImeId?: string,
     timeoutMs: number = imeCommitTimeoutMs(text),
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    ...[delivery, trace]: [delivery?: "commit" | "keyEvents" | "clearField", trace?: boolean]
+    options?: ImeCommitOptions,
   ): Promise<ImeCommitActionResult> {
+    const { signal, delivery, trace } = { ...options };
     let dispatchedId: string | undefined;
     let timedOut = false;
     let result: ImeCommitActionResult;

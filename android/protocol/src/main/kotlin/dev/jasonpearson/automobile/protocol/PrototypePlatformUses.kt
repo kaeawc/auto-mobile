@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.keyPath
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -16,7 +17,7 @@ internal object PrototypePlatformUses {
 
     class Call(path: String, val action: JsonObject) : Use(path)
 
-    class Read(path: String, val pointer: String) : Use(path)
+    class Read(path: String, val pointer: String, val condition: JsonObject? = null) : Use(path)
 
     class Event(path: String, val inHandler: Boolean) : Use(path)
   }
@@ -30,6 +31,7 @@ internal object PrototypePlatformUses {
       found.add(Use.Handler(at, event))
       scan(handler, at, true, found)
     }
+    for ((handler, path) in PrototypeChannels.handlers(root)) scan(handler, path, true, found)
     root["root"]?.let { scan(it, "root", false, found) }
     for ((node, path) in context.nodes) {
       PrototypeBindableFields.first(node, path) { field, at, kind ->
@@ -55,6 +57,22 @@ internal object PrototypePlatformUses {
     }
   }
 
+  /** A `pasteButton` node runs `clipboard.paste` into its `into` path. */
+  private fun addPasteButtonUse(value: JsonObject, path: String, found: MutableList<Use>) {
+    if (value.text("type") != "pasteButton") return
+    found.add(
+      Use.Call(
+        path,
+        JsonObject(
+          mapOf(
+            "call" to JsonPrimitive("clipboard.paste"),
+            "into" to (value["into"] ?: JsonNull),
+          ),
+        ),
+      ),
+    )
+  }
+
   private fun scanObject(
     value: JsonObject,
     path: String,
@@ -62,11 +80,12 @@ internal object PrototypePlatformUses {
     found: MutableList<Use>,
   ) {
     if (value.size == 1 && value.containsKey("value")) return
+    addPasteButtonUse(value, path, found)
     if (value.text("type") == "platform" && value.text("call") != null) {
       found.add(Use.Call(path, value))
     }
     if (value["type"] == null) {
-      value.text("platform")?.let { found.add(Use.Read("$path.platform", it)) }
+      value.text("platform")?.let { found.add(Use.Read("$path.platform", it, value)) }
       if (value.text("event") != null) found.add(Use.Event("$path.event", inHandler))
     }
     for (key in value.keys.sorted()) {

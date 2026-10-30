@@ -1,6 +1,7 @@
 import { holderOf } from "../../daemon/deviceBinding";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
 import type { IdGenerator } from "../../utils/IdGenerator";
@@ -29,7 +30,11 @@ import {
   projectActionableHierarchy,
 } from "./HierarchyNormalization";
 import type { SettleObserve } from "./interfaces/SettleObserve";
-import type { HierarchySyncDiagnostics, ObserverHierarchyRequestOptions } from "./android/types";
+import type {
+  HierarchySyncDiagnostics,
+  HierarchySyncRequestOptions,
+  ObserverHierarchyRequestOptions,
+} from "./android/types";
 import {
   existingHierarchyClient,
   getObservationReadServiceStart,
@@ -54,8 +59,7 @@ export interface HierarchySyncClient {
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
     timeoutMs: number,
-    diagnostics?: HierarchySyncDiagnostics,
-    displayId?: number,
+    options?: HierarchySyncRequestOptions,
   ): Promise<SyncedHierarchy | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
   connectForObservationRead?(): Promise<boolean>;
@@ -127,7 +131,10 @@ async function requestSyncHierarchy(
         : request.displayId,
     );
   } else {
-    synced = await client.requestHierarchySync(...args, diagnostics, request.displayId);
+    synced = await client.requestHierarchySync(...args, {
+      diagnostics,
+      displayId: request.displayId,
+    });
   }
   if (!synced) {
     const detail =
@@ -375,6 +382,7 @@ export function createDeviceHierarchyCapture(
   device: BootedDevice,
   dependencies: DeviceHierarchyCaptureDependencies = {},
 ): HierarchyCapture {
+  const platform = requireAndroidOrIosPlatform(device.platform, "Observing the view hierarchy");
   const reader = new ViewHierarchyCaptureReader(
     {
       getViewHierarchy: (queryOptions, request) => {
@@ -452,11 +460,11 @@ export function createDeviceHierarchyCapture(
     },
     (hierarchy) =>
       projectActionableHierarchy(
-        device.platform,
+        platform,
         hierarchy,
-        device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
+        platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
       ),
     dependencies.settle,
   );
-  return new DefaultHierarchyCapture(device.platform, reader, dependencies.timer, dependencies.ids);
+  return new DefaultHierarchyCapture(platform, reader, dependencies.timer, dependencies.ids);
 }

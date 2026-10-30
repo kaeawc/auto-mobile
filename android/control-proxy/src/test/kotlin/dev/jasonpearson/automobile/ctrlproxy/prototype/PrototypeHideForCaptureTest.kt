@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.View
 import androidx.compose.ui.platform.ComposeView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -65,6 +67,7 @@ class PrototypeHideForCaptureTest {
         manager,
         isViewAttached = manager::isViewAttached,
         sdkInt = 30,
+        firstRenderWaiter = PrototypeFirstRenderWaiter { _, _ -> true },
         mainThread = main,
         settleTimer = FakePrototypeSettleTimer(history),
         backScope = CoroutineScope(Dispatchers.Unconfined),
@@ -90,10 +93,14 @@ class PrototypeHideForCaptureTest {
   fun `hides, waits for frames, captures, then restores`() = runTest {
     host.show()
     history.clear()
+    val lifecycle = checkNotNull(manager.view!!.findViewTreeLifecycleOwner()).lifecycle
+    assertEquals(Lifecycle.State.RESUMED, lifecycle.currentState)
     val capture = host.withHiddenForCapture {
+      assertEquals(Lifecycle.State.STARTED, lifecycle.currentState)
       history += "capture:${visibility()}"
       "pixels"
     }
+    assertEquals(Lifecycle.State.RESUMED, lifecycle.currentState)
     assertEquals(listOf("frames:2", "capture:hidden"), history)
     assertEquals(PrototypeHiddenCapture("pixels", prototypeExcluded = true), capture)
     assertEquals(View.VISIBLE, manager.view!!.visibility)

@@ -1,3 +1,4 @@
+import type { SessionDeviceRebound } from "./sessionDeviceReboundBroadcast";
 import { type SessionBrokerResult } from "../devices/sessionBrokerResult";
 import type { SessionConfig } from "../devices/sessionConfig";
 import { type ListChangedKind } from "./listChangedBroadcast";
@@ -276,6 +277,14 @@ export class DaemonMcpProxy {
   }
 
   /**
+   * Register a listener told when a session this proxy holds was rebound onto another device
+   * serial, so a harness can verify the move without an extra read.
+   */
+  onSessionDeviceRebound(listener: (event: SessionDeviceRebound) => void): () => void {
+    return this.notifications.onSessionDeviceRebound(listener);
+  }
+
+  /**
    * Register a listener told when automatic liveness recovery was exhausted (#10053), so a harness
    * that is idle between tool calls still learns a session was lost. The same structured error is
    * returned on the next tool call for an affected session.
@@ -377,10 +386,9 @@ export class DaemonMcpProxy {
     args: Record<string, unknown>,
     progressToken?: string | number,
     onProgress?: DaemonProxyProgressCallback,
-    callerSignal?: AbortSignal,
     options: DaemonProxyToolCallOptions = {},
   ): Promise<any> {
-    return this.toolCalls.callTool(name, args, progressToken, onProgress, callerSignal, options);
+    return this.toolCalls.callTool(name, args, progressToken, onProgress, options);
   }
 
   /**
@@ -436,8 +444,11 @@ export class DaemonMcpProxy {
   /**
    * Read a resource from the daemon
    */
-  readResource(uri: string, { signal: callerSignal }: { signal?: AbortSignal } = {}): Promise<any> {
-    return this.discovery.readResource(uri, { signal: callerSignal });
+  readResource(
+    uri: string,
+    options: { signal?: AbortSignal; _meta?: Record<string, unknown> } = {},
+  ): Promise<any> {
+    return this.discovery.readResource(uri, options);
   }
 
   /**
@@ -474,6 +485,7 @@ export class DaemonMcpProxy {
   }
 
   close(options?: DaemonMcpProxyCloseOptions): Promise<void> {
+    this.notifications.clearSessionDeviceReboundListeners();
     return this.connection.close(options);
   }
   private createProxyToolCalls(): ProxyToolCalls {

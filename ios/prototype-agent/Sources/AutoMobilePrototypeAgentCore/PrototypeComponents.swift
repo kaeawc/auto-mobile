@@ -6,7 +6,7 @@ import Foundation
 // so the renderer and the `simulate_tap` test hook share one implementation.
 
 /// Node types drawn above the whole author tree while their `openWhen` holds, never inline.
-let prototypeModalTypes: Set<String> = ["dialog", "snackbar", "menu"]
+let prototypeModalTypes: Set<String> = ["dialog", "snackbar", "menu", "tooltip", "drawer", "bottomSheet"]
 
 extension PrototypeNode {
     /// Focus does not change expansion; only the authored boolean state does.
@@ -30,7 +30,11 @@ extension PrototypeNode {
     var toggleKey: String? {
         switch type {
         case "switch", "checkbox", "chip": stateKey
-        case "listItem": ["switch", "checkbox"].contains(trailing?.type) ? trailing?.stateKey : nil
+        case "listItem":
+            switch trailing {
+            case let .switch(stateKey), let .checkbox(stateKey): stateKey
+            default: nil
+            }
         default: nil
         }
     }
@@ -47,17 +51,21 @@ extension PrototypeNode {
     func openModals(
         state: [String: JSONValue],
         pages: [String: Int],
-        stacks: [String: PrototypeStackSnapshot] = [:]
+        stacks: [String: PrototypeStackSnapshot] = [:],
+        data: [String: JSONValue]? = nil
     )
         -> [PrototypeNode]
     {
         if let visibleWhen, !visibleWhen.holds(state) { return [] }
         let modal = prototypeModalTypes.contains(type)
-        if modal || type == "bottomSheet", !(openWhen?.holds(state) ?? false) { return [] }
+        if modal, !(openWhen?.holds(state) ?? false) { return [] }
+        // A lazy list's rows are decoded on demand, so a modal in the row template joins the layer here.
         let nested = currentChildEntries(
             path: "root", pages: pages, stacks: stacks, state: state, clampPagerPage: false
-        ).map(\.node)
-        return (modal ? [self] : []) + nested.flatMap { $0.openModals(state: state, pages: pages, stacks: stacks) }
+        ).map(\.node) + lazyModalRows.nodes(of: self, data: data)
+        return (modal ? [self] : []) + nested.flatMap {
+            $0.openModals(state: state, pages: pages, stacks: stacks, data: data)
+        }
     }
 
     /// Whether an open dialog or menu makes the page behind it inert (hidden from accessibility); a
@@ -65,22 +73,34 @@ extension PrototypeNode {
     func blocksPage(
         state: [String: JSONValue],
         pages: [String: Int],
-        stacks: [String: PrototypeStackSnapshot] = [:]
+        stacks: [String: PrototypeStackSnapshot] = [:],
+        data: [String: JSONValue]? = nil
     )
         -> Bool
     {
-        openModals(state: state, pages: pages, stacks: stacks).contains { ["dialog", "menu"].contains($0.type) }
+        openModals(state: state, pages: pages, stacks: stacks, data: data).contains { node in
+            guard node.blocksUnderlyingPage else { return false }
+            if node.type == "tooltip", let id = node.anchorTo {
+                return renderedNode(id: id, state: state, pages: pages, stacks: stacks) != nil
+            }
+            return true
+        }
+    }
+
+    var blocksUnderlyingPage: Bool {
+        ["dialog", "menu", "drawer"].contains(type) || (type == "tooltip" && spotlight != nil)
     }
 
     /// How the page and the anchor layer expose their nodes to accessibility under this root.
     func layerAccessibility(
         state: [String: JSONValue],
         pages: [String: Int],
-        stacks: [String: PrototypeStackSnapshot] = [:]
+        stacks: [String: PrototypeStackSnapshot] = [:],
+        data: [String: JSONValue]? = nil
     )
         -> PrototypeLayerAccessibility
     {
-        PrototypeLayerAccessibility(inert: blocksPage(state: state, pages: pages, stacks: stacks))
+        PrototypeLayerAccessibility(inert: blocksPage(state: state, pages: pages, stacks: stacks, data: data))
     }
 
     /// The node or composite part whose identifier is `identifier`, depth-first in tree order.
@@ -92,9 +112,11 @@ extension PrototypeNode {
         -> PrototypeTapTarget?
     {
         if let visibleWhen, !visibleWhen.holds(state) { return nil }
-        if prototypeModalTypes.contains(type) || type == "bottomSheet",
+        if prototypeModalTypes.contains(type),
            !(openWhen?.holds(state) ?? false) { return nil }
         if identifier == wanted { return .node(self) }
+        if type == "drawer" || (type == "tooltip" && spotlight != nil),
+           wanted == partIdentifier("close") { return .close(self) }
         if let part = part(named: wanted, state: state) { return part }
         for entry in currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) {
             if let match = entry.node
@@ -162,6 +184,7 @@ extension PrototypeNode {
 /// What a tap lands on: a node's own target, or one part of a composite node.
 enum PrototypeTapTarget {
     case node(PrototypeNode)
+    case close(PrototypeNode)
     /// A `dialog` confirm/dismiss button or the `snackbar` action.
     case modalButton(PrototypeNode, PrototypeDialogButton)
     case menuItem(PrototypeNode, PrototypeMenuEntry)
@@ -177,6 +200,7 @@ extension PrototypeSession {
     private mutating func activateNode(_ node: PrototypeNode) -> [PrototypeEvent]? {
         guard isEnabled(node) else { return [] }
         if let key = node.toggleKey { return toggle(key: key, then: node.onTap ?? []) }
+        if node.type == "tooltip", node.onTap == nil { return closeModal(node) }
         guard let actions = node.onTap, !actions.isEmpty else { return nil }
         return run(actions)
     }
@@ -185,6 +209,8 @@ extension PrototypeSession {
     /// has nothing to do (a plain node without `onTap`, an app-bar button without actions).
     mutating func activate(_ target: PrototypeTapTarget) -> [PrototypeEvent]? {
         switch target {
+        case let .close(node):
+            return closeModal(node)
         case let .node(node):
             return activateNode(node)
         case let .menuItem(node, item):
@@ -198,10 +224,14 @@ extension PrototypeSession {
         case let .swipeAction(action):
             return run(action.onTap)
         case let .option(node, option):
-            guard isEnabled(node) else { return [] }
-            guard let key = node.stateKey else { return nil }
-            return choose(key: key, value: option.value, then: node.onTap ?? [])
+            return activateOption(node, option)
         }
+    }
+
+    private mutating func activateOption(_ node: PrototypeNode, _ option: PrototypeOption) -> [PrototypeEvent]? {
+        guard isEnabled(node) else { return [] }
+        guard let key = node.stateKey else { return nil }
+        return choose(key: key, value: option.value, then: node.onTap ?? [])
     }
 
     /// A `radioGroup`/`segmentedButton` option or `datePicker` day: binds the string key, emits
@@ -244,7 +274,7 @@ extension PrototypeSession {
         if let (key, equals) = node.openCondition, state[key] == .bool(equals) {
             own = [(key, .bool(!equals))]
         }
-        return control(own: own, then: actions)
+        return control(own: own, then: (node.type == "tooltip" ? node.onDismiss ?? [] : []) + actions)
     }
 }
 

@@ -7,6 +7,8 @@ import { SESSION_RELEASE_PERSIST_TIMEOUT_MS, SessionReleaseSnapshot } from "../s
 import { type SessionRowWriter } from "../sessionRowWriter";
 import { type TerminalReleaseJournal } from "../terminalReleaseJournal";
 
+export type TerminalIntentDurability = ReturnType<TerminalReleaseJournal["record"]>;
+
 export interface SessionReleaseWriteHost {
   isSessionBeingRecreated(sessionId: string): boolean;
   readonly rowWriter: SessionRowWriter;
@@ -31,7 +33,34 @@ export interface SessionReleaseWriteHost {
 }
 
 export class SessionReleaseWrite {
+  /** Snapshots whose intent a releasing session recorded early, to be consumed by their first write. */
+  private readonly preRecorded = new WeakSet<SessionReleaseSnapshot>();
+
   constructor(private readonly host: SessionReleaseWriteHost) {}
+
+  /**
+   * Record the terminal intent before the row write, and report how durable it is. A release that
+   * commits before its row lands records it ahead of its final supersede fence; its first write
+   * then skips the record (#11799). Volatile intents cannot protect a crash between the device
+   * being freed and the row landing.
+   */
+  recordTerminalIntent(snapshot: SessionReleaseSnapshot, early = false): TerminalIntentDurability {
+    const durability = this.host.terminalReleaseJournal.record({
+      sessionId: snapshot.sessionId,
+      reason: snapshot.releaseReason,
+      // Read back by the next daemon on its own session clock: stored as wall ms (#11162).
+      at: this.host.sessionClockToWall(snapshot.releasedAtMs),
+    });
+    if (durability === "volatile") {
+      this.host.volatileTerminalReleaseIntents.set(snapshot.sessionId, snapshot.releaseReason);
+    } else {
+      this.host.volatileTerminalReleaseIntents.delete(snapshot.sessionId);
+    }
+    if (early) {
+      this.preRecorded.add(snapshot);
+    }
+    return durability;
+  }
 
   async persistSessionRelease(
     snapshot: SessionReleaseSnapshot,
@@ -44,19 +73,9 @@ export class SessionReleaseWrite {
     }
     this.host.rowWriter.noteRelease(snapshot);
     try {
-      if (snapshot.terminal) {
+      if (snapshot.terminal && !this.preRecorded.delete(snapshot)) {
         // Record before issuing the row write; volatile intents cannot protect a crash at timeout.
-        const durability = this.host.terminalReleaseJournal.record({
-          sessionId: snapshot.sessionId,
-          reason: snapshot.releaseReason,
-          // Read back by the next daemon on its own session clock: stored as wall ms (#11162).
-          at: this.host.sessionClockToWall(snapshot.releasedAtMs),
-        });
-        if (durability === "volatile") {
-          this.host.volatileTerminalReleaseIntents.set(snapshot.sessionId, snapshot.releaseReason);
-        } else {
-          this.host.volatileTerminalReleaseIntents.delete(snapshot.sessionId);
-        }
+        this.recordTerminalIntent(snapshot);
       }
       const precondition = {
         ...this.host.releaseWritePrecondition(snapshot),

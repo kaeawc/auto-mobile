@@ -263,13 +263,9 @@ test("capture provenance is available on direct output without serialized metada
 test("observed provenance retains identity across visible projection and excludes raw nodes", () => {
   const source = hierarchy(0);
   attachRawViewHierarchy(source, hierarchy(5000));
-  const snapshot = identifyObservedHierarchy(
-    "android",
-    source,
-    "cached-ok",
-    new FakeTimer(),
-    new CountingIdGenerator(),
-  );
+  const snapshot = identifyObservedHierarchy("android", source, "cached-ok", new FakeTimer(), {
+    ids: new CountingIdGenerator(),
+  });
   expect(snapshot.nodes[0].bounds?.left).toBe(0);
   expect(resolveViewHierarchyForSearch(snapshot.hierarchy)).toBe(snapshot.hierarchy);
   const projected = hierarchy(20);

@@ -27,6 +27,8 @@ import {
   captureAndroidMutationBaseline,
   isAndroidResetFile,
 } from "./androidMutationBaseline";
+import { settingsBackedRawMutations } from "./androidSettingsBackedRevert";
+import { appLocaleJournalAppId, appLocalePrior } from "./appLocaleJournalKey";
 import { genericBaselineRevert, type BaselineChange } from "./mutations/baseline";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 import type { DeviceBaseline, DeviceMutationEntry, DeviceMutationInput } from "./mutations/types";
@@ -34,6 +36,11 @@ import {
   SCREEN_STATE_MUTATION_KEY,
   isRestorableScreenState,
 } from "./mutations/screenStateMutation";
+import {
+  systemPropertyJournalName,
+  systemPropertyRevertValue,
+} from "./mutations/systemPropertyMutation";
+import { VOLUME_RESTORED_MARKER, volumeRevertScript } from "./mutations/volumeMutation";
 
 interface AndroidRevertCommand {
   command: string;
@@ -43,6 +50,8 @@ interface AndroidRevertCommand {
   wakeSleptScreen?: boolean;
 }
 
+/** A key-press volume revert sets and reads every stream, with a legacy setter fallback. */
+const VOLUME_REVERT_TIMEOUT_MS = 10_000;
 const PACKAGE_PATTERN = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/;
 type AndroidRevertAdapter = (mutation: DeviceMutationInput) => AndroidRevertCommand[] | null;
 
@@ -57,6 +66,9 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       this.displayOverrideCommands(mutation) ??
       this.nightModeCommands(mutation) ??
       this.screenStateCommands(mutation) ??
+      this.volumeCommands(mutation) ??
+      this.settingsBackedCommands(mutation) ??
+      this.appLocaleCommands(mutation) ??
       deviceStateSettingCommands(mutation),
     clock: (mutation) =>
       this.timezoneCommands(mutation) ??
@@ -69,7 +81,8 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     keyboard: (mutation) => this.settingCommands(mutation),
     clipboard: (mutation) => this.clipboardCommands(mutation),
     location: (mutation) => this.locationCommands(mutation),
-    preference: (mutation) => this.appDataCommands(mutation),
+    preference: (mutation) =>
+      this.appDataCommands(mutation) ?? this.systemPropertyCommands(mutation),
     "shared-file": (mutation) => this.fileCommands(mutation),
     "status-bar": (mutation) => this.statusBarCommands(mutation),
   };
@@ -426,6 +439,43 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
     ];
   }
 
+  /** fontScale, timeFormat and accessibility display rows restore their raw settings rows. */
+  private settingsBackedCommands(mutation: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const raw = settingsBackedRawMutations(mutation);
+    if (!raw) {
+      return null;
+    }
+    const commands = raw.map((row) => this.settingCommands(row));
+    return commands.every((command) => command !== null) ? commands.flat() : null;
+  }
+
+  /**
+   * Puts back an app's locale list (`""` clears its override) for the user changeLocalization
+   * targeted, then reads it back: `cmd locale` exits 0 and prints nothing on success, and an
+   * unknown package is reported on stderr, which fails the command.
+   */
+  private appLocaleCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const appId = appLocaleJournalAppId(key);
+    const prior = appLocalePrior(priorValue);
+    if (appId === null || !PACKAGE_PATTERN.test(appId) || !prior) {
+      return null;
+    }
+    const { userId, locales } = prior;
+    return [
+      {
+        command: `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${userId} --locales ${shellQuote(locales)}`,
+        success: "",
+      },
+      {
+        command: `shell cmd locale get-app-locales ${shellQuote(appId)} --user ${userId}`,
+        success: `Locales for ${appId} for user ${userId} are [${locales}]`,
+      },
+    ];
+  }
+
   private connectivityCommands({
     key,
     priorValue,
@@ -488,6 +538,24 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
       : null;
   }
 
+  /**
+   * Sets each stream a volume row covers back to its journaled level in one device shell, which
+   * prints the marker only when every stream reads its level back; any other output fails the
+   * revert. Unrestorable priors (unreadable, or a level of 0) have no command.
+   */
+  private volumeCommands({ key, priorValue }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const script = volumeRevertScript(key, priorValue);
+    return script === null
+      ? null
+      : [
+          {
+            command: `shell sh -c ${shellQuote(script)}`,
+            success: VOLUME_RESTORED_MARKER,
+            timeoutMs: VOLUME_REVERT_TIMEOUT_MS,
+          },
+        ];
+  }
+
   private nightModeCommands({
     key,
     priorValue,
@@ -506,7 +574,11 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
   }: DeviceMutationInput): AndroidRevertCommand[] | null {
     const prior = priorValue.state === "present" ? priorValue.value : undefined;
     return key === "timezone" && typeof prior === "string" && prior.length > 0
-      ? [{ command: `shell cmd alarm set-timezone ${shellQuote(prior)}` }]
+      ? [
+          { command: `shell cmd alarm set-timezone ${shellQuote(prior)}` },
+          // The prior was read from this property, so only an identical read-back proves restore.
+          { command: "shell getprop persist.sys.timezone", success: prior },
+        ]
       : null;
   }
 
@@ -542,6 +614,26 @@ export class AndroidDeviceMutationResetPort implements AndroidKeepBootedResetPor
           },
         ]
       : null;
+  }
+
+  /**
+   * Puts back a property `setPreference` wrote: `setprop` prints nothing on success, and only a
+   * read-back equal to the prior proves the restore. An absent prior is restored as `""`, which
+   * `getprop` reads the same as absent (`setprop` cannot delete a property); a `persist.*` name
+   * also writes that empty value to disk. Read-only and control properties have no revert.
+   */
+  private systemPropertyCommands({
+    key,
+    priorValue,
+  }: DeviceMutationInput): AndroidRevertCommand[] | null {
+    const name = systemPropertyJournalName(key);
+    const prior = systemPropertyRevertValue(priorValue);
+    return name === null || prior === null
+      ? null
+      : [
+          { command: `shell setprop ${name} ${shellQuote(prior)}`, success: "" },
+          { command: `shell getprop ${name}`, success: prior },
+        ];
   }
 
   /** Leaves SystemUI demo mode, then puts `sysui_demo_allowed` back to its journaled value. */

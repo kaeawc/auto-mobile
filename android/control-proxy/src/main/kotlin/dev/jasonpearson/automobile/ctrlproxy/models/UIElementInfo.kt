@@ -65,6 +65,7 @@ data class UIElementInfo(
   @SerialName("hint-text") val hintText: String? = null, // Hint text for input fields
   @SerialName("tooltip-text") val tooltipText: String? = null, // Tooltip text
   @SerialName("pane-title") val paneTitle: String? = null, // Pane title for navigation
+  val heading: String? = null, // "true" when the platform marks a heading (API 28+)
   @SerialName("live-region") val liveRegion: String? = null, // Live region mode
   @SerialName("collection-info") val collectionInfo: String? = null, // Collection information
   @SerialName("collection-item-info")

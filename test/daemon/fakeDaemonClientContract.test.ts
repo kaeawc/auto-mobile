@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect } from "bun:test";
-import type { DaemonClientLike } from "../../src/daemon/client";
+import type { DaemonClientLike } from "../../src/daemon/client/client";
 import type { DaemonNotification } from "../../src/daemon/types";
 import { ROUTED_SESSION_META_KEY } from "../../src/daemon/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -51,9 +51,9 @@ function recording(
   return {
     connect: (timeoutMs, signal) => client.connect(timeoutMs, signal),
     close: () => client.close(),
-    callTool: (name, params, progressToken, onRequestId, signal) =>
+    callTool: (name, params, progressToken, onRequestId, options) =>
       record(`tools/call ${name}`, params, () =>
-        client.callTool(name, params, progressToken, onRequestId, signal),
+        client.callTool(name, params, progressToken, onRequestId, options),
       ),
     readResource: (uri, params, options) =>
       record(`resources/read ${uri}`, params, () => client.readResource(uri, params, options)),

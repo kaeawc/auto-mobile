@@ -4,8 +4,8 @@ import { raceWithDeadline } from "./utils/raceWithDeadline";
 
 /**
  * What started a shutdown. `stdin` means the client input closed; `stdout` means a transport
- * write failed (#11710). `execution-owner-lost` is a broker binding proxy whose execution owner
- * exited or which was re-parented (#11176).
+ * closed or a write failed (#11710). `execution-owner-lost` is a broker binding proxy whose
+ * execution owner exited or which was re-parented (#11176).
  */
 export type ShutdownSignal =
   | "SIGINT"
@@ -28,6 +28,11 @@ export interface StdinShutdownSource {
 
 export interface StdioWriteErrorSource {
   on(event: "error", listener: (error: Error) => void): unknown;
+}
+
+export interface StdoutShutdownSource extends StdioWriteErrorSource {
+  on(event: "error", listener: (error: Error) => void): unknown;
+  on(event: "close", listener: () => void): unknown;
 }
 
 export type ShutdownCleanupOperation = () => void | Promise<void>;
@@ -95,6 +100,7 @@ export class ProcessLifecycleHandlers {
   private shutdownInProgress = false;
   private readonly shutdownStarted = Promise.withResolvers<void>();
   private shutdownHandler: ProcessShutdownHandler | undefined;
+  private shutdownExitCode: number | undefined;
   private shutdownTimeoutHandler: ProcessShutdownTimeoutHandler | undefined;
   private fatalProcessHandler: FatalProcessHandler | undefined;
 
@@ -134,6 +140,11 @@ export class ProcessLifecycleHandlers {
 
   setFatalProcessHandler(handler: FatalProcessHandler): void {
     this.fatalProcessHandler = handler;
+  }
+
+  /** Exit code once the shutdown handler completes in time; defaults to 0 (a timeout is 1). */
+  setShutdownExitCode(code: number): void {
+    this.shutdownExitCode = code;
   }
 
   /**
@@ -195,7 +206,7 @@ export class ProcessLifecycleHandlers {
 
   private async waitForStdinAnswers(answers: Promise<void>, timeoutMs: number): Promise<void> {
     try {
-      // A signal or stdout error ends the wait and clears its deadline before process exit.
+      // A signal or stdout loss ends the wait and clears its deadline before process exit.
       await raceWithDeadline([answers, this.shutdownStarted.promise], {
         timer: this.timer,
         timeoutMs,
@@ -207,19 +218,27 @@ export class ProcessLifecycleHandlers {
     await this.shutdown("stdin");
   }
 
-  installStdoutShutdownHandler(stdout: StdioWriteErrorSource, onClientGone?: () => void): void {
+  installStdoutShutdownHandler(stdout: StdoutShutdownSource, onClientGone?: () => void): void {
     if (this.stdoutShutdownHandlerInstalled) {
       return;
     }
     this.stdoutShutdownHandlerInstalled = true;
-    stdout.on("error", () => {
+    let clientGone = false;
+    const shutdownOnStdoutClose = () => {
+      if (clientGone) {
+        return;
+      }
+      clientGone = true;
       try {
         onClientGone?.();
       } catch (error) {
         writeEmergencyLog("Error in stdout client-gone callback", error);
       }
       void this.shutdown("stdout");
-    });
+    };
+    // Output can close while stdin stays open, without a failed write to emit an error.
+    stdout.on("error", shutdownOnStdoutClose);
+    stdout.on("close", shutdownOnStdoutClose);
   }
 
   installStderrErrorGuard(stderr: StdioWriteErrorSource): void {
@@ -246,7 +265,7 @@ export class ProcessLifecycleHandlers {
 
     try {
       const shutdownCompleted = await this.runShutdownHandler(signal);
-      let exitCode = 0;
+      let exitCode = this.shutdownExitCode ?? 0;
       if (!shutdownCompleted) {
         writeEmergencyLog(`Shutdown timed out after ${this.shutdownTimeoutMs}ms; forcing exit`);
         exitCode = (await this.runShutdownTimeoutHandler())?.exitCode ?? 1;
@@ -351,7 +370,7 @@ export function installStdinShutdownHandlers(
 }
 
 export function installStdoutShutdownHandler(
-  stdout: StdioWriteErrorSource = process.stdout,
+  stdout: StdoutShutdownSource = process.stdout,
   onClientGone?: () => void,
 ): void {
   processLifecycleHandlers.installStdoutShutdownHandler(stdout, onClientGone);
@@ -371,6 +390,11 @@ export function setProcessShutdownHandler(
   timeoutHandler?: ProcessShutdownTimeoutHandler,
 ): void {
   processLifecycleHandlers.setShutdownHandler(handler, timeoutHandler);
+}
+
+/** Make an orderly shutdown exit non-zero, e.g. 130 for an interrupted command (#15312). */
+export function setProcessShutdownExitCode(code: number): void {
+  processLifecycleHandlers.setShutdownExitCode(code);
 }
 
 export function setFatalProcessHandler(handler: FatalProcessHandler): void {

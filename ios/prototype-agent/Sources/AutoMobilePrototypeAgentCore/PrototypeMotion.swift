@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+    import UIKit
+#endif
 
 /// A node's `transition` as authored: its type alone, or `{type, delayMs?}` (#15247). The agent
 /// keeps the type; delays, `stagger` and `blurReplace` need `prototype_choreography_v1`, which iOS
@@ -28,19 +31,67 @@ enum PrototypeVisibilityTransition: Equatable {
     case slide
 }
 
-/// Android's prototype motion decision (#10442), device-free. Motion is on unless the spec sets
-/// `motion: "none"` or the system reduces motion (`UIAccessibility.isReduceMotionEnabled`).
-struct PrototypeMotion: Equatable {
-    let enabled: Bool
+enum PrototypeMotionProfile: Equatable {
+    case full, reduced, off
+}
 
-    init(specMotion: String?, reduceMotion: Bool) {
-        enabled = specMotion != "none" && !reduceMotion
+/// The system accessibility settings that select the reduced profile (#15244). Injected so tests
+/// drive them without UIKit.
+protocol PrototypeAccessibilityProviding {
+    var isReduceMotionEnabled: Bool { get }
+    var prefersCrossFadeTransitions: Bool { get }
+}
+
+/// The live settings: `UIAccessibility.isReduceMotionEnabled` and `prefersCrossFadeTransitions`.
+/// UIKit isolates them to the main actor, so reads from another thread hop to it.
+struct PrototypeSystemAccessibility: PrototypeAccessibilityProviding {
+    #if canImport(UIKit)
+        var isReduceMotionEnabled: Bool { onMain { UIAccessibility.isReduceMotionEnabled } }
+
+        var prefersCrossFadeTransitions: Bool { onMain { UIAccessibility.prefersCrossFadeTransitions } }
+
+        private func onMain(_ read: @MainActor () -> Bool) -> Bool {
+            if Thread.isMainThread { return MainActor.assumeIsolated(read) }
+            return DispatchQueue.main.sync { MainActor.assumeIsolated(read) }
+        }
+    #else
+        var isReduceMotionEnabled: Bool { false }
+        var prefersCrossFadeTransitions: Bool { false }
+    #endif
+}
+
+/// The spec can disable all animation; system Reduce Motion and the cross-fade preference select
+/// the reduced profile, which preserves crossfades and colors. Neither selects `off`.
+struct PrototypeMotion: Equatable {
+    let profile: PrototypeMotionProfile
+    var enabled: Bool { profile != .off }
+    var spatial: Bool { profile == .full }
+    var fadeOnly: Bool { profile == .reduced }
+    var fadeDuration: Double? { enabled ? 0.25 : nil }
+
+    init(
+        specMotion: String?, reduceMotion: Bool,
+        accessibility: PrototypeAccessibilityProviding = PrototypeSystemAccessibility()
+    ) {
+        let systemReduces = reduceMotion || accessibility.isReduceMotionEnabled
+            || accessibility.prefersCrossFadeTransitions
+        profile = specMotion == "none" ? .off : (specMotion == "reduced" || systemReduces ? .reduced : .full)
     }
 
     /// Nodes without `visibleWhen` have nothing to animate, so callers pass the transition only for
-    /// those that do.
-    func visibility(transition: String?) -> PrototypeVisibilityTransition {
+    /// those that do. A stack's transition controls navigation only, so visibility uses the default.
+    /// A `shared` node (one with a `sharedKey`) crossfades even under `transition: "none"`, as on Android.
+    func visibility(
+        transition: String?,
+        nodeType: String? = nil,
+        shared: Bool = false
+    )
+        -> PrototypeVisibilityTransition
+    {
         guard enabled else { return .instant }
+        let transition = nodeType == "stack" ? nil : transition
+        if transition == "none" { return shared ? .fade : .instant }
+        if fadeOnly { return .fade }
         switch transition {
         case "none": return .instant
         case "fade": return .fade
@@ -56,27 +107,23 @@ extension PrototypeMotion {
     /// (Android's `animateContentSize`); nil is instant, so settled screenshots never see an
     /// in-flight size when motion is off.
     var containerSizeDuration: Double? {
-        enabled ? 0.25 : nil
+        spatial ? 0.25 : nil
     }
 }
 
 extension PrototypeMotion {
     /// Seconds the press-scale feedback (`pressScale`) springs for; nil snaps instantly under spec
-    /// `motion: "none"` or Reduce Motion, as every other animation does (#10885).
+    /// `motion: "none"` or the reduced profile (#10885).
     var pressScaleDuration: Double? {
-        enabled ? 0.2 : nil
+        spatial ? 0.2 : nil
     }
 }
 
 extension PrototypeNode {
-    /// Whether the node takes a slot in its parent's stack: not hidden by `visibleWhen`, not drawn
-    /// elsewhere (an anchored node is drawn by the anchor layer, a dialog or snackbar by the modal
-    /// layer) and not a closed `bottomSheet`. A stack puts its spacing around every child it is
-    /// given, even an empty one, so a parent leaves these out (#10912).
+    /// Hidden, anchored and modal nodes take no stack slot; even an empty slot adds spacing (#10912).
     func drawsInPlace(holds: (Condition) -> Bool) -> Bool {
         if let visibleWhen, !holds(visibleWhen) { return false }
         if anchor != nil || prototypeModalTypes.contains(type) { return false }
-        if type == "bottomSheet", !(openWhen.map(holds) ?? false) { return false }
         return true
     }
 

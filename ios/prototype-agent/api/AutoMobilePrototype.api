@@ -1,0 +1,187 @@
+AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public init(spec: Data, assets: PrototypeAssets = .none, storage: PrototypeStorageOption = .none, network: PrototypeNetworkConfiguration = .default, options: PrototypeEmbeddedOptions = PrototypeEmbeddedOptions(), registry: PrototypePlatformRegistry = .system, onEvent: @escaping @MainActor (PrototypeEvent) -> Void = { _ in }, onDismiss: @escaping @MainActor (PrototypeDismissReason) -> Void = { _ in }, onLoadError: @escaping @MainActor (PrototypeLoadError) -> Void = { _ in })
+AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public struct AutoMobilePrototypeView: View
+AutoMobilePrototypeAgent/AutoMobilePrototypeView.swift: public var body: some View
+AutoMobilePrototypeAgent/PrototypeAgent.swift: public func amPrototypeAgentStart()
+AutoMobilePrototypeAgent/PrototypeAgent.swift: public func amPrototypeAgentStartStandalone()
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public final class UIPasteboardPrototypeClipboard: PrototypeClipboard
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public func copy(text: String, sensitive: Bool, label _: String?)
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public func paste() async throws -> String
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public init(pasteboard: UIPasteboard = .general, now: @escaping () -> Date = Date.init)
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public static let system =
+AutoMobilePrototypeAgent/UIPasteboardPrototypeClipboard.swift: public var hasText: Bool
+AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift: public enum AutoMobilePrototypeCapabilities
+AutoMobilePrototypeAgentCore/AutoMobilePrototypeCapabilities.swift: public static let supported: [String] = PrototypeAgentProtocol.advertisedCapabilities()
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: [PrototypeClipboard] func copy(text: String, sensitive: Bool, label: String?)
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: [PrototypeClipboard] func paste() async throws -> String
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: [PrototypeClipboard] var hasText: Bool
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public enum PrototypeClipboardError: Error
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public final class FakePrototypeClipboard: PrototypeClipboard
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public final class PrototypeClipboardModule: PrototypePlatformModule
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public func availability() -> PlatformAvailability
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public func call(_ call: PlatformCall) async -> PlatformCallResult
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public func copy(text: String, sensitive: Bool, label: String?)
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public func paste() async throws -> String
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public init(clipboard: any PrototypeClipboard)
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public init(text: String = "")
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public let capability = "prototype_platform_clipboard_v1"
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public let maxPrototypeClipboardTextBytes = 65536
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public let name = "clipboard"
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public private(set) var label: String?
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public private(set) var platformCalls: [JSONValue] = []
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public private(set) var sensitive = false
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public protocol PrototypeClipboard
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var denied = false
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var events: AsyncStream<PlatformEvent>
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var hasText: Bool
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var state: [String: JSONValue]
+AutoMobilePrototypeAgentCore/PrototypeClipboard.swift: public var text: String
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: [Kind] case change
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: [Kind] case dataWrite
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: [Kind] case dismissed
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: [Kind] case emitted
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: [Kind] case generic(String)
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: [Kind] case request
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public enum Kind: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var dismissReason: PrototypeDismissReason?
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var kind: Kind
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var payloadJSON: Data
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var stateJSON: Data
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedEvent.swift: public var wireJSON: Data
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: [PrototypeStorageOption] case directory(URL)
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: [PrototypeStorageOption] case fileBacked
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: [PrototypeStorageOption] case none
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public enum PrototypeStorageOption: Sendable, Hashable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public init(deviceClient: Client? = nil, hostHandler: Client? = nil)
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public init(images: [String: Data] = [:], fonts: [String: Data] = [:])
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public init(locale: String? = nil)
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public let fonts: [String: Data]
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public let images: [String: Data]
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public let locale: String?
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public static func pinned(allowsCleartext: Bool = false) -> PrototypeNetworkConfiguration
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public static let `default` = PrototypeNetworkConfiguration()
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public static let none = PrototypeAssets()
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public struct PrototypeAssets: Sendable, Hashable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public struct PrototypeEmbeddedOptions: Sendable, Hashable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public struct PrototypeNetworkConfiguration: Sendable
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedOptions.swift: public typealias Client = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: [PrototypeLoadError] case invalidSpec(path: String, message: String)
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: [PrototypeLoadError] case unsupportedCapabilities([String])
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: public enum PrototypeLoadError: Error, Equatable, Sendable, LocalizedError
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: public static func validate(spec: Data) throws
+AutoMobilePrototypeAgentCore/PrototypeEmbeddedSpec.swift: public var errorDescription: String?
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeFeedbackOutcome] case played
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeFeedbackOutcome] case suppressed
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeFeedbackOutcome] case unavailable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticEffect] case click, tick, heavyClick, doubleClick, selection, success, warning, error
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticEffect] case impactLight, impactMedium, impactHeavy, longPress
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticPlan] case double(Impact, gapMs: Int)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticPlan] case impact(Impact)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticPlan] case notification(Notification)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticPlan] case selection
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeHapticsPlayer] func perform(_ effect: PrototypeHapticEffect) -> PrototypeFeedbackOutcome
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeSoundCue] case click, send, receive, shutter
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: [PrototypeSoundPlayer] func play(_ cue: PrototypeSoundCue, volume: Int?) -> PrototypeFeedbackOutcome
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum Impact: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum Notification: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeFeedbackOutcome: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeHapticEffect: String, CaseIterable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeHapticPlan: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeSoundCue: String, CaseIterable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public enum PrototypeSystemSound
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public final class PrototypeHapticsModule: PrototypePlatformModule
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public final class PrototypeSoundModule: PrototypePlatformModule
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public func availability() -> PlatformAvailability
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public func availability() -> PlatformAvailability
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public func call(_ call: PlatformCall) async -> PlatformCallResult
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public func call(_ call: PlatformCall) async -> PlatformCallResult
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public init(player: any PrototypeHapticsPlayer)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public init(player: any PrototypeSoundPlayer)
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let capability = "prototype_platform_haptics_v1"
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let capability = "prototype_platform_sound_v1"
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let events = AsyncStream<PlatformEvent>
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let events = AsyncStream<PlatformEvent>
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let name = "haptics"
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let name = "sound"
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let state: [String: JSONValue] = [:]
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public let state: [String: JSONValue] = [:]
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public protocol PrototypeHapticsPlayer
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public protocol PrototypeSoundPlayer
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public static func id(for cue: PrototypeSoundCue) -> UInt32
+AutoMobilePrototypeAgentCore/PrototypeFeedback.swift: public static func plan(for effect: PrototypeHapticEffect) -> PrototypeHapticPlan
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetwork.swift: public enum PrototypeLibraryNetwork
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetwork.swift: public static func configuration(gate: PrototypeLibraryNetworkGate, allowsCleartext: Bool, onLocalNetworkDenied: @escaping @MainActor @Sendable (PrototypeConsentEpoch) -> Void = { _ in }, pinned: @escaping @MainActor @Sendable (Bool, PrototypeConsentEpoch) -> PrototypeNetworkConfiguration) -> PrototypeNetworkConfiguration
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetwork.swift: public static func configuration(networkSwitch: PrototypeLibraryNetworkSwitch, allowsCleartext: Bool) -> PrototypeNetworkConfiguration
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkGate.swift: public final class PrototypeLibraryNetworkGate: @unchecked Sendable
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkGate.swift: public func setEnabled(_ value: Bool)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkGate.swift: public init(enabled: Bool = false)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkGate.swift: public typealias PrototypeConsentEpoch = UInt64
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: [PrototypeLibraryNetworkSettingStore] func bool(forKey key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: [PrototypeLibraryNetworkSettingStore] func set(_ value: Bool, forKey key: String)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public final class PrototypeLibraryNetworkSwitch
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public func bool(forKey key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public func denyLocalNetwork(epoch: PrototypeConsentEpoch)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public func set(_ value: Bool, forKey key: String)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public init(defaults: UserDefaults = .standard)
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public init(store: any PrototypeLibraryNetworkSettingStore = PrototypeLibraryUserDefaultsSettingStore())
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public let gate: PrototypeLibraryNetworkGate
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public private(set) var localNetworkDenied = false
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public protocol PrototypeLibraryNetworkSettingStore
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public static let key = "allowImportedPrototypeNetwork"
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public struct PrototypeLibraryUserDefaultsSettingStore: PrototypeLibraryNetworkSettingStore
+AutoMobilePrototypeAgentCore/PrototypeLibraryNetworkSwitch.swift: public var enabled: Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformAvailability] case needsPermission([String])
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformAvailability] case ready
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformAvailability] case unavailable(String)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformCallResult] case failure(PlatformErrorCode, String)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformCallResult] case success(JSONValue)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case invalidArgs = "invalid_args"
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case permissionDenied = "permission_denied"
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case platformError = "platform_error"
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case tooManyInFlight = "too_many_in_flight"
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PlatformErrorCode] case unsupported, unavailable, cancelled, timeout
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypeBundleReader] func containsInfoPlistKey(_ key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func availability() -> PlatformAvailability
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] func call(_ call: PlatformCall) async -> PlatformCallResult
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var capability: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var events: AsyncStream<PlatformEvent>
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var name: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var requiredInfoPlistKeys: [String]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: [PrototypePlatformModule] var state: [String: JSONValue]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformAvailability: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformCallResult: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public enum PlatformErrorCode: String, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public final class PrototypePlatformRegistry
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public func containsInfoPlistKey(_ key: String) -> Bool
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init()
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init(event: String, data: JSONValue)
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public init(modules: [any PrototypePlatformModule] = [], bundle: any PrototypeBundleReader = PrototypeMainBundleReader())
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let args: [String: JSONValue]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let call: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let callId: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let data: JSONValue
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public let event: String
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public protocol PrototypeBundleReader
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public protocol PrototypePlatformModule: Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public static let empty = PrototypePlatformRegistry()
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct PlatformCall: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct PlatformEvent: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public struct PrototypeMainBundleReader: PrototypeBundleReader
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var capabilities: [String]
+AutoMobilePrototypeAgentCore/PrototypePlatformRegistry.swift: public var requiredInfoPlistKeys: [String]
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: [PrototypeDismissReason] case user
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public enum PrototypeDismissReason: String, Sendable
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let id: String
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let name: String?
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public let sequence: Int
+AutoMobilePrototypeAgentCore/PrototypeSession.swift: public struct PrototypeEvent: Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case array([JSONValue])
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case bool(Bool)
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case null
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case number(Double)
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case object([String: JSONValue])
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: [JSONValue] case string(String)
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public enum JSONValue: Codable, Equatable, Sendable
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public func encode(to encoder: Encoder) throws
+AutoMobilePrototypeAgentCore/PrototypeSpec.swift: public init(from decoder: Decoder) throws
+AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public enum PrototypeSpecStrictValidator
+AutoMobilePrototypeAgentCore/PrototypeSpecStrictValidator.swift: public static func validate(data: Data, supportedCapabilities: Set<String>? = nil, library: Bool = false, shareAssetIds: Set<String>? = nil) throws

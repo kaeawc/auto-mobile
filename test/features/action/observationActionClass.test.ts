@@ -34,6 +34,7 @@ const advertisedClasses = {
   dragAndDrop: "scroll",
   biometricAuth: "unknown",
   dragPath: "unknown", // Like tapAt: unclassified until coordinate gestures are classified together.
+  hoverAt: "unknown", // Hover has no contact; unclassified like the other coordinate gestures.
   launchApp: "unknown",
   observe: "unknown", // Top-level projection; included to cover every raw/project advertiser.
   multiTouch: "unknown",
@@ -64,6 +65,13 @@ const buttonClasses: Record<string, ObservationActionClass> = {
   menu: "inPlace",
   volume_up: "inPlace",
   volume_down: "inPlace",
+  rotary_rotate_cw: "inPlace",
+  rotary_rotate_ccw: "inPlace",
+  rotary_nudge_up: "inPlace",
+  rotary_nudge_down: "inPlace",
+  rotary_nudge_left: "inPlace",
+  rotary_nudge_right: "inPlace",
+  rotary_select: "navigation",
 };
 const submittingKeys = ["enter", "done", "go", "search", "send"];
 const inPlaceKeys = [

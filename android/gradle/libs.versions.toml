@@ -33,6 +33,7 @@ androidx-core = "1.19.1"
 androidx-window = "1.5.0"
 androidx-activity-compose = "1.13.0"
 androidx-compose-bom = "2026.09.00"
+androidx-compose-adaptive = "1.3.0" # Independently versioned; aligned with the 2026.09.00 BOM
 androidx-lifecycle = "2.11.0"
 androidx-startup = "1.2.0"
 
@@ -68,7 +69,7 @@ lifecycleViewmodelNavigation3Android = "2.11.0"
 
 # Network and server libraries
 ktor = "3.6.0"
-okhttp = "5.5.0"
+okhttp = "5.5.1"
 retrofit = "3.0.0"
 
 # Publishing
@@ -76,8 +77,11 @@ mavenpublish = "0.37.0"
 dokka = "2.2.0"
 compose-multiplatform = "1.12.2"
 compose-hot-reload = "1.2.0"
-metro = "1.4.5"
+metro = "1.5.0"
 conveyor = "2.0"
+# Build-time license collection for ProtoViewer's in-app licenses screen (#14158). Gradle plugin only:
+# no runtime library, the app renders the generated JSON itself.
+aboutlibraries = "15.3.0"
 # Conveyor's in-app update control API (SoftwareUpdateController). Versioned independently of the
 # `conveyor` Gradle plugin above — this is the runtime library the desktop app links against.
 conveyor-control = "1.1"
@@ -95,8 +99,13 @@ compose-hot-reload = { id = "org.jetbrains.compose.hot-reload", version.ref = "c
 metro = { id = "dev.zacsweers.metro", version.ref = "metro" }
 detekt = { id = "dev.detekt", version.ref = "detekt" }
 conveyor = { id = "dev.hydraulic.conveyor", version.ref = "conveyor" }
+aboutlibraries = { id = "com.mikepenz.aboutlibraries.plugin.android", version.ref = "aboutlibraries" }
 
 [libraries]
+compose-adaptive-core = { module = "androidx.compose.material3.adaptive:adaptive", version.ref = "androidx-compose-adaptive" }
+compose-adaptive-layout = { module = "androidx.compose.material3.adaptive:adaptive-layout", version.ref = "androidx-compose-adaptive" }
+compose-adaptive-navigation = { module = "androidx.compose.material3.adaptive:adaptive-navigation", version.ref = "androidx-compose-adaptive" }
+compose-adaptive-navigation-suite = { module = "androidx.compose.material3:material3-adaptive-navigation-suite" }
 # H.264 decoding for the live device view. Deliberately org.bytedeco:ffmpeg and NOT
 # ffmpeg-platform (which pulls every platform's natives, ~150-200MB) nor javacv-platform
 # (which drags in OpenCV). The non-gpl artifact is LGPL and sufficient: only the x264/x265

@@ -1,3 +1,10 @@
+import {
+  dispatchRichStylus,
+  pointerNeedsInstrumentation,
+  strokeRequest,
+  type RichStylusOptions,
+} from "./pointer/richStylus";
+import type { PointerOption } from "../../models/PointerOption";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { ActionableError } from "../../models/ActionableError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
@@ -50,6 +57,8 @@ export interface SwipeAtCoordinateDependencies extends DisplayFenceDependencies 
   /** CtrlProxy client that carries `displayId` for an explicit-display swipe. */
   androidClient?: Pick<AndroidCtrlProxy, "requestSwipe" | "supportsCommand">;
   lastRenderedObservation?: RenderedObservationReader;
+  /** Stylus routes and device facts; the defaults use the instrumentation route and the live device. */
+  stylus?: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
 }
 
 type NativePoint = { x: number; y: number };
@@ -132,6 +141,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
   private readonly invalidateIosCache: () => void;
   private readonly androidClient: Pick<AndroidCtrlProxy, "requestSwipe" | "supportsCommand">;
   private readonly lastRenderedObservation?: RenderedObservationReader;
+  private readonly stylusRoutes: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
 
   constructor(
     device: BootedDevice,
@@ -145,6 +155,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     this.androidClient =
       dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
+    this.stylusRoutes = dependencies.stylus ?? {};
     this.invalidateIosCache =
       dependencies.invalidateIosCache ??
       (() => IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache());
@@ -310,10 +321,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     if (displayId === undefined || displayId === 0) {
       // The gesture reports its own outcomeIndeterminate; a throw before sending is a plain failure.
       return this.executeGesture.swipe(
-        from.x,
-        from.y,
-        to.x,
-        to.y,
+        { x1: from.x, y1: from.y, x2: to.x, y2: to.y },
         { duration, displayFence: { assertCurrent: target.assertCurrent } },
         { perf, signal },
       );
@@ -369,9 +377,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       this.adb,
       `swipe ${from.x} ${from.y} ${to.x} ${to.y} ${inputDurationArgument(duration)}`,
       displayId,
-      signal,
-      target.assertCurrent,
-      { onDispatch },
+      { signal, assertCurrent: target.assertCurrent, onDispatch },
     );
     return { success: true, x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration };
   }
@@ -384,16 +390,28 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     resolved: { from: NativePoint; to: NativePoint },
     duration: number,
     fence: { assertCurrent: () => void } | undefined,
+    pointer: PointerOption | undefined,
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const { from, to } = resolved;
     const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
     try {
-      await dispatchStylusSwipe(
-        this.adb,
-        { from, to, duration },
-        { signal, assertCurrent: fence?.assertCurrent },
-      );
+      if (pointerNeedsInstrumentation(pointer)) {
+        // Pressure, tilt, orientation or buttons: the instrumentation route, refused before input
+        // when the device lacks it (#13099).
+        await dispatchRichStylus(
+          this.device,
+          this.adb,
+          strokeRequest(pointer!, [from, { ...to, durationMs: duration }]),
+          { ...this.stylusRoutes, signal, assertCurrent: fence?.assertCurrent },
+        );
+      } else {
+        await dispatchStylusSwipe(
+          this.adb,
+          { from, to, duration },
+          { signal, assertCurrent: fence?.assertCurrent },
+        );
+      }
       return { success: true, ...base, duration };
     } catch (error) {
       // An abort before the command was sent is a plain cancellation, as is a stale display.
@@ -480,12 +498,14 @@ export class SwipeAtCoordinate extends BaseVisualChange {
             options.durationMs ?? this.geometry.getSwipeDurationFromSpeed(options.speed);
           const result = await perf.track("executeSwipe", () =>
             options.pointer
-              ? this.dispatchStylus(resolved, duration, fence, signal)
+              ? this.dispatchStylus(resolved, duration, fence, options.pointer, signal)
               : this.executeGesture.swipe(
-                  resolved.from.x,
-                  resolved.from.y,
-                  resolved.to.x,
-                  resolved.to.y,
+                  {
+                    x1: resolved.from.x,
+                    y1: resolved.from.y,
+                    x2: resolved.to.x,
+                    y2: resolved.to.y,
+                  },
                   {
                     duration,
                     // A display change since the pre-dispatch read refuses just before the finger goes down.

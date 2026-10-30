@@ -19,6 +19,7 @@ import {
   BootedDevice,
   GetCalendarSystemResult,
   LocalizationSettingsResult,
+  requireAndroidOrIosPlatform,
   Set24HourFormatResult,
   SetCalendarSystemResult,
   SetLocaleResult,
@@ -84,7 +85,10 @@ export class SystemConfigurationManager {
     }
     // Validate once, before any adapter writes: both platforms store whatever
     // string they are given and read it back unchanged (issue #10190).
-    const check = checkTimeZoneId(trimmedZone, this.device.platform);
+    const check = checkTimeZoneId(
+      trimmedZone,
+      requireAndroidOrIosPlatform(this.device.platform, "Setting the time zone"),
+    );
     if (check.error) {
       return { success: false, zoneId, error: check.error };
     }

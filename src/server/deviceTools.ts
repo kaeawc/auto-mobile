@@ -18,9 +18,11 @@ import {
   getAppleSchema,
   getDeviceTeardownService,
   getDeviceToolsDependencies,
-  provisionDeviceSchema,
-  startDeviceSchema,
+  provisionDeviceRegistrationSchema,
+  startDeviceRegistrationSchema,
+  type ProvisionDeviceArgs,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
+import { isWatchProvisionRequest, provisionWatchDevice } from "./deviceToolsWatchProvision";
 import { registerDaemonDeviceDeletion } from "../daemon/daemonDeviceDeletion";
 import {
   killDeviceSchema,
@@ -29,6 +31,7 @@ import {
   listDevicesOutputSchema,
   listDevicesSchema,
   provisionDeviceOutputSchema,
+  teardownDeviceRegistrationSchema,
   teardownDeviceSchema,
 } from "../features/deviceLifecycle/core/toolSchemas";
 export * from "../features/deviceLifecycle/deviceLifecycleCore";
@@ -76,7 +79,12 @@ export function registerDeviceTools() {
     "List device images",
     listDeviceImagesSchema,
     listDeviceImagesHandler,
-    { defaultEnabled: true, outputSchema: listDeviceImagesOutputSchema, readOnly: true },
+    {
+      defaultEnabled: true,
+      outputSchema: listDeviceImagesOutputSchema,
+      readOnly: true,
+      hostInventory: true,
+    },
   );
 
   ToolRegistry.register(
@@ -84,7 +92,12 @@ export function registerDeviceTools() {
     "List booted devices; pending configured-image enrichment includes retry hints and failed provenance includes a non-retryable reason; resource pointers for images and detail in the note",
     listDevicesSchema,
     listDevicesHandler,
-    { defaultEnabled: true, outputSchema: listDevicesOutputSchema, readOnly: true },
+    {
+      defaultEnabled: true,
+      outputSchema: listDevicesOutputSchema,
+      readOnly: true,
+      hostInventory: true,
+    },
   );
 
   // The acquiring tools are registered as the request-level race sees them: a call whose client
@@ -111,7 +124,7 @@ export function registerDeviceTools() {
   ToolRegistry.register(
     "startDevice",
     "Start device",
-    startDeviceSchema,
+    startDeviceRegistrationSchema,
     (args, progress, signal) =>
       acquireUndoneIfUndelivered(signal, () => startDeviceHandler(args, progress, signal)),
     {
@@ -126,8 +139,16 @@ export function registerDeviceTools() {
   ToolRegistry.register(
     "provisionDevice",
     "Provision exact virtual device",
-    provisionDeviceSchema,
-    provisionDeviceHandler,
+    provisionDeviceRegistrationSchema,
+    // An Apple Watch simulator has its own provisioning path (#15882); like provisionDevice, it
+    // undoes an acquisition its caller never received.
+    (args, progress, signal) =>
+      isWatchProvisionRequest(args)
+        ? acquireUndoneIfUndelivered(signal, () =>
+            provisionWatchDevice(args, bindBootedDeviceSession, signal),
+          )
+        : // The Android/iOS handler re-parses its own request with provisionDeviceSchema.
+          provisionDeviceHandler(args as Partial<ProvisionDeviceArgs>, progress, signal),
     {
       defaultEnabled: false,
       outputSchema: provisionDeviceOutputSchema,
@@ -143,7 +164,7 @@ export function registerDeviceTools() {
   ToolRegistry.register(
     "deleteDevice",
     "Stop and permanently delete a device, with verified platform-inventory absence",
-    teardownDeviceSchema,
+    teardownDeviceRegistrationSchema,
     deleteDeviceHandler,
     { defaultEnabled: false, transportRecovery: "connect" },
   );

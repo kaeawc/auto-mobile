@@ -1,3 +1,4 @@
+import { SessionDeviceReboundBroadcaster } from "./sessionDeviceReboundBroadcast";
 import { registerPrototypeDaemonPort } from "../features/prototype/prototypeDaemonPorts";
 import { daemonToolRegistry } from "./toolRegistryPort";
 import {} from "./networkStateSessionCleanup";
@@ -15,7 +16,6 @@ import { type HealthFailureKind } from "./daemonHealthCheck";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { DevicePool } from "./devicePool";
 import { createForeignCtrlProxyForwardEvidence } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
-import { type SqliteBindingRegistry } from "./sessionBroker/registry/sqliteBindingRegistry";
 import { ENV, readEnvRaw } from "../config/env";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import { DEFAULT_DAEMON_PORT } from "./wire/constants";
@@ -343,7 +343,9 @@ export class Daemon {
       configureDeviceDataStreamServer: () => this.streams.configureDeviceDataStreamServer(),
     });
     this.deviceSessionRepository = deviceSessionRepository;
-    this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
+    this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository, {
+      sessionDeviceReboundEmitter: SessionDeviceReboundBroadcaster,
+    });
     this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
     // Read when a recovery claims its row, so a peer that started after this daemon is seen. A
     // restart incumbent whose pid file this daemon replaced is not listed, so it is added while
@@ -595,7 +597,7 @@ export class Daemon {
       /** Replaces start-sequence steps with doubles on this instance. */
       overrideStartSteps: (steps: {
         startThroughSocketBind?: () => Promise<void>;
-        openBindingRegistry?: (signal?: AbortSignal) => Promise<SqliteBindingRegistry>;
+        openBindingRegistry?: DaemonBroker["openBindingRegistry"];
         setupShutdownHandlers?: () => void;
       }): void => {
         this.startThroughSocketBind = steps.startThroughSocketBind ?? this.startThroughSocketBind;
@@ -604,8 +606,12 @@ export class Daemon {
       },
     } as const;
   }
-  stop(...args: Parameters<DaemonShutdown["stop"]>) {
-    return this.shutdown.stop(...args);
+  async stop(...args: Parameters<DaemonShutdown["stop"]>) {
+    try {
+      return await this.shutdown.stop(...args);
+    } finally {
+      this.daemonState.retireForeignAndroidSerialSource(this.devicePool);
+    }
   }
 
   /**
@@ -639,6 +645,7 @@ export class Daemon {
       identity,
       lifecycle,
       bindingRegistry: () => daemon.runtime.bindingRegistry,
+      deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       setBindingRegistry: (value) => {
         daemon.runtime.bindingRegistry = value;
       },
@@ -659,6 +666,9 @@ export class Daemon {
       identity,
       lifecycle,
       bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
+      startBackgroundRegistryUpgrade: () => this.broker.startBackgroundRegistryUpgrade(),
+      bindingRegistry: () => daemon.runtime.bindingRegistry,
+      deviceClaimMirrors: () => daemon.runtime.deviceClaimMirrors,
       foreignCtrlProxyForwardEvidence: () => daemon.injected.foreignCtrlProxyForwardEvidence,
       deviceStateChangeNotifier: () => daemon.deviceStateChangeNotifier,
       observerSessionRegistry: () => daemon.observerSessionRegistry,
@@ -726,6 +736,7 @@ export class Daemon {
       reownRehydratedManagedExecutions: (...args) =>
         this.broker.reownRehydratedManagedExecutions(...args),
       installSessionBroker: (...args) => this.broker.installSessionBroker(...args),
+      startBackgroundRegistryUpgrade: () => this.broker.startBackgroundRegistryUpgrade(),
       initializeIosServices: (...args) => this.initializeIosServices(...args),
       restoreIncumbentOwnerRecord: (...args) => this.identity.restoreIncumbentOwnerRecord(...args),
       republishIdentity: (...args) => this.identity.republishIdentity(...args),

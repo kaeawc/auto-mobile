@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import contract from "../../schemas/prototype-spec-contract.json";
 import { validatePrototypeSpec } from "../../src/features/prototype/prototypeValidation";
+import { PrototypeMockBackendRegistry } from "../../src/features/prototype/PrototypeMockBackendRegistry";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
   PROTOTYPE_APPEARANCE_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
@@ -119,13 +121,22 @@ describe("automobile:prototype resource", () => {
     const blocks = [...renderPrototypeGuide().matchAll(/```json\n([\s\S]*?)```/g)].map((m) =>
       JSON.parse(m[1]),
     );
-    expect(blocks).toHaveLength(5);
-    const [minimal, list, data, components, appearanceCall] = blocks;
+    // The seventh block is the platform section's example, validated in prototypeGuidePlatform.test.ts.
+    expect(blocks).toHaveLength(7);
+    const [minimal, list, data, components, appearanceCall, mockCall] = blocks;
     expect(validatePrototypeSpec(data)).toMatchObject({ success: true });
     expect(validatePrototypeSpec(minimal).success).toBe(true);
     // The light/dark section's example is a whole tool call, not a bare spec.
     expect(prototypeSchema.safeParse(appearanceCall)).toMatchObject({ success: true });
     expect(appearanceCall.appearance).toBe("dark");
+    // The mock backend section's example is a whole tool call whose definition must be accepted.
+    expect(prototypeSchema.safeParse(mockCall)).toMatchObject({ success: true });
+    expect(() =>
+      new PrototypeMockBackendRegistry({
+        ids: new CountingIdGenerator(),
+        timer: { sleep: async () => {} },
+      }).define(mockCall.backendId, mockCall.backend),
+    ).not.toThrow();
     expect(validatePrototypeSpec(components)).toMatchObject({ success: true });
     const wrapped = {
       id: "list",

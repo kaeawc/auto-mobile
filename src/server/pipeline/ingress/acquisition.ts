@@ -151,8 +151,10 @@ export async function enrichProvisionDeviceResult<
   result: T,
   sessionUuid: string | undefined,
   service: McpServerOptions["sessionToolSelectionService"],
-  enableTools: readonly string[],
-  connectionProfileUuid: string | undefined,
+  {
+    enableTools,
+    connectionProfileUuid,
+  }: { enableTools: readonly string[]; connectionProfileUuid: string | undefined },
 ): Promise<T> {
   if (toolName !== "provisionDevice" || !sessionUuid) {
     return result;

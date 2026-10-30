@@ -401,7 +401,6 @@ describe("Rotate", () => {
       expect(result.message).toContain("automatic rotation is on");
       expect(result.message).toContain("at the time the call returned");
       expect(result.message).toContain("lockOrientation: true");
-      expect(result.message).toContain("device session");
       expect(result.observation?.rotation).toBe(1);
       expect(commandsAtObservation.filter((command) => command === liveCommand)).toHaveLength(9);
       expect(commandsAtObservation).toContain("shell settings put system accelerometer_rotation 1");
@@ -468,7 +467,7 @@ describe("Rotate", () => {
           });
         }
         const result = await rotate.execute("landscape", {
-          lockOrientation: mode === "session" ? undefined : true,
+          lockOrientation: true,
         });
         expect(result.success).toBe(true);
         expect(result.currentOrientation).toBe("landscape");
@@ -618,14 +617,14 @@ describe("Rotate", () => {
       ]);
     }
 
-    test("session default holds auto-rotate off and records originals before writes", async () => {
+    test("session default restores auto-rotate and records originals before writes", async () => {
       const original = useSession();
-      settingsSequence(["1", "0"]);
+      settingsSequence(["1"]);
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(true);
-      expect(result.orientationLockState).toBe("locked");
+      expect(result.orientationLockState).toBe("unlocked");
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
-        false,
+        true,
       );
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
       const calls = fakeAdb.getExecutedCommands();
@@ -642,7 +641,7 @@ describe("Rotate", () => {
       expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
     });
 
-    test("session already-matching orientation locks and records before its first write", async () => {
+    test("session already-matching orientation preserves automatic rotation without writes", async () => {
       const original = useSession();
       fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
       fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
@@ -651,8 +650,8 @@ describe("Rotate", () => {
       ]);
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(true);
-      expect(result.orientationLockState).toBe("locked");
-      expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
+      expect(result.orientationLockState).toBe("unlocked");
+      expect(original()).toBeUndefined();
     });
 
     test("session unknown initial auto-rotate preserves guard and records null", async () => {
@@ -756,6 +755,33 @@ describe("Rotate", () => {
         }
       },
     );
+
+    test("an explicit unlock confirmed after a wait failure still puts the original user_rotation back", async () => {
+      useSession();
+      settingsSequence(["1", "1", "1"]);
+      fakeAdb.setCommandResponseSequence("shell dumpsys window displays", [
+        createExecResult("mRotation=0"),
+        createExecResult("mRotation=1"),
+      ]);
+      fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+        createExecResult("2"),
+        createExecResult("1"),
+        createExecResult("2"),
+      ]);
+      const wait = spyOn(fakeAwaitIdle, "waitForRotation").mockRejectedValue(
+        new Error("rotation wait failed"),
+      );
+      try {
+        const result = await rotate.execute("landscape", { lockOrientation: false });
+        expect(result.success).toBe(true);
+        const writes = fakeAdb
+          .getExecutedCommands()
+          .filter((command) => command.includes("settings put"));
+        expect(writes.at(-1)).toBe("shell settings put system user_rotation 2");
+      } finally {
+        wait.mockRestore();
+      }
+    });
 
     test("stalled live confirmation is bounded by FakeTimer and never rolls back", async () => {
       useSession();
@@ -954,6 +980,56 @@ describe("Rotate", () => {
       const result = await rotate.execute("landscape");
       expect(result.currentOrientation).toBe("unknown");
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(false);
+    });
+
+    test("an explicit unlock in a session puts the original user_rotation back after the rotation", async () => {
+      const original = useSession();
+      settingsSequence(["1"]);
+      const result = await rotate.execute("landscape", { lockOrientation: false });
+      expect(result.success).toBe(true);
+      expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
+      const writes = fakeAdb
+        .getExecutedCommands()
+        .filter((command) => command.startsWith("shell settings put system user_rotation"));
+      expect(writes.at(-1)).toBe("shell settings put system user_rotation 0");
+    });
+
+    test("cancellation during the session user_rotation restore is surfaced", async () => {
+      useSession();
+      settingsSequence(["1"]);
+      const controller = new AbortController();
+      fakeAdb.abortAfterCommand("shell settings put system user_rotation 0", controller);
+      await expect(
+        rotate.execute("landscape", { lockOrientation: false, signal: controller.signal }),
+      ).rejects.toThrow("Rotation cancelled");
+    });
+
+    test("an explicit unlock of an already-applied orientation in a session restores the original user_rotation", async () => {
+      const original = useSession();
+      fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
+        createExecResult("0"),
+        createExecResult("1"),
+      ]);
+      fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult("mRotation=1"));
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
+      const result = await rotate.execute("landscape", { lockOrientation: false });
+      expect(result.success).toBe(true);
+      expect(result.rotationPerformed).toBe(false);
+      expect(original()).toEqual({ accelerometerRotation: 0, userRotation: 1 });
+      const writes = fakeAdb
+        .getExecutedCommands()
+        .filter((command) => command.includes("settings put"));
+      expect(writes.at(-1)).toBe("shell settings put system user_rotation 1");
+    });
+
+    test("abort during the orientation reads stops before any rotation write", async () => {
+      settingsSequence(["1"]);
+      const controller = new AbortController();
+      fakeAdb.abortAfterCommand("shell settings get system accelerometer_rotation", controller);
+      await expect(rotate.execute("landscape", { signal: controller.signal })).rejects.toThrow();
+      expect(
+        fakeAdb.getExecutedCommands().filter((command) => command.includes("settings put")),
+      ).toEqual([]);
     });
 
     test("abort after a user_rotation write never rolls it back", async () => {

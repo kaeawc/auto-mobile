@@ -101,6 +101,7 @@ final class PrototypeHostChromeTests: XCTestCase {
             plain.sheetHandle,
             plain.navSelected,
             plain.navIndicator,
+            plain.navContainer,
             plain.navUnselected,
             plain.placeholderFill,
             plain.placeholderGlyph,
@@ -113,9 +114,19 @@ final class PrototypeHostChromeTests: XCTestCase {
         XCTAssertEqual(palette.sheetHandle, palette.color(role: "onSurfaceVariant"))
         XCTAssertEqual(palette.navSelected, palette.color(role: "onSecondaryContainer"))
         XCTAssertEqual(palette.navIndicator, palette.color(role: "secondaryContainer"))
+        XCTAssertEqual(palette.navContainer, palette.color(role: "surfaceContainer"))
         XCTAssertEqual(palette.navUnselected, palette.color(role: "onSurfaceVariant"))
         XCTAssertEqual(palette.placeholderFill, palette.color(role: "surfaceVariant"))
         XCTAssertEqual(palette.placeholderGlyph, palette.color(role: "onSurfaceVariant"))
+    }
+
+    func testNavContainerFollowsSurfaceContainerOverride() throws {
+        let theme = try JSONDecoder().decode(
+            PrototypeTheme.self,
+            from: Data(##"{"colors":{"surfaceContainer":"#123456"}}"##.utf8)
+        )
+        let palette = PrototypePalette.make(theme: theme, systemDark: false)
+        XCTAssertEqual(palette.navContainer, PrototypeRGBA(hex: "#123456"))
     }
 
     // MARK: Dialog parts (D3)

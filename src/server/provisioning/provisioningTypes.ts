@@ -1,9 +1,11 @@
+import type { DeleteDeviceOptions } from "../../features/deviceLifecycle/teardown/teardownContracts";
 import type { DeviceResourceConfigurationResult } from "../../models/DeviceResourceConfiguration";
 import { BootedDevice, DeviceInfo } from "../../models";
 import { createPerformanceTracker } from "../../utils/PerformanceTracker";
 import { type AcquisitionReceipt } from "../../daemon/acquisitionReceipt";
 import type { DeviceReadinessLevel } from "../../daemon/readiness/DeviceReadiness";
 import type { DeviceReadinessReservation } from "../../daemon/devicePool";
+import { type DeviceCreationGate } from "../../devices/deviceCreationGate";
 import { type ExactDeviceProvisioner } from "../../devices/exactDeviceProvisioning";
 import { type VirtualDeviceLifecycleLease } from "../../devices/virtualDeviceLifecycleCoordinator";
 import { DeviceTeardownService } from "../../devices/deviceTeardownService";
@@ -22,15 +24,16 @@ export type ProvisioningHooks = {
   bindBootedDeviceSession: (
     device: BootedDevice,
     args: StartDeviceArgs,
-    sourceImage?: DeviceInfo,
-    childProcess?: ChildProcess | null,
-    options?: {
+    sourceImage: DeviceInfo | undefined,
+    childProcess: ChildProcess | null | undefined,
+    options: {
       autolockEnabled?: boolean;
       readinessReservationOwners?: ReadonlySet<symbol>;
       verifiedAndroidAvdIdentity?: DeviceInfo;
       achievedReadiness?: DeviceReadinessLevel;
       collectCancellationSettlement?: (settlement: Promise<void>) => void;
       receipt?: AcquisitionReceipt;
+      signal: AbortSignal | undefined;
     },
   ) => Promise<string>;
   ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
@@ -39,7 +42,7 @@ export type ProvisioningHooks = {
     deps: DeviceToolsDependencies,
     callerSignal: AbortSignal | undefined,
     teardownService: DeviceTeardownService,
-    lifecycleLease?: VirtualDeviceLifecycleLease,
+    options?: DeleteDeviceOptions,
   ) => Promise<TeardownToolResponse>;
 };
 
@@ -75,6 +78,7 @@ export type ProvisionBootOptions = {
   ) => Promise<void>;
   /** Records that an adopted device's undone request left nothing of its own behind. */
   recordUndeliveredAdoption?: (reason: unknown) => void;
+  deviceCreationGate: DeviceCreationGate;
   provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>;
   perf: ReturnType<typeof createPerformanceTracker>;
   totalDeadlineMs: number;
@@ -85,6 +89,8 @@ export type ProvisionBootOptions = {
 };
 
 export type ProvisionSettlementState = {
+  /** Conservative launch boundary: even a rejected boot call may have launched the AVD. */
+  bootAttempted?: boolean;
   /** Only a retryable readiness deadline after creation, before binding, may retain a simulator. */
   retainCreatedForRetry?: boolean;
   exactProvisioning?: Promise<unknown>;

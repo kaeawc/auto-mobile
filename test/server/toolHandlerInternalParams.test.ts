@@ -108,12 +108,38 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
+      // The host-built test-session report, validated as JSON for the output envelope.
+      if (
+        file === "prototypeTools/testSession.ts" &&
+        receiver.type === "Identifier" &&
+        receiver.name === "hostReportSchema"
+      ) {
+        return;
+      }
       // The injected iOS agent's status reply, likewise not a tool argument.
       if (
         file === "prototypeTools/inspection.ts" &&
         receiver.type === "Identifier" &&
         receiver.name === "iosAgentStatusSchema" &&
         first?.type === "MemberExpression"
+      ) {
+        return;
+      }
+      // The ambiguous-device refusal is a tool RESULT the dispatcher inspects, not tool arguments.
+      if (
+        file === "ambiguousDeviceElicitation.ts" &&
+        receiver.type === "Identifier" &&
+        ["refusalResultSchema", "textBlockSchema", "refusalPayloadSchema"].includes(receiver.name)
+      ) {
+        return;
+      }
+      // MRTR state is an SDK-verified continuation payload, not tool arguments.
+      if (
+        receiver.type === "Identifier" &&
+        ((file === "ambiguousDeviceMrtr.ts" &&
+          receiver.name === "deviceChoiceRequestStateSchema") ||
+          (file === "deviceChoiceRequestState.ts" &&
+            ["sealedStateSchema", "deviceChoiceRequestStateSchema"].includes(receiver.name)))
       ) {
         return;
       }

@@ -1,0 +1,39 @@
+{
+  "id": "channel-argument",
+  "requires": {
+    "platform": ["realtime"]
+  },
+  "channels": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "kind": "websocket",
+      "url": "wss://example.com"
+    }
+  },
+  "root": {
+    "type": "button",
+    "label": "Connect",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "realtime.connect",
+        "args": {
+          "channel": {
+            "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "realtime.disconnect",
+        "args": {
+          "channel": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    ]
+  },
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  }
+}

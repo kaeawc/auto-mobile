@@ -14,7 +14,13 @@ import {
 } from "../../src/devices/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../../src/utils/deviceMatcher";
-import { pickAndroidSystemImage } from "../../src/devices/deviceProvisioning";
+import {
+  DefaultDeviceProvisioner,
+  pickAndroidSystemImage,
+} from "../../src/devices/deviceProvisioning";
+import { avdConfigFormFactor } from "../../src/utils/android-cmdline-tools/avdDeviceInfoEnrichment";
+import { FakeAndroidAvdCreator } from "../fakes/FakeDeviceProvisioner";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { ProvisionDeviceCreateRejectedError } from "../../src/devices/exactDeviceProvisioning";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
@@ -24,6 +30,7 @@ import {
   type Platform,
 } from "../../src/models";
 import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
+import { DeviceOwnedByOtherDaemonError } from "../../src/models/deviceAcquisitionRefusals";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import type { DeviceBootRecovery } from "../../src/devices/deviceBootRecovery";
@@ -60,6 +67,7 @@ function service(
     | "onAndroidColdBootTrackingChanged"
     | "onIdentityResolved"
     | "invalidateAndroidDeviceList"
+    | "assertExplicitDeviceNotForeignOwned"
   >,
   displayInventory?: FakeDisplayInventoryProvider,
 ): DeviceBootService {
@@ -83,6 +91,95 @@ function service(
 }
 
 describe("DeviceBootService", () => {
+  it.each([true, false])(
+    "reports a fresh foreign owner on an explicit-id miss (foreign placeholder=%s)",
+    async (placeholder) => {
+      const devices = new FakeDeviceUtils();
+      const deviceId = "emulator-5610";
+      if (placeholder) {
+        devices.setBootedDevices("android", [
+          { name: image.name, platform: "android", deviceId, foreignOwned: true },
+        ]);
+      }
+      const checked: Array<[string, Platform]> = [];
+      const boot = service(devices, undefined, undefined, undefined, undefined, {
+        assertExplicitDeviceNotForeignOwned: async (id, platform) => {
+          checked.push([id, platform]);
+          throw new DeviceOwnedByOtherDaemonError(id, 43210);
+        },
+      });
+      const failure = boot.boot({ platform: "android", deviceId });
+      await expect(failure).rejects.toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      await expect(failure).rejects.toMatchObject({ code: "device_owned_by_other_daemon" });
+      await expect(failure).rejects.toThrow("PID 43210");
+      expect(checked).toEqual([[deviceId, "android"]]);
+      expect(devices.wasMethodCalled("listDeviceImages")).toBe(false);
+    },
+  );
+
+  it("keeps the not-found error when a fresh explicit-id check finds no owner", async () => {
+    const devices = new FakeDeviceUtils();
+    const checked: string[] = [];
+    const boot = service(devices, undefined, undefined, undefined, undefined, {
+      assertExplicitDeviceNotForeignOwned: async (id) => {
+        checked.push(id);
+      },
+    });
+    const failure = boot.boot({ platform: "android", deviceId: "missing-id" });
+    await expect(failure).rejects.toBeInstanceOf(ActionableError);
+    await expect(failure).rejects.toThrow("Device 'missing-id' not found");
+    expect(checked).toEqual(["missing-id"]);
+  });
+
+  it.each([
+    { deviceId: "emulator-5554" },
+    { name: image.name, matchExactName: true },
+    { formFactor: "phone" as const },
+  ])("checks ownership only on an explicit-id miss: %j", async (selector) => {
+    const devices = new FakeDeviceUtils();
+    devices.setBootedDevices("android", [
+      { name: image.name, platform: "android", deviceId: "emulator-5610", foreignOwned: true },
+      { name: image.name, platform: "android", deviceId: "emulator-5554", formFactor: "phone" },
+    ]);
+    devices.setDeviceImages("android", [{ ...image, formFactor: "phone" }]);
+    let checks = 0;
+    const boot = service(devices, new DefaultDeviceMatcher(), undefined, undefined, undefined, {
+      assertExplicitDeviceNotForeignOwned: async (id) => {
+        checks++;
+        throw new DeviceOwnedByOtherDaemonError(id, 43210);
+      },
+    });
+    const result = await boot.boot({ platform: "android", ...selector });
+    expect(result.device.deviceId).toBe("emulator-5554");
+    expect(checks).toBe(0);
+  });
+
+  it("checks an explicit AVD name literally instead of using a foreign serial", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [image]);
+    devices.setBootedDevices("android", [
+      {
+        name: "Unknown (emulator-5610)",
+        platform: "android",
+        deviceId: "emulator-5610",
+        foreignOwned: true,
+      },
+    ]);
+    const checked: string[] = [];
+    const boot = service(devices, new DefaultDeviceMatcher(), undefined, undefined, undefined, {
+      assertExplicitDeviceNotForeignOwned: async (id) => {
+        checked.push(id);
+        if (id === "emulator-5610") {
+          throw new DeviceOwnedByOtherDaemonError(id, 43210);
+        }
+      },
+    });
+    const result = await boot.boot({ platform: "android", deviceId: image.name });
+    expect(result.source).toBe("cold-boot");
+    expect(result.device.name).toBe(image.name);
+    expect(checked).toEqual([image.name]);
+  });
+
   it("hydrates a running foldable before matching panel requirements", async () => {
     const devices = new FakeDeviceUtils();
     const running: BootedDevice = { name: "Fold", platform: "android", deviceId: "emulator-5554" };
@@ -765,6 +862,91 @@ describe("DeviceBootService", () => {
       expect(second.sourceImage?.name).toBe(createdName);
     });
   }
+
+  it("creates a TV AVD for formFactor tv, reuses it, and keeps phone requests off it (#15881)", async () => {
+    const devices = new FakeDeviceUtils();
+    const avd = new FakeAndroidAvdCreator([
+      {
+        packageName: "system-images;android-34;android-tv;x86_64",
+        apiIdentifier: "34",
+        apiLevel: 34,
+        tag: "android-tv",
+        abi: "x86_64",
+        versionInfo: "",
+      },
+      {
+        packageName: "system-images;android-34;google_apis;x86_64",
+        apiIdentifier: "34",
+        apiLevel: 34,
+        tag: "google_apis",
+        abi: "x86_64",
+        versionInfo: "",
+      },
+    ]);
+    const createdImages: DeviceInfo[] = [];
+    const createAvd = avd.createAvd.bind(avd);
+    avd.createAvd = async (params) => {
+      const result = await createAvd(params);
+      // What AvdConfigReader reports for the new AVD on the next listing: the form factor is
+      // classified from config.ini's system image and hardware profile.
+      createdImages.push({
+        name: params.name,
+        platform: "android",
+        isRunning: false,
+        apiLevel: 34,
+        osVersion: "14",
+        formFactor: avdConfigFormFactor({
+          systemImagePackage: params.package,
+          deviceName: params.device,
+        }),
+      });
+      devices.setDeviceImages("android", [...createdImages]);
+      return result;
+    };
+    const boot = new DeviceBootService({
+      deviceManager: devices,
+      deviceMatcher: new DefaultDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: new DefaultDeviceProvisioner({
+        iosCreator: () => undefined,
+        androidCreator: () => avd,
+        idGenerator: new CountingIdGenerator("uuid"),
+        architecture: "x64",
+      }),
+      matchingStrategy: "LATEST",
+      timer: new FakeTimer(),
+    });
+    // preferRunning:false forces repeat calls through matchDeviceImage.
+    const tvRequest = {
+      platform: "android" as const,
+      formFactor: "tv" as const,
+      createIfMissing: true,
+      preferRunning: false,
+    };
+
+    const first = await boot.boot(tvRequest);
+    expect(first.provisioned).toBe(true);
+    expect(first.device.name).toBe("AutoMobile-android-tv-34-uuid1");
+    expect(createdImages[0]?.formFactor).toBe("tv");
+
+    const second = await boot.boot(tvRequest);
+    expect(second.provisioned).toBe(false);
+    expect(second.sourceImage?.name).toBe("AutoMobile-android-tv-34-uuid1");
+
+    const phone = await boot.boot({ ...tvRequest, formFactor: "phone" });
+    expect(phone.provisioned).toBe(true);
+    expect(avd.createCalls).toEqual([
+      {
+        name: "AutoMobile-android-tv-34-uuid1",
+        package: "system-images;android-34;android-tv;x86_64",
+        device: "tv_1080p",
+      },
+      {
+        name: "AutoMobile-android-34-uuid2",
+        package: "system-images;android-34;google_apis;x86_64",
+      },
+    ]);
+  });
 
   it("binds a generated Android AVD identity before provisioning creates it", async () => {
     const devices = new FakeDeviceUtils();

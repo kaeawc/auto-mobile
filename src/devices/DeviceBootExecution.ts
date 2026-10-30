@@ -28,6 +28,13 @@ import type {
 } from "./deviceBootService";
 import { waitForDeviceReadyOrCancel, type BootedDeviceDiscoveryOptions } from "./deviceUtils";
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+
+/** How a boot phase sweeps booted devices; absent fields keep the cached, settling defaults. */
+export interface BootDiscoveryOptions {
+  bypassAndroidCache?: boolean;
+  awaitAbortSettlement?: boolean;
+  presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"];
+}
 /** Deadline-bound discovery, launch and cleanup of processes owned by a boot. */
 export class DeviceBootExecution {
   constructor(
@@ -39,9 +46,11 @@ export class DeviceBootExecution {
     platform: DeviceBootRequest["platform"],
     context: BootDeadlineContext,
     phase: string,
-    bypassAndroidCache = false,
-    awaitAbortSettlement = true,
-    presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
+    {
+      bypassAndroidCache = false,
+      awaitAbortSettlement = true,
+      presentationOrder,
+    }: BootDiscoveryOptions = {},
   ): Promise<BootedDevice[]> {
     // Android completeness can only be judged from the detailed discovery
     // result (`succeededPlatforms`), so android always takes this path — a
@@ -316,9 +325,17 @@ export class DeviceBootExecution {
       return await this.dependencies.deviceManager.startDevice(
         image,
         this.remaining(context, "starting the device"),
-        context.request.cameraPosterPath === undefined
+        context.request.cameraPosterPath === undefined &&
+          context.request.discardSnapshotOnExit !== true
           ? undefined
-          : { cameraPosterPath: context.request.cameraPosterPath },
+          : {
+              ...(context.request.cameraPosterPath === undefined
+                ? {}
+                : { cameraPosterPath: context.request.cameraPosterPath }),
+              ...(context.request.discardSnapshotOnExit === true
+                ? { discardSnapshotOnExit: true }
+                : {}),
+            },
       );
     } catch (error) {
       if (isEmulatorLaunchCancelledError(error) && error.process) {

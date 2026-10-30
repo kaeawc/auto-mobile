@@ -10,6 +10,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import {
   PROTOVIEWER_CLEANUP_TIMEOUT_MS,
   ProtoViewerEntryPointMissingError,
+  ProtoViewerForegroundError,
   ProtoViewerStorageError,
   type ProtoViewerDevice,
 } from "./protoViewerDevice";
@@ -29,6 +30,11 @@ const PROTOVIEWER_MIN_RESULT_WAIT_MS = 1_000;
 export interface IosProtoViewerSimctl {
   installed(udid: string, signal?: AbortSignal): Promise<boolean>;
   dataContainer(udid: string, signal?: AbortSignal): Promise<string>;
+  /**
+   * Brings ProtoViewer to the foreground (`simctl launch`). iOS asks "Open in ProtoViewer?" when a URL
+   * is opened while the app is in the background, and nothing answers that alert (#15435).
+   */
+  launch(udid: string, timeoutMs: number, signal?: AbortSignal): Promise<void>;
   /** Resolves only on exit zero; rejects for non-delivery or a typed command timeout. */
   openurl(args: readonly string[], timeoutMs: number, signal?: AbortSignal): Promise<void>;
 }
@@ -89,12 +95,13 @@ export class IosProtoViewer implements ProtoViewerDevice {
     const temporary = `${inbox}.tmp`;
     const resultPath = join(resultsDir, `${request}.json`);
     try {
-      await this.prepare(inboxDir, resultsDir, temporary, inbox, work, signal);
+      await this.prepare({ inboxDir, resultsDir, temporary, inbox }, work, signal);
       signal?.throwIfAborted();
       const url =
         "bytes" in work
           ? protoViewerIosImportUrl(request, work.label)
           : protoViewerIosOpenUrl(request, work.libraryId);
+      await this.foreground(timeoutMs, signal);
       await this.deliver(url, timeoutMs, signal);
       // One budget for delivery and polling, so a slow cold launch cannot double the wait.
       const pollMs = Math.max(
@@ -127,10 +134,12 @@ export class IosProtoViewer implements ProtoViewerDevice {
   }
 
   private async prepare(
-    inboxDir: string,
-    resultsDir: string,
-    temporary: string,
-    inbox: string,
+    {
+      inboxDir,
+      resultsDir,
+      temporary,
+      inbox,
+    }: { inboxDir: string; resultsDir: string; temporary: string; inbox: string },
     work: { bytes: Uint8Array } | { libraryId: string },
     signal?: AbortSignal,
   ): Promise<void> {
@@ -149,6 +158,18 @@ export class IosProtoViewer implements ProtoViewerDevice {
         `Could not prepare ProtoViewer's inbox: ${errorMessage(error)}`,
         { cause: error },
       );
+    }
+  }
+
+  /** Require foreground launch: openurl can succeed while an unanswered Open-in alert blocks delivery. */
+  private async foreground(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    try {
+      await this.deps.simctl.launch(this.deps.deviceId, timeoutMs, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      throw new ProtoViewerForegroundError({ cause: error });
     }
   }
 

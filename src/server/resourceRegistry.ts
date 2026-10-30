@@ -1,4 +1,6 @@
+import { requestAdvertisesMcpApps } from "./mcpAppsSupport";
 import {
+  ResourceNotFoundError,
   type ReadResourceResult,
   type Resource,
   type ResourceTemplateType as ResourceTemplate,
@@ -6,6 +8,7 @@ import {
 import { McpError } from "../daemon/mcpError";
 import type { ResourceRegistryHost } from "./registryHost";
 import { logger } from "../utils/logger";
+import { isSkillUri, readUsageSkillResource } from "./usageSkill";
 import { setDefaultResourceNotifier } from "../utils/NetworkState";
 import { registerResourceUpdateNotifier } from "../daemon/resourceUpdateNotifier";
 import {
@@ -22,6 +25,8 @@ export interface ResourceReadContext {
   /** A released session identity, available only to handlers that safely report inactivity. */
   releasedSessionUuid?: string;
   signal?: AbortSignal;
+  /** The reading client advertised MCP Apps support (`io.modelcontextprotocol/ui`) at initialize or on this request. */
+  clientSupportsApps?: boolean;
 }
 
 // Interface for resource content handlers.
@@ -49,6 +54,8 @@ export interface ResourceContent {
   mimeType?: string;
   text?: string;
   blob?: string; // base64 encoded
+  /** Content-level `_meta` (the MCP Apps `ui` hints ride here). */
+  _meta?: Record<string, unknown>;
 }
 
 // Interface for a registered resource
@@ -80,6 +87,20 @@ interface ResourceTemplateMetadata {
   // non-paginated templates, which keeps their exact-match notify behavior.
   paginationParamNames: string[];
 }
+
+// What a caller supplies when registering a resource template, beyond its URI
+// template and name. `paginationParams` names the query params that scope a
+// page rather than the resource's identity (see `paginationParamNames`).
+interface TemplateRegistration<Handler> {
+  description: string;
+  mimeType: string;
+  handler: Handler;
+  paginationParams?: string[];
+}
+
+type ResourceTemplateRegistration = TemplateRegistration<ResourceTemplateHandler>;
+type ContextualResourceTemplateRegistration =
+  TemplateRegistration<ContextualResourceTemplateHandler>;
 
 const requestedResourceUri = Symbol("requestedResourceUri");
 
@@ -310,10 +331,7 @@ class ResourceRegistryClass {
   registerTemplate(
     uriTemplate: string,
     name: string,
-    description: string,
-    mimeType: string,
-    handler: ResourceTemplateHandler,
-    paginationParams: string[] = [],
+    { description, mimeType, handler, paginationParams = [] }: ResourceTemplateRegistration,
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     ListChangedBroadcaster.invalidate("resources");
@@ -333,10 +351,12 @@ class ResourceRegistryClass {
   registerTemplateWithReadContext(
     uriTemplate: string,
     name: string,
-    description: string,
-    mimeType: string,
-    handlerWithReadContext: ContextualResourceTemplateHandler,
-    paginationParams: string[] = [],
+    {
+      description,
+      mimeType,
+      handler: handlerWithReadContext,
+      paginationParams = [],
+    }: ContextualResourceTemplateRegistration,
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     ListChangedBroadcaster.invalidate("resources");
@@ -470,6 +490,16 @@ class ResourceRegistryClass {
       const { uri } = request.params;
       logger.info(`[ResourceRegistry] ReadResource request for URI: ${uri}`);
 
+      // Skill files (SEP-2640) are not `automobile:` resources; the skills extension's own
+      // read is replaced by this handler, so serve them from the same source (#15430).
+      if (isSkillUri(uri)) {
+        const skillResult = await readUsageSkillResource(uri);
+        if (skillResult) {
+          return skillResult as ReadResourceResult;
+        }
+        throw new ResourceNotFoundError(uri);
+      }
+
       // Check for common incorrect URI schemes and provide helpful error
       // messages. `automobile:` is the data-resource scheme; `ui:` is the MCP
       // Apps UI-resource scheme (issue #4669). Anything else is a typo — but
@@ -487,10 +517,19 @@ class ResourceRegistryClass {
         }
       }
 
+      const readContext = () => {
+        const context = getReadContext(ctx.mcpReq.signal);
+        const apps = requestAdvertisesMcpApps({
+          envelope: ctx.mcpReq.envelope,
+          meta: ctx.mcpReq._meta,
+        });
+        return apps === undefined ? context : { ...context, clientSupportsApps: apps };
+      };
+
       // First, try to find an exact match resource
       const resource = this.getResource(uri);
       if (resource) {
-        const content = await resource.handler(getReadContext(ctx.mcpReq.signal));
+        const content = await resource.handler(readContext());
         return {
           contents: [content],
         } as ReadResourceResult;
@@ -503,7 +542,7 @@ class ResourceRegistryClass {
         try {
           const content =
             "handlerWithReadContext" in template
-              ? await template.handlerWithReadContext(params, getReadContext(ctx.mcpReq.signal))
+              ? await template.handlerWithReadContext(params, readContext())
               : await template.handler(params);
           return {
             contents: [content],

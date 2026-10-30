@@ -1,3 +1,4 @@
+import type { AndroidFoldPostureRestore } from "./androidFoldPostureRestore";
 import { mutationIncarnation } from "./mutations/incarnation";
 import {
   ctrlProxyDeadlineMs,
@@ -13,25 +14,19 @@ import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/s
 import { isUnknownEmulatorName } from "../../utils/android-cmdline-tools/emulatorReadinessEvaluation";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { getAbortSignal } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
 import type { BrokerNativeProfile } from "./profile";
 import type { ExecutionTracker } from "../executionTracker";
 import type { ResetOutcome } from "./devicePort";
 import { ResetFailureError } from "./ResetFailureError";
+import {
+  staticToolChangesHostSideState,
+  staticToolChangesOpaquePersistentState,
+} from "../staticToolDefinitions";
 import type { DeviceMutationResetContext } from "./mutations/reset";
 
 export const DEFAULT_ANDROID_RESET_TIMEOUT_MS = 600_000;
 const ANDROID_BASELINE_STEP_ATTEMPTS = 3;
-// User snapshot capture writes emulator state outside the guest that a broker snapshot load keeps.
-// Host-side state (AVD config, mock-network rules) survives snapshot load and wipe-data alike.
-const HOST_SIDE_TOOLS: ReadonlySet<string> = new Set([
-  "network",
-  "mockNetwork",
-  "clearMockNetwork",
-  "setDeviceResources",
-]);
-const OPAQUE_PERSISTENT_TOOLS: ReadonlySet<string> = new Set(["deviceSnapshot"]);
 
 function activityAllowsReset(
   strategy: AndroidResetStrategy,
@@ -65,8 +60,10 @@ export function watchAndroidResetSession(
   const close = tracker.onSessionExecutionEnded((sessionIds, activity) => {
     if (sessionIds.includes(sessionId) && activity.admitted) {
       safe = false;
-      opaque ||= OPAQUE_PERSISTENT_TOOLS.has(activity.toolName);
-      hostSide ||= HOST_SIDE_TOOLS.has(activity.toolName);
+      // The tool traits say which tools leave state a snapshot load (opaque) or any guest reset
+      // (host-side) cannot revert (#15672).
+      opaque ||= staticToolChangesOpaquePersistentState(activity.toolName);
+      hostSide ||= staticToolChangesHostSideState(activity.toolName);
     }
   });
   return {
@@ -96,6 +93,8 @@ export interface AndroidResetSessionContext {
   resourceId: string;
   sessionId?: string;
   incarnation?: string;
+  /** The reset restores a foldable's opened posture itself, so a journaled posture change is covered. */
+  foldPostureRestored?: boolean;
   /** The session made changes a snapshot load cannot revert; only wipe-data is clean. */
   opaquePersistentChanges?: boolean;
   signal?: AbortSignal;
@@ -116,6 +115,7 @@ export interface AndroidResetContext extends AndroidResetSessionContext {
 export type AndroidResetCaptureContext = AndroidResetContext;
 
 export interface AndroidBaselineResetDependencies {
+  postureReset?: AndroidFoldPostureRestore;
   inventory(options: {
     signal?: AbortSignal;
     timeoutMs: number;
@@ -340,6 +340,7 @@ export class AndroidBaselineReset {
     device: BootedDevice,
     profile: AndroidResetProfile,
     assertOwned: () => Promise<void>,
+    signal?: AbortSignal,
   ): Promise<"clean" | ResetOutcome> {
     const timing: ResetOutcome = { outcome: "pending", mode: "none", phases: {} };
     const timer = this.dependencies.timer ?? this.baselines.get(resourceId)?.timer ?? defaultTimer;
@@ -349,19 +350,17 @@ export class AndroidBaselineReset {
     }
     const deadlineMs = timer.now() + timeoutMs;
     const controller = new AbortController();
-    const ambientSignal = getAbortSignal();
-    const signal = ambientSignal
-      ? AbortSignal.any([ambientSignal, controller.signal])
-      : controller.signal;
+    const resetSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const owned = async () => {
-      signal.throwIfAborted();
+      resetSignal.throwIfAborted();
       await assertOwned();
-      signal.throwIfAborted();
+      resetSignal.throwIfAborted();
     };
     try {
       return await raceWithDeadline(
         () =>
-          this.resetWithinDeadline(resourceId, device, profile, owned, signal, {
+          this.resetWithinDeadline(resourceId, device, profile, owned, {
+            signal: resetSignal,
             deadlineMs,
             timing,
             timer,
@@ -369,7 +368,7 @@ export class AndroidBaselineReset {
         {
           timer,
           timeoutMs,
-          signal,
+          signal: resetSignal,
           label: "Android baseline reset",
           onTimeout: () =>
             controller.abort(new ActionableError("Android baseline reset deadline exceeded")),
@@ -392,17 +391,57 @@ export class AndroidBaselineReset {
     }
   }
 
+  private async restoreFoldPosture(
+    device: BootedDevice,
+    profile: AndroidResetProfile,
+    assertOwned: () => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (profile.archetype === "foldable") {
+      signal.throwIfAborted();
+      await assertOwned();
+      if (!this.dependencies.postureReset) {
+        throw new ActionableError(
+          `Cannot restore Android device '${device.deviceId}' to opened posture: posture reset is unavailable`,
+        );
+      }
+      await this.dependencies.postureReset.restore(device, signal);
+      signal.throwIfAborted();
+      await assertOwned();
+    }
+  }
+
+  private requireBaseline(
+    resourceId: string,
+    device: BootedDevice,
+    profile: AndroidResetProfile,
+  ): AndroidBaseline {
+    const baseline = this.baselines.get(resourceId);
+    if (
+      !baseline ||
+      baseline.device.deviceId !== device.deviceId ||
+      baseline.device.name !== device.name ||
+      baseline.profile.systemImagePackage !== profile.systemImagePackage ||
+      baseline.profile.profileId !== profile.profileId ||
+      baseline.profile.memoryMb !== profile.memoryMb
+    ) {
+      throw new ActionableError("Android reset lacks the original session baseline");
+    }
+    return baseline;
+  }
+
   private async resetWithinDeadline(
     resourceId: string,
     device: BootedDevice,
     profile: AndroidResetProfile,
     assertOwned: () => Promise<void>,
-    signal: AbortSignal,
     {
+      signal,
       deadlineMs,
       timing,
       timer,
     }: {
+      signal: AbortSignal;
       deadlineMs: number;
       timing: ResetOutcome;
       timer: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
@@ -413,33 +452,18 @@ export class AndroidBaselineReset {
       await this.forget(resourceId);
       throw new ActionableError("Android reset cannot prove restoration of unobservable state");
     }
-    const baseline = this.baselines.get(resourceId);
-    if (
-      !baseline ||
-      baseline.device.deviceId !== device.deviceId ||
-      baseline.device.name !== device.name ||
-      baseline.profile.systemImagePackage !== profile.systemImagePackage ||
-      baseline.profile.profileId !== profile.profileId
-    ) {
-      throw new ActionableError("Android reset lacks the original session baseline");
-    }
+    const baseline = this.requireBaseline(resourceId, device, profile);
     const budget: ResetReadBudget = { deadlineMs, timer, assertOwned };
     const fence = async () => {
       await assertOwned();
       if (!strategy.handlesSessionMutations && !activityAllowsReset(strategy, baseline.activity)) {
         throw new ActionableError("Android session mutations cannot be restored by this reset");
       }
-      await this.assertTarget(
-        device,
-        profile,
-        signal,
-        Math.max(1, deadlineMs - timer.now()),
-        {
-          requireBoot: !strategy.handlesSessionMutations,
-          allowPendingName: true,
-        },
+      await this.assertTarget(device, profile, signal, Math.max(1, deadlineMs - timer.now()), {
+        requireBoot: !strategy.handlesSessionMutations,
+        allowPendingName: true,
         budget,
-      );
+      });
       if (baseline.bootId) {
         await this.assertBootIdentity(device, baseline.bootId, signal, budget);
       }
@@ -484,6 +508,8 @@ export class AndroidBaselineReset {
           sessionId: baseline.sessionId,
           incarnation: baseline.incarnation,
           opaquePersistentChanges: baseline.activity.madeOpaquePersistentChanges(),
+          foldPostureRestored:
+            profile.archetype === "foldable" && this.dependencies.postureReset !== undefined,
           signal,
           timeoutMs: deadlineMs - timer.now(),
           deadlineMs,
@@ -496,8 +522,7 @@ export class AndroidBaselineReset {
               profile,
               signal,
               Math.max(1, deadlineMs - timer.now()),
-              { allowPendingName: true },
-              budget,
+              { allowPendingName: true, budget },
             );
             const bootId = await this.bootIdentity(device, signal, undefined, budget);
             await assertOwned();
@@ -515,6 +540,8 @@ export class AndroidBaselineReset {
         },
       );
       Object.assign(timing, result);
+      await fence();
+      await this.restoreFoldPosture(device, profile, assertOwned, signal);
       await fence();
       if (!strategy.handlesSessionMutations) {
         await this.assertPackagesMatch(
@@ -545,8 +572,7 @@ export class AndroidBaselineReset {
       profile,
       signal,
       Math.max(1, budget.deadlineMs - budget.timer.now()),
-      { allowPendingName: true },
-      budget,
+      { allowPendingName: true, budget },
     );
     await budget.assertOwned();
     await this.packages(device, signal, undefined, budget);
@@ -566,8 +592,8 @@ export class AndroidBaselineReset {
     {
       requireBoot = true,
       allowPendingName = false,
-    }: { requireBoot?: boolean; allowPendingName?: boolean } = {},
-    budget?: ResetReadBudget,
+      budget,
+    }: { requireBoot?: boolean; allowPendingName?: boolean; budget?: ResetReadBudget } = {},
   ): Promise<void> {
     const runtime = parseAndroidSystemImageRuntime(profile.systemImagePackage);
     const validInput = [

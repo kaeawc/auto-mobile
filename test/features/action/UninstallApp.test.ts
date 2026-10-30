@@ -693,6 +693,79 @@ describe("UninstallApp (Android)", () => {
     expect(commands).not.toContain("shell pm uninstall --user 0 'com.example.app'");
   });
 
+  test("an explicit userId targets that user even when the app is installed for another", async () => {
+    fakeAdb.setForegroundApp(null);
+    fakeAdb.setUsers([
+      { userId: 0, name: "Owner", flags: 0x4000, running: true },
+      { userId: 10, name: "Work", flags: 0x30, running: true },
+    ]);
+    fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
+      createExecResult("package:com.example.app", ""),
+      createExecResult("package:com.example.app", ""),
+    ]);
+    fakeAdb.setCommandResultSequence("shell pm list packages --user 10", [
+      createExecResult("package:com.example.app", ""),
+      createExecResult("package:com.android.settings", ""),
+    ]);
+
+    const result = await new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb)).execute(
+      "com.example.app",
+      { userId: 10 },
+    );
+
+    expect(result).toMatchObject({ success: true, userId: 10 });
+    const commands = fakeAdb.getCommandCalls().map((call) => call.command);
+    expect(commands).toContain("shell pm uninstall --user 10 'com.example.app'");
+    expect(commands).not.toContain("shell pm uninstall --user 0 'com.example.app'");
+  });
+
+  test.each([
+    [true, "-k "],
+    [false, ""],
+  ])(
+    "a timed-out uninstall that stays installed keeps keepData=%s and the target user in its failure",
+    async (keepData, flag) => {
+      const command = `shell pm uninstall --user 10 ${flag}'com.example.app'`;
+      class AlwaysTimeoutUninstallAdb extends FakeAdbClient {
+        override async executeCommand(cmd: string, options?: AdbExecuteOptions) {
+          if (cmd === command) {
+            await super.executeCommand(cmd, options);
+            throw new AdbCommandTimeoutError("Command timed out");
+          }
+          return super.executeCommand(cmd, options);
+        }
+      }
+      const adb = new AlwaysTimeoutUninstallAdb();
+      adb.setForegroundApp(null);
+      adb.setUsers([
+        { userId: 0, name: "Owner", flags: 0x4000, running: true },
+        { userId: 10, name: "Work", flags: 0x30, running: true },
+      ]);
+      setupNoApp(adb, 0);
+      adb.setCommandResultSequence("shell pm list packages --user 10", [
+        "package:com.example.app",
+        "package:com.example.app",
+        "package:com.example.app",
+        "package:com.example.app",
+      ]);
+
+      const result = await new UninstallApp(androidDevice, fakeAdbFactory(adb)).execute(
+        "com.example.app",
+        { keepData },
+      );
+
+      expect(result).toMatchObject({ success: false, keepData, userId: 10 });
+      expect(result.error).toContain("(user 10)");
+    },
+  );
+
+  test("a blank package name echoes the requested keepData", async () => {
+    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
+    const result = await uninstall.execute("  ", { keepData: true });
+
+    expect(result).toMatchObject({ success: false, keepData: true });
+  });
+
   test("returns failure for blank package name", async () => {
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb));
     const result = await uninstall.execute("  ");

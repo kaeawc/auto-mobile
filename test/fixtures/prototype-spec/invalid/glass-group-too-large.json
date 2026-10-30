@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "ios": {
+        "glassGroup": {
+          "spacing": 201
+        }
+      },
+      "children": []
+    }
+  },
+  "expectedPath": "root.ios.glassGroup.spacing",
+  "expectedMessage": "Invalid number value"
+}

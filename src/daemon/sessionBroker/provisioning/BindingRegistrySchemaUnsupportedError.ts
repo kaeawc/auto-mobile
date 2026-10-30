@@ -6,6 +6,8 @@ export const BINDING_REGISTRY_SCHEMA_UNSUPPORTED_CODE = "registry_schema_unsuppo
 export class BindingRegistrySchemaUnsupportedError extends ActionableError {
   readonly code = BINDING_REGISTRY_SCHEMA_UNSUPPORTED_CODE;
   readonly retryable = false;
+  readonly remedy =
+    "Upgrade the daemons sharing managed devices to a release that includes these migrations.";
 
   constructor(
     readonly dbPath: string,
@@ -24,6 +26,7 @@ export class BindingRegistrySchemaUnsupportedError extends ActionableError {
       retryable: this.retryable,
       dbPath: this.dbPath,
       unknownMigrations: this.unknownMigrations,
+      remedy: this.remedy,
     };
   }
 }

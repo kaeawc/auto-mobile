@@ -3,6 +3,7 @@ import { ActionableError, BootedDevice, LaunchAppResult, ObserveResult } from ".
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
+import { resolveSetupUser } from "../../ctrlProxy/setupUser";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
@@ -323,14 +324,10 @@ export class LaunchApp extends BaseVisualChange {
       );
 
       signal?.throwIfAborted();
-      const settledResult = await this.ensureLaunchObservationMatchesPackage(
-        result,
-        bundleId,
-        undefined,
-        undefined,
+      const settledResult = await this.ensureLaunchObservationMatchesPackage(result, bundleId, {
         signal,
-        { coldBoot },
-      );
+        coldBoot,
+      });
       await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
       return settledResult;
     });
@@ -413,6 +410,11 @@ export class LaunchApp extends BaseVisualChange {
     userId?: number,
     signal?: AbortSignal,
   ): Promise<number> {
+    const foregroundUser =
+      userId === undefined ? await resolveSetupUser(this.adb, this.device) : undefined;
+    if (foregroundUser !== undefined) {
+      return foregroundUser;
+    }
     const target = await new AndroidUserTargetResolver(this.adb).resolve({
       packageName,
       explicitUserId: userId,
@@ -726,14 +728,12 @@ export class LaunchApp extends BaseVisualChange {
     // `alreadyForeground: true` over a capture of a different app, which
     // `buildLaunchAppResponse` would surface as a clean success with a
     // mismatched `observedAppId` and no error (issue #6868 review).
-    const settledResult = await this.ensureLaunchObservationMatchesPackage(
-      result,
-      packageName,
-      ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
-      undefined,
+    const settledResult = await this.ensureLaunchObservationMatchesPackage(result, packageName, {
+      timeoutMs: ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
       signal,
-      { coldBoot, expectedUserId: targetUserId },
-    );
+      coldBoot,
+      expectedUserId: targetUserId,
+    });
     await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
     return settledResult;
   }
@@ -773,18 +773,15 @@ export class LaunchApp extends BaseVisualChange {
           activityName,
           targetUserId,
           perf,
-          signal,
-          intent,
+          { signal, intent },
         );
         signal?.throwIfAborted();
-        const foregroundReady = await this.waitForAppForeground(
-          packageName,
-          targetUserId,
-          foregroundWaitTimeoutMs,
-          foregroundPollIntervalMs,
+        const foregroundReady = await this.waitForAppForeground(packageName, targetUserId, {
+          timeoutMs: foregroundWaitTimeoutMs,
+          pollIntervalMs: foregroundPollIntervalMs,
           perf,
           signal,
-        );
+        });
         if (!foregroundReady) {
           logger.warn(
             `[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`,
@@ -817,10 +814,12 @@ export class LaunchApp extends BaseVisualChange {
     const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
       launchResult,
       packageName,
-      ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
-      undefined,
-      signal,
-      { coldBoot, expectedUserId: targetUserId },
+      {
+        timeoutMs: ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
+        signal,
+        coldBoot,
+        expectedUserId: targetUserId,
+      },
     );
     if (clearAppData && settledLaunchResult.success && settledLaunchResult.observation) {
       await this.waitForAndroidColdStableFrame(settledLaunchResult, packageName, signal);

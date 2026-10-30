@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   IosDeviceDetector,
+  SIMULATOR_STATE_ABSENT,
   type RemoteDeviceListingRunner,
 } from "../../../src/ctrlProxy/ios/IosDeviceDetector";
 import { createExecResult } from "../../../src/utils/execResult";
@@ -236,7 +237,8 @@ describe("positive-only simulator shutdown detection", () => {
     ["Shutting Down", true],
     ["Booted", false],
     ["Booting", false],
-    ["absent", false],
+    // A complete listing without this udid: the simulator was deleted (#15309).
+    ["absent", true],
     ["empty", false],
     ["malformed", false],
     ["malformed runtime", false],
@@ -300,7 +302,6 @@ describe("positive-only simulator shutdown detection", () => {
       });
       const unknown =
         [
-          "absent",
           "empty",
           "malformed",
           "malformed runtime",
@@ -310,7 +311,9 @@ describe("positive-only simulator shutdown detection", () => {
           "error",
         ].includes(state) ||
         (remote && state === "remote failure");
-      expect(await detector.getSimulatorState()).toBe(unknown ? undefined : state);
+      expect(await detector.getSimulatorState()).toBe(
+        unknown ? undefined : state === "absent" ? SIMULATOR_STATE_ABSENT : state,
+      );
       expect(await detector.isSimulatorShutDown()).toBe(expected);
       if (remote) {
         expect(calls).toEqual(Array(2).fill(["list", "devices", "--json"]));

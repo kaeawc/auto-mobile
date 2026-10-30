@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "on": true,
+      "t": "a"
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "textField",
+      "label": "L",
+      "stateKey": "t",
+      "errorWhen": {
+        "key": "on",
+        "equals": true
+      },
+      "ios": {
+        "glassUnion": "u"
+      }
+    }
+  },
+  "expectedPath": "root.ios.glassUnion",
+  "expectedMessage": "glassUnion requires a glass surface"
+}

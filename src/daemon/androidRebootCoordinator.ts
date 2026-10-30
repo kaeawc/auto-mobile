@@ -80,6 +80,7 @@ export interface AndroidRebootCoordinatorPoolPort {
     handoffOwner: symbol,
     preservedSessionId: string | undefined,
     preservedSession: Session | undefined,
+    signal: AbortSignal | undefined,
   ): Promise<"stopped" | "same-avd" | "declined">;
   rebindSameAvdReplacementSession(
     device: PooledDevice,
@@ -204,6 +205,7 @@ export class AndroidRebootCoordinator {
           replacementHandoffOwner,
           preservedSessionId,
           preservedSession,
+          signal,
         );
       } catch (error) {
         logger.warn(

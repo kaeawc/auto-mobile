@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { DaemonUnavailableError } from "../../src/daemon/client";
-import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
+import { DaemonUnavailableError } from "../../src/daemon/client/client";
+import { DaemonFrameTooLargeError } from "../../src/daemon/wire/DaemonFrameTooLargeError";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { InMemoryDaemonClient, SocketEnd } from "./inMemoryDaemonWire";

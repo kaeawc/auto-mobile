@@ -416,7 +416,9 @@ describe("IOSCtrlProxyClient", function () {
     socket: CapturingWebSocket,
     type: string,
   ): Promise<Record<string, unknown>> => {
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    // A microtask budget, not a timeout: each awaited hop between the probe reply and the send
+    // costs a few turns, so leave headroom for the capability lookup's internal awaits.
+    for (let attempt = 0; attempt < 50; attempt += 1) {
       const message = socket.sentMessages
         .map((payload) => JSON.parse(payload))
         .find((payload) => payload.type === type);
@@ -1712,7 +1714,7 @@ describe("IOSCtrlProxyClient", function () {
         const updates: XCTestHierarchy[] = [];
         const unsubscribe = client.onPushUpdate((hierarchy) => updates.push(hierarchy));
         const options: NonNullable<
-          Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[5]
+          Parameters<(typeof client)["hierarchy"]["requestHierarchySync"]>[4]
         > = {
           failureSink: {},
         };
@@ -1726,7 +1728,7 @@ describe("IOSCtrlProxyClient", function () {
           const pending = hasPendingRequest
             ? client.testHooks
                 .hierarchy()
-                .requestHierarchySync(undefined, false, undefined, 1000, false, options)
+                .requestHierarchySync(undefined, false, undefined, 1000, options)
             : undefined;
           if (hasPendingRequest) {
             const request = await waitForMessageType(socket, "request_hierarchy_if_stale");

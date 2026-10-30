@@ -1,3 +1,4 @@
+import { iosBackendFields } from "./IosSdkTextRouting";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { withStaleDisplay } from "../../observe/StaleDisplayError";
@@ -214,7 +215,13 @@ export class CommandRunner {
       if (!command) {
         continue;
       }
-      const result = await this.executeCommandResult(command, index, signal, routing);
+      const result = await this.executeCommandResult(
+        command,
+        index,
+        signal,
+        routing,
+        this.needsEnterReadBack(command, commands[index + 1], results),
+      );
       this.checkBudgetCommandResult(result, signal);
       result.index = index;
       this.addImeFailureGuidance(command, result, results);
@@ -233,11 +240,32 @@ export class CommandRunner {
     return { results };
   }
 
+  private needsEnterReadBack(
+    command: SendKeysCommand,
+    next: SendKeysCommand | undefined,
+    completed: readonly SendKeysCommandResult[],
+  ): boolean {
+    if (this.deps.device.platform !== "android" || command.action !== "key") {
+      return false;
+    }
+    if (!["enter", 66].includes(command.key) || command.modifiers?.length) {
+      return false;
+    }
+    return (
+      next?.action === "type" &&
+      next.mode === "a11y" &&
+      (next.operation ?? "insert") === "insert" &&
+      next.text.length > 0 &&
+      completed.some((result) => result.action === "type" && result.success)
+    );
+  }
+
   async executeCommandResult(
     command: SendKeysCommand,
     index: number,
     signal: AbortSignal | undefined,
     routing: SendKeysRouting,
+    verifyEnter = false,
   ): Promise<SendKeysCommandResult> {
     try {
       routing.assertCurrent?.();
@@ -246,13 +274,18 @@ export class CommandRunner {
       signal?.throwIfAborted();
       routing.onCommandStart?.();
       const before = await this.readPrototypeBefore(command, routing, signal);
-      const result = await this.executeCommand(
-        command,
-        signal,
-        routing.onDispatch,
-        routing.displayId,
-        routing.display,
-      );
+      const action = () =>
+        this.executeCommand(
+          command,
+          signal,
+          routing.onDispatch,
+          routing.displayId,
+          routing.display,
+        );
+      const result =
+        verifyEnter && this.deps.executor.withEnterReadBack
+          ? await this.deps.executor.withEnterReadBack(action, signal, routing.display)
+          : await action();
       return this.verifyPrototypeCommand(command, result, routing, signal, before);
     } catch (error) {
       signal?.throwIfAborted();
@@ -308,6 +341,7 @@ export class CommandRunner {
           ...(result.retryable === false ? { retryable: false } : {}),
           ...(result.warning === undefined ? {} : { warning: result.warning }),
           ...(result.error ? { error: result.error } : {}),
+          ...iosBackendFields(result.iosBackend),
         }));
     }
   }

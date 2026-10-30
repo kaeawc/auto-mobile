@@ -1,4 +1,5 @@
-import type { BootedDevice, ObserveResult } from "../../models";
+import type { AndroidOrIosPlatform, BootedDevice, ObserveResult } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import type { ViewHierarchyResult } from "../../models";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -47,6 +48,10 @@ export class StaleHierarchyRecovery {
   private get deviceStateCollector(): DeviceStateCollectorPort {
     return this.deps.deviceStateCollector();
   }
+  /** Recaptures validate against the device's own platform; a watch has no hierarchy path. */
+  private get hierarchyPlatform(): AndroidOrIosPlatform {
+    return requireAndroidOrIosPlatform(this.device.platform, "Observing the view hierarchy");
+  }
   private get platformValidator(): HierarchyPlatformValidator {
     return this.deps.platformValidator();
   }
@@ -77,7 +82,7 @@ export class StaleHierarchyRecovery {
       hierarchy?.fresh === true &&
       hasUsableHierarchy(hierarchy) &&
       hierarchy.packageName === foreground &&
-      this.platformValidator.validate(this.device.platform, hierarchy).valid
+      this.platformValidator.validate(this.hierarchyPlatform, hierarchy).valid
     ) {
       this.reconciler.applyRecapturedHierarchy(result, hierarchy);
       this.reconciler.recorrelateActiveWindowToRecapture(result, hierarchy);
@@ -240,7 +245,7 @@ export class StaleHierarchyRecovery {
       hierarchy.fresh === true &&
       hasUsableHierarchy(hierarchy) &&
       hierarchy.packageName === cached.packageName &&
-      this.platformValidator.validate(this.device.platform, hierarchy).valid
+      this.platformValidator.validate(this.hierarchyPlatform, hierarchy).valid
     );
   }
 
@@ -267,11 +272,14 @@ export class StaleHierarchyRecovery {
         () =>
           this.viewHierarchy.getViewHierarchy(
             {},
-            new NoOpPerformanceTracker(),
-            true,
-            Math.max(1, updatedAt ?? 1),
-            retrySignal,
-            { timeoutMs: remainingMs, requireFreshExtraction: true },
+            {
+              perf: new NoOpPerformanceTracker(),
+              skipWaitForFresh: true,
+              minTimestamp: Math.max(1, updatedAt ?? 1),
+              signal: retrySignal,
+              timeoutMs: remainingMs,
+              requireFreshExtraction: true,
+            },
           ),
         {
           timer: this.timer,

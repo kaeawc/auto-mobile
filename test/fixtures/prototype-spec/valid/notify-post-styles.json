@@ -1,0 +1,171 @@
+{
+  "id": "notify-post-styles",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "postStatus": ""
+  },
+  "requires": {
+    "platform": ["notifications"],
+    "permissions": [
+      {
+        "name": "notifications",
+        "purpose": "Tell you about new messages"
+      }
+    ]
+  },
+  "root": {
+    "type": "button",
+    "label": "Notify",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "notifications.post",
+        "args": {
+          "id": {
+            "value": "msg-1"
+          },
+          "channel": {
+            "value": "messages"
+          },
+          "title": {
+            "value": "Ada"
+          },
+          "style": {
+            "value": {
+              "type": "bigText"
+            }
+          },
+          "body": {
+            "value": "A long body"
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "notifications.post",
+        "args": {
+          "id": {
+            "value": "msg-1"
+          },
+          "channel": {
+            "value": "messages"
+          },
+          "title": {
+            "value": "Ada"
+          },
+          "style": {
+            "value": {
+              "type": "bigPicture",
+              "image": "hero"
+            }
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "notifications.post",
+        "args": {
+          "id": {
+            "value": "msg-1"
+          },
+          "channel": {
+            "value": "messages"
+          },
+          "title": {
+            "value": "Ada"
+          },
+          "style": {
+            "value": {
+              "type": "inbox",
+              "lines": ["1", "2", "3", "4", "5", "6"],
+              "summary": "+3 more"
+            }
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "notifications.post",
+        "args": {
+          "id": {
+            "value": "msg-1"
+          },
+          "channel": {
+            "value": "messages"
+          },
+          "title": {
+            "value": "Ada"
+          },
+          "progress": {
+            "value": {
+              "value": 0.5
+            }
+          },
+          "ongoing": {
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "notifications.post",
+        "args": {
+          "id": {
+            "value": "msg-1"
+          },
+          "channel": {
+            "value": "messages"
+          },
+          "title": {
+            "value": "Ada"
+          },
+          "progress": {
+            "value": {
+              "indeterminate": true
+            }
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "notifications.cancel",
+        "args": {
+          "id": {
+            "value": "msg-1"
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "notifications.cancel",
+        "args": {
+          "group": {
+            "value": "conv-1"
+          }
+        }
+      },
+      {
+        "type": "platform",
+        "call": "notifications.cancel",
+        "args": {
+          "all": {
+            "value": true
+          }
+        }
+      }
+    ]
+  },
+  "notifications": {
+    "channels": [
+      {
+        "id": "messages",
+        "name": "Messages",
+        "importance": "default"
+      }
+    ]
+  }
+}

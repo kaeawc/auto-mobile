@@ -11,12 +11,14 @@ import { PROTOVIEWER_IMPORTED_WARNING } from "../../src/features/prototype/proto
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
+import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakePrototypeAssetFileReader } from "../fakes/FakePrototypeAssetFileReader";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { pinDialogTree } from "../helpers/pinDialogTree";
 import { toolStructured } from "../helpers/toolResponse";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -80,6 +82,9 @@ describe("prototype save and open through ProtoViewer", () => {
     dispose = registerPrototypeTools({
       clientFactory: () => proxy,
       adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      // A pinned save looks for the shortcut on the home screen (#14887): never the real device.
+      anchorHierarchyCaptureFactory: () =>
+        new FakeHierarchyCapture(() => pinDialogTree(["demo"]), "android", timer),
       protoViewerFactory: () => fake,
       iosSavedPrototypeInstaller: {
         install: async (input) => {

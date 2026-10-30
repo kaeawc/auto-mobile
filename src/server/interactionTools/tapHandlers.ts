@@ -19,6 +19,7 @@ import { resolveTransportDeadlineMs } from "../formTools";
 import { defaultTapOnElementFactory, isIosAppOpenAlertHierarchy } from "../interactionToolHandlers";
 import type { TapAnyArgs, TapAtArgs, TapOnArgs } from "../interactionToolTypes";
 import { ProgressCallback } from "../toolRegistry";
+import { internalTapAtContext } from "../internalToolParams";
 import type { InteractionToolDependencies, TapAtElementLike } from "./dependencies";
 import { hitTestSchema } from "./tapSchemas";
 
@@ -36,6 +37,7 @@ export function buildTapOnResultMessage(
   searchSummary: string | undefined,
   activatedSubtext?: { text: string; occurrence: number },
   selectorLabel?: string,
+  longPress?: Pick<TapOnElementResult, "action" | "longClickAdvertised">,
 ): string {
   const details = buildTapOnResultDetails(
     selectedElement,
@@ -43,7 +45,14 @@ export function buildTapOnResultMessage(
     activatedSubtext,
     selectorLabel,
   );
-  return details.length > 0 ? `Tapped on element (${details.join("; ")})` : "Tapped on element";
+  // A long press must not read as a tap: callers judged a held press "delivered as a tap" from
+  // the shared "Tapped on element" wording.
+  const isLongPress = longPress?.action === "longPress";
+  if (isLongPress && longPress?.longClickAdvertised === false) {
+    details.push("target advertises no long-click action");
+  }
+  const verb = isLongPress ? "Long-pressed element" : "Tapped on element";
+  return details.length > 0 ? `${verb} (${details.join("; ")})` : verb;
 }
 
 /**
@@ -208,6 +217,7 @@ function buildTapOnSuccessMessage(
     searchSummary,
     result.activatedSubtext,
     selectorLabel,
+    result,
   );
 }
 
@@ -298,7 +308,7 @@ export async function tapAtHandler(
       layer: args.layer,
       pointer: args.pointer,
     } as Parameters<TapAtElementLike["execute"]>[0],
-    { progress, signal, planContext: args.__tapAtPlanContext ?? args.__tapAtRecordingContext },
+    { progress, signal, planContext: internalTapAtContext(args) },
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`

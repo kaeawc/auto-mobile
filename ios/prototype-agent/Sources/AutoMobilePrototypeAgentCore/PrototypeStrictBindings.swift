@@ -16,6 +16,7 @@ enum PrototypeStrictBindings {
         var own = fields.filter { [
             "type",
             "stateKey",
+            "kind", "selectionKey", "openKey",
             "activeKey",
             "hourKey",
             "minuteKey",
@@ -36,6 +37,7 @@ enum PrototypeStrictBindings {
             "keyboardType",
             "imeAction",
         ].contains($0.key) }
+        if fields["type"] == .string("adaptive") { own["items"] = fields["items"] }
         if fields["type"] == .string("menu") { own["items"] = .array([]) }
         if fields["onSubmit"] != nil { own["onSubmit"] = .array([]) }
         if let refresh = fields["refresh"]?
@@ -70,6 +72,7 @@ enum PrototypeStrictBindings {
     static func boundKeys(_ node: Fields) -> [String] {
         [
             node["stateKey"],
+            node["selectionKey"], node["openKey"],
             node["activeKey"],
             node["hourKey"],
             node["minuteKey"],
@@ -82,15 +85,16 @@ enum PrototypeStrictBindings {
 
     static func validate(nodes: [PrototypeLocatedValue], actions: [PrototypeLocatedValue], state: Fields) throws {
         for node in nodes {
+            try PrototypeAdaptive.validate(node.value, path: node.path, state: state)
             if let field = try field(node.value, state: state) { throw PrototypeContractValidator.invalid(
                 "\(node.path).\(field)",
                 "Invalid control binding"
             ) }
         }
         for node in nodes {
-            if let field = try secondary(node.value, state: state) { throw PrototypeContractValidator.invalid(
+            if let field = try secondary(node.value, state: state) { throw try PrototypeContractValidator.invalid(
                 "\(node.path).\(field)",
-                "Invalid control binding"
+                PrototypeStateValidator.openWhenError(control(node.value), state)?.message ?? "Invalid control binding"
             ) }
         }
         for action in actions {
@@ -99,12 +103,23 @@ enum PrototypeStrictBindings {
                 if type == "toggle",
                    state[key]?
                    .boolValue ==
-                   nil { throw PrototypeContractValidator.invalid("\(action.path).key", "Expected boolean state") }
+                   nil
+                { throw PrototypeContractValidator.invalid(
+                    "\(action.path).key",
+                    "Toggle requires a boolean state key"
+                ) }
                 if type == "increment" || type == "decrement",
                    state[key]?
                    .numberValue ==
-                   nil { throw PrototypeContractValidator.invalid("\(action.path).key", "Expected numeric state") }
-                if type == "setState", !action.operandTemplated, let operand = value["value"] {
+                   nil
+                { throw PrototypeContractValidator.invalid(
+                    "\(action.path).key",
+                    type == "increment" ? "Increment requires a numeric state key" :
+                        "Decrement requires a numeric state key"
+                ) }
+                if type == "setState", !action.operandTemplated, let operand = value["value"],
+                   operand.objectFields?["event"] == nil, operand.objectFields?["platform"] == nil
+                {
                     let controls = nodes.filter { boundKeys($0.value).contains(key) }
                     if Set(controls.compactMap { $0.value["type"]?.stringValue }).count == 1 {
                         var written = state
@@ -114,9 +129,17 @@ enum PrototypeStrictBindings {
                             let second = try secondary($0.value, state: written)
                             return first != nil || second != nil
                         }) {
-                            throw PrototypeContractValidator.invalid(
+                            throw try PrototypeContractValidator.invalid(
                                 "\(action.path).value",
-                                "setState value does not fit control"
+                                controls.compactMap {
+                                    guard ["tooltip", "drawer"].contains($0.value["type"]?.stringValue ?? ""),
+                                          let error = try PrototypeStateValidator.openWhenError(
+                                              control($0.value),
+                                              written
+                                          )
+                                    else { return nil as String? }
+                                    return "setState value does not fit the control bound to \"\(key)\": \(error.message)"
+                                }.first ?? "setState value does not fit control"
                             )
                         }
                     }

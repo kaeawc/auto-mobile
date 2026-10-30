@@ -2,6 +2,18 @@ import type { CallToolResult, McpServer, ServerContext } from "@modelcontextprot
 import { ActionableError } from "../models";
 import type { CreateTaskResult } from "../daemon/tasks/mcpTasksExtension";
 import { logger } from "../utils/logger";
+import { withAmbiguousDeviceMrtr } from "./ambiguousDeviceMrtr";
+import { DeclineMemory } from "./elicitationPolicy";
+import {
+  daemonDeviceChoiceRequestState,
+  type DeviceChoiceRequestState,
+  type DeviceChoiceRequestStateCodec,
+} from "./deviceChoiceRequestState";
+import {
+  deviceChoicePeerFor,
+  withAmbiguousDeviceElicitation,
+  type AmbiguousDeviceElicitationOptions,
+} from "./ambiguousDeviceElicitation";
 
 /**
  * The single MCP `tools/call` dispatch envelope (issue #6545).
@@ -128,6 +140,13 @@ export interface McpToolCallExtra extends ToolCallExtra {
    * protocol version); read for the Tasks extension declaration (#4668).
    */
   readonly envelope?: Readonly<Record<string, unknown>>;
+  /** Client answers lifted by the SDK on a modern multi-round-trip retry. */
+  readonly inputResponses?: Readonly<Record<string, unknown>>;
+  /** Verified by the SDK hook before dispatch; minting retains this request's session binding. */
+  readonly deviceChoiceState?: {
+    readonly verified: unknown;
+    mint(payload: DeviceChoiceRequestState): Promise<string>;
+  };
   /**
    * Overrides the transport scope the call's execution registers under. Set only for work
    * running as an MCP task, which must not be cancelled when its request closes (#4668).
@@ -138,11 +157,21 @@ export interface McpToolCallExtra extends ToolCallExtra {
 export type McpToolCallResult = CallToolResult;
 
 /** Adapts an SDK v2 request context to {@link McpToolCallExtra}. */
-export function toolCallExtraFromContext(ctx: ServerContext): McpToolCallExtra {
+export function toolCallExtraFromContext(
+  ctx: ServerContext,
+  requestState?: DeviceChoiceRequestStateCodec,
+): McpToolCallExtra {
   return {
     signal: ctx.mcpReq.signal,
     _meta: ctx.mcpReq._meta,
     ...(ctx.mcpReq.envelope !== undefined && { envelope: ctx.mcpReq.envelope }),
+    ...(ctx.mcpReq.inputResponses !== undefined && { inputResponses: ctx.mcpReq.inputResponses }),
+    ...(requestState && {
+      deviceChoiceState: {
+        verified: ctx.mcpReq.requestState<unknown>(),
+        mint: (payload: DeviceChoiceRequestState) => requestState.mint(payload, ctx),
+      },
+    }),
     sendNotification: (notification) => ctx.mcpReq.notify(notification),
   };
 }
@@ -151,20 +180,40 @@ export function toolCallExtraFromContext(ctx: ServerContext): McpToolCallExtra {
  * Installs {@link dispatchToolCall} as the server's one `tools/call` handler. A backend may
  * answer with a Tasks-extension `CreateTaskResult` (#4668), but only to a request that
  * declared the extension.
+ *
+ * Modern servers use MRTR for the device question. `ambiguousDeviceElicitation` enables the
+ * legacy push question only for servers with a stateful client connection (#13945).
  */
 export function installToolCallDispatcher(
   server: McpServer,
   backend: ToolCallBackend<ToolCallRequest, McpToolCallExtra, McpToolCallResult | CreateTaskResult>,
+  options: {
+    era?: "legacy" | "modern";
+    ambiguousDeviceElicitation?: AmbiguousDeviceElicitationOptions;
+    deviceChoiceRequestState?: DeviceChoiceRequestStateCodec;
+  } = {},
 ): void {
+  // One memory per connection: the legacy server instance is one client's, so it outlives calls.
+  const declines = new DeclineMemory();
+  const dispatchBackend = options.era === "modern" ? withAmbiguousDeviceMrtr(backend) : backend;
+  const requestState =
+    options.era === "modern"
+      ? (options.deviceChoiceRequestState ?? daemonDeviceChoiceRequestState)
+      : undefined;
   server.server.setRequestHandler(
     "tools/call",
-    // The SDK types `tools/call` as `CallToolResult` only; `createSdkMcpServer` passes a
-    // `CreateTaskResult` through to the wire unchanged.
+    // The SDK serves InputRequiredResult natively; createSdkMcpServer also passes our
+    // Tasks-extension CreateTaskResult through to the wire unchanged.
     async (request, ctx) =>
       (await dispatchToolCall(
         request,
-        toolCallExtraFromContext(ctx),
-        backend,
+        toolCallExtraFromContext(ctx, requestState),
+        options.era !== "modern" && options.ambiguousDeviceElicitation
+          ? withAmbiguousDeviceElicitation(backend, deviceChoicePeerFor(server, ctx), {
+              declines,
+              ...options.ambiguousDeviceElicitation,
+            })
+          : dispatchBackend,
       )) as McpToolCallResult,
   );
 }

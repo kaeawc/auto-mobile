@@ -31,9 +31,11 @@ extension PrototypeContractValidator {
         case "color": return matches("color", text)
         case "string":
             return (rule["empty"] == .bool(true) || !text.isEmpty)
+                && (rule["pattern"]?.stringValue.map { matches($0, text) } ?? true)
                 && (rule["nonblank"] != .bool(true) || !matches("blankText", text))
                 && Double(text.utf16.count) >= (rule["min"]?.numberValue ?? 0)
                 && Double(text.utf16.count) <= (rule["max"]?.numberValue ?? .infinity)
+                && Double(text.utf8.count) <= (rule["maxBytes"]?.numberValue ?? .infinity)
         default: return false
         }
     }
@@ -48,7 +50,16 @@ extension PrototypeContractValidator {
                 guard let end = units[(index + 1)...].firstIndex(of: 125) else { return false }
                 let token = String(decoding: units[(index + 1) ..< end], as: UTF16.self)
                 let parts = token.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
-                guard token == "index" || (parts.count == 2 && parts.allSatisfy(PrototypeRepeat.isFieldName)) else {
+                guard token == "index" ||
+                    (
+                        parts
+                            .count == 2 &&
+                            (
+                                parts[0] == "route" ? PrototypeContractValidator.matches("pathKey", parts[1]) : parts
+                                    .allSatisfy(PrototypeRepeat.isFieldName)
+                            )
+                    )
+                else {
                     return false
                 }
                 placeholders += 1

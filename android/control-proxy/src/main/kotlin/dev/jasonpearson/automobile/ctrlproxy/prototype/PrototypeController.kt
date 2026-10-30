@@ -5,8 +5,11 @@ import android.view.Display
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
+import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
+import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
+import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
@@ -18,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -36,7 +40,11 @@ fun interface PrototypeWindowOnScreen {
   fun isOnScreen(displayId: Int): Boolean?
 }
 
-fun interface PrototypeResultSink {
+/**
+ * The base `prototype_result` reply and the saved-prototype replies, which default to it. Sinks
+ * that predate a saved-prototype reply answer a bare success or refusal.
+ */
+interface PrototypeReplySink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
 
   suspend fun sendPinned(
@@ -59,7 +67,10 @@ fun interface PrototypeResultSink {
     code: dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode,
     error: String,
   ) = send(requestId, false, error)
+}
 
+/** Every reply the prototype controllers send; the rest default to the base reply. */
+fun interface PrototypeResultSink : PrototypeReplySink {
   /**
    * A successful `show_prototype` that references assets the device does not have: a warning
    * carried by the same single `prototype_result`, so the host can re-upload. Sinks that predate it
@@ -103,8 +114,37 @@ fun interface PrototypeResultSink {
     hiddenReason: PrototypeHiddenReason? = null,
   ) = sendShown(requestId, missingAssets, appearance, hiddenReason)
 
+  /**
+   * A successful show that also reports [degradedEffects] (`prototype_effects_v1`). The default
+   * drops them, so sinks that predate the field keep answering as before.
+   */
+  @Suppress("LongParameterList") // Mirrors sendShownNavigation plus the one new field.
+  suspend fun sendShownDegraded(
+    requestId: String?,
+    missingAssets: List<String>,
+    appearance: PrototypeAppearance,
+    pages: Map<String, Int>,
+    stacks: Map<String, PrototypeStackSnapshot>,
+    hiddenReason: PrototypeHiddenReason?,
+    degradedEffects: List<PrototypeDegradedEffect>,
+  ) = sendShownNavigation(requestId, missingAssets, appearance, pages, stacks, hiddenReason)
+
   /** The reply to `clear_prototype_storage`. Sinks that predate it answer a bare success. */
+  /**
+   * What a show with `window.backdrop` drew (`prototype_backdrop_v1`), called just before the show
+   * reply so the sink can attach it. Sinks that predate it drop it.
+   */
+  fun noteShownBackdrop(requestId: String?, backdrop: String) {}
+
+  /** The display actually selected by the show, including an in-place replay. */
+  fun noteShownDisplay(requestId: String?, displayId: Int) {}
+
   suspend fun sendCleared(requestId: String?, cleared: Int) = send(requestId, true, null)
+
+  suspend fun sendAdvanced(requestId: String?, fired: Int) = send(requestId, true, null)
+
+  suspend fun sendAdvanceFailed(requestId: String?, fired: Int, error: String) =
+    send(requestId, false, error)
 
   /** The reply to `inspect_prototypes`. Sinks that predate it answer a bare success. */
   suspend fun sendPrototypeStatus(
@@ -159,7 +199,11 @@ class PrototypeController(
   private val foreground: PrototypeForegroundScope = NoPrototypeForegroundScope,
   /** The device's light or dark setting and dynamic-colour palette, read at every resolve. */
   private val deviceAppearance: PrototypeDeviceAppearance = NoPrototypeDeviceAppearance,
+  private val deviceLocale: PrototypeDeviceLocale = NoPrototypeDeviceLocale,
   private val windowOnScreen: PrototypeWindowOnScreen = PrototypeWindowOnScreen { null },
+  /** Whether the device can blur behind a window right now (`window.backdrop`, #15126). */
+  private val backdropSupport: PrototypeBackdropSupport = PrototypeBackdropSupport { false },
+  private val sdkInt: Int = android.os.Build.VERSION.SDK_INT,
   private val settle: suspend (Long) -> Unit = { delay(it) },
   /** The supplied host handles the first surface; additional surfaces need independent hosts. */
   private val hostFactory: () -> PrototypeHost = { host },
@@ -172,7 +216,15 @@ class PrototypeController(
   private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
   /** Where requests wait for their response; they are cancelled when their prototype ends. */
   private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+  /** Device-compiled uniform declarations, checked even for hidden/styleWhen nodes. */
+  private val validateShaders: (PrototypeNode) -> Unit = {},
+  private val platform: dev.jasonpearson.automobile.prototype.PrototypePlatform =
+    dev.jasonpearson.automobile.prototype.PrototypePlatform.None,
 ) {
+  // Asset cleanup must outlive service cancellation while retaining the injected worker dispatcher.
+  private val assetCleanupScope = CoroutineScope(requestScope.coroutineContext + SupervisorJob())
+  private val platformLimiter = PrototypeRequestLimiter(PrototypePlatformCalls.maxInFlight)
+
   val isShowing: Boolean
     get() = surfaces.values.any { it.host.isShowing }
 
@@ -193,23 +245,33 @@ class PrototypeController(
     // Titled windows identify their surface; legacy windows use the most recently shown one.
     val surface =
       (if (surfaceId != null) surfaces[surfaceId]?.takeIf { it.host.isShowing }
-      else surfaces.values.lastOrNull { it.host.isShowing }) ?: return null
-    val runtime = surface.runtime
-    return try {
-      val current = runtime.current
-      // Opacity follows the mode the window is drawn in, not every mode the spec could reach.
-      val shown = surface.theme.value
+      else surfaces.values.lastOrNull { it.host.isShowing })
+        ?: return exitResources.metadata(surfaceId)
+    val result =
+      surfaceMetadata(surface.runtime, surface.request, surface.theme.value) ?: return null
+    val motion = result.motion ?: PrototypeMotionState.Settled
+    return result.copy(
+      motion = motion.copy(active = motion.active + exitResources.count(surfaceId)),
+    )
+  }
+
+  private fun surfaceMetadata(
+    runtime: PrototypeRuntime,
+    request: PrototypeRequest,
+    shown: PrototypeShownTheme,
+  ): PrototypeWindowMetadata? =
+    try {
       prototypeWindowMetadata(
-        runtime.renderModel(current),
-        dismissBarDrawn = prototypeHostChrome(surface.request).dismissVisible,
-        palettes = listOf(prototypeShownPalette(shown)),
-        appearance = shown.appearance,
-      )
+          runtime.renderModel(runtime.current),
+          dismissBarDrawn = prototypeHostChrome(request).dismissVisible,
+          palettes = listOf(prototypeShownPalette(shown)),
+          appearance = shown.appearance,
+        )
+        .copy(motion = runtime.motionActivity.snapshot())
     } catch (error: Exception) {
       Log.w("PrototypeController", "Prototype window metadata unavailable", error)
       null
     }
-  }
 
   /** True while a prototype exists but is hidden because its app left the foreground. */
   val isSuspendedByForeground: Boolean
@@ -250,6 +312,7 @@ class PrototypeController(
     @Volatile var request: PrototypeRequest,
     val theme: MutableStateFlow<PrototypeShownTheme>,
     val appearanceOverride: PrototypeAppearanceOverride?,
+    val localeOverride: String?,
     val observerSession: Int,
     val host: PrototypeHost,
     val idle: PrototypeLifecycle,
@@ -260,6 +323,14 @@ class PrototypeController(
 
   // Mutations run under mutex; readers and capture use an immutable ordered snapshot.
   @Volatile private var surfaces: Map<String, Surface> = emptyMap()
+
+  internal suspend fun <T> readClipboard(read: () -> T): T {
+    val surface =
+      surfaces.values.lastOrNull { it.runtime.current.active && !it.foreground.suspended }
+        ?: throw SecurityException("No foreground prototype")
+    return surface.host.readClipboard(read)
+  }
+
   // Retained for existing single-surface callers/tests, now a view of the most recent surface.
   internal val activeRuntime: PrototypeRuntime?
     get() = surfaces.values.lastOrNull { it.runtime.current.active }?.runtime
@@ -281,13 +352,18 @@ class PrototypeController(
     val dark: Boolean,
     val paletteKey: Int,
     val override: PrototypeAppearanceOverride?,
+    val locales: List<String>,
   ) {
     fun matches(other: AppearanceSyncKey): Boolean =
       snapshot === other.snapshot &&
         dark == other.dark &&
         paletteKey == other.paletteKey &&
-        override == other.override
+        override == other.override &&
+        locales == other.locales
   }
+
+  private fun effectiveLocales(locale: String?): List<String> =
+    locale?.let { listOf(it) } ?: deviceLocale.locales.toList()
 
   private fun appearanceKey(runtime: PrototypeRuntime) =
     AppearanceSyncKey(
@@ -295,6 +371,7 @@ class PrototypeController(
       deviceAppearance.dark,
       deviceAppearance.paletteKey,
       surfaceOf(runtime)?.appearanceOverride,
+      effectiveLocales(surfaceOf(runtime)?.localeOverride),
     )
 
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
@@ -324,6 +401,7 @@ class PrototypeController(
     reset: Boolean = false,
     appearance: PrototypeAppearanceOverride? = null,
     replaceOthers: Boolean = true,
+    locale: String? = null,
   ) =
     execute(requestId) {
       val previous = surfaces[spec.id]
@@ -339,7 +417,7 @@ class PrototypeController(
           preservePages = inPlace,
           displayId =
             if (inPlace) previous.request.displayId else displayId ?: Display.DEFAULT_DISPLAY,
-          appearance = appearance,
+          preferences = ShowPreferences(appearance, locale),
         )
       if (surfaceOf(shown.runtime) == null) Outcome()
       else
@@ -349,6 +427,13 @@ class PrototypeController(
           hiddenReason = shownHiddenReason(shown),
           pages = shown.runtime.current.pages,
           stacks = shown.runtime.current.stacks,
+          backdrop = shown.request.backdrop?.mode?.wire,
+          displayId = shown.request.displayId,
+          degradedEffects =
+            prototypeEffectReport(
+              shown.runtime.renderModel(shown.runtime.current).root,
+              shown.runtime.effectHealth,
+            ),
         )
     }
 
@@ -411,6 +496,9 @@ class PrototypeController(
     val hiddenReason: PrototypeHiddenReason? = null,
     val pages: Map<String, Int>? = null,
     val stacks: Map<String, PrototypeStackSnapshot>? = null,
+    val backdrop: String? = null,
+    val displayId: Int = Display.DEFAULT_DISPLAY,
+    val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
   )
 
   private fun validate(spec: JsonObject): PrototypeSpec =
@@ -431,6 +519,7 @@ class PrototypeController(
       }
     val resolved = PrototypeDataResolver.resolve(validated)
     guardPrototypeTree(resolved.root)
+    validateShaders(resolved.root)
     if (resolved.root !== validated.root) requireResolvedPrototypeAnchors(resolved.root)
     return validated
   }
@@ -499,13 +588,21 @@ class PrototypeController(
     }
   }
 
+  /** What a show asks of presentation beyond the spec: an appearance pin and a locale override. */
+  private class ShowPreferences(
+    val appearance: PrototypeAppearanceOverride? = null,
+    val locale: String? = null,
+  )
+
   private suspend fun display(
     spec: PrototypeSpec,
     replaceOthers: Boolean,
     preservePages: Boolean = false,
     displayId: Int = Display.DEFAULT_DISPLAY,
-    appearance: PrototypeAppearanceOverride? = null,
+    preferences: ShowPreferences = ShowPreferences(),
   ): Surface {
+    val appearance = preferences.appearance
+    val locale = preferences.locale
     val authored = validate(spec)
     // A same-id show reads the document the shown prototype is about to have written.
     surfaces[spec.id]?.runtime?.flushStorage()
@@ -520,7 +617,13 @@ class PrototypeController(
         .copy(
           displayId = displayId,
           chrome = prototypeWindowChrome(validated),
+          transition = validated.window.transition ?: "auto",
+          motion = validated.motion,
           surfaceId = validated.id,
+          backdrop =
+            validated.window.backdrop?.let {
+              PrototypeBackdrops.plan(it, sdkInt, backdropSupport.blurEnabled())
+            },
         )
     requireDisplayAvailable(displayId)
     requireLayerPermitted(request.layer)
@@ -534,6 +637,7 @@ class PrototypeController(
     val scope = reused?.foreground ?: if (surfaceHost === host) foreground else foreground.fork()
     val idle = reused?.idle ?: lifecycle.fork()
     val observerSession = lifecycle.observerSession()
+    var animateDismiss = true
     lateinit var runtime: PrototypeRuntime
     runtime =
       PrototypeRuntime(
@@ -545,7 +649,10 @@ class PrototypeController(
           sequences[validated.id] = next
           next
         },
-        requestDismiss = { removeSurface(runtime) },
+        beforeDismiss = {
+          animateDismiss = it == PrototypeDismissReason.USER || it == PrototypeDismissReason.AGENT
+        },
+        requestDismiss = { removeSurface(runtime, animateDismiss) },
         previousPages =
           if (preservePages) previous?.runtime?.current?.pages.orEmpty() else emptyMap(),
         initialRevision = nextRevision(validated.id),
@@ -554,11 +661,18 @@ class PrototypeController(
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
         httpClients = httpClients,
+        platform = platform,
+        platformLimiter = platformLimiter,
         requestScope = requestScope,
         // A response lands between interactions, never in the middle of one.
         exclusively = { block -> settleRequest(runtime, block) },
         requestLimiter = requestLimiter,
+        initialPlatformState = surfaceHost.initialDeviceState(request),
+        shaderSession =
+          if (preservePages) previous?.runtime?.shaderSession ?: PrototypeShaderSession()
+          else PrototypeShaderSession(),
       )
+    runtime.updateLocales(effectiveLocales(locale))
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
     val interactive =
@@ -567,13 +681,18 @@ class PrototypeController(
         hasStackBack = runtime.hasPoppableStack(mappedSpec),
         // Each window keeps its own focus flags; cross-window focus coordination is a follow-up.
         isSuspended = { scope.suspended },
-        bringToFront = reused != null && surfaces.values.lastOrNull() !== reused,
+        bringToFront = reused != null && request.transition != "none" && request.motion != "none",
         theme = theme,
+        motionActivity = runtime.motionActivity,
+        exitResources = exitResources,
+        exitMetadata = { surfaceMetadata(runtime, request, theme.value) },
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
         onHostBack = { interact(runtime, PrototypeInteraction.Back) },
         content = {
-          PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
-            interact(runtime, interaction)
+          PrototypeBackdropLayer(request.backdrop) {
+            PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
+              interact(runtime, interaction)
+            }
           }
         },
       )
@@ -603,6 +722,7 @@ class PrototypeController(
     reused?.runtime?.flushStorage()
     // A same-id show without a reset keeps its requests in flight; a reset or another id cancels.
     if (preservePages && reused === previous) reused?.runtime?.handOverRequests(runtime)
+    reused?.runtime?.cancelPlatformCalls()
     reused?.runtime?.close()
     idle.cancel()
     val retainedRequest =
@@ -613,6 +733,7 @@ class PrototypeController(
         retainedRequest,
         theme,
         appearance,
+        locale,
         observerSession,
         surfaceHost,
         idle,
@@ -623,6 +744,7 @@ class PrototypeController(
             theme.value.appearance.deviceDark,
             theme.value.paletteKey,
             appearance,
+            effectiveLocales(locale),
           ),
       )
     surfaces =
@@ -631,7 +753,11 @@ class PrototypeController(
         remove(validated.id)
         put(validated.id, surface)
       }
+    runtime.startPlatformModules()
+    if (blocked) runtime.pauseTimers()
     armIdle(runtime)
+    runtime.shown(preservingState = preservePages)
+    syncAfterChange(runtime)
     // The accepted show succeeds even if a sibling host cannot detach. Its closed runtime stays
     // addressable only for host cleanup retries, never as a live inspected surface.
     forEachSurface(retiring) { retire(it) }
@@ -644,6 +770,7 @@ class PrototypeController(
   /** Replacement closes silently, just as the former single runtime did. */
   private suspend fun retire(surface: Surface, notifyDismissed: Boolean = false) {
     surface.runtime.flushStorage()
+    surface.runtime.cancelPlatformCalls()
     surface.runtime.close()
     surface.idle.cancel()
     surface.foreground.release()
@@ -659,6 +786,8 @@ class PrototypeController(
     if (notifyDismissed && wasShowing && !isShowing) notifyDetached()
     if (surfaces.isEmpty()) releaseAssets()
   }
+
+  private val exitResources = PrototypeExitResources()
 
   private val PrototypeRuntime.persistent: Boolean
     get() = isDevicePersistent(current.spec)
@@ -747,10 +876,10 @@ class PrototypeController(
     }
 
   /** Shared by dismiss_prototype and this runtime's own dismiss action, under mutex. */
-  private suspend fun removeSurface(runtime: PrototypeRuntime): Boolean {
+  private suspend fun removeSurface(runtime: PrototypeRuntime, animate: Boolean = true): Boolean {
     val surface = surfaceOf(runtime) ?: return true
     val wasShowing = isShowing
-    if (!surface.host.dismiss()) return false
+    if (!(if (animate) surface.host.dismiss() else surface.host.dismissImmediately())) return false
     surfaces = surfaces.filterValues { it !== surface }
     surface.foreground.release()
     surface.idle.cancel()
@@ -771,10 +900,19 @@ class PrototypeController(
 
   /** Asset cleanup is ancillary: it must never suppress a dismissal, event or lifecycle step. */
   private fun releaseAssets() {
-    try {
-      clearAssets()
-    } catch (error: Exception) {
-      Log.w("PrototypeController", "Prototype asset cleanup failed", error)
+    exitResources.whenIdle {
+      // Cleanup survives service cancellation, on the same worker dispatcher as requests.
+      assetCleanupScope.launch {
+        mutex.withLock {
+          if (surfaces.isEmpty()) {
+            try {
+              clearAssets()
+            } catch (error: Exception) {
+              Log.w("PrototypeController", "Prototype asset cleanup failed", error)
+            }
+          }
+        }
+      }
     }
   }
 
@@ -783,14 +921,7 @@ class PrototypeController(
       if (destroyed || !runtime.current.active || surfaceOf(runtime) == null) return@withLock
       PrototypeTrace.asyncSection(PrototypeTrace.INTERACT) {
         try {
-          // Compose reports its initial/restored settled page; that is rendering, not idle
-          // activity.
-          if (
-            interaction !is PrototypeInteraction.PagerMotion ||
-              interaction.scrolling ||
-              runtime.current.pages[interaction.pager] != interaction.page
-          )
-            armIdle(runtime)
+          if (interaction.countsAsUserActivity(runtime.current.pages)) armIdle(runtime)
           runtime.handle(interaction)
           syncAfterChange(runtime)
         } catch (error: CancellationException) {
@@ -835,6 +966,7 @@ class PrototypeController(
     action: suspend () -> Outcome,
   ) = mutex.withLock {
     var outcome = Outcome()
+    var renderFailure: PrototypeRenderFailedException? = null
     val error =
       try {
         check(!destroyed) { "Prototype host destroyed" }
@@ -842,17 +974,51 @@ class PrototypeController(
         outcome.error
       } catch (error: CancellationException) {
         throw error
+      } catch (error: PrototypeRenderFailedException) {
+        renderFailure = error
+        Log.w("PrototypeController", "Prototype first render failed", error)
+        error.reason
       } catch (error: Exception) {
         Log.w("PrototypeController", "Prototype request failed", error)
         error.message ?: "Prototype request failed (${error.javaClass.simpleName})"
       }
     val missing = outcome.missingAssets
     val appearance = outcome.appearance
-    if (patchId != null) {
+    if (renderFailure != null) {
+      sink.sendRefusal(
+        requestId,
+        dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode.RENDER_FAILED,
+        renderFailure.reason,
+      )
+    } else if (patchId != null) {
       val revision =
         outcome.revision ?: surfaces[patchId]?.runtime?.current?.takeIf { it.active }?.revision
       sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
-    } else if (error == null && appearance != null)
+    } else if (error == null && appearance != null) {
+      sink.noteShownDisplay(requestId, outcome.displayId)
+      outcome.backdrop?.let { sink.noteShownBackdrop(requestId, it) }
+      sendShown(requestId, outcome, missing, appearance)
+    } else if (missing.isEmpty()) sink.send(requestId, error == null, error)
+    else sink.sendWithMissingAssets(requestId, error == null, error, missing)
+  }
+
+  private suspend fun sendShown(
+    requestId: String?,
+    outcome: Outcome,
+    missing: List<String>,
+    appearance: PrototypeAppearance,
+  ) {
+    if (outcome.degradedEffects.isNotEmpty()) {
+      sink.sendShownDegraded(
+        requestId,
+        missing,
+        appearance,
+        outcome.pages.orEmpty(),
+        outcome.stacks.orEmpty(),
+        outcome.hiddenReason,
+        outcome.degradedEffects,
+      )
+    } else {
       sink.sendShownNavigation(
         requestId,
         missing,
@@ -861,8 +1027,7 @@ class PrototypeController(
         outcome.stacks.orEmpty(),
         outcome.hiddenReason,
       )
-    else if (missing.isEmpty()) sink.send(requestId, error == null, error)
-    else sink.sendWithMissingAssets(requestId, error == null, error, missing)
+    }
   }
 
   private fun armIdle(
@@ -949,6 +1114,25 @@ class PrototypeController(
     }
   }
 
+  suspend fun advanceClock(requestId: String?, id: String, advanceTimeMs: Int) = mutex.withLock {
+    try {
+      check(!destroyed) { "Prototype host destroyed" }
+      val runtime = surfaces[id]?.runtime ?: error("Unknown prototype: $id")
+      val fired = runtime.advanceClock(advanceTimeMs)
+      syncAfterChange(runtime)
+      sink.sendAdvanced(requestId, fired)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: PrototypeTimerAdvanceLimitException) {
+      Log.w("PrototypeController", "Prototype clock advance reached fire limit", error)
+      surfaces[id]?.runtime?.let { syncAfterChange(it) }
+      sink.sendAdvanceFailed(requestId, error.fired, checkNotNull(error.message))
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Prototype clock advance failed", error)
+      sink.send(requestId, false, error.message ?: "Prototype clock advance failed")
+    }
+  }
+
   /** The stored keys removed for [id]; callers hold no controller state of their own. */
   suspend fun clearStoredValues(id: String): Int {
     val persistence = storage ?: return 0
@@ -971,6 +1155,11 @@ class PrototypeController(
       hiddenReason = shownHiddenReason(surface),
       appearance = surface.theme.value.appearance,
       storage = runtime.storage?.report(),
+      timers = runtime.timerReports(),
+      shaderFailures = runtime.shaderSession.failures(),
+      degradedEffects =
+        prototypeEffectReport(runtime.renderModel(runtime.current).root, runtime.effectHealth),
+      feedbackLog = runtime.feedbackLog.snapshot(),
     )
   }
 
@@ -1028,7 +1217,8 @@ class PrototypeController(
     try {
       val key = appearanceKey(runtime)
       if (surfaceOf(runtime)?.appearanceSyncKey?.matches(key) == true) return
-      syncAppearance(runtime, runtime.renderModel(), key)
+      runtime.updateLocales(key.locales)
+      syncAppearance(runtime, runtime.renderModel(), appearanceKey(runtime))
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
@@ -1064,6 +1254,7 @@ class PrototypeController(
       PrototypeWindowDecision.HIDE -> {
         val wasShowing = isShowing
         check(surface.host.dismiss()) { "Prototype host failed to hide window" }
+        runtime.pauseTimers()
         if (wasShowing && !isShowing) notifyDetached()
       }
       PrototypeWindowDecision.RELAYOUT -> relayoutOrRestore(runtime)
@@ -1082,14 +1273,19 @@ class PrototypeController(
     val request = surface.request
     if (host.isShowing) {
       if (host.relayout()) {
+        if (host.isShowing) runtime.resumeTimers()
         if (!host.isShowing && !isShowing) notifyDetached()
         return
       }
       // Still attached: a retryable platform failure, so keep the window and runtime as they are.
       check(!host.isShowing) { "Prototype host failed to re-layout window" }
     }
-    if (restoreWindow(surface.host, request)) return
+    if (restoreWindow(surface.host, request)) {
+      runtime.resumeTimers()
+      return
+    }
     if (lifecycle.isBlocked() || surface.foreground.suspended) {
+      runtime.pauseTimers()
       if (!isShowing) notifyDetached()
     } else abandon(runtime)
   }
@@ -1101,7 +1297,7 @@ class PrototypeController(
    */
   private suspend fun restoreWindow(host: PrototypeHost, request: PrototypeRequest): Boolean =
     try {
-      host.show(request)
+      host.show(request.copy(animateEnter = false))
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
@@ -1155,8 +1351,9 @@ class PrototypeController(
    * retryable.
    */
   suspend fun dismissForUnbind() = signal {
+    exitResources.drain()
     if (surfaces.isEmpty()) {
-      check(host.dismiss()) { "Prototype host failed to dismiss window" }
+      check(host.dismissImmediately()) { "Prototype host failed to dismiss window" }
       releaseAssets()
     } else
       forEachSurface(surfaces.values.toList()) {
@@ -1204,6 +1401,7 @@ class PrototypeController(
   /** Run from a teardown scope independent of the cancelled service scope; no blocking join. */
   suspend fun destroy() = mutex.withLock {
     destroyed = true
+    exitResources.drain()
     val selected = surfaces.values.toList()
     val remaining = linkedMapOf<String, Surface>()
     lifecycle.cancel()

@@ -92,6 +92,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   exportPlan: entry("Export Plan", controlDevice),
   highlight: entry("Highlight Screen Element", controlDevice),
   homeScreen: entry("Open Home Screen", controlDevice),
+  hoverAt: entry("Hover Over Path", destructiveDevice),
   keyboard: entry("Control Keyboard", destructiveDevice),
   multiTouch: entry("Multi Touch Gesture", destructiveDevice),
   mockNetwork: entry("Mock Network Response", controlDevice),
@@ -147,6 +148,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   appLifecycle: entry("Control App Lifecycle", destructiveDevice),
   changeLocalization: entry("Change Locale", destructiveDevice),
   clipboard: entry("Control Clipboard", destructiveDevice),
+  siri: entry("Activate Siri", destructiveDevice),
   crashApp: entry("Crash App", destructiveDevice),
   criticalSection: entry("Run Critical Section", destructiveDevice),
   deviceSnapshot: entry("Manage Snapshot", destructiveDevice),
@@ -172,6 +174,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
 
   // Scoped clears/deletes and replacement values remain destructive even when idempotent.
   setSensor: entry("Set Emulator Sensor", clearDevice),
+  injectAudioInput: entry("Inject Emulator Microphone Audio", controlDevice),
+  stopAudioInput: entry("Stop Emulator Microphone Audio", setDevice),
+  captureAudio: entry("Capture Emulator Audio Output", captureDevice),
   statusBar: entry("Set Status Bar", clearDevice),
   clearKeyValueFile: entry("Clear Key Value File", clearDevice),
   clearMockNetwork: entry("Clear Mock Network Rules", clearDevice),

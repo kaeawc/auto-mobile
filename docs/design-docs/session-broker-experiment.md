@@ -320,10 +320,21 @@ hoc host signature.
 ```
 
 `androidProfileArchetypes` and `iosClassifications` classify installed AVD
-profiles and simulator device types; without them Android acquisition fails with
-`catalog_metadata_invalid`. Android `os` selectors use the release version (`16`),
+profiles (`phone`, `tablet`, or `foldable`) and simulator device types; without them Android acquisition fails with
+`catalog_metadata_invalid`. `capabilities.iosDuo` (default `false`, requires
+`defaults.ios`) lets the host execute iPhone Duo requests. Creating a Duo for a
+`duo` archetype request needs both a Duo `archetypes` entry and a Duo
+`modelTypes` entry; a Duo model-type request needs only the `modelTypes` entry;
+an exact Duo model needs neither. Android `os` selectors use the release version (`16`),
 not the API level (`36`); at equal versions the resolver prefers `google_apis`
-over `google_apis_playstore`.
+over `google_apis_playstore`. Android hardware defaults map archetypes to installed
+profile IDs through `defaults.android.hardware.profiles`, for example
+`[{ "archetype": "foldable", "profileId": "pixel_9_pro_fold", "memoryMb": 4096 }]`
+with `androidProfileArchetypes: { "pixel_9_pro_fold": "foldable" }`. The optional
+`memoryMb` is an integer of at least 2048 MB and constrains creation and reuse.
+Unmapped foldables are refused without reservation with non-retryable
+`unsupported_hardware`; they never fall back to phone hardware. Foldable baseline
+reset restores opened posture and a 180-degree hinge before final health checks.
 
 **Caps** are optional nonnegative integers. Reservations, native creation, active
 sessions, reset, uncertain state, and unfinished destruction count toward the total
@@ -478,6 +489,14 @@ receipts and admission reservations to the same SQLite database, using immediate
 transactions for cross-process admission; assignment generations and native journal
 operations stay private, and allocation indices are never public session
 identities. Provider-local SQLite only (no Talos PostgreSQL change).
+An executed migration unknown to this daemon disables registry exclusion for generic
+acquisition: the `files_only` diagnostic names the path, migrations and remedy, and a
+warning is logged once per process per registry path. Managed bindings are not enforced
+in files-only mode: this daemon can allocate a device held only by a managed binding,
+because allocation claim files alone decide ownership. The device-claims mirror skips
+reads, writes, opens and retries until daemon restart. Writers and ownership readers
+requiring current registry evidence still fail with non-retryable
+`registry_schema_unsupported`; the schema guard runs before any migration or write.
 
 Broker mode holds a process-generation-aware host lock and refuses startup over
 unaccounted managed inventory or live generic sessions (drain the prior provider
@@ -513,5 +532,8 @@ inventory or an unconfirmed stop leave retirement pending for a later startup (a
 broker provider fails startup; an ordinary daemon warns and continues). The
 verification pass is bounded to 30 s. Broker records and their private scope
 survive; registry locations, SQL storage names and migration keys stay compatible.
+Unknown executed migrations are never upgraded or modified by an older daemon.
+Managed bindings are not enforced in files-only mode.
+Upgrade the daemons sharing managed devices to a release that includes these migrations.
 The retained native-resource budget variable is documented under
 [environment variables](../using/environment-variables.md).

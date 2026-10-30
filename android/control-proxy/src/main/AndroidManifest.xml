@@ -30,6 +30,9 @@
   <!-- Prototype request actions with via "device" make their own HTTP calls (#12528). -->
   <uses-permission android:name="android.permission.INTERNET" />
 
+  <!-- Prototype /platform/connectivity reads the default network and Data Saver (#14273). -->
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
   <!-- Android 17 (API 37) drops outbound connections to local-network addresses (RFC 1918, -->
   <!-- loopback aliases such as the emulator host 10.0.2.2) from apps targeting 37 without this -->
   <!-- runtime permission, which surfaces as a timeout, not an error (#13018). Grant it with -->
@@ -42,6 +45,8 @@
   <uses-permission android:name="android.permission.MANAGE_CA_CERTIFICATES" />
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <!-- Normal permission: haptics.perform (#14329). -->
+  <uses-permission android:name="android.permission.VIBRATE" />
 
   <application
         android:allowBackup="true"
@@ -72,6 +77,8 @@
 
       <activity
         android:name=".prototype.SavedPrototypeActivity"
+        android:enableOnBackInvokedCallback="true"
+        tools:ignore="UnusedAttribute"
         android:exported="false"
         android:documentLaunchMode="intoExisting"
         android:excludeFromRecents="false"
@@ -118,5 +125,12 @@
       </receiver>
 
   </application>
+
+  <!-- Stylus and hover injection through UiAutomation (#13097). Started by the host with
+       `am instrument`; it declares no component other than this entry. -->
+  <instrumentation
+      android:name=".pointer.PointerInstrumentation"
+      android:targetPackage="dev.jasonpearson.automobile.ctrlproxy"
+      android:label="AutoMobile pointer injection" />
 
 </manifest>

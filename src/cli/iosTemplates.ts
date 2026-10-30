@@ -4,6 +4,7 @@ import { toActionableError } from "../models/ActionableError";
 import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import { setProcessShutdownExitCode, setProcessShutdownHandler } from "../processLifecycle";
 import type { SimulatorTemplateKey } from "../utils/ios-cmdline-tools/SimulatorTemplateKey";
 import type { TemplateCleanupOptions } from "../features/iosTemplates/SimulatorTemplateCleanup";
 export const IOS_TEMPLATES_USAGE =
@@ -62,8 +63,16 @@ function validateTarget(parsed: IosTemplatesArgs): void {
     throw new ActionableError(IOS_TEMPLATES_USAGE);
   }
 }
+/** Exit code of a command ended by SIGINT, by shell convention (128 + 2). */
+export const IOS_TEMPLATES_INTERRUPTED_EXIT_CODE = 130;
+
 export interface IosTemplatesCommandDependencies {
   platform: NodeJS.Platform;
+  /**
+   * Runs `listener` when the process is asked to stop, and keeps the process alive until it
+   * settles: the process-wide SIGINT handler would otherwise exit 0 before any cleanup (#15312).
+   */
+  onInterrupt(listener: () => Promise<void>): void;
   write(line: string): void;
   resolveKey(runtime: string, deviceType: string): Promise<SimulatorTemplateKey>;
   build(key: SimulatorTemplateKey, signal?: AbortSignal): Promise<unknown>;
@@ -75,6 +84,12 @@ async function defaultDependencies(): Promise<IosTemplatesCommandDependencies> {
   const { dependencies, cleanup } = createTemplateMaintenance();
   return {
     platform: process.platform,
+    onInterrupt: (listener) => {
+      setProcessShutdownHandler(async () => {
+        setProcessShutdownExitCode(IOS_TEMPLATES_INTERRUPTED_EXIT_CODE);
+        await listener();
+      });
+    },
     write: (line) => console.log(line),
     build: (key, signal) => dependencies.builder.build(key, signal),
     clean: (options) => cleanup.clean(options),
@@ -110,7 +125,11 @@ async function executeTemplateCommand(
 ): Promise<number> {
   const key = await commandKey(parsed, resolved);
   if (parsed.action === "build" && key) {
-    const result = await buildInterruptibly(resolved, key);
+    const { result, interrupted } = await buildInterruptibly(resolved, key);
+    if (interrupted) {
+      resolved.write(JSON.stringify({ result: "interrupted" }));
+      return IOS_TEMPLATES_INTERRUPTED_EXIT_CODE;
+    }
     resolved.write(JSON.stringify({ result }));
     return result === "ready" ? 0 : 1;
   }
@@ -138,15 +157,20 @@ async function commandKey(
 async function buildInterruptibly(
   deps: IosTemplatesCommandDependencies,
   key: SimulatorTemplateKey,
-): Promise<unknown> {
+): Promise<{ result: unknown; interrupted: boolean }> {
   const controller = new AbortController();
-  const interrupt = () => controller.abort(new Error("Template build interrupted"));
-  process.once("SIGINT", interrupt);
-  try {
-    return await deps.build(key, controller.signal);
-  } finally {
-    process.removeListener("SIGINT", interrupt);
-  }
+  let settled: Promise<unknown> = Promise.resolve();
+  deps.onInterrupt(async () => {
+    controller.abort(new Error("Template build interrupted"));
+    // The builder's own abort path removes the partial simulator and releases the lock.
+    await settled;
+  });
+  const run = deps.build(key, controller.signal);
+  settled = run.catch((error: unknown) => {
+    logger.debug(`iOS template build ended with an error: ${errorMessage(error)}`);
+  });
+  const result = await run;
+  return { result, interrupted: controller.signal.aborted };
 }
 
 export async function resolveTemplateMaintenanceKey(

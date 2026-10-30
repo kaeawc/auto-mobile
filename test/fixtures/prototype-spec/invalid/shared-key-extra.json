@@ -1,0 +1,56 @@
+{
+  "spec": {
+    "id": "shared",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": true
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "lone",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "hero",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "hero",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "Hero",
+          "sharedKey": "hero",
+          "visibleWhen": {
+            "key": "open",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[3].sharedKey",
+  "expectedMessage": "sharedKey \"hero\" must be used by exactly two nodes"
+}

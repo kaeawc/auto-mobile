@@ -151,20 +151,27 @@ struct PrototypeThemeShapes: Decodable, Equatable {
     let corner: String?
 }
 
-/// The spec's `theme`: colours via `PrototypePalette`, type scale via `PrototypeTypography`, corner
-/// scale via `PrototypeShapes`.
+enum PrototypeDesign: String, Decodable {
+    case material, platform
+}
+
+/// The spec's `theme`: design, colours via `PrototypePalette`, type scale via `PrototypeTypography`,
+/// and corner scale via `PrototypeShapes`.
 struct PrototypeTheme: Decodable, Equatable {
+    let design: PrototypeDesign?
     let mode: String?
     let colors: PrototypeThemeColors?
     let typography: PrototypeThemeTypography?
     let shapes: PrototypeThemeShapes?
 
     init(
+        design: PrototypeDesign? = nil,
         mode: String? = nil,
         colors: PrototypeThemeColors? = nil,
         typography: PrototypeThemeTypography? = nil,
         shapes: PrototypeThemeShapes? = nil
     ) {
+        self.design = design
         self.mode = mode
         self.colors = colors
         self.typography = typography
@@ -346,6 +353,13 @@ struct PrototypePalette: Equatable {
         guard value == "scrim", var color = colors["scrim"] else { return resolve(value) }
         color.alpha = Self.scrimRoleAlpha
         return color
+    }
+
+    /// A bottomSheet's scrim: the authored slot through `scrim`, or the `scrim` role at
+    /// `scrimRoleAlpha` when the sheet has none, the fallback Android draws
+    /// (`prototypeSheetScrimFallback`, #15117). A tap on it closes the sheet like an authored one.
+    func sheetScrim(_ spec: PrototypeModeValue?) -> PrototypeRGBA? {
+        scrim(spec ?? .single("scrim"))
     }
 
     /// The asset id an image slot names in this palette's mode.

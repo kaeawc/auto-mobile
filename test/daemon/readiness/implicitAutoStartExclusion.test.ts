@@ -1,3 +1,5 @@
+import { BindingRegistrySchemaUnsupportedError } from "../../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
+import { selectReadinessAutoStartImage } from "../../../src/daemon/readiness/readinessAutoStart";
 import { describe, expect, test } from "bun:test";
 import {
   DeviceReadiness,
@@ -98,6 +100,18 @@ function harness(platform: Platform, images: DeviceInfo[], booted: BootedDevice[
 }
 
 describe.each(["ios", "android"] as const)("%s implicit readiness auto-start", (platform) => {
+  test("unknown migrations allow implicit cold-boot selection using claim-file ownership", async () => {
+    const timer = new FakeTimer();
+    const bindings = new RegistryBindingExclusion(async () => {
+      throw new BindingRegistrySchemaUnsupportedError(`/fake/readiness-${platform}.sqlite`, [
+        "future",
+      ]);
+    }, timer);
+    const candidate = image(platform, "Local phone", "LOCAL");
+    expect(await selectReadinessAutoStartImage([candidate], bindings)).toBe(candidate);
+    expect(bindings.degraded()?.mode).toBe("files_only");
+  });
+
   test.each(["ambroker-a", "amslot-a"])("skips %s even when it is first", async (name) => {
     const broker = image(platform, name, "AAAA");
     const plain = image(platform, "plain", "BBBB");

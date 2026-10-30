@@ -25,6 +25,7 @@ export interface UnixSocketServerTestHooks {
   readonly transport: Pick<
     SocketServerOperations,
     | "processSocketRequestLine"
+    | "broadcastSessionDeviceRebound"
     | "writeTerminalSocketResponse"
     | "handleConnection"
     | "handleRequest"

@@ -189,6 +189,12 @@ export interface FramesDroppedMessage extends Pick<
   reason: "backpressure";
 }
 
+/** Capture metadata and per-push options for one `pushScreenshotUpdate`. */
+export interface ScreenshotPushDetails {
+  metadata?: ScreenshotMetadata;
+  options?: PushScreenshotOptions;
+}
+
 /**
  * Per-push options for `pushScreenshotUpdate`.
  */

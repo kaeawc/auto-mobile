@@ -23,7 +23,7 @@ afterEach(() => {
   createConnectionSpy.mockRestore();
 });
 
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 
 describe("DaemonClient socket error disconnect cause", () => {

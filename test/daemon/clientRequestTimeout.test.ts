@@ -9,11 +9,11 @@ import {
   DaemonClient,
   DaemonUnavailableError,
   DAEMON_RESPONSE_GRACE_MS,
-} from "../../src/daemon/client";
+} from "../../src/daemon/client/client";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { pushProgressNotification } from "../../src/daemon/socketServer/notificationFanOut";
 import { McpTimeoutError } from "../../src/daemon/wire/McpTimeoutError";
-import { MAX_CANCELLED_REQUEST_IDS } from "../../src/daemon/clientResponseDecoding";
+import { MAX_CANCELLED_REQUEST_IDS } from "../../src/daemon/client/clientResponseDecoding";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -819,7 +819,7 @@ test.each(["timeout", "reply", "abort"])(
         { action: "longPress", duration: Number.MAX_SAFE_INTEGER },
         undefined,
         undefined,
-        controller.signal,
+        { signal: controller.signal },
       )
       .catch((error: unknown) => error);
     const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];

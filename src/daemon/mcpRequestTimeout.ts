@@ -38,6 +38,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { DaemonRequest } from "./types";
+import { staticToolDeclaresDeviceResourceBudget } from "./staticToolDefinitions";
 import {
   asRecord,
   MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
@@ -154,6 +155,15 @@ export const MIN_LAUNCH_APP_MCP_TIMEOUT_MS = 90_000;
 export const MIN_CRASH_APP_MCP_TIMEOUT_MS = 90_000;
 
 /**
+ * Floor for `performanceTrace`: an iOS `stop` waits for xctrace to finalise the
+ * `.trace` (up to 180 s: `DEFAULT_STOP_MAX_MS` in XctraceRecorder.ts) and then
+ * runs up to two `xctrace export` calls (120 s each) to summarise it. With only
+ * the 30 s standard deadline the daemon cut the call off before the typed
+ * stop-timeout error could reach the client (#15330).
+ */
+export const MIN_PERFORMANCE_TRACE_MCP_TIMEOUT_MS = 180_000 + 2 * 120_000 + 30_000;
+
+/**
  * Compatibility floor while video recording startup moves to a strict,
  * backend-owned five-second budget.
  */
@@ -259,6 +269,7 @@ const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
       DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
     crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
+    performanceTrace: MIN_PERFORMANCE_TRACE_MCP_TIMEOUT_MS,
     getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
     setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
     setUIState: MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
@@ -520,16 +531,12 @@ function resolveLegacyStartDeviceBudgetMs(
   );
 }
 
-const DEVICE_RESOURCE_TOOLS: ReadonlySet<string> = new Set([
-  "setDeviceResources",
-  "reconcileDeviceResources",
-]);
-
+// The `deviceResourceBudget` trait (#15672) read from the committed tool definitions.
 function resolveDeviceResourceToolBudgetMs(
   toolName: unknown,
   argumentsRecord: Record<string, unknown>,
 ): number | undefined {
-  return DEVICE_RESOURCE_TOOLS.has(String(toolName))
+  return staticToolDeclaresDeviceResourceBudget(String(toolName))
     ? resolveDeviceResourceBudgetMs(argumentsRecord)
     : undefined;
 }

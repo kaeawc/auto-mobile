@@ -1,3 +1,4 @@
+import type { HostChildProcess, HostSpawnOptions } from "../utils/HostCommandExecutor";
 import type { SimulatorContainerOwnershipOptions } from "../utils/ios-cmdline-tools/simulatorOwnContainer";
 import { ActionableError, type BootedDevice, type ExecResult, type Platform } from "../models";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -26,8 +27,9 @@ import type {
 import { SessionLogSourceError } from "./SessionLogSourceError";
 import { SessionLogTimeoutError } from "./SessionLogTimeoutError";
 
-/** The narrow simctl surface the iOS provider needs: one argv exec and one shell-string exec. */
+/** The narrow simctl surface for container commands and streaming log collection. */
 export interface SessionLogSimctl {
+  startCommandArgs(args: string[], options?: HostSpawnOptions): Promise<HostChildProcess>;
   executeCommand(command: string, timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
   executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
 }
@@ -57,36 +59,43 @@ export interface SessionLogService {
  * have; the service reports those as `unavailable` rather than failing the
  * collection.
  */
+/** Byte cap and cancellation for one provider read. */
+export interface SessionLogReadBounds {
+  maxBytes: number;
+  signal?: AbortSignal;
+}
+
+/** Unified-log bounds: which end of an over-cap stream to keep (default `"head"`). */
+export interface UnifiedLogReadBounds extends SessionLogReadBounds {
+  retain?: "head" | "tail";
+}
+
 export interface SessionLogProvider {
   readonly platform: Platform;
   readAppLogs(
     device: BootedDevice,
     appId: string,
     request: SessionLogFilesRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
+    bounds: SessionLogReadBounds,
   ): Promise<SessionLogFilesResult>;
   resetAppLogs(request: ResetAppLogsRequest): Promise<ResetAppLogsPathOutcome[]>;
   readAppGroup?(
     device: BootedDevice,
     appId: string,
     request: SessionLogAppGroupRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
+    bounds: SessionLogReadBounds,
   ): Promise<SessionLogAppGroupResult>;
   collectUnifiedLog?(
     device: BootedDevice,
     appId: string,
     request: UnifiedLogWindowRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
+    bounds: UnifiedLogReadBounds,
   ): Promise<UnifiedLogWindowResult>;
   collectAndroidLogcat?(
     device: BootedDevice,
     appId: string,
     request: UnifiedLogWindowRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
+    bounds: SessionLogReadBounds,
   ): Promise<AndroidLogcatWindowResult>;
 }
 
@@ -135,14 +144,14 @@ export class DefaultSessionLogService implements SessionLogService {
     const files = request.request.files;
     if (files) {
       result.files = await runSource("app-container logs", () =>
-        provider.readAppLogs(device, appId, files, maxBytes, signal),
+        provider.readAppLogs(device, appId, files, { maxBytes, signal }),
       );
     }
     const appGroup = request.request.appGroup;
     if (appGroup) {
       result.appGroup = provider.readAppGroup
         ? await runSource("App Group files", () =>
-            provider.readAppGroup!(device, appId, appGroup, maxBytes, signal),
+            provider.readAppGroup!(device, appId, appGroup, { maxBytes, signal }),
           )
         : unavailable(`App Group containers are not available on ${device.platform}.`);
     }
@@ -151,13 +160,13 @@ export class DefaultSessionLogService implements SessionLogService {
       if (device.platform === "android") {
         result.androidLogcat = provider.collectAndroidLogcat
           ? await runSource("Android logcat", () =>
-              provider.collectAndroidLogcat!(device, appId, unifiedLog, maxBytes, signal),
+              provider.collectAndroidLogcat!(device, appId, unifiedLog, { maxBytes, signal }),
             )
           : unavailable(`Android logcat is not available on ${device.deviceId}.`);
       } else {
         result.unifiedLog = provider.collectUnifiedLog
           ? await runSource("unified log", () =>
-              provider.collectUnifiedLog!(device, appId, unifiedLog, maxBytes, signal),
+              provider.collectUnifiedLog!(device, appId, unifiedLog, { maxBytes, signal }),
             )
           : unavailable(`The unified log is not available on ${device.platform}.`);
       }

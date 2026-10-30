@@ -34,12 +34,12 @@ export async function reserveExistingIosProvisionDeviceLifecycle(
     deps.timer,
     totalDeadlineMs,
     signal,
-    "resolving the exact iOS simulator identity",
     async (deadlineSignal) =>
       await deviceManager.getDeviceImagesDetailed("ios", {
         bypassIosDeviceListCache: true,
         signal: deadlineSignal,
       }),
+    { phase: "resolving the exact iOS simulator identity" },
   );
   if (!discovery.succeededPlatforms.has("ios")) {
     throw new ProvisionDeviceError(

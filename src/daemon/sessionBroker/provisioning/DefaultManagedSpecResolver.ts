@@ -10,9 +10,12 @@ import {
   type ExactIosRuntimeCatalog,
   type ResolvedExactDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
-import { androidProfileFormFactor } from "../../../models/formFactor";
+import { androidProfileFormFactor, defaultAndroidProfileIdFor } from "../../../models/formFactor";
 import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
-import { inferIosFormFactor } from "../../../utils/ios-cmdline-tools/iosDeviceType";
+import {
+  inferIosFormFactor,
+  isIosDuoDeviceType,
+} from "../../../utils/ios-cmdline-tools/iosDeviceType";
 import { evaluateRuntimeCompatibility } from "../../../utils/ios-cmdline-tools/runtimeCompatibility";
 import type {
   AppleDeviceRuntime,
@@ -78,10 +81,10 @@ export const BINDING_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
   phone: BINDING_DEFAULT_ANDROID_DEVICE_TYPE,
   tablet: "pixel_tablet",
   foldable: "pixel_fold",
-  // Names from avdmanager listings; confirm with `avdmanager list device` (form-factors.md row 10).
-  tv: "tv_1080p",
-  watch: "wearos_small_round",
-  automotive: "automotive_1024p_landscape",
+  // Shared with default provisioning (models/formFactor.ts), so the two paths create one profile.
+  tv: defaultAndroidProfileIdFor("tv"),
+  watch: defaultAndroidProfileIdFor("watch"),
+  automotive: defaultAndroidProfileIdFor("automotive"),
 } as const satisfies Record<BindingDeviceFamily, string>;
 
 export type ManagedSpecResolution =
@@ -522,11 +525,11 @@ function refused(
 }
 
 /**
- * The model "any model" creates for an iOS runtime: a supported iPhone (excluding iPods),
- * else one with unknown runtime compatibility (simctl stays the authority). An explicit family
- * selects that family's types instead. Within each tier, parseable iPhone/iPad model identifiers
- * outrank unparseable ones: highest major generation, then lowest minor variant, then shortest
- * name, then ascending identifier wins. Unparseable entries retain last-in-catalog selection.
+ * The model "any model" creates for an iOS runtime: a supported iPhone (excluding iPods and the
+ * foldable Duo), else one with unknown runtime compatibility (simctl stays the authority). An
+ * explicit family selects that family's types instead. Within each tier, parseable iPhone/iPad
+ * model identifiers outrank unparseable ones: highest major generation, then lowest minor
+ * variant, then shortest name, then ascending identifier wins. Unparseable entries retain last-in-catalog selection.
  * Undefined when the runtime is missing or unavailable, or no selected-family type fits.
  */
 export function chooseIosDeviceType(
@@ -541,7 +544,9 @@ export function chooseIosDeviceType(
   }
   const candidates = deviceTypes.filter((entry) =>
     family === undefined
-      ? entry.productFamily === "iPhone" && !entry.modelIdentifier?.startsWith("iPod")
+      ? entry.productFamily === "iPhone" &&
+        !entry.modelIdentifier?.startsWith("iPod") &&
+        !isIosDuoDeviceType(entry.identifier)
       : inferIosFormFactor(entry.identifier) === family,
   );
   const statusOf = (entry: AppleDeviceType) =>

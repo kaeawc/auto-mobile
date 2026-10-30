@@ -1,12 +1,9 @@
-import { IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL } from "./IosFramePipeline";
 import { QUALITY_PRESET_MAX_LONG_SIDE, qualityPresetBitrateBps } from "./qualityPresets";
 import { basename } from "node:path";
 import { ActionableError, toActionableError, type BootedDevice } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
-import { errorMessage } from "../../utils/describeUnknownError";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { logger } from "../../utils/logger";
-import type { FfmpegClient } from "../../utils/media/FfmpegClient";
 import type { CaptureTarget, EncodeBitratePolicy, EncodeSettings } from "../screen-stream";
 import {
   CAPTURE_PERMISSION_PREFIX,
@@ -21,13 +18,12 @@ import { ScreenRecordingPermissionError } from "./ScreenRecordingPermissionError
 import { defaultProcessSpawner } from "./processSpawner";
 import {
   DEFAULT_IOS_WEBRTC_FPS,
-  IOS_WEBRTC_FFMPEG_ENV,
+  IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL,
   IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS,
   IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
   IOS_HELPER_PATH_RESOLUTION_TIMEOUT_MS,
   type IosH264SourceOptions,
   type CommandRunner,
-  type CommandResult,
   type IosSimulatorWindowResolver,
   type ScreenCaptureHelperEnsurer,
 } from "./IosH264SourceConfig";
@@ -197,67 +193,14 @@ export function describeCaptureTarget(target: CaptureTarget): string {
     : `iOS device ${target.deviceId ?? "default"}`;
 }
 
-export async function validateFfmpegAvailability(
-  ffmpegClient: FfmpegClient,
-  ffmpegPath: string,
-  timeoutMs: number,
-  testCommandRunner?: CommandRunner,
-): Promise<void> {
-  // `commandRunner` is a long-standing test seam. Production probes must stay
-  // behind FfmpegClient, while injected fakes can retain their narrow runner.
-  if (testCommandRunner) {
-    return validateFfmpegAvailabilityWithRunner(ffmpegPath, testCommandRunner);
-  }
-  try {
-    await ffmpegClient.probe({ requiredEncoders: ["h264_videotoolbox"], timeoutMs });
-  } catch (error) {
-    const message = errorMessage(error);
-    if (message.includes("missing required encoder")) {
-      throw new ActionableError(
-        "iOS WebRTC streaming requires an ffmpeg build with the h264_videotoolbox encoder.",
-      );
-    }
-    throw new ActionableError(
-      `iOS WebRTC streaming requires ffmpeg. Set ${IOS_WEBRTC_FFMPEG_ENV} to a working ffmpeg binary. ${message}`,
-    );
-  }
-}
-
-async function validateFfmpegAvailabilityWithRunner(
-  ffmpegPath: string,
-  commandRunner: CommandRunner,
-): Promise<void> {
-  let version: CommandResult;
-  try {
-    version = await commandRunner(ffmpegPath, ["-version"]);
-  } catch (error) {
-    throw new ActionableError(
-      `iOS WebRTC streaming requires ffmpeg. Set ${IOS_WEBRTC_FFMPEG_ENV} to a working ffmpeg binary. ${errorMessage(error)}`,
-    );
-  }
-  if (version.exitCode !== 0) {
-    throw new ActionableError(
-      `iOS WebRTC ffmpeg probe failed: ${version.stderr.trim() || `exited with code ${version.exitCode}`}`,
-    );
-  }
-
-  const encoders = await commandRunner(ffmpegPath, ["-hide_banner", "-encoders"]);
-  const encoderOutput = `${encoders.stdout}\n${encoders.stderr}`;
-  if (encoders.exitCode !== 0 || !encoderOutput.includes("h264_videotoolbox")) {
-    throw new ActionableError(
-      "iOS WebRTC streaming requires an ffmpeg build with the h264_videotoolbox encoder.",
-    );
-  }
-}
-
 export async function defaultResolveSimulatorWindowId(
   helperPath: string,
   device: BootedDevice,
   commandRunner: CommandRunner,
   audioEnabled: boolean,
-  signal: AbortSignal,
-  poll: { timer: Timer; pollBudgetMs: number },
+  poll: { signal: AbortSignal; timer: Timer; pollBudgetMs: number },
 ): Promise<number> {
+  const { signal } = poll;
   const startedAt = poll.timer.now();
   let lookups = 0;
   for (;;) {
@@ -404,10 +347,14 @@ function simulatorTitleNamesDeviceExactly(title: string, deviceName: string): bo
 /**
  * Map the bitrate policy onto helper encode flags: an operator override becomes
  * `--bitrate-bps`, otherwise the Simulator default `--bits-per-pixel` budget is
- * passed for the helper to apply against the delivered pixels x fps (#4375).
+ * passed for the helper to apply against the delivered pixels x fps. Physical
+ * devices leave bitrate to VideoToolbox unless explicitly configured (#4375).
  */
-export function resolveEncodeSettings(options: IosH264SourceOptions): EncodeSettings {
-  // Explicit bitrate override > quality preset > bits-per-pixel budget.
+export function resolveEncodeSettings(
+  options: IosH264SourceOptions,
+  targetKind: CaptureTarget["kind"],
+): EncodeSettings {
+  // Explicit override > quality preset > target-specific default (#4375).
   const override =
     options.bitrateBps && options.bitrateBps > 0
       ? options.bitrateBps
@@ -415,7 +362,9 @@ export function resolveEncodeSettings(options: IosH264SourceOptions): EncodeSett
   const bitrate: EncodeBitratePolicy =
     override !== undefined
       ? { kind: "explicitBps", bps: override }
-      : { kind: "bitsPerPixel", bpp: IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL };
+      : targetKind === "simulator"
+        ? { kind: "bitsPerPixel", bpp: IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL }
+        : { kind: "videoToolboxDefault" };
   const maxLongSide = options.quality ? QUALITY_PRESET_MAX_LONG_SIDE[options.quality] : undefined;
   return {
     codec: "h264",

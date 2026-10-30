@@ -63,7 +63,7 @@ async function cleanupAll(
   };
   for (const trace of state.traces) {
     try {
-      await stopPerfettoRecorder(adb, timer, trace.pid, [], poll);
+      await stopPerfettoRecorder(adb, timer, trace.pid, [], { poll });
       report.stoppedTraces.push(trace.traceId);
     } catch (error) {
       report.errors.push(`stop ${trace.traceId}: ${errorMessage(error)}`);

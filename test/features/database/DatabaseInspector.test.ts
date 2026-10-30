@@ -45,6 +45,32 @@ describe("DatabaseInspector", () => {
     inspector = new DatabaseInspector(device, fakeAdb, fakeTimer);
   });
 
+  test.each([
+    "Bundle[{success=false, errorType=InvalidPath, error=SDK path refused}]",
+    'Bundle[{success=false, result={"errorType":"InvalidPath","error":"SDK path refused"}}]',
+  ])("InvalidPath gives path and registered database guidance: %s", async (reply) => {
+    const path = "nested/sessions.db";
+    fakeAdb.setCommandResult(
+      `shell content call --uri 'content://${appId}.automobile.database' --method executeSQL --extra databasePath:s:'${path}' --extra query:s:'SELECT 1'`,
+      reply,
+    );
+    const pending = inspector.executeSQL(appId, path, "SELECT 1");
+    await expect(pending).rejects.toBeInstanceOf(ActionableError);
+    await expect(pending).rejects.toMatchObject({
+      message: `Database error (InvalidPath): Invalid database path: ${path}. The path must be absolute under the app's data directory, for example /data/data/${appId}/databases/<name>. List registered paths with the App Databases resource (automobile:devices/${device.deviceId}/databases?appId=${appId}).`,
+    });
+  });
+
+  test("InvalidPath text alone does not trigger path guidance", async () => {
+    fakeAdb.setCommandResult(
+      `shell content call --uri 'content://${appId}.automobile.database' --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'SELECT 1'`,
+      "Bundle[{success=false, errorType=SQL_ERROR, error=InvalidPath in SQL text}]",
+    );
+    await expect(inspector.executeSQL(appId, databasePath, "SELECT 1")).rejects.toThrow(
+      "Database error (SQL_ERROR): InvalidPath in SQL text",
+    );
+  });
+
   describe("readOnly request flag (#10966)", () => {
     const base = `shell content call --uri 'content://${appId}.automobile.database' --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'select 1'`;
     const ok = `Bundle[{success=true, result={"type":"query","columns":["1"],"rows":[[1]]}}]`;

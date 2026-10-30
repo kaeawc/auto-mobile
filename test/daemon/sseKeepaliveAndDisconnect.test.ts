@@ -1,10 +1,11 @@
 import { planDisconnectMonitorHarness } from "./helpers/planDisconnectMonitorHarness";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { DaemonDisconnectHarness, createPooledDevice } from "./helpers/DaemonDisconnectHarness";
 
 import { getPerformanceMonitor } from "../../src/features/performance/PerformanceMonitor";
 import { serverConfig } from "../../src/utils/ServerConfig";
-import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
+import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/deviceLossMisses";
 import { ADB_TRANSPORT_RESTART_GRACE_MS } from "../../src/utils/android-cmdline-tools/AdbTransportRestartRegistry";
 import {
   evaluateDeviceDisconnects,
@@ -17,8 +18,11 @@ import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { executionTracker } from "../../src/daemon/executionTracker";
 import { waitForObservation, type WaitForWithSettled } from "../../src/server/observeTools";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
+import { seededMisses } from "./helpers/seededMisses";
 
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
+afterEach(() => DaemonState.getInstance().reset());
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 
@@ -246,7 +250,7 @@ type DiscoveryPlatform = "android" | "ios";
 
 describe("disconnect monitor miss counting", () => {
   const runDisconnectPoll = (
-    deviceDisconnectMisses: Map<string, number>,
+    deviceDisconnectMisses: DeviceLossMisses,
     bootedDeviceIds: Set<string>,
     candidateDeviceIds: Set<string>,
     succeededPlatforms: Set<DiscoveryPlatform> = new Set(),
@@ -267,7 +271,7 @@ describe("disconnect monitor miss counting", () => {
   };
 
   test("resets miss count when device appears in booted list", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     misses.set("device-1", 2);
 
     runDisconnectPoll(misses, new Set(["device-1"]), new Set(["device-1"]));
@@ -282,7 +286,7 @@ describe("disconnect monitor miss counting", () => {
   const ANDROID_SUCCEEDED = new Set<DiscoveryPlatform>(["android"]);
 
   test("increments miss count when device is absent", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
 
     runDisconnectPoll(misses, new Set(), new Set(["device-1"]));
     // No platform discovery succeeded, so retain the tracked device.
@@ -309,7 +313,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("reports disconnect after threshold consecutive misses", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
 
     for (let i = 1; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
       const result = runDisconnectPoll(
@@ -341,7 +345,7 @@ describe("disconnect monitor miss counting", () => {
    * that never covered it (#5683 review).
    */
   test("never ages out a candidate whose platform is unknown", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
 
     for (let i = 0; i <= DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
       const result = runDisconnectPoll(
@@ -360,7 +364,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("miss-counts an Android candidate when Android discovery succeeds empty", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
 
     const result = runDisconnectPoll(
       misses,
@@ -376,7 +380,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("miss-counts an iOS candidate when iOS discovery succeeds empty", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
 
     const result = runDisconnectPoll(
       misses,
@@ -392,7 +396,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("holds candidate misses when all platform discovery fails", () => {
-    const misses = new Map<string, number>([["device-1", 2]]);
+    const misses = seededMisses([["device-1", 2]]);
 
     const result = runDisconnectPoll(
       misses,
@@ -408,7 +412,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("miss-counts only candidates whose platform discovery succeeds", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
 
     const result = runDisconnectPoll(
       misses,
@@ -428,7 +432,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("a detached forced Android session follows the three-miss debounce", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const forced = new Set(["emulator-5554"]);
     const input = {
       deviceDisconnectMisses: misses,
@@ -453,7 +457,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("a forced missing device does not bypass the all-discovery-failed guard", () => {
-    const misses = new Map([["emulator-5554", 1]]);
+    const misses = seededMisses([["emulator-5554", 1]]);
     const result = evaluateDeviceDisconnects({
       deviceDisconnectMisses: misses,
       confirmedDisconnectedDeviceIds: new Set(),
@@ -474,7 +478,7 @@ describe("disconnect monitor miss counting", () => {
   test("fresh booted scan clears a stale forced missing flag", () => {
     const forceDisconnectedDeviceIds = new Set(["emulator-5554"]);
     const result = evaluateDeviceDisconnects({
-      deviceDisconnectMisses: new Map(),
+      deviceDisconnectMisses: new DeviceLossMisses(),
       confirmedDisconnectedDeviceIds: new Set(),
       forceDisconnectedDeviceIds,
       bootedDeviceIds: new Set(["emulator-5554"]),
@@ -528,7 +532,7 @@ describe("disconnect monitor miss counting", () => {
             new Error("adb: device 'emulator-5554' not found"),
           );
           const confirmation = evaluateDeviceDisconnects({
-            deviceDisconnectMisses: new Map(),
+            deviceDisconnectMisses: new DeviceLossMisses(),
             confirmedDisconnectedDeviceIds: new Set(),
             forceDisconnectedDeviceIds: daemon.forcedDisconnected,
             bootedDeviceIds: new Set(["emulator-5554"]),
@@ -624,7 +628,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("skips candidates from platforms whose discovery did not succeed", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     misses.set("sim-1", 2);
 
     // Android discovery succeeded; iOS discovery did not, so the iOS
@@ -643,7 +647,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("miss-counts a device once its platform discovery succeeds", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
 
     // iOS discovery succeeded but reported zero simulators, so an iOS
     // device that is genuinely gone should now be miss-counted.
@@ -660,7 +664,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("miss count resets after device reappears then starts over", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const poll = (booted: Set<string>) =>
       runDisconnectPoll(
         misses,
@@ -682,7 +686,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("does not carry misses from a replaced device incarnation", () => {
-    const misses = new Map<string, number>([["sim-1", 2]]);
+    const misses = seededMisses([["sim-1", 2]]);
     const candidateIncarnations = new Map<string, number>([["sim-1", 2]]);
     const deviceDisconnectMissIncarnations = new Map<string, number>([["sim-1", 1]]);
 
@@ -702,7 +706,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("does not carry misses to a replacement recording-only lifecycle", () => {
-    const misses = new Map<string, number>([["sim-1", 2]]);
+    const misses = seededMisses([["sim-1", 2]]);
     const priorIncarnations = recordingCandidateIncarnations([
       { deviceId: "sim-1", recordingId: "recording-old" },
     ]);
@@ -729,7 +733,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("clears miss state after a candidate stops being tracked", () => {
-    const misses = new Map<string, number>([["sim-1", 2]]);
+    const misses = seededMisses([["sim-1", 2]]);
     const confirmedDisconnectedDeviceIds = new Set(["sim-1"]);
 
     evaluateDeviceDisconnects({
@@ -749,7 +753,7 @@ describe("disconnect monitor miss counting", () => {
     const confirmedDisconnectedDeviceIds = new Set(["sim-1"]);
 
     evaluateDeviceDisconnects({
-      deviceDisconnectMisses: new Map(),
+      deviceDisconnectMisses: new DeviceLossMisses(),
       confirmedDisconnectedDeviceIds,
       bootedDeviceIds: new Set(["emulator-5554"]),
       candidateDeviceIds: new Set(),
@@ -762,7 +766,7 @@ describe("disconnect monitor miss counting", () => {
 
   test("clears a confirmed marker for a newly pooled candidate", () => {
     const confirmedDisconnectedDeviceIds = new Set(["sim-1"]);
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
 
     evaluateDeviceDisconnects({
       deviceDisconnectMisses: misses,
@@ -779,7 +783,7 @@ describe("disconnect monitor miss counting", () => {
   });
 
   test("keeps returning a threshold-missed stale candidate until caller settles cleanup", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const confirmedDisconnectedDeviceIds = new Set<string>();
     const input = {
       deviceDisconnectMisses: misses,
@@ -807,7 +811,7 @@ describe("disconnect monitor miss counting", () => {
 
   test("clears settled disconnect state when the device reappears", () => {
     const confirmedDisconnectedDeviceIds = new Set(["device-1"]);
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
 
     evaluateDeviceDisconnects({
       deviceDisconnectMisses: misses,
@@ -899,7 +903,12 @@ describe("disconnect monitor miss counting", () => {
     daemon.getDevicePool().getDevice = () => replacementDevice;
     daemon.getSessionManager().getSessionForDevice = () => null;
 
-    expect(daemon.isCapturedTargetCurrent("emulator-5554", capturedDevice, 4)).toBe(false);
+    expect(
+      daemon.isCapturedTargetCurrent("emulator-5554", {
+        pooledDeviceAtDisconnect: capturedDevice,
+        assignmentCountAtDisconnect: 4,
+      }),
+    ).toBe(false);
   });
 
   test("retains disconnect state when cleanup verification is inconclusive", async () => {

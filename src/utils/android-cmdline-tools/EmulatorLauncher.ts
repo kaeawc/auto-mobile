@@ -8,7 +8,10 @@ import {
   AndroidCommandOutputStreamRedactor,
   redactAndroidCommandOutput,
 } from "./redactAndroidCommandOutput";
-import type { EmulatorDeviceIdReservation } from "./EmulatorPortReservations";
+import type {
+  EmulatorDeviceIdReservation,
+  EmulatorGrpcPortLease,
+} from "./EmulatorPortReservations";
 
 import {
   EARLY_EXIT_DRAIN_TIMEOUT_MS,
@@ -27,6 +30,10 @@ import type {
   EmulatorLauncherHost,
 } from "./EmulatorLaunchSupport";
 import { EmulatorStartupValidation } from "./EmulatorStartupValidation";
+import {
+  handOffEmulatorGrpcLease,
+  leaseEmulatorGrpcPort,
+} from "./emulatorGrpc/emulatorGrpcLaunchLease";
 import { ENV, readEnvRaw } from "../../config/env";
 
 export * from "./EmulatorLaunchSupport";
@@ -149,10 +156,19 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       args.push(...requestedExtraArgs);
     }
     this.appendCameraPosterArguments(args, options.cameraPosterPath);
-    this.host.throwIfLaunchCancelled(avdName, isCancelled);
-    // Queue for capacity only now that this launch will spawn: every adoption
-    // path above returned first, and an invalid AVD has already failed fast.
-    return await this.spawnWithBootAdmission(avdName, perf, args, options);
+    let grpcLease: EmulatorGrpcPortLease | undefined;
+    try {
+      grpcLease = await leaseEmulatorGrpcPort(args, this.host.reservations());
+      this.host.throwIfLaunchCancelled(avdName, isCancelled);
+      // Queue for capacity only now that this launch will spawn: every adoption
+      // path above returned first, and an invalid AVD has already failed fast.
+      const launch = await this.spawnWithBootAdmission(avdName, perf, args, options);
+      handOffEmulatorGrpcLease(grpcLease, launch.process, this.host.reservations());
+      return launch;
+    } catch (error) {
+      grpcLease?.release();
+      throw error;
+    }
   }
 
   /**
@@ -408,9 +424,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
             reject(
               this.host.formatEarlyExitError(
                 avdName,
-                state.exitCode ?? null,
-                state.exitSignal ?? null,
-                state.earlyExitCategory,
+                {
+                  code: state.exitCode ?? null,
+                  signal: state.exitSignal ?? null,
+                  category: state.earlyExitCategory,
+                },
                 flushLaunchOutput(),
                 "",
               ),
@@ -456,8 +474,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
         context.perf.endOperation("panicDetection");
         context.resolve(context.child);
       },
-      options.expectedDeviceId,
-      options.signal,
+      { expectedDeviceId: options.expectedDeviceId, signal: options.signal },
     );
   }
 
@@ -629,9 +646,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     const postValidationExitError = (output: string): ActionableError => {
       const formattedError = this.host.formatEarlyExitError(
         avdName,
-        state.exitCode ?? null,
-        state.exitSignal ?? null,
-        state.earlyExitCategory,
+        {
+          code: state.exitCode ?? null,
+          signal: state.exitSignal ?? null,
+          category: state.earlyExitCategory,
+        },
         output,
         "",
       );
@@ -1038,9 +1057,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       reject(
         this.host.formatEarlyExitError(
           avdName,
-          completedExitCode,
-          completedExitSignal,
-          category,
+          { code: completedExitCode, signal: completedExitSignal, category },
           finalizedOutput,
           accelCheckOutput,
         ),

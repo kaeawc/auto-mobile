@@ -3,6 +3,7 @@ import addresses from "../../fixtures/prototype-egress-policy/addresses.json";
 import {
   checkUrl,
   classifyAddress,
+  destinationPort,
   forbiddenHeaderOf,
   StrictEgressPolicy,
 } from "../../../src/features/prototype/prototypeEgressPolicy";
@@ -165,5 +166,25 @@ describe("prototype egress policy", () => {
     expect(
       forbiddenHeaderOf({ Authorization: "value", "Content-Type": "application/json" }),
     ).toBeUndefined();
+  });
+
+  test("destinationPort applies each scheme's default port", () => {
+    expect(
+      [
+        "http://a.test/",
+        "https://a.test/",
+        "ws://a.test/",
+        "wss://a.test/",
+        "wss://a.test:8443/",
+      ].map((raw) => destinationPort(new URL(raw))),
+    ).toEqual([80, 443, 80, 443, 8443]);
+  });
+
+  test("a wss URL without a port is checked against 443, not 80", () => {
+    const only443 = new StrictEgressPolicy(new Set([443]));
+    const only80 = new StrictEgressPolicy(new Set([80]));
+    const url = new URL("wss://192.168.1.2/");
+    expect(checkUrl(url, only443)).toBe("The destination is not permitted.");
+    expect(checkUrl(url, only80)).toBeUndefined();
   });
 });

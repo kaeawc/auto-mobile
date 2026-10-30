@@ -1,3 +1,4 @@
+import { poolMatcher } from "./brokerPoolMatch";
 import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
 import {
   abortedByBrokerStop,
@@ -11,8 +12,9 @@ import {
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
+import { DestructionQueue, type SessionBrokerPoolDrainResult } from "./destructionQueue";
+import { IdlePoolExpiry } from "./idlePoolExpiry";
 import {
-  matchSessionDevice,
   normalizeSessionDeviceRequirement,
   resolveSessionDeviceProfile,
 } from "../../devices/sessionRequirements";
@@ -38,7 +40,7 @@ import { ResetReadiness } from "./resetReadiness";
 import { SessionBrokerFailureError } from "./devicePort";
 import { assertDeviceProfileEmulatable, requestedDeviceProfile } from "./deviceProfile";
 import type { SessionBrokerOptions } from "./brokerOptions";
-import { nativeProfile, poolProfile } from "./profile";
+import { nativeProfile } from "./profile";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
 import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
 import {
@@ -59,6 +61,8 @@ export { EXPORT_RETENTION_MS } from "./store";
 export { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./releaseReply";
 
 export { RECEIPT_RETENTION_MS } from "./retention";
+
+export type { SessionBrokerPoolDrainEntry, SessionBrokerPoolDrainResult } from "./destructionQueue";
 /** Rows deleted per retention call, so one pass never holds the write lock for long. */
 export const RECEIPT_PRUNE_BATCH = 500;
 
@@ -80,7 +84,8 @@ export class SessionBroker {
   private stopping = false;
 
   private readonly cleanup: RecoveryCleanup;
-  private readonly destroys = new Map<string, Promise<void>>();
+  private readonly destructions: DestructionQueue;
+  private readonly idleExpiry: IdlePoolExpiry;
   /** A stop leaves them durable for the successor. */
   private readonly queuedRecoveryReleases = new Set<string>();
   private readonly timing: BrokerTimingRecorder;
@@ -88,6 +93,13 @@ export class SessionBroker {
   private readonly resetReadiness: ResetReadiness;
 
   constructor(private readonly options: SessionBrokerOptions) {
+    this.destructions = new DestructionQueue(options.store, options.devices);
+    this.idleExpiry = new IdlePoolExpiry(
+      options.idleTtlMs ?? {},
+      options.store,
+      this.destructions,
+      () => this.now(),
+    );
     this.cleanup = new RecoveryCleanup(
       options.cleanupConcurrency,
       options.cleanupWaitMs,
@@ -99,14 +111,12 @@ export class SessionBroker {
       setTimeout: (callback, ms) => (options.timer ?? defaultTimer).setTimeout(callback, ms),
       clearTimeout: (handle) => (options.timer ?? defaultTimer).clearTimeout(handle),
     });
-    this.resetRelease = new BrokerResetRelease(
-      options,
-      this.timing,
-      () => this.now(),
-      (ticket, signal) => this.tryCleanup(ticket, signal),
-      (resourceId) => this.resetReadiness.notify(resourceId),
-      (resourceId, active) => this.resetReadiness.setResetActive(resourceId, active),
-    );
+    this.resetRelease = new BrokerResetRelease(options, this.timing, () => this.now(), {
+      tryCleanup: (ticket, signal) => this.tryCleanup(ticket, signal),
+      notifyReady: (resourceId) => this.resetReadiness.notify(resourceId),
+      setResetActive: (resourceId, active) =>
+        this.resetReadiness.setResetActive(resourceId, active),
+    });
   }
 
   private now(): number {
@@ -115,6 +125,22 @@ export class SessionBroker {
 
   stats(windowMs = 24 * 60 * 60 * 1000, limit = 5000): Promise<SessionBrokerStats> {
     return readBrokerTimingStats(this.options.store, () => this.now(), windowMs, limit);
+  }
+
+  /** Operator drain of idle pooled devices through the durable destroy journal (#15653). */
+  async drainIdlePool(): Promise<SessionBrokerPoolDrainResult> {
+    if (this.stopping) {
+      throw new SessionBrokerStoppingError();
+    }
+    return this.destructions.drainIdlePool();
+  }
+
+  /** Idle-expiry pass (#14364); a stopping broker expires nothing and its successor restarts clocks. */
+  async expireIdlePool(): Promise<SessionBrokerPoolDrainResult> {
+    if (this.stopping) {
+      return { resources: [] };
+    }
+    return this.idleExpiry.sweep();
   }
 
   prepare(
@@ -187,14 +213,10 @@ export class SessionBroker {
         `Session request ${config.requestId} preparation failed: ${errorMessage(error)}`,
         error,
       );
-      return this.handlePreparationFailure(
-        config,
-        livenessOwnerToken,
-        fingerprint,
-        admitted,
-        preparationFailureError(error, signal),
+      return this.handlePreparationFailure(config, livenessOwnerToken, fingerprint, admitted, {
+        error: preparationFailureError(error, signal),
         exportIdentity,
-      );
+      });
     } finally {
       this.finishPreparation(config.requestId);
     }
@@ -205,8 +227,7 @@ export class SessionBroker {
     livenessOwnerToken: string,
     fingerprint: string,
     admitted: boolean,
-    error: unknown,
-    exportIdentity?: BrokerExportIdentity,
+    { error, exportIdentity }: { error: unknown; exportIdentity?: BrokerExportIdentity },
   ): Promise<SessionBrokerResult> {
     const failure = failureFor(error);
     if (admitted) {
@@ -336,7 +357,10 @@ export class SessionBroker {
     signal.throwIfAborted();
     const catalog = await this.options.catalog(config.device.platform, signal);
     const defaults = this.options.defaults(config.device.platform);
-    const requirement = unwrap(normalizeSessionDeviceRequirement(config.device, defaults, catalog));
+    const capabilities = this.options.capabilities ?? {};
+    const requirement = unwrap(
+      normalizeSessionDeviceRequirement(config.device, defaults, catalog, capabilities),
+    );
     assertDeviceProfileEmulatable(requestedDeviceProfile(config));
     return {
       requestId: config.requestId,
@@ -345,8 +369,9 @@ export class SessionBroker {
       owner: this.options.owner,
       export: exportIdentity,
       limits: this.options.limits,
-      matches: (profile) => matchSessionDevice(requirement, poolProfile(profile)).kind === "match",
-      resolveCreation: () => unwrap(resolveSessionDeviceProfile(requirement, defaults, catalog)),
+      matches: poolMatcher(requirement, defaults),
+      resolveCreation: () =>
+        unwrap(resolveSessionDeviceProfile(requirement, defaults, catalog, capabilities)),
     };
   }
 
@@ -368,14 +393,16 @@ export class SessionBroker {
     // Each eviction removes a distinct idle resource. No creation reservation is made until
     // the existing journal confirms that device's absence.
     while (admission.kind === "evict") {
-      const destroyed = await this.destroy(admission.resource).catch((error: unknown) => {
-        if (classifyCleanReleaseError(error) !== "retryable") {
-          throw error;
-        }
-        // The durable destroying row retains capacity until recovery confirms absence.
-        logger.warn(`Device eviction remains pending: ${errorMessage(error)}`, error);
-        return false;
-      });
+      const destroyed = await this.destructions
+        .destroy(admission.resource)
+        .catch((error: unknown) => {
+          if (classifyCleanReleaseError(error) !== "retryable") {
+            throw error;
+          }
+          // The durable destroying row retains capacity until recovery confirms absence.
+          logger.warn(`Device eviction remains pending: ${errorMessage(error)}`, error);
+          return false;
+        });
       if (!destroyed) {
         // A new request ID may evict the next idle device during this destroy, bounded by pool size.
         throw new SessionBrokerFailureError({
@@ -453,6 +480,11 @@ export class SessionBroker {
   ): Promise<SessionBrokerResult> {
     const latest = await this.options.store.getRequest(config.requestId);
     return latest && latest.state !== "active" ? this.result(latest) : result;
+  }
+
+  /** Whether this host's configuration enables iPhone Duo sessions. */
+  supportsIosDuo(): boolean {
+    return this.options.capabilities?.iosDuo === true;
   }
 
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {
@@ -695,7 +727,7 @@ export class SessionBroker {
     );
     await this.joinReleases();
     await this.cleanup.join();
-    await Promise.allSettled([...this.destroys.values()]);
+    await this.destructions.joinAll();
   }
 
   /**
@@ -1008,38 +1040,7 @@ export class SessionBroker {
     return (this.preparations.get(requestId) ?? 0) > 0;
   }
 
-  private async destroy(resource: BrokerResourceRecord, signal?: AbortSignal): Promise<boolean> {
-    if ((await this.options.devices.destroy(resource, signal)) !== "absent") {
-      return false;
-    }
-    signal?.throwIfAborted();
-    return this.options.store.confirmDestroyed(destructionTicket(resource));
-  }
-
   private tryCleanup(ticket: DestructionTicket, signal?: AbortSignal): Promise<void> {
-    const previous = this.destroys.get(ticket.resourceId);
-    if (previous) {
-      return previous;
-    }
-    const pending = this.cleanupOnce(ticket, signal).finally(() => {
-      this.destroys.delete(ticket.resourceId);
-    });
-    this.destroys.set(ticket.resourceId, pending);
-    return pending;
-  }
-
-  private async cleanupOnce(ticket: DestructionTicket, signal?: AbortSignal): Promise<void> {
-    const resource = await this.options.store.getResource(ticket.resourceId);
-    if (resource?.state === "destroying" && resource.revision === ticket.revision) {
-      try {
-        signal?.throwIfAborted();
-        await this.destroy(resource, signal);
-      } catch (error) {
-        // The durable destroying row and native journal retain ownership for another pass.
-        logger.warn(
-          `Session resource ${resource.resourceId} cleanup remains pending: ${errorMessage(error)}`,
-        );
-      }
-    }
+    return this.destructions.tryCleanup(ticket, signal);
   }
 }

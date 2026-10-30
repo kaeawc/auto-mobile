@@ -4,7 +4,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import { addSessionUuidToSchema } from "../utils/schemaHelpers";
+import { addSessionUuidToSchema, resourceLinkField } from "../utils/schemaHelpers";
 import {
   startDeviceGestureRecording,
   getStoppedDeviceGestureRecording,
@@ -47,13 +47,9 @@ const recordDeviceGesturesTool = async (
   try {
     // The owning session is recorded so releasing it stops the recording instead of leaving it
     // to capture the device's next owner.
-    const result = await startDeviceGestureRecording(
-      device,
-      undefined,
-      undefined,
-      undefined,
-      params?.sessionUuid,
-    );
+    const result = await startDeviceGestureRecording(device, undefined, undefined, undefined, {
+      ownerSessionUuid: params?.sessionUuid,
+    });
 
     return createStructuredToolResponse({
       success: true,
@@ -77,6 +73,7 @@ const exportPlanSchema = addSessionUuidToSchema(
     .object({
       recordingId: z.string().optional().describe("Recording ID"),
       planName: z.string().optional().describe("Plan name"),
+      resourceLink: resourceLinkField(),
     })
     .strict(),
 );

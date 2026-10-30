@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "ios": {
+        "glassGroup": {}
+      },
+      "children": []
+    }
+  },
+  "expectedPath": "root.ios.glassGroup.spacing",
+  "expectedMessage": "Required property"
+}

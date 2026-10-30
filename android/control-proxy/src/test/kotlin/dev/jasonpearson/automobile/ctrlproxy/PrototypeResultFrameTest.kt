@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeResult
@@ -18,10 +19,39 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 
 class PrototypeResultFrameTest {
+  companion object {
+    @JvmStatic
+    @BeforeClass
+    fun warmCodec() {
+      // Polymorphic protocol serializers load once per JVM, outside per-test timing.
+      val frame = prototypeResultFrame("warmup", true, null, screenRound = false)
+      Json.decodeFromString<WebSocketResponse>(frame)
+    }
+  }
+
   private val json = Json { classDiscriminator = "type" }
+
+  @Test
+  fun `show shape is optional even with explicit default encoding`() {
+    val defaults = Json { encodeDefaults = true }
+    val result = PrototypeResult(timestamp = 1, success = true)
+    assertFalse(
+      "screenRound" in
+        defaults.encodeToJsonElement(PrototypeResult.serializer(), result).jsonObject,
+    )
+    for (round in listOf(true, false)) {
+      val frame = prototypeResultFrame("show", true, null, screenRound = round)
+      assertEquals(JsonPrimitive(round), json.parseToJsonElement(frame).jsonObject["screenRound"])
+      assertEquals(
+        round,
+        (json.decodeFromString<WebSocketResponse>(frame) as PrototypeResult).screenRound,
+      )
+    }
+  }
 
   @Test
   fun `patch conflict carries revision and scalar state in the same result frame`() {
@@ -173,5 +203,32 @@ class PrototypeResultFrameTest {
     val none =
       json.parseToJsonElement(prototypeStatusFrame("r9", listOf(entry.copy(storage = null)), 0))
     assertFalse("storage" in none.jsonObject.getValue("prototypes").jsonArray.single().jsonObject)
+  }
+
+  @Test
+  fun `degraded effects round trip in a show result and are omitted when empty`() {
+    val degraded =
+      listOf(
+        PrototypeDegradedEffect("root.children[0].style.effects[1]", "wave", "api"),
+        PrototypeDegradedEffect("root.style.effects[0]", "ripple", "budget"),
+      )
+    val frame = prototypeResultFrame("show", true, null, degradedEffects = degraded)
+    val parsed = json.parseToJsonElement(frame).jsonObject
+    assertEquals(
+      json.parseToJsonElement(
+        """[{"path":"root.children[0].style.effects[1]","type":"wave","reason":"api"},""" +
+          """{"path":"root.style.effects[0]","type":"ripple","reason":"budget"}]""",
+      ),
+      parsed["degradedEffects"],
+    )
+    val decoded = json.decodeFromString<WebSocketResponse>(frame) as PrototypeResult
+    assertEquals(degraded, decoded.degradedEffects)
+    val plain = json.parseToJsonElement(prototypeResultFrame("show", true, null)).jsonObject
+    assertFalse("degradedEffects" in plain)
+    val legacy =
+      json.decodeFromString<WebSocketResponse>(
+        """{"type":"prototype_result","timestamp":1,"success":true}""",
+      ) as PrototypeResult
+    assertNull(legacy.degradedEffects)
   }
 }

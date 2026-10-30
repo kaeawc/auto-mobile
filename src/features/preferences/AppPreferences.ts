@@ -20,8 +20,8 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
-import type { BootedDevice } from "../../models";
-import { ActionableError } from "../../models";
+import type { AndroidOrIosPlatform, BootedDevice } from "../../models";
+import { ActionableError, requireAndroidOrIosPlatform } from "../../models";
 import { findIosSimulatorAppProcess } from "../action/CrashApp";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { logger } from "../../utils/logger";
@@ -117,10 +117,15 @@ export class AppPreferences {
     this.plistReader = dependencies.plistReader;
   }
 
+  /** Every preference route is Android or iOS; a watch fails before any branch picks one. */
+  private get platform(): AndroidOrIosPlatform {
+    return requireAndroidOrIosPlatform(this.device.platform, "Preference access");
+  }
+
   async getPreference(input: GetPreferenceInput): Promise<PreferenceResult> {
     this.validateScope(input);
 
-    if (this.device.platform === "android") {
+    if (this.platform === "android") {
       if (input.scope === "systemProperty") {
         return this.getAndroidSystemProperty(input);
       }
@@ -134,7 +139,7 @@ export class AppPreferences {
     this.validateScope(input);
     const normalizedValue = normalizeValueForType(input.value, input.type);
 
-    if (this.device.platform === "android") {
+    if (this.platform === "android") {
       if (input.scope === "systemProperty") {
         await this.adb().executeCommand(
           `shell setprop ${shellQuoteUnlessSafe(input.key)} ${shellQuoteUnlessSafe(stringValue(normalizedValue))}`,
@@ -161,7 +166,7 @@ export class AppPreferences {
             verified: false,
             warning: [
               readBack.warning,
-              preferenceWriteWarning(this.device.platform, input.scope, store.kind),
+              preferenceWriteWarning(this.platform, input.scope, store.kind),
               `The value was written but the effective value read back has a different type (${readBack.type} vs requested ${input.type}), so equality was not verified.`,
             ]
               .filter(Boolean)
@@ -200,29 +205,29 @@ export class AppPreferences {
       : null;
     return {
       ...readBack,
-      type: this.device.platform === "ios" ? readBack.type : input.type,
+      type: this.platform === "ios" ? readBack.type : input.type,
       value:
-        this.device.platform === "ios"
+        this.platform === "ios"
           ? readBack.value
           : readBack.found
             ? parsedReadBackValue
             : readBack.value,
       verified:
         readBack.found &&
-        (this.device.platform === "android" &&
+        (this.platform === "android" &&
         input.scope === "sharedPreferences" &&
         input.type === "float"
           ? Math.fround(parsedReadBackValue as number) === Math.fround(normalizedValue as number)
           : valuesEqual(parsedReadBackValue, normalizedValue, input.type)),
-      warning: preferenceWriteWarning(this.device.platform, input.scope, iosStore?.kind),
+      warning: preferenceWriteWarning(this.platform, input.scope, iosStore?.kind),
     };
   }
 
   private validateScope(input: GetPreferenceInput): void {
-    if (this.device.platform === "android" && input.scope === "userDefaults") {
+    if (this.platform === "android" && input.scope === "userDefaults") {
       throw new ActionableError("userDefaults scope is only supported on iOS devices.");
     }
-    if (this.device.platform === "ios" && input.scope !== "userDefaults") {
+    if (this.platform === "ios" && input.scope !== "userDefaults") {
       throw new ActionableError(`${input.scope} scope is only supported on Android devices.`);
     }
     if (
@@ -637,9 +642,11 @@ export class AppPreferences {
               store.client.setPreference(
                 input.appId!,
                 iosSdkStoreName(store.store),
-                input.key,
-                stringValue(input.value),
-                IOS_PREFERENCE_WRITE_TYPES[input.type],
+                {
+                  key: input.key,
+                  value: stringValue(input.value),
+                  type: IOS_PREFERENCE_WRITE_TYPES[input.type],
+                },
                 timeoutMs,
               ),
             deadlineMs,
@@ -786,7 +793,7 @@ export class AppPreferences {
     return {
       success: true,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       scope: input.scope,
       appId: input.appId,
       suite: input.suite,

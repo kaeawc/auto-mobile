@@ -26,7 +26,7 @@ import {
   LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   LEGACY_DEFAULT_SESSION_TIMEOUT_MS,
   type SessionLifecycleSlots,
-  type SharedSessionAssignment,
+  type PersistedSessionRecovery,
   isSessionRecoveryIdentityLossError,
   persistedHeartbeatTimeoutSource,
   persistedLivenessPolicy,
@@ -48,8 +48,7 @@ export interface SessionRecoveryHost {
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
     persisted: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    recovery: PersistedSessionRecovery,
   ): Promise<Session>;
   readonly daemonSessionId: string | undefined;
   readonly deviceSessionRepository: Pick<
@@ -57,9 +56,6 @@ export interface SessionRecoveryHost {
     "claimRecoverableSession" | "releaseRecoverableSessionClaim"
   >;
   readPersistedSession(sessionId: string): Promise<DeviceSession | undefined>;
-  unlessBeingReplaced(
-    release: SessionReleaseSnapshot | undefined,
-  ): SessionReleaseSnapshot | undefined;
   terminalReleaseFromPersisted(
     sessionId: string,
     persisted: DeviceSession,
@@ -92,8 +88,7 @@ export class SessionRecovery {
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
     listed: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    recovery: PersistedSessionRecovery,
   ): Promise<Session> {
     if (this.host.isLapsedUnownedRestartRecovery(listed)) {
       listed = await this.host.admitPersistedSession(sessionId, listed);
@@ -108,8 +103,7 @@ export class SessionRecovery {
         devicePool,
         platform,
         claim?.row ?? listed,
-        initialOwnership,
-        shared,
+        recovery,
       );
     } catch (error) {
       if (claim) {
@@ -156,9 +150,7 @@ export class SessionRecovery {
     if (this.host.isLapsedUnownedRestartRecovery(current)) {
       current = await this.host.admitPersistedSession(sessionId, current);
     }
-    const terminalRelease = this.host.unlessBeingReplaced(
-      current && this.host.terminalReleaseFromPersisted(sessionId, current),
-    );
+    const terminalRelease = current && this.host.terminalReleaseFromPersisted(sessionId, current);
     if (terminalRelease) {
       this.host.sessionSlots.setTerminalSnapshot(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);
@@ -338,22 +330,38 @@ export class SessionRecovery {
     try {
       await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);
     } catch (error) {
+      // Preserve terminal recovery fencing while surfacing the explicit-bind refusal itself.
+      logger.debug(
+        `[SessionManager] Recovery assignment refused for ${sessionId}: ${errorMessage(error)}`,
+      );
+      const recoveryError =
+        error instanceof DeviceOwnedByOtherDaemonError && recoveryTarget
+          ? new SessionRecoveryIdentityLossError(
+              sessionId,
+              recoveryTarget,
+              "owned-by-other-daemon",
+              {
+                deviceId: error.deviceId,
+                ownerPid: error.ownerPid,
+              },
+            )
+          : error;
       if (
         !persisted ||
-        !isSessionRecoveryIdentityLossError(error) ||
-        error.sessionUuid !== sessionId
+        !isSessionRecoveryIdentityLossError(recoveryError) ||
+        recoveryError.sessionUuid !== sessionId
       ) {
         throw error;
       }
       if (!this.host.isNameReissueOnlyRow(persisted)) {
-        await this.host.terminalizePersistedRecoveryFailure(sessionId, persisted, error);
+        await this.host.terminalizePersistedRecoveryFailure(sessionId, persisted, recoveryError);
         throw error;
       }
       // #11418: a re-issued plan session has no device identity to protect. Its old device being
       // taken or gone is not a loss; the UUID stays usable on whatever ordinary allocation grants.
       logger.info(
         `[SessionManager] Re-issuing session ${sessionId} on another device: its previous device ` +
-          `${persisted.device_id} cannot be reused (${error.reason})`,
+          `${persisted.device_id} cannot be reused (${recoveryError.reason})`,
       );
       await devicePool.assignDeviceToSession(sessionId, platform ?? persisted.platform);
     }

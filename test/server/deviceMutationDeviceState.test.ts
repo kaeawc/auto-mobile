@@ -158,6 +158,20 @@ describe("setDeviceState journal intents", () => {
     ).toEqual([]);
   });
 
+  test("a deviceCondition clock skew journals the same clock intent as setDeviceState.clock", () => {
+    const skew = { deviceCondition: { faults: { clockSkew: { offsetSeconds: 86400 } } } };
+    expect(deviceToolMutations("setDeviceState", skew, "android")).toContainEqual({
+      kind: "clock",
+      key: "device",
+    });
+    const unset = { deviceCondition: { faults: { clockSkew: "unset" } } };
+    expect(
+      deviceToolMutations("setDeviceState", unset, "android").filter(
+        (entry) => entry.kind === "clock",
+      ),
+    ).toEqual([]);
+  });
+
   test("calls that apply no new Android state add no fallback", () => {
     const entries = deviceToolMutations(
       "setDeviceState",
@@ -197,6 +211,13 @@ describe("setPosture and changeLocalization journal intents", () => {
     expect(entries[0]).toEqual({ kind: "device-setting", key: "tool:setPosture" });
     expect(entries.filter(opaqueForcesFallback)).toHaveLength(1);
     expect(
+      deviceToolMutations(
+        "setPosture",
+        { posture: "opened", displayPreset: "tablet" },
+        "android",
+      ).filter(opaqueForcesFallback),
+    ).toHaveLength(2);
+    expect(
       deviceToolMutations("setPosture", { hingeAngle: 90 }, "ios").filter(opaqueForcesFallback),
     ).toEqual([]);
   });
@@ -223,15 +244,11 @@ describe("DeviceStateMutationPriorReader", () => {
       "shell getprop persist.sys.timezone",
       createExecResult("Europe/Paris\n", ""),
     );
-    const defaultReader = new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      () => {
+    const defaultReader = new DefaultMutationPriorReader({
+      stateFor: () => {
         throw new Error("the clock state must not be read for a time zone row");
       },
-      undefined,
-      {
+      observationReaders: {
         dataReader: {
           read: async (_device, mutations) => mutations.map(() => ({ state: "unobservable" })),
         },
@@ -239,7 +256,7 @@ describe("DeviceStateMutationPriorReader", () => {
           create: () => adb,
         }),
       },
-    );
+    });
     expect(await defaultReader.read(ANDROID, [{ kind: "clock", key: "timezone" }])).toEqual([
       { state: "present", value: "Europe/Paris" },
     ]);
@@ -331,19 +348,14 @@ describe("DeviceStateMutationPriorReader", () => {
 
   test("the default reader routes power intents to it and keeps the other priors", async () => {
     const adb = new FakePowerAdb();
-    const defaultReader = new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+    const defaultReader = new DefaultMutationPriorReader({
+      observationReaders: {
         dataReader: {
           read: async (_device, mutations) => mutations.map(() => ({ state: "unobservable" })),
         },
         deviceStateReader: reader(adb),
       },
-    );
+    });
     const priors = await defaultReader.read(ANDROID, [setting("power:dataSaver")]);
     expect(priors).toEqual([{ state: "present", value: false }]);
   });

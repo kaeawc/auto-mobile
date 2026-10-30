@@ -681,6 +681,106 @@
       }
     },
     {
+      "name" : "sdk_observation_result",
+      "wire" : {
+        "available" : true,
+        "observation" : {
+          "bounds" : {
+            "bottom" : 844,
+            "left" : 0,
+            "right" : 390,
+            "top" : 0
+          },
+          "capabilities" : [
+
+          ],
+          "captureIdentity" : 41,
+          "coordinateSpace" : "screen",
+          "orientation" : "portrait"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_observation_result"
+      }
+    },
+    {
+      "name" : "sdk_action_result",
+      "wire" : {
+        "available" : true,
+        "error" : "stale_observation",
+        "requestId" : "fixture-request-id",
+        "result" : {
+          "durationMs" : 0,
+          "reason" : "stale_observation",
+          "status" : "rejected"
+        },
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_action_result"
+      }
+    },
+    {
+      "name" : "sdk_web_snapshot_result",
+      "wire" : {
+        "available" : true,
+        "requestId" : "fixture-request-id",
+        "snapshot" : {
+          "elements" : [
+            {
+              "bounds" : [
+                10,
+                20,
+                80,
+                30
+              ],
+              "enabled" : true,
+              "focused" : false,
+              "id" : "submit",
+              "label" : "Submit",
+              "role" : "button",
+              "visible" : true
+            }
+          ],
+          "snapshotId" : "s1",
+          "url" : "https:\/\/fixture.local\/"
+        },
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_web_snapshot_result",
+        "webViewId" : "main",
+        "webViews" : [
+          {
+            "allowedOrigins" : [
+              "https:\/\/fixture.local"
+            ],
+            "contentProcessAvailable" : true,
+            "url" : "https:\/\/fixture.local\/",
+            "webViewId" : "main"
+          }
+        ]
+      }
+    },
+    {
+      "name" : "sdk_web_action_result",
+      "wire" : {
+        "available" : true,
+        "error" : "stale_snapshot",
+        "requestId" : "fixture-request-id",
+        "result" : {
+          "reason" : "stale_snapshot",
+          "status" : "rejected"
+        },
+        "success" : false,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "sdk_web_action_result"
+      }
+    },
+    {
       "name" : "voiceover_state_result",
       "wire" : {
         "enabled" : true,
@@ -998,6 +1098,26 @@
         "timestamp" : 1700000000000,
         "totalTimeMs" : 17,
         "type" : "appearance_result"
+      }
+    },
+    {
+      "name" : "siri_result",
+      "wire" : {
+        "perfTiming" : {
+          "children" : [
+            {
+              "durationMs" : 3,
+              "name" : "dispatch"
+            }
+          ],
+          "durationMs" : 7,
+          "name" : "gesturePhases"
+        },
+        "requestId" : "fixture-request-id",
+        "success" : true,
+        "timestamp" : 1700000000000,
+        "totalTimeMs" : 17,
+        "type" : "siri_result"
       }
     },
     {
@@ -1334,8 +1454,12 @@
     "reset_permissions_result",
     "rotate_result",
     "screenshot",
+    "sdk_action_result",
     "sdk_capabilities_result",
+    "sdk_observation_result",
     "sdk_trigger_result",
+    "sdk_web_action_result",
+    "sdk_web_snapshot_result",
     "select_all_result",
     "set_hierarchy_poll_interval_result",
     "set_network_error_simulation_result",
@@ -1344,6 +1468,7 @@
     "set_preference_result",
     "set_text_result",
     "shake_result",
+    "siri_result",
     "storage_capabilities_result",
     "swipe_result",
     "table_data_result",

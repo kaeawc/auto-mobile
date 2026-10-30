@@ -66,6 +66,7 @@ extension PrototypePalette {
     var sheetHandle: PrototypeRGBA? { themedRole("onSurfaceVariant") }
     var navSelected: PrototypeRGBA? { themedRole("onSecondaryContainer") }
     var navIndicator: PrototypeRGBA? { themedRole("secondaryContainer") }
+    var navContainer: PrototypeRGBA? { themedRole("surfaceContainer") }
     var navUnselected: PrototypeRGBA? { themedRole("onSurfaceVariant") }
     var placeholderFill: PrototypeRGBA? { themedRole("surfaceVariant") }
     var placeholderGlyph: PrototypeRGBA? { themedRole("onSurfaceVariant") }

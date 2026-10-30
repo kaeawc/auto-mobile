@@ -1,3 +1,4 @@
+import { internalMcpSessionId, internalOneShotCli } from "../internalToolParams";
 import { disabledDeviceResourceReport } from "../../utils/iosDeviceResourceImpact";
 import { mergeProvenResourceStates } from "../../utils/deviceResourceStates";
 import { observeConfiguredDeviceResources } from "../deviceResourceTools";
@@ -178,11 +179,7 @@ export async function reserveProvisionDeviceReadiness(
     boot.device,
     boot.sourceImage?.name ?? boot.device.name,
     undefined,
-    args.__oneShotCli
-      ? { oneShotCli: true }
-      : args.__mcpSessionId
-        ? { mcpSessionId: args.__mcpSessionId }
-        : undefined,
+    { autolockClient: readinessReservationOwner(args) },
   );
 }
 
@@ -191,12 +188,13 @@ export async function ensureProvisionDeviceReadiness(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   device: BootedDevice,
-  requestedIdentity: string,
   {
+    requestedIdentity,
     totalDeadlineMs,
     perf,
     signal,
   }: {
+    requestedIdentity: string;
     totalDeadlineMs: number;
     perf: ReturnType<typeof createPerformanceTracker>;
     signal: AbortSignal | undefined;
@@ -294,4 +292,15 @@ function provisionReadinessStatus(
       ? "automation_ready"
       : "device_ready"
     : "not_requested";
+}
+
+/** The reservation owner: an anonymous one-shot CLI call, else the caller's MCP connection. */
+export function readinessReservationOwner(
+  args: object,
+): { oneShotCli: true } | { mcpSessionId: string } | undefined {
+  if (internalOneShotCli(args)) {
+    return { oneShotCli: true };
+  }
+  const mcpSessionId = internalMcpSessionId(args);
+  return mcpSessionId ? { mcpSessionId } : undefined;
 }

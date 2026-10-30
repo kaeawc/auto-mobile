@@ -10,6 +10,7 @@ import {
   type SendKeysDependencies,
   type SendKeysObserver,
   type SendKeysTextClient,
+  type SendKeysPlatformDependencies,
 } from "../../../src/features/action/SendKeys";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -189,6 +190,7 @@ export function createSendKeysHarness(
   device: BootedDevice,
   observe: SendKeysObserver = observer,
   timer = autoAdvancingTimer(),
+  dependencies: Pick<SendKeysPlatformDependencies, "iosSdkTextRouter" | "iosSdkWebTextRouter"> = {},
 ) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
@@ -253,6 +255,7 @@ export function createSendKeysHarness(
       timer,
       textClient: client,
       inputKey: { press: async () => ({ success: true }) },
+      ...dependencies,
     }),
   };
 }

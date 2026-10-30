@@ -1,0 +1,45 @@
+{
+  "spec": {
+    "id": "map-limits",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "route": [
+        {
+          "lat": 0,
+          "lng": 0
+        }
+      ]
+    },
+    "requires": {
+      "platform": ["map"]
+    },
+    "root": {
+      "type": "map",
+      "camera": {
+        "lat": 90,
+        "lng": -180,
+        "zoom": 22,
+        "bearing": 360,
+        "tilt": 60
+      },
+      "mapStyle": "plain",
+      "fit": "route",
+      "markers": {
+        "path": "/route",
+        "as": "p",
+        "id": "{index}",
+        "lat": "{p.lat}",
+        "lng": "{p.lng}",
+        "title": "Stop {index}",
+        "animateMs": 2000
+      },
+      "polylines": []
+    }
+  },
+  "expectedPath": "root.polylines",
+  "expectedMessage": "Array length out of range"
+}

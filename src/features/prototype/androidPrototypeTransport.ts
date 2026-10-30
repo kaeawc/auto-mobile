@@ -35,7 +35,13 @@ export type AndroidPrototypeClient = Pick<
   | "supportsCommand"
 > &
   Partial<
-    Pick<AndroidCtrlProxyClient, "attachPrototypeRequestHost" | "requestClearPrototypeStorage">
+    Pick<
+      AndroidCtrlProxyClient,
+      | "attachPrototypeRequestHost"
+      | "attachPrototypeChannelHost"
+      | "requestClearPrototypeStorage"
+      | "requestAdvancePrototypeClock"
+    >
   >;
 
 /**
@@ -47,14 +53,13 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
 
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
     return withParsedAppearance(
-      await this.client.requestShowPrototype(
-        spec,
-        options.timeoutMs,
-        undefined,
-        options.displayId,
-        options.reset,
-        { appearance: options.appearance, replaceOthers: options.replaceOthers },
-      ),
+      await this.client.requestShowPrototype(spec, options.timeoutMs, undefined, {
+        displayId: options.displayId,
+        reset: options.reset,
+        appearance: options.appearance,
+        replaceOthers: options.replaceOthers,
+        locale: spec.strings ? options.locale : undefined,
+      }),
     );
   }
 
@@ -88,6 +93,13 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
 
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult> {
     return this.client.requestDismissPrototype(target, timeoutMs);
+  }
+
+  advanceClock(id: string, advanceTimeMs: number, timeoutMs?: number): Promise<PrototypeResult> {
+    if (!this.client.requestAdvancePrototypeClock) {
+      throw new ActionableError("Update the connected CtrlProxy to simulate prototype timers");
+    }
+    return this.client.requestAdvancePrototypeClock(id, advanceTimeMs, timeoutMs);
   }
 
   /** Wipes the values CtrlProxy stored for `id` (#12522); needs prototype_storage_v1. */

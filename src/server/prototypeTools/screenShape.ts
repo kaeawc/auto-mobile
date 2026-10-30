@@ -1,0 +1,60 @@
+import { AdbScreenRoundReader, type ScreenRoundReader } from "../../features/wear/screenRound";
+import type { BootedDevice } from "../../models";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
+
+/** Builds the round-display reader for one device; tests inject a fake. */
+export type ScreenRoundReaderFactory = (device: BootedDevice) => ScreenRoundReader;
+
+/**
+ * `screenRound` for a successful show on a Wear OS device (#14907), so an agent can tell why
+ * corner content is clipped. Gated like `observe`'s `isScreenRound`: other devices pay no read
+ * and report no field, and an unreadable display leaves it absent.
+ */
+export async function prototypeScreenShapeOutput(
+  input: {
+    action: string;
+    success: boolean;
+    device: BootedDevice;
+    deviceScreenRound?: boolean;
+    signal?: AbortSignal;
+  },
+  deps: { screenRoundFactory?: ScreenRoundReaderFactory; adbFactory?: AdbClientFactory },
+): Promise<{ screenRound?: boolean }> {
+  const { action, success, device, deviceScreenRound, signal } = input;
+  if (action !== "show" || !success || device.platform !== "android") {
+    return {};
+  }
+  if (device.formFactor !== "watch") {
+    return {};
+  }
+  if (typeof deviceScreenRound === "boolean") {
+    return { screenRound: deviceScreenRound };
+  }
+  const reader =
+    deps.screenRoundFactory?.(device) ??
+    new AdbScreenRoundReader((deps.adbFactory ?? defaultAdbClientFactory).create(device));
+  const round = await reader.isScreenRound(signal);
+  return round === undefined ? {} : { screenRound: round };
+}
+
+/**
+ * `formFactor` for a successful show on an Android Automotive device (#14922). The Android renderer is
+ * phone-oriented, so on a car display it lays out wide and landscape; the field tells an agent why. It
+ * comes from the booted device's form factor, so no read; other devices report no field.
+ */
+export function prototypeFormFactorOutput(input: {
+  action: string;
+  success: boolean;
+  device: BootedDevice;
+}): { formFactor?: "automotive" } {
+  const { action, success, device } = input;
+  return action === "show" &&
+    success &&
+    device.platform === "android" &&
+    device.formFactor === "automotive"
+    ? { formFactor: "automotive" }
+    : {};
+}

@@ -4,13 +4,22 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 
+/** How a stream device lookup retries discovery and tags its observations. */
+export interface StreamDeviceResolveOptions {
+  timer?: Timer;
+  signal?: AbortSignal;
+  source?: string;
+}
+
 export async function resolveStreamDevice(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
   platform: "android" | "ios" | "either" = "android",
-  timer: Timer = defaultTimer,
-  signal?: AbortSignal,
-  source = "webrtc-stream-resolve",
+  {
+    timer = defaultTimer,
+    signal,
+    source = "webrtc-stream-resolve",
+  }: StreamDeviceResolveOptions = {},
 ): Promise<BootedDevice> {
   // Explicit platforms avoid waiting on the other platform. Legacy video requests use either.
   let candidates = await deviceManager.getBootedDevices(platform);

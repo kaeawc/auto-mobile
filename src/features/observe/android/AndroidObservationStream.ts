@@ -164,11 +164,13 @@ export class AndroidObservationStream {
         screenshotBase64,
         screenWidth,
         screenHeight,
-        metadata,
         {
-          ...screenshotBindingPushOptions(binding),
-          rotation,
-          ...(frameContext === undefined ? {} : { frameContext }),
+          metadata,
+          options: {
+            ...screenshotBindingPushOptions(binding),
+            rotation,
+            ...(frameContext === undefined ? {} : { frameContext }),
+          },
         },
       );
     } catch (error) {

@@ -308,7 +308,9 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
 describe("InMemoryPrototypeStatusStore.shownOnDevice", () => {
   test("finds a shown prototype from any session on that device only, as a copy", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
-    store.record({ sessionUuid: "a", deviceId: "dev" }, "show", { id: "panel" }, ok, 2);
+    store.record({ sessionUuid: "a", deviceId: "dev" }, "show", { id: "panel" }, ok, {
+      displayId: 2,
+    });
     expect(store.shownOnDevice("dev", "panel")?.displayId).toBe(2);
     expect(store.shownOnDevice("other", "panel")).toBeUndefined();
     expect(store.shownOnDevice("dev", "missing")).toBeUndefined();
@@ -321,7 +323,7 @@ test("data is copied on show, adoption and every read, preserved on failure, and
   const store = new InMemoryPrototypeStatusStore(new FakeTimer());
   const scope = { deviceId: "data-device" };
   const data = { orders: [{ title: "Latte" }] };
-  store.record(scope, "show", { id: "orders" }, ok, undefined, { data });
+  store.record(scope, "show", { id: "orders" }, ok, { data });
   data.orders[0].title = "external";
   const status = store.status(scope);
   expect(status.prototypes[0].data).toEqual({ orders: [{ title: "Latte" }] });
@@ -333,19 +335,25 @@ test("data is copied on show, adoption and every read, preserved on failure, and
     shown.data.orders = [];
   }
   expect(store.status(scope).prototypes[0].data).toEqual({ orders: [{ title: "Latte" }] });
-  store.record(scope, "show", { id: "orders" }, { success: false }, undefined, {
-    data: { orders: [] },
-  });
+  store.record(
+    scope,
+    "show",
+    { id: "orders" },
+    { success: false },
+    {
+      data: { orders: [] },
+    },
+  );
   expect(store.status(scope).prototypes[0].data).toEqual({ orders: [{ title: "Latte" }] });
   store.adopt(scope, { id: "orders", data, pages: {}, state: {} });
   data.orders[0].title = "changed again";
   expect(store.status(scope).prototypes[0].data).toEqual({ orders: [{ title: "external" }] });
   store.adopt(scope, { id: "orders", pages: {}, state: {} });
   expect(store.status(scope).prototypes[0]).not.toHaveProperty("data");
-  store.record(scope, "show", { id: "orders" }, ok, undefined, { data });
+  store.record(scope, "show", { id: "orders" }, ok, { data });
   store.record(scope, "show", { id: "orders" }, ok);
   expect(store.status(scope).prototypes[0]).not.toHaveProperty("data");
-  store.record(scope, "show", { id: "orders" }, ok, undefined, { data });
+  store.record(scope, "show", { id: "orders" }, ok, { data });
   store.record(scope, "dismiss", { id: "orders" }, ok);
   expect(store.status(scope).prototypes).toEqual([]);
 });
@@ -367,7 +375,7 @@ describe("patch spec and data hooks", () => {
   function track(store: InMemoryPrototypeStatusStore) {
     const ticket = store.shownSpecs.beginShow(scope.deviceId);
     store.shownSpecs.endShow(scope.deviceId, ticket, { id: "panel", spec: { data: { count: 1 } } });
-    store.record(scope, "show", { id: "panel" }, ok, undefined, { data: { count: 1 } });
+    store.record(scope, "show", { id: "panel" }, ok, { data: { count: 1 } });
   }
   test("patched data refreshes every session without touching results or snapshots", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
@@ -387,7 +395,7 @@ describe("patch spec and data hooks", () => {
     store.recordPatchedData("device", "panel", undefined);
     expect(store.status(other)).toEqual(before);
     // Insert another session presence through the public show path, then prove device/id filtering.
-    store.record(scope, "show", { id: "panel" }, ok, undefined, { data: { count: 1 } });
+    store.record(scope, "show", { id: "panel" }, ok, { data: { count: 1 } });
     store.recordPatchedData("device", "other", { count: 3 });
     expect(store.status(scope).prototypes[0].data).toEqual({ count: 1 });
   });

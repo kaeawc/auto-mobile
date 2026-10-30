@@ -33,6 +33,7 @@ import type {
   EmulatorReadinessHost,
   EmulatorReadinessPoller,
   EmulatorReadinessState,
+  EmulatorReadyWait,
   OfflineTracker,
   ReadinessPollCycle,
   ReadinessPollOutcome,
@@ -49,6 +50,7 @@ const READINESS_PROBE_TIMEOUT_MS = 10_000;
 export type {
   EmulatorReadinessHost,
   EmulatorReadinessPoller,
+  EmulatorReadyWait,
   OfflineTracker,
 } from "./EmulatorReadinessTypes";
 
@@ -292,8 +294,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
     targetDeviceId?: string,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    { signal, options }: EmulatorReadyWait = {},
   ): Promise<BootedDevice> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
@@ -445,14 +446,11 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       state.resolvedTargetDeviceId,
     );
     const target = readinessTarget(correlatedTargetDeviceId, offlineTracker);
-    throw readinessTimeoutError(
-      avdName,
-      timeoutMs,
-      state.processExitError,
-      state.correlationFailure,
-      state.lastDiagnostic,
+    throw readinessTimeoutError(avdName, timeoutMs, state.processExitError, {
+      correlationFailure: state.correlationFailure,
+      diagnostic: state.lastDiagnostic,
       target,
-    );
+    });
   }
 
   private validateReadinessCandidate(
@@ -753,14 +751,12 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       signal,
       snapshot?.states,
     );
-    await this.host.maybeRecoverFreshOffline(
-      offlineTracker,
-      options,
-      correlatedTargetDeviceId,
+    await this.host.maybeRecoverFreshOffline(offlineTracker, options, correlatedTargetDeviceId, {
+      avdName,
+      signal,
       startTime,
       timeoutMs,
-      { avdName, signal },
-    );
+    });
     if (!polling.active || this.timer.now() - startTime >= timeoutMs) {
       return "stop";
     }
@@ -873,8 +869,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       options,
       cycle.correlatedTargetDeviceId,
       now,
-      pollingIntervalMs,
-      remainingPollingTimeMs,
+      { pollingIntervalMs, remainingPollingTimeMs },
     );
 
     // Never let the background poller sleep past the readiness deadline.

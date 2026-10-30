@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "icon-effects",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "flag": false
+    },
+    "data": {
+      "revision": 0
+    },
+    "root": {
+      "type": "icon",
+      "name": "home",
+      "effect": {
+        "type": "pulse",
+        "trigger": {
+          "data": "bad"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.effect.trigger.data",
+  "expectedMessage": "Invalid pointer value"
+}

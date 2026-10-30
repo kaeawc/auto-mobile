@@ -12,7 +12,7 @@ import {
   DaemonReadiness,
   type DaemonReadinessHost,
 } from "../../../src/daemon/manager/DaemonReadiness";
-import type { DaemonClientLike } from "../../../src/daemon/client";
+import type { DaemonClientLike } from "../../../src/daemon/client/client";
 import type { DaemonStatus } from "../../../src/daemon/types";
 import { FakeTimer } from "../../fakes/FakeTimer";
 

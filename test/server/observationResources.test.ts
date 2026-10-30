@@ -4,6 +4,10 @@ import type { BootedDevice, ObserveResult } from "../../src/models";
 import type { ScreenshotResult } from "../../src/models/ScreenshotResult";
 import type { TrackedScreenshotService } from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
 import type { ScreenshotJobOptions } from "../../src/utils/ScreenshotJobTracker";
+import {
+  ANDROID_PROTOVIEWER_PACKAGE,
+  IMPORTED_PROTOTYPE_CONTENT,
+} from "../../src/features/observe/importedPrototypeContent";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
@@ -714,6 +718,37 @@ describe("unscoped latest observation resources", () => {
       RealObserveScreen.getRecentCachedResultForDevice(deviceA.deviceId)
         ?.screenshotCaptureAttempted,
     ).toBe(false);
+  });
+
+  test("marks the latest cached observation of an imported prototype as untrusted", async () => {
+    await cacheObservationFor(deviceA, ANDROID_PROTOVIEWER_PACKAGE);
+
+    const content = await readLatestObservation();
+
+    expect(JSON.parse(content.text!).importedPrototypeContent).toEqual(IMPORTED_PROTOTYPE_CONTENT);
+    expect(
+      RealObserveScreen.getRecentCachedObservation()?.result.importedPrototypeContent,
+    ).toBeUndefined();
+  });
+
+  test("marks a session cached observation of an imported prototype as untrusted", async () => {
+    await cacheObservationFor(deviceA, ANDROID_PROTOVIEWER_PACKAGE);
+    registerDirectSessionDevice(sessionUuid, deviceA);
+
+    const content = await readTemplate("automobile:observation/session/session-123/latest");
+
+    expect(JSON.parse(content.text!).importedPrototypeContent).toEqual(IMPORTED_PROTOTYPE_CONTENT);
+  });
+
+  test("leaves ordinary cached observations unmarked on both resource paths", async () => {
+    await cacheObservationFor(deviceA, "com.example.app");
+    registerDirectSessionDevice(sessionUuid, deviceA);
+
+    const latest = await readLatestObservation();
+    const session = await readTemplate("automobile:observation/session/session-123/latest");
+
+    expect(JSON.parse(latest.text!)).not.toHaveProperty("importedPrototypeContent");
+    expect(JSON.parse(session.text!)).not.toHaveProperty("importedPrototypeContent");
   });
 
   test("serves the screenshot captured with the requested observation", async () => {

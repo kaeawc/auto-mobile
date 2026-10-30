@@ -82,6 +82,12 @@ export interface SharedSessionAssignment {
   recoveryWait: PromiseWithResolvers<RecoveryAssignmentWait | undefined>;
 }
 
+/** Who a recovered persisted session belongs to and the shared assignment it publishes into. */
+export interface PersistedSessionRecovery {
+  initialOwnership: "owned" | "awaiting-owner";
+  shared: SharedSessionAssignment;
+}
+
 /** A recoverable row this daemon claimed for recovery, and the owner a failed recovery restores. */
 export interface ClaimedRecoverableRow {
   row: DeviceSession;

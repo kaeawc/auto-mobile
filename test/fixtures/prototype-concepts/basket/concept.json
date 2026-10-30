@@ -1,0 +1,20 @@
+{
+  "issue": 14223,
+  "name": "Basket",
+  "capabilities": [
+    "prototype_carousel_v1",
+    "prototype_checks_v1",
+    "prototype_data_model_v1",
+    "prototype_emit_context_v1",
+    "prototype_flow_grid_v1",
+    "prototype_format_v1",
+    "prototype_menus_v1",
+    "prototype_search_bar_v1",
+    "prototype_semantics_v1",
+    "prototype_stack_v1",
+    "prototype_storage_v1",
+    "prototype_string_conditions_v1",
+    "prototype_text_field_options_v1",
+    "prototype_timers_v1"
+  ]
+}

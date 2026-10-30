@@ -37,13 +37,20 @@ class FakeStdin {
 
 class FakeWritableErrorSource implements StdioWriteErrorSource {
   readonly listeners: Array<(error: Error) => void> = [];
+  readonly closeListeners: Array<() => void> = [];
   writeCalls = 0;
   unhandledErrorReports = 0;
 
   constructor(private readonly fakeProcess: FakeProcess) {}
 
-  on(_event: "error", listener: (error: Error) => void): this {
-    this.listeners.push(listener);
+  on(event: "error", listener: (error: Error) => void): this;
+  on(event: "close", listener: () => void): this;
+  on(event: "error" | "close", listener: ((error: Error) => void) | (() => void)): this {
+    if (event === "error") {
+      this.listeners.push(listener);
+    } else {
+      this.closeListeners.push(listener as () => void);
+    }
     return this;
   }
 
@@ -82,8 +89,14 @@ async function flushUntilExit(fakeProcess: FakeProcess): Promise<void> {
 }
 
 describe("synchronous stdio client-gone callbacks", () => {
-  type StdioEvent = "stdin end" | "stdin close" | "stdin error" | "stdout error";
-  const cases: StdioEvent[] = ["stdin end", "stdin close", "stdin error", "stdout error"];
+  type StdioEvent = "stdin end" | "stdin close" | "stdin error" | "stdout error" | "stdout close";
+  const cases: StdioEvent[] = [
+    "stdin end",
+    "stdin close",
+    "stdin error",
+    "stdout error",
+    "stdout close",
+  ];
 
   function installCallback(
     lifecycle: ProcessLifecycleHandlers,
@@ -91,7 +104,7 @@ describe("synchronous stdio client-gone callbacks", () => {
     event: StdioEvent,
     callback?: () => void,
   ): void {
-    if (event === "stdout error") {
+    if (event.startsWith("stdout")) {
       lifecycle.installStdoutShutdownHandler(source, callback);
     } else {
       lifecycle.installStdinShutdownHandlers(source, callback);
@@ -197,6 +210,31 @@ describe("synchronous stdio client-gone callbacks", () => {
 });
 
 describe("stdio write errors (#11710)", () => {
+  test.each(["error-first", "close-first"])("stdout %s reports client loss once", async (order) => {
+    const fakeProcess = new FakeProcess();
+    const stdout = new FakeStdin();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, new FakeTimer());
+    let callbacks = 0;
+    const reasons: string[] = [];
+    lifecycle.installStdoutShutdownHandler(stdout, () => {
+      callbacks++;
+    });
+    lifecycle.setShutdownHandler((reason) => {
+      reasons.push(reason);
+    });
+
+    if (order === "close-first") {
+      stdout.emit("close");
+    }
+    stdout.emit("error", new Error("broken output"));
+    stdout.emit("close");
+    await flushUntilExit(fakeProcess);
+
+    expect(callbacks).toBe(1);
+    expect(reasons).toEqual(["stdout"]);
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
   test.each(["EPIPE", "EIO"])("stdout %s shuts down once and exits cleanly", async (code) => {
     const fakeProcess = new FakeProcess();
     const stdout = new FakeWritableErrorSource(fakeProcess);
@@ -289,6 +327,7 @@ describe("stdio write errors (#11710)", () => {
     lifecycle.installStdoutShutdownHandler(stdout);
 
     expect(stdout.listeners).toHaveLength(1);
+    expect(stdout.closeListeners).toHaveLength(1);
   });
 
   test("installs each stderr error guard only once", () => {
@@ -406,6 +445,24 @@ describe("process lifecycle handlers", () => {
     await flushMicrotasks();
 
     expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("a handler-set exit code is used once an orderly shutdown completes (#15312)", async () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+    let cleaned = false;
+    lifecycle.install();
+    lifecycle.setShutdownHandler(async () => {
+      lifecycle.setShutdownExitCode(130);
+      await Promise.resolve();
+      cleaned = true;
+    });
+
+    fakeProcess.emit("SIGINT");
+    await flushUntilExit(fakeProcess);
+
+    expect(cleaned).toBe(true);
+    expect(fakeProcess.exitCodes).toEqual([130]);
   });
 
   test("awaits the bound shutdown handler before exiting", async () => {
@@ -819,6 +876,25 @@ describe("stdin answer wait (#12049)", () => {
     rig.fakeProcess.emit("SIGTERM");
     await flushUntilExit(rig.fakeProcess);
     expect(rig.shutdowns).toEqual(["SIGTERM"]);
+    expect(rig.fakeProcess.exitCodes).toEqual([0]);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
+    rig.answer.resolve();
+    await flushMicrotasks();
+    expect(rig.fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("stdout close interrupts the stdin answer wait and clears its deadline", async () => {
+    const rig = waiting();
+    const stdout = new FakeStdin();
+    rig.lifecycle.installStdoutShutdownHandler(stdout);
+    rig.stdin.emit("end");
+    await flushMicrotasks();
+    expect(rig.fakeProcess.exitCodes).toEqual([]);
+
+    stdout.emit("close");
+    await flushUntilExit(rig.fakeProcess);
+
+    expect(rig.shutdowns).toEqual(["stdout"]);
     expect(rig.fakeProcess.exitCodes).toEqual([0]);
     expect(rig.timer.getPendingTimeoutCount()).toBe(0);
     rig.answer.resolve();

@@ -5,6 +5,12 @@ import XCTest
 /// renderer reads, and taps, picks and drags change state and emit events as Android's
 /// `PrototypeRuntime` does.
 final class PrototypeComponentsTests: XCTestCase {
+    override static func setUp() {
+        super.setUp()
+        // Warm the generated contract outside per-test timing, including isolated back-policy runs.
+        _ = try? PrototypeSpecStrictValidator.validate(data: Data("{}".utf8))
+    }
+
     private func fixture(_ name: String) throws -> PrototypeSpec {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -99,10 +105,10 @@ final class PrototypeComponentsTests: XCTestCase {
         XCTAssertEqual(nodes[1].headline, "Sync")
         XCTAssertEqual(nodes[1].supporting, "Keep alarms in step across devices")
         XCTAssertEqual(nodes[1].leadingIcon, "refresh")
-        XCTAssertEqual(nodes[1].trailing?.type, "switch")
+        XCTAssertEqual(nodes[1].trailing, .switch(stateKey: "sync"))
         XCTAssertEqual(nodes[1].toggleKey, "sync")
         XCTAssertEqual(nodes[2].toggleKey, "wifi")
-        XCTAssertEqual(nodes[3].trailing?.name, "chevron_right")
+        XCTAssertEqual(nodes[3].trailing, .icon(name: "chevron_right"))
         XCTAssertNil(nodes[3].toggleKey, "a trailing icon is decorative")
         XCTAssertEqual(nodes[5].variant, "tonal")
         XCTAssertEqual(nodes[5].icon, "check")
@@ -288,6 +294,112 @@ final class PrototypeComponentsTests: XCTestCase {
         let state: [String: JSONValue] = ["a": .bool(true), "hide": .bool(true)]
         XCTAssertEqual(root.openModals(state: state, pages: ["p": 1]).map(\.id), ["page1", "outer", "inner"])
         XCTAssertEqual(root.openModals(state: state, pages: [:]).map(\.id), ["page0", "outer", "inner"])
+    }
+
+    func testBottomSheetIsCollectedOnlyWhenOpenAndVisible() throws {
+        let root = try spec("""
+        {"id":"s","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"bottomSheet","id":"sheet","openWhen":{"key":"open","equals":true},
+          "visibleWhen":{"key":"visible","equals":true},
+          "child":{"type":"snackbar","id":"nested","text":"Saved",
+                   "openWhen":{"key":"notice","equals":true}}}}
+        """).root
+        let open: [String: JSONValue] = ["open": .bool(true), "visible": .bool(true), "notice": .bool(true)]
+        XCTAssertEqual(root.openModals(state: open, pages: [:]).map(\.id), ["sheet", "nested"])
+        XCTAssertTrue(
+            root.openModals(state: open.merging(["open": .bool(false)]) { _, value in value }, pages: [:])
+                .isEmpty
+        )
+        XCTAssertTrue(
+            root.openModals(state: open.merging(["visible": .bool(false)]) { _, value in value }, pages: [:])
+                .isEmpty
+        )
+        XCTAssertTrue(root.openModals(state: [:], pages: [:]).isEmpty)
+        XCTAssertFalse(root.drawsInPlace { $0.holds(open) })
+        XCTAssertFalse(root.blocksPage(state: open, pages: [:]))
+        XCTAssertEqual(root.layerAccessibility(state: open, pages: [:]), .container)
+    }
+
+    func testOpenModalsCollectBottomSheetsNestedInRepeatedRowsOnce() throws {
+        let root = try spec("""
+        {"id":"r","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"column","repeat":{"as":"item","items":[{"id":1},{"id":2}]},"children":[
+          {"type":"row","children":[
+           {"type":"text","text":"Item {item.id}"},
+           {"type":"bottomSheet","openWhen":{"key":"open_{item.id}","equals":true},
+            "child":{"type":"text","text":"Sheet {item.id}"}}]}]}}
+        """).root
+        let open: [String: JSONValue] = ["open_1": .bool(true), "open_2": .bool(true)]
+        let modals = root.openModals(state: open, pages: [:])
+        XCTAssertEqual(modals.map { $0.openCondition?.key }, ["open_1", "open_2"])
+        XCTAssertEqual(Set(modals.map(ObjectIdentifier.init)).count, 2)
+        XCTAssertEqual(
+            root.openModals(state: ["open_2": .bool(true)], pages: [:]).map { $0.openCondition?.key }, ["open_2"]
+        )
+        for row in root.children ?? [] {
+            XCTAssertEqual(row.drawnChildren { $0.holds(open) }.map(\.offset), [0])
+        }
+    }
+
+    func testOpenModalsCollectBottomSheetsDeclaredInLazyListRowTemplates() throws {
+        let loaded = try spec("""
+        {"id":"l","window":{"placement":{"type":"fullscreen"}},
+         "data":{"feed":{"items":[{"id":1},{"id":2}]}},
+         "root":{"type":"list","maxItems":2,"repeat":{"items":{"path":"/feed/items"},"as":"post","key":"id"},
+          "children":[{"type":"column","children":[
+           {"type":"text","text":"Row {post.id}"},
+           {"type":"bottomSheet","openWhen":{"key":"open_{post.id}","equals":true},
+            "child":{"type":"text","text":"Sheet {post.id}"}}]}]}}
+        """)
+        let open: [String: JSONValue] = ["open_2": .bool(true)]
+        let first = loaded.root.openModals(state: open, pages: [:], data: loaded.data)
+        XCTAssertEqual(first.map { $0.openCondition?.key }, ["open_2"])
+        // The same node comes back while the row is unchanged, so view identity survives a re-render.
+        let again = loaded.root.openModals(state: open, pages: [:], data: loaded.data)
+        XCTAssertEqual(first.map(ObjectIdentifier.init), again.map(ObjectIdentifier.init))
+        XCTAssertTrue(loaded.root.openModals(state: [:], pages: [:], data: loaded.data).isEmpty)
+        XCTAssertTrue(loaded.root.openModals(state: open, pages: [:]).isEmpty, "no data, no rows")
+    }
+
+    func testLazyListWithoutModalTemplateContributesNoModals() throws {
+        let loaded = try spec("""
+        {"id":"l","window":{"placement":{"type":"fullscreen"}},
+         "data":{"feed":{"items":[{"id":1}]}},
+         "root":{"type":"list","maxItems":1,"repeat":{"items":{"path":"/feed/items"},"as":"post","key":"id"},
+          "children":[{"type":"text","text":"Row {post.id}"}]}}
+        """)
+        XCTAssertTrue(loaded.root.openModals(state: [:], pages: [:], data: loaded.data).isEmpty)
+    }
+
+    func testBackClosesLazyRowDrawerBeforePoppingBackgroundStack() throws {
+        let loaded = try spec("""
+        {"id":"l","window":{"placement":{"type":"fullscreen"}},
+         "state":{"open_2":true},"data":{"feed":{"items":[{"id":1},{"id":2}]}},
+         "root":{"type":"stack","id":"nav","start":"home","screens":{
+          "home":{"type":"text","text":"Home"},
+          "detail":{"type":"list","maxItems":2,
+           "repeat":{"items":{"path":"/feed/items"},"as":"post","key":"id"},
+           "children":[{"type":"column","children":[
+            {"type":"text","text":"Row {post.id}"},
+            {"type":"drawer","edge":"start","openWhen":{"key":"open_{post.id}","equals":true},
+             "child":{"type":"text","text":"Drawer {post.id}"}}]}]}}}}
+        """)
+        var session = PrototypeSession()
+        session.show(loaded)
+        let push = try JSONDecoder().decode(
+            PrototypeAction.self, from: Data(#"{"type":"push","stack":"nav","screen":"detail"}"#.utf8)
+        )
+        _ = session.run([push])
+        XCTAssertNil(PrototypeStacks.popTarget(
+            root: loaded.root, state: session.state, pages: session.pages, stacks: session.stacks, data: session.data
+        ), "An open lazy drawer must block direct stack pop targeting")
+        XCTAssertNil(session.stackPopTarget, "An open lazy drawer must block the background stack")
+        _ = session.popTopmostStack()
+        XCTAssertEqual(session.state["open_2"], .bool(false), "Back must close the lazy-row drawer")
+        XCTAssertEqual(session.stacks["nav"]?.path, ["home", "detail"])
+        XCTAssertEqual(session.stackPopTarget, "nav")
+        _ = session.popTopmostStack()
+        XCTAssertEqual(session.stacks["nav"]?.path, ["home"])
     }
 
     // MARK: Pickers and sliders

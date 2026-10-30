@@ -4,6 +4,7 @@ import type {
   Element,
   ElementSelectionResult,
   ObserveResult,
+  Point,
   TapOnSelectedElement,
   ViewHierarchyResult,
 } from "../../../src/models";
@@ -195,22 +196,12 @@ async function executeFocusWithDuplicateEmail(
     hierarchy: { node: { $: {}, node: [hierarchyNode(clickable), hierarchyNode(focused)] } },
   };
   if (moveDuringStability) {
-    identifyObservedHierarchy(
-      "android",
-      before,
-      "cached-ok",
-      undefined,
-      undefined,
-      "initial-capture",
-    );
-    identifyObservedHierarchy(
-      "android",
-      stableHierarchy,
-      "fresh",
-      undefined,
-      undefined,
-      "stable-capture",
-    );
+    identifyObservedHierarchy("android", before, "cached-ok", undefined, {
+      captureId: "initial-capture",
+    });
+    identifyObservedHierarchy("android", stableHierarchy, "fresh", undefined, {
+      captureId: "stable-capture",
+    });
   }
   const selector = new FakeElementSelector();
   const selectionIntents: string[] = [];
@@ -256,8 +247,7 @@ async function executeFocusWithDuplicateEmail(
   tap.refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
   tap.executeAndroidTap = async (
     _action: string,
-    _x: number,
-    _y: number,
+    _point: Point,
     _duration: number,
     element: Element,
   ) => {

@@ -27,6 +27,7 @@ internal object PrototypeNodeBindings {
   ): PrototypeSpecError? {
     val stored = value.text("stateKey")?.let { state[it] as? JsonPrimitive }
     return when (value.text("type")) {
+      "adaptive" -> PrototypeAdaptiveRules.error(value, path, state)
       "textField" -> textFieldErrors(value, path, stored)
       "slider" -> sliderErrors(value, path, stored)
       "chip" -> chipErrors(value, path, stored)
@@ -82,7 +83,10 @@ internal object PrototypeNodeBindings {
     path: String,
     stored: JsonPrimitive?,
   ): PrototypeSpecError? {
-    if (value.text("type") !in setOf("tabBar", "bottomNav")) return null
+    if (
+      value.text("type") !in setOf("tabBar", "bottomNav", "pager") || value.text("stateKey") == null
+    )
+      return null
     val number = stored?.takeIf { !it.isString }?.doubleOrNull
     return if (!isNonnegativeInteger(number))
       fail("$path.stateKey", "Selection requires a nonnegative integer state key")

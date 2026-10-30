@@ -258,6 +258,39 @@ describe("Android keep-booted strategy", () => {
     expect(result.fallbackReason).toContain("sendBroadcast");
   });
 
+  test("a journaled posture change stays clean when the reset restores the fold posture", async () => {
+    const { port, strategy, journal } = await rig();
+    await journal.record(SCOPE, {
+      kind: "opaque",
+      key: opaqueIntentKey("setDeviceState", "posture"),
+      priorValue: { state: "unobservable" },
+      toolName: "setPosture",
+    });
+    const result = await strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+      ...SESSION,
+      foldPostureRestored: true,
+    });
+    expect(port.cleanCount).toBe(1);
+    expect(result).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+  });
+
+  test("a posture change with a display preset still escalates despite the fold restore", async () => {
+    const { port, strategy, journal } = await rig();
+    await journal.record(SCOPE, {
+      kind: "opaque",
+      key: opaqueIntentKey("setDeviceState", "posture", "displayPreset"),
+      priorValue: { state: "unobservable" },
+      toolName: "setPosture",
+    });
+    await expect(
+      strategy.reset(ANDROID_RESET_DEVICE, new Set(), async () => {}, {
+        ...SESSION,
+        foldPostureRestored: true,
+      }),
+    ).rejects.toThrow("fallback or destruction");
+    expect(port.cleanCount).toBe(0);
+  });
+
   test("a best-effort opaque journal row keeps the booted clean", async () => {
     const { port, strategy, journal } = await rig();
     await journal.record(SCOPE, {
@@ -1275,6 +1308,60 @@ describe("keep-booted derived budgets", () => {
   });
 });
 
+const systemPropertyRow = (key: string): DeviceMutationInput => ({
+  kind: "preference",
+  key: JSON.stringify({
+    store: "preference",
+    scope: "systemProperty",
+    appId: null,
+    suite: null,
+    userId: null,
+    key,
+  }),
+  priorValue: { state: "absent" },
+  toolName: "setPreference",
+});
+
+test("a session that set a system property reverts it in place and releases clean (#15792)", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: {
+      reset: async () => {
+        throw new Error("fallback must not run");
+      },
+    },
+  });
+  const row = systemPropertyRow("debug.app.api_url");
+  await journal.record(SCOPE, row);
+  expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+  expect(port.reverted).toMatchObject([row]);
+});
+
+test("a read-only system property row still escalates (#15792)", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },
+  });
+  await journal.record(SCOPE, systemPropertyRow("ro.debuggable"));
+  expect(await reset()).toMatchObject({
+    outcome: "fallback:snapshot",
+    fallbackReason: expect.stringContaining("cannot be baseline-cleaned"),
+  });
+  expect(port.reverted).toEqual([]);
+});
+
+test("a failed system property read-back escalates (#15792)", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },
+  });
+  await journal.record(SCOPE, systemPropertyRow("debug.app.api_url"));
+  port.beforeWrite = async () => {
+    throw new Error("property did not read back");
+  };
+  expect(await reset()).toMatchObject({
+    outcome: "fallback:snapshot",
+    fallbackReason: expect.stringContaining("property did not read back"),
+  });
+});
+
 test("failed uncovered fontScale journal revert requires fallback", async () => {
   const { journal, port, reset } = await rig({
     fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },
@@ -1286,6 +1373,24 @@ test("failed uncovered fontScale journal revert requires fallback", async () => 
   expect(await reset()).toMatchObject({
     outcome: "fallback:snapshot",
     fallbackReason: expect.stringContaining("fontScale write failed"),
+  });
+});
+
+test("failed volume journal revert requires fallback, not the volume_* settings clean", async () => {
+  const { journal, port, reset } = await rig({
+    fallback: { reset: async () => ({ outcome: "clean", mode: "snapshot", phases: {} }) },
+  });
+  await journal.record(SCOPE, {
+    ...SETTING,
+    key: "volume:music",
+    priorValue: { state: "present", value: 5 },
+  });
+  port.beforeWrite = async () => {
+    throw new Error("music volume did not read back");
+  };
+  expect(await reset()).toMatchObject({
+    outcome: "fallback:snapshot",
+    fallbackReason: expect.stringContaining("music volume did not read back"),
   });
 });
 

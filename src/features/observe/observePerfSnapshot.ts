@@ -1,4 +1,5 @@
 import type { BootedDevice, ObserveResult } from "../../models";
+import { isAndroidOrIosPlatform } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { getPerfWindowBuffer } from "../performance/PerfWindowBuffer";
@@ -29,6 +30,11 @@ export async function attachObservePerfSnapshot(
     logger.debug("[PerfSnapshot] Skipping snapshot, no active app");
     return;
   }
+  const platform = device.platform;
+  if (!isAndroidOrIosPlatform(platform)) {
+    logger.debug(`[PerfSnapshot] Skipping snapshot, no perf sampling on ${platform}`);
+    return;
+  }
 
   try {
     // Refresh the sampling lease. The first observe warms the window;
@@ -36,7 +42,7 @@ export async function attachObservePerfSnapshot(
     const { getPerformanceMonitor, getLastStartupTimingMs } =
       await import("../performance/PerformanceMonitor");
     const monitor = getPerformanceMonitor();
-    monitor.requestPerfWindow(device.deviceId, appId, device.platform);
+    monitor.requestPerfWindow(device.deviceId, appId, platform);
 
     const snapshot = getPerfWindowBuffer().snapshot(
       device.deviceId,

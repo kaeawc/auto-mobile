@@ -1,0 +1,11 @@
+{
+  "id": "icon-integers",
+  "window": { "placement": { "type": "fullscreen" } },
+  "root": {
+    "type": "row",
+    "children": [
+      { "type": "icon", "name": "home", "effect": { "type": "pulse", "repeat": 5.0 } },
+      { "type": "icon", "name": "star", "effect": { "type": "bounce", "repeat": 1e1 } }
+    ]
+  }
+}

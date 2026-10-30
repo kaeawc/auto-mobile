@@ -8,6 +8,7 @@
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { DelegateContext, CtrlProxyClipboardResult } from "./types";
+import type { DispatchOptions } from "../shared/types";
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -31,8 +32,7 @@ export class CtrlProxyClipboard {
     text?: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { signal, onDispatch }: DispatchOptions = {},
   ): Promise<CtrlProxyClipboardResult & { acknowledged: boolean }> {
     const params: Record<string, unknown> = { action };
     if (text !== undefined) {

@@ -60,10 +60,11 @@ import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import { type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type {
   KeyValueType,
+  KeyValueWrite,
   PreferenceStoreResolution,
   StorageWriteOptions,
 } from "../../features/storage/storageTypes";
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, Platform } from "../../models";
 import { executionTracker, type ActiveExecution } from "../executionTracker";
 import { processGenerationRecordFields } from "../processGenerationFields";
 import { sessionReleaseThatCancelledCall } from "../sessionReleasedDuringCall";
@@ -92,7 +93,7 @@ export interface IdeDeviceRoutesPorts {
         ReturnType<DaemonStateAccess["getDevicePool"]>,
         "isShutdownReserved" | "assertNotAssignedToBinding"
       > & {
-        getAllDevices?(): readonly { id: string; platform: "android" | "ios" }[];
+        getAllDevices?(): readonly { id: string; platform: Platform }[];
       };
   };
   adbClientFactory: () => AdbClientFactory;
@@ -111,6 +112,7 @@ export interface IdeDeviceRoutesPorts {
     execution: ActiveExecution,
     deviceId: string,
     holderSessionUuid: string | undefined,
+    ownerSignal: AbortSignal | undefined,
   ) => Promise<void>;
   /** Call through the server so protected instance overrides and spies still intercept. */
   listBootedDevicesForIdeAction: IdeDeviceRoutes["listBootedDevicesForIdeAction"];
@@ -134,9 +136,7 @@ interface KeyValueMutationClient {
   setPreference(
     packageName: string,
     fileName: string,
-    key: string,
-    value: string,
-    type: KeyValueType,
+    entry: KeyValueWrite,
     timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<PreferenceStoreResolution | void>;
   removePreference(
@@ -328,7 +328,7 @@ export class IdeDeviceRoutes {
           ideMutation,
           viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
           viaDirectFile: (adb) =>
-            removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+            removeAndroidKeyValueDirect(adb, device.deviceId, { appId, fileName }, key),
         },
       ));
     } else {
@@ -344,8 +344,7 @@ export class IdeDeviceRoutes {
         fileName,
         {
           ideMutation,
-          viaSdk: (onDispatch) =>
-            client.setPreference(appId, fileName, key, entry.value, entry.type, { onDispatch }),
+          viaSdk: (onDispatch) => client.setPreference(appId, fileName, entry, { onDispatch }),
           viaDirectFile: (adb) =>
             setAndroidKeyValueDirect(adb, device.deviceId, { appId, fileName }, entry),
         },
@@ -391,7 +390,7 @@ export class IdeDeviceRoutes {
         ideMutation,
         viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
         viaDirectFile: (adb) =>
-          removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+          removeAndroidKeyValueDirect(adb, device.deviceId, { appId, fileName }, key),
       },
     );
     const resolvedStore = resolution?.resolvedStore;
@@ -537,6 +536,7 @@ export class IdeDeviceRoutes {
         execution,
         target.deviceId,
         target.holderSessionUuid,
+        ideMutation?.signal,
       );
       if (ideMutation) {
         // Tracked from here; stamped as session use only when the route dispatches (#11596).

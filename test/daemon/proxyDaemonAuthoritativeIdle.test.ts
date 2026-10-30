@@ -5,7 +5,7 @@ import {
   DaemonMcpProxy,
 } from "../../src/daemon/daemonMcpProxy";
 import { noActiveDeviceSessionResult } from "../../src/server/proxyServer";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_VERSION,

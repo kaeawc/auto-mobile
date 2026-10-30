@@ -887,6 +887,8 @@ data class PrototypeResult(
    * to (`prototype_appearance_v1`). Omitted by every other result and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
+  /** Only a successful show reply, when the host knows the target display shape. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val screenRound: Boolean? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val saved: SavedPrototypeInfo? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val savedPrototypes: List<SavedPrototypeEntry>? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val errorCode: SavedPrototypeErrorCode? = null,
@@ -901,7 +903,28 @@ data class PrototypeResult(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val pin: SavedPrototypePinInfo? = null,
   /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val cleared: Int? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val fired: Int? = null,
+  /**
+   * Only the reply to a successful `show_prototype` whose spec has `window.backdrop`
+   * (`prototype_backdrop_v1`): `blur` when what is behind the window was blurred, `fallback` when
+   * the tonal fill was drawn instead.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val backdrop: String? = null,
+  /**
+   * A warning, like [missingAssets]: the `style.effects` entries of a successful show this device
+   * cannot draw (`prototype_effects_v1`). Omitted when empty and by older APKs.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val degradedEffects: List<PrototypeDegradedEffect>? = null,
 ) : WebSocketResponse(), CorrelatedResponse
+
+/**
+ * One `style.effects` entry the device does not draw. [reason] is `api` (the device is below the
+ * effect's API floor, so the node renders unshaded) or `budget` (the effect took longer than 32 ms
+ * a frame for 30 frames and its phase was frozen). [path] is the node's structural path.
+ */
+@Serializable
+data class PrototypeDegradedEffect(val path: String, val type: String, val reason: String)
 
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -964,6 +987,7 @@ enum class SavedPrototypeErrorCode {
   @SerialName("not_found") NOT_FOUND,
   @SerialName("unsupported_format") UNSUPPORTED_FORMAT,
   @SerialName("internal_error") INTERNAL_ERROR,
+  @SerialName("render_failed") RENDER_FAILED,
 }
 
 @Serializable
@@ -1045,6 +1069,33 @@ data class PrototypeStatusEntry(
    * What the device stores for this prototype (`prototype_storage_v1`); absent without `storage`.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val storage: PrototypeStorageReport? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val timers: List<PrototypeTimerReport> = emptyList(),
+  /** Node identity to permanent shader fallback reason; omitted when every shader is healthy. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shaderFailures: Map<String, String> = emptyMap(),
+  /** Effects not drawn right now (`prototype_effects_v1`); absent when every effect renders. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
+  /**
+   * The last haptic and sound calls this prototype made, oldest first, at most 64
+   * (`prototype_platform_haptics_v1`, `prototype_platform_sound_v1`); absent when it made none.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val feedbackLog: List<PrototypeFeedbackEntry> = emptyList(),
+)
+
+/**
+ * One `haptics.perform` or `sound.play` call. Exactly one of [effect] and [sound] is set; [nodeId]
+ * is the node whose action made the call, null for a platform handler or when no single node owns
+ * it; [timeMs] is the device clock; [suppressed] is true when a system setting or the ringer state
+ * stopped the feedback from being produced.
+ */
+@Serializable
+data class PrototypeFeedbackEntry(
+  val timeMs: Long,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val effect: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val sound: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val nodeId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val suppressed: Boolean? = null,
 )
 
 /** Input validation vocabulary understood by this protocol version. */
@@ -1279,3 +1330,5 @@ data class LaunchIntentResult(
   val totalTimeMs: Long,
   val error: String? = null,
 ) : WebSocketResponse(), CorrelatedResponse
+
+@Serializable data class PrototypeTimerReport(val id: String, val nextFireInMs: Long, val runs: Int)

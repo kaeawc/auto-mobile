@@ -71,6 +71,7 @@ async function harness() {
     "request_list_keyboard_profiles",
     "prototype_saved_v1",
     "prototype_storage_v1",
+    "prototype_timers_v1",
     "prototype_patch_v1",
     "prototype_persistence_replay_v1",
     "show_prototype",
@@ -82,6 +83,7 @@ async function harness() {
     "inspect_prototypes",
     "delete_saved_prototype",
     "clear_prototype_storage",
+    "advance_prototype_clock",
     "put_prototype_asset",
     "remove_prototype_asset",
   ]);
@@ -119,7 +121,7 @@ const pngBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 const methods: RequestMethod[] = [
   {
     name: "requestAction",
-    invoke: (h, s) => h.client.requestAction("click", "id", LONG_TIMEOUT_MS, perf, undefined, s),
+    invoke: (h, s) => h.client.requestAction("click", "id", LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestClickFocusedInput",
@@ -152,7 +154,8 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestClipboard",
-    invoke: (h, s) => h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) =>
+      h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestSettingsGet",
@@ -161,7 +164,11 @@ const methods: RequestMethod[] = [
   {
     name: "requestSettingsPut",
     invoke: (h, s) =>
-      h.client.requestSettingsPut("global", "key", "1", undefined, LONG_TIMEOUT_MS, perf, s),
+      h.client.requestSettingsPut("global", "key", "1", undefined, {
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestSettingsList",
@@ -169,7 +176,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestGlobalAction",
-    invoke: (h, s) => h.client.requestGlobalAction("back", LONG_TIMEOUT_MS, perf, undefined, s),
+    invoke: (h, s) => h.client.requestGlobalAction("back", LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "validateFrameContext",
@@ -260,7 +267,8 @@ const methods: RequestMethod[] = [
   {
     name: "requestGestureEnd",
     abortable: false,
-    invoke: (h) => h.client.requestGestureEnd("g", 1, 2, false, LONG_TIMEOUT_MS, perf),
+    invoke: (h) =>
+      h.client.requestGestureEnd("g", 1, 2, false, { timeoutMs: LONG_TIMEOUT_MS, perf }),
   },
   {
     name: "requestSetText",
@@ -273,7 +281,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "commitViaIme",
-    invoke: (h, s) => h.client.commitViaIme("hi", undefined, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) => h.client.commitViaIme("hi", undefined, LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestImeAction",
@@ -403,6 +411,11 @@ const methods: RequestMethod[] = [
     invoke: (h) => h.client.requestClearPrototypeStorage("p", LONG_TIMEOUT_MS, perf),
   },
   {
+    name: "requestAdvancePrototypeClock",
+    abortable: false,
+    invoke: (h) => h.client.requestAdvancePrototypeClock("p", 1000, LONG_TIMEOUT_MS, perf),
+  },
+  {
     name: "requestPutPrototypeAsset",
     invoke: (h, s) =>
       h.client.requestPutPrototypeAsset(
@@ -486,7 +499,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestScreenshot",
-    invoke: (h, s) => h.client.requestScreenshot(LONG_TIMEOUT_MS, perf, false, s),
+    invoke: (h, s) => h.client.requestScreenshot(LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestHierarchySync",
@@ -510,7 +523,13 @@ const methods: RequestMethod[] = [
   {
     name: "setPreference",
     abortable: false,
-    invoke: (h) => h.client.setPreference("pkg", "file", "key", "1", "STRING", LONG_TIMEOUT_MS),
+    invoke: (h) =>
+      h.client.setPreference(
+        "pkg",
+        "file",
+        { key: "key", value: "1", type: "STRING" },
+        LONG_TIMEOUT_MS,
+      ),
   },
   {
     name: "removePreference",
@@ -639,6 +658,7 @@ const EXCLUDED: Record<string, string> = {
     "sends only when the device advertises the optional command, which this harness does not",
   addStorageChangeListener: "registers an in-process listener; it sends nothing",
   attachPrototypeRequestHost: "wires an in-process host; it sends nothing",
+  attachPrototypeChannelHost: "wires an in-process host; it sends nothing",
   onPrototypeEvent: "registers an in-process listener; it sends nothing",
   requestIdFromWireData: "decodes an inbound frame's id; it sends nothing",
 };

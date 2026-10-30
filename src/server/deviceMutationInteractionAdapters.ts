@@ -1,38 +1,13 @@
 import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
 import type { Platform } from "../models";
 import { SCREEN_STATE_MUTATION_KEY } from "../daemon/sessionBroker/mutations/screenStateMutation";
+import {
+  VOLUME_KEY_PRESS_MUTATION_KEY,
+  volumeStreamMutationKey,
+} from "../daemon/sessionBroker/mutations/volumeMutation";
+import { MEDIA_VOLUME_STREAMS } from "../features/media/MediaSessionTypes";
 import { isRecord } from "./pipeline/isRecord";
 import type { ToolMutation } from "./deviceMutationAdapters";
-
-/**
- * Input events that change no device state a later session could observe. Verified against what
- * each tool executes: `input tap/swipe/touchscreen/stylus/keyevent`, CtrlProxy accessibility
- * actions and gestures, `cmd statusbar expand/collapse`, a CtrlProxy overlay window that removes
- * itself, an emulator accelerometer vector the call restores in a `finally`, and wake/dismiss-
- * keyguard key events that move the device toward the ready state. Effects the target app causes
- * (a tapped Settings switch, a notification's content intent, text typed into a field) are
- * app-owned and outside the journal's scope; the keep-booted baseline clean still covers shared
- * settings, packages and files.
- */
-const PURE_INPUT_TOOLS: ReadonlySet<string> = new Set([
-  "accessibilityFocus",
-  "dragAndDrop",
-  "dragPath",
-  "highlight",
-  "homeScreen",
-  "multiTouch",
-  "pinchOn",
-  "recentApps",
-  "selectAllText",
-  "shake",
-  "swipeAt",
-  "swipeOn",
-  "systemTray",
-  "tapAny",
-  "tapAt",
-  "tapOn",
-  "wakeAndUnlock",
-]);
 
 function opaqueBreadcrumb(...parts: readonly string[]): ToolMutation {
   return { kind: "opaque", key: ["tool", ...parts].join(":") };
@@ -42,9 +17,10 @@ function opaqueBreadcrumb(...parts: readonly string[]): ToolMutation {
  * pressButton changes persistent state only for some buttons:
  * - `power` and `lock` (Android) sleep or lock the device. A reset can wake and dismiss a keyguard
  *   with no credential, so the screen state is journaled with a readable prior.
- * - `volume_up` and `volume_down` change the audio stream volume. Android persists it in settings
- *   rows the baseline clean restores; the live level and the iOS level have no revert. A fallback
- *   intent prevents a clean keep-booted reset on both platforms.
+ * - `volume_up` and `volume_down` change an audio stream volume. On Android the stream depends on
+ *   audio focus and call state, so the press journals the level of every stream a key can change
+ *   (one `volume:key-press` row) and the reset sets them back. The iOS level has no simctl revert,
+ *   so an iOS press records a fallback intent.
  * - iOS `power` locks the simulator and iOS `action` runs the user's Action button shortcut; neither
  *   has a simctl revert, so they retain diagnostic breadcrumbs.
  * Back, home, recent, menu, camera and the transient system UI actions (power menu, quick settings,
@@ -54,7 +30,9 @@ function opaqueBreadcrumb(...parts: readonly string[]): ToolMutation {
 function pressButtonMutations(args: Record<string, unknown>, platform?: Platform): ToolMutation[] {
   const button = typeof args.button === "string" ? args.button.toLowerCase() : "";
   if (button === "volume_up" || button === "volume_down") {
-    return [{ kind: "opaque", key: opaqueIntentKey("pressButton", "volume") }];
+    return platform === "ios"
+      ? [{ kind: "opaque", key: opaqueIntentKey("pressButton", "volume") }]
+      : [{ kind: "device-setting", key: VOLUME_KEY_PRESS_MUTATION_KEY }];
   }
   if (platform === "ios") {
     return button === "power" || button === "action"
@@ -63,6 +41,27 @@ function pressButtonMutations(args: Record<string, unknown>, platform?: Platform
   }
   return button === "power" || button === "lock"
     ? [{ kind: "device-setting", key: SCREEN_STATE_MUTATION_KEY }]
+    : [];
+}
+
+/**
+ * mediaSession `volume` sets a music, ring or alarm stream index: the Android row journals that
+ * stream's level (`volume:<stream>`) and the reset sets it back. The tool is Android-only; an iOS
+ * call or an unknown stream keeps a fallback intent.
+ * `dispatch` sends a transport key to the app holding the media session: its effect is app-owned,
+ * so it keeps a diagnostic breadcrumb. `get` is a read.
+ */
+function mediaSessionMutations(args: Record<string, unknown>, platform?: Platform): ToolMutation[] {
+  const action = args.action;
+  if (isRecord(action) && "volume" in action) {
+    const stream = isRecord(action.volume) ? action.volume.stream : undefined;
+    const known = MEDIA_VOLUME_STREAMS.find((candidate) => candidate === stream);
+    return platform !== "ios" && known
+      ? [{ kind: "device-setting", key: volumeStreamMutationKey(known) }]
+      : [{ kind: "opaque", key: opaqueIntentKey("mediaSession", "volume") }];
+  }
+  return isRecord(action) && "dispatch" in action
+    ? [opaqueBreadcrumb("mediaSession", "dispatch")]
     : [];
 }
 
@@ -97,5 +96,8 @@ export function interactionToolMutations(
   if (name === "sendKeys") {
     return sendKeysMutations(args, platform);
   }
-  return PURE_INPUT_TOOLS.has(name) ? [] : undefined;
+  if (name === "mediaSession") {
+    return mediaSessionMutations(args, platform);
+  }
+  return undefined;
 }

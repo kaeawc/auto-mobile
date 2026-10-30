@@ -95,13 +95,16 @@ internal fun PrototypeSwipeRow(
       fullSwipe = swipe.fullSwipe == true,
       density = density,
     )
-  val animate = LocalPrototypeMotion.current
+  val animate =
+    LocalPrototypeMotion.current &&
+      LocalPrototypeMotionProfile.current == PrototypeMotionProfile.FULL
   val scope = rememberCoroutineScope()
   val initial =
     if (coordinator.isOpen(id)) swipeRestOffset(SwipeSettle.Open(coordinator.openSide), geometry)
     else 0f
   val offset = remember(id) { Animatable(initial) }
   var raw by remember(id) { mutableFloatStateOf(initial) }
+  ReportPrototypeMotion { offset.isRunning }
   val entries = remember(swipe) { swipe.entries() }
 
   suspend fun moveTo(target: Float) {

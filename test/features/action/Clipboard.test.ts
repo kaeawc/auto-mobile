@@ -648,8 +648,7 @@ describe("Clipboard Android", () => {
           _text,
           _timeout,
           _perf,
-          _signal,
-          onDispatch?: () => void,
+          { onDispatch }: { onDispatch?: () => void } = {},
         ) => {
           if (!undelivered) {
             onDispatch?.();
@@ -698,7 +697,7 @@ describe("Clipboard Android", () => {
         androidDevice,
         new FakeAdbClientFactory(adb),
         () => ({
-          requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+          requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
             onDispatch?.();
             return { success: false, acknowledged: true, error, totalTimeMs: 1 };
           },
@@ -777,7 +776,7 @@ describe("Clipboard Android", () => {
           androidDevice,
           new FakeAdbClientFactory(adb),
           () => ({
-            requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+            requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
               if (proxyFailure === "pre-send throw") {
                 throw new Error(reason);
               }
@@ -900,7 +899,7 @@ describe("Clipboard Android", () => {
         androidDevice,
         new FakeAdbClientFactory(adb),
         () => ({
-          requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+          requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
             onDispatch?.();
             if (failure === "throw") {
               throw new Error(reason);
@@ -934,7 +933,7 @@ describe("Clipboard Android", () => {
         androidDevice,
         new FakeAdbClientFactory(adb),
         () => ({
-          requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+          requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
             onDispatch?.();
             return { success: true, acknowledged: true, text: "hello", totalTimeMs: 1 };
           },
@@ -1047,7 +1046,7 @@ describe("Clipboard iOS dispatch outcomes", () => {
         device,
         new FakeAdbClientFactory(),
         () => ({
-          requestClipboard: async (action, _text, _timeout, _perf, signal, onDispatch) => {
+          requestClipboard: async (action, _text, _timeout, _perf, { signal, onDispatch } = {}) => {
             if (action === "get") {
               return { success: true, text: "", totalTimeMs: 0 };
             }
@@ -1095,7 +1094,7 @@ describe("Clipboard iOS dispatch outcomes", () => {
     async (BusyError) => {
       let pasteRequests = 0;
       const clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => ({
-        requestClipboard: async (action, _text, _timeout, _perf, _signal, onDispatch) => {
+        requestClipboard: async (action, _text, _timeout, _perf, { onDispatch } = {}) => {
           if (action === "get") {
             return { success: true, text: "", totalTimeMs: 0 };
           }
@@ -1131,7 +1130,7 @@ describe("Clipboard iOS dispatch outcomes", () => {
     "%s remains a plain failure after dispatch without acknowledgement",
     async (action) => {
       const clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => ({
-        requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+        requestClipboard: async (_action, _text, _timeout, _perf, { onDispatch } = {}) => {
           onDispatch?.();
           return { success: false, acknowledged: false, error: "timeout", totalTimeMs: 0 };
         },

@@ -1,4 +1,4 @@
-import type { DaemonSocketReachabilityLike } from "./daemonSocketReachability";
+import type { DaemonSocketReachabilityLike } from "./client/daemonSocketReachability";
 import {
   classifySocketPath,
   type SocketFileIdentity,

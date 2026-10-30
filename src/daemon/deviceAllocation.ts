@@ -26,7 +26,10 @@ import type { EmulatorLossIncident, EmulatorLossIncidentStore } from "./emulator
 import type { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
 import type { IdleDeviceReaper, IosLivenessSnapshot } from "./idleDeviceReaper";
-import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
+import {
+  refreshAllocationBindingExclusion,
+  type BindingExclusion,
+} from "./sessionBroker/provisioning/exclusion";
 import type { SessionReleaseReason } from "./releaseReasons";
 import {
   SessionRecoveryIdentityLossError,
@@ -99,6 +102,7 @@ export interface DeviceAllocationPort extends Pick<
   foreignOwnershipFor(platform: Platform | undefined): ForeignDeviceOwnership | undefined;
   isDrivenByForeignDaemon(device: PooledDevice): boolean;
   publishDeviceClaim(deviceId: string): Promise<boolean>;
+  assertNotClaimedByForeignDaemon(deviceId: string, platform: Platform): Promise<void>;
   rollbackAssignments(
     assignments: ReadonlyMap<string, RollbackAssignment>,
     releaseReason?: SessionReleaseReason,
@@ -136,6 +140,13 @@ export interface DeviceAllocationPort extends Pick<
   restoreSessionAssignment(device: PooledDevice, snapshot: SessionAssignmentSnapshot): void;
   notifyDeviceStateChanged(device: Pick<PooledDevice, "id" | "platform">): void;
   isPotentialAllocationSupply(device: PooledDevice): boolean;
+}
+
+/** The recovery a single-attempt assignment serves, and the caller's cancellation. */
+export interface AssignFromOptions {
+  recoveryTarget?: SessionRecoveryTarget;
+  settledRecoveryLoss?: boolean;
+  signal?: AbortSignal;
 }
 
 export class DeviceAllocation {
@@ -436,7 +447,7 @@ export class DeviceAllocation {
   }> {
     if (!recoveryTarget && this.port.bindingExclusion) {
       // Guarded, not awaited unconditionally: an extra tick reorders allocation interleavings.
-      await this.port.bindingExclusion.refresh({ requireCurrent: true });
+      await refreshAllocationBindingExclusion(this.port.bindingExclusion);
     }
     if (!recoveryTarget && this.port.tracksForeignOwnership(platform)) {
       return this.tryAssignUnclaimedDevice(sessionId, platform, signal);
@@ -448,21 +459,19 @@ export class DeviceAllocation {
         () => this.port.getGenericallyAllocatableDevices(platform),
         "platform pool empty",
         () => this.port.hasPendingAndroidRecovery(platform),
-        undefined,
         { signal },
       );
     }
     const ownership = this.port.foreignOwnershipFor(recoveryTarget.platform);
     if (ownership) {
-      await this.assertRecoveryTargetNotForeignOwned(sessionId, recoveryTarget, ownership);
+      await this.assertRecoveryTargetNotForeignOwned(recoveryTarget);
     }
     const result = await this.tryAssignFrom(
       sessionId,
       () => this.port.getDevicesMatchingRecoveryTarget(recoveryTarget),
       "recovery target pool empty",
       () => this.port.hasPendingAndroidRecovery(platform),
-      recoveryTarget,
-      { settledRecoveryLoss, signal },
+      { recoveryTarget, settledRecoveryLoss, signal },
     );
     if (ownership && result.success && result.deviceId !== undefined && result.session) {
       await this.claimRecoveredDevice(
@@ -478,26 +487,17 @@ export class DeviceAllocation {
 
   /**
    * A restarted daemon must not rehydrate a session onto a device another live daemon took over
-   * while it was down (#11076): both would drive it. The persisted session is terminal then.
+   * while it was down (#11076, #15738). Only the devices the target resolves to now are checked:
+   * its persisted serial may name another AVD today. An empty pool is checked again after discovery,
+   * before binding (see the caller).
    */
-  private async assertRecoveryTargetNotForeignOwned(
-    sessionId: string,
-    target: SessionRecoveryTarget,
-    ownership: ForeignDeviceOwnership,
-  ): Promise<void> {
+  private async assertRecoveryTargetNotForeignOwned(target: SessionRecoveryTarget): Promise<void> {
     const idle = this.port
       .getDevicesMatchingRecoveryTarget(target)
       .filter((device) => holderOf(device) === null);
-    if (idle.length === 0) {
-      return;
-    }
-    await ownership.refresh(idle.map((device) => device.id));
-    const foreign = idle.find((device) => this.port.isDrivenByForeignDaemon(device));
-    if (foreign) {
-      throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
-        deviceId: foreign.id,
-        ownerPid: ownership.foreignOwnerPid(foreign.id),
-      });
+    for (const { id: deviceId } of idle) {
+      // Use the explicit-bind judgement: files first, then the table, with a fresh read.
+      await this.port.assertNotClaimedByForeignDaemon(deviceId, target.platform);
     }
   }
 
@@ -516,9 +516,11 @@ export class DeviceAllocation {
       return;
     }
     logger.warn(
-      `[DevicePool] Another AutoMobile process claims ${deviceId}; rolling back recovery of session ${sessionId}`,
+      `[DevicePool] Another AutoMobile process (PID ${ownership.foreignOwnerPid(deviceId)}) claims ${deviceId}; rolling back recovery of session ${sessionId}`,
     );
     await this.port.rollbackAssignments(new Map([[sessionId, { deviceId, session }]]));
+    // Rollback cleared the local holder, so the fresh explicit-bind refusal can name the winner.
+    await this.port.assertNotClaimedByForeignDaemon(deviceId, target.platform);
     throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
       deviceId,
       ownerPid: ownership.foreignOwnerPid(deviceId),
@@ -564,7 +566,6 @@ export class DeviceAllocation {
             .filter((device) => !this.port.isDrivenByForeignDaemon(device)),
         "platform pool empty",
         () => this.port.hasPendingAndroidRecovery(platform),
-        undefined,
         { signal },
       ),
     );
@@ -637,7 +638,6 @@ export class DeviceAllocation {
         () => this.port.getUnownedDevicesMatchingCriteria(criteria),
         "criteria pool empty",
         () => this.port.hasPendingAndroidRecoveryMatching(criteria),
-        undefined,
         { signal },
       ),
     );
@@ -659,11 +659,7 @@ export class DeviceAllocation {
     selectCandidates: () => PooledDevice[],
     emptyCandidatePoolReason: string,
     hasPendingRecovery: () => boolean,
-    recoveryTarget?: SessionRecoveryTarget,
-    {
-      settledRecoveryLoss = false,
-      signal,
-    }: { settledRecoveryLoss?: boolean; signal?: AbortSignal } = {},
+    options: AssignFromOptions = {},
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -675,6 +671,7 @@ export class DeviceAllocation {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
+    const { recoveryTarget, settledRecoveryLoss = false, signal } = options;
     let livenessUnknown = false;
     let refreshCompleteness: DiscoveryCompleteness | undefined;
     let refreshFailure: string | undefined;
@@ -704,6 +701,12 @@ export class DeviceAllocation {
         { timer: this.port.timer, signal, label: "Device allocation discovery" },
       );
       const snapshots = { capturedEntries, iosLiveness, androidPresence };
+
+      if (recoveryTarget && this.port.foreignOwnershipFor(recoveryTarget.platform)) {
+        // Discovery may have added the target or its owner may have changed since preflight.
+        // Check before binding: once held locally the explicit-bind guard intentionally skips it.
+        await this.assertRecoveryTargetNotForeignOwned(recoveryTarget);
+      }
 
       // Platform snapshots and refresh discovery are outside this boundary.
       // In-memory validation and short local DB/incident-ledger writes stay inside.

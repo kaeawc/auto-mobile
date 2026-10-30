@@ -1,0 +1,31 @@
+{
+  "id": "glass",
+  "state": {
+    "active": true
+  },
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "box",
+    "ios": {
+      "glassGroup": {
+        "spacing": 0
+      }
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "Glass",
+        "style": {
+          "surface": "glass"
+        },
+        "ios": {
+          "glassTransition": "identity"
+        }
+      }
+    ]
+  }
+}

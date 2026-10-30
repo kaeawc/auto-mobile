@@ -97,14 +97,10 @@ describe("diagnostics", () => {
   test("readinessTimeoutError prefers the process exit error, else lists details", () => {
     const exit = new Error("exited") as never;
     expect(readinessTimeoutError("Pixel", 10, exit)).toBe(exit);
-    const error = readinessTimeoutError(
-      "Pixel",
-      10,
-      null,
-      undefined,
-      { phase: "boot-animation", summary: "s" },
-      { deviceId: "emulator-5554", state: "offline" },
-    );
+    const error = readinessTimeoutError("Pixel", 10, null, {
+      diagnostic: { phase: "boot-animation", summary: "s" },
+      target: { deviceId: "emulator-5554", state: "offline" },
+    });
     expect(error.message).toBe(
       [
         "Emulator 'Pixel' failed to become ready within 10ms",

@@ -20,7 +20,13 @@ const APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const performanceTraceSchema = addDeviceTargetingToSchema(
   z
     .object({
-      action: z.enum(["start", "stop"]).describe("start a recorder, or stop one by traceId"),
+      action: z
+        .enum(["start", "stop"])
+        .describe(
+          "start a recorder, or stop one by traceId. iOS stop waits for finalisation: " +
+            "60 seconds without output or artifact growth, at most 180 seconds total; " +
+            "a timeout reports an incomplete trace that cannot be summarised. Retry with a shorter timeLimitMs or on a quieter host.",
+        ),
       appId: z
         .string()
         .regex(APP_ID_PATTERN, "appId must be a package name or bundle identifier")

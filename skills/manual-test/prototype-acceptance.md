@@ -27,10 +27,10 @@ ground truth named below; file a bug for each FAIL and link it to #9295.
    A live owner plus heartbeat holds the broker session beyond the plain idle
    window; session-persistent prototypes end when that execution ends.
 4. Install Playground, `launchApp`, tap Skip then Continue as Guest to reach the Discover screen.
-5. Prototype-window ground truth:
-   `adb -s <serial> shell dumpsys window windows | grep -c "package=dev.jasonpearson.automobile.ctrlproxy appop=CREATE_ACCESSIBILITY_OVERLAY"`
+5. Prototype-window ground truth: count window lines with the title prefix `AutoMobile Prototype:`:
+   `adb -s <serial> shell dumpsys window windows | grep -cF "AutoMobile Prototype:"`
    (`layer: app` prototypes show `appop=SYSTEM_ALERT_WINDOW` and the title
-   `AutoMobile Interactive Prototype`). `adb -s <serial> exec-out screencap -p` is the composited truth;
+   `AutoMobile Prototype:<id>`). `adb -s <serial> exec-out screencap -p` is the composited truth;
    compare it with the `observe` screenshot. Scope every `adb` command to the
    granted serial with `adb -s <serial>`; do not let default ADB choose another device.
 6. Prototype assets: four tiny PNGs, passed as `assets: [{id, path}]` on `show`.
@@ -64,7 +64,7 @@ that lifecycle check.
 
 ## Related device checks (same session)
 
-- Layer `app`: `window.layer: "app"`; window title `AutoMobile Interactive Prototype` with
+- Layer `app`: `window.layer: "app"`; window title `AutoMobile Prototype:<id>` with
   `appop=SYSTEM_ALERT_WINDOW`; swipe and tap still work; `cmd statusbar expand-notifications`
   draws the shade over it.
 - Same-id `show` keeps the pager page; `reset: true` returns to page 1.

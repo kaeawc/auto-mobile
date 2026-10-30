@@ -1,3 +1,5 @@
+import { parsePrototypeBackdrop } from "../../prototype/prototypeBackdrop";
+import { prototypeDegradedEffectsField } from "../../prototype/prototypeDegradedEffects";
 import { parsePrototypeStacks } from "./CtrlProxyPrototypes";
 import { prototypePatchReplyFields } from "../../prototype/prototypePatchWire";
 import { logger } from "../../../utils/logger";
@@ -378,6 +380,7 @@ export class AndroidInboundResponseHandlers {
           : {}),
         ...prototypePatchReplyFields(message),
         ...prototypeSavedReplyFields(message),
+        ...prototypeDegradedEffectsField(message.degradedEffects),
         ...(Array.isArray(message.prototypes) ? { prototypes: message.prototypes } : {}),
         ...(parsePrototypeStacks(message.stacks)
           ? { stacks: parsePrototypeStacks(message.stacks) }
@@ -385,6 +388,8 @@ export class AndroidInboundResponseHandlers {
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }
           : {}),
+        ...parsePrototypeBackdrop(message.backdrop),
+        ...(typeof message.screenRound === "boolean" ? { screenRound: message.screenRound } : {}),
         ...(Number.isSafeInteger(message.cleared) && message.cleared! >= 0
           ? { cleared: message.cleared }
           : {}),

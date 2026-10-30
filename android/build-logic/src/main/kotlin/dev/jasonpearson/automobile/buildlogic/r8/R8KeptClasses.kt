@@ -51,6 +51,7 @@ object R8KeptClasses {
     classBytes: Sequence<ByteArray>,
     ownedPackagePrefixes: List<String>,
     requiredMembers: List<String>,
+    keptSerializablePrefixes: List<String> = ownedPackagePrefixes,
   ): Result {
     val (components, referencedClasses) = manifestClasses(manifestXml, namespace)
     val ownedClasses = mutableSetOf<String>()
@@ -72,7 +73,12 @@ object R8KeptClasses {
         ClassReader.SKIP_CODE or ClassReader.SKIP_DEBUG or ClassReader.SKIP_FRAMES,
       )
     }
-    val serializers = serializable.map { "$it\$\$serializer" }.filter { it in ownedClasses }
+    // Only @Serializable classes under these prefixes must survive unrenamed; the rest of an owned
+    // dependency (an unused wire protocol, say) may be shrunk or obfuscated.
+    val keptSerializable = serializable.filter { name ->
+      keptSerializablePrefixes.any { name.replace('.', '/').startsWith(it) }
+    }
+    val serializers = keptSerializable.map { "$it\$\$serializer" }.filter { it in ownedClasses }
     val classes = mutableMapOf<String, String>()
     val methods = mutableMapOf<String, MutableSet<String>>()
     var owner: String? = null
@@ -93,7 +99,7 @@ object R8KeptClasses {
     }
     val violations = mutableListOf<String>()
     if (components.isEmpty()) violations.add("manifest component: zero components found")
-    if (serializable.isEmpty()) violations.add("@Serializable class: zero classes found")
+    if (keptSerializable.isEmpty()) violations.add("@Serializable class: zero classes found")
     fun checkClass(category: String, name: String) {
       val finalName = classes[name]
       if (finalName == null || finalName.startsWith("R8\$\$REMOVED\$\$CLASS\$\$")) {
@@ -102,7 +108,7 @@ object R8KeptClasses {
     }
     components.forEach { checkClass("manifest component", it) }
     referencedClasses.forEach { checkClass("manifest-referenced class", it) }
-    serializable.forEach { checkClass("@Serializable class", it) }
+    keptSerializable.forEach { checkClass("@Serializable class", it) }
     serializers.forEach { checkClass("serializer", it) }
     val sentinels = requiredMembers.distinct().sorted()
     for (sentinel in sentinels) {
@@ -130,7 +136,7 @@ object R8KeptClasses {
     return Result(
       components,
       referencedClasses,
-      serializable.toList(),
+      keptSerializable,
       serializers,
       sentinels,
       violations.sorted(),
@@ -155,7 +161,15 @@ object R8KeptClasses {
         else -> name
       }
     for (tag in
-      listOf("application", "activity", "activity-alias", "service", "receiver", "provider")) {
+      listOf(
+        "application",
+        "activity",
+        "activity-alias",
+        "service",
+        "receiver",
+        "provider",
+        "instrumentation",
+      )) {
       val elements = document.getElementsByTagName(tag)
       for (index in 0 until elements.length) {
         val element = elements.item(index) as Element

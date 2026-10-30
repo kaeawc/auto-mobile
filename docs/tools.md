@@ -21,6 +21,7 @@ Every tool works from the **CLI** (`bunx @kaeawc/auto-mobile --cli <tool>`), **M
 - 🔑 `sessionUuid` — run on a held device session (device tools)
 - 💡 `keepScreenAwake` — wake and keep a physical Android device awake (default on at session setup)
 - 🪞 `raw` / `project` (`skeleton` default, `full`) / `includeExtras` — observation output on action tools
+- 🔗 `resourceLink` — `getLogs`, `exportPlan`, and `videoRecording` stop: return the complete result as an `automobile:tool-output` resource and a `resource_link` block, keeping only `success`, `error`, and the result's required fields (a stop's `action`, `count`, `recordings`, each bounded) inline (default off, inline)
 - 📱 `deviceId` — target a device explicitly on reads
 
 ### Reading a device you do not own (`deviceId`)
@@ -44,24 +45,26 @@ A read never writes settings on a device another session holds. A sessionless re
 
 ## 👆 Interact
 
-| Tool                          | What it does                                                                                 |
-| ----------------------------- | -------------------------------------------------------------------------------------------- |
-| 📍 <code>tapAt</code>         | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units |
-| 👆 <code>tapOn</code>         | Tap an element by text, id, or test tag                                                      |
-| 🤏 <code>tapAny</code>        | Tap any clickable element; scope with container or scrollableContainer                       |
-| 👉 <code>swipeOn</code>       | Swipe/scroll on screen or elements                                                           |
-| ↔️ <code>swipeAt</code>       | Swipe between two screen points                                                              |
-| 🫳 <code>dragAndDrop</code>   | Drag and drop element                                                                        |
-| 〰️ <code>dragPath</code>      | Drag a finger along a timed path                                                             |
-| 🤌 <code>pinchOn</code>       | Pinch to zoom                                                                                |
-| 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                          |
-| ⌨️ <code>sendKeys</code>      | Execute ordered typing, clear, raw-key, and semantic IME commands                            |
-| 🧭 <code>focusNavigate</code> | Move D-pad focus to an element on Android TV; stops `focused`, `max_steps` or `stuck`        |
-| 🎛️ <code>setUIState</code>    | Set multiple form fields by desired state                                                    |
-| 📝 <code>selectAllText</code> | Select all text in focused input                                                             |
-| 🔘 <code>pressButton</code>   | Press a device or navigation button                                                          |
-| ⌨️ <code>keyboard</code>      | Open, close, detect, or switch the keyboard / IME                                            |
-| 📋 <code>clipboard</code>     | Clipboard operations (copy/paste/clear/get)                                                  |
+| Tool                          | What it does                                                                                                                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 📍 <code>tapAt</code>         | Tap, long press, or double tap at screen coordinates in native, normalized, or percent units                                                                                        |
+| 👆 <code>tapOn</code>         | Tap an element by text, id, or test tag                                                                                                                                             |
+| 🤏 <code>tapAny</code>        | Tap any clickable element; scope with container or scrollableContainer                                                                                                              |
+| 👉 <code>swipeOn</code>       | Swipe/scroll on screen or elements                                                                                                                                                  |
+| ↔️ <code>swipeAt</code>       | Swipe between two screen points                                                                                                                                                     |
+| 🫳 <code>dragAndDrop</code>   | Drag and drop element                                                                                                                                                               |
+| 〰️ <code>dragPath</code>      | Drag a finger along a timed path                                                                                                                                                    |
+| 🖱️ <code>hoverAt</code>       | Hover a stylus or mouse over a path with no contact (Android)                                                                                                                       |
+| 🤌 <code>pinchOn</code>       | Pinch to zoom                                                                                                                                                                       |
+| 🖐️ <code>multiTouch</code>    | Simultaneous 2-5 finger tap, long press, or swipe at a screen point                                                                                                                 |
+| ⌨️ <code>sendKeys</code>      | Execute ordered typing, clear, raw-key, and semantic IME commands                                                                                                                   |
+| 🧭 <code>focusNavigate</code> | Move D-pad focus to an element on Android TV; stops `focused`, `max_steps` or `stuck`                                                                                               |
+| 🎛️ <code>setUIState</code>    | Set multiple form fields by desired state                                                                                                                                           |
+| 📝 <code>selectAllText</code> | Select all text in focused input                                                                                                                                                    |
+| 🔘 <code>pressButton</code>   | Press a device or navigation button                                                                                                                                                 |
+| ⌨️ <code>keyboard</code>      | Open, close, detect, or switch the keyboard / IME                                                                                                                                   |
+| 📋 <code>clipboard</code>     | Clipboard operations (copy/paste/clear/get)                                                                                                                                         |
+| 🗣️ <code>siri</code>          | iOS: activate Siri with a phrase (off by default: setToolEnabled; needs the siriAndAppIntents service) (e.g. an App Shortcut), returns the observation; Android returns unsupported |
 
 ## 📦 Apps, files & data
 
@@ -128,6 +131,9 @@ A read never writes settings on a device another session holds. A sessionless re
 | 🪪 <code>biometricAuth</code>               | Simulate biometric success or failure                                                |
 | 📳 <code>shake</code>                       | Shake the device (simulator/emulator)                                                |
 | 🧲 <code>setSensor</code>                   | Set an emulator sensor (accelerometer, gyro, …)                                      |
+| 🎙️ <code>injectAudioInput</code>            | Emulator or simulator: play a WAV file or tone into the microphone. Off by default   |
+| ⏹️ <code>stopAudioInput</code>              | Stop an audio injection. Off by default                                              |
+| 🔊 <code>captureAudio</code>                | Emulator or simulator: record audio output and report its level. Off by default      |
 | 📞 <code>phoneCall</code>                   | Simulate an incoming phone call                                                      |
 | 💬 <code>sendSms</code>                     | Simulate an incoming SMS                                                             |
 | 🎵 <code>mediaSession</code>                | Read or control Android media sessions                                               |
@@ -187,6 +193,118 @@ separate `select` key exists. Android only; not yet verified on a TV image
 - 📸 Screenshot paths are kept for **at least 10 minutes after return** unless evicted early under capacity pressure; each path has a `screenshotExpiresAt`/`expiresAt` (host epoch ms, not a promise). Retention starts at **128 MiB** and scales by 64 MiB per active device up to 1 GiB, within a limit of **4096 files**. Each device’s newest 3 screenshots (counting its incoming frame) are evicted only as a last resort, and a capture is admitted even if nothing fits. The byte limits and per-device allowance are [configurable](using/environment-variables.md#screenshot-retention). After a restart, existing files get a process-start grace of ten minutes.
 - 🧹 `holdSessionOnFailure` keeps plan sessions instead of auto-releasing them.
 
+### No audio input (`audio_input_unavailable`)
+
+When a device cannot record audio, `observe` returns `diagnostics: [{ code: "audio_input_unavailable", message, retryable: false }]`,
+and a `setAppPermissions` grant of `microphone` (iOS) or `RECORD_AUDIO` (Android) still succeeds but carries the same
+`diagnostics` entry. This applies to an iOS simulator on a host with no audio input device, and to an Android emulator launched
+with `-no-audio` (`AUTOMOBILE_EMULATOR_AUDIO=false`) or with `hw.audioInput=no`. Recordings on that device contain no audio.
+Treat this as an environment limitation: do not retry, and do not report it as an app failure. Fix the host (for example, make a
+virtual loopback device the default input) or the AVD audio settings. The `message` names the cause.
+
+### Stylus pointer on `tapAt`, `swipeAt` and `dragPath`
+
+`pointer: { toolType: "stylus" }` injects a stylus instead of a finger (Android only; never falls back to a finger).
+
+| `pointer` shape                                                                                                      | Route                     | Needs                           |
+| -------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------- |
+| `{ toolType: "stylus" }`, `pressure` omitted or `1` (`tapAt`, `swipeAt`)                                             | `adb shell input stylus`  | Android 12+ (API 31)            |
+| `pressure` other than 1, `tilt` (radians, 0 to PI/2), `orientation` (radians), or `buttons` (`primary`, `secondary`) | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
+| `dragPath` with any `pointer`                                                                                        | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
+
+`dragPath` points also take `pressure` and `tilt` (they need `pointer`), interpolated between points; `holdMs` and
+`releaseHoldMs` become holds at the first and last point. A device or runner that cannot honour the request is refused before
+anything is sent, naming the missing capability. `tilt`, `orientation` and `buttons` are Android only; `doubleTap` and a panel
+`display` are not supported with a stylus yet. Details and the unverified parts are in the
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md).
+
+### hoverAt
+
+Hover enter, move and exit over `points` with no contact (Android only; the reasons iOS is refused are in the
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md)). It takes the `dragPath` point shape
+(`x`, `y`, per-point `durationMs`) plus an optional per-point `distance` (stylus only), and the same
+`coordinateSpace`, `display`, `snapshotId` and `layer`.
+
+`toolType` chooses who hovers, and apps see the difference:
+
+| `toolType`         | What the app receives                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| `stylus` (default) | `ACTION_HOVER_*` with `TOOL_TYPE_STYLUS`, `SOURCE_STYLUS` and an `AXIS_DISTANCE` value    |
+| `mouse`            | `ACTION_HOVER_*` with `TOOL_TYPE_MOUSE` and `SOURCE_MOUSE`; no distance; desktop-style UI |
+
+It needs the `hover_input_v1` runner capability. A device or runner without it, and iOS, are refused before
+anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
+advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
+[stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)); the semantics above
+are the documented intent and still need on-device confirmation (#13082).
+
 ### prototype
 
 Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](design-docs/plat/android/prototype-ux.md).
+
+#### Watch-sized mockups
+
+Prototypes cannot run on watchOS, but a watch-sized spec gives a quick visual mockup of a watch
+screen on an iPhone simulator or Android emulator. Float the window in the centre and give the root
+`box` the watch screen's size, a large corner radius (which also clips its content) and a black
+background:
+
+| Case        | `width` × `height` (dp/pt) | `cornerRadius` |
+| ----------- | -------------------------- | -------------- |
+| 41 mm       | 176 × 215                  | 36             |
+| 45 mm       | 198 × 242                  | 40             |
+| 49 mm Ultra | 205 × 251                  | 44             |
+
+```json
+{
+  "id": "watch-41mm",
+  "window": {
+    "placement": { "type": "floating", "gravity": "center", "offset": { "x": 0, "y": 0 } }
+  },
+  "components": {
+    "watchRow": {
+      "root": {
+        "type": "row",
+        "style": {
+          "width": "fill",
+          "background": "#222222",
+          "cornerRadius": 16,
+          "padding": { "start": 10, "end": 10, "top": 8, "bottom": 8 }
+        },
+        "children": [{ "type": "text", "text": "{props.title}", "style": { "color": "#FFFFFF" } }]
+      }
+    }
+  },
+  "root": {
+    "type": "box",
+    "style": {
+      "width": { "dp": 176 },
+      "height": { "dp": 215 },
+      "cornerRadius": 36,
+      "background": "#000000"
+    },
+    "children": [
+      {
+        "type": "scroll",
+        "child": {
+          "type": "column",
+          "style": { "spacing": 6, "padding": { "start": 8, "end": 8, "top": 12 } },
+          "children": [
+            { "type": "use", "component": "watchRow", "props": { "title": "Drink water" } },
+            { "type": "use", "component": "watchRow", "props": { "title": "Stand up" } }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+Put each common watch pattern in `components` and reuse it with `use`: a vertically scrolling list
+of rows, a full-screen metric (one large number with a label and unit), a two-button confirmation
+(two `button`s with `weight: 1` in a `row`, swapped in with `visibleWhen`), and a now-playing card
+(title, artist, previous / play-pause / next `iconButton`s and a linear `progress`).
+
+The mockup is a phone overlay sized like a watch. It does not simulate the Digital Crown, Always-On
+or wrist-down dimming, real watchOS or Wear OS fonts and controls, or the round Wear OS screen, and
+nothing runs on a watch. Check the final design on a real watch.

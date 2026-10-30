@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { MAX_ROTARY_STEPS, ROTARY_BUTTONS } from "../../features/action/RotaryInput";
 import { KEYBOARD_PROFILE_IDS } from "../../features/action/keyboardProfiles";
 import { HINGE_ANGLE_MAX_DEGREES, HINGE_ANGLE_MIN_DEGREES } from "../../features/device/SetPosture";
 import { hierarchyLayerSchema } from "../../models/elementSelectorSchemas";
@@ -114,7 +115,16 @@ export const pressButtonInput = z.object({
     "screenshot",
     "split_screen",
     "dismiss_notification_shade",
+    // Rotary controller input on Android Automotive (#14920); refused on other devices.
+    ...ROTARY_BUTTONS,
   ]),
+  steps: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_ROTARY_STEPS)
+    .optional()
+    .describe("Detents for rotary_rotate_cw / rotary_rotate_ccw (default 1)."),
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on
   // its own.
@@ -296,7 +306,7 @@ export const rotateInput = z.object({
     .boolean()
     .optional()
     .describe(
-      "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
+      "Android only. true keeps automatic rotation off to hold the requested orientation. Omission restores the prior automatic-rotation setting after orientation confirmation, including in a device session; an unreadable initial setting is left unchanged. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
     ),
   display: z
     .number()

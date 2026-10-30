@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEVICE_CLOCK_TOLERANCE_MS, MAX_DEVICE_CLOCK_ADVANCE_MS } from "../utility/DeviceClock";
 
 /**
  * Session-scoped device-condition fixtures (#14050, epic #14047): root, integrity
@@ -15,7 +16,11 @@ export const DEVICE_CONDITION_SCHEMA_VERSION = 1;
 export const DEVICE_CONDITION_MAX_LEASE_SECONDS = 86_400;
 
 /** The condition keys an injector can own. Fault keys are `faults.<name>`. */
-export type DeviceConditionKey = "rootState" | "integrityState" | `faults.${string}`;
+export type DeviceConditionKey =
+  | "rootState"
+  | "integrityState"
+  | `faults.${string}`
+  | `vehicle.${string}`;
 
 /** A request value; `"unset"` clears the condition instead of applying one. */
 export const DEVICE_CONDITION_UNSET = "unset";
@@ -71,6 +76,11 @@ export interface DeviceConditionTrimTarget {
     | "COMPLETE";
 }
 
+/** How far a `clockSkew` fault moves the device clock from real time, in whole seconds. */
+export interface DeviceConditionClockSkew {
+  offsetSeconds: number;
+}
+
 /** The app and runtime permission a `revokePermission` fault targets. */
 export interface DeviceConditionPermissionTarget {
   package: string;
@@ -112,6 +122,13 @@ export interface DeviceConditionInput {
     killApp?: DeviceConditionKillTarget | typeof DEVICE_CONDITION_UNSET;
     trimMemory?: DeviceConditionTrimTarget | typeof DEVICE_CONDITION_UNSET;
     clearPackageData?: DeviceConditionPackageTarget | typeof DEVICE_CONDITION_UNSET;
+    /** Clock fault (#14069): move the device clock away from real time until reset. */
+    clockSkew?: DeviceConditionClockSkew | typeof DEVICE_CONDITION_UNSET;
+  };
+  /** Automotive vehicle state (#14919), each clearable with `"unset"`. */
+  vehicle?: {
+    motion?: "parked" | "driving" | typeof DEVICE_CONDITION_UNSET;
+    nightMode?: "on" | "off" | typeof DEVICE_CONDITION_UNSET;
   };
   expiresInSeconds?: number;
   reset?: true;
@@ -151,6 +168,28 @@ const trimTargetSchema = () =>
         "RUNNING_CRITICAL",
         "COMPLETE",
       ]),
+    })
+    .strict();
+
+/** The largest clock skew either way: the same ten-year bound as `setDeviceState.clock` advance. */
+export const MAX_CLOCK_SKEW_SECONDS = MAX_DEVICE_CLOCK_ADVANCE_MS / 1000;
+
+/** A skew inside the clock's own read-back tolerance could not be told apart from no skew. */
+export const MIN_CLOCK_SKEW_SECONDS = Math.ceil(DEVICE_CLOCK_TOLERANCE_MS / 1000) + 1;
+
+/** `faults.clockSkew` parameters; the injector re-validates its params with the same schema. */
+export const clockSkewParamsSchema = () =>
+  z
+    .object({
+      offsetSeconds: z
+        .number()
+        .int()
+        .min(-MAX_CLOCK_SKEW_SECONDS)
+        .max(MAX_CLOCK_SKEW_SECONDS)
+        .refine(
+          (value) => Math.abs(value) >= MIN_CLOCK_SKEW_SECONDS,
+          `offsetSeconds must be at least ${MIN_CLOCK_SKEW_SECONDS} seconds either way`,
+        ),
     })
     .strict();
 
@@ -246,10 +285,36 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
           .describe(
             "Clear an installed app's data with `pm clear` ({ package }). One-shot: it kills the app's process and cannot be undone, so there is nothing to reset. 'unset' is a no-op.",
           ),
+        clockSkew: z
+          .union([z.literal(DEVICE_CONDITION_UNSET), clockSkewParamsSchema()])
+          .optional()
+          .describe(
+            "Set the device clock offsetSeconds ahead of (positive) or behind (negative) real time ({ offsetSeconds }), 3 seconds to 10 years either way, with automatic time off. Reset restores real time and the original automatic-time setting and verifies them. Rootable Android emulators only (needs adb root, which restarts adbd). Shares the device clock with setDeviceState.clock: a reset from either restores real time. Or unset.",
+          ),
       })
       .strict()
       .optional()
       .describe("Power and lifecycle fault injectors (Android only, behind the feature flag)."),
+    vehicle: z
+      .object({
+        motion: z
+          .enum(["parked", "driving", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Vehicle motion on an Android Automotive emulator: 'parked' (gear park, speed 0, parking brake on) or 'driving' (gear drive, moving, brake off), set together so the state is consistent. Restored to the values read before the first change; or unset.",
+          ),
+        nightMode: z
+          .enum(["on", "off", DEVICE_CONDITION_UNSET])
+          .optional()
+          .describe(
+            "Vehicle night-mode signal on an Android Automotive emulator: 'on' or 'off' sets the signal; unset or reset returns day/night to automatic sensor control without preserving a prior manual override.",
+          ),
+      })
+      .strict()
+      .optional()
+      .describe(
+        "Vehicle state (Android Automotive emulators only; 'unsupported' elsewhere), via `cmd car_service inject-vhal-event`.",
+      ),
     expiresInSeconds: z
       .number()
       .int()
@@ -294,6 +359,13 @@ export function deviceConditionChanges(input: DeviceConditionInput): DeviceCondi
         value: DEVICE_CONDITION_APPLY,
         params: { ...value },
       });
+    }
+  }
+  const vehicle = input.vehicle ?? {};
+  for (const name of Object.keys(vehicle).sort()) {
+    const value = (vehicle as Record<string, unknown>)[name];
+    if (typeof value === "string") {
+      changes.push({ key: `vehicle.${name}`, value });
     }
   }
   return changes;

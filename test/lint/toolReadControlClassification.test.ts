@@ -41,6 +41,7 @@ const PROTOTYPE_ARGS = {
 
 const CLASSIFICATION: Classification = {
   read: [
+    "captureAudio",
     "compareScreenshot",
     "getAppPermissions",
     "getDataStore",
@@ -136,6 +137,7 @@ const CLASSIFICATION: Classification = {
     "displayProfile",
     "dragAndDrop",
     "dragPath",
+    "hoverAt",
     "executePlan",
     "explore",
     "focusNavigate",
@@ -152,6 +154,9 @@ const CLASSIFICATION: Classification = {
     "performanceTrace",
     // Starts and stops an on-device Perfetto recorder from typed categories; heapDump makes the app write a dump.
     "captureTrace",
+    // Feeds, then stops feeding, audio into the emulator microphone.
+    "injectAudioInput",
+    "stopAudioInput",
     "heapDump",
     "phoneCall",
     "pinchOn",
@@ -182,6 +187,7 @@ const CLASSIFICATION: Classification = {
     "setSensor",
     "setUIState",
     "shake",
+    "siri",
     "swipeAt",
     "swipeOn",
     // Pulls the notification shade down, even to list or find.

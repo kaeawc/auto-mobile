@@ -4,7 +4,7 @@ import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { ambiguousSessionSelectorResult, createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonAmbiguousSessionSelectorError } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/daemon/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

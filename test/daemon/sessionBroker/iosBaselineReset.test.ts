@@ -999,16 +999,31 @@ describe("IosBaselineReset", () => {
       ),
     ).rejects.toBeInstanceOf(ActionableError);
     expect(invalidTarget.events).toEqual([]);
+  });
 
+  test("erases and reboots a Duo simulator so it can be reused", async () => {
+    const duoType = "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo";
+    const duoRuntime = "com.apple.CoreSimulator.SimRuntime.iOS-27-1";
     const duoProfile: typeof PROFILE = {
       ...PROFILE,
+      simulatorDeviceTypeIdentifier: duoType,
+      modelIdentifier: "iPhone19,1",
       archetype: "duo",
       modelType: { family: "duo", variant: "duo" },
+      runtimeId: duoRuntime,
+      osVersion: "27.1",
     };
-    const duo = harness();
-    await expect(
-      duo.resetter.reset(DEVICE, duoProfile, () => Promise.resolve()),
-    ).rejects.toBeInstanceOf(ActionableError);
-    expect(duo.events).toEqual([]);
+    const duoImage = (state: "Booted" | "Shutdown") =>
+      image(state, { deviceTypeIdentifier: duoType, runtime: duoRuntime, os_version: "27.1" });
+    const duo = harness({
+      inventories: [[duoImage("Booted")], [duoImage("Shutdown")], [duoImage("Booted")]],
+    });
+
+    await expect(duo.resetter.reset(DEVICE, duoProfile, duo.assertOwned)).resolves.toBe("clean");
+    expect(duo.events.filter((event) => /^(stop|erase|boot):/.test(event))).toEqual([
+      `stop:${UDID}`,
+      `erase:${UDID}`,
+      `boot:${UDID}`,
+    ]);
   });
 });

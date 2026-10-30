@@ -6,17 +6,12 @@ import { AppPermissions, type SetAppPermissionsResult } from "../features/action
 import { CrashApp } from "../features/action/CrashApp";
 import {
   type AndroidInstallRequest,
-  InstallApp,
   type InstallAppCall,
   type InstallGuardOptions,
 } from "../features/action/InstallApp";
 import { ResetKeychain } from "../features/action/ResetKeychain";
-import { TerminateApp, type TerminateAppCall } from "../features/action/TerminateApp";
-import {
-  UninstallApp,
-  type UninstallAppCall,
-  type UninstallGuardOptions,
-} from "../features/action/UninstallApp";
+import type { TerminateAppCall } from "../features/action/TerminateApp";
+import { type UninstallAppCall, type UninstallGuardOptions } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
 import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
@@ -38,11 +33,7 @@ import type {
 import type { UninstallAppResult } from "../models/UninstallAppResult";
 import { isDeviceLostError } from "../utils/deviceLossOutcome";
 import { logger } from "../utils/logger";
-import {
-  createJSONToolResponse,
-  createStructuredToolResponse,
-  withIsErrorOnFailure,
-} from "../utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import {
   invalidateInstalledAppsCache,
   notifyInstalledAppResourceUpdated,
@@ -54,6 +45,9 @@ import {
   crashAppResultSchema,
   getAppPermissionsResultSchema,
   inspectPackageSigningResultSchema,
+  resetKeychainResultSchema,
+  setAppPermissionsResultSchema,
+  uninstallAppResultSchema,
 } from "./appToolOutputSchemas";
 import {
   attachLaunchedViewer,
@@ -88,6 +82,15 @@ import {
   type UninstallAppArgs,
   uninstallAppSchema,
 } from "./appToolsSchemas";
+import {
+  assertWatchLaunchSupported,
+  createPlatformInstallApp,
+  createPlatformLaunchApp,
+  createPlatformQueryInstalledApps,
+  createPlatformTerminateApp,
+  createPlatformUninstallApp,
+  type WatchAppManagerFactory,
+} from "./appToolsWatch";
 import { launchFailure, redactLaunchMessage } from "./launchAppFailure";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
@@ -157,8 +160,10 @@ export interface ListAppsToolDependencies {
   queryInstalledApps: typeof queryInstalledApps;
 }
 
-const createDefaultListAppsToolDependencies = (): ListAppsToolDependencies => ({
-  queryInstalledApps,
+const createDefaultListAppsToolDependencies = (
+  watchApps?: WatchAppManagerFactory,
+): ListAppsToolDependencies => ({
+  queryInstalledApps: createPlatformQueryInstalledApps(watchApps),
 });
 
 export interface TerminateAppExecutor {
@@ -169,9 +174,11 @@ export interface TerminateAppToolDependencies {
   createTerminateApp(device: BootedDevice): TerminateAppExecutor;
 }
 
-const defaultTerminateAppToolDependencies: TerminateAppToolDependencies = {
-  createTerminateApp: (device) => new TerminateApp(device),
-};
+const createDefaultTerminateAppToolDependencies = (
+  watchApps?: WatchAppManagerFactory,
+): TerminateAppToolDependencies => ({
+  createTerminateApp: (device) => createPlatformTerminateApp(device, watchApps),
+});
 
 export interface CrashAppExecutor {
   execute(appId: string, call?: ActionCall): Promise<CrashAppResult>;
@@ -217,9 +224,11 @@ export interface UninstallAppToolDependencies {
   createUninstallApp(device: BootedDevice): UninstallAppExecutor;
 }
 
-const defaultUninstallAppToolDependencies: UninstallAppToolDependencies = {
-  createUninstallApp: (device) => new UninstallApp(device),
-};
+const createDefaultUninstallAppToolDependencies = (
+  watchApps?: WatchAppManagerFactory,
+): UninstallAppToolDependencies => ({
+  createUninstallApp: (device) => createPlatformUninstallApp(device, watchApps),
+});
 
 export interface InspectPackageSigningExecutor {
   execute(
@@ -239,9 +248,11 @@ const defaultInspectPackageSigningToolDependencies: InspectPackageSigningToolDep
       : new InspectPackageSigning(device),
 };
 
-const defaultInstallAppToolDependencies: InstallAppToolDependencies = {
-  createInstallApp: (device) => new InstallApp(device),
-};
+const createDefaultInstallAppToolDependencies = (
+  watchApps?: WatchAppManagerFactory,
+): InstallAppToolDependencies => ({
+  createInstallApp: (device) => createPlatformInstallApp(device, watchApps),
+});
 
 function buildTerminateMessage(appId: string, result: TerminateAppResult): string {
   if (result.wasInstalled === false) {
@@ -267,6 +278,12 @@ export type AppPermissionsFactory = (device: BootedDevice) => AppPermissionsLike
 const defaultAppPermissionsFactory: AppPermissionsFactory = (device) => new AppPermissions(device);
 
 function describeSetPermissionsSuccess(appId: string, result: SetAppPermissionsResult): string {
+  const applied = describeAppliedPermissions(appId, result);
+  const diagnostics = result.diagnostics?.map((diagnostic) => diagnostic.message) ?? [];
+  return diagnostics.length > 0 ? `${applied}. Warning: ${diagnostics.join(" ")}` : applied;
+}
+
+function describeAppliedPermissions(appId: string, result: SetAppPermissionsResult): string {
   if (result.warnings?.length) {
     return `Applied ${result.changedCount} verified app permission change(s) for ${appId}; not verified: ${result.warnings.join("; ")}`;
   }
@@ -288,7 +305,7 @@ export const createSetAppPermissionsHandler =
       scheduleExactAlarm: args.scheduleExactAlarm,
     });
 
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message: result.success
         ? describeSetPermissionsSuccess(args.appId, result)
         : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
@@ -396,6 +413,7 @@ const createLaunchAppHandler =
     let prototypeLaunch: PrototypeLaunch | undefined;
     try {
       signal?.throwIfAborted();
+      assertWatchLaunchSupported(device, args);
       prototypeLaunch = args.prototype
         ? await beginPrototypeLaunch(dependencies, device, args.appId)
         : undefined;
@@ -607,7 +625,7 @@ const createInstallAppHandler =
         ? `Installed app from ${args.artifactPath}. Warning: ${result.warning}`
         : `Installed app from ${args.artifactPath}`;
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message,
         ...result,
       });
@@ -660,7 +678,7 @@ const createUninstallAppHandler =
         ? `Uninstalled app ${args.appId}${result.keepData ? " (data preserved)" : ""}`
         : `App ${args.appId} was not installed`;
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message,
         ...result,
       });
@@ -713,29 +731,35 @@ export interface AppToolsDependencies {
   appLifecycle?: Partial<AppLifecycleToolDependencies>;
   inspectPackageSigning?: Partial<InspectPackageSigningToolDependencies>;
   appPermissionsFactory?: AppPermissionsFactory;
+  /** The Apple Watch app manager the app tools use for a watch (install through terminate). */
+  watchApps?: WatchAppManagerFactory;
 }
 
 /** Builds every injectable handler from real defaults overlaid with `dependencies`. */
 function createAppToolHandlers(dependencies: AppToolsDependencies) {
   const listAppsHandler = createListAppsHandler({
-    ...createDefaultListAppsToolDependencies(),
+    ...createDefaultListAppsToolDependencies(dependencies.watchApps),
     ...dependencies.listApps,
   });
   const launchAppDependencies: LaunchAppToolDependencies = {
     ...createDefaultLaunchAppToolDependencies(),
+    createLaunchApp: (device) => createPlatformLaunchApp(device, dependencies.watchApps),
     ...dependencies.launchApp,
   };
   const launchAppHandler = createLaunchAppHandler(launchAppDependencies);
   const terminateAppHandler = createTerminateAppHandler(
-    { ...defaultTerminateAppToolDependencies, ...dependencies.terminateApp },
+    {
+      ...createDefaultTerminateAppToolDependencies(dependencies.watchApps),
+      ...dependencies.terminateApp,
+    },
     launchAppDependencies,
   );
   const uninstallAppHandler = createUninstallAppHandler({
-    ...defaultUninstallAppToolDependencies,
+    ...createDefaultUninstallAppToolDependencies(dependencies.watchApps),
     ...dependencies.uninstallApp,
   });
   const installAppHandler = createInstallAppHandler({
-    ...defaultInstallAppToolDependencies,
+    ...createDefaultInstallAppToolDependencies(dependencies.watchApps),
     ...dependencies.installApp,
   });
   const crashAppHandler = createCrashAppHandler({
@@ -825,7 +849,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       explicitlyTargeted,
     });
 
-    return createJSONToolResponse({ ...result });
+    return createStructuredToolResponse({ ...result });
   };
 
   // Register with the tool registry
@@ -878,7 +902,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Uninstall app by package name or bundle identifier",
     uninstallAppSchema,
     uninstallAppHandler,
-    { defaultEnabled: true, stopsApp: true },
+    { defaultEnabled: true, outputSchema: uninstallAppResultSchema, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -886,7 +910,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     setAppPermissionsHandler,
-    { ...PLAN_RELEVANT, defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setAppPermissionsResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -918,7 +942,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
     resetKeychainSchema,
     resetKeychainHandler,
-    { ...PLAN_RELEVANT, defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: resetKeychainResultSchema },
   );
 
   listAppsTool.register(ToolRegistry, listAppsHandler);

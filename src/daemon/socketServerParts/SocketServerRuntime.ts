@@ -12,7 +12,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { DaemonRequest, SessionContext, type DaemonOptions } from "../types";
 import { SOCKET_PATH, DAEMON_HANDSHAKE_ENABLED } from "../wire/constants";
 
-import { type DaemonSocketReachabilityLike } from "../daemonSocketReachability";
+import { type DaemonSocketReachabilityLike } from "../client/daemonSocketReachability";
 
 import { type DaemonSelfIdentity } from "../wire/daemonHandshake";
 
@@ -137,6 +137,7 @@ export class SocketServerRuntime {
   pendingSessionReleaseWrites: Set<Promise<void>> = new Set();
   listChangedUnsubscribe: (() => void) | null = null;
   sessionReleaseUnsubscribe: (() => void) | null = null;
+  sessionDeviceReboundUnsubscribe: (() => void) | null = null;
   socketPath: string;
   daemonState: SocketDaemonStateAccess;
   readonly clearConnectionDevicePin: ((connectionId: string) => void) | undefined;

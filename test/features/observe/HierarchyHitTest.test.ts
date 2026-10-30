@@ -179,7 +179,7 @@ test("application fallback avoids multiple covering windows and the IME", () => 
       target,
       row.bounds,
       { x: 200, y: 50 },
-      { left: 360, top: 0, right: 400, bottom: 100 },
+      { imeBounds: { left: 360, top: 0, right: 400, bottom: 100 } },
     ),
   ).toEqual({ point: null, coveredBy: "Dialog" });
 });
@@ -297,8 +297,7 @@ describe("AutoMobile prototype covers (#10715)", () => {
         target(hierarchy),
         row.bounds,
         { x: 200, y: 50 },
-        undefined,
-        "touch",
+        { ownWindows: "touch" },
       ).point,
     ).toBeNull();
     expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });

@@ -1,11 +1,14 @@
 import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
-import type { CtrlSocket } from "../shared/types";
 import { AccessibilityHierarchyConverter } from "./AccessibilityHierarchyConverter";
 import { AndroidHierarchyRequestSender } from "./AndroidHierarchyRequestSender";
 import { AndroidHierarchySyncRunner } from "./AndroidHierarchySyncRunner";
-import { AndroidHierarchyWaiter, type PendingHierarchyReply } from "./AndroidHierarchyWaiter";
+import {
+  AndroidHierarchyWaiter,
+  type FreshDataWaitOptions,
+  type PendingHierarchyReply,
+} from "./AndroidHierarchyWaiter";
 import { satisfiesMinTimestamp } from "./hierarchyFreshness";
 /**
  * CtrlProxyHierarchy - Delegate for hierarchy retrieval and caching.
@@ -36,7 +39,17 @@ import type {
   HierarchyDelegateContext,
   HierarchySyncDiagnostics,
   ObserverHierarchyRequestOptions,
+  HierarchySyncRequestOptions,
+  LatestHierarchyOptions,
 } from "./types";
+
+/** Applies `getLatestHierarchy`'s defaults: no options means no freshness floor. */
+function resolveLatestHierarchyOptions(options: LatestHierarchyOptions = {}): {
+  minTimestamp: number;
+  signal?: AbortSignal;
+} {
+  return { minTimestamp: options.minTimestamp ?? 0, signal: options.signal };
+}
 
 /** Cooldown after a WebSocket timeout before retrying fresh-data waits. Keep short: a long
  *  cooldown (e.g. 5s) makes one slow response cascade into stale data for every request. */
@@ -168,7 +181,7 @@ export class CtrlProxyHierarchy {
    * @param timeout - Maximum time to wait for fresh data in milliseconds
    * @param perf - Performance tracker for timing
    * @param skipWaitForFresh - If true, skip waiting for fresh data entirely (go straight to sync)
-   * @param minTimestamp - If provided, cached data must have updatedAt >= this value to be considered fresh
+   * @param options.minTimestamp - If provided, cached data must have updatedAt >= this value to be considered fresh
    * @returns Promise<AccessibilityHierarchyResponse>
    */
   async getLatestHierarchy(
@@ -176,9 +189,9 @@ export class CtrlProxyHierarchy {
     timeout: number = DEFAULT_FRESH_WAIT_MS,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    signal?: AbortSignal,
+    options?: LatestHierarchyOptions,
   ): Promise<HierarchyLookupResult> {
+    const { minTimestamp, signal } = resolveLatestHierarchyOptions(options);
     const startTime = this.context.timer.now();
     let cachedHierarchy = this.context.getCachedHierarchy();
 
@@ -556,14 +569,10 @@ export class CtrlProxyHierarchy {
       // fresh wait, blowing the deadline this parameter exists to protect.
       const freshWaitMs = this.getFreshHierarchyWaitBudget(timeoutMs, startTime);
       const response = await perf.track("getHierarchy", () =>
-        this.getLatestHierarchy(
-          waitForFresh,
-          freshWaitMs,
-          perf,
-          skipWaitForFresh,
+        this.getLatestHierarchy(waitForFresh, freshWaitMs, perf, skipWaitForFresh, {
           minTimestamp,
           signal,
-        ),
+        }),
       );
 
       let hierarchyData = response.hierarchy;
@@ -616,13 +625,9 @@ export class CtrlProxyHierarchy {
             ? undefined
             : Math.max(0, timeoutMs - (this.context.timer.now() - startTime));
         const syncResult = await perf.track("syncRequest", () =>
-          this.requestHierarchySync(
-            perf,
-            disableAllFiltering,
-            signal,
-            syncTimeoutMs,
-            syncDiagnostics,
-          ),
+          this.requestHierarchySync(perf, disableAllFiltering, signal, syncTimeoutMs, {
+            diagnostics: syncDiagnostics,
+          }),
         );
 
         if (syncResult) {
@@ -765,16 +770,15 @@ export class CtrlProxyHierarchy {
     disableAllFiltering: boolean = false,
     signal?: AbortSignal,
     timeoutMs: number = 10000,
-    diagnostics?: HierarchySyncDiagnostics,
-    displayId?: number,
+    options: HierarchySyncRequestOptions = {},
   ): Promise<HierarchySyncResult> {
     return this.requestHierarchySyncWithOptions({
       perf,
       disableAllFiltering,
       signal,
       timeoutMs,
-      diagnostics,
-      displayId,
+      diagnostics: options.diagnostics,
+      displayId: options.displayId,
       observerMode: false,
     });
   }
@@ -825,13 +829,13 @@ export class CtrlProxyHierarchy {
             disableAllFiltering,
             signal ?? new AbortController().signal,
             effectiveTimeoutMs,
-            diagnostics ?? {},
             {
               startTime,
               displayId,
               observerMode,
               preserveDisplayState,
               onRequestId: options.onRequestId,
+              diagnostics: diagnostics ?? {},
             },
           ),
           signal,
@@ -867,8 +871,13 @@ export class CtrlProxyHierarchy {
             disableAllFiltering,
             controller.signal,
             effectiveTimeoutMs,
-            sharedDiagnostics,
-            { startTime, displayId, observerMode, preserveDisplayState },
+            {
+              startTime,
+              displayId,
+              observerMode,
+              preserveDisplayState,
+              diagnostics: sharedDiagnostics,
+            },
           ),
         };
         const createdFlight = flight;
@@ -987,25 +996,11 @@ export class CtrlProxyHierarchy {
     minTimestamp: number,
     useDeviceTimestamp: boolean,
     signal?: AbortSignal,
-    requestId?: string,
-    options: {
-      dispatchSocket?: CtrlSocket | null;
-      allowStaleResponse: boolean;
-      observerMode?: boolean;
-      displayId?: number;
-      diagnostics?: HierarchySyncDiagnostics;
-    } = {
+    options: FreshDataWaitOptions = {
       allowStaleResponse: true,
     },
   ): Promise<CachedHierarchy | null> {
-    return this.waiter.waitForFreshData(
-      timeout,
-      minTimestamp,
-      useDeviceTimestamp,
-      signal,
-      requestId,
-      options,
-    );
+    return this.waiter.waitForFreshData(timeout, minTimestamp, useDeviceTimestamp, signal, options);
   }
   private sendRecompositionTrackingRequest(enabled: boolean): boolean {
     return this.sender.sendRecompositionTrackingRequest(enabled);

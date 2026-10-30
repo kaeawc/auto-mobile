@@ -1,6 +1,10 @@
 import { z } from "zod/v4";
 import type { BootedDevice } from "../models";
-import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  platformSchema,
+  resourceLinkField,
+} from "../utils/schemaHelpers";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
 import { IOS_MAX_DURATION_SECONDS } from "../daemon/videoRecordingManager";
 import type { LifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
@@ -82,8 +86,15 @@ export const videoRecordingSchema = addDeviceTargetingToSchema(
         .optional()
         .describe("Max duration seconds"),
       outputName: z.string().optional().describe("Recording label"),
+      audio: z
+        .boolean()
+        .optional()
+        .describe(
+          "Also record the device's audio into the file (start only; local emulators and iOS Simulators; needs FFmpeg)",
+        ),
       display: z.string().optional().describe('Android panel key, role, or "active" (start only)'),
       highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
+      resourceLink: resourceLinkField(),
     })
     .strict(),
 );
@@ -232,7 +243,10 @@ export function assertActiveRecordingOwner(
     deviceId,
     requesterSessionUuid,
     undefined,
-    `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
-      "another session. Only the session that started an active recording can stop it.",
+    {
+      message:
+        `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
+        "another session. Only the session that started an active recording can stop it.",
+    },
   );
 }

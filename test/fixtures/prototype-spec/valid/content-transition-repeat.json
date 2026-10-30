@@ -1,0 +1,29 @@
+{
+  "id": "content-transition",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [
+        {
+          "count": 1
+        },
+        {
+          "count": 2
+        }
+      ],
+      "as": "item"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{item.count}",
+        "contentTransition": "numeric"
+      }
+    ]
+  }
+}

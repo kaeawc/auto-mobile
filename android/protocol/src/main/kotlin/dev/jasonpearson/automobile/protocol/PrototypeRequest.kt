@@ -125,8 +125,13 @@ object PrototypeRequests {
           element.content == "false"
     }
 
-  /** `{data:/pointer}` placeholders in [text] read from [data], as in any text field. */
-  fun bindDataText(text: String, data: JsonObject?): String = PrototypeDataText.bind(text, data)
+  /**
+   * Request text in one pass: `{data:/pointer}` placeholders in [text] read from [data], and only
+   * the authored text between them goes through [state] interpolation, so a data value that holds
+   * `{key}` is sent as written instead of reading that state key.
+   */
+  fun bindText(text: String, data: JsonObject?, state: (String) -> String): String =
+    PrototypeDataText.bindAround(text, data, state)
 }
 
 /** The transport codes of the host executor (`prototypeRequestProtocol.ts`) plus two of ours. */
@@ -384,6 +389,7 @@ data class PrototypeRequestResult(
   val succeeded: Boolean,
   val meta: PrototypeRequestMeta,
   val wroteInto: Boolean,
+  val appended: Int = 0,
 )
 
 data class PrototypeRequestApplied(val data: JsonObject?, val result: PrototypeRequestResult)
@@ -419,7 +425,7 @@ object PrototypeRequestOutcome {
 
   /** The `into` value of a 2xx response: JSON as is, an empty body (and HEAD) as `""`. */
   fun intoValue(response: PrototypeRequestResponse.Received): JsonElement =
-    response.body ?: JsonPrimitive("")
+    response.body?.takeUnless { it is JsonNull } ?: JsonPrimitive("")
 
   /**
    * Applies one response through [commit], which performs one `/data` write and returns why it was
@@ -428,77 +434,82 @@ object PrototypeRequestOutcome {
    * still follow the response. If the whole metadata does not fit the write limit, `headers` is
    * dropped before giving up.
    */
-  inline fun complete(
+  fun complete(
     into: String?,
     response: PrototypeRequestResponse,
-    /**
-     * Whether [writes], applied in order from the current data, would all be accepted; the first
-     * refusal is returned. Nothing is applied or reported, so a response that ends up refused
-     * leaves no trace of the writes tried for it.
-     */
+    trial: (List<PrototypeDataWrite>) -> PrototypeDataWriteError?,
+    commit: (PrototypeDataWrite) -> PrototypeDataWriteError?,
+  ): PrototypeRequestResult = complete(into, response, null, trial, commit)
+
+  fun complete(
+    into: String?,
+    response: PrototypeRequestResponse,
+    append: PrototypeRequestAppend?,
     trial: (List<PrototypeDataWrite>) -> PrototypeDataWriteError?,
     commit: (PrototypeDataWrite) -> PrototypeDataWriteError?,
   ): PrototypeRequestResult {
     var meta = metaOf(response)
-    // Prefer complete metadata, with a header-free fallback only when headers were supplied.
-    val metadataForms = listOfNotNull(true, false.takeIf { meta.headers != null })
     var wroteInto = false
-    var form: Boolean? = null
-    if (response is PrototypeRequestResponse.Received && response.body is JsonNull) {
-      // A literal JSON `null` body is not an empty one: /data cannot hold it, so `into` stays.
-      if (meta.error == null) {
-        meta =
-          meta.copy(
-            error =
-              PrototypeRequestError(
-                PrototypeRequestErrorCode.INVALID_RESPONSE,
-                "The response body is JSON null, which /data cannot hold.",
-              ),
-          )
-      }
-    } else if (
-      response is PrototypeRequestResponse.Received && meta.error == null && into != null
-    ) {
-      val body = PrototypeDataWrite.Set(into, intoValue(response))
-      val metaPath = PrototypeRequests.metaPath(into)
-      val refused = trial(listOf(body))
-      if (refused != null) {
-        meta =
-          meta.copy(
-            error =
-              PrototypeRequestError(PrototypeRequestErrorCode.INVALID_RESPONSE, refused.message),
-          )
-      } else {
-        // The body and the first form of metadata that fits beside it are staged together; only
-        // an accepted pair is applied (and reported), never a body whose metadata is refused.
-        val forms = metadataForms
-        form = forms.firstOrNull {
-          trial(listOf(body, PrototypeDataWrite.Set(metaPath, meta.toJson(it)))) == null
-        }
-        if (form != null && commit(body) == null) {
-          wroteInto = true
-        } else {
-          form = null
-          meta =
-            meta.copy(
-              error =
-                PrototypeRequestError(
-                  PrototypeRequestErrorCode.INVALID_RESPONSE,
-                  METADATA_DOES_NOT_FIT,
-                ),
-            )
+    var appended = 0
+    if (response is PrototypeRequestResponse.Received && meta.error == null) {
+      val staged = PrototypeRequestAppendWrites.stage(into, response.body, append)
+      val appendRefusal =
+        staged.writes
+          .firstOrNull()
+          ?.takeIf { it is PrototypeDataWrite.Extend }
+          ?.let { trial(listOf(it)) }
+          ?.let { "append.to ${it.message}" }
+      val refusal = staged.message ?: appendRefusal ?: trial(staged.writes)?.message
+      if (refusal != null) meta = invalidMeta(meta, refusal)
+      else {
+        val metadata = into?.let { metadataWrite(it, meta, staged.writes, trial) }
+        if (into != null && metadata == null) meta = invalidMeta(meta, METADATA_DOES_NOT_FIT)
+        else {
+          for (write in staged.writes) {
+            val error = commit(write)
+            check(error == null) { "A staged request write was refused: $error" }
+          }
+          if (metadata != null) {
+            val error = commit(metadata)
+            check(error == null) { "Staged request metadata was refused: $error" }
+          }
+          wroteInto = into != null
+          appended = staged.appended
+          return PrototypeRequestResult(true, meta, wroteInto, appended)
         }
       }
     }
-    if (into != null) {
-      val path = PrototypeRequests.metaPath(into)
-      val attempts = listOfNotNull(form).ifEmpty { metadataForms }
-      for (withHeaders in attempts) {
-        if (commit(PrototypeDataWrite.Set(path, meta.toJson(withHeaders))) == null) break
-      }
-    }
-    return PrototypeRequestResult(meta.error == null, meta, wroteInto)
+    if (into != null) writeErrorMeta(into, meta, trial, commit)
+    return PrototypeRequestResult(meta.error == null, meta, wroteInto, appended)
   }
+
+  private fun writeErrorMeta(
+    into: String,
+    meta: PrototypeRequestMeta,
+    trial: (List<PrototypeDataWrite>) -> PrototypeDataWriteError?,
+    commit: (PrototypeDataWrite) -> PrototypeDataWriteError?,
+  ) {
+    val metadata = metadataWrite(into, meta, emptyList(), trial)
+    if (metadata != null) commit(metadata)
+    else if (meta.error?.message == METADATA_DOES_NOT_FIT) {
+      val minimal = meta.copy(status = null, headers = null)
+      val write = PrototypeDataWrite.Set(PrototypeRequests.metaPath(into), minimal.toJson())
+      if (trial(listOf(write)) == null) commit(write)
+    }
+  }
+
+  private fun invalidMeta(meta: PrototypeRequestMeta, message: String): PrototypeRequestMeta =
+    meta.copy(error = PrototypeRequestError(PrototypeRequestErrorCode.INVALID_RESPONSE, message))
+
+  private fun metadataWrite(
+    into: String,
+    meta: PrototypeRequestMeta,
+    staged: List<PrototypeDataWrite>,
+    trial: (List<PrototypeDataWrite>) -> PrototypeDataWriteError?,
+  ): PrototypeDataWrite.Set? =
+    listOfNotNull(true, false.takeIf { meta.headers != null })
+      .map { PrototypeDataWrite.Set(PrototypeRequests.metaPath(into), meta.toJson(it)) }
+      .firstOrNull { trial(staged + it) == null }
 
   const val METADATA_DOES_NOT_FIT = "response and metadata exceed the data limit"
 
@@ -519,18 +530,25 @@ object PrototypeRequestOutcome {
     data: JsonObject?,
     into: String?,
     response: PrototypeRequestResponse,
+    append: PrototypeRequestAppend? = null,
   ): PrototypeRequestApplied {
     var current = data
     val result =
-      complete(into, response, { writes -> dataTrial(current, writes) }) { write ->
-        when (val written = PrototypeDataWriter.apply(current, write)) {
-          is PrototypeDataWriteResult.Success -> {
-            current = written.data
-            null
+      complete(
+        into,
+        response,
+        append,
+        { writes -> dataTrial(current, writes) },
+        { write ->
+          when (val written = PrototypeDataWriter.apply(current, write)) {
+            is PrototypeDataWriteResult.Success -> {
+              current = written.data
+              null
+            }
+            is PrototypeDataWriteResult.Failure -> written.error
           }
-          is PrototypeDataWriteResult.Failure -> written.error
-        }
-      }
+        },
+      )
     return PrototypeRequestApplied(current, result)
   }
 }

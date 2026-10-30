@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "id": "hk2",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "draft": ""
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "draft"
+        },
+        {
+          "type": "button",
+          "label": "Done",
+          "onTap": [
+            {
+              "type": "hideKeyboard",
+              "animated": true
+            },
+            {
+              "type": "emit",
+              "name": "done"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].animated"
+}

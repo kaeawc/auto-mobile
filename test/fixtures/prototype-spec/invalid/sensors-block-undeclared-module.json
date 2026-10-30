@@ -1,0 +1,44 @@
+{
+  "spec": {
+    "id": "sensors-block-undeclared-module",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "shakes": 0
+    },
+    "requires": {
+      "platform": ["clipboard"],
+      "permissions": [
+        {
+          "name": "motion",
+          "purpose": "Count your steps."
+        }
+      ]
+    },
+    "sensors": {
+      "shake": {},
+      "orientation": {
+        "rateHz": 10
+      },
+      "steps": {},
+      "proximity": {},
+      "light": {
+        "rateHz": 2
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Hi"
+        }
+      ]
+    }
+  },
+  "expectedPath": "sensors",
+  "expectedMessage": "The sensors block requires sensors in requires.platform"
+}

@@ -7,8 +7,11 @@ import dev.jasonpearson.automobile.ctrlproxy.prototypeResultFrame
 import dev.jasonpearson.automobile.ctrlproxy.prototypeStatusFrame
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
@@ -49,6 +52,7 @@ class PrototypeControllerTest {
       onDismissed = { dismissed++ },
       eventSink = PrototypeEventSink { if (connected) events += it },
       clock = { 42L },
+      requestScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
       lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
       render = { spec ->
         mapPrototypeSpec(spec).also { models += it }.request()
@@ -553,6 +557,47 @@ class PrototypeControllerTest {
     assertEquals(status.stacks, frames.last().stacks)
   }
 
+  private class FakeDeviceLocale(override var locales: List<String>) : PrototypeDeviceLocale
+
+  @Test
+  fun `locale changes publish a new snapshot while show override remains sticky`() = runTest {
+    val device = FakeDeviceLocale(listOf("en"))
+    val subject =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, _, _ -> },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        deviceLocale = device,
+      )
+    val localized =
+      spec()
+        .copy(
+          root = PrototypeTextNode(text = "{t:title}"),
+          strings =
+            Json.parseToJsonElement(
+              """{"default":{"title":"Hello"},"ar":{"title":"Arabic"}}""",
+            ) as kotlinx.serialization.json.JsonObject,
+        )
+    subject.show("show", localized)
+    val runtime = checkNotNull(subject.activeRuntime)
+    val before = runtime.current
+    assertEquals("Hello", runtime.renderModel().root.text)
+    device.locales = listOf("ar")
+    subject.onConfigurationChanged()
+    assertNotSame(before, runtime.current)
+    assertEquals(listOf("ar"), runtime.current.locales)
+    assertEquals("Arabic", runtime.renderModel().root.text)
+    subject.show("override", localized, locale = "en")
+    val overridden = checkNotNull(subject.activeRuntime)
+    device.locales = listOf("ar-EG")
+    val pinned = overridden.current
+    subject.onConfigurationChanged()
+    assertSame(pinned, overridden.current)
+    assertEquals("Hello", overridden.renderModel().root.text)
+    subject.show("follow", localized)
+    assertEquals("Arabic", checkNotNull(subject.activeRuntime).renderModel().root.text)
+  }
+
   @Test
   fun `idle configuration keeps mapping passes stable but always relayouts`() = runTest {
     val device = FakePrototypeDeviceAppearance()
@@ -730,8 +775,11 @@ class PrototypeControllerTest {
           reset: Boolean,
           appearance: PrototypeAppearanceOverride?,
           replaceOthers: Boolean,
+          locale: String?,
         ) {
-          launch { controller.show(requestId, spec, displayId, reset, appearance, replaceOthers) }
+          launch {
+            controller.show(requestId, spec, displayId, reset, appearance, replaceOthers, locale)
+          }
         }
 
         override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
@@ -893,6 +941,56 @@ class PrototypeControllerTest {
     assertEquals(listOf("show", "destroy"), host.calls)
     controller.show("late", spec())
     assertResult("late", false, "destroyed")
+  }
+
+  @Test
+  fun `first render failure sends render_failed and never sends shown`() = runTest {
+    val refusals = mutableListOf<SavedPrototypeErrorCode>()
+    var shown = 0
+    val statuses = mutableListOf<PrototypeStatusEntry>()
+    val failing =
+      PrototypeController(
+        host,
+        object : PrototypeResultSink {
+          override suspend fun send(requestId: String?, success: Boolean, error: String?) {
+            fail("Expected typed refusal")
+          }
+
+          override suspend fun sendRefusal(
+            requestId: String?,
+            code: SavedPrototypeErrorCode,
+            error: String,
+          ) {
+            assertEquals("first composition timed out", error)
+            refusals += code
+          }
+
+          override suspend fun sendPrototypeStatus(
+            requestId: String?,
+            prototypes: List<PrototypeStatusEntry>,
+            droppedEvents: Long,
+          ) {
+            statuses.addAll(prototypes)
+          }
+
+          override suspend fun sendShown(
+            requestId: String?,
+            missingAssets: List<String>,
+            appearance: PrototypeAppearance,
+            hiddenReason: PrototypeHiddenReason?,
+          ) {
+            shown++
+          }
+        },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        render = { mapPrototypeSpec(it).request() },
+      )
+    host.failure = PrototypeRenderFailedException("first composition timed out")
+    failing.show("render", spec())
+    assertEquals(listOf(SavedPrototypeErrorCode.RENDER_FAILED), refusals)
+    assertEquals(0, shown)
+    failing.inspect("inspect")
+    assertTrue(statuses.isEmpty())
   }
 
   @Test

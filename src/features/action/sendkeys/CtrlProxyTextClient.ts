@@ -55,9 +55,7 @@ export function createSendKeysTextClient(
           priorImeId ?? undefined,
           undefined,
           undefined,
-          signal,
-          delivery,
-          trace,
+          { signal, delivery, trace },
         );
         return {
           success: result.success,

@@ -64,6 +64,14 @@ function swipeOutcomeUnknown(
   return unacknowledged || isRunnerGestureOutcomeUnknown(result);
 }
 
+/** A straight swipe stroke from (x1, y1) to (x2, y2), in device pixels. */
+export interface SwipeLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 /** Call context for {@link ExecuteGesture.execute}: duration and display fence ride beside the signal. */
 export interface GestureCall extends ActionCall {
   durationMs?: number;
@@ -87,19 +95,13 @@ export class ExecuteGesture extends BaseVisualChange {
    * Execute a swipe gesture from one point to another
    * Note: This method executes the raw swipe command without observation.
    * Callers that need observation should use observedInteraction at a higher level.
-   * @param x1 - Starting X coordinate
-   * @param y1 - Starting Y coordinate
-   * @param x2 - Ending X coordinate
-   * @param y2 - Ending Y coordinate
+   * @param line - Start and end coordinates
    * @param options - Additional gesture options
    * @param call - Request-scoped context (cancellation signal, optional performance tracker)
    * @returns Result of the swipe operation
    */
   async swipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
+    line: SwipeLine,
     options: FencedGestureOptions = {},
     call: ActionCall = {},
   ): Promise<SwipeResult> {
@@ -107,9 +109,9 @@ export class ExecuteGesture extends BaseVisualChange {
     // Platform-specific swipe execution (no observedInteraction - caller handles observation)
     switch (this.device.platform) {
       case "android":
-        return await this.executeAndroidSwipe(x1, y1, x2, y2, options, call);
+        return await this.executeAndroidSwipe(line, options, call);
       case "ios":
-        return await this.executeiOSSwipe(x1, y1, x2, y2, options, call);
+        return await this.executeiOSSwipe(line, options, call);
       default:
         throw unsupportedPlatformError(this.device.platform, "execute gesture");
     }
@@ -117,22 +119,17 @@ export class ExecuteGesture extends BaseVisualChange {
 
   /**
    * Execute Android-specific swipe gesture
-   * @param x1 - Starting X coordinate
-   * @param y1 - Starting Y coordinate
-   * @param x2 - Ending X coordinate
-   * @param y2 - Ending Y coordinate
+   * @param line - Start and end coordinates
    * @param options - Additional gesture options
    * @param call - Request-scoped context (cancellation signal, optional performance tracker)
    * @returns Result of the swipe operation
    */
   private async executeAndroidSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
+    line: SwipeLine,
     options: FencedGestureOptions = {},
     call: ActionCall = {},
   ): Promise<SwipeResult> {
+    const { x1, y1, x2, y2 } = line;
     const { signal } = call;
     const perf = callPerf(call);
     const duration = options.duration ?? 300; // Default duration
@@ -148,10 +145,12 @@ export class ExecuteGesture extends BaseVisualChange {
       const searchDuration = new DefaultElementGeometry().getSwipeDurationFromSpeed("slow");
       const fallback = () =>
         this.executeAndroidSwipe(
-          coordinates.startX,
-          coordinates.startY,
-          coordinates.endX,
-          coordinates.endY,
+          {
+            x1: coordinates.startX,
+            y1: coordinates.startY,
+            x2: coordinates.endX,
+            y2: coordinates.endY,
+          },
           { duration: searchDuration, scrollMode: "adb", displayFence: options.displayFence },
           call,
         );
@@ -175,7 +174,7 @@ export class ExecuteGesture extends BaseVisualChange {
 
     // Use accessibility service swipe if requested
     if (scrollMode === "a11y") {
-      return await this.executeA11ySwipe(x1, y1, x2, y2, duration, {
+      return await this.executeA11ySwipe(line, duration, {
         perf,
         signal,
         displayFence: options.displayFence,
@@ -216,22 +215,17 @@ export class ExecuteGesture extends BaseVisualChange {
   /**
    * Execute swipe using accessibility service's dispatchGesture API.
    * This is significantly faster than ADB's input swipe command.
-   * @param x1 - Starting X coordinate
-   * @param y1 - Starting Y coordinate
-   * @param x2 - Ending X coordinate
-   * @param y2 - Ending Y coordinate
+   * @param line - Start and end coordinates
    * @param duration - Swipe duration in milliseconds
    * @param call - Request-scoped context (signal, performance tracker) plus the display fence
    * @returns Result of the swipe operation
    */
   private async executeA11ySwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
+    line: SwipeLine,
     duration: number,
     call: ActionCall & DisplayFenceOption = {},
   ): Promise<SwipeResult> {
+    const { x1, y1, x2, y2 } = line;
     const { signal } = call;
     const perf = callPerf(call);
     const fence = resolveDisplayFence(call);
@@ -340,44 +334,33 @@ export class ExecuteGesture extends BaseVisualChange {
 
   /**
    * Execute iOS-specific swipe gesture
-   * @param x1 - Starting X coordinate
-   * @param y1 - Starting Y coordinate
-   * @param x2 - Ending X coordinate
-   * @param y2 - Ending Y coordinate
+   * @param line - Start and end coordinates
    * @param options - Additional gesture options
    * @param call - Request-scoped context (cancellation signal, optional performance tracker)
    * @returns Result of the swipe operation
    */
   private async executeiOSSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
+    line: SwipeLine,
     options: FencedGestureOptions = {},
     call: ActionCall = {},
   ): Promise<SwipeResult> {
-    return await this.executeXCTestSwipe(x1, y1, x2, y2, options, call);
+    return await this.executeXCTestSwipe(line, options, call);
   }
 
   /**
    * Execute swipe using CtrlProxy iOS's gesture API.
    * This uses the WebSocket-based CtrlProxy iOS for faster, more reliable gestures.
-   * @param x1 - Starting X coordinate
-   * @param y1 - Starting Y coordinate
-   * @param x2 - Ending X coordinate
-   * @param y2 - Ending Y coordinate
+   * @param line - Start and end coordinates
    * @param options - Additional gesture options (duration defaults to 300 ms)
    * @param call - Request-scoped context (cancellation signal, optional performance tracker)
    * @returns Result of the swipe operation
    */
   private async executeXCTestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
+    line: SwipeLine,
     options: FencedGestureOptions = {},
     call: ActionCall = {},
   ): Promise<SwipeResult> {
+    const { x1, y1, x2, y2 } = line;
     const duration = options.duration || 300;
     const { signal } = call;
     const perf = callPerf(call);

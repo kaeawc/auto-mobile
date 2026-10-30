@@ -22,7 +22,7 @@ import type { InvocationPlan } from "./invoke";
 /**
  * Admit a plain tool that names a session, so it passes the same refusals as
  * every sibling plain session tool. Device-aware tools carry their admitted
- * identity into execution in ToolRegistry; acquisition, `setActiveDevice` and a
+ * identity into execution in ToolRegistry; acquisition, active-device selection and a
  * profile-minted `setToolEnabled` are exempt.
  */
 export async function admitNamedSession(
@@ -39,7 +39,7 @@ export async function admitNamedSession(
     !providedSessionUuid ||
     tool.requiresDevice ||
     isDeviceSessionAcquisitionTool(name) ||
-    name === "setActiveDevice" ||
+    tool.selectsActiveDevice === true ||
     // #6148 (#6069 residual): setToolEnabled is exempt ONLY when the explicit
     // sessionUuid is a profile THIS DAEMON PROCESS itself minted
     // (toolSelectionProfileRegistry.has, populated only alongside
@@ -112,13 +112,13 @@ export function trackAcquisitionReleases(name: string): {
   };
 }
 
-/** Bind a successful `setActiveDevice` result to the connection. */
+/** Bind a successful active-device selection (`setActiveDevice`) result to the connection. */
 export function bindActiveDeviceResult(
   plan: InvocationPlan,
   result: { isError?: boolean } | undefined,
 ): void {
   if (
-    plan.name === "setActiveDevice" &&
+    plan.tool.selectsActiveDevice === true &&
     !result?.isError &&
     plan.sessionToolBinding.bind(
       plan.sessionId,

@@ -5,7 +5,7 @@ import { type IdGenerator } from "../../utils/IdGenerator";
 import { type Timer } from "../../utils/SystemTimer";
 import { carryToolFailureMark } from "../../utils/toolFailureSignal";
 import { type BuildIdentity } from "../wire/buildIdentity";
-import { DaemonClient, type DaemonClientFactory } from "../client";
+import { DaemonClient, type DaemonClientFactory } from "../client/client";
 import { DaemonBoundSessionLostError } from "../DaemonBoundSessionLostError";
 import {
   type DeviceSessionSuspectRefusal,
@@ -17,18 +17,15 @@ import {
   DaemonToolOutcomeUnknownError,
 } from "../proxy/daemonErrors";
 import { livenessResumedNotice } from "../proxyLivenessRecovery";
-import { getConnectedStaticToolDefinitions } from "../staticToolDefinitions";
+import {
+  getConnectedStaticToolDefinitions,
+  staticToolDeclaresHostInventory,
+} from "../staticToolDefinitions";
 import { type DaemonOptions, type DaemonStatus } from "../types";
 
 export const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
 
 export const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
-
-// These inventory tools never operate a device or mint a device session. They
-// normally retain a live binding's policy, but after that binding is terminally
-// released they must be able to discover the stable target for an explicit
-// getAndroid/getApple reacquisition (#7144).
-export const SESSIONLESS_DEVICE_DISCOVERY_TOOLS = ["listDevices", "listDeviceImages"] as const;
 
 /**
  * A tool definition's read classification, generated from the tool's `deviceReadOnly`
@@ -38,11 +35,14 @@ export const DEVICE_READ_ONLY_META_KEY = "automobile/deviceReadOnly";
 
 export const DEVICE_READ_ONLY_ARGS_META_KEY = "automobile/deviceReadOnlyArgs";
 
+/**
+ * Host inventory tools (the `hostInventory` trait) never operate a device or mint a device session.
+ * They normally retain a live binding's policy, but after that binding is terminally released they
+ * must be able to discover the stable target for an explicit getAndroid/getApple reacquisition
+ * (#7144).
+ */
 export function isDeviceInventoryTool(name: unknown): boolean {
-  return (
-    typeof name === "string" &&
-    (SESSIONLESS_DEVICE_DISCOVERY_TOOLS as readonly string[]).includes(name)
-  );
+  return staticToolDeclaresHostInventory(name);
 }
 
 /**
@@ -77,6 +77,8 @@ export interface DaemonProxyToolCallOptions {
    * the daemon answer with a task handle.
    */
   readonly declaresTasks?: boolean;
+  /** The client's cancellation of this call. */
+  readonly signal?: AbortSignal;
 }
 
 /** Failures that give no evidence the forwarded session is still live and admitted. */

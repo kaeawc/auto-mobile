@@ -62,6 +62,33 @@ class LibraryImportTest {
   }
 
   @Test
+  fun chromelessBundleWithHostCapabilityRequirementReachesCommit() {
+    bytes = ImportBundleFixtures.chromelessWindowChrome
+    assertTrue(import() is LibraryImportResult.Imported)
+    assertEquals(listOf("prototype_window_chrome_v1"), committed?.requires)
+    val expectedSpec =
+      """{"id":"chrome","window":{"placement":{"type":"fullscreen"},"chrome":"none"},"root":""" +
+        """{"type":"text","text":"Prototype content"}}"""
+    assertEquals(
+      expectedSpec,
+      committed?.spec?.toString(Charsets.UTF_8),
+    )
+
+    val unsupported =
+      ValidatedLibraryImporter(
+        setOf("viewer.exports"),
+        ImportContent { ByteArrayInputStream(ImportBundleFixtures.chromelessWindowChrome) },
+        AutoMobilePrototype.capabilities - "prototype_window_chrome_v1",
+        ImportAssetCheck { null },
+        LibraryImportCommit { _, _, _ -> error("Must not commit") },
+      )
+    assertEquals(
+      LibraryImportResult.Rejected("spec.json", UNSUPPORTED_PROTOTYPE_REASON),
+      unsupported.import(LibraryImportRequest(ImportAction.View, "content://external/document")),
+    )
+  }
+
+  @Test
   fun hostileZipIsRejectedWithPathBeforeCommit() {
     bytes = ImportBundleFixtures.hostile
     val result = import() as LibraryImportResult.Rejected

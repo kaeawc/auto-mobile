@@ -5,7 +5,7 @@ import {
   DaemonMcpProxy,
   DaemonSessionStalledError,
 } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -1186,13 +1186,9 @@ describe("proxy liveness stalls (#10053)", () => {
         const reason = new Error("Caller cancelled recovery wait");
         const cancelled = (
           kind === "tool"
-            ? proxy.callTool(
-                "observe",
-                { sessionUuid: "android-session" },
-                undefined,
-                undefined,
-                controller.signal,
-              )
+            ? proxy.callTool("observe", { sessionUuid: "android-session" }, undefined, undefined, {
+                signal: controller.signal,
+              })
             : proxy.readResource("automobile:devices/booted", { signal: controller.signal })
         ).catch((error: unknown) => error);
         const sibling = proxy.callTool("observe", { sessionUuid: "android-session" });
@@ -1458,7 +1454,7 @@ describe("proxy liveness stalls (#10053)", () => {
         { sessionUuid: "android-session" },
         undefined,
         undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       await drain();
       expect(observeCalls).toBe(1);

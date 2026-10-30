@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "adaptive",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "selection": "",
+      "tab": "home",
+      "open": true
+    },
+    "root": {
+      "type": "adaptive",
+      "kind": "listDetail",
+      "list": {
+        "type": "text",
+        "text": "Pane"
+      },
+      "detail": {
+        "type": "text",
+        "text": "Pane"
+      }
+    }
+  },
+  "expectedPath": "root.selectionKey"
+}

@@ -116,7 +116,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ),
   ...tools(
     ["pressButton"],
-    "Power/lock journal the screen state with a readable prior; volume presses record a fallback intent because live audio levels have no revert on either platform. iOS power/action retain diagnostic breadcrumbs; other buttons are transient input.",
+    "Power/lock journal the screen state with a readable prior; Android volume presses journal the level of every stream a volume key can change, which the reset sets back and reads back. iOS volume presses record a fallback intent because simctl has no volume revert; iOS power/action retain diagnostic breadcrumbs; other buttons are transient input.",
     "journaled",
     { fallback: true },
   ),
@@ -133,7 +133,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ),
   ...tools(
     ["launchApp", "measureStartup", "installApp", "uninstallApp"],
-    "clearAppData, a persistent compilation mode, an install over, or an uninstall of an app the baseline held records a fallback intent unless the session installed an app the baseline did not hold; installs also keep their installed-app row. Other calls only start or stop processes.",
+    "clearAppData, a persistent compilation mode, an install over, or an uninstall of an app the baseline held records a fallback intent unless the session installed an app the baseline did not hold; installs also keep their installed-app row. Android launches and startup measurements record a non-fallback launch row so keep-booted cleaning clears a launched preinstalled app's data. Other calls only start or stop processes.",
     "journaled",
     { fallback: true },
   ),
@@ -143,6 +143,14 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
     "journaled",
     { fallback: true },
   ),
+  // Input events that change no device state a later session could observe. Verified against what
+  // each tool executes: `input tap/swipe/touchscreen/stylus/keyevent`, CtrlProxy accessibility
+  // actions and gestures, `cmd statusbar expand/collapse`, a CtrlProxy overlay window that removes
+  // itself, an emulator accelerometer vector the call restores in a `finally`, and wake/dismiss-
+  // keyguard key events that move the device toward the ready state. Effects the target app causes
+  // (a tapped Settings switch, a notification's content intent, text typed into a field) are
+  // app-owned and outside the journal's scope; the keep-booted baseline clean still covers shared
+  // settings, packages and files.
   ...tools(
     [
       "accessibilityFocus",
@@ -151,12 +159,14 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
       "focusNavigate",
       "highlight",
       "homeScreen",
+      "hoverAt",
       "multiTouch",
       "pinchOn",
       "recentApps",
       "rotaryScroll",
       "selectAllText",
       "shake",
+      "siri",
       "swipeAt",
       "swipeOn",
       "systemTray",
@@ -176,6 +186,11 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ...tools(
     ["performanceTrace", "captureTrace", "heapDump", "videoRecording", "recordDeviceGestures"],
     "Writes host-side artifacts; the device-side recording, trace or heap dump file is removed after the pull (session release removes one left behind), and gesture capture only reads input events.",
+    "notJournaled",
+  ),
+  ...tools(
+    ["injectAudioInput", "stopAudioInput"],
+    "Streams audio into the emulator microphone over its gRPC API; nothing persists on the device, and session release stops a stream still playing.",
     "notJournaled",
   ),
   ...tools(

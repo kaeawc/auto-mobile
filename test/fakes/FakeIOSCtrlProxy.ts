@@ -3,7 +3,10 @@ import type { TapCoordinatesRequest } from "../../src/features/observe/shared/Sh
 import type { IosActivateAccessibilityLinkRequest } from "../../src/features/observe/ios/CtrlProxyVoiceOver";
 import { IosCtrlProxy } from "../../src/features/observe/ios";
 import { convertIosHierarchy } from "../helpers/iosHierarchyConverter";
-import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
+import type {
+  IOSDispatchResult,
+  IosFrameDispatchOptions,
+} from "../../src/features/observe/ios/CtrlProxyDispatch";
 import {
   CtrlProxyScreenshotResult,
   CtrlProxyDragResult,
@@ -27,6 +30,15 @@ import {
   CtrlProxyPerfTiming,
 } from "../../src/features/observe/ios";
 import type { SdkTriggerRequest } from "../../src/features/observe/ios/CtrlProxySdkTrigger";
+import type { IosObservationBridgeState } from "../../src/features/observe/ios/observationBridgeState";
+import type { IosSdkAction } from "../../src/features/observe/ios/sdkObservationBridge";
+import type { IosSdkWebAction } from "../../src/features/observe/ios/sdkWebViewBridge";
+import type {
+  CtrlProxySdkActionResult,
+  CtrlProxySdkObservationResult,
+  CtrlProxySdkWebActionResult,
+  CtrlProxySdkWebSnapshotResult,
+} from "../../src/features/observe/ios/types";
 import type {
   CtrlProxyMagicTapResult,
   CtrlProxySdkTriggerResult,
@@ -36,6 +48,7 @@ import type {
   CtrlProxyLocationResult,
   CtrlProxyAppearance,
   CtrlProxyAppearanceResult,
+  CtrlProxySiriResult,
   CtrlProxyActionResult,
   CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
@@ -58,6 +71,7 @@ import {
   resolveAccessibilityHierarchyArgs,
   type AccessibilityHierarchyRequest,
 } from "../../src/features/observe/hierarchyReadArgs";
+import type { LatestHierarchyOptions } from "../../src/features/observe/android/types";
 
 /**
  * Fake implementation of IosCtrlProxy for testing
@@ -689,7 +703,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     timeout: number = 100,
     perf?: PerformanceTracker,
     skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
+    _options?: LatestHierarchyOptions,
   ): Promise<CtrlProxyHierarchyResponse> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getLatestHierarchy");
@@ -791,9 +805,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     x: number,
     y: number,
     _timeoutMs?: number,
-    _frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { signal, onDispatch }: IosFrameDispatchOptions = {},
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
     signal?.throwIfAborted();
     await this.applyDelay("tap");
@@ -1071,6 +1083,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   async requestPressHome(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    _frameContext?: string,
   ): Promise<CtrlProxyPressHomeResult> {
     this.pressHomeRequestCount++;
     await this.applyDelay("pressHome");
@@ -1202,6 +1215,21 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     await this.applyDelay("requestLocation");
     this.checkFailure("requestLocation");
     return this.locationResult ?? { success: true, totalTimeMs: 0 };
+  }
+
+  /** Siri phrases seen, and an optional scripted result (#14109). */
+  readonly siriHistory: string[] = [];
+  siriResult?: CtrlProxySiriResult;
+
+  async requestSiri(
+    text: string,
+    _timeoutMs: number = 10000,
+    _signal?: AbortSignal,
+  ): Promise<CtrlProxySiriResult> {
+    this.siriHistory.push(text);
+    await this.applyDelay("requestSiri");
+    this.checkFailure("requestSiri");
+    return this.siriResult ?? { success: true, totalTimeMs: 0 };
   }
 
   /** Appearance requests seen (`undefined` = read only) and the simulated system appearance. */
@@ -1421,7 +1449,6 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     resourceId?: string,
     label?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("action");
@@ -1443,6 +1470,69 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
       action,
       totalTimeMs: 50,
     };
+  }
+
+  /** Scripted SDK observation-bridge state and replies (#5159); default: no bridge registered. */
+  observationBridgeState: IosObservationBridgeState = {
+    status: "unavailable",
+    reason: "NOT_REGISTERED",
+  };
+  sdkObservationReply: CtrlProxySdkObservationResult = {
+    success: false,
+    available: false,
+    failure: "bridge_unavailable",
+    totalTimeMs: 0,
+  };
+  sdkActionReplies: CtrlProxySdkActionResult[] = [];
+  readonly sdkActions: IosSdkAction[] = [];
+
+  async getObservationBridgeStateForIos(): Promise<IosObservationBridgeState> {
+    return this.observationBridgeState;
+  }
+
+  async requestSdkObservationForIos(): Promise<CtrlProxySdkObservationResult> {
+    return this.sdkObservationReply;
+  }
+
+  async requestSdkActionForIos(action: IosSdkAction): Promise<CtrlProxySdkActionResult> {
+    this.sdkActions.push(action);
+    return (
+      this.sdkActionReplies.shift() ?? {
+        success: false,
+        available: false,
+        failure: "bridge_unavailable",
+        totalTimeMs: 0,
+      }
+    );
+  }
+
+  /** Scripted SDK web-view replies (#5162); default: no web view registered. */
+  sdkWebSnapshotReply: CtrlProxySdkWebSnapshotResult = {
+    success: false,
+    available: false,
+    failure: "bridge_unavailable",
+    totalTimeMs: 0,
+  };
+  sdkWebActionReplies: CtrlProxySdkWebActionResult[] = [];
+  readonly sdkWebActions: Array<{ webViewId: string; action: IosSdkWebAction }> = [];
+
+  async requestSdkWebSnapshotForIos(): Promise<CtrlProxySdkWebSnapshotResult> {
+    return this.sdkWebSnapshotReply;
+  }
+
+  async requestSdkWebActionForIos(
+    webViewId: string,
+    action: IosSdkWebAction,
+  ): Promise<CtrlProxySdkWebActionResult> {
+    this.sdkWebActions.push({ webViewId, action });
+    return (
+      this.sdkWebActionReplies.shift() ?? {
+        success: false,
+        available: false,
+        failure: "bridge_unavailable",
+        totalTimeMs: 0,
+      }
+    );
   }
 
   /** Script the next `requestSdkTrigger` results (default: delivered, HTTP 200). */

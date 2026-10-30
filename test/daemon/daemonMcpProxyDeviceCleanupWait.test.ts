@@ -1,6 +1,6 @@
 import { describe, expect, test, spyOn, afterEach, mock, beforeEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   DeviceCleanupInProgressError,
@@ -342,7 +342,9 @@ describe("DaemonMcpProxy waits out device_cleanup_in_progress (#11900)", () => {
     try {
       const controller = new AbortController();
       const reason = new Error("caller cancelled cleanup wait");
-      const call = proxy.callTool("getAndroid", {}, undefined, undefined, controller.signal);
+      const call = proxy.callTool("getAndroid", {}, undefined, undefined, {
+        signal: controller.signal,
+      });
       const rejected = call.then(
         () => {
           throw new Error("Expected caller cancellation");

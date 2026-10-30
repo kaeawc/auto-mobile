@@ -1,3 +1,4 @@
+import { internalExecutionId, internalMcpSessionId } from "../internalToolParams";
 import { BootedDeviceDiscoveryIncompleteError } from "../../models/BootedDeviceDiscoveryIncompleteError";
 import {
   explicitReadTargetPlatform,
@@ -134,8 +135,22 @@ async function resolveStoppedReservedRead(
   deviceId: string,
 ): Promise<BootedDevice> {
   return withReadRestartReservation(input, deviceId, () =>
-    read.resolve(deviceId, input.signal, input.args.platform || "either"),
+    read.resolve(
+      deviceId,
+      input.signal,
+      input.args.platform || pooledWatchPlatform(deviceId) || "either",
+    ),
   );
+}
+
+/**
+ * A pooled watch read without a platform (a late or gated read of a watch session's device) is
+ * listed as a watch: "either" lists Android and iOS only, so it would never find it (#14908).
+ */
+function pooledWatchPlatform(deviceId: string): "watchos" | undefined {
+  return defaultDaemonContext.devicePool()?.getDevice(deviceId)?.platform === "watchos"
+    ? "watchos"
+    : undefined;
 }
 
 class ReadTargetBecameHeld extends Error {
@@ -190,8 +205,7 @@ export async function ensureReadTargetOrWatch(
   platform: SomePlatform,
   providedDeviceId: string | undefined,
   options: DeviceReadyOptions,
-  read: SessionlessDeviceRead,
-  readinessTarget: string | undefined,
+  { read, readinessTarget }: { read: SessionlessDeviceRead; readinessTarget: string | undefined },
 ): Promise<
   | { device: BootedDevice; watched?: undefined }
   | { watched: ExecutionTargetContext; device?: undefined }
@@ -202,7 +216,7 @@ export async function ensureReadTargetOrWatch(
     };
   }
   const readiness = new AbortController();
-  const executionId = input.args.__executionId;
+  const executionId = internalExecutionId(input.args);
   let markedTarget = readinessTarget;
   let resolvedDevice: BootedDevice | undefined;
   const mark = (deviceId: string) => {
@@ -642,10 +656,7 @@ export function adoptHolderConnectionSession(args: Record<string, unknown>): voi
   }
   // #11469: a plan step or nested call carries no socket identity of its own; it runs for the
   // connection of the call that started it.
-  const mcpSessionId =
-    typeof args.__mcpSessionId === "string"
-      ? args.__mcpSessionId
-      : getToolSelectionContext()?.callerMcpSessionId;
+  const mcpSessionId = internalMcpSessionId(args) ?? getToolSelectionContext()?.callerMcpSessionId;
   if (!mcpSessionId) {
     return;
   }
@@ -656,8 +667,9 @@ export function adoptHolderConnectionSession(args: Record<string, unknown>): voi
     return;
   }
   args.sessionUuid = holderSessionUuid;
-  if (typeof args.__executionId === "string") {
+  const executionId = internalExecutionId(args);
+  if (executionId !== undefined) {
     // Attribute the execution to the session: its end is use, and it vetoes release in flight.
-    executionTracker.setResolvedAutolockSessionUuid(args.__executionId, holderSessionUuid);
+    executionTracker.setResolvedAutolockSessionUuid(executionId, holderSessionUuid);
   }
 }

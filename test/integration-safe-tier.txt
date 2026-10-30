@@ -59,6 +59,7 @@ test/daemon/sessionBroker/brokerRestartHandoff.integration.test.ts | safe | :mem
 test/daemon/sessionBroker/brokerTiming.integration.test.ts | safe | private file-backed registry temp directory, FakeNativePort and FakeTimer, no processes or host tooling
 test/daemon/sessionBroker/exports.integration.test.ts | safe | file-backed registry in tracked harness temp directory with FakeNativePort and FakeTimer
 test/daemon/sessionBroker/provisioning/bindingRegistryAbsence.integration.test.ts | safe | temp-dir SQLite via bindFileBackedDbHarness L18, FakeTimer
+test/daemon/sessionBroker/provisioning/cachedRegistrySchema.integration.test.ts | safe | two SQLite registry handles over a private mkdtemp file with FakeTimer, closed and removed afterwards
 test/daemon/sessionBroker/provisioning/simctlCatalog.integration.test.ts | safe | real resolver and SimCtlClient over injected exec seam and FakeTimer; no host commands
 test/daemon/sessionBroker/registry/bindingJournal.integration.test.ts | unsafe | Bun.spawn of a crash child process L93
 test/daemon/sessionBroker/registry/bindingRegistryBusyBound.integration.test.ts | safe | real SQLite handles on useScratchRoot temp files and a file-backed harness, explicit dbPath, no host tooling
@@ -92,6 +93,7 @@ test/daemon/socketServerReaffirmedProfileAcquisition.integration.test.ts | safe 
 test/daemon/socketServerScopeKey.integration.test.ts | safe | tmpdir socket L72
 test/daemon/socketServerToolCapabilities.integration.test.ts | safe | tmpdir socket L62
 test/daemon/socketTasksRelay.integration.test.ts | safe | tmpdir socket L281, in-process dispatcher, DaemonClient.isAvailable spied, hermetic fixture device boundary
+test/daemon/statelessMcpHttpModern.integration.test.ts | safe | real SDK HTTP, listen, MRTR and task device-choice handlers with captured Request/Response, in-memory task store and bus, hermetic tool/device-manager fakes and FakeTimer; no network listener or database resolution
 test/daemon/telemetryPushSocketServer.integration.test.ts | safe | FakeSocket, FakeTimer, in-memory singleton DB
 test/daemon/videoStreamSocketServer.integration.test.ts | safe | mkdtemp socket dir L144, fake H264 capture source and timer
 test/db/DatabaseHealthProbe.integration.test.ts | safe | temp sqlite file, fake worker; /tmp path L164 is a string only
@@ -192,7 +194,9 @@ test/features/observe/android/storageChangedWireToDb.integration.test.ts | safe 
 test/features/observe/cache/FileSystemObserveCacheStore.integration.test.ts | safe | cache store rooted in mkdtemp tmpdir L32
 test/features/observe/ios/IOSCtrlProxyClient.stream.integration.test.ts | safe | FakeWebSocket/FakeSocket; fake sock path never bound L43
 test/features/observe/ios/ctrlProxyWireParity.integration.test.ts | safe | read-only scan of repo sources L21/L28
+test/features/prototype/PrototypeChannelExecutor.integration.test.ts | safe | ws server and Bun.serve on 127.0.0.1 port 0; loopback only
 test/features/prototype/PrototypeHttpExecutor.integration.test.ts | safe | Bun.serve on 127.0.0.1 port 0 L4; loopback only
+test/features/prototype/prototypeBundleFuzz.integration.test.ts | safe | seeded pure-function fuzz of the bundle reader over in-memory buffers; no I/O, ports or shared paths
 test/features/screen-stream/ScreenCaptureHelperProvider.integration.test.ts | safe | fake downloader/checksum/timer; cache in tmpdir L36/L49
 test/features/shared/GenericThresholdManager.integration.test.ts | safe | createTestDatabase; static threshold calculation only L220
 test/features/video/FfmpegVideoProcessingBackend.integration.test.ts | unsafe | node:child_process spawn/spawnSync of ffmpeg and ffprobe L15/L60
@@ -225,16 +229,22 @@ test/package/webrtcRuntimeMetadata.integration.test.ts | unsafe | Bun.spawn of t
 test/scripts/xcodegenDriftCheck.integration.test.ts | unsafe | spawnSync bash running repo shell scripts L241/L245
 test/server/acquisitionEnableTools.integration.test.ts | safe | hermetic fixture and in-memory MCP transport L1
 test/server/androidNavigationWorkflow.integration.test.ts | safe | hermetic fixture; Explore stubbed with fake executor L1/L141
+test/server/appTools.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; fake app executors and spied ResetKeychain
+test/server/claudeCodeElicitation.integration.test.ts | unsafe | spawns a real Claude Code binary and a stdio child server, and skips without one
 test/server/configManagerDefaultRepositories.integration.test.ts | safe | getDatabase spied to createTestDatabase L29/L31
 test/server/daemonShutdownOutcomeWire.integration.test.ts | safe | hermetic fixture and McpTestFixture in-memory L14
 test/server/deviceLabelSessionReleaseOrdering.integration.test.ts | safe | in-memory DB; new Daemon never started, pool release mocked L33
 test/server/deviceLossOutcomeWire.integration.test.ts | safe | FakeDeviceManager installed; in-memory McpTestFixture L29
 test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceReadiness L67; UnixSocketServer never started, fake pool and :memory: DB
 test/server/finalizeToolResponse.outputSchema.integration.test.ts | safe | FakeDeviceManager and FakeArtifactWriter L19/L142
+test/server/identifyInteractions.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; FakeObserveScreen, spied NavigationGraphManager.getInstance and IdentifyInteractions.analyze
+test/server/interactionTools.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; fake action factories, spied HomeScreen/SystemTray execute
 test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of src files L8
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts | safe | hermetic fixture; tools are in-test stubs L1
 test/server/mcpSessionAutolockRouting.integration.test.ts | safe | FakeDeviceUtils pool, FakeDeviceSessionPersistence L170/L186
+test/server/navigationTools.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; fake navigation graph and NavigateTo, spied Explore.execute
 test/server/observeAppResource.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture L129
+test/server/observeAppShellMinified.integration.test.ts | safe | Bun.build of one source file and a fake window, written under os.tmpdir()
 test/server/outputSchema.sdk.integration.test.ts | safe | hermetic server fixture; in-memory McpTestFixture; in-test stub tool L7
 test/server/performanceResources.integration.test.ts | safe | createTestDatabase in-memory L53
 test/server/plainReadToolSessionActivity.integration.test.ts | safe | hermetic fixture; FakeDeviceUtils pool L36
@@ -265,6 +275,7 @@ test/server/unissuedSessionBoundConnection.integration.test.ts | safe | hermetic
 test/setup/realDeviceToolSpawnGuardPreload.integration.test.ts | unsafe | Bun.spawnSync of bun test and adb devices fixtures L26/L40/L94
 test/utils/FileDownloader.integration.test.ts | safe | fake response streams, no network or spawn; writes only under cwd/scratch L186
 test/utils/FileDownloaderNodeHttp.integration.test.ts | safe | loopback 127.0.0.1:0 server, curl/wget stubbed unavailable L36/L52
+test/utils/android-cmdline-tools/emulatorGrpc/Http2GrpcTransport.integration.test.ts | safe | in-process node:http2 fake emulator on a 127.0.0.1 ephemeral port; no files, processes or devices
 test/utils/deviceSnapshotStore.integration.test.ts | safe | store rooted in mkdtemp tmpdir L12
 test/utils/image/backend/JimpBackend.integration.test.ts | safe | in-process Jimp image processing only
 test/utils/image/backend/JimpCliBackend.integration.test.ts | safe | FakeWebpCodec injected, no CLI spawn L42

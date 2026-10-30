@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "channel-argument",
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "channels": {
+      "chat": {
+        "kind": "websocket",
+        "url": "wss://example.com"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": "Connect",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "realtime.connect",
+          "args": {
+            "channel": {
+              "value": ""
+            }
+          }
+        }
+      ]
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    }
+  },
+  "expectedPath": "root.onTap[0].args.channel.value",
+  "expectedMessage": "Invalid string value"
+}

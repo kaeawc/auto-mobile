@@ -21,6 +21,7 @@ import {
   TeardownToolResponse,
   attachProvisionDeviceLifecycle,
   isTeardownFailure,
+  isDeviceIntactRefusal,
   lifecycleCleanupStatus,
   lifecycleStateForCleanup,
 } from "../../features/deviceLifecycle/deviceLifecycleCore";
@@ -28,6 +29,7 @@ import { provisionDeviceLifecycleReason } from "./provisioningErrors";
 import type { ProvisioningContext } from "./provisioningTypes";
 
 type ProvisionCleanupOptions = {
+  createdNeverLaunched?: boolean;
   lifecycleLease: VirtualDeviceLifecycleLease | undefined;
   pendingMutationSettlement?: Promise<unknown>;
   /** Absolute rollback deadline already anchored by the caller (e.g. iOS identity discovery). */
@@ -259,6 +261,18 @@ function provisionCleanupLifecycle(
   };
 }
 
+function rollbackErrorForCleanup(
+  provisionFailure: ProvisionDeviceError,
+  cleanup: ProvisionDeviceCleanup,
+  lifecycleDevice: ProvisionDeviceLifecycleOutcome["device"],
+): ProvisionDeviceRollbackError {
+  return new ProvisionDeviceRollbackError(
+    provisionFailure,
+    cleanup,
+    isDeviceIntactRefusal(cleanup) && lifecycleDevice ? { retainedDevice: lifecycleDevice } : {},
+  );
+}
+
 export async function cleanupFailedProvisionDevice(
   ctx: ProvisioningContext,
   deps: DeviceToolsDependencies,
@@ -269,6 +283,7 @@ export async function cleanupFailedProvisionDevice(
     pendingMutationSettlement,
     recordLifecycle,
     lifecycleDevice,
+    createdNeverLaunched,
     rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
     collectDeferredCleanup,
   }: ProvisionCleanupOptions,
@@ -370,20 +385,15 @@ export async function cleanupFailedProvisionDevice(
       platform: createdDevice.platform,
       stableId,
     });
-    const cleanup = ctx.executeDeleteDevice(
-      cleanupArgs,
-      deps,
-      undefined,
-      cleanupService,
+    const cleanup = ctx.executeDeleteDevice(cleanupArgs, deps, undefined, cleanupService, {
       lifecycleLease,
-    );
+      internal: createdNeverLaunched ? { unlaunchedCreatedAvd: { stableId } } : undefined,
+    });
     lifecycleLeaseTransferred = true;
     const response = await cleanup;
+    const cleanupResult = provisionDeviceCleanupResult(cleanupArgs, response);
     return await finalizeCleanup(
-      new ProvisionDeviceRollbackError(
-        provisionFailure,
-        provisionDeviceCleanupResult(cleanupArgs, response),
-      ),
+      rollbackErrorForCleanup(provisionFailure, cleanupResult, lifecycleDevice),
     );
   } catch (error) {
     // A rollback failure summarizes to a one-line message in the response, so

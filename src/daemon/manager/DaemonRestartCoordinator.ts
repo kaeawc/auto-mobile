@@ -2,7 +2,7 @@ import { republishResultSchema, type IdentityRecoveryIO } from "../identityRecov
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { DaemonStatus, DaemonOptions } from "../types";
-import { type DaemonClientFactoryOptions, type DaemonClientLike } from "../client";
+import { type DaemonClientFactoryOptions, type DaemonClientLike } from "../client/client";
 import {
   DAEMON_PREPARE_MAINTENANCE_METHOD,
   DAEMON_COMPLETE_MAINTENANCE_METHOD,

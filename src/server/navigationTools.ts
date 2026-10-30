@@ -5,7 +5,7 @@ import {
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { ActionableError, BootedDevice } from "../models";
+import { ActionableError, BootedDevice, requireAndroidOrIosPlatform } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
 import {
   NavigationGraphManager,
@@ -14,12 +14,17 @@ import {
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { throwIfAborted, createJSONToolResponse } from "../utils/toolUtils";
+import { throwIfAborted, createStructuredToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
+import {
+  exploreResultSchema,
+  getNavigationGraphResultSchema,
+  navigateToResultSchema,
+} from "./navigationToolOutputSchemas";
 
 // Schema definitions
 // #6712: `.strict()` on each of these — the advertised schemas already said
@@ -151,14 +156,14 @@ export function createNavigateToHandler({
           ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
           : {}),
         targetScreen: args.targetScreen,
-        platform: args.platform || device.platform,
+        platform: requireAndroidOrIosPlatform(args.platform || device.platform, "navigateTo"),
         sessionUuid: args.sessionUuid,
       };
       const result = await navigateTo.execute(options, progress, signal);
       throwIfAborted(signal);
 
       if (result.success) {
-        return createJSONToolResponse({
+        return createStructuredToolResponse({
           message: result.message || `Navigated to ${args.targetScreen}`,
           ...result,
         });
@@ -166,7 +171,7 @@ export function createNavigateToHandler({
         // A failed navigation must not read as a completed one: mark the MCP
         // envelope `isError`, exactly as tapOn/sendKeys do (#6200, #6251).
         return {
-          ...createJSONToolResponse({
+          ...createStructuredToolResponse({
             error: result.error || "Navigation failed",
             ...result,
           }),
@@ -211,7 +216,7 @@ export function registerNavigationTools({
       const stats = await manager.getStatsForApp(appId);
       const graph = await manager.exportGraphForApp(appId);
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: `Navigation graph for app: ${appId || "none"}`,
         requestedAppId,
         observedAppId,
@@ -245,7 +250,12 @@ export function registerNavigationTools({
     "Navigate to screen using navigation graph",
     navigateToSchema,
     createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
-    { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      embeddedSdkOnly: true,
+      outputSchema: navigateToResultSchema,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -254,7 +264,12 @@ export function registerNavigationTools({
     getNavigationGraphSchema,
     getNavigationGraphHandler,
     // Reads only; read-only access never requires a session (#10965).
-    { defaultEnabled: false, embeddedSdkOnly: true, deviceReadOnly: true },
+    {
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      deviceReadOnly: true,
+      outputSchema: getNavigationGraphResultSchema,
+    },
   );
 
   // Explore handler
@@ -297,7 +312,7 @@ export function registerNavigationTools({
         null,
         undefined,
         navigationManagerFactory(args.sessionUuid),
-        args.sessionUuid,
+        { sessionUuid: args.sessionUuid },
       );
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
@@ -312,7 +327,7 @@ export function registerNavigationTools({
       const result = await explore.execute(options, progress, signal);
 
       if ("dryRun" in result) {
-        return createJSONToolResponse({
+        return createStructuredToolResponse({
           message: `Exploration dry run completed: ${result.plannedInteractions.length} planned interactions`,
           ...result,
         });
@@ -321,7 +336,7 @@ export function registerNavigationTools({
       const completion = result.stopReason?.startsWith("Left target app (")
         ? `Exploration stopped: ${result.stopReason}.`
         : "Exploration completed:";
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: `${completion} ${result.interactionsPerformed} interactions, ${result.screensDiscovered} new screens discovered, ${result.coverage.percentage}% coverage`,
         ...result,
       });
@@ -335,6 +350,11 @@ export function registerNavigationTools({
     "Automatically explore app to build navigation graph",
     exploreSchema,
     exploreHandler,
-    { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      embeddedSdkOnly: true,
+      outputSchema: exploreResultSchema,
+    },
   );
 }

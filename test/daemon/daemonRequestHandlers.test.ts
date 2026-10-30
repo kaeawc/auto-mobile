@@ -290,6 +290,7 @@ describe("handleDaemonRequest", () => {
     expect(capabilities?.result?.capabilities).toContain("session-broker/v1");
     expect(capabilities?.result?.capabilities).toContain("session-broker-export/v1");
     expect(capabilities?.result?.capabilities).not.toContain("managed-slots/v1"); // Legacy capability is absent after upgrade.
+    expect(capabilities?.result?.capabilities).not.toContain("session-broker/ios-duo/v1");
     // A provider that has not completed broker startup cannot grant a session.
     expect(await handleDaemonRequest(buildRequest("daemon/prepareSession"), state)).toMatchObject({
       success: false,

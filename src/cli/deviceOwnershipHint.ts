@@ -1,5 +1,6 @@
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../daemon/inputDeviceOwnership";
 import { isDeviceSessionAcquisitionTool } from "../daemon/deviceSessionResult";
+import { staticToolDeclaresInput } from "../daemon/staticToolDefinitions";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -8,9 +9,6 @@ import {
   SESSION_REBINDING_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
 } from "../models/deviceAcquisitionRefusals";
-
-/** Tools that stop a device and therefore accept `force` to override a held-device refusal. */
-const FORCE_OVERRIDE_TOOLS: ReadonlySet<string> = new Set(["killDevice", "deleteDevice"]);
 
 function refusalCode(payload: unknown): unknown {
   if (!payload || typeof payload !== "object") {
@@ -90,7 +88,8 @@ export function cliDeviceOwnershipHint(payload: unknown, toolName: string): stri
       "release it."
     );
   }
-  const forceHint = FORCE_OVERRIDE_TOOLS.has(toolName)
+  // A tool that declares a `force` input accepts it to override a held-device refusal.
+  const forceHint = staticToolDeclaresInput(toolName, "force")
     ? ` To stop it anyway, pass --force true.`
     : "";
   return (

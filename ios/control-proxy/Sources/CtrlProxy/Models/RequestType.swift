@@ -45,6 +45,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case requestLocation = "request_location"
     case setHingeAngle = "set_hinge_angle"
     case requestAppearance = "request_appearance"
+    case requestSiri = "request_siri"
 
     /// Clipboard
     case requestClipboard = "request_clipboard"
@@ -55,6 +56,10 @@ public enum RequestType: String, CaseIterable, Sendable {
     case addHighlight = "add_highlight"
     case magicTap = "request_magic_tap"
     case sdkTrigger = "request_sdk_trigger"
+    case sdkObservation = "request_sdk_observation"
+    case sdkAction = "request_sdk_action"
+    case sdkWebSnapshot = "request_sdk_web_snapshot"
+    case sdkWebAction = "request_sdk_web_action"
     case getVoiceOverState = "get_voiceover_state"
     case setVoiceOverState = "set_voiceover_state"
     case requestAccessibilityAudit = "request_accessibility_audit"
@@ -120,6 +125,7 @@ extension RequestType {
         case .requestLocation: return .locationResult
         case .setHingeAngle: return .hingeAngleResult
         case .requestAppearance: return .appearanceResult
+        case .requestSiri: return .siriResult
         case .requestClipboard: return .clipboardResult
         case .getCurrentFocus: return .currentFocusResult
         case .getTraversalOrder: return .traversalOrderResult
@@ -127,6 +133,10 @@ extension RequestType {
         case .magicTap: return .magicTapResult
         case .requestAccessibilityAudit: return .accessibilityAuditResult
         case .sdkTrigger: return .sdkTriggerResult
+        case .sdkObservation: return .sdkObservationResult
+        case .sdkAction: return .sdkActionResult
+        case .sdkWebSnapshot: return .sdkWebSnapshotResult
+        case .sdkWebAction: return .sdkWebActionResult
         case .getVoiceOverState: return .voiceOverStateResult
         case .setVoiceOverState: return .voiceOverSetResult
         case .listPreferenceFiles: return .preferenceFiles

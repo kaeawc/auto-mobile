@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Share",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "share.open",
+          "args": {
+            "images": {
+              "value": ["missing"]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.images.value[0]",
+  "expectedMessage": "Unknown share asset",
+  "options": {
+    "shareAssetIds": []
+  }
+}

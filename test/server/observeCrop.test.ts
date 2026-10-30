@@ -268,14 +268,10 @@ describe("observe crop capture and output", () => {
       expect(crop.expiresAt).toBe(timer.now() + SCREENSHOT_PATH_MIN_LIFETIME_MS);
       const files = [{ path: crop.cropPath, size: 129 * 1024 * 1024, mtimeMs: 0 }];
       const sweep = () =>
-        selectScreenshotsToEvict(
-          files,
-          128 * 1024 * 1024,
-          0,
-          timer.now(),
-          () => false,
-          protection.isProtected.bind(protection),
-        );
+        selectScreenshotsToEvict(files, 128 * 1024 * 1024, 0, timer.now(), {
+          isReferenced: () => false,
+          isProtected: protection.isProtected.bind(protection),
+        });
       timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 1);
       expect(sweep().toEvict).toEqual([]);
       timer.advanceTime(1);

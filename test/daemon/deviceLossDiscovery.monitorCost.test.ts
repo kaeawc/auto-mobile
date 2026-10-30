@@ -23,6 +23,7 @@ import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { createPooledDevice } from "./helpers/DaemonDisconnectHarness";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
 
 const PHONE: BootedDevice = {
   platform: "ios",
@@ -87,7 +88,7 @@ class CachedMonitorDeviceManager implements MonitorDeviceManager {
 function missingMonitorHarness(device: BootedDevice, source: DiscoverySource, heldOnly = false) {
   const timer = new FakeTimer();
   const manager = new CachedMonitorDeviceManager(device, source, timer);
-  const misses = new Map<string, number>();
+  const misses = new DeviceLossMisses();
   const countedSnapshots = new Set<number>();
   const pool = poolFor(heldOnly ? [] : [device]);
   const sweep = async (planActive = false) => {
@@ -147,11 +148,12 @@ function managerWithPhysicalCounter() {
     }),
     createFakeAndroidEmulator({ getBootedDevicesChecked: async () => [] }),
     undefined,
-    undefined,
     {
-      listConnectedDevices: async () => {
-        physicalCalls++;
-        return { devices: [PHONE], complete: true };
+      physicalIosDevices: {
+        listConnectedDevices: async () => {
+          physicalCalls++;
+          return { devices: [PHONE], complete: true };
+        },
       },
     },
   );

@@ -35,13 +35,95 @@ private final class PrototypeSceneActivationObserver: NSObject {
 /// A window above the app's own windows (including its alerts) that accepts touches only inside
 /// the prototype content and the host dismiss control; everything else falls through to the app.
 @MainActor
-final class PassthroughWindow: UIWindow {
+final class PassthroughWindow: UIWindow, PrototypeOverlayWindow {
     weak var model: PrototypeModel?
+    var showsPrototype: Bool { model?.spec != nil }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard let model, model.spec != nil,
-              model.hitRects.contains(point) else { return nil }
+        guard let model, model.spec != nil else { return nil }
+        if nativePresentationRegion()?.contains(point) == true { return super.hitTest(point, with: event) }
+        guard model.hitRects.contains(point) else { return nil }
         return super.hitTest(point, with: event)
+    }
+
+    /// The area a native presentation from the root controller claims (#15463), computed at hit
+    /// time so it follows detent changes and dismissal without observation. Not yet device-verified.
+    private func nativePresentationRegion() -> CGRect? {
+        guard let presented = rootViewController?.presentedViewController, !presented.isBeingDismissed else {
+            return nil
+        }
+        var interaction = PrototypeNativePresentationHitRegion.Interaction.modal
+        if let sheet = presented.sheetPresentationController {
+            let detents = sheet.detents.map(\.identifier)
+            interaction = PrototypeNativePresentationHitRegion.interaction(
+                selectedDetentIndex: sheet.selectedDetentIdentifier.flatMap(detents.firstIndex(of:)),
+                largestUndimmedDetentIndex: sheet.largestUndimmedDetentIdentifier.flatMap(detents.firstIndex(of:))
+            )
+        }
+        return PrototypeNativePresentationHitRegion.region(
+            interaction: interaction,
+            presentedFrame: presented.presentationController?.frameOfPresentedViewInContainerView
+                ?? presented.view.frame,
+            windowBounds: bounds
+        )
+    }
+
+    private var activeTouches = Set<UITouch>()
+
+    override func sendEvent(_ event: UIEvent) {
+        guard event.type == .touches, let touches = event.touches(for: self), let model else {
+            super.sendEvent(event)
+            return
+        }
+        for touch in touches where touch.phase == .began {
+            let point = touch.location(in: self)
+            if activeTouches.isEmpty {
+                model.beginDeadTap(at: point, inside: model.hitRects.contains(point))
+            } else {
+                model.consumeDeadTap()
+            }
+            activeTouches.insert(touch)
+        }
+        if activeTouches.count > 1 { model.consumeDeadTap() }
+        for touch in touches {
+            for sample in event.coalescedTouches(for: touch) ?? [touch] {
+                model.moveDeadTap(to: sample.location(in: self))
+            }
+            if touch.phase == .cancelled { model.consumeDeadTap() }
+            consumeNativeControl(touch, model: model)
+        }
+        super.sendEvent(event)
+        for touch in touches {
+            consumeScroll(touch, model: model)
+            if touch.phase == .ended || touch.phase == .cancelled { activeTouches.remove(touch) }
+        }
+        if activeTouches.isEmpty {
+            let revision = model.deadTapRevision
+            // SwiftUI dispatches its gesture/control callbacks while completing this turn.
+            DispatchQueue.main.async { [weak model] in model?.finishDeadTap(revision: revision) }
+        }
+    }
+
+    /// UIKit-backed editing and controls consume even a no-op tap.
+    private func consumeNativeControl(_ touch: UITouch, model: PrototypeModel) {
+        var view = touch.view
+        while let current = view, current !== self {
+            if current is UIControl || current is UITextView { model.consumeDeadTap() }
+            view = current.superview
+        }
+    }
+
+    private func consumeScroll(_ touch: UITouch, model: PrototypeModel) {
+        var view = touch.view
+        while let current = view, current !== self {
+            if let scroll = current as? UIScrollView,
+               scroll.panGestureRecognizer.state != .possible,
+               scroll.panGestureRecognizer.state != .failed
+            {
+                model.consumeDeadTap()
+            }
+            view = current.superview
+        }
     }
 
     override func layoutSubviews() {
@@ -69,7 +151,7 @@ final class PrototypeAgent: NSObject {
     private static var instance: PrototypeAgent?
     static var shared: PrototypeAgent {
         if let instance { return instance }
-        let agent = PrototypeAgent(mode: .session)
+        let agent = PrototypeAgent(mode: .session, registry: .feedbackModules())
         instance = agent
         return agent
     }
@@ -83,7 +165,7 @@ final class PrototypeAgent: NSObject {
             return
         }
 
-        let agent = PrototypeAgent(mode: .standalone)
+        let agent = PrototypeAgent(mode: .standalone, registry: .feedbackModules())
         instance = agent
         agent.boot()
     }
@@ -100,7 +182,10 @@ final class PrototypeAgent: NSObject {
         let server = PrototypeServer(
             configuration: PrototypeAgentConfiguration(port: 0, token: publisher.token),
             capabilities: PrototypeViewerHostCapabilities.advertised(
-                model.mode.advertising(PrototypeTestHooks.capabilities(enabled: false))
+                model.mode.advertising(PrototypeTestHooks.capabilities(
+                    enabled: false,
+                    registryCapabilities: model.platformRegistry.capabilities
+                ))
             ),
             maxAuthenticatedClients: 1,
             onReady: { [weak agent] port in
@@ -144,8 +229,9 @@ final class PrototypeAgent: NSObject {
     let model: PrototypeModel
     private var outbox: PrototypeEventOutbox<[String: Any]>
 
-    init(mode: PrototypeLifecycleMode = .session) {
-        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked())
+    init(mode: PrototypeLifecycleMode = .session, registry: PrototypePlatformRegistry = .system) {
+        // No concrete permission-needing modules are approved for injection yet (#14289).
+        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked(), registry: registry)
         outbox = PrototypeEventOutbox(mode: mode)
         super.init()
     }
@@ -168,6 +254,8 @@ final class PrototypeAgent: NSObject {
     // its old block registration was retained by the center until that registration was removed.
     private var sceneObservers: [PrototypeSceneActivationObserver] = []
     /// Keeps the scene's appearance observation alive; the window, once attached, is never removed.
+    private var localeObservation: NSObjectProtocol?
+    private let localeProvider: any PrototypeLocaleProvider = SystemPrototypeLocaleProvider()
     private var appearanceObservation: (any UITraitChangeRegistration)?
     /// App windows' own `accessibilityElementsHidden` while the prototype covers them.
     private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
@@ -207,7 +295,10 @@ final class PrototypeAgent: NSObject {
         )
         let server = PrototypeServer(
             configuration: configuration,
-            capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(enabled: testHooksEnabled))
+            capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(
+                enabled: testHooksEnabled,
+                registryCapabilities: model.platformRegistry.capabilities
+            ))
         ) { [weak self] message, reply in
             self?.handle(message, reply: reply)
         }
@@ -360,6 +451,7 @@ final class PrototypeAgent: NSObject {
     private func syncDeviceAppearance() {
         let traits = (window?.windowScene ?? activeScene())?.traitCollection ?? UITraitCollection.current
         model.setDeviceDark(traits.userInterfaceStyle == .dark)
+        model.setDeviceLocales(localeProvider.preferredLanguages)
     }
 
     /// Puts the resolved mode on the window's UIKit trait, so UIKit-backed pieces (a text field's
@@ -372,6 +464,12 @@ final class PrototypeAgent: NSObject {
     }
 
     private func setVisible(_ visible: Bool) {
+        // Every show (a replace included) and every hide ends the content that opened an in-app
+        // browser, and the window is reused, so close it now (#14238). Platform calls run in a later
+        // task, so a link the new prototype opens is presented after this.
+        #if canImport(SafariServices)
+            UIKitLinkOpener.dismissPresentedBrowser()
+        #endif
         if visible {
             attachWindow()
             window?.isHidden = captureHold.isHiding
@@ -436,6 +534,7 @@ final class PrototypeAgent: NSObject {
         }
         let window = PassthroughWindow(windowScene: scene)
         window.model = model
+        model.nativePresentationActive = { [weak window] in window?.rootViewController?.presentedViewController != nil }
         window.windowLevel = .alert + 1
         let layers = PrototypeLayersViewController(model: model)
         window.rootViewController = layers
@@ -450,6 +549,13 @@ final class PrototypeAgent: NSObject {
             [UITraitUserInterfaceStyle.self]
         ) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
             self?.syncDeviceAppearance()
+        }
+        if localeObservation == nil {
+            localeObservation = NotificationCenter.default.addObserver(
+                forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.syncDeviceAppearance() }
+            }
         }
         syncDeviceAppearance()
         applyInterfaceStyle(session: model.session)
@@ -503,6 +609,15 @@ final class PrototypeAgent: NSObject {
             // No update_prototype (#10550): a same-id show_prototype replaces the shown prototype.
             case "dismiss_prototype":
                 dismissPrototype(message, result: result)
+            case PrototypeAgentProtocol.advanceClockRequest:
+                guard let id = message["id"] as? String, !id.isEmpty,
+                      let raw = message["advanceTimeMs"] as? NSNumber,
+                      CFGetTypeID(raw) != CFBooleanGetTypeID(),
+                      raw.doubleValue.rounded() == raw.doubleValue,
+                      (1 ... 3_600_000).contains(raw.doubleValue)
+                else { return result(false, "advance_prototype_clock needs an id and advanceTimeMs") }
+                let advanced = model.advanceClock(id: id, milliseconds: raw.intValue)
+                result(advanced.error == nil, advanced.error, extra: ["fired": advanced.fired])
             case PrototypeAgentProtocol.clearStorageRequest:
                 clearStorage(message, result: result)
             default: handleAuxiliary(type, message: message, result: result)
@@ -575,12 +690,17 @@ final class PrototypeAgent: NSObject {
         guard let appearance = PrototypeAppearanceOverride.parse(message["appearance"]) else {
             return result(false, "appearance: Expected device, light or dark")
         }
+        if let rawLocale = message["locale"],
+           (rawLocale as? String)
+           .map({ $0.utf16.count <= 35 && PrototypeContractValidator.matches("localeTag", $0) }) != true
+        { return result(false, "locale: Invalid locale tag") }
         // The viewer controller owns device appearance; the injected agent reads it here.
         if !viewerHosted { syncDeviceAppearance() }
         model.show(
             spec,
             reset: message["reset"] as? Bool == true,
             appearance: appearance,
+            locale: message["locale"] as? String,
             specBytes: message["spec"].flatMap {
                 try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed).count
             }
@@ -591,8 +711,11 @@ final class PrototypeAgent: NSObject {
         warnAboutFontAssets(for: spec)
         warnAboutUnknownThemeColors(for: spec)
         var extra = missingAssetsExtra()
+        let degraded = model.degradedEffects()
+        if !degraded.isEmpty { extra["degradedEffects"] = degraded }
         extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
         if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
+        if let plan = model.backdropPlan { extra["backdrop"] = plan.mode.rawValue }
         // The host can leave before this queued show runs; nothing would remove it later.
         if connectedClients == 0 { model.hostDisconnected() }
         result(true, extra: extra)
@@ -632,6 +755,15 @@ final class PrototypeAgent: NSObject {
     }
 
     private func putAsset(_ message: [String: Any], result: ProtocolResult) {
+        if message["mimeType"] as? String == PrototypeCustomShaders.mimeType {
+            return result(false, PrototypeCustomShaders.refusal)
+        }
+        if let id = message["id"] as? String, PrototypeMediaItems.isMediaId(id) {
+            return result(
+                false,
+                "Asset ids cannot start with \(PrototypeMediaItems.idPrefix); the device mints those for its media items"
+            )
+        }
         guard let id = message["id"] as? String,
               let base64 = message["dataBase64"] as? String,
               let data = Data(base64Encoded: base64),
@@ -682,6 +814,7 @@ final class PrototypeAgent: NSObject {
         let heldByOthers = captureHold.isHiding
         let ticket = captureHold.hide(deadlineMs: deadlineMs)
         let wasVisible = window?.isHidden == false || heldByOthers
+        model.iconMotionActivity.capturing = true
         window?.isHidden = true
         CATransaction.flush()
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(deadlineMs)) { [weak self] in
@@ -699,6 +832,7 @@ final class PrototypeAgent: NSObject {
     }
 
     private func showAfterCapture() {
+        model.iconMotionActivity.capturing = false
         window?.isHidden = model.spec == nil
         updateAccessibility(session: model.session)
     }

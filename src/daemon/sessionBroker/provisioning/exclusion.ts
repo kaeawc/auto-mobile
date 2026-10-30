@@ -1,15 +1,12 @@
+import { BindingRegistrySchemaUnsupportedError } from "./BindingRegistrySchemaUnsupportedError";
 import { BindingRegistryUpgradePendingError } from "../registry/bindingRegistryMigrations";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { Timer } from "../../../utils/SystemTimer";
+import type { Platform } from "../../../models/Platform";
 import { DeviceAssignedToBindingError, BindingDiscoveryIncompleteError } from "./refusal";
-import type {
-  ManagedDeviceEntry,
-  BindingKey,
-  BindingPlatform,
-  BindingRegistry,
-} from "../registry/bindingRegistry";
+import type { ManagedDeviceEntry, BindingKey, BindingRegistry } from "../registry/bindingRegistry";
 import {
   openSqliteBindingRegistry,
   bindingRegistryFileExists,
@@ -20,7 +17,8 @@ import {
  * (AVD name, simulator UDID, or a physical serial). Unknown identities are left out.
  */
 export interface ManagedDeviceRef {
-  platform: BindingPlatform;
+  /** Bindings hold only Android and iOS devices, so a watch device is never held. */
+  platform: Platform;
   stableIds: ReadonlyArray<string | undefined>;
 }
 
@@ -42,6 +40,15 @@ export interface BindingRefreshOptions {
   refuseUpgradePending?: boolean;
 }
 
+export interface BindingRegistryDegradation {
+  code: "registry_schema_unsupported";
+  retryable: false;
+  mode: "files_only";
+  dbPath: string;
+  unknownMigrations: readonly string[];
+  remedy: string;
+}
+
 /**
  * Generic-pool exclusion for bindings (#11174 part b, #11178 part a): every device a managed
  * binding holds, idle or not, plus the managed free pool, read from the host-wide {@link BindingRegistry}.
@@ -52,15 +59,18 @@ export interface BindingRefreshOptions {
  * On that failed read, DevicePool admits a session already holding its device before consulting
  * retained entries; retained refusals for other sessions are retryable discovery failures. Plain
  * callers keep known-device refusals, and reconciler exemptions remain binding-specific.
+ * Unknown migrations instead use claim files for generic allocation; strict ownership readers refuse.
  */
 export interface BindingExclusion {
+  /** Files-only acquisition diagnostic; ownership readers still refuse this schema. */
+  degraded?(): BindingRegistryDegradation | undefined;
   refresh(options?: BindingRefreshOptions): Promise<void>;
   /** True after a failed registry read; cleared by a successful or absent load. */
   lastReadFailed?(): boolean;
   /** The managed entry holding the device, from the last snapshot. */
   holderOf(device: ManagedDeviceRef): ManagedDeviceEntry | undefined;
   /** Every stable id the last snapshot holds for `platform`, for selector-based boots. */
-  stableIdsFor(platform: BindingPlatform): ReadonlySet<string>;
+  stableIdsFor(platform: Platform): ReadonlySet<string>;
 }
 
 /**
@@ -130,14 +140,14 @@ export function bindingRefusal(
   return new DeviceAssignedToBindingError(input.action, input.deviceId, entry);
 }
 
-function entryKey(platform: BindingPlatform, stableId: string): string {
+function entryKey(platform: Platform, stableId: string): string {
   return JSON.stringify([platform, stableId]);
 }
 
 interface LoadedSnapshot {
   kind: "loaded";
   byDevice: Map<string, ManagedDeviceEntry>;
-  byPlatform: Map<BindingPlatform, Set<string>>;
+  byPlatform: Map<Platform, Set<string>>;
   loadedAtMs: number;
 }
 
@@ -154,7 +164,36 @@ interface UnreadableSnapshot {
   kind: "unreadable";
 }
 
-type RegistryState = LoadedSnapshot | AbsentSnapshot | UnreadableSnapshot;
+interface FilesOnlySnapshot {
+  kind: "files_only";
+  loadedAtMs: number;
+  diagnostic: BindingRegistryDegradation;
+}
+
+type RegistryState = LoadedSnapshot | AbsentSnapshot | UnreadableSnapshot | FilesOnlySnapshot;
+
+// Shared by every exclusion view in this process; each registry path warns only once.
+const warnedUnsupportedPaths = new Set<string>();
+
+// Other views may still hold the same handle after its first reader closes it.
+const unsupportedRegistries = new WeakMap<BindingRegistry, BindingRegistrySchemaUnsupportedError>();
+
+/** Generic allocation stays strict for read failures, but unknown schemas use claim files. */
+export async function refreshAllocationBindingExclusion(
+  exclusion: Pick<BindingExclusion, "refresh">,
+  options: Pick<BindingRefreshOptions, "fresh" | "maxAgeMs"> = {},
+): Promise<void> {
+  try {
+    await exclusion.refresh({ ...options, requireCurrent: true });
+  } catch (error) {
+    if (!(error instanceof BindingRegistrySchemaUnsupportedError)) {
+      throw error;
+    }
+    // Generic allocation can rely on claim files; ownership readers must keep the typed refusal.
+    logger.debug(`[Bindings] Allocation using claim files: ${errorMessage(error)}`);
+    await exclusion.refresh(options);
+  }
+}
 
 export class RegistryBindingExclusion implements BindingExclusion {
   private snapshot: RegistryState | undefined;
@@ -162,6 +201,8 @@ export class RegistryBindingExclusion implements BindingExclusion {
   private inFlight: Promise<void> | undefined;
   private registry: Promise<BindingRegistry> | undefined;
   private warnedUpgradePending = false;
+  // Schema incompatibility is terminal for this daemon's lifetime; restart re-evaluates it.
+  private unsupportedSchema: BindingRegistrySchemaUnsupportedError | undefined;
 
   constructor(
     private readonly openRegistry: () => Promise<BindingRegistry>,
@@ -174,6 +215,9 @@ export class RegistryBindingExclusion implements BindingExclusion {
   ) {}
 
   async refresh(options: BindingRefreshOptions = {}): Promise<void> {
+    if (this.unsupportedSchema && (options.requireCurrent || options.refuseUpgradePending)) {
+      throw this.unsupportedSchema;
+    }
     if (options.fresh || !this.snapshotIsYoung(options.maxAgeMs ?? 0)) {
       await this.reload(options);
     }
@@ -190,6 +234,32 @@ export class RegistryBindingExclusion implements BindingExclusion {
     try {
       await (options.fresh ? this.refreshFresh() : this.loadShared());
     } catch (error) {
+      if (error instanceof BindingRegistrySchemaUnsupportedError) {
+        if (options.requireCurrent || options.refuseUpgradePending) {
+          throw error;
+        }
+        const diagnostic: BindingRegistryDegradation = {
+          code: error.code,
+          retryable: error.retryable,
+          mode: "files_only",
+          dbPath: error.dbPath,
+          unknownMigrations: error.unknownMigrations,
+          remedy: error.remedy,
+        };
+        this.snapshot = { kind: "files_only", loadedAtMs: this.timer.now(), diagnostic };
+        this.readFailed = false;
+        if (!warnedUnsupportedPaths.has(error.dbPath)) {
+          warnedUnsupportedPaths.add(error.dbPath);
+          logger.warn(
+            `[Bindings] Registry at ${error.dbPath} has migrations unknown to this daemon: ` +
+              `${error.unknownMigrations.join(", ")}. Bindings and device_claims rows are not ` +
+              `consulted or written; allocation claim files decide ownership. Managed bindings ` +
+              `are not enforced in this mode, so this daemon can allocate a device held only ` +
+              `by a managed binding. ${error.remedy}`,
+          );
+        }
+        return;
+      }
       if (
         options.requireCurrent ||
         this.snapshot?.kind !== "loaded" ||
@@ -204,6 +274,7 @@ export class RegistryBindingExclusion implements BindingExclusion {
 
   private snapshotIsYoung(maxAgeMs: number): boolean {
     return (
+      this.unsupportedSchema === undefined &&
       maxAgeMs > 0 &&
       this.snapshot !== undefined &&
       this.snapshot.kind !== "unreadable" &&
@@ -239,6 +310,10 @@ export class RegistryBindingExclusion implements BindingExclusion {
     return waiter;
   }
 
+  degraded(): BindingRegistryDegradation | undefined {
+    return this.snapshot?.kind === "files_only" ? this.snapshot.diagnostic : undefined;
+  }
+
   lastReadFailed(): boolean {
     return this.readFailed;
   }
@@ -257,14 +332,18 @@ export class RegistryBindingExclusion implements BindingExclusion {
     return undefined;
   }
 
-  stableIdsFor(platform: BindingPlatform): ReadonlySet<string> {
+  stableIdsFor(platform: Platform): ReadonlySet<string> {
     return this.snapshot?.kind === "loaded"
       ? (this.snapshot.byPlatform.get(platform) ?? new Set())
       : new Set();
   }
 
   private async load(): Promise<void> {
+    if (this.unsupportedSchema) {
+      throw this.unsupportedSchema;
+    }
     let entries: ManagedDeviceEntry[];
+    let registry: BindingRegistry | undefined;
     if (this.registry === undefined && !this.registryExists()) {
       // A host that never served a managed binding has no registry: nothing is managed, and reading
       // must not create the file. This is "absent", not a successful read of the registry.
@@ -273,8 +352,15 @@ export class RegistryBindingExclusion implements BindingExclusion {
       return;
     }
     try {
-      entries = await (await this.openRegistryOnce()).snapshotManagedDevices();
+      registry = await this.openRegistryOnce();
+      await registry.assertSupportedSchema();
+      entries = await registry.snapshotManagedDevices();
     } catch (error) {
+      if (error instanceof BindingRegistrySchemaUnsupportedError) {
+        this.unsupportedSchema = error;
+        await this.dropUnsupportedRegistry(registry, error);
+        throw error;
+      }
       if (error instanceof BindingRegistryUpgradePendingError) {
         if (!this.warnedUpgradePending) {
           logger.warn(
@@ -300,7 +386,7 @@ export class RegistryBindingExclusion implements BindingExclusion {
       throw new BindingDiscoveryIncompleteError(errorMessage(error));
     }
     const byDevice = new Map<string, ManagedDeviceEntry>();
-    const byPlatform = new Map<BindingPlatform, Set<string>>();
+    const byPlatform = new Map<Platform, Set<string>>();
     for (const entry of entries) {
       byDevice.set(entryKey(entry.platform, entry.stableDeviceId), entry);
       const ids = byPlatform.get(entry.platform) ?? new Set<string>();
@@ -311,34 +397,85 @@ export class RegistryBindingExclusion implements BindingExclusion {
     this.readFailed = false;
   }
 
-  private openRegistryOnce(): Promise<BindingRegistry> {
+  private async openRegistryOnce(): Promise<BindingRegistry> {
     this.registry ??= this.openRegistry().catch((error: unknown) => {
       // Let the next refresh retry the open instead of caching the failure.
       this.registry = undefined;
       throw error;
     });
-    return this.registry;
+    const registry = await this.registry;
+    const unsupported = unsupportedRegistries.get(registry);
+    if (unsupported) {
+      throw unsupported;
+    }
+    return registry;
+  }
+
+  private async dropUnsupportedRegistry(
+    registry: BindingRegistry | undefined,
+    error: BindingRegistrySchemaUnsupportedError,
+  ): Promise<void> {
+    this.registry = undefined;
+    if (!registry) {
+      return;
+    }
+    if (sharedHostRegistry?.handle === registry) {
+      sharedHostRegistry = undefined;
+    }
+    if (unsupportedRegistries.has(registry)) {
+      return;
+    }
+    unsupportedRegistries.set(registry, error);
+    try {
+      await registry.close();
+    } catch (closeError) {
+      // Preserve the typed schema refusal even if releasing the incompatible handle fails.
+      logger.warn("[Bindings] Failed to close unsupported registry", closeError);
+    }
   }
 }
 
-let sharedHostRegistry: Promise<BindingRegistry> | undefined;
+interface HostRegistryCache {
+  promise: Promise<BindingRegistry>;
+  handle?: BindingRegistry;
+}
+
+let sharedHostRegistry: HostRegistryCache | undefined;
 
 /**
  * The daemon's default: the host-wide SQLite registry, opened lazily on first use and shared by
  * every pool in this process. A failed open is retried on the next refresh.
  */
-export function createDefaultBindingExclusion(timer: Pick<Timer, "now">): BindingExclusion {
+export function createDefaultBindingExclusion(
+  timer: Pick<Timer, "now">,
+  sources: {
+    openRegistry?: () => Promise<BindingRegistry>;
+    registryExists?: () => boolean;
+  } = {},
+): BindingExclusion {
   return new RegistryBindingExclusion(
     () => {
-      sharedHostRegistry ??= openSqliteBindingRegistry({ migrate: false }).catch(
-        (error: unknown) => {
-          sharedHostRegistry = undefined;
-          throw error;
-        },
-      );
-      return sharedHostRegistry;
+      if (!sharedHostRegistry) {
+        const cached: HostRegistryCache = {
+          promise: (sources.openRegistry?.() ?? openSqliteBindingRegistry({ migrate: false })).then(
+            (registry) => {
+              cached.handle = registry;
+              return registry;
+            },
+            (error: unknown) => {
+              if (sharedHostRegistry === cached) {
+                sharedHostRegistry = undefined;
+              }
+              throw error;
+            },
+          ),
+        };
+        sharedHostRegistry = cached;
+      }
+      return sharedHostRegistry.promise;
     },
     timer,
-    () => sharedHostRegistry !== undefined || bindingRegistryFileExists(),
+    () =>
+      sharedHostRegistry !== undefined || (sources.registryExists ?? bindingRegistryFileExists)(),
   );
 }

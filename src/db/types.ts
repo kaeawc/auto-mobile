@@ -1,4 +1,5 @@
 import type { InstalledAppsTable } from "../models/InstalledAppsStore";
+import type { Platform } from "../models/Platform";
 import type { Generated, Insertable, Selectable, Updateable } from "kysely";
 
 /**
@@ -10,7 +11,7 @@ import type { Generated, Insertable, Selectable, Updateable } from "kysely";
 export interface DeviceConfigTable {
   id: Generated<number>;
   device_id: string;
-  platform: "android" | "ios";
+  platform: Platform;
   active_mode: string | null;
   config_json: string; // JSON blob for flexible config storage
   created_at: Generated<string>;
@@ -495,7 +496,7 @@ export interface DeviceSessionsTable {
   device_id: string;
   stable_device_id?: string | null;
   stable_identity_generation?: number;
-  platform: "android" | "ios";
+  platform: Platform;
   status: DeviceSessionStatus;
   source: string | null;
   autolock_enabled: number;
@@ -674,6 +675,10 @@ export interface VideoRecordingsTable {
   recorder_daemon_session_id: string | null;
   recorded_panel_json: string | null;
   display_transitions_json: string | null;
+  // Set for a recording that asked for audio: 1 when the file has an audio track (#15858).
+  has_audio_track: number | null;
+  // The finalized stop's warnings, such as why the audio track is missing (#15858).
+  warnings_json: string | null;
   // Daemon session that started the recording (issue #4752). Nullable: rows that
   // predate the owner-scoping migration have no known owner and are treated as
   // legacy/unowned.
@@ -853,6 +858,8 @@ export interface Database {
   device_locks: DeviceLocksTable;
   device_resource_applications: DeviceResourceApplicationsTable;
   mcp_tasks: McpTasksTable;
+  prototype_test_sessions: PrototypeTestSessionsTable;
+  prototype_test_session_steps: PrototypeTestSessionEventsTable;
   emulator_loss_incidents: EmulatorLossIncidentsTable;
   provisioned_device_transport_tombstones: ProvisionedDeviceTransportTombstonesTable;
   tool_selection_profile_provenance: ToolSelectionProfileProvenanceTable;
@@ -1040,3 +1047,28 @@ export type NewNavigationNodeFingerprint = Insertable<NavigationNodeFingerprints
 
 export type NavigationSuggestion = Selectable<NavigationSuggestionsTable>;
 export type NewNavigationSuggestion = Insertable<NavigationSuggestionsTable>;
+
+export interface PrototypeTestSessionsTable {
+  test_session_id: string;
+  prototype_id: string;
+  device_id: string;
+  session_uuid: string | null;
+  cohort: string | null;
+  goal: string | null;
+  start_screen: string;
+  status: "active" | "ended";
+  started_at_ms: number;
+  ended_at_ms: number | null;
+  ended_reason: "end" | "dismissed" | "released" | null;
+  dropped_count: number;
+}
+export interface PrototypeTestSessionEventsTable {
+  test_session_id: string;
+  seq: number;
+  event_sequence: number;
+  at_ms: number;
+  kind: string;
+  name: string | null;
+  screen: string;
+  detail_json: string;
+}

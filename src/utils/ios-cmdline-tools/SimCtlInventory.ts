@@ -1,5 +1,6 @@
 import { SimCtlCreation } from "./SimCtlCreation";
 import { isTemplateSimName } from "./SimulatorTemplateKey";
+import { isIosSimulatorRuntime } from "./simulatorRuntimeFamily";
 import {
   type SimCtlCatalog,
   AppleDevice,
@@ -28,11 +29,12 @@ import { SingleFlight } from "../cache/SingleFlight";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 
-import { inferIosFormFactor } from "./iosDeviceType";
+import { inferIosFormFactor, isIosDuoDeviceType } from "./iosDeviceType";
 
 import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 
 import { iosSimulatorCapabilityInventory } from "../virtualDeviceCapabilities";
+import { hostAudioSnapshot } from "../audio/defaultHostAudioProbe";
 
 import { compareStrictNumericVersions } from "../deviceMatcher";
 
@@ -470,7 +472,12 @@ export class SimCtlInventory {
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DeviceInfo[]> {
-    const listedDevices = Object.values(simulatorList.devices).flat();
+    // Watch, Apple TV and Vision Pro simulators share this listing but are not iOS devices
+    // (#14901, #15885), so only iOS runtimes are kept.
+    const iosRuntimes = Object.entries(simulatorList.devices).filter(([runtimeId]) =>
+      isIosSimulatorRuntime(runtimeId),
+    );
+    const listedDevices = iosRuntimes.flatMap(([, runtimeDevices]) => runtimeDevices);
     const signature = JSON.stringify(
       listedDevices
         .map(({ udid, state, isAvailable, name }): [string, string, boolean, string] => [
@@ -487,7 +494,7 @@ export class SimCtlInventory {
     }
     this.retireStoppedSimulatorDisplays(simulatorList);
     const devices = await Promise.all(
-      Object.entries(simulatorList.devices).flatMap(([runtimeId, runtimeDevices]) =>
+      iosRuntimes.flatMap(([runtimeId, runtimeDevices]) =>
         runtimeDevices
           .filter((device) => !isTemplateSimName(device.name))
           .map(async (device): Promise<DeviceInfo> => {
@@ -530,6 +537,7 @@ export class SimCtlInventory {
                 isAvailable: device.isAvailable,
                 availabilityError: device.availabilityError,
                 runtime: runtimeId,
+                hostAudio: hostAudioSnapshot(),
               }),
             } as DeviceInfo;
           }),
@@ -565,7 +573,7 @@ export class SimCtlInventory {
       return [];
     }
     // Duo panels can change with fold state without a new boot timestamp.
-    const cacheable = !device.deviceTypeIdentifier?.endsWith(".iPhone-Duo");
+    const cacheable = !isIosDuoDeviceType(device.deviceTypeIdentifier);
     const cached = SimCtlInventory.simulatorDisplays.get(device.udid);
     if (cacheable && cached?.displays && cached.lastUsedAt === device.lastUsedAt) {
       return cached.displays;

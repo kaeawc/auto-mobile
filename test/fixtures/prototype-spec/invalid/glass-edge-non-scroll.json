@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "edgeEffect": "soft",
+      "children": []
+    }
+  },
+  "expectedPath": "root.edgeEffect",
+  "expectedMessage": "Unknown property"
+}

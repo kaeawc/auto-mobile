@@ -19,6 +19,7 @@ import {
 } from "../utils/discoverySource";
 import type { DeviceCriteriaMatcher } from "./DeviceCriteriaMatcher";
 import type { PooledDevice } from "./devicePool";
+import type { DeviceLossMissPort } from "./deviceLossMisses";
 import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 
 export interface DevicePoolRefreshResult {
@@ -99,7 +100,7 @@ export interface DevicePoolRefreshPort {
     evidence: IdentityEvidence,
   ): Pick<PooledDevice, "identityObservedAt" | "identityUnresolved">;
   getDeviceSessionStarts(): Map<string, number>;
-  getRefreshMissingDeviceMisses(): Map<string, number>;
+  getRefreshMissingDeviceMisses(): DeviceLossMissPort;
   getSettledLateShutdowns(): Map<string, { incarnation: number; refreshGeneration: number }>;
   getIntentionalShutdowns(): Map<string, number>;
   seedLastUsedAt(now: number): number;
@@ -117,8 +118,7 @@ export interface DevicePoolRefreshPort {
     refreshGeneration: number,
     bootedDeviceIds: Set<string>,
     bootedPlatforms: Set<Platform>,
-    succeededPlatforms: Set<Platform>,
-    succeededSources?: Set<DiscoverySource>,
+    discovery: Pick<BootedDeviceDiscovery, "succeededPlatforms" | "succeededSources">,
   ): Promise<number | undefined>;
   notifyDeviceReady(deviceId: string): void;
   /** Lift recovery reservations a fresh observation of this generation decides. */
@@ -181,9 +181,11 @@ export class DevicePoolRefresh {
       this.logDiscoveryEnvironment();
 
       perf.startOperation("deviceDiscovery");
+      // The pool is the one "either" reader that also tracks Apple Watch simulators (#14908).
       const discovery = await this.pool.getDeviceManager().getBootedDevicesDetailed("either", {
         bypassAndroidDeviceListCache: true,
         bypassIosDeviceListCache: true,
+        includeWatchOs: true,
       });
       perf.endOperation("deviceDiscovery");
       const bootedDevices = this.discoveryNeedsTransportNormalization(discovery.devices)
@@ -211,8 +213,10 @@ export class DevicePoolRefresh {
         refreshGeneration,
         bootedDeviceIds,
         bootedPlatforms,
-        discovery.succeededPlatforms,
-        discovery.succeededSources,
+        {
+          succeededPlatforms: discovery.succeededPlatforms,
+          succeededSources: discovery.succeededSources,
+        },
       );
       if (removed === undefined) {
         logger.info("Discarding an out-of-date device discovery snapshot");
@@ -271,7 +275,7 @@ export class DevicePoolRefresh {
           });
           this.pool.notifyDeviceIncarnationAssigned?.(device.deviceId);
           this.pool.getDeviceSessionStarts().set(device.deviceId, now);
-          this.pool.getRefreshMissingDeviceMisses().delete(device.deviceId);
+          this.pool.getRefreshMissingDeviceMisses().reset(device.deviceId);
           await this.pool.setDeviceSessionTracking(device.deviceId, now);
           logger.info(`Added device ${device.deviceId} to pool during refresh`);
           return true;

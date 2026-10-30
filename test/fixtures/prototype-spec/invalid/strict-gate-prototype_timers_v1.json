@@ -1,0 +1,47 @@
+{
+  "spec": {
+    "id": "repeat-appear",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "show": true
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "as": "item",
+        "items": [
+          {
+            "name": "one"
+          },
+          {
+            "name": "two"
+          }
+        ]
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{item.name}",
+          "visibleWhen": {
+            "key": "show",
+            "equals": true
+          },
+          "onAppear": [
+            {
+              "type": "emit",
+              "name": "{item.name}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$"
+}

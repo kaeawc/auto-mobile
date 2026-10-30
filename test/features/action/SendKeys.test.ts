@@ -139,8 +139,7 @@ describe("SendKeys iOS text transport", () => {
             { action: "type", text: "again" },
           ],
           undefined,
-          undefined,
-          controller.signal,
+          { signal: controller.signal },
         );
         await new Promise<void>((resolve) => setImmediate(resolve));
         if (failure === "timeout") {
@@ -982,9 +981,7 @@ describe("SendKeys", () => {
       await sendKeys.execute(
         [{ action: "type", text: "123", mode: "ime" }],
         { text: "Phone" },
-        undefined,
-        undefined,
-        "external",
+        { display: "external" },
       ),
     ).toMatchObject({ success: true });
     expect(
@@ -4601,7 +4598,7 @@ describe("SendKeys post-action capture boundary", () => {
   test("explicit-display focus preparation captures nothing and preserves its routing", async () => {
     const h = createSendKeysCaptureHarness();
     await runWithPostActionCaptureScope(undefined, async () => {
-      const result = await h.action.execute(h.commands, undefined, undefined, undefined, "0");
+      const result = await h.action.execute(h.commands, undefined, { display: "0" });
       expect(result.success).toBe(true);
       expect(h.captures).toHaveLength(0);
       expect(h.reads[0]).toEqual({
@@ -4826,16 +4823,13 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         if (failure === "preAbort") {
           controller.abort();
           await expect(
-            sendKeys.execute([...primer, command], undefined, undefined, controller.signal),
+            sendKeys.execute([...primer, command], undefined, { signal: controller.signal }),
           ).rejects.toThrow();
           expect(attempts).toHaveLength(0);
         } else {
-          const result = await sendKeys.execute(
-            [...primer, command, command],
-            undefined,
-            undefined,
-            controller.signal,
-          );
+          const result = await sendKeys.execute([...primer, command, command], undefined, {
+            signal: controller.signal,
+          });
           if (["timeout", "disconnect", "abort"].includes(failure)) {
             expect(result).toMatchObject({ success: false, retryable: false });
             expect(result.commands[lead]).toMatchObject({
@@ -4921,11 +4915,11 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         if (failure === "preAbort") {
           controller.abort();
           await expect(
-            sendKeys.execute(commands, undefined, undefined, controller.signal),
+            sendKeys.execute(commands, undefined, { signal: controller.signal }),
           ).rejects.toThrow();
           expect(attempts).toBe(0);
         } else {
-          const result = await sendKeys.execute(commands, undefined, undefined, controller.signal);
+          const result = await sendKeys.execute(commands, undefined, { signal: controller.signal });
           if (["timeout", "disconnect", "abort"].includes(failure)) {
             expect(result).toMatchObject({ success: false, retryable: false });
             expect(result.commands[0].retryable).toBe(false);

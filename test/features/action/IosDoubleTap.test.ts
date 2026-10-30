@@ -8,7 +8,7 @@ for (const outcome of ["success", "refusal", "unanswered", "aborted"] as const) 
   test(`atomic iOS double tap: ${outcome}`, async () => {
     const single = mock(async () => ({ success: true }));
     const double = mock<IosCoordinateTapClient["requestDoubleTapCoordinates"]>(
-      async (_x, _y, _timeout, _frame, _signal, onDispatch) => {
+      async (_x, _y, _timeout, { onDispatch } = {}) => {
         onDispatch?.();
         return {
           success: outcome === "success",
@@ -24,8 +24,7 @@ for (const outcome of ["success", "refusal", "unanswered", "aborted"] as const) 
     }
     const result = dispatchIosDoubleTap(
       { requestTapCoordinates: single, requestDoubleTapCoordinates: double },
-      1,
-      2,
+      { x: 1, y: 2 },
       50,
       "frame",
       { signal: controller.signal },

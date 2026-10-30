@@ -1,3 +1,6 @@
+import type { PrototypeTestSessionStore } from "../../db/prototypeTestSessionRepository";
+import type { PrototypeChannelExecutor } from "../../features/prototype/PrototypeChannelExecutor";
+import type { IdGenerator } from "../../utils/IdGenerator";
 import type { z } from "zod/v4";
 import type { ProtoViewerDevice } from "../../features/prototype/protoViewer/protoViewerDevice";
 import type { DeviceWindowCacheInvalidator } from "../../features/observe/DeviceWindowCacheInvalidator";
@@ -32,6 +35,7 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import type { PrototypeEventLifecycle } from "../prototypeLifecycle";
 import type { IosSavedPrototypeInstaller } from "../prototypeSavedActions";
 import type { prototypeOutputSchema } from "./schemas";
+import type { ScreenRoundReaderFactory } from "./screenShape";
 
 export type PrototypeClient = AndroidPrototypeClient;
 /**
@@ -41,9 +45,22 @@ export type PrototypeClient = AndroidPrototypeClient;
 export interface PrototypeTarget {
   transport: PrototypeTransport;
   android?: AndroidPrototypeTransport;
-  ios?: Pick<IosPrototypeTransport, "supportsCapability" | "status" | "clearStorage">;
+  ios?: Pick<
+    IosPrototypeTransport,
+    "supportsCapability" | "status" | "clearStorage" | "advanceClock"
+  >;
 }
 export interface PrototypeToolDependencies {
+  testSessionStore?: PrototypeTestSessionStore;
+  idGenerator?: IdGenerator;
+  /** Replaces the host WebSocket and SSE transports for channels; tests supply a fake. */
+  channelExecutor?: PrototypeChannelExecutor;
+  /** Host feature gates; tests supply an isolated environment. */
+  env?: NodeJS.ProcessEnv;
+  shaderAssetCache?: Pick<
+    import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache,
+    "get"
+  >;
   /** Saved iOS actions use the host installer without an agent connection; created lazily by default. */
   iosSavedPrototypeInstaller?: IosSavedPrototypeInstaller;
   /** ProtoViewer on Android or an iOS simulator for saved `save`/`open` (#13621). */
@@ -65,6 +82,8 @@ export interface PrototypeToolDependencies {
   cacheInvalidator?: DeviceWindowCacheInvalidator;
   /** Captures the hierarchy element anchors resolve against; tests inject captured hierarchies. */
   anchorHierarchyCaptureFactory?: (device: BootedDevice) => HierarchyCapture;
+  /** Reads whether a watch display is round for the show result; tests inject a fake. */
+  screenRoundFactory?: ScreenRoundReaderFactory;
 }
 
 export interface AnchorStage {
@@ -88,6 +107,7 @@ export interface AssetStage {
 }
 
 export interface AssetReaders {
+  env?: NodeJS.ProcessEnv;
   assetFileReader: PrototypeAssetFileReader;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
 }
@@ -104,6 +124,11 @@ export type PrototypeHandlerDependencies = {
   timer?: Timer;
 } & Pick<
   PrototypeToolDependencies,
-  "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
+  | "adbFactory"
+  | "lastRenderedObservation"
+  | "anchorHierarchyCaptureFactory"
+  | "screenRoundFactory"
+  | "shaderAssetCache"
+  | "env"
 >;
 export type PrototypeOutput = z.infer<typeof prototypeOutputSchema>;

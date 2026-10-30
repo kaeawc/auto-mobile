@@ -15,12 +15,14 @@ import { win32 } from "node:path";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 
-/** The managed fixture app is a follow-up; no provider auto-install occurs here. */
-export const IOS_FILES_FIXTURE_BUNDLE_ID = "dev.jasonpearson.automobile.FilesFixture";
+export { IOS_FILES_FIXTURE_BUNDLE_ID } from "../constants/iosFilesFixture";
 
 /** Host staging only; completion makes no assertion about document-picker visibility. */
 export interface IosFilesFixtureContainer {
-  stageFiles(requests: readonly PutAppFileProviderRequest[]): Promise<void>;
+  /** Resolves with `providerInstalled` when this call had to install the fixture app first. */
+  stageFiles(
+    requests: readonly PutAppFileProviderRequest[],
+  ): Promise<void | { providerInstalled?: boolean }>;
 }
 
 export interface DocumentPickerVisibilityVerifier {
@@ -90,7 +92,8 @@ export class IosSimulatorUserFilesProvider implements AppFileWriteProvider {
 
   async putFiles(requests: PutAppFileProviderRequest[]): Promise<AppFileProviderWriteResult[]> {
     const normalized = requests.map(normalizeIosFilesRequest);
-    await this.container.stageFiles(normalized);
+    const staged = await this.container.stageFiles(normalized);
+    const providerInstalled = staged?.providerInstalled === true;
     const results: AppFileProviderWriteResult[] = [];
     for (const request of normalized) {
       let visibility: Awaited<ReturnType<DocumentPickerVisibilityVerifier["verify"]>>;
@@ -113,6 +116,9 @@ export class IosSimulatorUserFilesProvider implements AppFileWriteProvider {
       }
       results.push({
         effects: [
+          ...(providerInstalled && results.length === 0
+            ? [{ type: "provider_install" as const, status: "completed" as const }]
+            : []),
           { type: "host_stage", status: "completed" },
           { type: "document_picker", ...visibility },
         ],

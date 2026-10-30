@@ -1,3 +1,25 @@
+import { FakeVideoRecordingRepository } from "../../fakes/FakeVideoRecordingRepository";
+import { WorkflowBindingDeviceDeleter } from "../../../src/daemon/sessionBroker/provisioning/deviceDeleter";
+import { DaemonState } from "../../../src/daemon/daemonState";
+import { SessionManager } from "../../../src/daemon/sessionManager";
+import {
+  registerDeviceTools,
+  resetDeviceToolsDependencies,
+  setDeviceToolsDependencies,
+} from "../../../src/server/deviceTools";
+import {
+  resetVideoRecordingManagerDependencies,
+  setVideoRecordingManagerDependencies,
+} from "../../../src/daemon/videoRecordingManager";
+import { DefaultEmulatorOfflineRecovery } from "../../../src/utils/android-cmdline-tools/EmulatorOfflineRecovery";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeAvdManager } from "../../fakes/FakeAvdManager";
+import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
+import { FakeDeviceSessionRepository } from "../../fakes/FakeDeviceSessionRepository";
+import { FakeEmulatorProcessStopper } from "../../fakes/FakeEmulatorProcessStopper";
+import { makePool } from "../../helpers/makePool";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 import type { DeviceMutationScope } from "../../../src/daemon/sessionBroker/mutations/types";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
@@ -41,6 +63,8 @@ import {
   ANDROID_RESET_PROFILE,
   FakeAndroidResetHost,
 } from "./fixtures/androidReset";
+
+isolateToolRegistry();
 
 const OWNER = { daemonId: "android-broker", pid: 101, processGenerationToken: "generation-a" };
 const SCOPE = {
@@ -296,6 +320,9 @@ describe("Android broker reset dispatch and recovery", () => {
   }
 
   async function tearDown() {
+    resetDeviceToolsDependencies();
+    resetVideoRecordingManagerDependencies();
+    DaemonState.getInstance().reset();
     await broker.close();
     await registry.close();
   }
@@ -352,6 +379,33 @@ describe("Android broker reset dispatch and recovery", () => {
       });
     },
   );
+
+  test("the port forwards its reset signal to the Android baseline reset", async () => {
+    const session = await ready();
+    const reached = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let strategySignal: AbortSignal | undefined;
+    host.strategy = {
+      reset: async (_device, _packages, assertOwned, context) => {
+        strategySignal = context.signal;
+        reached.resolve();
+        await resume.promise;
+        await assertOwned();
+        return { outcome: "clean", mode: "none", phases: {} };
+      },
+    };
+    await options.store.beginRelease(session, OWNER);
+    expect((await options.devices.release(session)).settled).toBe(true);
+    const resource = (await options.store.listResources())[0]!;
+    const controller = new AbortController();
+    const reset = options.devices.reset!(resource, controller.signal);
+    await reached.promise;
+    controller.abort(new Error("release cancelled"));
+    // The strategy's signal aborts with the caller's, not only once the port's fence notices.
+    expect(strategySignal?.aborted).toBe(true);
+    resume.resolve();
+    await expect(reset).rejects.toThrow("release cancelled");
+  });
 
   test("qualified injected Android strategy reuses the same AVD without creation", async () => {
     const first = await ready();
@@ -796,6 +850,91 @@ describe("Android broker reset dispatch and recovery", () => {
     expect(host.commands.some((command) => command.startsWith("uninstall"))).toBe(false);
     expect(deleter.calls).toHaveLength(1);
     await interrupted.close();
+  });
+
+  test("unproven stop keeps the release cleanup_pending until verified deletion", async () => {
+    const snapshotPort = new FakeAndroidSnapshotPort();
+    snapshotPort.failures.add("load");
+    snapshotPort.failures.add("stop");
+    host.strategy = new AndroidSnapshotReset(snapshotPort, timer, {
+      prepareForIncarnationChange: async () => {},
+      invalidate: async () => {},
+      settleIncarnationChange: async () => {},
+    });
+    const manager = new FakeDeviceUtils();
+    const avdManager = new FakeAvdManager();
+    const stopper = new FakeEmulatorProcessStopper();
+    const adb = new FakeAdbExecutor();
+    const runtime = { platform: "android" as const, name: deviceName, deviceId: transportId };
+    const image = { platform: "android" as const, name: deviceName, isRunning: false };
+    stopper.avdCandidates = [
+      { pid: 4242, command: `qemu-system-aarch64 -avd ${deviceName} -port 5554` },
+    ];
+    adb.setDeviceStates([{ deviceId: transportId, state: "offline" }]);
+    const recovery = new DefaultEmulatorOfflineRecovery({
+      timer: () => timer,
+      adbFactory: () => new FakeAdbClientFactory(adb),
+    });
+    manager.getAndroidListedDeviceStates = (serials, probeOptions) =>
+      recovery.getListedNonDeviceStatesAmong(serials, probeOptions);
+    manager.setDeviceImages("android", [image]);
+    avdManager.setListDeviceImagesResponse([{ name: deviceName }]);
+    const destroy = manager.destroyDevice.bind(manager);
+    // Bridge the fake platform's native deletion to the fake AVD store; all workflow guards,
+    // ownership retirement, absence verification, journal redrive and receipts are production.
+    manager.destroyDevice = async (device, destroyOptions) => {
+      await avdManager.deleteAvd(device.name);
+      avdManager.setListDeviceImagesResponse([]);
+      await destroy(device, destroyOptions);
+    };
+    const repository = new FakeDeviceSessionRepository();
+    const sessions = new SessionManager(timer, repository);
+    const pool = makePool(sessions, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      deviceSessionRepository: repository,
+    });
+    await pool.addDevice(runtime, image);
+    DaemonState.getInstance().initialize(sessions, pool);
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: {} as never,
+      recordingRepository: new FakeVideoRecordingRepository(),
+      configRepository: {} as never,
+      highlightClient: {} as never,
+      timer,
+    });
+    setDeviceToolsDependencies({
+      timer,
+      deviceManagerFactory: () => manager,
+      avdManagerFactory: () => avdManager,
+      androidEmulatorProcessStopper: stopper,
+      notifyResourcesChanged: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+    });
+    registerDeviceTools();
+    const workflow = new WorkflowBindingDeviceDeleter(timer);
+    deleter.deleteAndVerifyAbsence = (target) => workflow.deleteAndVerifyAbsence(target);
+    const session = await ready();
+    const release = await broker.release(session);
+    expect(snapshotPort.calls).toContain("stop");
+    expect(release).toMatchObject({ outcome: "cleanup_pending" });
+    expect(release.timing?.reset?.outcome).toBe("pending");
+    expect(release.timing?.reset?.retired).not.toBe(true);
+    expect((await options.store.listResources())[0]!.state).toBe("destroying");
+    timer.advanceTime(60_000);
+    await broker.recover();
+    expect((await options.store.listResources())[0]!.state).toBe("destroying");
+    expect(avdManager.getDeleteAvdCalls()).toHaveLength(0);
+    expect(pool.getDevice(transportId)).not.toBeNull();
+    expect(stopper.describeAvdCalls[0]?.[0]).toBe(deviceName);
+    stopper.avdCandidates = [];
+    adb.setDeviceStates([]);
+    timer.advanceTime(60_000);
+    await broker.recover();
+    expect((await options.store.listResources())[0]!.state).toBe("destroyed");
+    expect(avdManager.getDeleteAvdCalls()).toEqual([{ name: deviceName }]);
+    expect(pool.getDevice(transportId)).toBeNull();
+    expect(await broker.status("first")).toMatchObject({ cleanupPending: false });
   });
 
   test("failed reset with transient deletion failure remains cleanup_pending until journal redrive", async () => {

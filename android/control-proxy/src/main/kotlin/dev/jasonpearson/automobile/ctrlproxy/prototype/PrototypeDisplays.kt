@@ -2,10 +2,14 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.annotation.TargetApi
 import android.content.Context
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.view.Display
+import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
+import kotlin.math.roundToInt
 
 /** Narrow seam over DisplayManager: can this logical display host a prototype window right now? */
 fun interface PrototypeDisplayProvider {
@@ -32,6 +36,24 @@ object PrototypeDisplayRouting {
 }
 
 /**
+ * Displays hot-plugged after the accessibility service connected get a null overlay token on
+ * Android 12L and 13, so adding a window there throws BadTokenException although the capability is
+ * advertised (#15318: API 32 displays 3-5 and API 33 displays 3-6 failed 7 of 7 while displays
+ * present at bind succeeded). API 34 and newer are unverified and left unchanged.
+ */
+object PrototypeDisplayHotPlug {
+  const val FIXED_API = 34
+
+  fun error(displayId: Int, sdkInt: Int, boundDisplayIds: Set<Int>): String? =
+    if (displayId != Display.DEFAULT_DISPLAY && sdkInt < FIXED_API && displayId !in boundDisplayIds)
+      "Display $displayId was connected after the accessibility service started; " +
+        "Android 12L and 13 give prototype windows no overlay token for it. " +
+        "Disable and re-enable the AutoMobile accessibility service with the display attached, " +
+        "or use a display that was present at that point"
+    else null
+}
+
+/**
  * Everything the host needs to attach a window to one display: a display-specific context (also
  * used to inflate the content, so density and insets are the display's own), its WindowManager, and
  * a density read taken afresh at every layout. [navigationBarBottomPx] is the visible navigation
@@ -42,7 +64,49 @@ class PrototypeDisplayWindow(
   val windowManager: WindowManager,
   val navigationBarBottomPx: () -> Int = { 0 },
   val density: () -> Float,
-)
+) {
+  /** Keep a persistent non-fullscreen host, including its close target, inside a round display. */
+  internal fun constrainDismissWindow(
+    params: WindowManager.LayoutParams,
+    request: PrototypeRequest,
+  ) {
+    if (!request.persistent || request.placement is PrototypePlacement.Fullscreen) return
+    val configuration = context.resources.configuration
+    if (!configuration.isScreenRound) return
+    val metrics = context.resources.displayMetrics
+    val safe = prototypeRoundSafeArea(metrics.widthPixels, metrics.heightPixels, true)
+    val width = metrics.widthPixels - 2 * safe.horizontal
+    val height = metrics.heightPixels - 2 * safe.vertical
+    // WRAP_CONTENT has no finite upper bound in LayoutParams. Give round floating hosts a
+    // bounded viewport; authored content still lays out inside it using its existing rules.
+    val minimumTarget = (48 * density()).roundToInt()
+    params.width =
+      if (params.width > 0) params.width.coerceAtLeast(minimumTarget).coerceAtMost(width) else width
+    params.height =
+      if (params.height > 0) params.height.coerceAtLeast(minimumTarget).coerceAtMost(height)
+      else height
+    val bounds = Rect()
+    Gravity.apply(
+      params.gravity,
+      params.width,
+      params.height,
+      Rect(0, 0, metrics.widthPixels, metrics.heightPixels),
+      params.x,
+      params.y,
+      bounds,
+      configuration.layoutDirection,
+    )
+    params.gravity = Gravity.TOP or Gravity.START
+    val left =
+      bounds.left.coerceIn(safe.horizontal, metrics.widthPixels - safe.horizontal - params.width)
+    params.x =
+      if (configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL)
+        metrics.widthPixels - left - params.width
+      else left
+    params.y =
+      bounds.top.coerceIn(safe.vertical, metrics.heightPixels - safe.vertical - params.height)
+  }
+}
 
 fun interface PrototypeDisplayWindows {
   /**
@@ -64,6 +128,22 @@ class AndroidPrototypeDisplays(
   private val service: Context,
   private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) : PrototypeDisplayProvider, PrototypeDisplayWindows {
+  @Volatile private var boundDisplayIds: Set<Int> = presentDisplayIds()
+
+  /**
+   * Re-read the displays the accessibility service holds overlay tokens for; call on each connect.
+   */
+  fun onServiceBound() {
+    boundDisplayIds = presentDisplayIds()
+  }
+
+  private fun presentDisplayIds(): Set<Int> =
+    (service.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
+      ?.displays
+      ?.map { it.displayId }
+      ?.toSet()
+      .orEmpty()
+
   private fun display(displayId: Int): Display? =
     (service.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.getDisplay(displayId)
 
@@ -72,6 +152,7 @@ class AndroidPrototypeDisplays(
 
   override fun unsupportedReason(displayId: Int): String? =
     PrototypeDisplayRouting.error(displayId, sdkInt)
+      ?: PrototypeDisplayHotPlug.error(displayId, sdkInt, boundDisplayIds)
 
   @TargetApi(Build.VERSION_CODES.R)
   override fun open(displayId: Int, layer: PrototypeWindowLayer): PrototypeDisplayWindow? {

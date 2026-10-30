@@ -4,10 +4,11 @@ import {
   addDeviceTargetingToSchema,
   responseShapeControlFields,
   withAppIdAliases,
+  watchAwarePlatformSchema,
   withJsonSchemaOverride,
 } from "../utils/schemaHelpers";
 import { SIGNING_SHA256_PATTERN } from "../utils/signingIdentity";
-import { listAppsResultSchema } from "./appToolOutputSchemas";
+import { installAppResultSchema, listAppsResultSchema } from "./appToolOutputSchemas";
 import { defineDeviceTool } from "./defineTool";
 
 // Schema definitions
@@ -35,6 +36,7 @@ export const terminateAppSchema = withAppIdAliases(
     z
       .object({
         appId: z.string(),
+        platform: watchAwarePlatformSchema(),
         ...responseShapeControlFields,
       })
       .strict(),
@@ -107,15 +109,20 @@ export const launchAppSchema = withAppIdAliases(
     z
       .object({
         appId: z.string(),
+        platform: watchAwarePlatformSchema(),
         clearAppData: z
           .boolean()
           .optional()
-          .describe("Clear app data before launch (default false)"),
+          .describe(
+            "Clear app data before launch (default false); on watchOS wipes the app's data container",
+          ),
         coldBoot: z.boolean().optional().describe("Cold boot app (default false)"),
         launchArguments: z
           .array(z.string())
           .optional()
-          .describe("Arguments passed to the launched iOS app. On Android use intent instead."),
+          .describe(
+            "Arguments passed to the launched iOS or watchOS app. On Android use intent instead.",
+          ),
         intent: androidIntentSchema
           .optional()
           .describe(
@@ -183,10 +190,11 @@ const installBundleSchema = z
   .strict();
 
 const installAppInput = z.object({
+  platform: watchAwarePlatformSchema(),
   artifactPath: z
     .string()
     .describe(
-      "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa",
+      "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa; watchOS: .app",
     ),
   splits: z
     .array(z.string().min(1))
@@ -231,6 +239,7 @@ export const installAppTool = defineDeviceTool({
     // does not use CtrlProxy.
     deviceReadiness: "booted",
     replacesProcess: true,
+    outputSchema: installAppResultSchema,
   },
 });
 
@@ -241,10 +250,13 @@ export const uninstallAppSchema = withAppIdAliases(
     z
       .object({
         appId: z.string(),
+        platform: watchAwarePlatformSchema(),
         keepData: z
           .boolean()
           .optional()
-          .describe("Keep app data after uninstall (Android only, default false)"),
+          .describe(
+            "Keep app data after uninstall (Android only, default false; refused on watchOS)",
+          ),
         expectedSigningSha256: expectedSigningSha256Schema
           .optional()
           .describe(
@@ -402,6 +414,7 @@ export const resetKeychainSchema = withAppIdAliases(
 // a call such as `listApps({ appId: "com.example" })` had the unsupported
 // filter silently dropped and returned the full unfiltered listing.
 const listAppsInput = z.object({
+  platform: watchAwarePlatformSchema(),
   type: z
     .enum(["launchable", "user", "system", "all"])
     .optional()

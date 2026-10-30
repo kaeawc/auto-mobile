@@ -1016,17 +1016,16 @@ describe("display fence options preserve public call shapes", () => {
               ? () =>
                   Reflect.apply(tap.executeAndroidTap, tap, [
                     "tap",
-                    50,
-                    70,
+                    { x: 50, y: 70 },
                     50,
                     element,
                     { isTalkBackEnabled: false },
                     [],
                   ])
               : shape === "legacy"
-                ? () => tap.executeAndroidTap("tap", 50, 70, 50, element)
+                ? () => tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element)
                 : () =>
-                    tap.executeAndroidTap("tap", 50, 70, 50, element, {
+                    tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element, {
                       options: { action: "tap", ...options },
                       isTalkBackEnabled: false,
                     });
@@ -1037,8 +1036,8 @@ describe("display fence options preserve public call shapes", () => {
             { x: 50, y: 70 },
             "tap",
             50,
-            element,
             {
+              tapElement: element,
               options: { action: "tap", ...options },
               isTalkBackEnabled: false,
               screenSize: h.screen.screenSize,
@@ -1063,33 +1062,38 @@ describe("display fence options preserve public call shapes", () => {
             shape === "extra"
               ? () =>
                   Reflect.apply(strategy.executeCoordinateFallback, strategy, [
-                    50,
-                    70,
+                    { x: 50, y: 70 },
                     "longPress",
                     500,
                     driver,
                     [],
                   ])
               : shape === "legacy"
-                ? () => strategy.executeCoordinateFallback(50, 70, "longPress", 500, driver)
+                ? () =>
+                    strategy.executeCoordinateFallback({ x: 50, y: 70 }, "longPress", 500, driver)
                 : () =>
-                    strategy.executeCoordinateFallback(50, 70, "longPress", 500, driver, options);
+                    strategy.executeCoordinateFallback(
+                      { x: 50, y: 70 },
+                      "longPress",
+                      500,
+                      driver,
+                      options,
+                    );
           break;
         case "longPress":
           invoke =
             shape === "extra"
               ? () =>
                   Reflect.apply(strategy.executeLongPress, strategy, [
-                    50,
-                    70,
+                    { x: 50, y: 70 },
                     500,
                     element,
                     driver,
                     [],
                   ])
               : shape === "legacy"
-                ? () => strategy.executeLongPress(50, 70, 500, element, driver)
-                : () => strategy.executeLongPress(50, 70, 500, element, driver, options);
+                ? () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, driver)
+                : () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, driver, options);
           break;
       }
       if (shape === "stale") {
@@ -1113,17 +1117,20 @@ test("review: explicit adb search preserves the default-display dispatch fence",
   let checks = 0;
   const gesture = new ExecuteGesture(h.device, h.adb, h.timer);
   expect(
-    await gesture.swipe(50, 180, 50, 20, {
-      searchScroll: true,
-      scrollMode: "adb",
-      duration: 1,
-      searchScrollBounds: { left: 0, top: 0, right: 100, bottom: 200 },
-      displayFence: {
-        assertCurrent: () => {
-          checks++;
+    await gesture.swipe(
+      { x1: 50, y1: 180, x2: 50, y2: 20 },
+      {
+        searchScroll: true,
+        scrollMode: "adb",
+        duration: 1,
+        searchScrollBounds: { left: 0, top: 0, right: 100, bottom: 200 },
+        displayFence: {
+          assertCurrent: () => {
+            checks++;
+          },
         },
       },
-    }),
+    ),
   ).toMatchObject({ success: true });
   expect(h.inputs()).toEqual(["shell input swipe 50 180 50 30 600"]);
   expect(h.android.getDragHistory()).toEqual([]);

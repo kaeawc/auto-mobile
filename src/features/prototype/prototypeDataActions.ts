@@ -10,7 +10,13 @@ import { templateSegments, type Binding } from "./prototypeTemplate";
  * could hold (`dataError`, the validator's data walk, is injected because the validator imports
  * this module). The write itself is {@link applyPrototypeDataWrite}.
  */
-export const PROTOTYPE_DATA_ACTION_TYPES = ["setData", "appendData", "removeData"] as const;
+export const PROTOTYPE_DATA_ACTION_TYPES = [
+  "setData",
+  "appendData",
+  "upsertData",
+  "prependData",
+  "removeData",
+] as const;
 
 /** Authored paths of every data action's `path`, including component definitions. */
 export function prototypeDataActionFields(spec: unknown): string[] {
@@ -27,7 +33,7 @@ export function prototypeDataActionsUnsupportedMessage(
       ? "Update the connected CtrlProxy"
       : "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version";
   const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
-  return `The ${device} does not advertise ${PROTOTYPE_DATA_ACTIONS_CAPABILITY}, so it cannot run the setData, appendData or removeData action at ${fields[0]}${more}. Nothing was shown. ${update}, or answer the tap from the host with a /data patch.`;
+  return `The ${device} does not advertise ${PROTOTYPE_DATA_ACTIONS_CAPABILITY}, so it cannot run the setData, appendData, prependData or removeData action at ${fields[0]}${more}. Nothing was shown. ${update}, or answer the tap from the host with a /data patch.`;
 }
 
 const INDEX_SEGMENT = "{index}";
@@ -97,17 +103,17 @@ export function prototypeDataActionError(
       message: "Data action paths are /data/<RFC 6901 pointer> and address a member of data",
     };
   }
-  const value = (action.value ?? {}) as Record<string, unknown>;
-  if (Object.hasOwn(value, "value") && dataError({ value: value.value }) !== undefined) {
-    return {
-      path: `${at}.value.value`,
-      message: "A data write value must be a string, boolean, finite number, array or object",
-    };
+  const literal = dataActionLiteralError(action, at, dataError);
+  if (literal) {
+    return literal;
   }
-  if (action.type === "appendData" && !prototypeDataPathHasIndex(path)) {
+  if (
+    ["appendData", "prependData", "upsertData"].includes(action.type) &&
+    !prototypeDataPathHasIndex(path)
+  ) {
     const target = resolvePrototypeDataPointer(data, pointer);
     if (target !== undefined && !Array.isArray(target)) {
-      return { path: `${at}.path`, message: "appendData target is not an array" };
+      return { path: `${at}.path`, message: `${action.type} target is not an array` };
     }
   }
   return undefined;
@@ -124,6 +130,31 @@ export function prototypeDataActionsError(
     if (error) {
       return error;
     }
+  }
+  return undefined;
+}
+
+function dataActionLiteralError(
+  action: Record<string, unknown>,
+  at: string,
+  dataError: (data: unknown) => unknown,
+): PrototypeDataActionError | undefined {
+  const value = (action.value ?? {}) as Record<string, unknown>;
+  if (action.type === "upsertData" && Object.hasOwn(value, "value")) {
+    const key = typeof action.key === "string" ? action.key : "";
+    const identity = resolvePrototypeDataPointer(value.value, key);
+    if (identity === undefined || identity === null) {
+      return {
+        path: `${at}.value.value`,
+        message: "upsertData key pointer must be present and non-null in the literal value",
+      };
+    }
+  }
+  if (Object.hasOwn(value, "value") && dataError({ value: value.value }) !== undefined) {
+    return {
+      path: `${at}.value.value`,
+      message: "A data write value must be a string, boolean, finite number, array or object",
+    };
   }
   return undefined;
 }

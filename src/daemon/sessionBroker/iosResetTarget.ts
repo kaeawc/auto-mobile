@@ -19,17 +19,13 @@ export function assertIosResetInput(device: BootedDevice, profile: IosResetProfi
   ) {
     throw new ActionableError("iOS baseline reset requires a complete exact iOS profile");
   }
-  if (profile.archetype === "duo" || profile.modelType.family === "duo") {
-    throw new ActionableError("iOS baseline reset does not support Duo devices");
-  }
 }
 
 export async function readExpectedIosResetTarget(
   simctl: Pick<SimCtl, "readSimulatorTarget">,
   udid: string,
   profile: IosResetProfile,
-  expectedState: "Booted" | "Shutdown",
-  action: string,
+  { state: expectedState, action }: { state: "Booted" | "Shutdown"; action: string },
   options?: { signal?: AbortSignal; timeoutMs: number },
 ): Promise<void> {
   let target;

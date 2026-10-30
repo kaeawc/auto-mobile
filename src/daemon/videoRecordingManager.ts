@@ -12,6 +12,7 @@ import { pathExists } from "../utils/filesystem/DefaultFileSystem";
 import {
   ActionableError,
   BootedDevice,
+  requireAndroidOrIosPlatform,
   VideoRecordingConfig,
   VideoRecordingConfigInput,
   VideoRecordingHighlightEntry,
@@ -20,7 +21,7 @@ import {
   toActionableError,
 } from "../models";
 import {
-  HybridVideoCaptureBackend,
+  createRecordingCaptureBackend,
   VideoRecorderService,
   parseVideoRecordingConfig,
   type ActiveVideoRecording,
@@ -42,6 +43,7 @@ import {
   VideoRecordingRepository,
   type VideoRecordingRecord,
 } from "../db/videoRecordingRepository";
+import { completedRecordingUpdate, toMetadata } from "./videoRecordingRecordMapping";
 import {
   createVideoRecordingConfigRepository,
   type ConfigRepository,
@@ -49,6 +51,7 @@ import {
 import { buildVideoArchiveItemUri, VIDEO_RESOURCE_URIS } from "./videoRecordingResourceUris";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
+  applyRecordingDisplayWarning,
   resolveAndroidRecordingDisplay,
   type AndroidRecordingDisplay,
 } from "../features/video/AndroidRecordingDisplay";
@@ -139,7 +142,7 @@ export function resolveVideoRetentionPolicy(
 /** Shared bound for post-cap host settlement and replaced-device stop waits. */
 export const INCOMPLETE_MARK_GRACE_MS = 5_000;
 
-interface StartVideoRecordingRequest {
+interface StartVideoRecordingRequest extends Pick<StartVideoRecordingOptions, "audio"> {
   device: BootedDevice;
   configOverrides?: VideoRecordingConfigInput;
   outputName?: string;
@@ -448,8 +451,7 @@ const inProgressSizeMonitors = new Map<string, { timer: Timer; handle: NodeJS.Ti
 let retentionSweepTimer: { timer: Timer; handle: NodeJS.Timeout } | null = null;
 
 async function selectBackend(): Promise<VideoCaptureBackend> {
-  logger.debug("[VideoRecording] Using HybridVideoCaptureBackend (iOS FFmpeg, Android platform)");
-  return new HybridVideoCaptureBackend();
+  return createRecordingCaptureBackend();
 }
 
 async function createRecorderService(): Promise<VideoRecorderService> {
@@ -920,13 +922,14 @@ async function runRetentionSweepWithDependencies(
  * eviction — which only ever considers *other completed* recordings — could run.
  * `capBytes <= 0` disables the monitor for that recording.
  *
- * `filePath` is the file the capture is writing right now: the backend's
+ * `filePaths` are the files the capture is growing right now: the backend's
  * `liveCapturePath` when it reports one (iOS Simulator's raw `.mov`, since the
- * final `.mp4` only exists after stop's post-process), else the output path.
+ * final `.mp4` only exists after stop's post-process), else the output path, plus
+ * any sidecar such as an audio track's PCM; their sizes are summed.
  */
 function scheduleInProgressSizeCap(
   recordingId: string,
-  filePath: string,
+  filePaths: string[],
   capBytes: number,
   deps: VideoRecordingManagerDependencies,
 ): void {
@@ -935,7 +938,7 @@ function scheduleInProgressSizeCap(
   }
   const { timer, retentionPolicy } = deps;
   const handle = timer.setInterval(() => {
-    void enforceInProgressSizeCap(recordingId, filePath, capBytes, deps).catch((error) => {
+    void enforceInProgressSizeCap(recordingId, filePaths, capBytes, deps).catch((error) => {
       logger.warn(`[VideoRecording] In-progress size check failed for ${recordingId}: ${error}`);
     });
   }, retentionPolicy.inProgressCheckIntervalMs);
@@ -992,20 +995,15 @@ async function rearmRetainedRecordingSafety(
   clearInProgressSizeCap(recordingId);
   scheduleInProgressSizeCap(
     recordingId,
-    sizeMonitorPath(deps.videoRecorderService.getLiveCapturePath(recordingId), record.filePath),
+    deps.videoRecorderService.getInProgressFiles(recordingId),
     capBytes,
     deps,
   );
 }
 
-/** The file to stat for the size cap: the live capture file if reported, else the output. */
-function sizeMonitorPath(liveCapturePath: string | undefined, outputPath: string): string {
-  return liveCapturePath ?? outputPath;
-}
-
 async function enforceInProgressSizeCap(
   recordingId: string,
-  filePath: string,
+  filePaths: string[],
   capBytes: number,
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
@@ -1017,9 +1015,10 @@ async function enforceInProgressSizeCap(
   // Host output can be absent during capture (Android pulls it only at stop).
   // Keep injected size probes intact; only the default probe's expected missing
   // file diagnostic should be quiet on recurring monitor ticks.
-  const sizeBytes = await (statFileSize === getFileSize
-    ? getFileSize(filePath, true)
-    : statFileSize(filePath));
+  const stat = (filePath: string) =>
+    statFileSize === getFileSize ? getFileSize(filePath, true) : statFileSize(filePath);
+  const sizes = await Promise.all(filePaths.map(stat));
+  const sizeBytes = sizes.reduce((total, size) => total + size, 0);
   if (moduleDependencies !== deps || sizeBytes < capBytes) {
     return;
   }
@@ -1224,28 +1223,6 @@ function calculateDurationMs(startedAt: string, endedAt: string): number | undef
   return Math.max(0, end - start);
 }
 
-function toMetadata(record: VideoRecordingRecord): VideoRecordingMetadata {
-  return {
-    recordingId: record.recordingId,
-    fileName: record.fileName,
-    filePath: record.filePath,
-    format: record.format,
-    sizeBytes: record.sizeBytes,
-    durationMs: record.durationMs,
-    videoDurationMs: record.videoDurationMs,
-    codec: record.codec,
-    outputName: record.outputName,
-    createdAt: record.createdAt,
-    startedAt: record.startedAt,
-    endedAt: record.endedAt,
-    lastAccessedAt: record.lastAccessedAt,
-    config: record.config,
-    highlights: record.highlights,
-    recordedPanel: record.recordedPanel,
-    transitions: record.transitions,
-  };
-}
-
 async function notifyVideoRecordingResources(recordingIds: string[]): Promise<void> {
   const uris = new Set<string>([VIDEO_RESOURCE_URIS.LATEST, VIDEO_RESOURCE_URIS.ARCHIVE]);
 
@@ -1338,17 +1315,8 @@ function videoRecordingStartOptions(
     display: request.display,
     recordingPanel: recordingDisplay?.panel,
     physicalDisplayId: recordingDisplay?.physicalId,
+    audio: request.audio,
   };
-}
-
-function applyRecordingDisplayWarning(
-  active: ActiveVideoRecording,
-  recordingDisplay: AndroidRecordingDisplay | undefined,
-): void {
-  active.warning = recordingDisplay?.warning ?? active.warning;
-  if (active.warning?.includes("rejected --display-id")) {
-    active.recordedPanel = undefined;
-  }
 }
 
 /** Publish capture ownership before inserting its row, and preserve adoption during that insert. */
@@ -1367,7 +1335,7 @@ async function persistStartedVideoRecording(
     recordingId: active.recordingId,
     captureTeardown: videoRecorderService.getCaptureTeardown(active.recordingId),
     deviceId: request.device.deviceId,
-    platform: request.device.platform,
+    platform: requireAndroidOrIosPlatform(request.device.platform, "Video recording"),
     status: "recording",
     outputName: active.outputName,
     fileName: active.fileName,
@@ -1398,6 +1366,8 @@ async function persistStartedVideoRecording(
 export async function startVideoRecording(
   request: StartVideoRecordingRequest,
 ): Promise<ActiveVideoRecording> {
+  // Fail closed before any capture state exists: no recorder drives a watch (#14899).
+  requireAndroidOrIosPlatform(request.device.platform, "Video recording");
   request = { ...request };
   const start = beginVideoRecordingStart(request);
   let active: ActiveVideoRecording | undefined;
@@ -1461,7 +1431,7 @@ export async function startVideoRecording(
     const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
     scheduleInProgressSizeCap(
       active.recordingId,
-      sizeMonitorPath(active.liveCapturePath, active.outputPath),
+      videoRecorderService.getInProgressFiles(active.recordingId),
       capBytes,
       deps,
     );
@@ -1702,24 +1672,10 @@ async function stopActiveVideoRecording(
       metadata.highlights = finalizedHighlights;
     }
   }
-  await recordingRepository.updateRecording(resolvedId, {
-    status: "completed",
-    captureTeardown: undefined,
-    ownerSessionUuid: owner?.ownerSessionUuid,
-    outputName: metadata.outputName,
-    fileName: metadata.fileName,
-    filePath: metadata.filePath,
-    format: metadata.format,
-    sizeBytes: metadata.sizeBytes,
-    durationMs: metadata.durationMs,
-    codec: metadata.codec,
-    endedAt: metadata.endedAt,
-    lastAccessedAt: metadata.lastAccessedAt,
-    config: metadata.config,
-    highlights: metadata.highlights,
-    recordedPanel: metadata.recordedPanel,
-    transitions: metadata.transitions,
-  });
+  await recordingRepository.updateRecording(
+    resolvedId,
+    completedRecordingUpdate(metadata, owner?.ownerSessionUuid),
+  );
 
   const eviction = await enforceArchiveLimit(deps, metadata.config.maxArchiveSizeMb, resolvedId);
   if (eviction.maxSizeBytes > 0 && eviction.currentSizeBytes > eviction.maxSizeBytes) {

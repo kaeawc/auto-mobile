@@ -12,12 +12,15 @@ class ReleaseSigningGuardTest {
 
   @Test
   fun allowsReleaseKeyWhenRequired() {
-    assertNull(ReleaseSigningGuard.violation(required = true, resolvedSigningConfigName = "release"))
+    assertNull(
+      ReleaseSigningGuard.violation(required = true, resolvedSigningConfigName = "release"),
+    )
   }
 
   @Test
   fun failsClosedOnDebugFallbackWhenRequired() {
-    val message = ReleaseSigningGuard.violation(required = true, resolvedSigningConfigName = "debug")
+    val message =
+      ReleaseSigningGuard.violation(required = true, resolvedSigningConfigName = "debug")
     assertTrue(message.orEmpty().contains("'debug'"))
     assertTrue(message.orEmpty().contains("RELEASE_KEYSTORE_PATH"))
   }

@@ -1,7 +1,7 @@
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { autolockWithSignal } from "../helpers/autolockWithSignal";
 import { afterEach, describe, expect, test, beforeEach, spyOn } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -177,8 +177,12 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
       const controller = new AbortController();
       try {
-        const binding = runWithAbortSignal(controller.signal, () =>
-          devicePool.autolockDevice(device.deviceId, "android", "mcp-expired"),
+        const binding = autolockWithSignal(
+          devicePool,
+          device.deviceId,
+          "android",
+          "mcp-expired",
+          controller.signal,
         ).catch((error: unknown) => error);
         await started.promise;
         const cancelledSessionId = devicePool.getDevice(device.deviceId)!.sessionId!;
@@ -235,8 +239,12 @@ describe("DevicePool", () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
       const controller = new AbortController();
       try {
-        const binding = runWithAbortSignal(controller.signal, () =>
-          devicePool.autolockDevice(first.deviceId, "android", "mcp-cancelled"),
+        const binding = autolockWithSignal(
+          devicePool,
+          first.deviceId,
+          "android",
+          "mcp-cancelled",
+          controller.signal,
         ).catch((error: unknown) => error);
         await metadataStarted.promise;
         const cancelledSessionId = devicePool.getDevice(first.deviceId)!.sessionId!;
@@ -563,8 +571,7 @@ describe("DevicePool", () => {
             replacement,
             sourceImage,
             undefined,
-            undefined,
-            excludeExecutionId,
+            { excludeExecutionId },
           );
         } finally {
           await reservation.release();
@@ -689,11 +696,13 @@ describe("DevicePool", () => {
           replacement,
           sourceImage,
           undefined,
-          () => {
-            // Session work can discover the replacement inside addDevice, so
-            // the marker must exist before that publication point.
-            expect(devicePool.getDevice(replacement.deviceId)).toBeNull();
-            readinessMarkerPublished = true;
+          {
+            beforeReplacementPublishes: () => {
+              // Session work can discover the replacement inside addDevice, so
+              // the marker must exist before that publication point.
+              expect(devicePool.getDevice(replacement.deviceId)).toBeNull();
+              readinessMarkerPublished = true;
+            },
           },
         );
 

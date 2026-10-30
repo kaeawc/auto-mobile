@@ -1,3 +1,4 @@
+import { SqliteDeviceClaims } from "./sqliteDeviceClaims";
 import { Kysely } from "kysely";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
 import { existsSync } from "node:fs";
@@ -64,7 +65,11 @@ import {
   type UpdateBindingStateOptions,
   type UpdateBindingStateResult,
 } from "./bindingRegistry";
-import { assertBindingRegistryCurrent, migrateBindingRegistry } from "./bindingRegistryMigrations";
+import {
+  assertBindingRegistryCurrent,
+  assertSupportedRegistrySchema,
+  migrateBindingRegistry,
+} from "./bindingRegistryMigrations";
 import {
   assertOpenPhase,
   AssignmentRow,
@@ -220,7 +225,7 @@ export async function openSqliteBindingRegistry(
     }
     throw error;
   }
-  return new SqliteBindingRegistry(db, options);
+  return new SqliteBindingRegistry(db, options, dbPath);
 }
 
 export class SqliteBindingRegistry implements BindingRegistry {
@@ -230,9 +235,14 @@ export class SqliteBindingRegistry implements BindingRegistry {
   constructor(
     private readonly db: Kysely<BindingRegistryDatabase>,
     options: SqliteBindingRegistryOptions = {},
+    private readonly dbPath: string = ":memory:",
   ) {
     this.timer = options.timer ?? defaultTimer;
     this.isExecOwnerLive = options.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
+  }
+
+  assertSupportedSchema(): Promise<void> {
+    return assertSupportedRegistrySchema(this.db, this.dbPath);
   }
 
   /** Shares this connection, transaction lock and physical authority; never opens another DB. */
@@ -242,6 +252,11 @@ export class SqliteBindingRegistry implements BindingRegistry {
 
   deviceMutationJournal(): SqliteDeviceMutationJournal {
     return new SqliteDeviceMutationJournal(this.db, this.timer);
+  }
+
+  /** The host-wide device claims table (#11811), on this connection and transaction lock. */
+  deviceClaims(): SqliteDeviceClaims {
+    return new SqliteDeviceClaims(this.db);
   }
 
   async ensureScope(identity: BindingScopeIdentity): Promise<EnsureScopeResult> {
@@ -460,15 +475,14 @@ export class SqliteBindingRegistry implements BindingRegistry {
     const settler = assertSettlerForState(state, options);
     return this.db
       .transaction()
-      .execute((trx) => this.updateBindingStateIn(trx, key, expected, state, settler));
+      .execute((trx) => this.updateBindingStateIn(trx, key, expected, { state, settler }));
   }
 
   private async updateBindingStateIn(
     trx: Executor,
     key: BindingKey,
     expected: BindingBindingExpectation,
-    state: BindingAssignmentState,
-    settler: BindingProcessIdentity | null,
+    { state, settler }: { state: BindingAssignmentState; settler: BindingProcessIdentity | null },
     journaled = false,
   ): Promise<UpdateBindingStateResult> {
     const checked = await this.checkBinding(trx, key, expected, journaled);
@@ -919,8 +933,10 @@ export class SqliteBindingRegistry implements BindingRegistry {
             trx,
             key,
             change.expected,
-            change.state,
-            assertSettlerForState(change.state, change.options),
+            {
+              state: change.state,
+              settler: assertSettlerForState(change.state, change.options),
+            },
             true,
           );
     return result.kind === "committed" || result.kind === "updated" ? result.assignment : result;

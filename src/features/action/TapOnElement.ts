@@ -22,7 +22,12 @@ import {
   type DisplayTransitionTracker,
 } from "../observe/DisplayTransition";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { ActionableError, BootedDevice, ObserveResult } from "../../models";
+import {
+  ActionableError,
+  BootedDevice,
+  ObserveResult,
+  requireAndroidOrIosPlatform,
+} from "../../models";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -444,14 +449,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
     this.elementSelector = this.createElementSelector(options);
-    const accessibility = resolveTapAccessibilityDependencies(
-      options,
+    const accessibility = resolveTapAccessibilityDependencies(options, {
       device,
-      this.adbFactory,
-      this.adb,
-      this.timer,
-      this.accessibilityDetector,
-    );
+      adbFactory: this.adbFactory,
+      adb: this.adb,
+      timer: this.timer,
+      accessibilityDetector: this.accessibilityDetector,
+    });
     this.talkBackDriverFactory = accessibility.talkBackDriverFactory;
     this.talkBackStrategy = accessibility.talkBackStrategy;
     this.iosVoiceOverDetector = accessibility.iosVoiceOverDetector;
@@ -469,7 +473,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return (
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
-        platform: this.device.platform,
+        platform: requireAndroidOrIosPlatform(this.device.platform, "tapOn"),
         iosMultiPanel:
           this.platformTraits.panelAwareSelection && (this.device.displays?.panels.length ?? 0) > 1,
       })

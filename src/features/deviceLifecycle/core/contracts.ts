@@ -37,6 +37,12 @@ export interface StartDeviceArgs {
   matchExactName?: boolean;
 }
 
+/**
+ * What binding a booted device's session reads from a start request. The bound device carries
+ * the platform, so the request's own may be any platform, an Apple Watch's included (#14908).
+ */
+export type StartDeviceSessionArgs = Omit<StartDeviceArgs, "platform"> & { platform?: Platform };
+
 export interface GetAndroidArgs {
   avdName?: string;
   deviceId?: string;
@@ -82,6 +88,8 @@ export interface ProvisionDeviceArgs {
 /** Only in-process binding reconciliation may retain a created simulator for readiness retry. */
 export interface InternalProvisionDeviceArgs extends ProvisionDeviceArgs {
   rollbackOnRetryableReadiness?: boolean;
+  /** Android: boot the emulator with `-no-snapshot-save` (#15477). */
+  discardSnapshotOnExit?: boolean;
 }
 
 export interface KillDeviceArgs {

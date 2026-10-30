@@ -1,3 +1,4 @@
+import { iosWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { androidCtrlProxyClientForPlatform } from "../../observe/android/androidCtrlProxyClientFor";
 import { SwipeOnAutoTargeting } from "./SwipeOnAutoTargeting";
 import { SwipeOnAndroidDisplay, containerFailureOf } from "./SwipeOnAndroidDisplay";
@@ -31,8 +32,8 @@ import {
   SwipeOnOptions,
   SwipeOnResult,
   ScrollableCandidate,
-  SwipeResult,
   ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
 } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ScrollableElementsQuery } from "../../../utils/interfaces/ElementTraitQueries";
@@ -79,6 +80,8 @@ import { AutoTargetSelector } from "./AutoTargetSelector";
 import { TalkBackSwipeExecutor } from "./TalkBackSwipeExecutor";
 import { SwipeOutcomeIndeterminateError } from "./SwipeOutcomeIndeterminateError";
 import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
+import { iosGestureFailureError, swipeMayHaveMoved } from "./iosSwipeOutcome";
+import { deviceIosSdkBridgeSwipeRunner } from "../IosSdkBridgeSwipeRouter";
 import { ScrollUntilVisible } from "./ScrollUntilVisible";
 import { isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
@@ -101,22 +104,6 @@ import { settleSdkRouteAssessment, type SdkRouteSource } from "./sdkRouteSettle"
 import { resolveActionCall, type ActionCall } from "../ActionCall";
 
 /** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
-/**
- * The error that stops a lock-screen swipe after a failed iOS gesture. It keeps the unconfirmed-
- * outcome marker as a type: the legacy catch rebuilds a plain failure result from the message.
- */
-function iosGestureFailureError(result: Pick<SwipeResult, "error" | "outcomeIndeterminate">) {
-  const message = result.error ?? "iOS lock-screen swipe failed";
-  return result.outcomeIndeterminate === true
-    ? new SwipeOutcomeIndeterminateError(message)
-    : new ActionableError(message);
-}
-
-/** A confirmed swipe, or one dispatched without a reply (#9972), may have moved the screen. */
-function swipeMayHaveMoved(result: Pick<SwipeResult, "success" | "outcomeIndeterminate">): boolean {
-  return result.success || result.outcomeIndeterminate === true;
-}
-
 /**
  * Refuse a swipe whose start point lies on the other `layer`: the window under the down event
  * receives the whole gesture (issue #9305). Resolution itself is scoped where the target is found.
@@ -244,13 +231,16 @@ export class SwipeOn extends BaseVisualChange {
     const iosVoiceOverDetector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.voiceOverExecutor =
       dependencies.voiceOverExecutor ??
-      new VoiceOverSwipeExecutor(
+      deviceIosSdkBridgeSwipeRunner(
         device,
-        this.executeGesture,
-        IOSCtrlProxyClient.getInstance(device),
-        iosVoiceOverDetector,
-        this.timer,
-        featureFlags,
+        new VoiceOverSwipeExecutor({
+          device,
+          executeGesture: this.executeGesture,
+          iosClient: IOSCtrlProxyClient.getInstance(device),
+          iosVoiceOverDetector,
+          timer: this.timer,
+          featureFlags,
+        }),
       );
     this.scrollUntilVisible = new ScrollUntilVisible({
       device,
@@ -264,6 +254,7 @@ export class SwipeOn extends BaseVisualChange {
       overlayDetector: this.overlayDetector,
       talkBackExecutor: this.talkBackExecutor,
       voiceOverExecutor: this.voiceOverExecutor,
+      webScrollIntoView: iosWebScrollIntoView(device, dependencies.webScrollIntoView),
       timer: this.timer,
       getDuration: this.getDuration.bind(this),
       resolveBoomerangConfig: this.resolveBoomerangConfig.bind(this),
@@ -511,8 +502,7 @@ export class SwipeOn extends BaseVisualChange {
           viewHierarchy,
           searchCriteria,
           this.visionConfig,
-          errorMsg,
-          { visionAnalyzer: this.visionAnalyzer },
+          { baseError: errorMsg, visionAnalyzer: this.visionAnalyzer },
         );
       }
 
@@ -742,16 +732,13 @@ export class SwipeOn extends BaseVisualChange {
         previous,
         result.observation,
         { x: result.x1, y: result.y1 },
-        this.device.platform,
+        requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
       );
-    const assessment = await settleSdkRouteAssessment(
-      assess(),
-      previous,
-      result.observation,
+    const assessment = await settleSdkRouteAssessment(assess(), previous, result.observation, {
       swipeEndedAtMs,
-      sdkRoutes,
-      assess,
-    );
+      source: sdkRoutes,
+      reassess: assess,
+    });
     if (!assessment) {
       return;
     }
@@ -794,7 +781,7 @@ export class SwipeOn extends BaseVisualChange {
         throwIfAborted(signal);
         const insetOptions = {
           observation: observeResult,
-          platform: this.device.platform,
+          platform: requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
           includeSystemInsets: options.includeSystemInsets,
           includeFloatingBars: !options.fromEdge,
         };
@@ -837,6 +824,7 @@ export class SwipeOn extends BaseVisualChange {
                 perf,
                 boomerang,
                 signal,
+                sdkObservation: options.fromEdge ? undefined : observeResult,
               })
             : this.talkBackExecutor.executeSwipeGesture({
                 x1: Math.floor(startX),
@@ -970,6 +958,7 @@ export class SwipeOn extends BaseVisualChange {
                 perf,
                 boomerang,
                 signal,
+                sdkObservation: observeResult,
               })
             : this.talkBackExecutor.executeSwipeGesture({
                 x1: Math.floor(startX),
@@ -1039,7 +1028,7 @@ export class SwipeOn extends BaseVisualChange {
       viewHierarchy,
       containerElement,
       observeResult,
-      platform: this.device.platform,
+      platform: requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
     });
   }
 

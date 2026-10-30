@@ -202,8 +202,27 @@ export class McpBindings {
       route,
       route.sessionUuid ?? sessionUuid,
       sessionWasActiveBeforeForward,
-      request.params?.name,
-      request.params?.arguments,
+      { toolName: request.params?.name, args: request.params?.arguments },
+    );
+  }
+  /**
+   * Whether this socket's connection holds the session (or the base of a derived `base:label`
+   * session): it acquired or restored it, holds its autolock route, or last routed a call to it.
+   * Conservative on purpose: a socket with no such record is not told about the session (#15456).
+   */
+  holdsSession(socketSessionId: string, sessionUuid: string): boolean {
+    const base = sessionUuid.split(":", 1)[0] ?? sessionUuid;
+    const bound = this.state.boundMcpClientKeysBySocketSession.get(socketSessionId)?.sessionUuid;
+    if (bound !== undefined && (bound === sessionUuid || bound === base)) {
+      return true;
+    }
+    if (!this.state.daemonState.isInitialized()) {
+      return false;
+    }
+    const pool = this.state.daemonState.getDevicePool();
+    return (
+      pool.isSessionOwnedByConnection?.(sessionUuid, socketSessionId) === true ||
+      pool.isSessionOwnedByConnection?.(base, socketSessionId) === true
     );
   }
   isSessionOwnedByOtherConnection(sessionUuid: string, socketSessionId: string): boolean {
@@ -258,8 +277,7 @@ export class McpBindings {
     route: McpForwardRoute,
     sessionUuid: string,
     sessionWasActiveBeforeForward: boolean,
-    toolName: unknown,
-    args: unknown,
+    { toolName, args }: { toolName: unknown; args: unknown },
   ): void {
     if (this.callbacks.isReleasedBoundSession(args, socketSessionId)) {
       this.callbacks.clearBoundMcpClientKey(socketSessionId);

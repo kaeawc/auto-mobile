@@ -2,7 +2,7 @@ import { type SessionBrokerResult } from "../../devices/sessionBrokerResult";
 import type { SessionConfig } from "../../devices/sessionConfig";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import { type DaemonClientLike } from "../client";
+import { type DaemonClientLike } from "../client/client";
 import {
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,

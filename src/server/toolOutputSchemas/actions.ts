@@ -5,7 +5,7 @@ import {
   staleDisplaySchema,
 } from "./display";
 import { elementSchema, selectedElementSchema } from "./elements";
-import { observationOutputSchema } from "./observation";
+import { observationBackendFields, observationOutputSchema } from "./observation";
 import { observationDiffMetadataSchema, tapEffectSchema } from "./observationMetadata";
 import { platformSchema } from "../../utils/schemaHelpers";
 
@@ -90,7 +90,8 @@ export const sendKeysResultSchema = z
               })
               .optional(),
             imeTrace: z.array(z.string()).optional(),
-            backend: z.literal("autoMobileIme").optional(),
+            backend: z.enum(["autoMobileIme", "sdk", "xctest"]).optional(),
+            fallbackReason: z.enum(["unavailable", "unsupported"]).optional(),
             capability: z.literal("semanticText").optional(),
             keyboard: keyboardIdentitySchema.optional(),
           })
@@ -121,7 +122,7 @@ const screenReaderNavigationSchema = z
   .passthrough();
 
 /** Shared optional action metadata, including finalized observation variants. */
-const lifecycleActionOutputFields = {
+export const lifecycleActionOutputFields = {
   message: z.string(),
   success: z.boolean().optional(),
   observation: observationOutputSchema.optional(),
@@ -212,6 +213,7 @@ export const tapOnResultSchema = z
     observationDiff: observationDiffMetadataSchema.optional(),
     effect: tapEffectSchema.optional(),
     selectedElement: selectedElementSchema.optional(),
+    ...observationBackendFields,
     activatedSubtext: z
       .object({
         text: z.string(),
@@ -225,7 +227,18 @@ export const tapOnResultSchema = z
     pinnedDisplay: pinnedDisplaySchema.optional(),
     displayInventory: displayInventoryUnavailableSchema.optional(),
     staleDisplay: staleDisplaySchema.optional(),
-    pressRecognized: z.boolean().optional(),
+    pressRecognized: z
+      .boolean()
+      .optional()
+      .describe(
+        "Long press heuristic: a context menu, text selection, or new window appeared. False means none was seen, not that a tap was sent",
+      ),
+    longClickAdvertised: z
+      .boolean()
+      .optional()
+      .describe(
+        "Android long press: whether the pressed node advertises a long-click action. False means it has no long-click handler, so the app handles the hold like a tap",
+      ),
     contextMenuOpened: z.boolean().optional(),
     selectionStarted: z.boolean().optional(),
     searchUntil: tapOnSearchUntilSchema.optional(),

@@ -1,0 +1,50 @@
+{
+  "spec": {
+    "id": "routes-integration",
+    "data": {
+      "items": []
+    },
+    "state": {
+      "input": "",
+      "open": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home"
+        },
+        "detail": {
+          "type": "button",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "prependData",
+              "path": "/data/items{route.id}",
+              "value": {
+                "value": 1
+              }
+            }
+          ]
+        }
+      },
+      "routes": {
+        "detail": {
+          "params": {
+            "id": "string"
+          }
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"detail\"].onTap[0].path",
+  "expectedMessage": "Route placeholder must occupy a whole data pointer segment"
+}

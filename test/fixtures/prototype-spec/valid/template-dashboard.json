@@ -1,0 +1,341 @@
+{
+  "id": "template-dashboard",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "range": "week",
+    "seconds": 0,
+    "running": false,
+    "goalProgress": 0.65
+  },
+  "data": {
+    "week": [
+      {
+        "day": "Mon",
+        "y": 4200
+      },
+      {
+        "day": "Tue",
+        "y": 6100
+      },
+      {
+        "day": "Wed",
+        "y": 5300
+      },
+      {
+        "day": "Thu",
+        "y": 7800
+      },
+      {
+        "day": "Fri",
+        "y": 6500
+      }
+    ],
+    "month": [
+      {
+        "day": "W1",
+        "y": 28000
+      },
+      {
+        "day": "W2",
+        "y": 33500
+      },
+      {
+        "day": "W3",
+        "y": 31000
+      },
+      {
+        "day": "W4",
+        "y": 36200
+      }
+    ],
+    "today": [
+      {
+        "y": 6500
+      }
+    ]
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "overview",
+    "style": {
+      "width": "fill",
+      "height": "fill"
+    },
+    "screens": {
+      "overview": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "dashboard_bar",
+            "title": "Today",
+            "actions": [
+              {
+                "icon": "info",
+                "label": "Details",
+                "onTap": [
+                  {
+                    "type": "push",
+                    "stack": "nav",
+                    "screen": "details"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "children": [
+                {
+                  "type": "segmentedButton",
+                  "testTag": "range_picker",
+                  "stateKey": "range",
+                  "options": [
+                    {
+                      "value": "week",
+                      "label": "Week"
+                    },
+                    {
+                      "value": "month",
+                      "label": "Month"
+                    }
+                  ]
+                },
+                {
+                  "type": "chart",
+                  "testTag": "steps_week",
+                  "variant": "line",
+                  "xLabels": "all",
+                  "goal": 7000,
+                  "visibleWhen": {
+                    "key": "range",
+                    "equals": "week"
+                  },
+                  "series": [
+                    {
+                      "path": "/week",
+                      "x": "day",
+                      "y": "y",
+                      "label": "Steps",
+                      "color": "primary"
+                    }
+                  ]
+                },
+                {
+                  "type": "chart",
+                  "testTag": "steps_month",
+                  "variant": "bar",
+                  "xLabels": "all",
+                  "visibleWhen": {
+                    "key": "range",
+                    "equals": "month"
+                  },
+                  "series": [
+                    {
+                      "path": "/month",
+                      "x": "day",
+                      "y": "y",
+                      "label": "Steps",
+                      "color": "primary"
+                    }
+                  ]
+                },
+                {
+                  "type": "chart",
+                  "testTag": "goal_ring",
+                  "variant": "ring",
+                  "goal": 10000,
+                  "series": [
+                    {
+                      "path": "/today",
+                      "y": "y",
+                      "label": "Steps today"
+                    }
+                  ]
+                },
+                {
+                  "type": "progress",
+                  "testTag": "goal_progress",
+                  "stateKey": "goalProgress"
+                },
+                {
+                  "type": "card",
+                  "variant": "outlined",
+                  "children": [
+                    {
+                      "type": "column",
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "Workout timer",
+                          "style": {
+                            "textStyle": "titleMedium"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "{seconds} s elapsed",
+                          "style": {
+                            "textStyle": "headlineSmall"
+                          },
+                          "testTag": "timer_label"
+                        },
+                        {
+                          "type": "row",
+                          "children": [
+                            {
+                              "type": "button",
+                              "label": "Start",
+                              "testTag": "timer_start",
+                              "onTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "running",
+                                  "value": true
+                                },
+                                {
+                                  "type": "startTimer",
+                                  "id": "clock",
+                                  "afterMs": 1000,
+                                  "everyMs": 1000,
+                                  "maxRuns": 3600,
+                                  "actions": [
+                                    {
+                                      "type": "increment",
+                                      "key": "seconds"
+                                    }
+                                  ]
+                                }
+                              ],
+                              "enabledWhen": {
+                                "key": "running",
+                                "equals": false
+                              }
+                            },
+                            {
+                              "type": "button",
+                              "label": "Stop",
+                              "testTag": "timer_stop",
+                              "onTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "running",
+                                  "value": false
+                                },
+                                {
+                                  "type": "cancelTimer",
+                                  "id": "clock"
+                                }
+                              ],
+                              "variant": "outlined",
+                              "enabledWhen": {
+                                "key": "running",
+                                "equals": true
+                              }
+                            },
+                            {
+                              "type": "button",
+                              "label": "Reset",
+                              "testTag": "timer_reset",
+                              "onTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "seconds",
+                                  "value": 0
+                                }
+                              ],
+                              "variant": "text"
+                            }
+                          ],
+                          "style": {
+                            "spacing": 8
+                          }
+                        }
+                      ],
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 16,
+                          "bottom": 16
+                        },
+                        "spacing": 12
+                      }
+                    }
+                  ]
+                }
+              ],
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 12
+              }
+            }
+          }
+        ]
+      },
+      "details": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "details_bar",
+            "title": "Details",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "children": [
+              {
+                "type": "text",
+                "text": "Goal: 10,000 steps a day.",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              },
+              {
+                "type": "text",
+                "text": "Today so far: {seconds} s of tracked workout.",
+                "style": {
+                  "textStyle": "bodyMedium"
+                }
+              }
+            ],
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            }
+          }
+        ]
+      }
+    }
+  }
+}

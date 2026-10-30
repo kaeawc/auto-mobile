@@ -2,6 +2,7 @@ import {
   PROTOTYPE_PLATFORM_DIFFERENCES,
   PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES,
 } from "./prototypePlatformNotes";
+import { PROTOTYPE_NOTIFICATION_CHANNEL_STATE_KEYS } from "./prototypeNotifications";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -16,7 +17,6 @@ import {
   GUIDE_DATA,
   GUIDE_DATA_ACTIONS,
   GUIDE_EMIT_CONTEXT,
-  GUIDE_DEVICE_LOOPBACK,
   GUIDE_REQUEST,
   GUIDE_ERRORS,
   GUIDE_GESTURES,
@@ -24,9 +24,21 @@ import {
   GUIDE_PATCH,
   GUIDE_REPEAT,
   GUIDE_STORAGE,
+  GUIDE_TEMPLATES,
 } from "./prototypeGuideProse";
+import {
+  GUIDE_DEVICE_LOOPBACK,
+  GUIDE_PLATFORM,
+  GUIDE_NOTIFICATIONS,
+  GUIDE_PLATFORM_EXAMPLE,
+  GUIDE_STRINGS_SEMANTICS,
+  GUIDE_TEST_SESSIONS,
+  GUIDE_TIMERS,
+  adaptiveGuideProse,
+} from "./prototypeGuideProseMore";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 import { PROTOTYPE_NATIVE_ASSET_URI, PROTOTYPE_NATIVE_URI } from "./nativePrototypeUris";
+import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
 
 /** Resource URIs served by the prototype authoring guide. */
 export const PROTOTYPE_GUIDE_URI = "automobile:prototype";
@@ -71,6 +83,8 @@ function describeRule(rule: Rule): string {
     case "boundKey":
       // A state key; inside a repeat template it may also hold placeholders (see Lists).
       return "key";
+    case "strings":
+      return "strings";
     case "screenMap":
       return `screen-name → node (${rule.min}..${rule.max} entries)`;
     case "array":
@@ -121,7 +135,7 @@ function fieldRuleValues(definition: string, field: string): string[] {
 /** Markdown limits table; every value comes from the contract's `limits`. */
 export function renderLimitsTable(): string {
   const rows = Object.entries(contract.limits).map(([name, value]) => `| \`${name}\` | ${value} |`);
-  const actionFields = ["onTap", "onLongPress", "onDoubleTap"];
+  const actionFields = ["onTap", "onLongPress", "onDoubleTap", "onAppear"];
   const items = (definitions.repeat.fields?.items.rule ?? {}) as Rule;
   for (const field of actionFields) {
     const rule = (definitions.node.variants?.box.fields?.[field].rule ?? {}) as Rule;
@@ -146,6 +160,7 @@ function renderNodes(): string {
     ...variantLines(variants, shared),
     "",
     `Pager options require \`${PROTOTYPE_PAGER_OPTIONS_CAPABILITY}\` whenever any is explicitly present (including default values): \`axis\` is horizontal (default) or vertical; \`pageSpacing\` is the dp gap (default 0); \`peek: {start?, end?}\` leaves neighbouring pages visible along the main axis (default 0 on each side, \`{}\` is a no-op); \`pageSize\` is fill (default) or \`{dp}\` for fixed-size pages. Distances are finite, spacing and peek are 0..${contract.limits.MAX_PROTOTYPE_PAGER_DP}, and fixed page size is 1e-6..${contract.limits.MAX_PROTOTYPE_PAGER_DP} (\`MAX_PROTOTYPE_PAGER_DP\`). Objects are strict. On iOS dp means points. A vertical pager cannot have any vertical scroll ancestor, including a scroll with omitted axis; a horizontal scroll ancestor is allowed. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.`,
+    "Bar scrolling requires `prototype_bar_scroll_v1` when `onScroll` or `scroll` is explicit. `topAppBar.onScroll` defaults to pinned; enterAlways hides and reveals with scroll direction; exitUntilCollapsed collapses medium/large titles to the small height. `bottomNav` and `tabBar` default to none; hide slides away and minimize draws icons only. Set `scroll` to exactly one scroll id in the same screen for an active behavior. Hidden bars leave hit testing and observation; partial bars expose drawn bounds. Reduced motion snaps between states. iOS uses custom Material bars; native platform bars are deferred.",
     "The current page is the first fully visible page (fixed-size pages snap at Start; fill uses the usual settled page). page_changed, {page}/{pageCount}, setPage and tabBar/bottomNav pager bindings keep their meaning. Fully off-screen retained neighbours stay outside the semantics tree; stable keys and neighbour retention are unchanged. Indicator and carousel remain deferred.",
   ].join("\n");
 }
@@ -155,7 +170,7 @@ function renderActions(): string {
   return [
     "## Actions",
     "",
-    "Used in `onTap`, `onLongPress`, `onDoubleTap` and searchBar `onSubmit` lists.",
+    "Used in `onTap`, `onLongPress`, `onDoubleTap`, `onAppear` and searchBar `onSubmit` lists.",
     "",
     `Gesture fields are available only on ${code(
       Object.entries(definitions.node.variants ?? {})
@@ -176,7 +191,7 @@ function renderTheme(): string {
     "",
     `Material colour roles (a colour field takes a hex value or one of these): ${code(roles)}.`,
     "",
-    `Per-mode values, refused unless the device advertises \`${PROTOTYPE_THEME_MODES_CAPABILITY}\`: every colour field (style colours, \`border.color\`, gradient stops, \`window.placement.scrim\`, a bottomSheet \`scrim\`) also takes \`{light, dark}\`, each a hex value or a role, both required; gradient stops and scrims take a role name too. \`theme.colors.light\` and \`theme.colors.dark\` are \`{<role>: hex}\` maps applied after the flat role overrides for the resolved mode. \`image.asset\` and a tabBar or bottomNav item \`image\` take \`{light: assetId, dark: assetId}\`: upload both, and a pair naming two different assets counts as two images. Prefer a role name, which already follows the mode; use a pair for a brand literal that needs a hand-picked dark value.`,
+    `Per-mode values, refused unless the device advertises \`${PROTOTYPE_THEME_MODES_CAPABILITY}\`: every colour field (style colours, \`border.color\`, gradient stops, \`window.placement.scrim\`, a bottomSheet or drawer \`scrim\`) also takes \`{light, dark}\`, each a hex value or a role, both required; gradient stops and scrims take a role name too. \`theme.colors.light\` and \`theme.colors.dark\` are \`{<role>: hex}\` maps applied after the flat role overrides for the resolved mode. \`image.asset\` and a tabBar or bottomNav item \`image\` take \`{light: assetId, dark: assetId}\`: upload both, and a pair naming two different assets counts as two images. Prefer a role name, which already follows the mode; use a pair for a brand literal that needs a hand-picked dark value.`,
     "",
     `Text style roles (\`style.textStyle\`): ${code(fieldRuleValues("style", "textStyle"))}.`,
     "",
@@ -230,6 +245,51 @@ export function searchIcons(query: string): { total: number; names: string[] } {
   return { total: matches.length, names: matches.slice(0, ICON_LOOKUP_LIMIT) };
 }
 
+/** Name and contract rule of one call argument; `?` marks an optional one. */
+function describeArgument(name: string, argument: { optional: boolean; value: Rule }): string {
+  return `${name}${argument.optional ? "?" : ""}: ${describeRule(argument.value)}`;
+}
+
+/** One line per module, generated from the contract's `platformModules` table. */
+export function renderPlatformModules(
+  modules: Record<string, PrototypePlatformModule> = PROTOTYPE_PLATFORM_MODULES,
+): string {
+  const rows = Object.entries(modules)
+    .filter(([, module]) => module.placeholder !== true)
+    .map(([name, module]) => {
+      const calls = Object.entries(module.calls).map(([op, call]) => {
+        const args = Object.entries(call.args).map(([arg, rule]) => describeArgument(arg, rule));
+        const needs = [
+          ...call.permissions.map((permission) => `permission ${permission}`),
+          ...call.background.map((mode) => `background ${mode}`),
+          ...(call.capability ? [`capability \`${call.capability}\``] : []),
+        ];
+        return `\`${name}.${op}\`(${args.join(", ")})${needs.length > 0 ? ` needs ${needs.join(", ")}` : ""}`;
+      });
+      const events = Object.keys(module.events).map((event) => `\`${name}.${event}\``);
+      const state = Object.keys(module.state ?? {}).map(
+        (key) => `\`/${name}/${platformStateScope(name, key)}${key}\``,
+      );
+      const capabilities = [module.capability, module.deviceCapability].filter(Boolean);
+      return `| \`${name}\` | ${code(capabilities as string[])} | ${calls.join("<br>") || "-"} | ${events.join(", ") || "-"} | ${state.join(", ") || "-"} |`;
+    });
+  return [
+    "| Module | Capabilities | Calls | Events | `/platform` state |",
+    "| --- | --- | --- | --- | --- |",
+    ...rows,
+  ].join("\n");
+}
+
+/** Media state is per declared player (#14253); notification `blocked` is per channel (#14280). */
+function platformStateScope(module: string, key: string): string {
+  if (module === "media") {
+    return "players/<id>/";
+  }
+  return module === "notifications" && PROTOTYPE_NOTIFICATION_CHANNEL_STATE_KEYS.has(key)
+    ? "channels/<id>/"
+    : "";
+}
+
 function renderPlatformDifferences(): string {
   return [
     "## Platform differences",
@@ -253,6 +313,8 @@ function renderPlatformDifferences(): string {
 export function renderPrototypeGuide(): string {
   return [
     GUIDE_INTRO,
+    GUIDE_STRINGS_SEMANTICS,
+    GUIDE_TEMPLATES,
     "## Limits\n\nGenerated from `schemas/prototype-spec-contract.json`.\n\n" + renderLimitsTable(),
     renderWindow(),
     renderNodes(),
@@ -262,6 +324,9 @@ export function renderPrototypeGuide(): string {
     GUIDE_DATA,
     GUIDE_DATA_ACTIONS,
     GUIDE_STORAGE,
+    GUIDE_TIMERS,
+    adaptiveGuideProse,
+    GUIDE_TEST_SESSIONS,
     GUIDE_REQUEST,
     GUIDE_EMIT_CONTEXT,
     GUIDE_CHECKS,
@@ -274,6 +339,7 @@ export function renderPrototypeGuide(): string {
     renderIcons(),
     renderPlatformDifferences(),
     renderNativeCode(),
+    `${GUIDE_PLATFORM}\n\n${renderPlatformModules()}\n\n${GUIDE_PLATFORM_EXAMPLE}\n\n${GUIDE_NOTIFICATIONS}`,
     GUIDE_COST,
     GUIDE_ERRORS,
   ].join("\n\n");

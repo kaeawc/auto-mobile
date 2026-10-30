@@ -1,0 +1,30 @@
+{
+  "id": "routes-review",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "screens": {
+      "home": {
+        "type": "text",
+        "text": "Home"
+      },
+      "detail": {
+        "type": "textField",
+        "stateKey": "key_{route.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
+      }
+    },
+    "routes": {
+      "detail": {
+        "params": {
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "string"
+        }
+      }
+    }
+  }
+}

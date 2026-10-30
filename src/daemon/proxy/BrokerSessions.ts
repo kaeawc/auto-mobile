@@ -9,7 +9,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
-import { DaemonUnavailableError, type DaemonClientLike } from "../client";
+import { DaemonUnavailableError, type DaemonClientLike } from "../client/client";
 import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "../sessionBroker/provisioning/executionLiveness";
 import {
   acquireSessionThroughDaemon,

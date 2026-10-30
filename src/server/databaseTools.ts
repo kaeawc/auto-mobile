@@ -16,6 +16,7 @@ import {
   type IosDatabaseClientResolver,
 } from "./iosDatabaseClient";
 import type { SQLResult } from "../features/database/DatabaseInspector";
+import { resolveAndroidDatabasePath } from "../features/database/androidDatabasePath";
 import { isReadOnlySqlQuery } from "../features/database/sqlQueryClassification";
 
 // Schema for sqlQuery tool
@@ -24,7 +25,11 @@ const sqlQuerySchema = withAppIdAliases(
     z
       .object({
         appId: z.string(),
-        databasePath: z.string().describe("Database path"),
+        databasePath: z
+          .string()
+          .describe(
+            "Absolute path under the app data directory, or on Android a bare file name in the app databases directory",
+          ),
         query: z.string().describe("SQL query"),
       })
       .strict(),
@@ -98,7 +103,11 @@ export function registerDatabaseTools(
   // SQL Query handler
   const sqlQueryHandler = async (device: BootedDevice, args: SqlQueryArgs) => {
     try {
-      const result = await executeSqlForDevice(device, args, iosClient);
+      const databasePath =
+        device.platform === "android"
+          ? resolveAndroidDatabasePath(args.appId, args.databasePath)
+          : args.databasePath;
+      const result = await executeSqlForDevice(device, { ...args, databasePath }, iosClient);
 
       // The executed result type is authoritative; SQL text classification is
       // only an approximation for decisions that must happen before execution.
@@ -107,7 +116,7 @@ export function registerDatabaseTools(
         await notifyDatabaseChanged(
           device.deviceId,
           args.appId,
-          args.databasePath,
+          databasePath,
           affectedTables.length > 0 ? affectedTables : undefined,
         );
       }

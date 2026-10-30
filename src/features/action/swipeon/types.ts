@@ -1,6 +1,6 @@
 import type { AndroidCtrlProxyClient } from "../../observe/android";
 import type { TalkBackSwipeCtrlProxy } from "./TalkBackSwipeExecutor";
-import type { FencedGestureOptions } from "../ExecuteGesture";
+import type { FencedGestureOptions, SwipeLine } from "../ExecuteGesture";
 import type { ActionCall } from "../ActionCall";
 import type { Timer } from "../../../utils/SystemTimer";
 import {
@@ -37,6 +37,11 @@ export type SwipeGestureRequest = {
   perf?: PerformanceTracker;
   boomerang?: BoomerangConfig;
   signal?: AbortSignal;
+  /**
+   * iOS: the observation the swipe was resolved against, so it can go through the SDK observation
+   * bridge (#5159). Omitted for edge swipes and scroll searches, which stay on XCTest.
+   */
+  sdkObservation?: Pick<ObserveResult, "viewHierarchy">;
 };
 
 export type BoomerangGestureRequest = Omit<
@@ -94,14 +99,7 @@ export interface OverlayAnalyzer {
 }
 
 export interface GestureExecutor {
-  swipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    options?: FencedGestureOptions,
-    call?: ActionCall,
-  ): Promise<SwipeResult>;
+  swipe(line: SwipeLine, options?: FencedGestureOptions, call?: ActionCall): Promise<SwipeResult>;
 }
 
 export interface ScrollAccessibilityService {
@@ -153,6 +151,8 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   iosVoiceOverDetector?: IosVoiceOverDetector;
   featureFlags?: import("../../featureFlags/FeatureFlagService").FeatureFlagReader;
   voiceOverExecutor?: VoiceOverSwipeRunner;
+  /** Scrolls a WKWebView DOM element into view for `lookFor` (#5162); iOS only. */
+  webScrollIntoView?: import("./IosSdkWebScrollIntoView").IosSdkWebScrollIntoView;
   autoTargetSelector?: AutoTargetSelectorService;
   visionConfig?: import("../../../vision/VisionTypes").VisionFallbackConfig;
   screenshotCapturer?: import("../../navigation/SelectionStateTracker").ScreenshotCapturer;

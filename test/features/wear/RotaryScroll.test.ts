@@ -58,7 +58,7 @@ beforeEach(() => {
 
 describe("rotary scroll", () => {
   test("stops at the first candidate whose read-back changed the screen", async () => {
-    adb.on(/rotaryencoder scroll 3$/, () => {
+    adb.on(/^shell input rotaryencoder scroll --axis SCROLL,-3$/, () => {
       adb.screen = "list@3";
       return "";
     });
@@ -70,11 +70,54 @@ describe("rotary scroll", () => {
     expect(result.attempts).toEqual([
       {
         method: "input_rotaryencoder",
-        command: "shell input rotaryencoder scroll 3",
+        command: "shell input rotaryencoder scroll --axis SCROLL,-3",
         outcome: "scrolled",
       },
     ]);
     expect(adb.commands.some((command) => command.includes("input swipe"))).toBe(false);
+  });
+
+  test("a negative delta sends a positive native SCROLL axis value", async () => {
+    adb.on(/^shell input rotaryencoder scroll --axis SCROLL,2$/, () => {
+      adb.screen = "list@-2";
+      return "";
+    });
+
+    const result = await scroller().scroll({ delta: -2 });
+
+    expect(result.success).toBe(true);
+    expect(result.attempts).toEqual([
+      {
+        method: "input_rotaryencoder",
+        command: "shell input rotaryencoder scroll --axis SCROLL,2",
+        outcome: "scrolled",
+      },
+    ]);
+    expect(adb.commands).toContain("shell input rotaryencoder scroll --axis SCROLL,2");
+  });
+
+  test("a successful native command with unchanged read-back tries the next candidate", async () => {
+    adb.on(/^emu event send EV_REL:REL_WHEEL:3$/, () => {
+      adb.screen = "list@3";
+      return "OK";
+    });
+
+    const result = await scroller().scroll({ delta: 3 });
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("emulator_rotary");
+    expect(result.attempts).toEqual([
+      {
+        method: "input_rotaryencoder",
+        command: "shell input rotaryencoder scroll --axis SCROLL,-3",
+        outcome: "unchanged",
+      },
+      {
+        method: "emulator_rotary",
+        command: "emu event send EV_REL:REL_WHEEL:3",
+        outcome: "scrolled",
+      },
+    ]);
   });
 
   test("falls through failed and unchanged candidates to the swipe", async () => {

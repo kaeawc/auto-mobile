@@ -1,10 +1,10 @@
 import { expect, spyOn, test } from "bun:test";
 import * as net from "node:net";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import type { DaemonNotification, DaemonResponse } from "../../src/daemon/types";
-import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/DaemonFrameTooLargeError";
+import { DaemonFrameTooLargeError } from "../../src/daemon/wire/DaemonFrameTooLargeError";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -41,7 +41,7 @@ function setup(limit = 256) {
   const feed = (frame: unknown) =>
     client.testHooks.simulateIncomingData(Buffer.from(JSON.stringify(frame) + "\n"));
   const request = (signal?: AbortSignal) =>
-    client.callTool("tapOn", {}, undefined, undefined, signal).catch((error: unknown) => error);
+    client.callTool("tapOn", {}, undefined, undefined, { signal }).catch((error: unknown) => error);
   return { client, timer, socket, feed, request };
 }
 
@@ -257,7 +257,7 @@ test("overflow preserves the frame error when a connection-closed handler closes
       void client.close();
     });
     const first = client
-      .callTool("tapOn", {}, undefined, undefined, controller.signal)
+      .callTool("tapOn", {}, undefined, undefined, { signal: controller.signal })
       .catch((error: unknown) => error);
     const second = client.callTool("tapOn", {}).catch((error: unknown) => error);
     try {

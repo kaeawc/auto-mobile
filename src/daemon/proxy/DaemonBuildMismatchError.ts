@@ -1,4 +1,4 @@
-import { DaemonUnavailableError } from "../client";
+import { DaemonUnavailableError } from "../client/client";
 import { type BuildIdentity, describeBuildIdentity } from "../wire/buildIdentity";
 
 export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";

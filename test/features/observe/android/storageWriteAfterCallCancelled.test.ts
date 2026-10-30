@@ -83,7 +83,7 @@ describe("a storage write whose call was cancelled before it was sent", () => {
 
   test("setPreference of a cancelled call is not sent to the device", async () => {
     await writeUnderCutCall(() =>
-      client.setPreference("com.example", "prefs", "key", "value", "STRING"),
+      client.setPreference("com.example", "prefs", { key: "key", value: "value", type: "STRING" }),
     );
 
     expect(socket.sentTypes).toEqual([]);
@@ -99,7 +99,7 @@ describe("a storage write whose call was cancelled before it was sent", () => {
       try {
         const pending =
           method === "setPreference"
-            ? client.setPreference("com.example", "prefs", "k", "v", "STRING")
+            ? client.setPreference("com.example", "prefs", { key: "k", value: "v", type: "STRING" })
             : method === "removePreference"
               ? client.removePreference("com.example", "prefs", "k")
               : client.clearPreferenceStore("com.example", "prefs");

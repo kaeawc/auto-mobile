@@ -63,11 +63,6 @@ function isUnvalidatedPlan(raw: unknown): raw is Plan {
  * Validates a plan structure and enforces multi-device rules.
  */
 export class PlanValidator {
-  // Tools that don't require device labels (exceptions to the rule).
-  // criticalSection is intentionally NOT here: every criticalSection step
-  // must target a specific device, just like any other tool.
-  private static readonly DEVICE_AGNOSTIC_TOOLS = new Set<string>();
-
   /**
    * Validates a plan and throws ActionableError if invalid.
    * @param plan Plan to validate
@@ -197,12 +192,6 @@ export class PlanValidator {
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
 
-      // Skip any device-agnostic tools (currently none — criticalSection is
-      // intentionally treated like any other device-targeted tool).
-      if (this.DEVICE_AGNOSTIC_TOOLS.has(step.tool)) {
-        continue;
-      }
-
       // Every step must declare a device, including criticalSection. Uses
       // effectiveField (not a raw params read) so an inline-form barrier
       // step -- lock/deviceCount/device sitting directly on the step rather
@@ -291,14 +280,10 @@ export class PlanValidator {
         ? effectiveOwner
         : undefined;
     for (let j = 0; j < subSteps.length; j++) {
-      this.recordCriticalSectionSubstepLabel(
-        subSteps[j],
-        i,
-        j,
+      this.recordCriticalSectionSubstepLabel(subSteps[j], i, j, labelErrors, {
         deviceSet,
-        labelErrors,
         ownerDevice,
-      );
+      });
     }
   }
 
@@ -306,9 +291,8 @@ export class PlanValidator {
     sub: unknown,
     i: number,
     j: number,
-    deviceSet: Set<string>,
     labelErrors: DeviceLabelErrors,
-    ownerDevice: string | undefined,
+    { deviceSet, ownerDevice }: { deviceSet: Set<string>; ownerDevice: string | undefined },
   ): void {
     if (!sub || typeof sub !== "object") {
       return;

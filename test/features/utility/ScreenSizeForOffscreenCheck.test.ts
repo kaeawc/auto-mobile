@@ -247,7 +247,6 @@ test.each(rows)("four consumers: $name", (row) => {
         { text: "D43 target" },
         hierarchy,
         row.platform,
-        new Map(),
         options,
       ) !== null,
     resolver: resolver.selectByText(hierarchy, "D43 target").element !== null,
@@ -304,7 +303,7 @@ test("fallback logs once per resolution, primary paths do not log", () => {
 test("platform precedence is explicit, snapshot, projection stamp, then Android order", () => {
   const raw = issue8379Hierarchy();
   expect(screenSizeForOffscreenCheck(raw)).toEqual({ width: 669, height: 951 });
-  identifyObservedHierarchy("ios", raw, "fresh", new FakeTimer(), new FakeIdGenerator());
+  identifyObservedHierarchy("ios", raw, "fresh", new FakeTimer(), { ids: new FakeIdGenerator() });
   expect(screenSizeForOffscreenCheck(raw)).toEqual({ width: 951, height: 669 });
   expect(screenSizeForOffscreenCheck(raw, { platform: "android" })).toEqual({
     width: 669,

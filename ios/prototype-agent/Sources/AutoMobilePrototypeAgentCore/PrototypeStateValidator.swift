@@ -46,6 +46,9 @@ enum PrototypeStateValidator {
         }
         for node in nodes {
             if let rejection = refreshError(node, state) { return rejection.message }
+            if node.type == "scroll", let key = node.atEndKey, state[key]?.boolValue == nil {
+                return "Chat scroll requires a declared boolean atEndKey"
+            }
         }
         return actionRejection(actions, state: state)
     }
@@ -66,12 +69,16 @@ enum PrototypeStateValidator {
 
     // MARK: Traversal
 
-    private static func collect(_ node: PrototypeNode, nodes: inout [PrototypeNode], actions: inout [PrototypeAction]) {
+    static func collect(_ node: PrototypeNode, nodes: inout [PrototypeNode], actions: inout [PrototypeAction]) {
         nodes.append(node)
         actions += node.onTap ?? []
+        actions += node.onAppear ?? []
+        actions += node.onEndReached ?? []
+        actions += node.onDismiss ?? []
         actions += node.onLongPress ?? []
         actions += node.onDoubleTap ?? []
         actions += node.onSubmit ?? []
+        actions += node.onStartReached ?? []
         actions += (node.swipeActions?.entries ?? []).flatMap(\.action.onTap)
         actions += node.trailingIcon?.onTap ?? []
         actions += node.refresh?.onRefresh ?? []
@@ -83,14 +90,15 @@ enum PrototypeStateValidator {
         actions += node.dismiss?.onTap ?? []
         actions += node.action?.onTap ?? []
         actions += (node.menuItems ?? []).flatMap { $0.entry?.onTap ?? [] }
-        node.children?.forEach { collect($0, nodes: &nodes, actions: &actions) }
-        if let child = node.child { collect(child, nodes: &nodes, actions: &actions) }
-        node.screens?.values.forEach { collect($0, nodes: &nodes, actions: &actions) }
+        for entry in node.childEntries(path: node.nodePath) {
+            collect(entry.node, nodes: &nodes, actions: &actions)
+        }
     }
 
     // MARK: Binding rules
 
     static func bindingRejection(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
+        if let error = PrototypeAdaptive.binding(node, state: state) { return error }
         if let message = componentError(node, state) { return message }
         guard let key = node.stateKey else {
             return node
@@ -114,7 +122,7 @@ enum PrototypeStateValidator {
             ) : nil
         case "radioGroup", "segmentedButton", "select":
             return radioGroupError(node, stored)
-        case "tabBar", "bottomNav":
+        case "pager", "tabBar", "bottomNav":
             guard let number = stored?.numberValue, number.isFinite, number >= 0,
                   number.truncatingRemainder(dividingBy: 1) == 0
             else { return .init(field: "stateKey", message: "Selection requires a nonnegative integer state key")
@@ -274,7 +282,7 @@ enum PrototypeStateValidator {
 
     /// A list item's trailing switch or checkbox binds a boolean, like the standalone controls.
     static func trailingError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
-        guard node.type == "listItem", let key = node.trailing?.stateKey else { return nil }
+        guard node.type == "listItem", let key = node.toggleKey else { return nil }
         return state[key]?.boolValue == nil ? .init(
             field: "trailing.stateKey",
             message: "Toggle control requires a boolean state key"
@@ -283,7 +291,14 @@ enum PrototypeStateValidator {
 
     /// Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean.
     static func openWhenError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> BindingRejection? {
-        let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar", "menu": "Menu"]
+        let names = [
+            "bottomSheet": "Sheet",
+            "dialog": "Dialog",
+            "snackbar": "Snackbar",
+            "menu": "Menu",
+            "tooltip": "Tooltip",
+            "drawer": "Drawer",
+        ]
         guard let name = names[node.type], let key = node.openWhen?.key, let stored = state[key] else { return nil }
         return stored
             .boolValue == nil ? .init(field: "openWhen.key", message: "\(name) requires a boolean state key") : nil
@@ -318,10 +333,11 @@ enum PrototypeStateValidator {
 }
 
 extension Condition {
-    /// The `key` of a `{key, equals | notEquals | gt | lt}` condition; the grouping forms have none.
+    /// The state key of a scalar, numeric or string comparison; grouping forms have none.
     var key: String? {
         switch self {
-        case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _): key
+        case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _),
+             let .contains(key, _), let .startsWith(key, _), let .lengthGt(key, _), let .lengthLt(key, _): key
         case .all, .any, .not, .valid: nil
         }
     }

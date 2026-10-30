@@ -171,7 +171,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
         const controller = new AbortController();
         let rejection: unknown;
         const readiness = client
-          .waitForEmulatorReady(avdName, 760_000, child, undefined, controller.signal)
+          .waitForEmulatorReady(avdName, 760_000, child, undefined, { signal: controller.signal })
           .then(
             () => {
               throw new Error("Expected readiness to reject");
@@ -273,7 +273,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
         const controller = new AbortController();
         let settled = false;
         const readiness = client
-          .waitForEmulatorReady(avdName, 760_000, child, undefined, controller.signal)
+          .waitForEmulatorReady(avdName, 760_000, child, undefined, { signal: controller.signal })
           .then(
             () => {
               settled = true;
@@ -609,13 +609,9 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     child.emit("exit", 1, null);
     child.emit("close", 1, null);
     const controller = new AbortController();
-    const readiness = client.waitForEmulatorReady(
-      avdName,
-      60_000,
-      launchedChild,
-      undefined,
-      controller.signal,
-    );
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild, undefined, {
+      signal: controller.signal,
+    });
     let rejection: Error | undefined;
     void readiness.catch((error) => {
       rejection = error instanceof Error ? error : new Error(String(error));
@@ -751,13 +747,9 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     });
     const launchedChild = await client.startEmulator(avdName);
     const controller = new AbortController();
-    const readiness = client.waitForEmulatorReady(
-      avdName,
-      60_000,
-      launchedChild,
-      undefined,
-      controller.signal,
-    );
+    const readiness = client.waitForEmulatorReady(avdName, 60_000, launchedChild, undefined, {
+      signal: controller.signal,
+    });
     let rejection: Error | undefined;
     void readiness.catch((error) => {
       rejection = error instanceof Error ? error : new Error(String(error));

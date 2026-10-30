@@ -14,6 +14,7 @@ import type {
   SimulatorTemplateManifestStore,
 } from "./SimulatorTemplateManifestStore";
 import type { XcodeVersionReader } from "./XcodeVersionReader";
+import type { SimulatorCloneRelocator } from "./SimulatorCloneRelocator";
 export interface TemplateSimulatorClient {
   createSimulator(
     name: string,
@@ -37,6 +38,8 @@ export interface TemplateCreationDependencies {
   timer: Pick<Timer, "now">;
   profile(): SimulatorTemplateKey["profile"];
   builder: TemplateBuildRequester;
+  /** Points a fresh clone's recorded paths at itself instead of its template (#15327). */
+  relocator: Pick<SimulatorCloneRelocator, "relocate">;
 }
 export class SimulatorCreationService {
   private readonly cloneFailures = new Map<string, number>();
@@ -151,6 +154,12 @@ export class SimulatorCreationService {
     );
     try {
       const udid = await deps.client.cloneSimulator(manifest.udid, request.name, request.signal);
+      // An unrelocated clone runs Safari and system daemons against the template's data.
+      await deps.relocator.relocate({
+        templateUdid: manifest.udid,
+        cloneUdid: udid,
+        signal: request.signal,
+      });
       this.cloneFailures.delete(manifest.udid);
       return { udid, preserveTemplate: true };
     } catch (error) {

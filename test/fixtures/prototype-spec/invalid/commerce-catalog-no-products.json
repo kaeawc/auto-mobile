@@ -1,0 +1,96 @@
+{
+  "spec": {
+    "id": "commerce-catalog-no-products",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "purchase": {}
+    },
+    "state": {
+      "buyStatus": "",
+      "failed": false,
+      "changes": 0
+    },
+    "requires": {
+      "platform": ["commerce"]
+    },
+    "commerce": {
+      "backend": "fake",
+      "products": []
+    },
+    "platform": {
+      "on": {
+        "commerce.entitlementsChanged": [
+          {
+            "type": "increment",
+            "key": "changes"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Entitlement changes {changes}"
+        },
+        {
+          "type": "button",
+          "label": "Go Pro",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "commerce.purchase",
+              "args": {
+                "productId": {
+                  "value": "pro_monthly"
+                }
+              },
+              "into": "/data/purchase",
+              "statusKey": "buyStatus",
+              "onError": [
+                {
+                  "type": "setState",
+                  "key": "failed",
+                  "value": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Coins",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "commerce.purchase",
+              "args": {
+                "productId": {
+                  "value": "coins_100"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Restore",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "commerce.restore",
+              "args": {}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "commerce.products",
+  "expectedMessage": "Array length out of range"
+}

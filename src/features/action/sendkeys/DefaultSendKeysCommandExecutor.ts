@@ -1,8 +1,12 @@
+import { ActionableError, toActionableError } from "../../../models/ActionableError";
+import { readBackWithSettle } from "./readBackWithSettle";
 import { TypingSession } from "./TypingSession";
-import { KeyEventSupport } from "./KeyEventSupport";
+import { KeyEventSupport, type KeyEventLetterCaseCheck } from "./KeyEventSupport";
 import {
   FocusedTextClearVerifier,
   checkAbort as checkAbortCheckpoint,
+  isEnterConfirmed,
+  type EnterFieldState,
 } from "./FocusedTextClearVerifier";
 import { EventLastTyper } from "./EventLastTyper";
 import { EventAllTyper } from "./EventAllTyper";
@@ -32,11 +36,18 @@ import {
 import { isSemanticKey, validateImeKeyEventsText } from "./SendKeysSupport";
 import { isSendKeysBudgetExhausted } from "./SendKeysRequestBudget";
 import { IosTyper } from "./IosTyper";
+import { IosSdkTextRouting, iosBackendFields, type IosSdkTextTarget } from "./IosSdkTextRouting";
+import { deviceIosSdkWebTextRouter, type IosSdkWebTextRouter } from "../IosSdkWebTextRouter";
+import {
+  deviceIosSdkBridgeTextRouter,
+  type IosSdkBridgeTextRouter,
+} from "../IosSdkBridgeTextRouter";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { clearIosFieldWithVerification } from "../iosClearVerification";
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import type { InsertTextState } from "../../observe/android/ctrlProxyProtocol";
 import type { BootedDevice, ObserveResult } from "../../../models";
+import { requireAndroidOrIosPlatform } from "../../../models/Platform";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -71,6 +82,9 @@ export interface SendKeysPlatformDependencies {
   timer?: Timer;
   textClient?: SendKeysTextClient;
   inputKey?: SendKeysInputKey;
+  /** Routes iOS text entry and clear on an SDK bridge field (#5159). */
+  iosSdkTextRouter?: IosSdkBridgeTextRouter;
+  iosSdkWebTextRouter?: IosSdkWebTextRouter;
   imeSpanService?: Pick<
     ImeSpanService,
     "imeSpan" | "withImeSpan" | "acquireImeSpan" | "restoreImeSpan"
@@ -86,6 +100,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly clearVerifier: FocusedTextClearVerifier;
   private readonly passwordRouting: PasswordRouting;
   private readonly iosTyper: IosTyper;
+  private readonly iosSdkText: IosSdkTextRouting;
   // These values intentionally survive commands and concurrent calls on this executor.
   private readonly session = new TypingSession();
   private readonly keyEventSupport: KeyEventSupport;
@@ -98,6 +113,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   setTargetPasswordField(passwordField: boolean): void {
     this.targetPasswordField = passwordField;
+  }
+
+  setIosSdkTextTarget(target: IosSdkTextTarget | undefined): void {
+    this.iosSdkText.setTarget(target);
   }
 
   private isPasswordRouting(routedPassword: boolean | undefined): boolean {
@@ -135,16 +154,26 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.observer = {
       execute: async (options) => {
         const observation = await observer.execute(options);
+        this.iosSdkText.observed(observation);
         if (this.targetLayer !== "prototype") {
           return observation;
         }
         return observation.viewHierarchy
-          ? scopeObserveResultToLayer(observation, "prototype", device.platform)
+          ? scopeObserveResultToLayer(
+              observation,
+              "prototype",
+              requireAndroidOrIosPlatform(device.platform, "sendKeys"),
+            )
           : { ...observation, focusedElement: undefined, accessibilityFocusedElement: undefined };
       },
       captureScreenshot: observer.captureScreenshot?.bind(observer),
     };
     this.timer = dependencies.timer ?? defaultTimer;
+    this.iosSdkText = new IosSdkTextRouting({
+      router: dependencies.iosSdkTextRouter ?? deviceIosSdkBridgeTextRouter(device),
+      webRouter: dependencies.iosSdkWebTextRouter ?? deviceIosSdkWebTextRouter(device),
+      observe: (signal) => this.observer.execute({ hierarchyOnly: true, signal }),
+    });
     this.clearVerifier = this.createClearVerifier();
     this.passwordRouting = this.createPasswordRouting();
     this.iosTyper = this.createIosTyper();
@@ -182,7 +211,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
       verifyKeyEventLetterCase: (text, typed, signal, display, before) =>
-        this.verifyKeyEventLetterCase(text, typed, "eventOnly", signal, display, before),
+        this.verifyKeyEventLetterCase(text, typed, { mode: "eventOnly", signal, display, before }),
       supportsAndroidKeyCombination: (signal) => this.supportsAndroidKeyCombination(signal),
       preExistingFieldText: (hierarchy, operation) => preExistingFieldText(hierarchy, operation),
       markPartialAfterMutation: (result) => markPartialAfterMutation(result),
@@ -200,8 +229,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
       withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
-      verifyKeyEventLetterCase: (text, typed, mode, signal, display, before) =>
-        this.verifyKeyEventLetterCase(text, typed, mode, signal, display, before),
+      verifyKeyEventLetterCase: (text, typed, check) =>
+        this.verifyKeyEventLetterCase(text, typed, check),
       checkAbort: (signal, error) => this.checkAbort(signal, error),
       getKeyEventPlan: (char, signal) => this.getKeyEventPlan(char, signal),
       clearForReplace: (operation, signal, display) =>
@@ -282,7 +311,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       timer: this.timer,
       targetLayer: () => this.targetLayer,
       clear: (signal, display) => this.clear(signal, display),
-      insert: (text, options) => this.textClient.insert(text, options),
+      insert: (text, options) =>
+        this.iosSdkText.insert(
+          text,
+          { timeoutMs: options?.timeoutMs, signal: options?.abortSignal },
+          () => this.textClient.insert(text, options),
+        ),
       withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
       markPartialAfterMutation: (result) => markPartialAfterMutation(result),
     });
@@ -308,8 +342,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       executeKeyEventPlanSafely: (plan, mutated, signal) =>
         this.executeKeyEventPlanSafely(plan, mutated, signal),
       withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
-      verifyKeyEventLetterCase: (text, typed, mode, signal, display, before) =>
-        this.verifyKeyEventLetterCase(text, typed, mode, signal, display, before),
+      verifyKeyEventLetterCase: (text, typed, check) =>
+        this.verifyKeyEventLetterCase(text, typed, check),
       checkAbort: (signal, error) => this.checkAbort(signal, error),
       getEventAllKeyEventPlan: (grapheme) => this.getEventAllKeyEventPlan(grapheme),
       getAndroidApiLevel: (signal) => this.getAndroidApiLevel(signal),
@@ -396,7 +430,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       );
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
-          ? await this.executeIosType(command.text, operation, signal, display)
+          ? await this.iosSdkText.tracked(() =>
+              this.executeIosType(command.text, operation, signal, display),
+            )
           : await this.executeAndroidType({
               text: command.text,
               operation,
@@ -426,6 +462,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         ...imeFailureFields(result),
         ...this.imeTraceFields(),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
+        ...iosBackendFields(result.iosBackend),
         ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
       };
     } catch (error) {
@@ -480,6 +517,72 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return null;
   }
 
+  async withEnterReadBack(
+    action: () => Promise<SendKeysCommandResult>,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<SendKeysCommandResult> {
+    const read = async () =>
+      this.clearVerifier.readEnterFieldState(
+        await this.clearVerifier.readFreshObservation(signal, display),
+      );
+    let before: EnterFieldState | undefined;
+    try {
+      // Take the baseline before dispatch, never from the prior command's cached tree.
+      before = await read();
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn("[SendKeys] Enter baseline read failed; dispatching without a read-back", error);
+    }
+    const result = await action();
+    if (!result.success) {
+      return result;
+    }
+    if (before?.kind !== "field" || before.snapshot === undefined) {
+      // No readable focused field before the key (password field, unreadable node): the
+      // newline cannot be confirmed either way, so keep the pre-guard behaviour.
+      logger.warn("[SendKeys] Enter read-back skipped: focused field text was unreadable");
+      return result;
+    }
+    const baseline = { text: before.snapshot.text, identity: before.identity };
+    try {
+      // The bug is a stale snapshot: the field still shows its pre-enter text after the key.
+      // Unavailable observations never confirm; they are polled again and, if they stay
+      // unavailable, reported as an unconfirmed newline (partial application).
+      const { accepted: confirmed, last } = await readBackWithSettle(
+        read,
+        (state) => isEnterConfirmed(baseline, state),
+        {
+          timer: this.timer,
+          beforeRead: () => this.checkAbort(signal),
+          finish: (state, accepted) => ({ accepted, last: state }),
+        },
+      );
+      if (confirmed) {
+        return result;
+      }
+      throw new ActionableError(
+        "Enter was dispatched but its newline could not be confirmed before the next a11y insert" +
+          (last?.kind === "unavailable" ? " (fresh observations were unavailable). " : ". ") +
+          "Observe the field before continuing; do not retry the sequence blindly. " +
+          "For a single-line submit action, end the sequence at enter and re-observe the target.",
+      );
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn("[SendKeys] Enter read-back failed after dispatch", error);
+      return {
+        ...result,
+        success: false,
+        partialApplication: true,
+        retryable: false,
+        error: toActionableError(
+          error,
+          "Enter read-back is unavailable after dispatch; observe the field and do not retry the sequence blindly",
+        ).message,
+      };
+    }
+  }
+
   async key(
     command: SendKeysKeyCommand,
     signal?: AbortSignal,
@@ -505,12 +608,25 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           };
         }
       }
-      const result = await this.textClient.ime(command.key, signal, onDispatch);
+      const key = command.key;
+      const result =
+        this.device.platform === "ios"
+          ? await this.iosSdkText.tracked(() =>
+              this.iosSdkText.ime(
+                key,
+                signal,
+                () => this.textClient.ime(key, signal, onDispatch),
+                onDispatch,
+              ),
+            )
+          : await this.textClient.ime(key, signal, onDispatch);
+      this.iosSdkText.focusMayHaveMoved();
       return {
         index: -1,
         action: "key",
         key: command.key,
         modifiers,
+        ...("iosBackend" in result ? iosBackendFields(result.iosBackend) : {}),
         success: result.success,
         ...(result.retryable === false ? { retryable: false } : {}),
         ...(result.warning ? { warning: result.warning } : {}),
@@ -519,6 +635,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     const result = await this.inputKey.press(command.key, undefined, undefined, modifiers);
+    if (command.key === "tab") {
+      this.iosSdkText.focusMayHaveMoved();
+    }
     return {
       index: -1,
       action: "key",
@@ -538,13 +657,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.resetCaretState();
     if (this.device.platform !== "android") {
       return this.device.platform === "ios"
-        ? clearIosFieldWithVerification({
-            clear: () => this.textClient.clear(signal),
-            observer: this.observer,
-            timer: this.timer,
-            signal,
-            display,
-          })
+        ? this.iosSdkText.tracked(() =>
+            clearIosFieldWithVerification({
+              clear: () => this.iosSdkText.clear(signal, () => this.textClient.clear(signal)),
+              observer: this.observer,
+              timer: this.timer,
+              signal,
+              display,
+            }),
+          )
         : this.textClient.clear();
     }
     if (mode === "a11y") {
@@ -828,19 +949,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private verifyKeyEventLetterCase(
     text: string,
     typed: TextActionResult,
-    mode: "eventAll" | "eventOnly" | "eventLast",
-    signal?: AbortSignal,
-    display?: string,
-    before = "",
+    check: KeyEventLetterCaseCheck,
   ): Promise<TextActionResult> {
-    return this.keyEventSupport.verifyKeyEventLetterCase(
-      text,
-      typed,
-      mode,
-      signal,
-      display,
-      before,
-    );
+    return this.keyEventSupport.verifyKeyEventLetterCase(text, typed, check);
   }
 
   private withTextWarnings(

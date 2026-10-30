@@ -10,6 +10,7 @@ import { registerSendBroadcastTools } from "./sendBroadcastTools";
 import { registerBackgroundWorkTools } from "./backgroundWorkTools";
 import { registerGetLogsTools } from "./getLogsTools";
 import { registerCompareScreenshotTools } from "./compareScreenshotTools";
+import { registerSiriTools } from "./siriTools";
 import { registerStatusBarTools } from "./statusBarTools";
 import { registerAppLinkTools } from "./appLinkTools";
 import { registerNavigationTools } from "./navigationTools";
@@ -49,6 +50,7 @@ import { registerNetworkTools } from "./networkTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSystemAlertTools } from "./systemAlertTools";
 import { registerSensorTools } from "./sensorTools";
+import { registerAudioTools } from "./audioTools";
 import { registerDisplayProfileTools } from "./displayProfileTools";
 import { registerPersonaTools } from "./personaTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
@@ -88,6 +90,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerGetLogsTools();
   registerCompareScreenshotTools();
   registerStatusBarTools();
+  registerSiriTools();
   registerAppLinkTools();
   registerNavigationTools();
   registerNotificationTools();
@@ -135,6 +138,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerKillProfileTools();
   registerSystemAlertTools();
   registerSensorTools();
+  registerAudioTools();
   registerDisplayProfileTools();
   registerPersonaTools();
   if (options.includeToolSelection ?? true) {

@@ -53,6 +53,16 @@ describe("emulatorLaunchFailure classifiers", () => {
     expect(detectDisplayError(fixture("normal-startup.txt")).isDisplayError).toBe(false);
   });
 
+  test("the headless display hint keeps audio on and warns that -no-audio disables audio tests", () => {
+    const { suggestion } = detectDisplayError(fixture("display-xcb.txt"));
+    expect(suggestion).toContain(
+      "AUTOMOBILE_EMULATOR_HEADLESS=true (adds -no-window; audio stays on)",
+    );
+    expect(suggestion).toContain(
+      "Do not add -no-audio (AUTOMOBILE_EMULATOR_AUDIO=false) when tests record or play audio",
+    );
+  });
+
   test("launchFailureCategory and accelerationCheckCategory", () => {
     expect(launchFailureCategory(fixture("missing-shared-library.txt"))).toBe(
       "missing_shared_library",

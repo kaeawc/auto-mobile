@@ -63,6 +63,7 @@ export interface AccessibilityNode {
   "tooltip-text"?: string | null;
   "pane-title"?: string | null;
   "live-region"?: string | null;
+  heading?: string | null;
   "collection-info"?: string | null;
   "collection-item-info"?: string | null;
   "range-info"?: string | null;
@@ -209,6 +210,29 @@ export interface HierarchySyncDiagnostics {
   /** Per-call failure detail, including connection/send failures, interrupted waits and timeout.
    * A null sync result alone is not evidence that the hierarchy service is unreachable. */
   failureReason?: string;
+}
+
+/** Trailing options for `getLatestHierarchy`. */
+export interface LatestHierarchyOptions {
+  /** Cached data must have `updatedAt` at or after this value to count as fresh. Defaults to 0. */
+  minTimestamp?: number;
+  signal?: AbortSignal;
+}
+
+/** Trailing options for `commitViaIme`. */
+export interface ImeCommitOptions {
+  signal?: AbortSignal;
+  /** How the IME applies the text; `"commit"` (the default) sends no delivery field. */
+  delivery?: "commit" | "keyEvents" | "clearField";
+  /** Opt in to the IME's commit trace fields. */
+  trace?: boolean;
+}
+
+/** Trailing options for `requestHierarchySync`. */
+export interface HierarchySyncRequestOptions {
+  /** Out-parameter populated with the failure detail; see {@link HierarchySyncDiagnostics}. */
+  diagnostics?: HierarchySyncDiagnostics;
+  displayId?: number;
 }
 
 /**

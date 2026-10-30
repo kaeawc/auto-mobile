@@ -83,13 +83,14 @@ describe("AndroidEmulatorClient launch contract", () => {
     };
     const baseline = await launch();
     const poster = await launch("poster image.PNG");
+    // The launch ends `-grpc <port> -port <console>`; the poster arguments sit just before `-grpc`.
     expect(poster).toEqual([
-      ...baseline.slice(0, -2),
+      ...baseline.slice(0, -4),
       "-camera-back",
       "virtualscene",
       "-virtualscene-poster",
       `wall=${resolve("poster image.PNG")}`,
-      ...baseline.slice(-2),
+      ...baseline.slice(-4),
     ]);
     for (const path of ["poster.jpg", "poster.jpeg"]) {
       expect(await launch(path)).toContain(`wall=${resolve(path)}`);

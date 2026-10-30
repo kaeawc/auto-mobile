@@ -176,6 +176,12 @@ describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
       ),
     ).toContain("--force true");
   });
+
+  test("does not offer --force for a tool whose definition declares no force input", () => {
+    expect(
+      cliDeviceOwnershipHint({ code: "device_owned_by_other_session" }, "tapOn"),
+    ).not.toContain("--force");
+  });
 });
 
 describe("--cli surfaces a held-device refusal", () => {

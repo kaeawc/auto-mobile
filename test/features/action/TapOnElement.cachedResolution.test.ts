@@ -105,7 +105,7 @@ function harness(
   tap.awaitIdle = new FakeAwaitIdle();
   tap.window = new FakeWindow();
   const points: { x: number; y: number }[] = [];
-  tap.executeAndroidTap = async (_action, x, y) => {
+  tap.executeAndroidTap = async (_action, { x, y }) => {
     points.push({ x, y });
   };
   tap.deriveTapEffectAfterPostTapObservation = async (before, current) => {
@@ -348,6 +348,28 @@ describe("TalkBack off cached observation safety", () => {
     expect(h.points).toEqual([{ x: 150, y: 350 }]);
     expect(captures.requests).toHaveLength(1);
     expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+});
+
+describe("Android long press long-click advertisement", () => {
+  test.each([
+    { actions: ["click"], expected: false },
+    { actions: ["click", "long_click"], expected: true },
+    { actions: undefined, expected: undefined },
+  ])("reports $expected for actions $actions", async ({ actions, expected }) => {
+    const target: Element = actions ? { ...row("Apps", 300), actions } : row("Apps", 300);
+    const current = page([target], "Main");
+    const h = harness(current, current);
+    const captures = new FakeHierarchyCapture(() => current.viewHierarchy!);
+    h.tap.refreshViewHierarchy = async (timeoutMs) =>
+      (await captures.capture({ freshness: "fresh", timeoutMs })).hierarchy;
+    const result = await h.tap.execute({
+      text: "Apps",
+      action: "longPress",
+      retryIfNoChange: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.longClickAdvertised).toBe(expected);
   });
 });
 
@@ -649,15 +671,8 @@ describe("TalkBack focus verification authority", () => {
     h.strategy.setAccessibilityServiceEnabled(true);
     h.tap.refreshViewHierarchy = async () => fresh.viewHierarchy!;
     let authority: ObserveResult["viewHierarchy"];
-    h.tap["verifyFocusedInputTarget"] = (
-      _options,
-      _target,
-      _observation,
-      _label,
-      _index,
-      before,
-    ) => {
-      authority = before;
+    h.tap["verifyFocusedInputTarget"] = (_options, _target, _observation, hints) => {
+      authority = hints?.preTapHierarchy;
       return true;
     };
     const result = await h.tap.execute({ text: "Search", action: "focus", retryIfNoChange: false });

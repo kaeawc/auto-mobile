@@ -15,7 +15,9 @@ struct PagerPosition: Equatable {
 func interpolatePrototypeText(
     _ text: String,
     state: [String: JSONValue],
-    pager: PagerPosition?
+    pager: PagerPosition?,
+    derived: PrototypeDerivedContext? = nil,
+    derivedOnly: Bool = false
 )
     -> String
 {
@@ -31,7 +33,10 @@ func interpolatePrototypeText(
         }
         let key = String(String.UnicodeScalarView(scalars[(index + 1) ..< (end - 1)]))
         let token = String(String.UnicodeScalarView(scalars[index ..< end]))
-        let value = resolveInterpolation(key: key, state: state, pager: pager)
+        let value: String?
+        if key.hasPrefix("derived:") {
+            value = derived?.resolve(String(key.dropFirst(8)), state: state)
+        } else { value = derivedOnly ? nil : resolveInterpolation(key: key, state: state, pager: pager) }
         if let value, value.utf16.count <= PrototypeLimits.maxSubstitutedTextLength - substitutedLength {
             substitutedLength += value.utf16.count
             out.append(contentsOf: value.unicodeScalars)
@@ -48,7 +53,11 @@ private func interpolationTokenEnd(_ scalars: [Unicode.Scalar], from start: Int)
     guard scalars[start] == "{", start + 1 < scalars.count, isInterpolationKeyStart(scalars[start + 1]) else {
         return nil
     }
-    var index = start + 2
+    var first = start + 1
+    let prefix = Array("derived:".unicodeScalars)
+    if scalars[first...].starts(with: prefix) { first += prefix.count }
+    guard first < scalars.count, isInterpolationKeyStart(scalars[first]) else { return nil }
+    var index = first + 1
     while index < scalars.count, isInterpolationKeyPart(scalars[index]) {
         index += 1
     }
@@ -78,6 +87,21 @@ private func resolveInterpolation(
 }
 
 extension PrototypeNode {
+    func announcementText(state: [String: JSONValue], pager: PagerPosition?) -> String {
+        if let label = semantics?.label ?? contentDescription {
+            return interpolatePrototypeText(label, state: state, pager: pager)
+        }
+        let authored = [label, title, headline, supporting, supportingText].compactMap { $0 }
+            .map { interpolatePrototypeText($0, state: state, pager: pager) }
+        // A button's or fab's plain text is its derived-only label; the fully resolved label is in `authored`.
+        let shown = type == "button" || type == "fab" ? [] : [plainText(state: state, pager: pager)]
+        let own = (shown + authored)
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        let descendants = (children ?? []) + [child].compactMap { $0 }
+        return ([own] + descendants.map { $0.announcementText(state: state, pager: pager) })
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
     /// The accessible label for this node, in Android's priority order (contentDescription, text,
     /// icon, node kind); `iconButton` and `fab` fall back to an extended FAB's label, then the icon. Placeholders are
     /// resolved in each. Nil means "let the native control
@@ -87,15 +111,16 @@ extension PrototypeNode {
     func accessibilityLabel(
         state: [String: JSONValue],
         pager: PagerPosition?,
-        tappable: Bool
+        tappable: Bool,
+        derived: PrototypeDerivedContext? = nil
     )
         -> String?
     {
-        let authored = contentDescription.map {
-            interpolatePrototypeText($0, state: state, pager: pager)
+        let authored = (semantics?.label ?? contentDescription).map {
+            interpolatePrototypeText($0, state: state, pager: pager, derived: derived)
         }
         if let authored, !authored.isEmpty { return authored }
-        let shown = plainText(state: state, pager: pager)
+        let shown = plainText(state: state, pager: pager, derived: derived)
         if !shown.isEmpty { return shown }
         if type == "icon", tappable, let name, !name.isEmpty { return name }
         // Icon-only controls (#10439): an extended FAB's label, else the icon name.

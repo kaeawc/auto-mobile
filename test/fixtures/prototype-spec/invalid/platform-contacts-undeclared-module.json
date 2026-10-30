@@ -1,0 +1,34 @@
+{
+  "spec": {
+    "id": "c3",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "recipient": {},
+      "saved": {}
+    },
+    "state": {
+      "pickStatus": ""
+    },
+    "requires": {
+      "platform": ["calendar"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Go",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "contacts.pick",
+          "args": {},
+          "into": "/data/recipient",
+          "statusKey": "pickStatus"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].call"
+}

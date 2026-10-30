@@ -8,7 +8,7 @@ import {
   buildIdentitiesMatch,
   buildIdentityFromStatus,
 } from "../wire/buildIdentity";
-import { type DaemonClientLike } from "../client";
+import { type DaemonClientLike } from "../client/client";
 import {
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_ONE_SHOT_CLI_PARAM,
@@ -111,15 +111,15 @@ export class ProxyToolCalls {
     args: Record<string, unknown>,
     progressToken?: string | number,
     onProgress?: DaemonProxyProgressCallback,
-    callerSignal?: AbortSignal,
     options: DaemonProxyToolCallOptions = {},
   ): Promise<any> {
     this.refuseBrokerGenericAcquisition(name);
-    const signal = this.port.untilClosed(callerSignal);
+    const signal = this.port.untilClosed(options.signal);
     const tasks = this.taskRelayForToolCall(name, options.declaresTasks === true);
-    let first = await this.forwardToolCall(name, args, progressToken, onProgress, signal, {
+    let first = await this.forwardToolCall(name, args, progressToken, onProgress, {
       allowSuspectRetry: true,
       tasks,
+      signal,
     });
     if (isDeviceBindingTool(name)) {
       first = await new DeviceCleanupWait({
@@ -133,8 +133,9 @@ export class ProxyToolCalls {
           readCleanupRefusal: readDeviceCleanupInProgressRefusal,
           isClosing: () => this.runtime.closing,
           reforward: () =>
-            this.forwardToolCall(name, args, progressToken, onProgress, signal, {
+            this.forwardToolCall(name, args, progressToken, onProgress, {
               allowSuspectRetry: false,
+              signal,
             }),
         },
         signal,
@@ -147,9 +148,10 @@ export class ProxyToolCalls {
     // Exactly one retry: the refused call never reached its handler (isSuspectRefusalRetryable).
     // The retry's own pre-forward checks surface a handover or loss recovery recorded.
     logger.info(`[DaemonMcpProxy] Session ${refusal.sessionUuid} restored; retrying ${name} once`);
-    const retried = await this.forwardToolCall(name, args, progressToken, onProgress, signal, {
+    const retried = await this.forwardToolCall(name, args, progressToken, onProgress, {
       allowSuspectRetry: false,
       tasks,
+      signal,
     });
     return this.withPendingResumedNotice(retried.forwardedSessionUuid, retried.result);
   }
@@ -197,8 +199,7 @@ export class ProxyToolCalls {
       undefined,
       true,
       true,
-      undefined,
-      signal,
+      { signal },
     );
     const answer = raceWithDeadline(forwarding, {
       timer: this.runtime.timer,
@@ -276,9 +277,9 @@ export class ProxyToolCalls {
     args: Record<string, unknown>,
     progressToken: string | number | undefined,
     onProgress: DaemonProxyProgressCallback | undefined,
-    signal: AbortSignal | undefined,
     mode: ToolCallForwardMode,
   ): Promise<ForwardedToolCall> {
+    const { signal } = mode;
     signal?.throwIfAborted();
     // From the first tool call on, a refused claim of the initial binding is leashed as usual.
     this.runtime.initialSessionAwaitingFirstCall = false;
@@ -313,7 +314,6 @@ export class ProxyToolCalls {
       callerArgs,
       progressToken,
       onProgress,
-      signal,
       mode,
     );
   }
@@ -344,14 +344,13 @@ export class ProxyToolCalls {
           signal?.throwIfAborted();
           const client = this.port.requireClient();
           return this.port.trackToolCallInFlight(client, () =>
-            client.callTool(name, forwardedArgs, progressToken, undefined, signal),
+            client.callTool(name, forwardedArgs, progressToken, undefined, { signal }),
           );
         },
         undefined,
         true,
         false,
-        undefined,
-        signal,
+        { signal },
       ),
       { timer: this.runtime.timer, signal, label: `Daemon tool ${name}` },
     );

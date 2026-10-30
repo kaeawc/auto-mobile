@@ -3,6 +3,11 @@ import { requestDeclaresTasks, type CreateTaskResult } from "../../daemon/tasks/
 import { runAsTask, type TaskPolicy, type TaskWorkRun } from "./runAsTask";
 import type { TaskManager } from "../../daemon/tasks/TaskManager";
 import type { TaskLeaseKeepalive } from "../../daemon/tasks/taskLeaseKeepalive";
+import { CLIENT_CAPABILITIES_META_KEY } from "@modelcontextprotocol/server";
+import { declaresFormElicitation } from "../ambiguousDeviceElicitation";
+import { executeWithDeviceChoice } from "../ambiguousDeviceChoice";
+import { elicitationEnabled } from "../elicitationPolicy";
+import { classifyElicitationDeclaration, defaultElicitationRecorder } from "../elicitationOutcome";
 
 /**
  * Eligibility and cancellation policy for THIS call, including its arguments (#13090).
@@ -75,6 +80,11 @@ export function createTaskAwareToolCallExecutor(
     if (!policy) {
       return deps.execute(call);
     }
+    // asTaskCall removes the request envelope: retain its declaration before entering work.
+    const canAsk =
+      call.args.deviceId === undefined &&
+      elicitationEnabled() &&
+      declaresFormElicitation(call.extra.envelope?.[CLIENT_CAPABILITIES_META_KEY]);
     return runAsTask(
       {
         declared: requestDeclaresTasks({ envelope: call.extra.envelope, meta: call.extra._meta }),
@@ -84,7 +94,24 @@ export function createTaskAwareToolCallExecutor(
         onCancel: policy.onCancel,
         ...(deps.keepalive && { keepalive: deps.keepalive }),
       },
-      (run) => deps.execute(asTaskCall(call, run)),
+      async (run) => {
+        const taskCall = asTaskCall(call, run);
+        const task = run.task;
+        if (!task || !canAsk) {
+          return deps.execute(taskCall);
+        }
+        return executeWithDeviceChoice(
+          taskCall,
+          (retry) => deps.execute(retry),
+          async ({ inputRequests }) => ({ responses: await task.requestInput(inputRequests) }),
+          {
+            recorder: defaultElicitationRecorder,
+            declared: classifyElicitationDeclaration(
+              call.extra.envelope?.[CLIENT_CAPABILITIES_META_KEY],
+            ),
+          },
+        );
+      },
     );
   };
 }

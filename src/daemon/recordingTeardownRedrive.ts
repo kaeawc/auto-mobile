@@ -205,7 +205,10 @@ function createStartupOrphanCaptures(
         (row) => !recordingId || row.recordingId === recordingId,
       );
       try {
-        await retryOrphanedCaptures(deviceId, records, deps, false, false, options?.mode ?? "user");
+        await retryOrphanedCaptures(deviceId, records, deps, {
+          waitForExpiry: false,
+          mode: options?.mode ?? "user",
+        });
       } finally {
         // A disposer belongs to a whole registered batch, not to an individual row.
         const batches = new Set(records.map((row) => row.withdrawRetry));
@@ -260,7 +263,7 @@ function markOrphanedCaptures(
   });
   const withdrawRetry = manager.markDeviceNeedsRecorderTeardown(
     deviceId,
-    () => retryOrphanedCaptures(deviceId, records, deps, true, hookDriven),
+    () => retryOrphanedCaptures(deviceId, records, deps, { waitForExpiry: true, hookDriven }),
     Math.max(INCOMPLETE_MARK_GRACE_MS, ...remainingMs.map((ms) => ms + INCOMPLETE_MARK_GRACE_MS)),
   );
   for (const row of records) {
@@ -341,7 +344,7 @@ async function confirmReleasedCaptures(
 ): Promise<void> {
   try {
     await raceWithDeadline(
-      () => retryOrphanedCaptures(deviceId, records, deps, false, hookDriven),
+      () => retryOrphanedCaptures(deviceId, records, deps, { waitForExpiry: false, hookDriven }),
       {
         timer: deps.timer,
         timeoutMs: INCOMPLETE_MARK_GRACE_MS,
@@ -362,9 +365,11 @@ async function retryOrphanedCaptures(
   deviceId: string,
   records: RetainedCaptureRow[],
   deps: RecordingTeardownRedriveDeps,
-  waitForExpiry: boolean,
-  hookDriven = false,
-  mode: "user" | "background" = "background",
+  {
+    waitForExpiry,
+    hookDriven = false,
+    mode = "background",
+  }: { waitForExpiry: boolean; hookDriven?: boolean; mode?: "user" | "background" },
 ): Promise<void> {
   const unconfirmed: string[] = [];
   const failures: unknown[] = [];

@@ -4,9 +4,10 @@ import type { Timer } from "../utils/SystemTimer";
 import type { Session, SessionReleaseSnapshot } from "./sessionManager";
 
 /**
- * Retries of a live row's rewrite over its superseded release's terminal row (#11557): one failed
- * write (a busy database) must not leave the live session behind a terminal row. Bounded; after
- * the last one the rewrite stays owed and the session's next activity write issues it again.
+ * Retries of a live row's rewrite after an overlapping row write (#11557): an activity re-persist
+ * that a rebind overlapped may have written the binding from before it, and one failed rewrite (a
+ * busy database) must not leave the live session's row behind. Bounded; after the last one the
+ * rewrite stays owed and the session's next activity write issues it again.
  */
 export const SUPERSEDED_ROW_REASSERT_RETRY_ATTEMPTS = 5;
 export const DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF: BackoffPolicy = exponentialBackoff({
@@ -27,12 +28,10 @@ export interface OwedSupersededRowReassertCallbacks<S extends SupersededRowIncar
   retryDuringDrain(entry: OwedSupersededRowReassert<S>): Promise<void>;
 }
 
-/** A live row's rewrite over its superseded release's terminal row that failed (#11557). */
+/** A live row's rewrite after an overlapping row write that is still owed (#11557). */
 export interface OwedSupersededRowReassert<S extends SupersededRowIncarnation = Session> {
   /** The incarnation the rewrite is owed to; a session revived under the UUID owes nothing. */
   session: S;
-  /** Reasons of the superseded releases whose terminal row the rewrite may replace. */
-  reasons: Set<string>;
   /** Failed attempts so far, the first write included. */
   attempt: number;
   /** The armed retry; absent while a retry runs and once the retries are exhausted. */
@@ -42,13 +41,7 @@ export interface OwedSupersededRowReassert<S extends SupersededRowIncarnation = 
   callbacks: OwedSupersededRowReassertCallbacks<S>;
 }
 
-/** A pending non-terminal release whose row still holds its session's superseded release's row. */
-export interface SupersededRowUnderPendingRelease<S extends SupersededRowIncarnation = Session> {
-  session: S;
-  reasons: readonly string[];
-  release: SessionReleaseSnapshot;
-}
-
+/** What the ledger needs from the row writer around it. */
 export interface SupersededRowReassertsCollaborators {
   timer: Timer;
   logger: Pick<Logger, "warn">;
@@ -59,39 +52,24 @@ export interface SupersededRowReassertsCollaborators {
 }
 
 /**
- * The superseded-row state of the row writer (#11799 W3): which superseded releases' terminal
- * rows a live row may be rewritten over, which rewrites are under way or owed, and the owed
- * rewrites' retry scheduling. Holds no I/O and no row policy: every statement, read and
- * precondition stays with the caller, which keeps its original await sequence.
+ * The superseded-row state of the row writer (#11799 W3): the live-row rewrites that repair a
+ * rebind and an activity write overlapping (which are under way, which are owed, and the owed
+ * rewrites' retry scheduling), and the earlier reasons a terminal release's committed upgrade may
+ * replace. Holds no I/O and no row policy: every statement, read and precondition stays with the
+ * caller, which keeps its original await sequence.
  */
 export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session> {
-  /** Own superseded releases can land late for this incarnation's entire lifetime (#11557). */
-  private readonly rememberedReasons = new WeakMap<S, Set<string>>();
   /** Only the exact earlier reasons of this release may be replaced by its committed upgrade. */
   private readonly reasonPredecessors = new WeakMap<SessionReleaseSnapshot, readonly string[]>();
-  /** A refused release wrote nothing, so superseding it owes no live-row rewrite. */
-  private readonly refusedWrites = new WeakSet<SessionReleaseSnapshot>();
   /**
-   * UUIDs whose live row this daemon is about to rewrite over a terminal row its own superseded
-   * release wrote or may still write (#11206), counted per pending rewrite. While one is pending,
-   * a terminal row under the live session is that release's, not the end of the UUID (#11498).
+   * UUIDs whose live row this daemon is rewriting after an overlapping row write, counted per
+   * pending rewrite. While one is pending, a refused activity write does not end the live session
+   * (#11498): the rewrite is about to leave its row live.
    */
   private readonly pendingReasserts = new Map<string, number>();
   /**
-   * Pending non-terminal releases whose row still holds their session's superseded release's
-   * terminal row (#11557): the retry of `release` replaces that row before it writes its own.
-   */
-  private readonly rowsUnderPendingRelease = new Map<string, SupersededRowUnderPendingRelease<S>>();
-  /**
-   * The superseded releases' reasons whose terminal row a rewrite or a replacement under way is
-   * replacing, one entry per write. Not the parked write's whole window: the row a peer or a
-   * committed release wrote meanwhile is the UUID's end.
-   */
-  private readonly reasonsBeingRewritten = new Map<string, string[]>();
-  /**
-   * Rewrites that failed and are still owed (#11557): retried with the backoff, then by the
-   * session's activity writes. While one is owed, its release's terminal row under the live
-   * session is not the UUID's end.
+   * Rewrites that failed, or that a rebind overtook, and are still owed (#11557): retried with
+   * the backoff, then by the session's activity writes once the retries are exhausted.
    */
   private readonly owedReasserts = new Map<string, OwedSupersededRowReassert<S>>();
   private backoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
@@ -100,21 +78,6 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
 
   setBackoff(backoff: BackoffPolicy): void {
     this.backoff = backoff;
-  }
-
-  /** Keep reasons beyond an owed entry's lifetime, without lending them to a same-UUID session. */
-  remember(session: S, reasons: readonly string[]): readonly string[] {
-    const remembered = this.rememberedReasons.get(session) ?? new Set<string>();
-    for (const reason of reasons) {
-      remembered.add(reason);
-    }
-    this.rememberedReasons.set(session, remembered);
-    return [...remembered];
-  }
-
-  /** The superseded reasons remembered for this incarnation, without recording any. */
-  remembered(session: S): ReadonlySet<string> | undefined {
-    return this.rememberedReasons.get(session);
   }
 
   notePredecessors(upgraded: SessionReleaseSnapshot, from: SessionReleaseSnapshot): void {
@@ -128,25 +91,10 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
     return this.reasonPredecessors.get(snapshot) ?? [];
   }
 
-  noteRefused(snapshot: SessionReleaseSnapshot): void {
-    this.refusedWrites.add(snapshot);
-  }
-
-  wasRefused(snapshot: SessionReleaseSnapshot): boolean {
-    return this.refusedWrites.has(snapshot);
-  }
-
-  /**
-   * Count a pending rewrite of `sessionId`'s row over the terminal row of the superseded releases
-   * named by `supersededReasons`; the returned function ends it, once.
-   */
-  expectReassert(sessionId: string, supersededReasons: readonly string[] = []): () => void {
+  /** Count a pending rewrite of `sessionId`'s live row; the returned function ends it, once. */
+  expectReassert(sessionId: string): () => void {
     const pending = this.pendingReasserts;
     pending.set(sessionId, (pending.get(sessionId) ?? 0) + 1);
-    const reasons = this.reasonsBeingRewritten;
-    if (supersededReasons.length > 0) {
-      reasons.set(sessionId, [...(reasons.get(sessionId) ?? []), ...supersededReasons]);
-    }
     let settled = false;
     return () => {
       if (settled) {
@@ -159,16 +107,6 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
       } else {
         pending.delete(sessionId);
       }
-      const left = reasons.get(sessionId) ?? [];
-      for (const reason of supersededReasons) {
-        const index = left.indexOf(reason);
-        if (index >= 0) {
-          left.splice(index, 1);
-        }
-      }
-      if (left.length === 0) {
-        reasons.delete(sessionId);
-      }
     };
   }
 
@@ -176,54 +114,12 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
     return this.pendingReasserts.has(sessionId);
   }
 
-  isBeingRewritten(sessionId: string, releaseReason: string): boolean {
-    return this.reasonsBeingRewritten.get(sessionId)?.includes(releaseReason) ?? false;
-  }
-
-  rowUnderPendingRelease(sessionId: string): SupersededRowUnderPendingRelease<S> | undefined {
-    return this.rowsUnderPendingRelease.get(sessionId);
-  }
-
-  noteRowUnderPendingRelease(entry: SupersededRowUnderPendingRelease<S>): void {
-    this.rowsUnderPendingRelease.set(entry.release.sessionId, entry);
-  }
-
-  forgetRowUnder(release: SessionReleaseSnapshot): void {
-    if (this.rowsUnderPendingRelease.get(release.sessionId)?.release === release) {
-      this.rowsUnderPendingRelease.delete(release.sessionId);
-    }
-  }
-
-  clearRowsUnderPendingRelease(): void {
-    this.rowsUnderPendingRelease.clear();
-  }
-
   owed(sessionId: string): OwedSupersededRowReassert<S> | undefined {
     return this.owedReasserts.get(sessionId);
   }
 
-  /** The superseded releases whose terminal row the session's owed rewrite is to replace. */
-  reasonsOwedTo(session: S): readonly string[] {
-    const owed = this.owedReasserts.get(session.sessionId);
-    return owed?.session === session ? [...owed.reasons] : [];
-  }
-
-  /**
-   * Whether `releaseReason`, found under the live `session`, is its own superseded release's
-   * terminal row with the rewrite still owed (#11557), rather than the end of the UUID.
-   */
-  isOwedFor(session: S, releaseReason: string): boolean {
-    const owed = this.owedReasserts.get(session.sessionId);
-    return owed?.session === session && owed.reasons.has(releaseReason);
-  }
-
   /** Record a failed rewrite as owed and arm its next retry, while any are left (#11557). */
-  owe(
-    session: S,
-    supersededReasons: readonly string[],
-    callbacks: OwedSupersededRowReassertCallbacks<S>,
-  ): void {
-    supersededReasons = this.remember(session, supersededReasons);
+  owe(session: S, callbacks: OwedSupersededRowReassertCallbacks<S>): void {
     const sessionId = session.sessionId;
     const owed = this.owedReasserts.get(sessionId);
     const previous = owed?.session === session ? owed : undefined;
@@ -232,7 +128,6 @@ export class SupersededRowReasserts<S extends SupersededRowIncarnation = Session
     }
     const entry: OwedSupersededRowReassert<S> = {
       session,
-      reasons: new Set([...(previous?.reasons ?? []), ...supersededReasons]),
       attempt: (previous?.attempt ?? 0) + 1,
       drainAttempted: previous?.drainAttempted,
       callbacks,

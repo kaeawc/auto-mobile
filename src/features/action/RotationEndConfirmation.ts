@@ -75,7 +75,7 @@ export class RotationEndConfirmation {
       result.orientationLockState === "unlocked"
         ? `The device ${confirmed} and then returned to ${actual} because automatic rotation is on.`
         : `The device left the requested ${orientation} orientation after the call confirmed it.`;
-    const error = `${cause} The device is in ${actual} at the time the call returned. Pass lockOrientation: true, or use a device session, to keep the requested orientation.`;
+    const error = `${cause} The device is in ${actual} at the time the call returned. Pass lockOrientation: true to keep the requested orientation.`;
     // The sensor undid the rotation, so the user_rotation this call wrote would only flip the
     // screen the next time rotation is locked (#14955): put the prior value back.
     const rollbackWarning = settings?.started

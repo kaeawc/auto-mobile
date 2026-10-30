@@ -122,8 +122,8 @@ describe("a direct frame naming a held handset by its other transport id", () =>
           return { success: true, totalTimeMs: 0 };
         },
         setPreference: async (...args) => {
-          if (typeof args[5] === "object") {
-            args[5].onDispatch?.();
+          if (typeof args[3] === "object") {
+            args[3].onDispatch?.();
           }
           driven.push(`setPreference:${device.deviceId}`);
         },
@@ -139,8 +139,8 @@ describe("a direct frame naming a held handset by its other transport id", () =>
         return { success: true };
       },
       setPreference: async (...args: Parameters<IOSCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
         }
         driven.push(`ios-setPreference:${device.deviceId}`);
       },

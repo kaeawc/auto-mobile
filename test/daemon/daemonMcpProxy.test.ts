@@ -25,7 +25,7 @@ import {
   DaemonClient,
   DaemonUnavailableError,
   type DaemonClientLike,
-} from "../../src/daemon/client";
+} from "../../src/daemon/client/client";
 import type { DaemonRestartResult } from "../../src/daemon/manager";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
@@ -3570,6 +3570,33 @@ describe("DaemonMcpProxy", () => {
         expect(resources).toEqual(expectedResources);
       } finally {
         isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("readResource carries Apps metadata through discovery with the existing session binding", async () => {
+      const fakeClient = new FakeDaemonClient({ resourceResult: { contents: [] } });
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+        timer: new FakeTimer(),
+      });
+      const _meta = {
+        "io.modelcontextprotocol/clientCapabilities": {
+          extensions: { "io.modelcontextprotocol/ui": {} },
+        },
+      };
+      try {
+        await proxy.readResource("ui://automobile/observe", { _meta });
+        await proxy.readResource("ui://automobile/observe");
+        expect(fakeClient.readResourceParams).toEqual([
+          { sessionUuid: "session-a", _meta },
+          { sessionUuid: "session-a" },
+        ]);
+      } finally {
         await proxy.close();
       }
     });

@@ -1,17 +1,27 @@
 import { z } from "zod";
+import { prototypeAnimateError } from "./prototypeMotionTokens";
+import { prototypeKeyframesSchema } from "./prototypeKeyframes";
 import { prototypeTransitionSchema } from "./prototypeChoreographySchema";
 import { imageAssetSchema } from "./prototypePresentationSchemas";
 
 /** Every node's `transition` and `animate` (#14208), spread into the common node shape. */
 export const prototypeMotionNodeShape = {
+  keyframes: prototypeKeyframesSchema.optional(),
   transition: prototypeTransitionSchema.optional(),
   // Animates styleWhen-driven alpha, offset, scale, rotation, background and color.
   animate: z
     .object({
+      tempo: z.enum(["fast", "default", "slow"]).optional(),
       durationMs: z.number().finite().int().min(0).max(2000).optional(),
       easing: z.enum(["standard", "emphasized", "linear", "spring"]).optional(),
     })
     .strict()
+    .superRefine((value, context) => {
+      const error = prototypeAnimateError(value, "");
+      if (error) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["tempo"], message: error.message });
+      }
+    })
     .optional(),
 };
 

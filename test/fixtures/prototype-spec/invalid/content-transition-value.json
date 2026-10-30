@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "content-transition",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "9",
+      "contentTransition": "slide"
+    }
+  },
+  "expectedPath": "root.contentTransition"
+}

@@ -1,0 +1,10 @@
+ProtoViewer is a viewer for design prototypes that its user authors. A prototype is a validated, declarative JSON document: it describes layout, theme, motion and saved values, and the renderer's feature set is fixed in this binary. The app does not download, install or execute code that adds or changes its features.
+
+The app works on its own. A bundled sample gallery opens on first launch, so no other app, account or sign-in is needed.
+
+To try the import flow:
+1. Open the Files app and tap a sample .automobile-proto file (or share one to ProtoViewer).
+2. Choose ProtoViewer. The prototype is validated and added to the library.
+3. Tap it to view it. Use the row menu to Relaunch, Reset or Share.
+
+Network access for imported prototypes is off by default and is switched on only in the library settings.

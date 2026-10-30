@@ -182,13 +182,9 @@ describe("terminal receipt recovery cost and retention", () => {
     const prune = spyOn(broker, "pruneReceipts");
     const recover = spyOn(broker, "recoverReceipts").mockResolvedValue(undefined);
     spyOn(broker, "recoverCleanup").mockResolvedValue(undefined);
-    const service = new SessionBrokerService(
-      broker,
-      "scope",
-      lock,
-      timer,
-      new InMemoryMutationRecordingGaps(),
-    );
+    const service = new SessionBrokerService(broker, "scope", lock, timer, {
+      recordingGaps: new InMemoryMutationRecordingGaps(),
+    });
     service.start();
     await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
       description: "immediate recovery parked before retention",
@@ -218,13 +214,9 @@ describe("terminal receipt recovery cost and retention", () => {
       .mockResolvedValue(3);
     spyOn(broker, "recoverReceipts").mockResolvedValue(undefined);
     spyOn(broker, "recoverCleanup").mockResolvedValue(undefined);
-    const service = new SessionBrokerService(
-      broker,
-      "scope",
-      lock,
-      timer,
-      new InMemoryMutationRecordingGaps(),
-    );
+    const service = new SessionBrokerService(broker, "scope", lock, timer, {
+      recordingGaps: new InMemoryMutationRecordingGaps(),
+    });
     service.start();
     await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
       description: "immediate recovery parked before retention backlog",

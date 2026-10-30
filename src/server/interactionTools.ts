@@ -8,6 +8,7 @@ import {
 } from "../features/systemTray/systemTrayHelpers";
 import { defineDeviceTool } from "./defineTool";
 import { dragPathHandler, dragPathSchema } from "./dragPathTool";
+import { hoverAtHandler, hoverAtSchema } from "./hoverAtTool";
 import {
   createClipboardHandler,
   createKeyboardHandler,
@@ -79,6 +80,16 @@ import type {
   WakeAndUnlockArgs,
 } from "./interactionToolTypes";
 import {
+  clipboardResultSchema,
+  dragAndDropResultSchema,
+  homeScreenResultSchema,
+  pinchOnResultSchema,
+  recentAppsResultSchema,
+  selectAllTextResultSchema,
+  shakeResultSchema,
+  systemTrayResultSchema,
+} from "./interactionToolOutputSchemas";
+import {
   keyboardResultSchema,
   openLinkResultSchema,
   pressButtonResultSchema,
@@ -128,7 +139,7 @@ const NAV_PLAN_SKELETON = { ...NAV, ...PLAN_SKELETON } as const;
 export const pressButtonTool = defineDeviceTool({
   name: "pressButton",
   description:
-    "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
+    "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
   input: pressButtonInput,
   options: {
     outputSchema: pressButtonResultSchema,
@@ -154,7 +165,12 @@ export const recentAppsTool = defineDeviceTool({
   name: "recentApps",
   description: "Open recent apps",
   input: recentAppsInput,
-  options: { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
+  options: {
+    defaultEnabled: true,
+    supportsProgress: true,
+    outputSchema: recentAppsResultSchema,
+    ...PLAN_SKELETON,
+  },
 });
 
 export const recentAppsSchema = recentAppsTool.schema;
@@ -163,7 +179,12 @@ const homeScreenTool = defineDeviceTool({
   name: "homeScreen",
   description: "Go to home screen",
   input: homeScreenInput,
-  options: { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
+  options: {
+    defaultEnabled: true,
+    supportsProgress: true,
+    outputSchema: homeScreenResultSchema,
+    ...PLAN_SKELETON,
+  },
 });
 
 export const homeScreenSchema = homeScreenTool.schema;
@@ -172,7 +193,12 @@ export const selectAllTextTool = defineDeviceTool({
   name: "selectAllText",
   description: "Select all text in focused input",
   input: selectAllTextInput,
-  options: { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
+  options: {
+    defaultEnabled: false,
+    supportsProgress: true,
+    outputSchema: selectAllTextResultSchema,
+    ...PLAN_SKELETON,
+  },
 });
 
 export const selectAllTextSchema = selectAllTextTool.schema;
@@ -182,7 +208,12 @@ export const shakeTool = defineDeviceTool({
   description:
     "Shake device; iOS Simulator and Android emulator only (unsupported on physical iOS and Android devices).",
   input: shakeInput,
-  options: { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
+  options: {
+    defaultEnabled: false,
+    supportsProgress: true,
+    outputSchema: shakeResultSchema,
+    ...PLAN_SKELETON,
+  },
 });
 
 export const shakeSchema = shakeTool.schema;
@@ -261,7 +292,12 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     systemTraySchema,
     systemTrayHandler,
-    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      outputSchema: systemTrayResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -310,9 +346,17 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   ToolRegistry.registerDeviceAware(
     "dragPath",
-    "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
+    "Drag a finger (or, with pointer, a stylus on Android 13+) along a polyline with segment timing, an initial hold and a release hold.",
     dragPathSchema,
     dragPathHandler,
+    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "hoverAt",
+    "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1).",
+    hoverAtSchema,
+    hoverAtHandler,
     { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
   );
 
@@ -339,7 +383,12 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Drag and drop element",
     dragAndDropSchema,
     (device, args, progress, signal) => dragAndDropHandler(device, args, progress, signal, deps),
-    { defaultEnabled: false, supportsProgress: true, ...NAV_PLAN_SKELETON },
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      outputSchema: dragAndDropResultSchema,
+      ...NAV_PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -358,6 +407,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     {
       defaultEnabled: false,
       supportsProgress: true,
+      outputSchema: pinchOnResultSchema,
       ...NAV_PLAN_SKELETON,
     },
   );
@@ -393,6 +443,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     {
       ...PLAN_RELEVANT,
       defaultEnabled: false,
+      outputSchema: clipboardResultSchema,
       deviceReadOnly: (args: ClipboardArgs) => args.action === "get",
       deviceReadOnlyArgs: [{ argument: "action", values: ["get"] }],
     },

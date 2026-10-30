@@ -1,5 +1,5 @@
 import { PROTOTYPE_LINKIFY_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
-import { prototypeSpecNodeRoots } from "./prototypeNodeChildren";
+import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import { record, type Raw } from "./prototypeTemplate";
 
 /**
@@ -163,8 +163,6 @@ export interface PrototypeLinkifyError {
   message: string;
 }
 
-const REPEAT_PLACEHOLDER = /\{(?:index|[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)\}/;
-
 /** The first non-undefined result of `find` over an array's entries, with indexed paths. */
 function firstInArray(
   value: unknown[],
@@ -178,28 +176,6 @@ function firstInArray(
     }
   }
   return undefined;
-}
-
-/** A repeat binding inside `linkify.onTap`, which this version does not bind per row. */
-function repeatBindingPath(value: unknown, path: string): string | undefined {
-  if (typeof value === "string") {
-    return REPEAT_PLACEHOLDER.test(value) ? path : undefined;
-  }
-  if (Array.isArray(value)) {
-    return firstInArray(value, path, repeatBindingPath);
-  }
-  const object = record(value);
-  if (!object || isLiteral(object)) {
-    return undefined;
-  }
-  if (Object.hasOwn(object, "item") || Object.hasOwn(object, "index")) {
-    return path;
-  }
-  return Object.keys(object)
-    .sort()
-    .filter((key) => key !== "payload")
-    .map((key) => repeatBindingPath(object[key], `${path}.${key}`))
-    .find((found) => found !== undefined);
 }
 
 /** A member's stray `{match}`; stack screens are named in brackets, as the screen-map walk does. */
@@ -242,10 +218,7 @@ function linkifyNodeError(node: Raw, path: string): PrototypeLinkifyError | unde
   if (node.spans !== undefined) {
     return { path: `${path}.linkify`, message: "linkify applies to text, not spans" };
   }
-  const repeat = repeatBindingPath(linkify.onTap, `${path}.linkify.onTap`);
-  return repeat
-    ? { path: repeat, message: "linkify actions cannot use repeat bindings" }
-    : undefined;
+  return undefined;
 }
 
 function walkNodes(value: unknown, path: string, visit: (node: Raw, path: string) => void) {
@@ -260,14 +233,8 @@ function walkNodes(value: unknown, path: string, visit: (node: Raw, path: string
   if (typeof object.type === "string") {
     visit(object, path);
   }
-  for (const key of Object.keys(object).sort()) {
-    if (key === "screens" && record(object.screens)) {
-      for (const name of Object.keys(record(object.screens)!).sort()) {
-        walkNodes(record(object.screens)![name], `${path}.screens[${JSON.stringify(name)}]`, visit);
-      }
-    } else if (key === "child" || key === "children") {
-      walkNodes(object[key], `${path}.${key}`, visit);
-    }
+  for (const child of prototypeNodeChildren(object)) {
+    walkNodes(child.value, `${path}${child.suffix}`, visit);
   }
 }
 

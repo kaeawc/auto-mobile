@@ -86,7 +86,7 @@ describe("preparations crossing restart handoff", () => {
       "shutdown-scope",
       { acquire: () => {}, release },
       timer,
-      new InMemoryMutationRecordingGaps(),
+      { recordingGaps: new InMemoryMutationRecordingGaps() },
     );
   }
 

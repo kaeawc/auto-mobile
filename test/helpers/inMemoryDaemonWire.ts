@@ -5,7 +5,7 @@ import type { Socket } from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
 import { FakeSocket } from "../fakes/FakeNetServer";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client/client";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
   DEFAULT_SOCKET_PATH,

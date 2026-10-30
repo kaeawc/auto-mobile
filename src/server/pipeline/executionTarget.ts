@@ -15,6 +15,7 @@ import {
 } from "../../devices/DisplayInventoryProvider";
 import {
   defaultDeviceObservationAccess,
+  HeldDeviceFormFactorResolver,
   sessionlessDeviceReadFor,
   type DeviceObservationAccess,
 } from "../deviceObservationAccess";
@@ -34,6 +35,7 @@ import {
   multipleDevicesError,
   resolveSessionlessDeviceRead,
 } from "./readTarget";
+import { callerHeldPlanSession, refuseEndedPlanBase } from "../planSessionOwnership";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import {
   bindingAccessFor,
@@ -54,13 +56,11 @@ import {
   refuseControlCallBeforeAdmission,
 } from "./deviceCallDispatch";
 import { createToolExecutionContext } from "../ToolExecutionContext";
-import { resolveDirectSessionDevice } from "../../utils/directSessionDeviceRegistry";
 import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import { AmbiguousDeviceTargetError } from "../../daemon/ambiguousDeviceTargetRefusal";
-import { DeviceOutsideBoundSessionError } from "../../daemon/deviceOutsideBoundSessionRefusal";
-import { DirectSessionNotActiveError } from "../../models/DirectSessionNotActiveError";
+import { adoptDirectSessionDevice } from "./directSessionTarget";
 
 export interface ExecutionTargetInput {
   name: string;
@@ -79,6 +79,8 @@ export interface ExecutionTargetContext {
   internalCall: boolean;
   sessionUuid: string | undefined;
   shouldResolveDevice: boolean;
+  /** The base was already live or resumable after device restart before this call acquired it. */
+  callerHeldSession?: boolean;
   /** Resolved through the read-only device path: the handler runs without recording or audit. */
   deviceRead?: SessionlessDeviceRead;
 }
@@ -89,15 +91,7 @@ export interface ExecutionTargetResolver {
 
 export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private readonly defaultDeviceRead: SessionlessDeviceRead;
-
-  private refuseEndedPlanBase(sessionUuid: string, executionId?: string): void {
-    const ended = defaultDaemonContext
-      .sessionManager()
-      ?.terminalAnswerForEndedSession(sessionUuid, executionId);
-    if (ended) {
-      throw ended;
-    }
-  }
+  private readonly sessionFormFactor: HeldDeviceFormFactorResolver;
 
   constructor(
     private readonly log: Logger = logger,
@@ -105,6 +99,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     deviceReadAccess: DeviceObservationAccess = defaultDeviceObservationAccess,
   ) {
     this.defaultDeviceRead = sessionlessDeviceReadFor(deviceReadAccess);
+    this.sessionFormFactor = new HeldDeviceFormFactorResolver(deviceReadAccess.avdConfigReader);
   }
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
     // Awaited only when a first-seen transport must be probed: every other call resolves its id
@@ -146,6 +141,8 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     if (state.shouldResolveDevice) {
       await this.resolveImplicitSession(state);
     }
+    const heldCheck = callerHeldPlanSession(input.name, state.baseSessionUuid ?? state.sessionUuid);
+    const callerHeldSession = typeof heldCheck === "boolean" ? heldCheck : await heldCheck;
     const sessionlessRead =
       (await this.admitReadOnlyCall(state)) ?? (await this.foreignDeviceReadTarget(state));
     if (sessionlessRead) {
@@ -166,6 +163,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       internalCall: state.internalCall,
       sessionUuid: state.sessionUuid,
       shouldResolveDevice: state.shouldResolveDevice,
+      callerHeldSession,
     };
   }
 
@@ -217,7 +215,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
     // The base's end ends its labels (#11640): a step whose base has ended, or is past its
     // idle deadline, fails with the base's terminal release, not as an unallocated label.
-    this.refuseEndedPlanBase(baseSessionUuid, state.execution?.executionId);
+    refuseEndedPlanBase(baseSessionUuid, state.execution?.executionId);
     throw new ActionableError(
       `Device label '${deviceLabel}' is not allocated. Provide a devices list to executePlan before using device labels.`,
     );
@@ -227,14 +225,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private async resolveImplicitSession(state: TargetResolution): Promise<void> {
     const { args, options, deviceReadiness, signal } = state.input;
     const { platform, providedDeviceId, execution, mcpSessionId, autolockEnabled } = state;
-    const implicitSessionUuid = this.resolveImplicitAutolockSession(
-      platform,
-      state.sessionUuid,
-      providedDeviceId,
-      mcpSessionId,
-      execution,
-      autolockEnabled,
-    );
+    const implicitSessionUuid = this.resolveImplicitAutolockSession(state);
     if (implicitSessionUuid) {
       state.sessionUuid = implicitSessionUuid;
       if (execution) {
@@ -421,7 +412,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // is sufficient on its own — without this, a client that omits `platform`
       // (now optional) with both platforms connected falls through to
       // ensureDeviceReady("either", undefined) and hits an ambiguity error.
-      this.adoptDirectSessionDevice(state, sessionUuid);
+      adoptDirectSessionDevice(state, sessionUuid);
     } else if (sessionUuid) {
       logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
     }
@@ -507,29 +498,6 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     options.assertHeldDeviceStart(admittedSession.assignedDevice || undefined, sessionUuid);
   }
 
-  private adoptDirectSessionDevice(state: TargetResolution, sessionUuid: string): void {
-    const directSession = resolveDirectSessionDevice(sessionUuid);
-    if (!directSession) {
-      throw new DirectSessionNotActiveError(sessionUuid);
-    }
-    if (state.providedDeviceId && state.providedDeviceId !== directSession.device.deviceId) {
-      throw new DeviceOutsideBoundSessionError(
-        sessionUuid,
-        directSession.device,
-        { deviceId: state.providedDeviceId },
-        `${state.input.name} deviceId '${state.providedDeviceId}' does not match session '${sessionUuid}' device '${directSession.device.deviceId}'. ` +
-          "Omit deviceId to target the session's device.",
-      );
-    }
-    if (!state.providedDeviceId) {
-      state.providedDeviceId = directSession.device.deviceId;
-      logger.info(
-        `[ToolRegistry] Resolved device from direct session ${sessionUuid}: ${state.providedDeviceId}`,
-      );
-      state.platform = directSession.device.platform;
-    }
-  }
-
   /** Resolves the device this call runs on, or answers early from the read-only device path. */
   private resolveDevice(state: TargetResolution): Promise<ExecutionTargetContext | undefined> {
     const { name } = state.input;
@@ -570,7 +538,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     };
     state.device = await this.hydrateDisplays(
       state,
-      device,
+      await this.sessionFormFactor.enrich(device, pooledDevice),
       `${pooledDevice?.incarnation ?? "unknown"}:${pooledDevice?.avdName ?? device.name}`,
     );
     logger.info(
@@ -671,8 +639,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
         getConnectedPlatforms: state.getConnectedPlatforms,
       },
-      options.sessionlessDeviceRead ?? this.defaultDeviceRead,
-      readinessTarget,
+      { read: options.sessionlessDeviceRead ?? this.defaultDeviceRead, readinessTarget },
     );
   }
 
@@ -947,14 +914,22 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     return explicitPin;
   }
 
-  private resolveImplicitAutolockSession(
-    platform: SomePlatform,
-    sessionUuid: string | undefined,
-    providedDeviceId: string | undefined,
-    mcpSessionId: string | undefined,
-    execution: import("../../daemon/sessionManager").SessionExecutionMetadata | undefined,
-    autolockEnabled: boolean,
-  ): string | undefined {
+  private resolveImplicitAutolockSession({
+    platform,
+    sessionUuid,
+    providedDeviceId,
+    mcpSessionId,
+    execution,
+    autolockEnabled,
+  }: Pick<
+    TargetResolution,
+    | "platform"
+    | "sessionUuid"
+    | "providedDeviceId"
+    | "mcpSessionId"
+    | "execution"
+    | "autolockEnabled"
+  >): string | undefined {
     if (sessionUuid) {
       return undefined;
     }
@@ -963,7 +938,8 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return undefined;
     }
 
-    const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
+    // "either" names no platform; a named one (watchOS included, #14908) narrows the selection.
+    const platformFilter = platform === "either" ? undefined : platform;
     const sessionId = devicePool.resolveAutolockSessionForMcpSession(
       mcpSessionId,
       platformFilter,

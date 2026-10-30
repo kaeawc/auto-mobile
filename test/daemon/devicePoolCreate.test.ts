@@ -1,6 +1,7 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
+import { ForwardLeaseForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
@@ -14,7 +15,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import type { AndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import type { DeviceRecoveryPolicy } from "../../src/daemon/poolConfig";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, Platform } from "../../src/models";
 import {
   AdbServerResetQuarantine,
   type AdbServerResetQuarantinePoolPort,
@@ -62,6 +63,19 @@ describe("DevicePool.create", () => {
     expect(factoryPool.getAvailableDeviceCount()).toBe(0);
   });
 
+  test("wires a watch claim store of its own, so watches are cross-daemon owned (#14908)", () => {
+    const timer = new FakeTimer();
+    const pool = DevicePool.create({
+      sessionManager: makeSessionManager(timer),
+      daemonSessionId: "watch-claims-daemon",
+      timer,
+    });
+
+    const watch = pool.testHooks.watchForeignDeviceOwnership;
+    expect(watch).toBeInstanceOf(ForwardLeaseForeignDeviceOwnership);
+    expect(watch).not.toBe(pool.testHooks.foreignDeviceOwnership);
+  });
+
   test("accepts an injected ADB reset quarantine factory", () => {
     const timer = new FakeTimer();
     const sessionManager = makeSessionManager(timer);
@@ -104,7 +118,7 @@ describe("DevicePool.create", () => {
       onLoss: true,
       maxAttempts: 2,
     };
-    const onDeviceRemoved = (_deviceId: string, _platform: "android" | "ios"): void => {};
+    const onDeviceRemoved = (_deviceId: string, _platform: Platform): void => {};
     const emulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer);
     const cancelDeviceSessionExecutions = async () => 0;
     const idGenerator = new CountingIdGenerator("create-test");

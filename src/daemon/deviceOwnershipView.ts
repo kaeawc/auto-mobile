@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path";
-import type { Platform } from "../models";
+import { isAndroidOrIosPlatform, type Platform } from "../models";
 import { readExclusiveLockContent, type LockContent } from "../utils/fileLock";
 import { sortedReaddirSync } from "../utils/io";
 import { isProcessRunning } from "../utils/processLiveness";
@@ -7,6 +7,7 @@ import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 import type { LockOwnerGenerationVerdict } from "../utils/fileLock";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import type { DeviceClaims } from "./deviceClaims";
 import { toActionableError } from "../models/ActionableError";
 import {
   ctrlProxyForwardLeaseDir,
@@ -32,6 +33,7 @@ export type DeviceOwnershipSourceName =
   | "legacy_claim_file"
   | "forward_lease"
   | "exec_owner"
+  | "device_claims"
   | "pool_holder"
   | "session_manager";
 
@@ -59,6 +61,8 @@ export interface DeviceOwnershipSources {
   lockFileOwners(device: DeviceRef): DeviceOwnerRecord[];
   /** The persisted binding's live execution owner for the device, if any. */
   execOwner(device: DeviceRef): Promise<DeviceOwnerRecord | undefined>;
+  /** The host-wide `device_claims` row dual-written beside the claim files (#11811 b). */
+  tableClaim?(device: DeviceRef): Promise<DeviceOwnerRecord | undefined>;
   /** In-daemon holders; absent when the view runs outside a daemon (doctor). */
   poolHolder?(device: DeviceRef): string | null | undefined;
   sessionManagerHolder?(device: DeviceRef): string | null | undefined;
@@ -132,6 +136,10 @@ export class DeviceOwnershipView {
     if (exec) {
       records.push(exec);
     }
+    const table = await this.sources.tableClaim?.(device);
+    if (table) {
+      records.push(table);
+    }
     const pool = this.sources.poolHolder?.(device);
     if (pool) {
       records.push({ source: "pool_holder", sessionId: pool });
@@ -174,6 +182,8 @@ const defaultLockFileReaders: LockFileReaders = {
 export interface DefaultSourcesOptions {
   /** Persisted binding registry, when one is readable; omitted means no exec-owner records. */
   registry?: Pick<BindingRegistry, "findDeviceHolder">;
+  /** The host-wide claims table, when the registry is readable; omitted means no table records. */
+  claims?: Pick<DeviceClaims, "get" | "list">;
   readers?: LockFileReaders;
   /** Maps an adb serial to the stable id the registry keys on; identity when omitted. */
   stableDeviceId?: (device: DeviceRef) => string;
@@ -230,7 +240,12 @@ export function createDefaultDeviceOwnershipSources(
 
   return {
     async listDevices() {
+      const tabled = ((await options.claims?.list()) ?? []).map(({ platform, deviceId }) => ({
+        platform,
+        deviceId,
+      }));
       const all = [
+        ...tabled,
         ...idsIn(claimDir("android"), "android"),
         ...idsIn(claimDir("ios"), "ios"),
         ...idsIn(legacyDir(), "android"),
@@ -257,8 +272,26 @@ export function createDefaultDeviceOwnershipSources(
       ];
       return found.filter((r): r is DeviceOwnerRecord => r !== undefined);
     },
+    async tableClaim(device) {
+      const claim = await options.claims?.get(device.platform, device.deviceId);
+      if (!claim) {
+        return undefined;
+      }
+      const running = readers.isProcessRunning(claim.pid);
+      const reused =
+        running &&
+        claim.processGenerationToken !== undefined &&
+        readers.generationVerdict?.(claim.pid, claim.processGenerationToken) === "different";
+      return {
+        source: "device_claims",
+        pid: claim.pid,
+        ...(claim.sessionUuid === undefined ? {} : { sessionId: claim.sessionUuid }),
+        alive: running && !reused,
+      };
+    },
     async execOwner(device) {
-      if (!options.registry) {
+      // Bindings hold only Android and iOS devices, so a watch has no binding execution owner.
+      if (!options.registry || !isAndroidOrIosPlatform(device.platform)) {
         return undefined;
       }
       const stable = options.stableDeviceId?.(device) ?? device.deviceId;

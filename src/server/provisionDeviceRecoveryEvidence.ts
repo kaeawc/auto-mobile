@@ -24,6 +24,8 @@ export interface ProvisionDeviceRecoveryInput {
   ownership?: DeviceOwnership;
   /** Failure boundaries: the provider's own verdict on whether retrying can help. */
   retryable?: boolean;
+  /** Rollback was refused before any mutation of the retained device. */
+  deviceIntact?: boolean;
 }
 
 type Cleanup = ProvisionDeviceRecoveryEvidence["cleanup"];
@@ -82,6 +84,14 @@ function nextAction(input: ProvisionDeviceRecoveryInput, cleanup: Cleanup): Next
 }
 
 function retainedDeviceAction(input: ProvisionDeviceRecoveryInput): NextAction {
+  if (input.deviceIntact && input.retryable === true && input.lifecycle?.device) {
+    return {
+      action: "reacquire_retained_device",
+      reason:
+        "Cleanup was refused before changing the device; retrying provisionDevice with the same device adopts it without creating another.",
+      automaticRetrySafe: true,
+    };
+  }
   if (!input.lifecycle?.device) {
     // A creation may have landed, but its exact identity was never resolved.
     return {

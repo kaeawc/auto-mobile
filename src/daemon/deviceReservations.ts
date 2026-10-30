@@ -7,6 +7,7 @@ import type { AutolockClient, DeviceAutolockManager } from "./deviceAutolockMana
 import type {
   DeviceReadinessReservation,
   PooledDevice,
+  ReadinessReservationOptions,
   RestartStopTargetIdentity,
   ShutdownIdentityReservation,
 } from "./devicePool";
@@ -19,7 +20,10 @@ import {
   DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS,
   isSameHolderSession,
 } from "./inputDeviceOwnership";
-import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
+import {
+  type BindingExclusion,
+  refreshAllocationBindingExclusion,
+} from "./sessionBroker/provisioning/exclusion";
 import { isDeviceRestartReleaseReason } from "../db/deviceSessionRepository";
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
@@ -122,16 +126,14 @@ export class DeviceReservations {
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
-    autolockClient?: AutolockClient & { restartResumeSessionId?: string },
-    enforceAndroidRecoveryExclusion = false,
+    options?: ReadinessReservationOptions,
   ): Promise<DeviceReadinessReservation> {
     const reservation = await this.port.shutdownReservationCoordinator.reserveDeviceForReadiness(
       deviceId,
       expectedIdentity,
       stableRuntimeName,
       verifiedAndroidAvdName,
-      autolockClient,
-      enforceAndroidRecoveryExclusion,
+      options,
     );
     // A reservation hides an idle device from allocation, so taking and giving it back are
     // idle/assigned transitions subscribers must hear about (#11568).
@@ -157,8 +159,10 @@ export class DeviceReservations {
         device,
         stableRuntimeName,
         undefined,
-        { restartResumeSessionId: sessionId },
-        true,
+        {
+          autolockClient: { restartResumeSessionId: sessionId },
+          enforceAndroidRecoveryExclusion: true,
+        },
       );
       permission.owners.add(reservation.owner);
       return Object.assign(
@@ -351,10 +355,10 @@ export class DeviceReservations {
       return;
     }
     if (this.port.bindingExclusion) {
+      // Unknown schemas use claim files and reserve by identity; unreadable registries reserve nothing.
       try {
-        await this.port.bindingExclusion.refresh({ requireCurrent: true });
+        await refreshAllocationBindingExclusion(this.port.bindingExclusion);
       } catch (error) {
-        // Which devices broker bindings hold is unknown, and they win: reserve nothing.
         logger.warn(
           `[DevicePool] Not reserving devices for restart recovery: ${errorMessage(error)}`,
           error,

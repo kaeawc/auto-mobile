@@ -50,6 +50,53 @@ jobs:
           AUTOMOBILE_UNIT_RANDOM_SEED: ${{ github.run_number }}
         run: bash scripts/test-ts.sh unit
 
+  # Advisory and independent: drives a pinned real Claude Code against a stub server built with the
+  # repo's own dispatcher (test/server/claudeCodeElicitation.integration.test.ts). It never touches a
+  # device. The pinned version is the first that declares form and url elicitation and negotiates
+  # 2026-07-28; bump it deliberately.
+  claude-code-elicitation-conformance:
+    name: "Claude Code Elicitation Conformance (Advisory)"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 15
+    # Runs a downloaded third-party binary, so it gets no write token.
+    permissions:
+      contents: read
+    env:
+      CLAUDE_CODE_VERSION: "2.1.311"
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Fetch pinned Claude Code"
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/claude-code"
+          mkdir -p "$dir"
+          cd "$dir"
+          tgz="$(npm pack --silent "@anthropic-ai/claude-code-linux-x64@${CLAUDE_CODE_VERSION}")"
+          tar xzf "$tgz"
+          chmod +x "$dir/package/claude"
+          "$dir/package/claude" --version
+          echo "AUTOMOBILE_CLAUDE_BIN=$dir/package/claude" >> "$GITHUB_ENV"
+
+      - name: "Run conformance"
+        shell: bash
+        run: bun test test/server/claudeCodeElicitation.integration.test.ts
+
   # Opt-in diagnostic only: like the foldable lane, this cannot fail Nightly.
   # No downstream job depends on its result; guard findings remain visible here.
   auto-advance-race-guard:

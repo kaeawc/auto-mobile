@@ -9,10 +9,12 @@ final class PrototypeLibraryFakeFileSystem: PrototypeLibraryFileSystem {
     var unreadable = Set<String>()
     var failWrite = false
     var failRemove = Set<String>()
+    var modified: [String: Date] = [:]
     var calls = 0
     private var stage = 0
 
     func exists(_ path: URL) -> Bool { directories.contains(path.path) || data[path.path] != nil }
+    func modifiedAt(_ path: URL) -> Date? { data[path.path] == nil ? nil : modified[path.path] }
     func createDirectory(_ path: URL) throws { directories.insert(path.path) }
     func assertRealDirectory(_ path: URL) throws {
         calls += 1

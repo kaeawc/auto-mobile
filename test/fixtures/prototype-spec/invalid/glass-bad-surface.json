@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "style": {
+        "surface": "material"
+      },
+      "children": []
+    }
+  },
+  "expectedPath": "root.style.surface",
+  "expectedMessage": "Invalid enum value"
+}

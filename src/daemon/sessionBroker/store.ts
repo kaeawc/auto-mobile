@@ -152,3 +152,22 @@ export interface BrokerAbandonment {
 export function destructionTicket(resource: BrokerResourceRecord): DestructionTicket {
   return { resourceId: resource.resourceId, revision: resource.revision };
 }
+
+/**
+ * Whether a drain may claim this resource: it is idle and, for idle expiry, still at a revision
+ * the expiry observed. Reserve, reset and re-idle each bump the revision, so a device an
+ * acquisition chose after the observation is never expired.
+ */
+export function drainableIdle(
+  resource: BrokerResourceRecord,
+  observed: readonly DestructionTicket[] | undefined,
+): boolean {
+  return (
+    resource.state === "idle" &&
+    (!observed ||
+      observed.some(
+        (ticket) =>
+          ticket.resourceId === resource.resourceId && ticket.revision === resource.revision,
+      ))
+  );
+}

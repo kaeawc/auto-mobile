@@ -47,7 +47,9 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPinnedShortcutPlatform
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceAppearance
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceLocale
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeScreenShapeSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
@@ -58,6 +60,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetStore
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdropSupport
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdrops
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
@@ -85,6 +89,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWi
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.CrashData
@@ -941,6 +946,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  // Kept as a Lazy so teardown closes the service-owned modules only if they were ever created.
+  private val prototypePlatformDelegate = lazy {
+    dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeRuntimePlatform(
+      this,
+      dev.jasonpearson.automobile.prototype.AndroidPrototypeClipboard(
+        this,
+        object : dev.jasonpearson.automobile.prototype.PrototypeClipboardFocus {
+          override suspend fun <T> read(block: () -> T): T =
+            prototypeController.readClipboard(block)
+        },
+      ),
+    )
+  }
+  private val prototypePlatform by prototypePlatformDelegate
+
   /**
    * Emits a `type:"error"` frame when a `serviceScope.launch { … }` throws uncaught. Correlation is
    * recovered from [RequestIdContext], which request-correlated raw launches attach through
@@ -1049,7 +1069,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
-      // Read once when this service instance starts, not on each hierarchy capture.
+      // Read once when this service instance starts, not on each hierarchy capture. On from API 30;
+      // the debug property overrides it (#13956).
       pruneBaselineWrappers = readBaselineWrapperPruningEnabled(),
       prototypeHiddenReason = { displayId, captured ->
         if (::prototypeController.isInitialized)
@@ -1146,6 +1167,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
       },
       resultBroadcaster,
+      AndroidPrototypeScreenShapeSource(this),
     )
   // Asset bytes live in the cache directory, never in the heap; cleared with the prototype session.
   // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
@@ -1812,9 +1834,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     gestureController.startThread()
   }
 
+  // Lazy: needs the service context, and the controller built below outlives reconnects.
+  private val prototypeDisplays by lazy { AndroidPrototypeDisplays(this) }
+
   override fun onServiceConnected() {
     super.onServiceConnected()
     Log.d(TAG, "onServiceConnected")
+    // Overlay tokens exist only for displays present now; displays added later cannot host
+    // prototype windows on Android 12L/13 (#15318).
+    prototypeDisplays.onServiceBound()
 
     // Subscribe to SUBSCRIBED_EVENT_TYPES_MASK (the handled set plus the framework cache-coherence
     // set) instead of TYPES_ALL_MASK, so the OS stops delivering high-frequency events we only drop
@@ -1862,7 +1890,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
       if (!::prototypeController.isInitialized) {
-        val prototypeDisplays = AndroidPrototypeDisplays(this)
         // Locks are shared safety facts; foreground suspension is request-local per surface.
         val prototypeWindowBlocked = {
           val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
@@ -1916,6 +1943,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 }
               },
             storage = prototypeStorage,
+            backdropSupport =
+              PrototypeBackdropSupport {
+                // Cross-window blur can be switched off at runtime (battery saver, developer
+                // option).
+                Build.VERSION.SDK_INT >= PrototypeBackdrops.MIN_BLUR_SDK &&
+                  getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true
+              },
             windowOnScreen =
               PrototypeWindowOnScreen { displayId ->
                 try {
@@ -1947,6 +1981,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             displays = prototypeDisplays,
             clearAssets = { prototypeAssets.clear() },
             hasAsset = { prototypeAssets.lookup(it) != null },
+            validateShaders = { validatePrototypeShaderUniforms(it, prototypeAssets::lookup) },
             images = prototypeImages,
             // The host grants this appop before showing a window.layer "app" prototype.
             appLayerPermitted = {
@@ -1956,6 +1991,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             fonts = prototypeFonts,
             foreground = prototypeForeground,
             deviceAppearance = AndroidPrototypeDeviceAppearance(this),
+            deviceLocale = AndroidPrototypeDeviceLocale(this),
             hostFactory = createPrototypeHost,
             httpClients =
               PrototypeHttpClients(
@@ -1963,6 +1999,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 device = RetrofitPrototypeHttpClient(OkHttpClient()),
               ),
             requestScope = serviceScope,
+            platform = prototypePlatform,
           )
         // Service start: drop anything a previous process left in the cache directory.
         prototypeAssets.purgeLeftovers()
@@ -2110,6 +2147,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         webSocketServer =
           WebSocketServer(
             port = 8765,
+            platform = prototypePlatform,
             scope = serviceScope,
             options =
               WebSocketServerOptions(
@@ -2290,10 +2328,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayDrawer.destroy()
     }
 
-    if (::prototypeController.isInitialized) {
-      // Independent of serviceScope cancellation below. Main-immediate runs inline when possible;
-      // a pending request releases the controller mutex on cancellation, then cleanup resumes.
-      teardownScope.launch { prototypeController.destroy() }
+    // Independent of serviceScope cancellation below. Main-immediate runs inline when possible;
+    // a pending request releases the controller mutex on cancellation, then cleanup resumes. The
+    // platform modules are shared by every surface, so they close once, after the controller.
+    teardownScope.launch {
+      if (::prototypeController.isInitialized) prototypeController.destroy()
+      if (prototypePlatformDelegate.isInitialized()) {
+        dev.jasonpearson.automobile.ctrlproxy.prototype.closePrototypeModules(prototypePlatform)
+      }
     }
     if (::overlayManager.isInitialized) {
       overlayManager.destroy()
@@ -2885,9 +2927,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
     replaceOthers: Boolean,
+    locale: String?,
   ) {
     launchRequestScope(requestId) {
-      prototypeController.show(requestId, spec, displayId, reset, appearance, replaceOthers)
+      prototypeController.show(requestId, spec, displayId, reset, appearance, replaceOthers, locale)
     }
   }
 
@@ -2914,6 +2957,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) {
     launchRequestScope(requestId) { savedPrototypeController.delete(requestId, id) }
+  }
+
+  override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) {
+    launchRequestScope(requestId) { prototypeController.advanceClock(requestId, id, advanceTimeMs) }
   }
 
   override suspend fun clearPrototypeStorage(requestId: String?, id: String) {
@@ -3684,7 +3731,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           capture.value
         } else {
           prototypesHidden = null
-          screenshotController.takeScreenshotAsync(targetDisplayId)
+          dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
+            screenshotController.takeScreenshotAsync(targetDisplayId)
+          }
         }
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       when (outcome) {
@@ -3735,11 +3784,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ): PrototypeHiddenCapture<ScreenshotCaptureOutcome> =
     if (::prototypeController.isInitialized)
       prototypeController.withHiddenForCapture {
-        screenshotController.takeScreenshotAsync(targetDisplayId)
+        dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
+          screenshotController.takeScreenshotAsync(targetDisplayId)
+        }
       }
     else
       PrototypeHiddenCapture(
-        screenshotController.takeScreenshotAsync(targetDisplayId),
+        dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
+          screenshotController.takeScreenshotAsync(targetDisplayId)
+        },
         prototypeExcluded = true,
       )
 

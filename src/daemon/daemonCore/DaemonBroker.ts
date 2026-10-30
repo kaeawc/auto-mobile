@@ -1,3 +1,5 @@
+import { BindingRegistrySchemaUnsupportedError } from "../sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
+import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
 import type {
   DaemonCoreServices,
@@ -28,6 +30,7 @@ import {
   type SessionBrokerService,
 } from "../sessionBroker/service";
 import {
+  discardsAndroidSnapshotOnExit,
   readSessionBrokerHostConfig,
   type SessionBrokerHostConfig,
 } from "../sessionBroker/hostConfig";
@@ -53,6 +56,7 @@ import { sessionDisposition } from "../sessionBroker/sessionDisposition";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
 import type { DaemonSessions } from "./DaemonSessions";
+import { BackgroundBindingRegistryUpgrade } from "../sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 
 export interface DaemonBrokerHost {
   readPersistedSession: DaemonDeviceSessionStore["getSession"];
@@ -82,6 +86,7 @@ export interface DaemonBrokerHost {
     | "setBackgroundRegistryUpgrade"
   >;
   bindingRegistry: () => Promise<SqliteBindingRegistry> | undefined;
+  deviceClaimMirrors: () => DeviceClaimMirrorHub;
   setBindingRegistry: (value: Promise<SqliteBindingRegistry> | undefined) => void;
   brokerDeviceAcquisition: () => DaemonBrokerDeviceAcquisitionHandle | undefined;
   setBrokerDeviceAcquisition: (value: DaemonBrokerDeviceAcquisitionHandle | undefined) => void;
@@ -138,6 +143,10 @@ export class DaemonBroker {
   private readonly bindingJournalInFlight = new BindingJournalInFlight();
 
   private bindingRedrive: BindingJournalRedriveLoop | undefined;
+  private readonly maintainedRegistries = new WeakSet<SqliteBindingRegistry>();
+  private registryClosing = false;
+  // No retry can make this daemon understand new migrations; restart re-evaluates the schema.
+  private unsupportedRegistrySchema: BindingRegistrySchemaUnsupportedError | undefined;
   constructor(private readonly host: DaemonBrokerHost) {}
 
   /**
@@ -226,6 +235,9 @@ export class DaemonBroker {
     );
     const acquisition = createDaemonBrokerDeviceAcquisition({
       registry: () => this.host.openBindingRegistry(),
+      // Unconfigured Android reuse destroys a released emulator, so its exit snapshot is waste.
+      // Warm reuse (snapshot or keep-booted) and an unread config keep the default (#15477).
+      discardAndroidSnapshotOnExit: () => discardsAndroidSnapshotOnExit(this.sessionBrokerConfig),
       // The broker and native ledger enforce the same cap independently: reservations are not
       // added to native usage twice, and unaccounted native devices can still refuse creation.
       resourceBudgetPolicy: {
@@ -295,9 +307,44 @@ export class DaemonBroker {
     // Broker startup awaits registry retirement; local startup upgrades after exposing its socket.
   }
 
-  openBindingRegistry(signal?: AbortSignal): Promise<SqliteBindingRegistry> {
-    if (this.host.bindingRegistry()) {
-      return this.host.bindingRegistry()!;
+  /** The caller has observed an existing registry; local daemons never create one here. */
+  startBackgroundRegistryUpgrade(): boolean {
+    if (this.registryClosing || this.host.lifecycle.shutdownInProgress()) {
+      return false;
+    }
+    // Broker startup owns registry preparation, so mirrors need not ask for a local upgrade.
+    if (this.host.lifecycle.sessionBrokerConfigPath()) {
+      return true;
+    }
+    if (!this.host.identity.socketBindCommitted()) {
+      return false;
+    }
+    if (!this.host.lifecycle.backgroundRegistryUpgrade()) {
+      const upgrade = new BackgroundBindingRegistryUpgrade(
+        (signal) => this.host.openBindingRegistry(signal),
+        { timer: this.host.services.timer() },
+      );
+      this.host.lifecycle.setBackgroundRegistryUpgrade(upgrade);
+      upgrade.start();
+    }
+    return true;
+  }
+
+  openBindingRegistry(
+    signal?: AbortSignal,
+    options?: { quiet?: boolean },
+  ): Promise<SqliteBindingRegistry> {
+    if (this.unsupportedRegistrySchema) {
+      return Promise.reject(this.unsupportedRegistrySchema);
+    }
+    const cached = this.host.bindingRegistry();
+    if (cached) {
+      return options?.quiet
+        ? cached
+        : cached.then((registry) => {
+            this.startBindingRegistryMaintenance(registry);
+            return registry;
+          });
     }
     const opening = openSqliteBindingRegistry({
       // Rehydration may open here before startup reaches the socket: only brokers may upgrade
@@ -335,27 +382,24 @@ export class DaemonBroker {
       }),
     });
     this.host.setBindingRegistry(opening);
-    // Restart-time recovery (#11242): broker bindings left settling are settled once that
-    // daemon is gone. Runs once per open, after the open succeeds.
     opening.then(
       (registry) => {
-        void this.brokerExecutionRelease?.recoverSettledBindings();
-        const acquisition = this.host.brokerDeviceAcquisition();
-        if (
-          acquisition &&
-          !this.host.lifecycle.sessionBrokerConfigPath() &&
-          !this.bindingRedrive &&
-          readEnvRaw(AMBIENT_ENV.NODE_ENV) !== "test"
-        ) {
-          this.bindingRedrive = acquisition.startJournalRedrive(registry);
+        // Claims taken before the registry opened, and releases still owed, reach the table now.
+        this.host.deviceClaimMirrors().registryOpened(registry.deviceClaims());
+        if (!options?.quiet) {
+          this.startBindingRegistryMaintenance(registry);
         }
       },
       // The open failure is logged (and the open forgotten) by the handler below.
       () => undefined,
     );
     opening.catch((error: unknown) => {
-      // The release that asked reports this failure; forgetting the failed open lets the next
-      // release retry instead of failing forever.
+      if (error instanceof BindingRegistrySchemaUnsupportedError) {
+        this.host.deviceClaimMirrors().skip();
+        this.unsupportedRegistrySchema = error;
+      }
+      // The release that asked reports this failure; forgetting the failed open lets transient
+      // failures retry. An unsupported schema is latched above and never opened again here.
       logger.debug(`[Daemon] Binding registry open failed: ${errorMessage(error)}`);
       if (this.host.bindingRegistry() === opening) {
         this.host.setBindingRegistry(undefined);
@@ -364,8 +408,29 @@ export class DaemonBroker {
     return opening;
   }
 
+  private startBindingRegistryMaintenance(registry: SqliteBindingRegistry): void {
+    if (this.maintainedRegistries.has(registry)) {
+      return;
+    }
+    this.maintainedRegistries.add(registry);
+    // Local startup's quiet open only exposes durable claims to discovery; normal open sites
+    // retain responsibility for restart-time settlement (#11242) and journal maintenance.
+    void this.brokerExecutionRelease?.recoverSettledBindings();
+    const acquisition = this.host.brokerDeviceAcquisition();
+    if (
+      acquisition &&
+      !this.host.lifecycle.sessionBrokerConfigPath() &&
+      !this.bindingRedrive &&
+      readEnvRaw(AMBIENT_ENV.NODE_ENV) !== "test"
+    ) {
+      this.bindingRedrive = acquisition.startJournalRedrive(registry);
+    }
+  }
+
   /** Stop the drain's settlement watchers and close the binding registry if this daemon opened it. */
   async closeManagedExecutionRelease(): Promise<void> {
+    // Mirrors are disposed later: fence late probes before the first shutdown await.
+    this.registryClosing = true;
     await this.host.lifecycle.backgroundRegistryUpgrade()?.close();
     this.host.lifecycle.setBackgroundRegistryUpgrade(undefined);
     await this.sessionBrokerService?.close();
@@ -385,6 +450,19 @@ export class DaemonBroker {
     this.host.setBrokerDeviceAcquisition(undefined);
     const registry = this.host.bindingRegistry();
     this.host.setBindingRegistry(undefined);
+    // A write already sent must settle before this daemon's rows are removed below.
+    this.host.deviceClaimMirrors().dispose();
+    await this.host.deviceClaimMirrors().idle();
+    try {
+      // The device allocation claims are released after this stage, when the table is gone: this
+      // daemon's rows leave with its registry so a clean stop strands none (#11811 b).
+      await this.host.deviceClaimMirrors().releaseOwnedClaims((await registry)?.deviceClaims());
+    } catch (error) {
+      logger.warn(
+        `[Daemon] Withdrawing this daemon's device claims failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
     try {
       await (await registry)?.close();
     } catch (error) {
@@ -448,8 +526,9 @@ export class DaemonBroker {
 
   get testHooks() {
     return {
-      openBindingRegistry: (signal?: AbortSignal): Promise<SqliteBindingRegistry> =>
-        this.host.openBindingRegistry(signal),
+      startBackgroundRegistryUpgrade: (): boolean => this.startBackgroundRegistryUpgrade(),
+      openBindingRegistry: (...args: Parameters<DaemonBroker["openBindingRegistry"]>) =>
+        this.host.openBindingRegistry(...args),
       closeManagedExecutionRelease: (): Promise<void> => this.closeManagedExecutionRelease(),
       bindingJournalOwner: (): BindingJournalOwner => this.bindingJournalOwner(),
       setBindingRegistry: (registry: Promise<SqliteBindingRegistry>): void => {

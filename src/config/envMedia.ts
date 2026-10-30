@@ -2,6 +2,12 @@ import type { EnvVarSpec } from "./envSpec";
 
 /** Observation, screenshot, video, WebRTC and logging variables. */
 export const MEDIA_ENV = {
+  PROTOTYPE_CUSTOM_SHADERS: {
+    name: "AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS",
+    kind: "string",
+    default: "off",
+    doc: "Enable Android prototype AGSL assets and style.shader only with the exact value 1.",
+  },
   SCREENSHOT_CACHE_MB: {
     name: "AUTOMOBILE_SCREENSHOT_CACHE_MB",
     kind: "number",
@@ -109,6 +115,12 @@ export const MEDIA_ENV = {
     default: "unset",
     doc: "Absolute path to a locally built screen-capture-helper.",
   },
+  IOS_AUDIO_LOOPBACK_HELPER: {
+    name: "AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER",
+    kind: "path",
+    default: "unset",
+    doc: "Absolute path to an audio-loopback-helper executable, for iOS Simulator audio tools.",
+  },
   ACTION_OBSERVATION_SKIP_SCREENSHOT: {
     name: "AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT",
     kind: "string",
@@ -131,7 +143,7 @@ export const MEDIA_ENV = {
     name: "AUTOMOBILE_EMULATOR_AUDIO",
     kind: "string",
     default: "audio on",
-    doc: "Exact false adds -no-audio to emulator launches; other values keep audio.",
+    doc: "Exact false adds -no-audio to emulator launches, disabling emulator audio; other values keep audio.",
   },
   NAV_RETENTION_SCREENSHOT_TTL_MS: {
     name: "AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS",
@@ -225,20 +237,6 @@ export const MEDIA_ENV = {
     kind: "path",
     default: "ffmpeg",
     doc: "ffmpeg binary used for video processing.",
-  },
-  IOS_WEBRTC_FFMPEG: {
-    name: "AUTOMOBILE_IOS_WEBRTC_FFMPEG",
-    legacyName: "AUTO_MOBILE_IOS_WEBRTC_FFMPEG",
-    kind: "path",
-    default: "ffmpeg",
-    doc: "ffmpeg binary used for iOS WebRTC streaming.",
-  },
-  IOS_WEBRTC_FORCE_RAW: {
-    name: "AUTOMOBILE_IOS_WEBRTC_FORCE_RAW",
-    legacyName: "AUTO_MOBILE_IOS_WEBRTC_FORCE_RAW",
-    kind: "bool",
-    default: "off",
-    doc: "Force the raw iOS WebRTC capture path (1/true).",
   },
   LOG_FORMAT: {
     name: "AUTOMOBILE_LOG_FORMAT",

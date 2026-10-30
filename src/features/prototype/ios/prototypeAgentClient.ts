@@ -15,6 +15,7 @@ import type { IdGenerator } from "../../../utils/IdGenerator";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import type { PrototypeRequestHost } from "../prototypeRequestHandler";
+import type { PrototypeChannelHost } from "../prototypeChannelHost";
 import { NodePrototypeAgentSocket } from "./NodePrototypeAgentSocket";
 import { LOOPBACK_HOST, SocketPrototypeAgentClient } from "./SocketPrototypeAgentClient";
 export { PROTOTYPE_AGENT_PROTOCOL_VERSION } from "./SocketPrototypeAgentClient";
@@ -41,6 +42,7 @@ export type PrototypeAgentRequestType =
   | "patch_prototype"
   | "dismiss_prototype"
   // Wipes a prototype's stored `storage` values (#12522), advertised as `prototype_storage_v1`.
+  | "advance_prototype_clock"
   | "clear_prototype_storage"
   | "put_prototype_asset"
   | "remove_prototype_asset"
@@ -59,6 +61,8 @@ export interface PrototypeAgentResult extends PrototypeAgentMessage {
   requestId: string;
   success: boolean;
   error?: string;
+  /** A show of a spec with `window.backdrop` (`prototype_backdrop_v1`): `blur` or `fallback`. */
+  backdrop?: string;
 }
 
 export interface PrototypeAgentHandshake {
@@ -83,6 +87,11 @@ export interface PrototypeAgentClient {
    * cancels its running requests when the connection ends. Replaces any earlier host.
    */
   attachRequestHost?(host: PrototypeRequestHost | undefined): void;
+  /**
+   * Routes the agent's `prototype_channel_*` frames (`via: "host"` channels, #14268) to the host
+   * channel proxy and closes its open connections when the connection ends. Replaces any earlier host.
+   */
+  attachChannelHost?(host: PrototypeChannelHost | undefined): void;
   close(): void;
 }
 

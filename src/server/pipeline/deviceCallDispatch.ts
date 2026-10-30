@@ -1,3 +1,4 @@
+import { internalExecutionId, internalExecutionStartTime } from "../internalToolParams";
 import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "../sessionDisplayPin";
@@ -8,7 +9,7 @@ import {
   DeviceReadiness,
   type ConnectedPlatformScan,
 } from "../../daemon/readiness/DeviceReadiness";
-import { BootedDevice, SomePlatform } from "../../models";
+import { BootedDevice, type Platform, SomePlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
@@ -41,6 +42,7 @@ import {
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { executionTracker } from "../../daemon/executionTracker";
 import { deviceActionClock } from "./deviceActionClock";
+import { assertToolSupportsDevicePlatform } from "../watchOsToolSupport";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,
@@ -93,8 +95,8 @@ function withAmbientDeviceContext(
   const needsRoutingSession = routingSessionUuid && args.sessionUuid !== routingSessionUuid;
   const needsExecution =
     execution &&
-    (args.__executionId !== execution.executionId ||
-      args.__executionStartTime !== execution.startTime);
+    (internalExecutionId(args) !== execution.executionId ||
+      internalExecutionStartTime(args) !== execution.startTime);
   if (!needsRoutingSession && !needsExecution) {
     return args;
   }
@@ -225,7 +227,9 @@ export async function unidentifiedToolTargetRow(
     return undefined;
   }
   const knownDevice = input.device ?? pool.getDevice(input.deviceId);
-  if (input.platform === "ios" || knownDevice?.platform === "ios") {
+  // Only an Android transport id needs a synthetic row. A watch is skipped only when the pool
+  // knows the device is one; a caller's "watchos" label alone must never bypass the identity check.
+  if (input.platform === "ios" || (knownDevice && knownDevice.platform !== "android")) {
     return undefined;
   }
   const synthetic: BootedDevice = {
@@ -489,15 +493,21 @@ export function assertInternalCallWithinBrokerGrant(
   }
 }
 
-/** The platforms a target may be on: the pool's record, else the call's platform, else both. */
+/**
+ * The platforms a target may be on: the pool's record, else the call's platform, else Android and
+ * iOS. A call names watchOS to reach a watch at all, so an unpooled watch it names is judged
+ * against watch ownership (#14908); a call naming no platform never lands on a watch.
+ */
 export function bindingPlatformsFor(
-  pooledPlatform: "android" | "ios" | undefined,
+  pooledPlatform: Platform | undefined,
   requestedPlatform: unknown,
-): Array<"android" | "ios"> {
+): Platform[] {
   if (pooledPlatform) {
     return [pooledPlatform];
   }
-  return requestedPlatform === "android" || requestedPlatform === "ios"
+  return requestedPlatform === "android" ||
+    requestedPlatform === "ios" ||
+    requestedPlatform === "watchos"
     ? [requestedPlatform]
     : ["android", "ios"];
 }
@@ -589,14 +599,16 @@ export async function invokeResolvedDeviceHandler(input: {
   isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
   const { target, name, args, handler, progress, signal, navigationRecorder, traits } = input;
+  // Fail closed: a watch never reaches a tool that has not opted in (#14899).
+  assertToolSupportsDevicePlatform(name, target.device);
   if (target.deviceRead) {
     // A read-only device read is not this caller's use of the device: no navigation recording
     // and no audit run on a device the caller may not hold (#10830).
     return handler(target.device, args, progress, signal);
   }
   deviceActionClock.recordDispatch(
-    args.__executionId,
-    args.__executionStartTime,
+    internalExecutionId(args),
+    internalExecutionStartTime(args),
     target.device.deviceId,
   );
   const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);

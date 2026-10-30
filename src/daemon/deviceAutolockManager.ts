@@ -8,6 +8,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
+import { matchesPlatformSelector } from "../models/Platform";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
@@ -55,7 +56,7 @@ interface AutolockAcquisitionOptions {
   collectCancellationSettlement?: (settlement: Promise<void>) => void;
   /** Records the session this acquisition minted (never a reused one) once it is committed. */
   receipt: AcquisitionReceipt;
-  /** The caller's cancel signal, threaded explicitly (#11817); DevicePool supplies it. */
+  /** The caller's cancel signal, threaded explicitly (#11817, #15671). */
   signal?: AbortSignal;
 }
 
@@ -359,14 +360,11 @@ export class DeviceAutolockManager {
       this.mcpSessionAcquiredAutolocks.set(owner, acquired);
     }
     // A refused owner is not persisted either, so a restart cannot restore it (#11192).
-    await this.persistAcquiredAutolockSession(
-      device,
-      session,
-      assignmentSnapshot,
-      owner,
+    await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, {
+      mcpSessionId: owner,
       collectCancellationSettlement,
       signal,
-    );
+    });
     receipt.minted = mintedSession(session, deviceId);
     this.noteStateChanged(device);
 
@@ -395,9 +393,15 @@ export class DeviceAutolockManager {
     device: PooledDevice,
     session: Session,
     snapshot: SessionAssignmentSnapshot,
-    mcpSessionId?: string,
-    collectCancellationSettlement?: (settlement: Promise<void>) => void,
-    signal?: AbortSignal,
+    {
+      mcpSessionId,
+      collectCancellationSettlement,
+      signal,
+    }: {
+      mcpSessionId?: string;
+      collectCancellationSettlement?: (settlement: Promise<void>) => void;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<void> {
     const cancelPublishedSession = async () => {
       // Only this newly minted session may be compensated; never a replacement.
@@ -654,13 +658,14 @@ export class DeviceAutolockManager {
     const device = this.pool.getDevice(session.assignedDevice);
     if (!device || device.autolockSessionId !== sessionId) {
       if (this.pool.isAdbServerResetQuarantined(sessionId)) {
-        return !platform || session.platform === platform ? sessionId : undefined;
+        return matchesPlatformSelector(session.platform, platform) ? sessionId : undefined;
       }
       this.mcpSessionAutolockMap.delete(mcpSessionId);
       return undefined;
     }
 
-    if (platform && device.platform !== platform) {
+    // A call that names no platform never lands on a watch (#14908).
+    if (!matchesPlatformSelector(device.platform, platform)) {
       return undefined;
     }
 
@@ -703,7 +708,7 @@ export class DeviceAutolockManager {
     );
     const matches = candidates.filter(
       (candidate) =>
-        (!platform || candidate.platform === platform) &&
+        matchesPlatformSelector(candidate.platform, platform) &&
         (!deviceId || candidate.deviceId === deviceId),
     );
     if (matches.length === 1) {

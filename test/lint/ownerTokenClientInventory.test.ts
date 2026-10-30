@@ -14,7 +14,7 @@ const clients = [
     "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonSocketClient.kt",
     "sends",
   ],
-  ["src/daemon/client.ts", "tokenless"],
+  ["src/daemon/client/client.ts", "tokenless"],
   [
     "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
     "tokenless",

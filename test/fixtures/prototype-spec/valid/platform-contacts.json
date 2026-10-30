@@ -1,0 +1,35 @@
+{
+  "id": "platform-contacts",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "recipient": {},
+    "saved": {}
+  },
+  "state": {
+    "pickStatus": ""
+  },
+  "requires": {
+    "platform": ["contacts"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Go",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "contacts.pick",
+        "args": {
+          "multiple": {
+            "value": true
+          }
+        },
+        "into": "/data/recipient",
+        "statusKey": "pickStatus"
+      }
+    ]
+  }
+}

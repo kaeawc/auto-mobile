@@ -38,6 +38,7 @@ import {
   type InputOperation,
   type InputRequestContext,
   type InputTargetAction,
+  type InputTargetResolveOptions,
 } from "../socketServer/inputDeviceGating";
 
 import { IdeServerRouteHandler } from "./socketServerContracts";
@@ -124,11 +125,12 @@ export class SocketIdeRoutes {
     sessionId: string,
     ownerSocket: Socket,
     cancelSignal: AbortSignal,
-    receivedAtMs: number,
     {
+      receivedAtMs,
       onOwnerSignal,
       onInputDispatch,
     }: {
+      receivedAtMs: number;
       onOwnerSignal: (signal: AbortSignal) => void;
       onInputDispatch?: () => void;
     },
@@ -238,8 +240,7 @@ export class SocketIdeRoutes {
       this.callbacks.assertDeviceActionable(deviceId, purpose),
     assertBrokerConnectionControl: (socketSessionId, action, target) =>
       this.callbacks.assertBrokerConnectionControl(socketSessionId, action, target),
-    admitInputAsControlCall: (execution, deviceId, holderSessionUuid) =>
-      this.callbacks.admitInputAsControlCall(execution, deviceId, holderSessionUuid),
+    admitInputAsControlCall: (...args) => this.callbacks.admitInputAsControlCall(...args),
     listBootedDevicesForIdeAction: (platform, serial, signal) =>
       this.callbacks.listBootedDevicesForIdeAction(platform, serial, signal),
     resolveIdeActionDevices: (platform, serial, signal) =>
@@ -373,8 +374,7 @@ export class SocketIdeRoutes {
         this.state.sessionToolSelectionService,
         // No connectionProfileUuid on this channel — a caller here is on the direct IDE
         // socket, which has no MCP connection profile and cannot invoke an MCP tool.
-        undefined,
-        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+        { remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD },
       );
       return;
     }
@@ -397,8 +397,7 @@ export class SocketIdeRoutes {
       // formatToolEnabledRemediationSentence in toolSelectionPolicy.ts) — the remediation must
       // name the daemon's own `ide/setSessionToolEnabled` method, not the MCP `setToolEnabled`
       // tool, since a caller on this channel cannot invoke an MCP tool (issue #6259).
-      undefined,
-      IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      { remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD },
     );
   }
   private inputDeviceGatingInstance?: InputDeviceGating;
@@ -449,16 +448,14 @@ export class SocketIdeRoutes {
     deviceId: string | undefined,
     socketSessionId: string | undefined,
     action: InputTargetAction,
-    bypassAndroidDeviceListCache: boolean = false,
-    requester?: () => string | undefined,
+    options?: InputTargetResolveOptions,
   ): Promise<BootedDevice> {
     return await this.inputDeviceGating.resolveInputTargetDevice(
       platform,
       deviceId,
       socketSessionId,
       action,
-      bypassAndroidDeviceListCache,
-      requester,
+      options,
     );
   }
   assertBrokerConnectionInputTarget(
@@ -588,11 +585,13 @@ export class SocketIdeRoutes {
     execution: ActiveExecution,
     deviceId: string,
     holderSessionUuid: string | undefined,
+    ownerSignal: AbortSignal | undefined,
   ): Promise<void> {
     return await this.inputDeviceGating.admitInputAsControlCall(
       execution,
       deviceId,
       holderSessionUuid,
+      ownerSignal,
     );
   }
   async answeringSessionRelease<T>(

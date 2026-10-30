@@ -121,6 +121,15 @@ function clearedPackageFallbacks(deviceCondition: unknown): ToolMutation[] {
 }
 
 /**
+ * True when a `setDeviceState` call skews the clock through `deviceCondition.faults.clockSkew`.
+ * It drives the same clock control as the `clock` field, so it journals the same `clock` intent.
+ */
+export function deviceConditionSkewsClock(args: Record<string, unknown>): boolean {
+  const faults = isRecord(args.deviceCondition) ? args.deviceCondition.faults : undefined;
+  return isRecord(faults) && isRecord(faults.clockSkew);
+}
+
+/**
  * Tools of this family whose intents are not `setDeviceState` fields. `setPosture` on an Android
  * emulator drives host-side state (`emu fold`/`unfold`/`posture`, `resize-display`, the
  * hinge-angle sensor and a `device_state` override) that no revert or baseline clean undoes, so
@@ -128,7 +137,7 @@ function clearedPackageFallbacks(deviceCondition: unknown): ToolMutation[] {
  */
 export function deviceStateToolMutations(
   name: string,
-  _args: Record<string, unknown>,
+  args: Record<string, unknown>,
   platform?: Platform,
 ): ToolMutation[] | undefined {
   if (name !== "setPosture") {
@@ -137,5 +146,9 @@ export function deviceStateToolMutations(
   return [
     { kind: "device-setting", key: "tool:setPosture" },
     ...(platform === "ios" ? [] : [opaqueDeviceState("posture")]),
+    // A display preset resizes the display, which the foldable posture restore does not undo.
+    ...(platform !== "ios" && args.displayPreset !== undefined
+      ? [opaqueDeviceState("posture", "displayPreset")]
+      : []),
   ];
 }

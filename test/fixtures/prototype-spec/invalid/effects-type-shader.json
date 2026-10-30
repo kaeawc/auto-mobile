@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Effect",
+      "style": {
+        "effects": [
+          {
+            "type": "shader"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.style.effects[0].type",
+  "expectedMessage": "Unknown or missing discriminator"
+}

@@ -5,9 +5,10 @@ import {
   resolveCoordinateTapCtrlProxyTimeoutMs,
   resolveGestureCtrlProxyTimeoutMs,
 } from "./gestureTransportTimeout";
-import { ActionableError } from "../../models";
+import { ActionableError, type Point } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
+import type { IosFrameDispatchOptions } from "../observe/ios/CtrlProxyDispatch";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -37,9 +38,7 @@ export interface IosCoordinateTapClient {
     x: number,
     y: number,
     timeoutMs?: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: IosFrameDispatchOptions,
   ): ReturnType<IosCoordinateTapClient["requestTapCoordinates"]>;
 
   requestTapCoordinates(request: TapCoordinatesRequest): Promise<{
@@ -55,6 +54,15 @@ export { isStaleFrameContextRejection };
 
 /** A tap that was written to the device but whose outcome was never confirmed. */
 export class IndeterminateTapError extends ActionableError {}
+
+/**
+ * An element-search debug context re-reads the hierarchy to list near misses. It only explains a
+ * target that was not found: after a tap was dispatched the target is known, and the re-read
+ * waits behind a runner still executing that tap (15 s of a 20 s `tapOn` in #15296).
+ */
+export function tapFailureNeedsSearchDebugContext(error: unknown): boolean {
+  return !(error instanceof IndeterminateTapError);
+}
 
 export function indeterminateTapError(error: string | undefined): ActionableError {
   return new IndeterminateTapError(
@@ -76,11 +84,11 @@ export interface AndroidCoordinateTapOptions {
 export async function dispatchAndroidCoordinateTap(
   accessibilityService: CoordinateTapClient,
   adb: AdbExecutor,
-  x: number,
-  y: number,
+  point: Point,
   durationMs: number,
   options: AndroidCoordinateTapOptions = {},
 ): Promise<void> {
+  const { x, y } = point;
   const { frameContext, signal, assertCurrent, onTapDelivered } = options;
   throwIfAborted(signal);
   let dispatched = false;
@@ -125,9 +133,9 @@ export async function dispatchAndroidCoordinateTap(
       ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`
       : `tap ${x} ${y}`,
     undefined,
-    signal,
-    assertCurrent,
     {
+      signal,
+      assertCurrent,
       timeoutMs:
         durationMs >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined,
     },
@@ -154,25 +162,23 @@ type InternalIosCoordinateTapOptions = IosCoordinateTapOptions & { doubleTap?: b
  */
 export async function dispatchIosCoordinateTap(
   client: IosCoordinateTapClient,
-  x: number,
-  y: number,
+  point: Point,
   durationMs: number,
   frameContext?: string,
   options: IosCoordinateTapOptions = {},
 ): Promise<void> {
-  return dispatchIosTap(client, x, y, durationMs, frameContext, options);
+  return dispatchIosTap(client, point, durationMs, frameContext, options);
 }
 
 /** One runner command owns the full double tap; a missing reply proves no partial count. */
 export async function dispatchIosDoubleTap(
   client: IosCoordinateTapClient,
-  x: number,
-  y: number,
+  point: Point,
   durationMs: number = 50,
   frameContext?: string,
   options: IosCoordinateTapOptions = {},
 ): Promise<void> {
-  return dispatchIosTap(client, x, y, durationMs, frameContext, {
+  return dispatchIosTap(client, point, durationMs, frameContext, {
     ...options,
     failureLabel: "double tap",
     doubleTap: true,
@@ -181,12 +187,12 @@ export async function dispatchIosDoubleTap(
 
 async function dispatchIosTap(
   client: IosCoordinateTapClient,
-  x: number,
-  y: number,
+  point: Point,
   durationMs: number,
   frameContext: string | undefined,
   options: InternalIosCoordinateTapOptions,
 ): Promise<void> {
+  const { x, y } = point;
   const { failureLabel = "tap", signal, doubleTap = false } = options;
   if (doubleTap) {
     throwIfAborted(signal, true);
@@ -199,7 +205,11 @@ async function dispatchIosTap(
   let result: IosTapReply;
   try {
     result = doubleTap
-      ? await client.requestDoubleTapCoordinates(x, y, timeoutMs, frameContext, signal, onDispatch)
+      ? await client.requestDoubleTapCoordinates(x, y, timeoutMs, {
+          frameContext,
+          signal,
+          onDispatch,
+        })
       : await client.requestTapCoordinates({
           x,
           y,
@@ -220,6 +230,13 @@ async function dispatchIosTap(
     return;
   }
   if (isUnconfirmedIosTapReply(result, dispatched)) {
+    // The runner's press is a blocking XCUITest call: the timeout here does not cancel it, so
+    // later reads fail with `runner is busy` until it returns. The runner's late
+    // `tap_coordinates_result ... lateResponse=true` line names the phase that stalled (#15296).
+    logger.warn(
+      `[coordinateTapDispatch] iOS ${failureLabel} at (${x}, ${y}) unconfirmed after ${timeoutMs}ms: ` +
+        `${result.error ?? "no error"}; the runner may stay busy until its XCUITest gesture returns`,
+    );
     throw indeterminateTapError(result.error);
   }
   throw new ActionableError(`CtrlProxy iOS ${failureLabel} failed: ${result.error}`);
@@ -307,8 +324,7 @@ function talkBackDisplayTapDispatch(
       action === "tap"
         ? await talkBack.strategy.executePreciseTap(x, y, talkBack.driver, fence)
         : await talkBack.strategy.executeCoordinateFallback(
-            x,
-            y,
+            { x, y },
             action,
             durationMs,
             talkBack.driver,
@@ -404,9 +420,9 @@ export async function androidDisplayTapDispatch(
         ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(duration)}`
         : `tap ${x} ${y}`,
       target.displayId,
-      signal,
-      target.assertCurrent,
       {
+        signal,
+        assertCurrent: target.assertCurrent,
         timeoutMs:
           options.action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
       },

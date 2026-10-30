@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { daemonResponseError } from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/client/client";
 import {
   LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
   advanceOwnerConflictLeash,

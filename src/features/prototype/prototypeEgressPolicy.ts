@@ -163,7 +163,7 @@ export function checkUrl(url: URL, policy: EgressPolicy): string | undefined {
 }
 
 export function destinationPort(url: URL): number {
-  return Number(url.port || (url.protocol === "https:" ? 443 : 80));
+  return Number(url.port || (url.protocol === "https:" || url.protocol === "wss:" ? 443 : 80));
 }
 
 const FORBIDDEN_HEADERS = new Set([

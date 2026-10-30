@@ -5,7 +5,7 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { BootedDevice } from "../../models";
+import { type BootedDevice, requireAndroidOrIosPlatform } from "../../models";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../../utils/logger";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -44,6 +44,8 @@ import {
   type IosSimulatorDisplayChange,
 } from "./IosSimulatorDisplayConfig";
 import {
+  androidResultMessage,
+  setFactoryDisplayConfig,
   accessibilityValuesOf,
   displayFieldsOf,
   mergeGeometryChange,
@@ -168,6 +170,8 @@ export interface SetDisplayConfigInput extends AccessibilityDisplayValues, Displ
    * Both platforms: restore each accessibility display preference this tool changed.
    */
   reset?: boolean;
+  /** With `reset`: also force platform defaults whatever baselines were recorded (#15337). */
+  factory?: boolean;
 }
 
 /** Process-lifetime baseline for the first night-mode value this tool replaces. */
@@ -222,10 +226,13 @@ const ANDROID_CONTENT_SIZE_UNSUPPORTED_ERROR =
   "contentSize is an iOS Dynamic Type category and is only supported on the iOS Simulator; " +
   "use fontScale on Android.";
 
-const ANDROID_UNSUPPORTED_PLATFORM_ERROR = "Display configuration is only supported on Android.";
-
 export class DisplayConfig {
   private device: BootedDevice;
+
+  /** Display configuration drives only Android and iOS; a watch is rejected on first use. */
+  private get platform() {
+    return requireAndroidOrIosPlatform(this.device.platform, "Display configuration");
+  }
 
   private adbFactory: AdbClientFactory;
 
@@ -257,7 +264,7 @@ export class DisplayConfig {
     return new AccessibilityDisplayPreferences(this.device, {
       adb: () => this.adbFactory.create(this.device),
       simctl: this.simctl,
-      iosSimulator: this.device.platform === "ios" && this.isIosSimulator(),
+      iosSimulator: this.platform === "ios" && this.isIosSimulator(),
       ...(this.accessibilityBaselines ? { baselines: this.accessibilityBaselines } : {}),
     });
   }
@@ -292,7 +299,7 @@ export class DisplayConfig {
   }
 
   private support(): DisplayConfigSupport {
-    if (this.device.platform === "ios") {
+    if (this.platform === "ios") {
       // Theme uses `simctl ui appearance` on the Simulator and the runner's
       // `XCUIDevice.appearance` on hardware (#14092). The Simulator also supports font scale
       // as a Dynamic Type category (`simctl ui content_size`, #14087); density has no
@@ -320,7 +327,7 @@ export class DisplayConfig {
     return {
       success: false,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: this.support(),
       error,
     };
@@ -374,7 +381,7 @@ export class DisplayConfig {
     return {
       success: false,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: this.support(),
       error,
     };
@@ -412,7 +419,7 @@ export class DisplayConfig {
     return {
       success: false,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: this.support(),
       error: errorMessage(error),
     };
@@ -520,7 +527,7 @@ export class DisplayConfig {
     return {
       success: error === undefined,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: this.support(),
       ...(applied ? { applied } : {}),
       previous,
@@ -556,7 +563,7 @@ export class DisplayConfig {
     return {
       success: error === undefined,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: this.support(),
       ...(change.applied ? { applied: change.applied } : {}),
       previous: change.previous,
@@ -571,7 +578,7 @@ export class DisplayConfig {
 
   /** Read the current font scale, density, and theme. */
   async getConfig(): Promise<DisplayConfigResult> {
-    if (this.device.platform === "ios") {
+    if (this.platform === "ios") {
       return this.getIosConfig();
     }
     try {
@@ -588,7 +595,7 @@ export class DisplayConfig {
       return {
         success: false,
         deviceId: this.device.deviceId,
-        platform: this.device.platform,
+        platform: this.platform,
         supported: this.support(),
         error: errorMessage(error),
       };
@@ -602,7 +609,7 @@ export class DisplayConfig {
     return {
       success: true,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: { ...this.support(), ...accessibility.supported },
       ...supportNotes(accessibility.notes),
       current: { ...current, ...accessibility.values },
@@ -615,7 +622,7 @@ export class DisplayConfig {
    * platform cannot read are omitted; failures propagate.
    */
   async getRestorableConfig(): Promise<DisplayConfigValues> {
-    if (this.device.platform === "ios") {
+    if (this.platform === "ios") {
       if (this.isIosSimulator()) {
         return this.iosSimulator().readRestorable();
       }
@@ -629,7 +636,7 @@ export class DisplayConfig {
     return {
       success: false,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: this.support(),
       error,
     };
@@ -637,17 +644,26 @@ export class DisplayConfig {
 
   /** Apply a font scale, density, and/or theme change, or reset to defaults. */
   async setConfig(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
+    if (input.factory === true && input.reset === true) {
+      return setFactoryDisplayConfig(this, this.platform);
+    }
     const refusal = this.refuseSetInput(input);
     if (refusal) {
       return refusal;
     }
-    if (
-      this.device.platform === "android" &&
-      (input.reset === true || hasDisplayGeometryField(input))
-    ) {
+    if (this.platform === "android" && (input.reset === true || hasDisplayGeometryField(input))) {
       return this.setWithGeometry(input);
     }
     return this.setNonGeometry(input);
+  }
+
+  /** Forget every recorded baseline: theme, accessibility preferences and Simulator text size. */
+  clearBaselines(): void {
+    this.themeBaselines.delete(this.device.deviceId);
+    this.accessibility().clearBaseline();
+    if (this.platform === "ios") {
+      this.iosSimulator().clearBaseline();
+    }
   }
 
   private geometry(adb: AdbExecutor): AndroidDisplayGeometry {
@@ -670,7 +686,7 @@ export class DisplayConfig {
     const change = prepared ? await geometry.apply(prepared) : await geometry.reset();
     return mergeGeometryChange(display, change, {
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: this.support(),
     });
   }
@@ -700,20 +716,17 @@ export class DisplayConfig {
     if (contradiction !== undefined) {
       return this.invalidRequest(contradiction);
     }
-    if (this.device.platform === "android" && input.contentSize !== undefined) {
+    if (this.platform === "android" && input.contentSize !== undefined) {
       return this.unsupported(ANDROID_CONTENT_SIZE_UNSUPPORTED_ERROR);
     }
-    if (this.device.platform !== "android" && this.device.platform !== "ios") {
-      return this.unsupported(ANDROID_UNSUPPORTED_PLATFORM_ERROR);
-    }
-    if (this.device.platform !== "android" && hasDisplayGeometryField(input)) {
+    if (this.platform !== "android" && hasDisplayGeometryField(input)) {
       return this.unsupported(GEOMETRY_ANDROID_ONLY_ERROR);
     }
     return undefined;
   }
 
   private setDisplayFields(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {
-    if (this.device.platform !== "ios") {
+    if (this.platform !== "ios") {
       return this.setAndroidConfig(input);
     }
     return this.isIosSimulator()
@@ -732,7 +745,7 @@ export class DisplayConfig {
     return {
       success: error === undefined,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: { ...(display?.supported ?? this.support()), ...change.supported },
       ...supportNotes(change.notes),
       applied: { ...display?.applied, ...change.applied },
@@ -758,7 +771,7 @@ export class DisplayConfig {
       return {
         success: false,
         deviceId: this.device.deviceId,
-        platform: this.device.platform,
+        platform: this.platform,
         supported: this.support(),
         error: errorMessage(error),
         message: errorMessage(error),
@@ -796,11 +809,11 @@ export class DisplayConfig {
     }
 
     const error = errors.length > 0 ? errors.join("; ") : undefined;
-    const message = this.androidResultMessage(input.reset, expectedTheme, error);
+    const message = androidResultMessage(input.reset, expectedTheme, error);
     return {
       success: error === undefined,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.platform,
       supported: this.support(),
       ...(applied ? { applied } : {}),
       previous,
@@ -834,24 +847,6 @@ export class DisplayConfig {
     if (restoredTheme !== undefined && appliedTheme === restoredTheme) {
       this.themeBaselines.delete(this.device.deviceId);
     }
-  }
-
-  private androidResultMessage(
-    reset: boolean | undefined,
-    theme: DisplayTheme | undefined,
-    error: string | undefined,
-  ): string | undefined {
-    if (error !== undefined) {
-      return error;
-    }
-    if (!reset) {
-      return undefined;
-    }
-    const nightMode =
-      theme === undefined
-        ? "night mode left unchanged (no night-mode baseline was recorded by displayConfig)"
-        : `night mode restored to ${theme} (changed earlier by displayConfig)`;
-    return `Reset font scale and density to device defaults; ${nightMode}.`;
   }
 
   private async readValues(adb: AdbExecutor): Promise<DisplayConfigValues> {

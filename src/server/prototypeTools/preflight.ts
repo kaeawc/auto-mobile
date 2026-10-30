@@ -1,3 +1,5 @@
+import { PROTOTYPE_DEAD_TAP_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
+import { prototypeDeadTapsUnsupportedMessage } from "../../features/prototype/prototypeDeadTaps";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
 import {
@@ -25,6 +27,11 @@ import {
   prototypeAppearanceOverride,
   prototypeAppearanceUnsupportedMessage,
 } from "../../features/prototype/prototypeAppearance";
+import {
+  prototypeShaderOptInProblem,
+  prototypeShaderFields,
+  PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR,
+} from "../../features/prototype/prototypeShaders";
 import { prototypeRequiredCapabilities } from "../../features/prototype/prototypeCapabilityGates";
 import {
   PROTOTYPE_IOS_MINIMUM_OS,
@@ -100,6 +107,11 @@ async function windowOptionsRefusal(
   if (args.action !== "show" || args.spec === undefined) {
     return undefined;
   }
+  // Only a dead-taps show looks anything up: an extra await here shifts the show's tick timing.
+  const deadTaps = wantsDeadTaps(args) ? await deadTapsRefusal(target, args, signal) : undefined;
+  if (deadTaps) {
+    return deadTaps;
+  }
   const options = requestedPrototypeWindowOptions(args.spec as PrototypeSpec);
   if (!options.appLayer && !options.devicePersistence) {
     return undefined;
@@ -118,6 +130,35 @@ async function windowOptionsRefusal(
     };
   }
   return undefined;
+}
+
+function wantsDeadTaps(args: z.infer<typeof prototypeSchema>): boolean {
+  return (
+    args.action === "show" && (args.spec as PrototypeSpec | undefined)?.window.deadTaps === true
+  );
+}
+
+/** Dead taps must never silently disappear on an older connected agent. */
+async function deadTapsRefusal(
+  target: PrototypeTarget,
+  args: z.infer<typeof prototypeSchema>,
+  signal: AbortSignal | undefined,
+): Promise<PrototypeResult | undefined> {
+  if (!wantsDeadTaps(args)) {
+    return undefined;
+  }
+  const supported = target.android
+    ? await target.android.supportsCommand(PROTOTYPE_DEAD_TAP_CAPABILITY)
+    : target.ios?.supportsCapability(PROTOTYPE_DEAD_TAP_CAPABILITY) === true;
+  signal?.throwIfAborted();
+  return supported
+    ? undefined
+    : {
+        success: false,
+        error: new ActionableError(
+          prototypeDeadTapsUnsupportedMessage(target.android ? "android" : "ios"),
+        ).message,
+      };
 }
 
 /**
@@ -148,6 +189,19 @@ export function appLayerGrant(
   };
 }
 
+/** Custom shaders are Android-only and stay behind a host opt-in. */
+function shaderRefusalFor(
+  target: { android?: unknown },
+  spec: unknown,
+  env: NodeJS.ProcessEnv | undefined,
+): PrototypeResult | undefined {
+  if (!target.android && prototypeShaderFields(spec).length) {
+    return { success: false, error: PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR };
+  }
+  const optIn = prototypeShaderOptInProblem(spec, env);
+  return optIn ? { success: false, error: optIn } : undefined;
+}
+
 /** Refuses spec-introduced features before a show or patch reaches the device. */
 export async function specCapabilityRefusal(
   target: {
@@ -157,8 +211,13 @@ export async function specCapabilityRefusal(
   spec: unknown,
   signal: AbortSignal | undefined,
   iosMinimumOs: Readonly<Record<string, number>> = PROTOTYPE_IOS_MINIMUM_OS,
+  env?: NodeJS.ProcessEnv,
 ): Promise<PrototypeResult | undefined> {
-  for (const gate of prototypeRequiredCapabilities(spec)) {
+  const shaderRefusal = shaderRefusalFor(target, spec, env);
+  if (shaderRefusal) {
+    return shaderRefusal;
+  }
+  for (const gate of prototypeRequiredCapabilities(spec, target.android ? "android" : "ios")) {
     const supported = target.android
       ? await target.android.supportsCommand(gate.capability)
       : target.ios?.supportsCapability(gate.capability) === true;
@@ -404,23 +463,30 @@ async function resolveShowDisplay(
   }
 }
 
+interface MutationPreflightShow {
+  inPlace: boolean;
+  shownDisplayId?: number;
+  signal: AbortSignal | undefined;
+}
+
 /**
  * Chrome resolution/refusal, then display resolution, the iOS reset refusal, the theme-modes
  * refusal, the appearance-override refusal, window-option support, then anchor
  * resolution: any refusal ends the call unsent and leaves the device untouched (the app-layer grant
  * is a device side effect that runs later, in [sendPrototype]). An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
+ * [show.signal] cancels every device read the preflight makes.
  */
 export async function preflightMutation(
-  show: { inPlace: boolean; shownDisplayId?: number },
+  show: MutationPreflightShow,
   target: PrototypeTarget,
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
   dependencies: Pick<
     PrototypeToolDependencies,
-    "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
+    "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory" | "env"
   >,
-  signal: AbortSignal | undefined,
 ): Promise<PreflightStage> {
+  const { signal } = show;
   const multiSurface = await multiSurfaceRefusal(target, args, signal);
   if (multiSurface) {
     return { failure: multiSurface };
@@ -429,21 +495,14 @@ export async function preflightMutation(
   if (chrome.failure) {
     return { failure: chrome.failure };
   }
-  const resolved = await resolveMutationDisplay(
-    show.inPlace,
-    target,
-    device,
-    args,
-    dependencies,
-    signal,
-  );
+  const resolved = await resolveMutationDisplay(show, target, device, args, dependencies);
   if (resolved.failure) {
     return resolved;
   }
   const failure =
     iosResetRefusal(target, args) ??
     (args.action === "show" && args.spec !== undefined
-      ? await specCapabilityRefusal(target, args.spec, signal)
+      ? await specCapabilityRefusal(target, args.spec, signal, undefined, dependencies.env)
       : undefined) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));
@@ -466,12 +525,11 @@ export async function preflightMutation(
  * the requested or pinned display is irrelevant: resolving it could only fail the call.
  */
 async function resolveMutationDisplay(
-  inPlace: boolean,
+  { inPlace, signal }: Pick<MutationPreflightShow, "inPlace" | "signal">,
   target: PrototypeTarget,
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
   dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
-  signal: AbortSignal | undefined,
 ): Promise<{ displayId?: number; failure?: PrototypeResult }> {
   return inPlace ? {} : resolveShowDisplay(target, device, args, dependencies, signal);
 }

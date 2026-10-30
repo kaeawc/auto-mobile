@@ -11,6 +11,7 @@ import { up as ownerUp } from "../../src/db/migrations/2026_07_31_000_video_reco
 import { up as displayUp } from "../../src/db/migrations/2026_09_30_000_video_recording_display";
 import { up as recorderUp } from "../../src/db/migrations/2026_10_13_000_video_recording_recorder_daemon";
 import { up as captureUp } from "../../src/db/migrations/2026_10_12_001_video_recording_capture_teardown";
+import { up as audioStateUp } from "../../src/db/migrations/2026_10_29_000_video_recording_audio_state";
 
 let db: Kysely<Database>;
 let repo: VideoRecordingRepository;
@@ -22,6 +23,7 @@ beforeEach(async () => {
     await up(db);
   }
   await recorderUp(db);
+  await audioStateUp(db);
   await sql`CREATE TABLE device_sessions (session_uuid TEXT, status TEXT, daemon_session_id TEXT)`.execute(
     db,
   );

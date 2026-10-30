@@ -58,7 +58,7 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, { packageName: "com.test" }, config);
 
       const contentDescViolations = result.violations.filter(
         (v) => v.type === "missing-content-description",
@@ -82,7 +82,7 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, { packageName: "com.test" }, config);
 
       const contentDescViolations = result.violations.filter(
         (v) => v.type === "missing-content-description",
@@ -106,7 +106,7 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, { packageName: "com.test" }, config);
 
       const contentDescViolations = result.violations.filter(
         (v) => v.type === "missing-content-description",
@@ -130,7 +130,7 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, { packageName: "com.test" }, config);
 
       const contentDescViolations = result.violations.filter(
         (v) => v.type === "missing-content-description",
@@ -154,7 +154,7 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, { packageName: "com.test" }, config);
 
       const contentDescViolations = result.violations.filter(
         (v) => v.type === "missing-content-description",
@@ -182,7 +182,13 @@ describe("WcagAudit", function () {
       };
 
       // mdpi (160 DPI): 1dp == 1px, so bounds-as-dp assumptions below hold exactly.
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        160,
+      );
 
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(1);
@@ -204,7 +210,13 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        160,
+      );
 
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(0);
@@ -226,7 +238,13 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        160,
+      );
 
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(0);
@@ -248,7 +266,7 @@ describe("WcagAudit", function () {
         useBaseline: false,
       };
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, { packageName: "com.test" }, config);
 
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
       expect(sizeViolations).toHaveLength(0);
@@ -279,7 +297,13 @@ describe("WcagAudit", function () {
 
       // mdpi (160 DPI) so the touch-target-size check (which now skips entirely
       // when density is unknown, issue #6196) actually runs.
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        160,
+      );
 
       // The fixture is two clickable, unlabelled elements both under 44x44dp, so
       // each yields a missing-content-description (error) AND a
@@ -307,7 +331,7 @@ describe("WcagAudit", function () {
       };
 
       // No screenshot provided - should not throw
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, { packageName: "com.test" }, config);
 
       expect(result).not.toBeNull();
       expect(result.violations).toBeInstanceOf(Array);
@@ -335,7 +359,13 @@ describe("WcagAudit", function () {
         "../../fixtures/screenshots/wcag-aa-large-text.png",
       );
 
-      const result = await audit.audit([], hierarchy, screenshot, "com.test", config, 480);
+      const result = await audit.audit(
+        [],
+        hierarchy,
+        { screenshotPath: screenshot, packageName: "com.test" },
+        config,
+        480,
+      );
 
       expect(result.summary.notEvaluated).toBeUndefined();
     });
@@ -361,7 +391,13 @@ describe("WcagAudit", function () {
     ];
 
     async function contrastViolations(density?: number, subject: Element[] = elements) {
-      const result = await audit.audit(subject, hierarchy, screenshot, "com.test", config, density);
+      const result = await audit.audit(
+        subject,
+        hierarchy,
+        { screenshotPath: screenshot, packageName: "com.test" },
+        config,
+        density,
+      );
       return result.violations.filter((v) => v.type === "insufficient-contrast");
     }
 
@@ -412,7 +448,13 @@ describe("WcagAudit", function () {
     const hierarchy: ViewHierarchyNode = { class: "View" };
 
     async function formInputViolations(elements: Element[], density?: number) {
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, density);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        density,
+      );
       return result.violations.filter((v) => v.type === "unlabeled-form-input");
     }
 
@@ -438,6 +480,28 @@ describe("WcagAudit", function () {
         },
       ];
       expect(await formInputViolations(elements)).toHaveLength(0);
+    });
+
+    it("does NOT flag a Compose text field labelled by a classless text node inside it (#14126)", async function () {
+      // Captured from a shown prototype: the label is a child accessibility node with text
+      // and no class, drawn inside the EditText's bounds.
+      const elements: Element[] = [
+        {
+          class: "android.widget.EditText",
+          "resource-id": "name_field",
+          bounds: { left: 42, top: 452, right: 777, bottom: 599 },
+        },
+        { text: "Name", bounds: { left: 84, top: 494, right: 201, bottom: 557 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(0);
+    });
+
+    it("still flags a Compose text field whose only text sits far outside it (#14126)", async function () {
+      const elements: Element[] = [
+        { class: "android.widget.EditText", bounds: { left: 0, top: 0, right: 100, bottom: 60 } },
+        { text: "Unrelated", bounds: { left: 0, top: 2000, right: 100, bottom: 2060 } },
+      ];
+      expect(await formInputViolations(elements)).toHaveLength(1);
     });
 
     it("flags an EditText whose only TextView is far away on both axes", async function () {
@@ -599,7 +663,13 @@ describe("WcagAudit", function () {
         };
 
         // mdpi (160 DPI): 1dp == 1px, so bounds-as-dp labels above hold exactly.
-        const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
+        const result = await audit.audit(
+          elements,
+          hierarchy,
+          { packageName: "com.test" },
+          config,
+          160,
+        );
         const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
         if (expectViolation) {
@@ -631,7 +701,13 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 480);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        480,
+      );
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(1);
@@ -649,7 +725,13 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 480);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        480,
+      );
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(0);
@@ -664,7 +746,13 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        160,
+      );
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(1);
@@ -686,7 +774,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config);
+      const result = await audit.audit(elements, hierarchy, { packageName: "com.test" }, config);
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(0);
@@ -704,7 +792,7 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 0);
+      const result = await audit.audit(elements, hierarchy, { packageName: "com.test" }, config, 0);
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(0);
@@ -723,7 +811,13 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 160);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        160,
+      );
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(1);
@@ -742,7 +836,13 @@ describe("WcagAudit", function () {
         },
       ];
 
-      const result = await audit.audit(elements, hierarchy, undefined, "com.test", config, 420);
+      const result = await audit.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        config,
+        420,
+      );
       const sizeViolations = result.violations.filter((v) => v.type === "touch-target-too-small");
 
       expect(sizeViolations).toHaveLength(1);
@@ -789,8 +889,7 @@ describe("WcagAudit", function () {
       const result = await audit.audit(
         [],
         hierarchyWithHeadingHeights(heights as number[]),
-        undefined,
-        "com.test",
+        { packageName: "com.test" },
         config,
       );
       const headingViolations = result.violations.filter((v) => v.type.includes("heading"));
@@ -801,8 +900,7 @@ describe("WcagAudit", function () {
       const result = await audit.audit(
         [],
         hierarchyWithHeadingHeights([50, 30, 25]),
-        undefined,
-        "com.test",
+        { packageName: "com.test" },
         config,
       );
       // The heading violation type is no longer produced or tracked.
@@ -845,8 +943,7 @@ describe("WcagAudit", function () {
       await new WcagAudit(new FakeTimer(), recorder).audit(
         [],
         { node: roots },
-        undefined,
-        "com.test",
+        { packageName: "com.test" },
         config,
         { windows },
       );
@@ -934,11 +1031,16 @@ describe("WcagAudit", function () {
       const recorder = new RecordingBaselineManager();
       const withRecorder = new WcagAudit(new FakeTimer(), recorder);
 
-      await withRecorder.audit([], hierarchy, undefined, "com.test", {
-        level: "AA",
-        failureMode: "report",
-        useBaseline: true,
-      });
+      await withRecorder.audit(
+        [],
+        hierarchy,
+        { packageName: "com.test" },
+        {
+          level: "AA",
+          failureMode: "report",
+          useBaseline: true,
+        },
+      );
 
       expect(recorder.lastScreenId).toBe("com.test:com.example.MainActivity:root-container");
     });
@@ -951,11 +1053,16 @@ describe("WcagAudit", function () {
       const recorder = new RecordingBaselineManager();
       const withRecorder = new WcagAudit(new FakeTimer(), recorder);
 
-      await withRecorder.audit([], hierarchy, undefined, "com.test", {
-        level: "AA",
-        failureMode: "report",
-        useBaseline: true,
-      });
+      await withRecorder.audit(
+        [],
+        hierarchy,
+        { packageName: "com.test" },
+        {
+          level: "AA",
+          failureMode: "report",
+          useBaseline: true,
+        },
+      );
 
       expect(recorder.lastScreenId).toBe("com.test:android.widget.FrameLayout:root-container");
     });
@@ -965,11 +1072,16 @@ describe("WcagAudit", function () {
       const recorder = new RecordingBaselineManager();
       const withRecorder = new WcagAudit(new FakeTimer(), recorder);
 
-      await withRecorder.audit([], hierarchy, undefined, "com.test", {
-        level: "AA",
-        failureMode: "report",
-        useBaseline: true,
-      });
+      await withRecorder.audit(
+        [],
+        hierarchy,
+        { packageName: "com.test" },
+        {
+          level: "AA",
+          failureMode: "report",
+          useBaseline: true,
+        },
+      );
 
       expect(recorder.lastScreenId).toBe("com.test:unknown:");
     });
@@ -985,11 +1097,16 @@ describe("WcagAudit", function () {
 
     async function baselineAndFindings() {
       const seed = new WcagAudit();
-      const seedResult = await seed.audit(elements, hierarchy, undefined, "com.test", {
-        level: "AA",
-        failureMode: "report",
-        useBaseline: false,
-      });
+      const seedResult = await seed.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        {
+          level: "AA",
+          failureMode: "report",
+          useBaseline: false,
+        },
+      );
       return seedResult;
     }
 
@@ -1002,11 +1119,16 @@ describe("WcagAudit", function () {
         violations: [suppressed],
       });
       const withBaseline = new WcagAudit(new FakeTimer(), stub);
-      const result = await withBaseline.audit(elements, hierarchy, undefined, "com.test", {
-        level: "AA",
-        failureMode: "report",
-        useBaseline: true,
-      });
+      const result = await withBaseline.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        {
+          level: "AA",
+          failureMode: "report",
+          useBaseline: true,
+        },
+      );
 
       expect(
         result.violations.find((v) => v.fingerprint === suppressed.fingerprint),
@@ -1023,11 +1145,16 @@ describe("WcagAudit", function () {
         violations: seedResult.violations,
       });
       const withBaseline = new WcagAudit(new FakeTimer(), stub);
-      const result = await withBaseline.audit(elements, hierarchy, undefined, "com.test", {
-        level: "AA",
-        failureMode: "report",
-        useBaseline: true,
-      });
+      const result = await withBaseline.audit(
+        elements,
+        hierarchy,
+        { packageName: "com.test" },
+        {
+          level: "AA",
+          failureMode: "report",
+          useBaseline: true,
+        },
+      );
 
       expect(result.violations).toHaveLength(0);
       expect(result.summary.baselinedViolations).toBe(seedResult.violations.length);

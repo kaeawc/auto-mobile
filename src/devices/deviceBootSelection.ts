@@ -237,6 +237,8 @@ export function findEligibleExactBootedDevice(
 /** Inputs which affect device discovery, creation, and readiness, but not MCP sessions or automation setup. */
 export interface DeviceBootRequest {
   cameraPosterPath?: string;
+  /** Android: launch without saving a quick-boot snapshot on exit (#15477). */
+  discardSnapshotOnExit?: boolean;
   operationName?: string;
   platform: "android" | "ios";
   minOsVersion?: string;
@@ -302,6 +304,8 @@ export interface DeviceBootResult {
 
 export interface DeviceBootServiceDependencies {
   invalidateAndroidDeviceList?: () => void;
+  /** Fresh claim check for a literal explicit ID missing from eligible running devices. */
+  assertExplicitDeviceNotForeignOwned?: (deviceId: string, platform: Platform) => Promise<void>;
   deviceManager: PlatformDeviceManager;
   deviceMatcher: DeviceMatcher;
   displayInventory?: DisplayInventoryProvider;

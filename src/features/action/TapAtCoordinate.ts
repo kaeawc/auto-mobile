@@ -59,7 +59,20 @@ import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 import { tapDurationMs, LONG_PRESS_MIN_MS } from "./tapAtGesture";
 import { resolveTapAtCall, type TapAtCall } from "./ActionCall";
 import { collectWarnings, partialDoubleTapNote } from "./tapSharedHelpers";
-import { dispatchStylusTap, refusedTap, stylusTapRefusal } from "./stylusPointer";
+import {
+  StylusOutcomeIndeterminateError,
+  dispatchStylusTap,
+  refusedTap,
+  stylusTapRefusal,
+} from "./stylusPointer";
+import { LONG_PRESS_DEFAULT_MS } from "./tapAtGesture";
+import {
+  dispatchRichStylus,
+  pointerNeedsInstrumentation,
+  strokeRequest,
+  tapStrokePoints,
+  type RichStylusOptions,
+} from "./pointer/richStylus";
 import { TapAtGeometryError } from "./TapAtGeometryError";
 import {
   failurePoint,
@@ -72,6 +85,29 @@ export { resolveTapAtCoordinates };
 
 type AndroidCoordinateTapDispatch = typeof dispatchAndroidCoordinateTap;
 type IosCoordinateTapDispatch = typeof dispatchIosCoordinateTap;
+
+/** Delivery hooks for a tap on an explicitly named display. */
+interface DisplayTapCall {
+  onTapDelivered: (talkBack?: boolean) => void;
+  signal?: AbortSignal;
+  onDispatchCompleted?: () => void;
+  onActivationWarnings?: (warnings?: string[]) => void;
+}
+
+/** The display revision an iOS tap is fenced to and its delivery hook. */
+interface IosTapDispatchContext {
+  transitionRevision: { revision: number; observedGeneration: number };
+  onTapDelivered: () => void;
+  signal?: AbortSignal;
+}
+
+/** The target panel, cancellation and fence for one display-addressed coordinate gesture. */
+interface DisplayGestureContext {
+  displayId: number | undefined;
+  signal: AbortSignal | undefined;
+  assertCurrent: () => void;
+  onTapDelivered: () => void;
+}
 
 export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   timer?: Timer;
@@ -87,6 +123,8 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   invalidateIosCache?: () => void;
   lastRenderedObservation?: RenderedObservationReader;
   snapshotReferences?: SnapshotReferenceStore;
+  /** Stylus routes and device facts; the defaults use the instrumentation route and the live device. */
+  stylus?: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
 }
 
 function resolveTalkBackDependencies(
@@ -116,6 +154,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
   private readonly invalidateIosCache: () => void;
   private readonly lastRenderedObservation?: RenderedObservationReader;
+  private readonly stylusRoutes: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
   private readonly snapshotReferences: SnapshotReferenceStore;
   private readonly androidTalkBack: AndroidCoordinateTalkBack;
   private readonly androidDispatcher: AndroidCoordinateTapDispatcher;
@@ -135,6 +174,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       dependencies.invalidateIosCache ??
       (() => IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache());
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
+    this.stylusRoutes = dependencies.stylus ?? {};
     this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
     const talkBack = resolveTalkBackDependencies(
       dependencies,
@@ -174,11 +214,9 @@ export class TapAtCoordinate extends BaseVisualChange {
   private async executeOnDisplay(
     options: TapAtOptions,
     display: string,
-    onTapDelivered: (talkBack?: boolean) => void,
-    signal?: AbortSignal,
-    onDispatchCompleted?: () => void,
-    onActivationWarnings?: (warnings?: string[]) => void,
+    call: DisplayTapCall,
   ): Promise<TapAtResult> {
+    const { onTapDelivered, signal, onDispatchCompleted, onActivationWarnings } = call;
     const action = options.action ?? "tap";
     const { observation, displayId, assertCurrent } = await prepareTargetDisplayAction(
       this.device,
@@ -230,7 +268,9 @@ export class TapAtCoordinate extends BaseVisualChange {
             onActivationWarnings,
           });
         } else {
-          await this.dispatchGesture(options, resolved, observation, signal, displayId, {
+          await this.dispatchGesture(options, resolved, observation, {
+            signal,
+            displayId,
             assertCurrent,
             onTapDelivered,
             onWarning: (warning) => onActivationWarnings?.([warning]),
@@ -274,6 +314,39 @@ export class TapAtCoordinate extends BaseVisualChange {
     return this.executeTap(options, progress, signal, planContext);
   }
 
+  /** A stylus tap or long press: `adb input stylus` for the plain case, the instrumentation route for more. */
+  private async dispatchStylusTapAt(
+    options: TapAtOptions,
+    resolved: { x: number; y: number },
+    transitionRevision: ReturnType<TapAtCoordinate["captureTransitionRevision"]>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const fence = {
+      signal,
+      assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
+    };
+    if (!pointerNeedsInstrumentation(options.pointer)) {
+      await dispatchStylusTap(this.adb, resolved, options, fence);
+      return;
+    }
+    // Pressure, tilt, orientation or buttons: refused before input when the device lacks the route (#13099).
+    const durationMs =
+      options.action === "longPress" ? (options.durationMs ?? LONG_PRESS_DEFAULT_MS) : undefined;
+    try {
+      await dispatchRichStylus(
+        this.device,
+        this.adb,
+        strokeRequest(options.pointer!, tapStrokePoints(resolved, durationMs)),
+        { ...fence, ...this.stylusRoutes },
+      );
+    } catch (error) {
+      // Once the stroke was sent, an unconfirmed result may have been applied.
+      throw error instanceof StylusOutcomeIndeterminateError
+        ? indeterminateTapError(error.message)
+        : error;
+    }
+  }
+
   private async executeTap(
     options: TapAtOptions,
     progress?: ProgressCallback,
@@ -298,16 +371,14 @@ export class TapAtCoordinate extends BaseVisualChange {
     try {
       throwIfAborted(signal);
       if (options.display !== undefined) {
-        const result = await this.executeOnDisplay(
-          options,
-          options.display,
+        const result = await this.executeOnDisplay(options, options.display, {
           onTapDelivered,
           signal,
-          () => {
+          onDispatchCompleted: () => {
             delivery.displayCompleted = true;
           },
           onActivationWarnings,
-        );
+        });
         return { ...result, ...(warnings.size ? { warnings: [...warnings] } : {}) };
       }
       if (
@@ -362,11 +433,9 @@ export class TapAtCoordinate extends BaseVisualChange {
           switch (this.device.platform) {
             case "android": {
               if (options.pointer) {
-                // Stylus goes straight through `input stylus`: no TalkBack routing and no finger fallback.
-                await dispatchStylusTap(this.adb, resolved, options, {
-                  signal,
-                  assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
-                });
+                // Stylus goes straight through `input stylus` or the instrumentation route: no
+                // TalkBack routing and no finger fallback.
+                await this.dispatchStylusTapAt(options, resolved, transitionRevision, signal);
                 onTapDelivered();
                 break;
               }
@@ -375,14 +444,14 @@ export class TapAtCoordinate extends BaseVisualChange {
                 onActivationWarnings,
               );
               delivery.talkBack = talkBackEnabled;
-              await this.androidDispatcher.dispatchAndroidTaps(
-                options,
-                resolved,
-                observeResult,
+              await this.androidDispatcher.dispatchAndroidTaps(options, resolved, observeResult, {
                 transitionRevision,
                 perf,
-                { signal, onTapDelivered, talkBackEnabled, onActivationWarnings },
-              );
+                signal,
+                onTapDelivered,
+                talkBackEnabled,
+                onActivationWarnings,
+              });
               break;
             }
             case "ios":
@@ -390,9 +459,7 @@ export class TapAtCoordinate extends BaseVisualChange {
                 options,
                 resolved,
                 observeResult,
-                transitionRevision,
-                onTapDelivered,
-                signal,
+                { transitionRevision, onTapDelivered, signal },
               );
               break;
             default:
@@ -488,20 +555,12 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     point: { x: number; y: number },
     observation: ObserveResult,
-    transitionRevision: { revision: number; observedGeneration: number },
-    onTapDelivered: () => void,
-    signal?: AbortSignal,
+    context: IosTapDispatchContext,
   ): Promise<number> {
+    const { transitionRevision, signal } = context;
     const frameContext = observation.viewHierarchy?.frameContext;
     try {
-      return await this.dispatchIosTaps(
-        options,
-        point,
-        frameContext,
-        transitionRevision,
-        onTapDelivered,
-        signal,
-      );
+      return await this.dispatchIosTaps(options, point, frameContext, context);
     } catch (error) {
       throwIfAborted(signal);
       const actionable = toActionableError(error, "Failed to dispatch iOS coordinate tap");
@@ -516,14 +575,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         throw actionable;
       }
       // No loop: a second stale rejection surfaces to the caller.
-      return await this.dispatchIosTaps(
-        options,
-        retry.point,
-        retry.frameContext,
-        transitionRevision,
-        onTapDelivered,
-        signal,
-      );
+      return await this.dispatchIosTaps(options, retry.point, retry.frameContext, context);
     }
   }
 
@@ -531,13 +583,12 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     point: { x: number; y: number },
     frameContext: string | undefined,
-    transitionRevision: { revision: number; observedGeneration: number },
-    onTapDelivered: () => void,
-    signal?: AbortSignal,
+    context: IosTapDispatchContext,
   ): Promise<number> {
+    const { transitionRevision, onTapDelivered, signal } = context;
     this.assertDisplayRevisionCurrent(transitionRevision);
     const dispatch = options.action === "doubleTap" ? this.iosDoubleTap : this.iosCoordinateTap;
-    await dispatch(this.iosClient, point.x, point.y, tapDurationMs(options, "ios"), frameContext, {
+    await dispatch(this.iosClient, point, tapDurationMs(options, "ios"), frameContext, {
       signal,
     });
     try {
@@ -710,10 +761,9 @@ export class TapAtCoordinate extends BaseVisualChange {
     point: { x: number; y: number },
     duration: number,
     command: string,
-    displayId: number | undefined,
-    signal: AbortSignal | undefined,
-    context: { assertCurrent: () => void; onTapDelivered: () => void },
+    context: DisplayGestureContext,
   ): Promise<void> {
+    const { displayId, signal } = context;
     if (await supportsCtrlProxyGestureDisplay(this.androidClient, displayId)) {
       throwIfAborted(signal);
       context.assertCurrent();
@@ -750,7 +800,9 @@ export class TapAtCoordinate extends BaseVisualChange {
     }
     throwIfAborted(signal);
     context.assertCurrent();
-    await executeTouchscreenInput(this.adb, command, displayId, signal, context.assertCurrent, {
+    await executeTouchscreenInput(this.adb, command, displayId, {
+      signal,
+      assertCurrent: context.assertCurrent,
       timeoutMs:
         duration >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
     });
@@ -762,14 +814,9 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     point: { x: number; y: number },
     observation: ObserveResult,
-    signal: AbortSignal | undefined,
-    displayId: number | undefined,
-    context: {
-      assertCurrent: () => void;
-      onTapDelivered: () => void;
-      onWarning?: (warning: string) => void;
-    },
+    context: DisplayGestureContext & { onWarning?: (warning: string) => void },
   ): Promise<void> {
+    const { signal, displayId } = context;
     const action = options.action ?? "tap";
     const duration = tapDurationMs(options, this.device.platform);
     const dispatch = async () => {
@@ -780,19 +827,11 @@ export class TapAtCoordinate extends BaseVisualChange {
           action === "longPress"
             ? `swipe ${point.x} ${point.y} ${point.x} ${point.y} ${duration}`
             : `tap ${point.x} ${point.y}`;
-        await this.dispatchAndroidDisplayGesture(
-          point,
-          duration,
-          command,
-          displayId,
-          signal,
-          context,
-        );
+        await this.dispatchAndroidDisplayGesture(point, duration, command, context);
       } else if (this.device.platform === "ios") {
         await (action === "doubleTap" ? this.iosDoubleTap : this.iosCoordinateTap)(
           this.iosClient,
-          point.x,
-          point.y,
+          point,
           duration,
           observation.viewHierarchy?.frameContext,
           { signal },

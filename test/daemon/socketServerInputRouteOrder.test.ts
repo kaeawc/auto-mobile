@@ -24,8 +24,9 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     createFakeDaemonState(),
     new FakeTimer(),
   ).testHooks.input;
-  server.resolveInputTargetDevice = async (_platform, _deviceId, _session, action, bypass) => {
-    events.push(`resolve:${action}:${bypass === true}`);
+  server.resolveInputTargetDevice = async (_platform, _deviceId, _session, action, options) => {
+    events.push(`resolve:${action}:${options?.bypassAndroidDeviceListCache === true}`);
+
     return androidDevice;
   };
   server.runTrackedKeyedDeviceInput = async (method, _device, operation) => {
@@ -56,11 +57,11 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     options.dispatching?.();
     return { success: true };
   }) as never;
-  server.executeInputTypeText = (async (...args: unknown[]) => {
+  server.executeInputTypeText = async (_platform, _device, _text, typeTextOptions) => {
     events.push("dispatch:typeText");
-    (args[args.length - 1] as (() => void) | undefined)?.();
+    typeTextOptions.dispatching?.();
     return { success: true };
-  }) as never;
+  };
   server.liftingStrokeOnSessionRefusal = async (kind, _session, _device, _id, run) => {
     events.push(`lift:${kind}`);
     return await run();

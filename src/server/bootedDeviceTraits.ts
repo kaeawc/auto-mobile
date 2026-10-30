@@ -24,7 +24,7 @@ export interface BootedDeviceTraits {
   model: string | null;
   sdk: number | null;
   abi: string | null;
-  /** `"watch"` or `"automotive"` when the build announces it; null otherwise. */
+  /** `"watch"`, `"automotive"` or `"tv"` when the build announces it; null otherwise. */
   formFactor: TraitFormFactor | null;
 }
 

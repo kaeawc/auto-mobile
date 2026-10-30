@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "string-conditions",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "value": "hello"
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "value",
+      "errorWhen": {
+        "key": "value"
+      }
+    }
+  },
+  "expectedPath": "root.errorWhen.equals",
+  "expectedMessage": "Exactly one of equals, notEquals, gt, lt, empty, contains, startsWith, lengthGt, lengthLt is required"
+}

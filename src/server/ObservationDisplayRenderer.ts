@@ -125,6 +125,7 @@ export class ObservationDisplayRenderer {
       screenSize: panel.screenSize,
       freshness: entry.freshness,
       ...copyDefinedFields(panel, [
+        "importedPrototypeContent",
         "viewHierarchy",
         "skeleton",
         "context",

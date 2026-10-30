@@ -86,7 +86,7 @@ describe("exportPlan from a connection that does not hold the recording's device
           return { steps: [step], stepCount: 1 };
         },
       }),
-      ownerSessionUuid,
+      { ownerSessionUuid },
     );
 
   beforeAll(async () => {

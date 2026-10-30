@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "scrub": 0
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "videoPlayer",
+          "id": "clip",
+          "source": {
+            "sample": "countdown"
+          },
+          "controls": "none",
+          "contentScale": "crop",
+          "autoplay": "whenVisible",
+          "muted": true,
+          "loop": true,
+          "startMs": 1500
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0]",
+  "expectedMessage": "videoPlayer requires media in requires.platform"
+}

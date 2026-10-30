@@ -156,8 +156,10 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       this.adbFactory,
       this.timer,
       this.activeVideoSessionRegistry,
-      this.teardownTimeoutMs,
-      (operation, ms, label) => this.withTimeout(operation, ms, label),
+      {
+        timeoutMs: this.teardownTimeoutMs,
+        withTimeout: (operation, ms, label) => this.withTimeout(operation, ms, label),
+      },
     );
     this.startup = new VideoServerStartup(
       options,

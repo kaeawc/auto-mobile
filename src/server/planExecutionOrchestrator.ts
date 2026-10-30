@@ -14,7 +14,14 @@ import {
   TestStepRecord,
 } from "../db/testExecutionRepository";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { ActionableError, BootedDevice, ExecutePlanResult, PlanExecutionResult } from "../models";
+import {
+  ActionableError,
+  type AndroidOrIosPlatform,
+  BootedDevice,
+  ExecutePlanResult,
+  PlanExecutionResult,
+  requireAndroidOrIosPlatform,
+} from "../models";
 import { PlanExecutionOptions } from "../models/ExecutePlanResult";
 import type { Plan } from "../models/Plan";
 import { serverConfig, type PlanExecutionLease } from "../utils/ServerConfig";
@@ -104,6 +111,7 @@ export class PlanExecutionOrchestrator {
   // Capture before planTools installs this invocation's own planRequest context.
   private readonly nestedInPlan = getToolSelectionContext()?.planRequest !== undefined;
   private readonly device: BootedDevice;
+  private readonly platform: AndroidOrIosPlatform;
   private readonly request: PlanExecutionRequest;
   private readonly progress?: ProgressCallback;
   private readonly signal?: AbortSignal;
@@ -124,6 +132,7 @@ export class PlanExecutionOrchestrator {
 
   constructor(context: ExecutionContext, deps: PlanExecutionDependencies = {}) {
     this.device = context.device;
+    this.platform = requireAndroidOrIosPlatform(context.device.platform, "executePlan");
     this.request = context.request;
     this.progress = context.progress;
     this.signal = context.signal;
@@ -243,7 +252,7 @@ export class PlanExecutionOrchestrator {
         error: result.failedStep ? result.failedStep.error : undefined,
         ...planBaseEndFields(this.request.sessionUuid, result.success, result.failedStep),
         ...planShutdownInterruptionFields(this.signal, result.success),
-        platform: this.device.platform,
+        platform: this.platform,
         deviceId: this.device.deviceId,
         deviceMapping,
         ...(this.request.captureObserveSteps && result.debug ? { debug: result.debug } : {}),
@@ -287,7 +296,7 @@ export class PlanExecutionOrchestrator {
         error: `${error}`,
         ...planRefusalFields(error),
         ...planShutdownInterruptionFields(this.signal),
-        platform: this.device.platform,
+        platform: this.platform,
         deviceId: this.device.deviceId,
         ...healthSummaryField(failureHealth),
       };
@@ -480,8 +489,7 @@ export class PlanExecutionOrchestrator {
       effectiveLabels,
       this.request.device,
       { keepScreenAwake: this.request.keepScreenAwake, platform: this.request.platform },
-      getToolSelectionContext()?.execution,
-      this.signal,
+      { execution: getToolSelectionContext()?.execution, signal: this.signal },
     );
 
     return deviceMapping;
@@ -513,9 +521,12 @@ export class PlanExecutionOrchestrator {
           taken.assignedDevice,
           sessionUuid,
           undefined,
-          `executePlan refused: device label '${label}' would be session ${labelSessionUuid}, ` +
-            "which is already a live session that no plan run created. " +
-            "Release that session or rename the label, then run the plan again.",
+          {
+            message:
+              `executePlan refused: device label '${label}' would be session ${labelSessionUuid}, ` +
+              "which is already a live session that no plan run created. " +
+              "Release that session or rename the label, then run the plan again.",
+          },
         );
       }
     }
@@ -589,6 +600,7 @@ export class PlanExecutionOrchestrator {
         sessionIds,
         this.request.deviceAllocationTimeoutMs,
         this.request.platform,
+        this.signal,
       );
     }
 
@@ -615,6 +627,7 @@ export class PlanExecutionOrchestrator {
     return devicePool.assignMultipleDevicesByCriteria(
       requests,
       this.request.deviceAllocationTimeoutMs,
+      this.signal,
     );
   }
 
@@ -654,7 +667,7 @@ export class PlanExecutionOrchestrator {
 
     try {
       this.perfLog("Starting automatic video recording for test");
-      if (this.device.platform === "android") {
+      if (this.platform === "android") {
         const session = new AndroidSegmentedPlanVideoSession({
           device: this.device,
           outputNamePrefix: videoOutputPrefix,
@@ -959,7 +972,7 @@ export class PlanExecutionOrchestrator {
         timestamp: this.timer.now(),
         deviceId: this.device.deviceId,
         deviceName: this.device.name,
-        devicePlatform: this.device.platform,
+        devicePlatform: this.platform,
         deviceType: getDeviceType(this.device),
         appVersion: this.request.testMetadata.appVersion,
         gitCommit: this.request.testMetadata.gitCommit,

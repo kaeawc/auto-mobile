@@ -26,6 +26,7 @@ final class PrototypePlatformTests: XCTestCase {
         for (name, entry) in table {
             let module = try XCTUnwrap(PrototypePlatformValidator.modules[name])
             XCTAssertEqual(module.capability, entry["capability"] as? String, name)
+            XCTAssertEqual(module.state, (entry["state"] as? [String: Any]).map { Set($0.keys) }, name)
             let events = try XCTUnwrap(entry["events"] as? [String: Any])
             XCTAssertEqual(module.events, Set(events.keys), name)
             let calls = try XCTUnwrap(entry["calls"] as? [String: [String: Any]])
@@ -34,6 +35,7 @@ final class PrototypePlatformTests: XCTestCase {
                 let swift = try XCTUnwrap(module.calls[op])
                 XCTAssertEqual(swift.permissions, call["permissions"] as? [String], op)
                 XCTAssertEqual(swift.background, call["background"] as? [String], op)
+                XCTAssertEqual(swift.capability, call["capability"] as? String, op)
                 let args = try XCTUnwrap(call["args"] as? [String: [String: Any]])
                 XCTAssertEqual(Set(args.keys), Set(swift.args.keys), op)
                 for (arg, definition) in args {
@@ -44,11 +46,41 @@ final class PrototypePlatformTests: XCTestCase {
                     case let .json(maxBytes):
                         XCTAssertEqual(rule["kind"] as? String, "json", arg)
                         XCTAssertEqual(rule["maxBytes"] as? Int, maxBytes, arg)
+                    case let .string(swiftRule):
+                        // The Swift rule is the contract rule itself, so every limit must round-trip.
+                        let flag = { (key: String) in rule[key] as? Bool ?? false }
+                        let limit = { (key: String) in (rule[key] as? Int).map(Double.init) }
+                        XCTAssertEqual(rule["kind"] as? String, "string", arg)
+                        XCTAssertEqual(swiftRule["kind"]?.stringValue, "string", arg)
+                        XCTAssertEqual(swiftRule["empty"] == .bool(true), flag("empty"), arg)
+                        XCTAssertEqual(swiftRule["nonblank"] == .bool(true), flag("nonblank"), arg)
+                        XCTAssertEqual(swiftRule["max"]?.numberValue, limit("max"), arg)
+                        XCTAssertEqual(swiftRule["maxBytes"]?.numberValue, limit("maxBytes"), arg)
+                        XCTAssertEqual(swiftRule["pattern"]?.stringValue, rule["pattern"] as? String, arg)
+                    case .boolean:
+                        XCTAssertEqual(rule["kind"] as? String, "boolean", arg)
                     case let .integer(min, max):
                         XCTAssertEqual(rule["kind"] as? String, "number", arg)
                         XCTAssertEqual(rule["integer"] as? Bool, true, arg)
                         XCTAssertEqual(rule["min"] as? Double, min, arg)
                         XCTAssertEqual(rule["max"] as? Double, max, arg)
+                    case let .number(min, max):
+                        XCTAssertEqual(rule["kind"] as? String, "number", arg)
+                        XCTAssertNotEqual(rule["integer"] as? Bool, true, arg)
+                        XCTAssertEqual(rule["min"] as? Double ?? -.infinity, min, arg)
+                        XCTAssertEqual(rule["max"] as? Double ?? .infinity, max, arg)
+                    case .key:
+                        XCTAssertEqual(rule["kind"] as? String, "key", arg)
+                    case let .enumeration(values):
+                        XCTAssertEqual(rule["kind"] as? String, "enum", arg)
+                        XCTAssertEqual(Set(rule["values"] as? [String] ?? []), values, arg)
+                    case let .contract(swiftRule):
+                        // Every other kind (array, tagged, choice, true, ...) keeps the contract rule
+                        // itself, so it must round-trip unchanged.
+                        let expected = try JSONDecoder().decode(
+                            JSONValue.self, from: JSONSerialization.data(withJSONObject: rule)
+                        )
+                        XCTAssertEqual(swiftRule, expected, arg)
                     }
                 }
             }
@@ -98,6 +130,27 @@ final class PrototypePlatformTests: XCTestCase {
                 )
             }
         }
+    }
+
+    func testStrictValidatorRejectsUnknownRepeatPlatformArgument() throws {
+        let file = PrototypeSpecFixtures.directory.appendingPathComponent("invalid/platform-repeat-unknown-item.json")
+        let raw = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file))
+        let spec = try XCTUnwrap(raw.objectFields?["spec"])
+        XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: JSONEncoder().encode(spec))) { error in
+            guard case let PrototypeLoadError.invalidSpec(path, _) = error else { return XCTFail("\(error)") }
+            XCTAssertEqual(path, "root.children[0].onTap[0].args.message")
+        }
+    }
+
+    func testKeyAndFractionalNumberArgumentsCheckLikeTheContract() {
+        let key = PrototypePlatformValidator.Rule.key
+        XCTAssertNoThrow(try PrototypePlatformValidator.check(.string("main"), key, path: "p"))
+        XCTAssertThrowsError(try PrototypePlatformValidator.check(.string("not-a-key"), key, path: "p"))
+        XCTAssertThrowsError(try PrototypePlatformValidator.check(.number(1), key, path: "p"))
+        let volume = PrototypePlatformValidator.Rule.number(min: 0, max: 1)
+        XCTAssertNoThrow(try PrototypePlatformValidator.check(.number(0.5), volume, path: "p"))
+        XCTAssertThrowsError(try PrototypePlatformValidator.check(.number(1.5), volume, path: "p"))
+        XCTAssertThrowsError(try PrototypePlatformValidator.check(.string("0.5"), volume, path: "p"))
     }
 
     func testPlatformPlaceholdersScanLikeDataPlaceholders() {

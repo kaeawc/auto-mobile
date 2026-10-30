@@ -1,0 +1,29 @@
+{
+  "id": "clipboard",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["clipboard"]
+  },
+  "root": {
+    "type": "button",
+    "label": "Clipboard",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "clipboard.paste",
+        "into": "/data/draft/code",
+        "statusKey": "pasteStatus"
+      }
+    ]
+  },
+  "data": {
+    "draft": {}
+  },
+  "state": {
+    "pasteStatus": "idle"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "spec": {
+    "id": "stack-patterns",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "stack",
+      "id": "nav",
+      "start": "home",
+      "transition": "sharedAxisX",
+      "screens": {
+        "home": {
+          "type": "text",
+          "text": "Home",
+          "onTap": [
+            {
+              "type": "push",
+              "stack": "nav",
+              "screen": "detail",
+              "transition": "zoom"
+            }
+          ]
+        },
+        "detail": {
+          "type": "text",
+          "text": "Detail"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.screens[\"home\"].onTap[0].source"
+}

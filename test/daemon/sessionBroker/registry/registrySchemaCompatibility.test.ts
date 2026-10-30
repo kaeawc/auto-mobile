@@ -1,3 +1,4 @@
+import * as registryDatabase from "../../../../src/daemon/sessionBroker/registry/RegistryDatabase";
 import { afterAll, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { Kysely } from "kysely";
@@ -7,6 +8,7 @@ import { NoOpMigrationLock } from "../../../../src/db/NoOpMigrationLock";
 import { BrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import * as refusals from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import {
+  assertBindingRegistryCurrent,
   migrateBindingRegistry,
   bindingRegistryMigrationProvider,
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
@@ -126,6 +128,54 @@ describe("binding registry schema compatibility", () => {
     }
   });
 
+  test.each([
+    ["fully migrated", full],
+    ["partially migrated", partial],
+  ] as const)(
+    "read-only compatibility check refuses a %s future registry without DDL, DML, or bookkeeping writes",
+    async (_label, harness) => {
+      const before = snapshot(harness.sqlite);
+      await expect(assertBindingRegistryCurrent(harness.db, ":memory:")).rejects.toMatchObject({
+        code: "registry_schema_unsupported",
+        retryable: false,
+        unknownMigrations: [FUTURE],
+      });
+      expect(snapshot(harness.sqlite)).toEqual(before);
+    },
+  );
+
+  test.each([false, true])(
+    "migrate:%s open preserves the typed refusal and never changes a future registry",
+    async (migrate) => {
+      const before = snapshot(full.sqlite);
+      const statements: string[] = [];
+      const create = spyOn(registryDatabase, "createRegistryDatabase").mockImplementation(() => ({
+        prepare: (sql) => {
+          statements.push(sql);
+          return full.sqlite.prepare(sql);
+        },
+        exec: (sql) => {
+          statements.push(sql);
+          // Match the production registry handle, which suppresses close-time maintenance.
+          if (sql !== "PRAGMA optimize;" && sql !== "PRAGMA wal_checkpoint(TRUNCATE);") {
+            full.sqlite.exec(sql);
+          }
+        },
+        // This borrowed in-memory fixture remains open for the surrounding schema assertions.
+        close: () => {},
+      }));
+      try {
+        await expect(
+          openSqliteBindingRegistry({ dbPath: ":memory:", migrate, timer: new FakeTimer() }),
+        ).rejects.toBeInstanceOf(refusals.BindingRegistrySchemaUnsupportedError);
+        expect(snapshot(full.sqlite)).toEqual(before);
+        expect(statements.every((sql) => /^(select|pragma)/i.test(sql.trim()))).toBe(true);
+      } finally {
+        create.mockRestore();
+      }
+    },
+  );
+
   test("rechecks a peer's migration after acquiring the lock, before Kysely writes", async () => {
     let before: ReturnType<typeof snapshot> | undefined;
     const acquire = spyOn(NoOpMigrationLock.prototype, "acquire").mockImplementation(async () => {
@@ -181,6 +231,7 @@ describe("binding registry schema compatibility", () => {
       retryable: false,
       dbPath: ":memory:",
       unknownMigrations: [FUTURE],
+      remedy: error.remedy,
     });
     const open = mock(async () => {
       throw error;

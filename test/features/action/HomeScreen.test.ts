@@ -1024,8 +1024,10 @@ describe("HomeScreen", () => {
         client.setHierarchyData(iosHierarchy("com.apple.springboard"));
         const read = spyOn(client, "requestHierarchySync");
 
-        await action.executeIosHomeNavigation(undefined, undefined, undefined, undefined, () => {
-          dispatches++;
+        await action.executeIosHomeNavigation({
+          onDispatch: () => {
+            dispatches++;
+          },
         });
         expect(timeouts).toEqual([2500, 2400]);
         expect(fakeTimer.getSleepHistory()).toEqual([2500, 100]);
@@ -1077,7 +1079,7 @@ describe("HomeScreen", () => {
             },
           });
 
-          const error = await action.executeIosHomeNavigation(undefined, undefined, budget).then(
+          const error = await action.executeIosHomeNavigation({ timeoutMs: budget }).then(
             () => undefined,
             (failure: unknown) => failure,
           );
@@ -1161,18 +1163,16 @@ describe("HomeScreen", () => {
             },
           },
         });
-        const pending = action
-          .executeIosHomeNavigation(undefined, undefined, undefined, controller.signal)
-          .then(
-            () => {
-              settled = true;
-              return undefined;
-            },
-            (error: unknown) => {
-              settled = true;
-              return error;
-            },
-          );
+        const pending = action.executeIosHomeNavigation({ signal: controller.signal }).then(
+          () => {
+            settled = true;
+            return undefined;
+          },
+          (error: unknown) => {
+            settled = true;
+            return error;
+          },
+        );
         try {
           fakeTimer.advanceTime(2500);
           await drainUntil(() => settled || fakeTimer.getPendingSleeps().includes(100), {
@@ -1299,7 +1299,7 @@ describe("HomeScreen", () => {
       client.setHierarchyData(iosHierarchy("com.apple.Maps"));
       const readSpy = spyOn(client, "requestHierarchySync");
 
-      await expect(action.executeIosHomeNavigation(undefined, undefined, 500)).rejects.toThrow(
+      await expect(action.executeIosHomeNavigation({ timeoutMs: 500 })).rejects.toThrow(
         /SpringBoard.*com\.apple\.Maps/,
       );
       expect(fakeTimer.now()).toBe(500);
@@ -1352,6 +1352,28 @@ describe("HomeScreen", () => {
 
       await expect(action.execute()).rejects.toThrow("hardware home failed");
       expect(launches).toBe(0);
+    });
+
+    test("physical iOS forwards the frame context to the runner Home press", async () => {
+      const { action, client } = createIosHomeScreen();
+      client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+      const press = spyOn(client, "requestPressHome");
+
+      await action.executeIosHomeNavigation({ frameContext: "frame-7" });
+      expect(press.mock.calls[0]?.[2]).toBe("frame-7");
+    });
+
+    test("physical iOS stops verification when the caller aborts during the foreground read", async () => {
+      const controller = new AbortController();
+      const { action, client } = createIosHomeScreen();
+      spyOn(client, "requestHierarchySync").mockImplementation(async () => {
+        controller.abort();
+        return { hierarchy: iosHierarchy("com.apple.springboard") };
+      });
+
+      await expect(
+        action.executeIosHomeNavigation({ signal: controller.signal }),
+      ).rejects.toBeDefined();
     });
   });
 
@@ -1406,6 +1428,57 @@ describe("HomeScreen", () => {
   // never becomes the launcher. Home must verify the actual foreground app
   // instead of trusting a dispatch method's self-reported result.
   describe("home-press verification (issue #6147)", () => {
+    test.each([true, false])(
+      "AAOS map-host Home is verified after global action success %s",
+      async (globalSuccess) => {
+        mockDevice = { ...mockDevice, formFactor: "automotive" };
+        fakeAdb.setCommandResponse(
+          "resolve-activity",
+          createExecResult("com.android.car.carlauncher/.CarLauncher", ""),
+        );
+        homeScreen = createHomeScreen(sequencedWindow(["com.android.car.mapsplaceholder"]), {
+          requestGlobalAction: async () => globalActionResult({ success: globalSuccess }),
+        });
+        const result = await homeScreen.execute();
+        expect(result.success).toBe(true);
+        expect(fakeAdb.getExecutedCommands().includes("shell input keyevent 3")).toBe(
+          !globalSuccess,
+        );
+      },
+    );
+
+    test.each(["automotive", "phone"] as const)(
+      "unchanged map host is already Home only on %s",
+      async (formFactor) => {
+        mockDevice = { ...mockDevice, formFactor };
+        const observation = createObserveResult();
+        observation.viewHierarchy = {
+          packageName: "com.android.car.mapsplaceholder",
+          hierarchy: { node: {} },
+        };
+        fakeObserveScreen.setObserveResult(observation);
+        fakeWindow.configureActiveWindow({
+          appId: "com.android.car.mapsplaceholder",
+          activityName: "Main",
+          layoutSeqSum: 1,
+        });
+        fakeAdb.setCommandResponse(
+          "resolve-activity",
+          createExecResult("com.android.car.carlauncher/.CarLauncher", ""),
+        );
+        homeScreen = createHomeScreen(fakeWindow, {
+          requestGlobalAction: async () => globalActionResult({ success: true }),
+        });
+        if (formFactor === "automotive") {
+          const result = await homeScreen.execute();
+          expect(result.success).toBe(true);
+          expect(result.message).toBe("Already on the home screen");
+        } else {
+          await expect(homeScreen.execute()).rejects.toThrow("did not background");
+        }
+      },
+    );
+
     test("reports success when the accessibility global action actually backgrounds the app", async () => {
       const globalActionClient = {
         requestGlobalAction: async () => globalActionResult({ success: true }),

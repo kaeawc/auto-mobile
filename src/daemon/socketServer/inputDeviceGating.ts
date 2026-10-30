@@ -62,6 +62,13 @@ export interface InputRequestContext {
   requester?: () => string | undefined;
 }
 
+/** How an `input/*` frame's target is listed and whose frame it is. */
+export interface InputTargetResolveOptions {
+  /** Re-read the Android device list instead of a cached one; defaults off. */
+  bypassAndroidDeviceListCache?: boolean;
+  requester?: InputRequestContext["requester"];
+}
+
 /** Owner fence and device-key wait bound for one tracked `input/*` execution. */
 export interface InputDeviceGate {
   onDispatch?: () => void;
@@ -231,8 +238,7 @@ export class InputDeviceGating {
     deviceId: string | undefined,
     socketSessionId: string | undefined,
     action: InputTargetAction,
-    bypassAndroidDeviceListCache: boolean = false,
-    requester?: () => string | undefined,
+    { bypassAndroidDeviceListCache = false, requester }: InputTargetResolveOptions = {},
   ): Promise<BootedDevice> {
     const targetDevice = await this.ports.selectInputTargetDevice(
       platform,
@@ -576,7 +582,12 @@ export class InputDeviceGating {
     try {
       executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
       signal.throwIfAborted();
-      await this.ports.admitInputAsControlCall(execution, targetDevice.deviceId, sessionUuid);
+      await this.ports.admitInputAsControlCall(
+        execution,
+        targetDevice.deviceId,
+        sessionUuid,
+        ownerSignal,
+      );
       // The holder, readiness and admission checks passed, so the execution stays tracked as
       // control in flight on the session from here on. It is USE of the session (#10824) only once
       // the handler's own pre-dispatch checks passed too: a frame refused for a stale frame
@@ -622,20 +633,27 @@ export class InputDeviceGating {
    * Input on a held device is a control call on the holder's session: refused while the session is
    * suspect, lapsed or past its idle deadline, exactly as an MCP control call is (#11417). Input
    * on a device no session holds has no session to admit.
+   *
+   * Admission runs under the execution's signal and the caller's own (`ownerSignal`: the frame's
+   * socket close or client cancel, or the `ide/*` route's signal), passed explicitly rather than
+   * read ambiently (#15671).
    */
   async admitInputAsControlCall(
     execution: ActiveExecution,
     deviceId: string,
     holderSessionUuid: string | undefined,
+    ownerSignal: AbortSignal | undefined,
   ): Promise<void> {
     if (!holderSessionUuid) {
       return;
     }
+    const trackerSignal = execution.abortController.signal;
     await admitInputOnHolderSession({
       deviceId,
       holderSessionUuid,
       sessionManager: this.ports.daemonState().getSessionManager(),
       execution: sessionExecutionMetadataOf(execution),
+      signal: ownerSignal ? AbortSignal.any([trackerSignal, ownerSignal]) : trackerSignal,
     });
     // A release that landed while admission was awaited answers its own typed refusal.
     await this.ports.answeringSessionRelease(execution, async () =>

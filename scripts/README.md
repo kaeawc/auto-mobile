@@ -355,6 +355,26 @@ that name the session are saved under `scratch/live-idle-release-check/<time>/`.
 On failure the private directory is kept. `test/bats/live-idle-release-check.bats`
 covers the script with a fake server, adb and clock.
 
+## Research: Persona Robustness Harness
+
+`persona-robustness/run.ts` (#14061) replays one plan under the stock baseline,
+each manufacturer profile and a set of display stressors on a real emulator, and
+writes `report.json` and `report.md`. It is manual only and never runs in CI.
+
+```bash
+bun run build
+bun scripts/persona-robustness/run.ts \
+  --plan test/resources/test-plans/playground/ux-exploration/navigate-demo-index.yaml \
+  --personas samsung-oneui,xiaomi-hyperos,motorola,display:font-scale-1.3 \
+  --repeats 2 --ablate
+```
+
+Options: `--app-id` (default: the plan's first `launchApp`), `--personas`,
+`--repeats`, `--ablate`, `--session`, `--avd`, `--server` and `--out` (default
+`scratch/persona-robustness/<time>/`). It exits 1 when a reset failed and the
+run stopped early. Scoring and attribution rules are in
+`docs/design-docs/plat/android/persona-robustness-harness.md`.
+
 ## Other Scripts
 
 ### Build Scripts
@@ -379,6 +399,7 @@ covers the script with a fake server, adb and clock.
   - `persistence-prepare` / `persistence-verify` - Check whether `-writable-system` changes survive an `avd snapshot save` + cold reload
   - See `docs/design-docs/plat/android/device-condition-capability-probe.md`
 - `capture-oem-evidence.sh <serial> [out-dir]` - Capture the non-interactive OEM evidence for #14048 from one connected device: `getprop` (device identifiers redacted), `pm list features`, system packages and default-app holders, under `test/fixtures/android-oem/<manufacturer>-<model>-<date>/` with a provenance manifest. The README it writes there lists the hierarchy captures still to take by hand. Tests: `test/bats/capture-oem-evidence.bats` (stub adb).
+- `media/generate-prototype-test-media.sh [out-dir]` - Generate the prototype test clips (#14257) with ffmpeg `lavfi` sources into `scratch/prototype-media/` (default): H.264/AAC MP4 and VP9/Opus WebM clips from 160x90 to 640x360 and 3-10 s, a two-rendition HLS ladder, five 5 s AAC episodes and a `manifest.txt` of sha256 sums. Output is byte-identical across runs with the same ffmpeg build, so no clip is committed. Needs ffmpeg with `libx264`, `aac`, `libvpx-vp9` and `libopus`; `FFMPEG` overrides the binary. Tests: `test/bats/generate-prototype-test-media.bats` (stub ffmpeg).
 
 ### Tool Definition Scripts
 
@@ -537,6 +558,10 @@ All scripts should:
 
 - `scripts/android/compose-compiler-report.sh` — opt-in release compiler reports, package stability summary, and generated Compose compiler report pages.
 - `scripts/android/prototype-frame-benchmark.sh` — explicit-device gfxinfo scenarios for the fixed benchmark prototype; supports command-only dry runs and stub executables.
+- `scripts/prototype/generate-plural-categories-fixture.ts` — regenerates `test/fixtures/prototype-spec/strings/plural-categories.json` (string-table plural categories per language) shared by the TypeScript, Kotlin and Swift tests.
+- `scripts/prototype/generate-feed-benchmark-spec.ts` — deterministic lazy-feed JSON generator with contract-bounded rows and optional fixture paging.
+- `scripts/android/prototype-feed-benchmark.sh` — feed gfxinfo scenarios with report-only or enforced p95 verdicts and optional Markdown output.
+- `scripts/ios/prototype-feed-benchmark.sh` — explicit-simulator scripted feed scrolling with per-step and total wall time, without frame metrics.
 
 See [prototype performance measurement](../docs/design-docs/plat/android/prototype-performance-measurement.md) for prerequisites and output formats.
 

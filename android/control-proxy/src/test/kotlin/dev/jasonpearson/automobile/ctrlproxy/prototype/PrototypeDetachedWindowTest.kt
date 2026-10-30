@@ -49,6 +49,7 @@ class PrototypeDetachedWindowTest {
         manager,
         isViewAttached = manager::isViewAttached,
         sdkInt = 30,
+        firstRenderWaiter = PrototypeFirstRenderWaiter { _, _ -> true },
         mainThread = main,
         settleTimer = FakePrototypeSettleTimer(history),
         densityProvider = { density },
@@ -135,7 +136,7 @@ class PrototypeDetachedWindowTest {
     assertSame(runtime, controller.activeRuntime)
     assertEquals(2, manager.added.size)
     assertEquals(2, requests.size)
-    assertSame(request, requests.last())
+    assertEquals(request.copy(animateEnter = false), requests.last())
     assertEquals(PrototypeWindowChrome.NONE, requests.last().chrome)
     assertTrue(events.isEmpty())
     manager.failRemove = false
@@ -161,7 +162,7 @@ class PrototypeDetachedWindowTest {
       controller.onConfigurationChanged()
       assertTrue(host.isShowing)
       assertSame(runtime, controller.activeRuntime)
-      assertSame(request, requests.last())
+      assertEquals(request.copy(animateEnter = false), requests.last())
       assertEquals(2, manager.added.size)
       assertTrue(events.isEmpty())
     }

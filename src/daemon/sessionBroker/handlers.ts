@@ -5,6 +5,7 @@ import {
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { z } from "zod";
 import { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./broker";
+import { brokerConnectionHostMutationRefusal } from "./connectionScope";
 import { RECEIPT_RETENTION_MS } from "./retention";
 import { SessionExportIdentityMismatchError } from "./store";
 import { parseSessionConfig } from "../../devices/sessionConfig";
@@ -380,4 +381,40 @@ export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMeth
     (request, state) => handleAbandonBrokerSessionRequest(request, state),
   ],
   ["daemon/releaseBrokerSession", (request, state) => handleReleaseBrokerSession(request, state)],
+  [
+    "daemon/drainBrokerPool",
+    (request, state, _executions, _signal, context) =>
+      handleDrainBrokerPool(request, state, context.socketSessionId),
+  ],
 ];
+
+/** Operator drain of idle pooled devices; takes no parameters and binds no connection. */
+export async function handleDrainBrokerPool(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+  socketSessionId?: string,
+): Promise<DaemonMethodResult> {
+  const refusal = brokerConnectionHostMutationRefusal({
+    binding: state.getBrokerConnectionScopes?.().get(socketSessionId),
+    action: "daemon/drainBrokerPool",
+  });
+  if (refusal) {
+    return { success: false, code: refusal.code, error: refusal.message };
+  }
+  const service = state.getSessionBrokerService?.();
+  if (!service) {
+    return unavailable(state);
+  }
+  const parsed = z
+    .object({})
+    .strict()
+    .safeParse(request.params ?? {});
+  if (!parsed.success) {
+    return { success: false, code: "session_config_invalid", error: "Drain takes no parameters" };
+  }
+  try {
+    return { success: true, result: { ...(await service.broker.drainIdlePool()) } };
+  } catch (error) {
+    return brokerRejection(error);
+  }
+}

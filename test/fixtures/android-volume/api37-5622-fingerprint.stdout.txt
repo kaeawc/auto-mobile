@@ -1,0 +1,1 @@
+google/sdk_gwear_arm64/emu64a:17/CP2A.260330.028.E2/15706224:user/release-keys

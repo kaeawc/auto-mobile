@@ -1,0 +1,23 @@
+{
+  "id": "hide-keyboard-ignored-accessory",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Hello",
+    "ios": {
+      "bottomAccessory": {
+        "type": "button",
+        "label": "Done",
+        "onTap": [
+          {
+            "type": "hideKeyboard"
+          }
+        ]
+      }
+    }
+  }
+}

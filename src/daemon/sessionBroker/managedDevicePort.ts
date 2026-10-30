@@ -616,7 +616,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         );
       }
       const device = this.androidResetTarget(resource, assignment, name);
-      return android.reset(resource.resourceId, device, profile, assertOwned);
+      return android.reset(resource.resourceId, device, profile, assertOwned, signal);
     });
     await assertOwned();
     return result;
@@ -899,6 +899,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     return {
       runtime: runtime.systemImagePackage,
       deviceType: profile.profileId,
+      ...(profile.memoryMb === undefined ? {} : { configuration: { memoryMb: profile.memoryMb } }),
     };
   }
 
@@ -918,10 +919,16 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (!stored || typeof stored !== "object") {
       return false;
     }
-    const candidate = stored as { runtime?: unknown; deviceType?: unknown };
+    const candidate = stored as {
+      runtime?: unknown;
+      deviceType?: unknown;
+      configuration?: { memoryMb?: unknown };
+    };
     return (
       candidate.runtime === requestedSpec.runtime &&
-      candidate.deviceType === requestedSpec.deviceType
+      candidate.deviceType === requestedSpec.deviceType &&
+      candidate.configuration?.memoryMb ===
+        ("configuration" in requestedSpec ? requestedSpec.configuration?.memoryMb : undefined)
     );
   }
 

@@ -10,8 +10,13 @@ setup() {
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgent" \
     "${FIXTURE}/ios/prototype-agent/ProtoViewer" "${FIXTURE}/ios/prototype-agent/Viewer"
-  cp "${REPO_ROOT}/scripts/ios/protoviewer-build.sh" "${FIXTURE}/scripts/ios/"
-  cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
+  cp "${REPO_ROOT}/scripts/ios/protoviewer-build.sh" "${REPO_ROOT}/scripts/ios/prototype-effects-metallib.sh" \
+    "${FIXTURE}/scripts/ios/"
+  mkdir -p "${FIXTURE}/ios/prototype-agent/Shaders"
+  touch "${FIXTURE}/ios/prototype-agent/Shaders/PrototypeEffects.metal"
+  cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" \
+    "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy" "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
+  cp "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/"*.xcstrings "${FIXTURE}/ios/prototype-agent/ProtoViewer/"
   touch "${FIXTURE}/ios/prototype-agent/ProtoViewer/ProtoViewerApp.swift" \
     "${FIXTURE}/ios/prototype-agent/Viewer/ViewerApp.swift" \
     "${FIXTURE}/ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/Core.swift" \
@@ -23,6 +28,13 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$BUILD_LOG"
 if [[ "$*" == '--sdk iphonesimulator --show-sdk-path' ]]; then
   echo /fake/sdk
+elif [[ "${3:-}" == metal || "${3:-}" == metallib ]]; then
+  # The effects metallib step: `metal --version` probes, `metal -c ... -o air`, `metallib air -o out`.
+  [[ "${4:-}" == --version ]] || printf 'compiled\n' > "${!#}"
+elif [[ "$1 ${2:-}" == 'xcstringstool compile' ]]; then
+  [[ -s "$3" && "$4" == --output-directory ]]
+  mkdir -p "$5/en.lproj"
+  touch "$5/en.lproj/$(basename "$3" .xcstrings).strings"
 elif [[ "$3" == swiftc ]]; then
   [[ "$*" == *'-swift-version 6 -warnings-as-errors'* ]]
   [[ "$*" == *'/ProtoViewer/ProtoViewerApp.swift'* ]]
@@ -44,7 +56,8 @@ if [[ "$1" == -create ]]; then
   while [[ "$1" != -output ]]; do shift; done
   printf 'universal\n' > "$2"
 else
-  [[ "$2" == -verify_arch ]]
+  # Xcode 27.1 beta: one -verify_arch per invocation; several architectures after one flag fail.
+  [[ "$2" == -verify_arch && $# -eq 3 ]]
 fi
 SCRIPT
   cat > "${MOCK_BIN}/plutil" <<'SCRIPT'
@@ -61,7 +74,7 @@ SCRIPT
   chmod +x "${MOCK_BIN}/"{xcrun,lipo,plutil,codesign}
   export PATH="${MOCK_BIN}:${PATH}"
   mkdir -p "${FIXTURE}/scripts/lib"
-  cp "${REPO_ROOT}/scripts/lib/spotlight-exclude.sh" "${FIXTURE}/scripts/lib/"
+  cp "${REPO_ROOT}/scripts/lib/spotlight-exclude.sh" "${REPO_ROOT}/scripts/lib/lipo-verify-arch.sh" "${FIXTURE}/scripts/lib/"
   unset PROTOVIEWER_CLEARTEXT
   SCRIPT="${FIXTURE}/scripts/ios/protoviewer-build.sh"
   OUT="${BATS_TEST_TMPDIR}/out space"
@@ -73,11 +86,15 @@ SCRIPT
   # Caller-owned output outside the fixture repo must remain searchable.
   [ ! -e "$OUT/.metadata_never_index" ]
   [ -s "$OUT/ProtoViewer.app/ProtoViewer" ]
+  # The privacy manifest ships at the bundle root (#14151).
+  cmp "$FIXTURE/ios/prototype-agent/ProtoViewer/PrivacyInfo.xcprivacy" "$OUT/ProtoViewer.app/PrivacyInfo.xcprivacy"
   [[ "$output" == *'/ProtoViewer.app'* ]]
   run cat "$BUILD_LOG"
   [[ "$output" == *'arm64-apple-ios17.0-simulator'* ]]
   [[ "$output" == *'x86_64-apple-ios17.0-simulator'* ]]
-  [[ "$output" == *'-verify_arch arm64 x86_64'* ]]
+  [[ "$output" == *' -verify_arch arm64'* ]]
+  [[ "$output" == *' -verify_arch x86_64'* ]]
+  [[ "$output" != *'-verify_arch arm64 x86_64'* ]]
   [[ "$output" == *'--force --sign - '* ]]
 }
 
@@ -114,6 +131,33 @@ def check(value):
         for item in value:
             check(item)
 check(value)
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "ProtoViewer and Viewer plists run natively on iPad with every orientation (#15431)" {
+  run python3 - "${REPO_ROOT}/ios/prototype-agent/ProtoViewer/Info.plist" \
+    "${REPO_ROOT}/ios/prototype-agent/Viewer/Info.plist" <<'PY'
+import plistlib
+import re
+import sys
+orientations = {
+    'UIInterfaceOrientationPortrait',
+    'UIInterfaceOrientationPortraitUpsideDown',
+    'UIInterfaceOrientationLandscapeLeft',
+    'UIInterfaceOrientationLandscapeRight',
+}
+for path in sys.argv[1:]:
+    with open(path, 'rb') as source:
+        # The Viewer template's stamping comment contains `--` flags, which expat rejects.
+        value = plistlib.loads(re.sub(rb'<!--.*?-->', b'', source.read(), flags=re.S))
+    assert value['UIDeviceFamily'] == [1, 2], path
+    assert set(value['UISupportedInterfaceOrientations~ipad']) == orientations, path
+    assert len(value['UISupportedInterfaceOrientations~ipad']) == 4, path
+    # iPhone orientations stay unchanged: no upside-down on the phone.
+    assert 'UIInterfaceOrientationPortraitUpsideDown' not in value['UISupportedInterfaceOrientations'], path
+    assert value['UIApplicationSceneManifest']['UIApplicationSupportsMultipleScenes'] is False, path
+    assert 'UIRequiresFullScreen' not in value, path
 PY
   [ "$status" -eq 0 ]
 }
@@ -164,4 +208,31 @@ PY
   run cat "$BUILD_LOG"
   [[ "$output" == *' swiftc '* ]]
   [[ "$output" != *'PROTOVIEWER_ALLOW_CLEARTEXT'* ]]
+}
+
+@test "compiles both string catalogs into localized bundle resources" {
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -eq 0 ]
+  [ -f "$OUT/ProtoViewer.app/en.lproj/Localizable.strings" ]
+  [ -f "$OUT/ProtoViewer.app/en.lproj/InfoPlist.strings" ]
+  run cat "$BUILD_LOG"
+  [[ "$output" == *'xcstringstool compile '*'Localizable.xcstrings --output-directory'* ]]
+  [[ "$output" == *'xcstringstool compile '*'InfoPlist.xcstrings --output-directory'* ]]
+}
+
+@test "rejects stray root InfoPlist strings and compiled assets" {
+  mkdir -p "$OUT/ProtoViewer.app"
+  touch "$OUT/ProtoViewer.app/InfoPlist.strings"
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -ne 0 ]
+  rm "$OUT/ProtoViewer.app/InfoPlist.strings"
+  mkdir -p "$OUT/ProtoViewer.app/stray"
+  touch "$OUT/ProtoViewer.app/stray/InfoPlist.strings"
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -ne 0 ]
+  rm "$OUT/ProtoViewer.app/stray/InfoPlist.strings"
+  mkdir -p "$OUT/ProtoViewer.app/en.lproj"
+  touch "$OUT/ProtoViewer.app/en.lproj/Assets.car"
+  run bash "$SCRIPT" "$OUT"
+  [ "$status" -ne 0 ]
 }

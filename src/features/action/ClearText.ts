@@ -1,3 +1,4 @@
+import { isAndroidHintText } from "./androidHintText";
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
@@ -26,6 +27,7 @@ import { toSearchable } from "../utility/SearchableNode";
 import { nodeBounds } from "../../models/ViewHierarchyResult";
 import { parseBounds } from "../../utils/bounds";
 import { IosKeyboardNativeEditableTracker } from "./iosKeyboardNativeEditable";
+import { readIosTokenField } from "./iosTokenField";
 import { ANDROID_INPUT_CLASSES, isTruthyFlag } from "../utility/elementProperties";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
@@ -57,15 +59,12 @@ function getEditableTextLength(
 ): number | undefined {
   const searchable = toSearchable(properties);
   const text = searchable.textSources.value ?? searchable.textSources.text;
-  const hint = properties["hint-text"];
   const android = ["android.", "androidx."].some((prefix) =>
     searchable.className?.startsWith(prefix),
   );
-  // Android hierarchy nodes carry no showing-hint flag. Typed text identical to
-  // the hint is indistinguishable and counts as empty for verification/skip-clear.
   // SendKeys includes the raw hint length for deletes so replace cannot under-delete
   // that real text; the existing clear sequence runs before verification and typing.
-  if (!includeHintText && android && typeof hint === "string" && hint !== "" && text === hint) {
+  if (!includeHintText && isAndroidHintText(searchable.className, properties["hint-text"], text)) {
     return 0;
   }
   const capturedLength = typeof text === "string" ? text.length : searchable.capturedTextLength;
@@ -137,6 +136,38 @@ export function hasFocusedTextInput(
   return false;
 }
 
+/**
+ * Stable identity of the focused editable control: resource id, class and top-left corner. The
+ * size is left out so a multiline field that grows after a newline keeps its identity.
+ */
+export function getFocusedTextFieldIdentity(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser(),
+): string | undefined {
+  for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    let identity: string | undefined;
+    for (const rootNode of rootGroup) {
+      parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
+        const properties = parser.extractNodeProperties(node);
+        if (identity !== undefined || !isFocusedTextInputProperties(properties)) {
+          return;
+        }
+        const searchable = toSearchable(properties);
+        identity = JSON.stringify([
+          searchable.nativeId ?? null,
+          searchable.className ?? null,
+          searchable.bounds?.left ?? null,
+          searchable.bounds?.top ?? null,
+        ]);
+      });
+    }
+    if (identity !== undefined) {
+      return identity;
+    }
+  }
+  return undefined;
+}
+
 /** Read the editable value, never an iOS field's accessibility label or placeholder. */
 export function getFocusedTextValue(
   viewHierarchy: ViewHierarchyResult,
@@ -152,6 +183,10 @@ export interface FocusedTextField {
   nativeEditableValues?: Readonly<Record<string, string>>;
   /** Value of the sole native iOS editable above the on-screen keyboard (blank reads as ""). */
   keyboardNativeEditableValue?: string;
+  /** Committed token labels of a recipient/token field; absent for an ordinary text field. */
+  tokens?: readonly string[];
+  /** A token field's value minus its token labels: the text typed after the last token. */
+  trailingText?: string;
 }
 
 export interface FocusedTextFieldOptions {
@@ -199,7 +234,7 @@ export function getFocusedTextField(
         if (!isFocusedTextInputProperties(properties)) {
           return;
         }
-        const field = readFocusedTextField(properties, options);
+        const field = readFocusedTextFieldWithTokens(node, properties, options, parser);
         if (field === undefined) {
           return;
         }
@@ -321,6 +356,21 @@ function readFocusedTextField(
   return value !== undefined || options.includeIosNativeEditableValues
     ? { value, secure }
     : undefined;
+}
+
+/** The focused field's value, plus the committed tokens of a recipient/token field. */
+function readFocusedTextFieldWithTokens(
+  node: ViewHierarchyNode,
+  properties: Record<string, unknown>,
+  options: FocusedTextFieldOptions,
+  parser: ElementParser,
+): FocusedTextField | undefined {
+  const field = readFocusedTextField(properties, options);
+  if (field === undefined || field.secure) {
+    return field;
+  }
+  const tokenState = readIosTokenField(node, field.value, parser);
+  return tokenState === undefined ? field : { ...field, ...tokenState };
 }
 
 function iosFieldValueOrBlank(textSources: Readonly<Record<string, string>>): string {

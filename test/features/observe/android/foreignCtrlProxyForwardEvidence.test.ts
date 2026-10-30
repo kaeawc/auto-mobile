@@ -7,13 +7,16 @@ import {
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
+// The source filters process.pid from foreign clients.
+const FOREIGN_PID = process.pid + 1;
+
 const deviceId = "evidence-test-device";
 afterEach(resetForeignCtrlProxyForwardEvidenceForTesting);
 
 function harness() {
   const adb = new FakeAdbExecutor();
   let rows = `${deviceId} tcp:52001 tcp:8765`;
-  let clients = [4242];
+  let clients = [FOREIGN_PID];
   let alive = true;
   let recorded = false;
   let probeError: Error | undefined;
@@ -64,6 +67,24 @@ function harness() {
 }
 
 describe("foreign CtrlProxy forward evidence", () => {
+  // A real PID of 4241 would make FOREIGN_PID equal the simulated self PID.
+  test.skipIf(FOREIGN_PID === 4242)(
+    "foreign evidence survives the old fixture PID becoming self",
+    async () => {
+      const originalDescriptor = Object.getOwnPropertyDescriptor(process, "pid");
+      if (!originalDescriptor) {
+        throw new Error("process.pid must have an own property descriptor");
+      }
+      try {
+        Object.defineProperty(process, "pid", { value: 4242, configurable: true });
+        const h = harness();
+        expect(await h.read()).toMatchObject({ kind: "foreign", clientPids: [FOREIGN_PID] });
+      } finally {
+        Object.defineProperty(process, "pid", originalDescriptor);
+      }
+    },
+  );
+
   test("S2 a shared listing failure retries once on the other device and detects its foreign client", async () => {
     const first = new FakeAdbExecutor();
     first.setCommandError("forward --list", new Error("first device offline"));
@@ -71,7 +92,7 @@ describe("foreign CtrlProxy forward evidence", () => {
     second.setCommandResponse("forward --list", createExecResult("second tcp:52001 tcp:8765", ""));
     const evidence = new DefaultForeignCtrlProxyForwardEvidence({
       adbFactory: { create: (device) => (device?.deviceId === "first" ? first : second) },
-      clientProbe: { findClientPids: async () => [4242] },
+      clientProbe: { findClientPids: async () => [FOREIGN_PID] },
       ownership: () => ({ ownsForward: () => false }),
       isProcessRunning: () => true,
       timer: new FakeTimer(),
@@ -85,7 +106,11 @@ describe("foreign CtrlProxy forward evidence", () => {
       ports: [],
       reason: "first device offline",
     });
-    expect(secondVerdict).toMatchObject({ kind: "foreign", ports: [52001], clientPids: [4242] });
+    expect(secondVerdict).toMatchObject({
+      kind: "foreign",
+      ports: [52001],
+      clientPids: [FOREIGN_PID],
+    });
     expect(first.getExecutedCommands()).toEqual(["forward --list"]);
     expect(second.getExecutedCommands()).toEqual(["forward --list"]);
   });
@@ -132,9 +157,13 @@ describe("foreign CtrlProxy forward evidence", () => {
 
   test("#12220 connected foreign PID is remembered until its process is provably dead", async () => {
     const h = harness();
-    expect(await h.read()).toMatchObject({ kind: "foreign", ports: [52001], clientPids: [4242] });
+    expect(await h.read()).toMatchObject({
+      kind: "foreign",
+      ports: [52001],
+      clientPids: [FOREIGN_PID],
+    });
     h.clients([]);
-    expect(await h.read()).toMatchObject({ kind: "foreign", clientPids: [4242] });
+    expect(await h.read()).toMatchObject({ kind: "foreign", clientPids: [FOREIGN_PID] });
     h.alive(false);
     expect(await h.read()).toEqual({ kind: "none" });
     expect(h.adb.getExecutedCommands()).toEqual([
@@ -149,7 +178,7 @@ describe("foreign CtrlProxy forward evidence", () => {
     await first.read();
     const second = harness();
     second.clients([]);
-    expect(await second.read()).toMatchObject({ kind: "foreign", clientPids: [4242] });
+    expect(await second.read()).toMatchObject({ kind: "foreign", clientPids: [FOREIGN_PID] });
   });
 
   test("#12220 forward disappearance forgets a remembered live PID", async () => {
@@ -215,6 +244,6 @@ describe("foreign CtrlProxy forward evidence", () => {
   test("#12220 connected PID is foreign even if a concurrent liveness probe sees death", async () => {
     const h = harness();
     h.alive(false);
-    expect(await h.read()).toMatchObject({ kind: "foreign", clientPids: [4242] });
+    expect(await h.read()).toMatchObject({ kind: "foreign", clientPids: [FOREIGN_PID] });
   });
 });

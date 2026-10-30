@@ -33,6 +33,12 @@ internal object PrototypePlatformModules {
     return owner to definition
   }
 
+  /** The capability a call needs on top of its module's, when its definition names one. */
+  fun callCapability(call: String?): String? =
+    (callDefinition(call)?.second?.get("capability") as? JsonPrimitive)
+      ?.takeIf(JsonPrimitive::isString)
+      ?.content
+
   fun eventModule(event: String): String? {
     val (owner, member) = qualified(event) ?: return null
     return owner.takeIf { module(owner)?.member("events")?.containsKey(member) == true }

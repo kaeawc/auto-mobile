@@ -1,6 +1,7 @@
 import type { BootedDevice, GfxMetrics } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
+import { prototypeMotionActive } from "./prototypeMotion";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { ViewHierarchyRequestReader } from "./interfaces/ViewHierarchy";
 import { ViewHierarchy } from "./ViewHierarchy";
@@ -199,9 +200,11 @@ export async function resolveConfiguredHomePackage(
   adb: AdbExecutor,
   deviceId: string,
   timer: Timer = defaultTimer,
-  incarnationToken?: string,
-  signal?: AbortSignal,
-  timeoutMs?: number,
+  {
+    incarnationToken,
+    signal,
+    timeoutMs,
+  }: { incarnationToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<string | null> {
   // Combine the caller's signal with the ambient request signal, then honor
   // cancellation BEFORE the warm-cache early return below: a hot cache would
@@ -296,20 +299,26 @@ export async function isForegroundLauncher(
   adb: AdbExecutor,
   deviceId: string,
   timer: Timer = defaultTimer,
-  options: { incarnationToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
+  options: {
+    incarnationToken?: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    formFactor?: BootedDevice["formFactor"];
+  } = {},
 ): Promise<boolean> {
   if (!appId) {
     return false;
   }
   const { incarnationToken, signal, timeoutMs } = options;
-  const configuredHome = await resolveConfiguredHomePackage(
-    adb,
-    deviceId,
-    timer,
+  const configuredHome = await resolveConfiguredHomePackage(adb, deviceId, timer, {
     incarnationToken,
     signal,
     timeoutMs,
-  );
+  });
+  // AAOS embeds this map host in Home while the configured HOME package owns the shell.
+  if (options.formFactor === "automotive" && appId === "com.android.car.mapsplaceholder") {
+    return true;
+  }
   if (configuredHome) {
     return appId === configuredHome;
   }
@@ -386,6 +395,10 @@ export class QuietTreeStability {
     );
     if (!tree.hierarchy.error) {
       this.lastUpdatedAt = hierarchyUpdatedAtToMillis(tree) ?? this.lastUpdatedAt;
+    }
+    // A tree read while the prototype still animates is not evidence of a settled screen (#15114).
+    if (prototypeMotionActive(tree) > 0) {
+      return null;
     }
     return tree.fresh === true && !tree.hierarchy.error ? hierarchyFingerprint(tree) : null;
   }

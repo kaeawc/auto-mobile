@@ -5318,13 +5318,9 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(
-          undefined,
-          false,
-          undefined,
-          10000,
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
           diagnostics,
-        );
+        });
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -5974,13 +5970,9 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(
-          undefined,
-          false,
-          undefined,
-          10000,
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
           diagnostics,
-        );
+        });
 
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
@@ -6028,13 +6020,9 @@ describe("AndroidCtrlProxyClient", function () {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
         // Short timeout; never deliver a push or an error frame -> genuine timeout.
-        const syncPromise = testClient.requestHierarchySync(
-          undefined,
-          false,
-          undefined,
-          3000,
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 3000, {
           diagnostics,
-        );
+        });
 
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
@@ -6062,13 +6050,9 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(
-          undefined,
-          false,
-          undefined,
-          10000,
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
           diagnostics,
-        );
+        });
 
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
@@ -6118,13 +6102,9 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(
-          undefined,
-          false,
-          undefined,
-          10000,
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
           diagnostics,
-        );
+        });
 
         const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
@@ -6620,13 +6600,9 @@ describe("AndroidCtrlProxyClient", function () {
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(
-          undefined,
-          false,
-          undefined,
-          10000,
+        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, {
           diagnostics,
-        );
+        });
 
         const socket = (await waitForSocket(getSocket)) as HierarchySendFailingWebSocket;
         expect(socket).not.toBeNull();
@@ -7042,7 +7018,7 @@ describe("AndroidCtrlProxyClient", function () {
       const controller = new AbortController();
       controller.abort();
 
-      const result = await client.requestScreenshot(500, undefined, false, controller.signal);
+      const result = await client.requestScreenshot(500, undefined, { signal: controller.signal });
 
       expect(result.success).toBe(false);
       expect(result.error).toBe(OPERATION_CANCELLED_MESSAGE);
@@ -7074,7 +7050,7 @@ describe("AndroidCtrlProxyClient", function () {
 
       // The capture starts on a disconnected client, so connectWebSocket() is still
       // in flight when the caller gives up - the race the outer await used to lose.
-      const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+      const capture = client.requestScreenshot(500, undefined, { signal: controller.signal });
       controller.abort();
 
       const result = await capture;
@@ -7098,7 +7074,7 @@ describe("AndroidCtrlProxyClient", function () {
       const pushSpy = spyOn(client, "pushScreenshotToObservationStream");
 
       const before = socket.sentMessages.length;
-      const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+      const capture = client.requestScreenshot(500, undefined, { signal: controller.signal });
       // Yield only microtasks: FakeTimer's auto-advance work runs on a later event-loop turn,
       // which would otherwise fire this request's timeout before we exercise the abort window.
       for (let attempt = 0; attempt < 5 && socket.sentMessages.length < before + 1; attempt += 1) {
@@ -7137,7 +7113,7 @@ describe("AndroidCtrlProxyClient", function () {
 
       try {
         const before = socket.sentMessages.length;
-        const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+        const capture = client.requestScreenshot(500, undefined, { signal: controller.signal });
         for (
           let attempt = 0;
           attempt < 5 && socket.sentMessages.length < before + 1;
@@ -7175,7 +7151,7 @@ describe("AndroidCtrlProxyClient", function () {
 
       try {
         const before = socket.sentMessages.length;
-        const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+        const capture = client.requestScreenshot(500, undefined, { signal: controller.signal });
         for (
           let attempt = 0;
           attempt < 5 && socket.sentMessages.length < before + 1;
@@ -7213,7 +7189,7 @@ describe("AndroidCtrlProxyClient", function () {
 
       try {
         const before = socket.sentMessages.length;
-        const capture = client.requestScreenshot(500, undefined, false, controller.signal);
+        const capture = client.requestScreenshot(500, undefined, { signal: controller.signal });
         for (
           let attempt = 0;
           attempt < 5 && socket.sentMessages.length < before + 1;

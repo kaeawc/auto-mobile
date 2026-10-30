@@ -1,7 +1,7 @@
 import { recordObservationRead } from "./observationReadScope";
 import { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import { logger } from "../../utils/logger";
-import { BootedDevice, ObserveResult } from "../../models";
+import { BootedDevice, ObserveResult, requireAndroidOrIosPlatform } from "../../models";
 import type { ObserveScreenshotOptions } from "./screenshot/screenshotOptions";
 import { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -61,7 +61,10 @@ export class SingleDisplayEnrichStage {
     if (result.viewHierarchy) {
       result.elements = this.d
         .elementsBuilder()
-        .build(result.viewHierarchy, this.d.device().platform);
+        .build(
+          result.viewHierarchy,
+          requireAndroidOrIosPlatform(this.d.device().platform, "Observing the view hierarchy"),
+        );
     }
   }
   /** Stage 3: derive elements, start screenshots, and run audits and predictions. */
@@ -101,8 +104,7 @@ export class SingleDisplayEnrichStage {
         perf,
         signal,
         options?.screenshot === "settled",
-        screenshotDisplayId,
-        options?.screenshotOptions,
+        { displayId: screenshotDisplayId, screenshotOptions: options?.screenshotOptions },
       );
     } else if (serverConfig.getAccessibilityAuditConfig()) {
       await this.d

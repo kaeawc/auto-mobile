@@ -43,6 +43,14 @@ import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { requestSdkTrigger } from "../../../../src/features/observe/ios/CtrlProxySdkTrigger";
+import {
+  requestSdkAction,
+  requestSdkObservation,
+} from "../../../../src/features/observe/ios/CtrlProxySdkObservation";
+import {
+  requestSdkWebAction,
+  requestSdkWebSnapshot,
+} from "../../../../src/features/observe/ios/CtrlProxySdkWebView";
 import { requestAccessibilityAudit } from "../../../../src/features/observe/ios/CtrlProxyAccessibilityAudit";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
@@ -200,6 +208,28 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_magic_tap",
     builder: "CtrlProxyVoiceOver.requestMagicTap",
     invoke: (h) => new CtrlProxyVoiceOver(h.context).requestMagicTap(),
+  },
+  {
+    name: "request_sdk_observation",
+    builder: "requestSdkObservation",
+    invoke: (h) => requestSdkObservation(h.context),
+  },
+  {
+    name: "request_sdk_action",
+    builder: "requestSdkAction",
+    invoke: (h) =>
+      requestSdkAction(h.context, { tap: { observationIdentity: 41, elementId: "submit" } }),
+  },
+  {
+    name: "request_sdk_web_snapshot",
+    builder: "requestSdkWebSnapshot",
+    invoke: (h) => requestSdkWebSnapshot(h.context, { webViewId: "main" }),
+  },
+  {
+    name: "request_sdk_web_action",
+    builder: "requestSdkWebAction",
+    invoke: (h) =>
+      requestSdkWebAction(h.context, "main", { click: { snapshotId: "s1", elementId: "submit" } }),
   },
   {
     name: "request_sdk_trigger",
@@ -398,12 +428,9 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_press_button",
     builder: "CtrlProxyNavigation.requestPressButton",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestPressButton(
-        "volume_up",
-        5000,
-        undefined,
-        "frame-context",
-      ),
+      new CtrlProxyNavigation(h.context).requestPressButton("volume_up", 5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_press_home",
@@ -479,6 +506,11 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "set_hinge_angle",
     builder: "CtrlProxyNavigation.requestSetHingeAngle",
     invoke: (h) => new CtrlProxyNavigation(h.context).requestSetHingeAngle(130),
+  },
+  {
+    name: "request_siri",
+    builder: "CtrlProxyNavigation.requestSiri",
+    invoke: (h) => new CtrlProxyNavigation(h.context).requestSiri("Show my orders in Playground"),
   },
   {
     name: "request_appearance",
@@ -558,9 +590,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
       new CtrlProxyStorage(h.context, () => "fixture-session-id").setPreference(
         "com.example.app",
         "Standard",
-        "launch_count",
-        "42",
-        "INT",
+        { key: "launch_count", value: "42", type: "INT" },
       ),
     resolveWith: { success: true },
   },
@@ -637,8 +667,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
         "com.example.app",
         "/Documents/app.sqlite",
         "users",
-        25,
-        10,
+        { limit: 25, offset: 10 },
       ),
     resolveWith: { success: true, totalTimeMs: 1, columns: [], rows: [], total: 0 },
   },

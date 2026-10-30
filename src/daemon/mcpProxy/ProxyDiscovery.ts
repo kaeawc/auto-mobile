@@ -1,7 +1,7 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { DaemonUnavailableError, type DaemonClientLike } from "../client";
+import { DaemonUnavailableError, type DaemonClientLike } from "../client/client";
 import { DAEMON_BOUND_SESSION_PARAM, DAEMON_RELEASED_SESSION_PARAM } from "../wire/constants";
 import { DeviceControlTransportError } from "../deviceControlTransportFailure";
 import { type ListChangedKind } from "../listChangedBroadcast";
@@ -504,7 +504,7 @@ export class ProxyDiscovery {
    */
   async readResource(
     uri: string,
-    { signal: callerSignal }: { signal?: AbortSignal } = {},
+    { signal: callerSignal, _meta }: { signal?: AbortSignal; _meta?: Record<string, unknown> } = {},
   ): Promise<any> {
     const signal = this.port.untilClosed(callerSignal);
     signal.throwIfAborted();
@@ -535,12 +535,18 @@ export class ProxyDiscovery {
           }
         : (ownerForwardedParams ?? this.port.withBoundSessionUuid({}));
     const forwarding = this.runtime.connectionRecovery.withRecoverableReconnect(
-      () => this.port.requireClient().readResource(uri, forwardedParams, { signal }),
+      () =>
+        this.port
+          .requireClient()
+          .readResource(
+            uri,
+            { ...forwardedParams, ...(_meta !== undefined && { _meta }) },
+            { signal },
+          ),
       this.port.sessionUuidFromArgs(forwardedParams),
       allowReleasedSession,
       true,
-      undefined,
-      signal,
+      { signal },
     );
     // Recovery is shared with siblings; abandon this wait without cancelling it.
     return await raceWithDeadline(forwarding, {

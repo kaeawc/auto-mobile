@@ -59,7 +59,7 @@ import {
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/client";
+import { daemonResponseError, DaemonUnavailableError } from "../../src/daemon/client/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolUnavailableError, UnknownToolError } from "../../src/daemon/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
@@ -356,6 +356,14 @@ export function overloadRefusalError(): McpOverloadError {
 
 /** One entry per wire code, each produced by the builder the daemon itself calls. */
 const BUILDERS: readonly FixtureEntry[] = [
+  [
+    "registry_schema_unsupported",
+    "BindingRegistrySchemaUnsupportedError via shapeToolCallError",
+    () =>
+      shaped(
+        new BindingRegistrySchemaUnsupportedError("/registry/slots.sqlite", ["004_new_schema"]),
+      ),
+  ],
   [
     "target_identity_unresolved",
     "AndroidAvdIdentityUnresolvedError via shapeToolCallError",
@@ -1246,10 +1254,6 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
     "Internal broker validation becomes a SessionBroker failure; slot launch and socket serializers were removed.",
   ],
   [
-    BindingRegistrySchemaUnsupportedError,
-    "Internal registry-open refusal becomes a SessionBroker failure; handler tests cover unsupported schema propagation.",
-  ],
-  [
     SessionConfigError,
     "launcher validation error; the prepare-session handler translates it to session_config_invalid, covered by handler tests but not yet a captured refusal fixture",
   ],
@@ -1326,8 +1330,6 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
 
 /** Codes that exist as named constants but never reach a client as a typed JSON refusal. */
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
-  registry_schema_unsupported:
-    "Internal registry-open code translated by the broker acquisition path; covered by broker handler tests.",
   daemon_unknown_tool:
     "a daemon socket response field the proxy classifies by (details.toolName); clients still see the unchanged `Unknown tool:` text",
   daemon_session_not_active:

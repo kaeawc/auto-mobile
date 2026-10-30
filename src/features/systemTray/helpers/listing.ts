@@ -1,7 +1,7 @@
 /** Adapt hierarchy and observation helpers for notification listing. */
 
 import { BootedDevice, ViewHierarchyNode } from "../../../models";
-import type { ProgressCallback } from "../../action/BaseVisualChange";
+import type { SystemTrayCall } from "../systemTrayTypes";
 import {
   type TrayNotificationListContext,
   listSystemTrayNotifications as listNotifications,
@@ -37,8 +37,7 @@ export const listSystemTrayNotifications = (
   appId: string,
   appLabel: string | null,
   awaitTimeoutMs: number,
-  _progress?: ProgressCallback,
-  signal?: AbortSignal,
+  { signal }: SystemTrayCall = {},
 ) => listNotifications({ device, appId, appLabel, awaitTimeoutMs, signal }, trayListingContext);
 
 /**

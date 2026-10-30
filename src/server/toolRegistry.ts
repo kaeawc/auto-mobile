@@ -1,3 +1,4 @@
+import { isDeviceBindingTool } from "../daemon/deviceSessionResult";
 import type { z, ZodType } from "zod/v4";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import {
@@ -51,6 +52,7 @@ import {
   AfterToolCallHandler,
   DefaultAfterToolCallHandler,
   isToolResponseFailure,
+  type PlainToolFinalizer,
 } from "./pipeline/afterToolCall";
 import { AuditRunner, DefaultAuditRunner } from "./pipeline/audit";
 import {
@@ -173,6 +175,7 @@ export class ToolRegistryClass {
   private auditRunner: AuditRunner;
   private navigationToolCallRecorder: NavigationToolCallRecorder;
   private afterToolCall: AfterToolCallHandler;
+  private plainToolFinalizer: PlainToolFinalizer;
   private planLifecycleManager: PlanLifecycleManager;
   private readonly isResponseFailure = (response: unknown): boolean =>
     isToolResponseFailure(response);
@@ -195,7 +198,10 @@ export class ToolRegistryClass {
     this.executionTargetResolver = new DefaultExecutionTargetResolver(loggerInstance);
     this.auditRunner = new DefaultAuditRunner(loggerInstance);
     this.navigationToolCallRecorder = new DefaultNavigationToolCallRecorder();
-    this.afterToolCall = new DefaultAfterToolCallHandler();
+    // One handler serves both paths, so plain and device tools share its artifact writers.
+    const afterToolCall = new DefaultAfterToolCallHandler();
+    this.afterToolCall = afterToolCall;
+    this.plainToolFinalizer = afterToolCall;
     this.planLifecycleManager = new DefaultPlanLifecycleManager(timer);
   }
 
@@ -288,7 +294,19 @@ export class ToolRegistryClass {
       schema,
       handler: async (args, progress, signal) => {
         await assertSessionBrokerToolCall(name, false, args);
-        return handler(args, progress, signal);
+        const response = await handler(args, progress, signal);
+        if (isDeviceBindingTool(name)) {
+          // Ingress binds and heartbeats the session these results name after the handler
+          // returns (`runtime.session.sessionUuid`, `sessionUuid`), so they are never spilled.
+          return response;
+        }
+        return this.plainToolFinalizer.finalizePlain({
+          name,
+          outputSchema: options.outputSchema,
+          args,
+          response,
+          timer: this.timer,
+        });
       },
       defaultEnabled: options.defaultEnabled ?? true,
       defaultDeclared: options.defaultEnabled !== undefined,
@@ -303,6 +321,8 @@ export class ToolRegistryClass {
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
+      selectsActiveDevice: options.selectsActiveDevice,
+      hostInventory: options.hostInventory,
     });
   }
 
@@ -650,8 +670,7 @@ export class ToolRegistryClass {
             invocation.args,
             progress ?? getToolSelectionContext()?.planRequest?.progress,
             signal,
-            options.targetDevice,
-            this.mutationRecording,
+            { targetDevice: options.targetDevice, mutationRecording: this.mutationRecording },
           ),
         false,
       ),
@@ -972,6 +991,7 @@ export class ToolRegistryClass {
       auditRunner: this.auditRunner,
       mutationRecording: this.mutationRecording,
       afterToolCall: this.afterToolCall,
+      plainToolFinalizer: this.plainToolFinalizer,
       planLifecycleManager: this.planLifecycleManager,
     };
 
@@ -988,6 +1008,7 @@ export class ToolRegistryClass {
     this.auditRunner = overrides.auditRunner ?? this.auditRunner;
     this.mutationRecording = overrides.mutationRecording ?? this.mutationRecording;
     this.afterToolCall = overrides.afterToolCall ?? this.afterToolCall;
+    this.plainToolFinalizer = overrides.plainToolFinalizer ?? this.plainToolFinalizer;
     this.planLifecycleManager = overrides.planLifecycleManager ?? this.planLifecycleManager;
 
     return () => {
@@ -996,6 +1017,7 @@ export class ToolRegistryClass {
       this.auditRunner = previous.auditRunner;
       this.mutationRecording = previous.mutationRecording;
       this.afterToolCall = previous.afterToolCall;
+      this.plainToolFinalizer = previous.plainToolFinalizer;
       this.planLifecycleManager = previous.planLifecycleManager;
     };
   }

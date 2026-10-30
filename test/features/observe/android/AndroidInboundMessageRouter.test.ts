@@ -52,6 +52,11 @@ class RecordingContext implements Context {
   prototypes: Context["prototypes"] = {
     handlePrototypeRequest: async () => {},
     handlePrototypeRequestCancel: () => {},
+    channels: {
+      handleFrame: (...args) => {
+        this.calls.push({ name: "channel", args });
+      },
+    },
     handlePrototypeEvent: (...args) => {
       this.calls.push({ name: "prototype", args });
     },
@@ -262,6 +267,26 @@ describe("AndroidInboundMessageRouter without a client", () => {
     for (const type of ["bogus_type", "toString", "constructor", "__proto__"]) {
       await expect(h.receive({ type })).resolves.toBeUndefined();
     }
+    expect(h.ctx.calls).toEqual([]);
+  });
+
+  test("routes prototype_channel_open, _send and _close frames to the prototypes delegate", async () => {
+    const h = harness();
+    const frames = [
+      { type: "prototype_channel_open", connectionId: "c1", url: "wss://chat.test/x" },
+      { type: "prototype_channel_send", connectionId: "c1", data: "hi" },
+      { type: "prototype_channel_close", connectionId: "c1", code: 1000 },
+    ];
+    for (const frame of frames) {
+      await h.receive(frame);
+    }
+    expect(h.ctx.calls).toEqual(frames.map((frame) => ({ name: "channel", args: [frame] })));
+  });
+
+  test("a transient observer ignores channel frames like every other non-observation frame", async () => {
+    const h = harness();
+    h.ctx.transientObserver = true;
+    await h.receive({ type: "prototype_channel_open", connectionId: "c1" });
     expect(h.ctx.calls).toEqual([]);
   });
 

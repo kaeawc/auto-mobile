@@ -262,7 +262,7 @@ describe("Android CtrlProxyText", () => {
     };
     const text = "one *bold* two `code` tail";
     expect(imeCommitSegmentCount(text)).toBe(3);
-    const expected = 10_000 + 750 * 2 + 20 * text.length;
+    const expected = 10_000 + 750 * 2 + 150 * text.length;
     expect(imeCommitTimeoutMs(text)).toBe(expected);
     expect(imeCommitTimeoutMs("*x* ".repeat(100))).toBe(25_000);
 
@@ -307,8 +307,7 @@ describe("Android CtrlProxyText", () => {
       undefined,
       10_000,
       undefined,
-      undefined,
-      "clearField",
+      { delivery: "clearField" },
     );
     await waitForSent(harness.sentMessages, 1);
     expect(harness.sentMessages[0]).toMatchObject({
@@ -410,7 +409,7 @@ describe("Android CtrlProxyText", () => {
         "prior",
         undefined,
         undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       void promise.then(() => {
         settled = true;
@@ -610,14 +609,9 @@ describe("Android CtrlProxyText", () => {
         socket.sentMessages.length = 0;
       }
 
-      const eventPromise = textDelegate.commitViaIme(
-        "Ab!",
-        "prior-ime",
-        10000,
-        undefined,
-        undefined,
-        "keyEvents",
-      );
+      const eventPromise = textDelegate.commitViaIme("Ab!", "prior-ime", 10000, undefined, {
+        delivery: "keyEvents",
+      });
       const eventRequest = await waitForRequest(socket, "request_commit_text");
       expect(eventRequest.delivery).toBe("keyEvents");
       socket.simulateMessage(
@@ -656,13 +650,9 @@ describe("Android CtrlProxyText", () => {
 
       socket.sentMessages.length = 0;
       const controller = new AbortController();
-      const aborted = textDelegate.commitViaIme(
-        "text",
-        "prior-ime",
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      const aborted = textDelegate.commitViaIme("text", "prior-ime", undefined, undefined, {
+        signal: controller.signal,
+      });
       const abortedRequest = await waitForRequest(socket, "request_commit_text");
       controller.abort();
       const cancelRequest = await waitForRequest(socket, "request_cancel_ime_commit");
@@ -1265,15 +1255,9 @@ describe("IME commit trace wire response", () => {
         throw new Error("Expected fake socket");
       }
       await waitForSocketOpen(socket);
-      const promise = client.commitViaIme(
-        "value",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        optIn,
-      );
+      const promise = client.commitViaIme("value", undefined, undefined, undefined, {
+        trace: optIn,
+      });
       const request = await waitForRequest(socket, "request_commit_text");
       expect("trace" in request).toBe(optIn === true);
       if (optIn) {

@@ -1,0 +1,171 @@
+{
+  "spec": {
+    "id": "realtime",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["realtime"]
+    },
+    "state": {
+      "chatStatus": "idle",
+      "unread": 0,
+      "peerTyping": false
+    },
+    "data": {
+      "messages": []
+    },
+    "channels": {
+      "chat": {
+        "kind": "websocket",
+        "url": "wss://chat.example.com/rooms/{roomId}",
+        "protocols": ["chat.v1"],
+        "headers": {
+          "X-0": "x",
+          "X-1": "x",
+          "X-2": "x",
+          "X-3": "x",
+          "X-4": "x",
+          "X-5": "x",
+          "X-6": "x",
+          "X-7": "x",
+          "X-8": "x",
+          "X-9": "x",
+          "X-10": "x",
+          "X-11": "x",
+          "X-12": "x",
+          "X-13": "x",
+          "X-14": "x",
+          "X-15": "x",
+          "X-16": "x"
+        },
+        "via": "host",
+        "connect": "onShow",
+        "statusKey": "chatStatus",
+        "reconnect": {
+          "maxAttempts": 8,
+          "initialDelayMs": 500,
+          "maxDelayMs": 30000
+        },
+        "decode": "json",
+        "routes": [
+          {
+            "when": {
+              "pointer": "/type",
+              "equals": "message"
+            },
+            "actions": [
+              {
+                "type": "upsertData",
+                "path": "/data/messages",
+                "key": "/id",
+                "value": {
+                  "event": "/message"
+                },
+                "maxItems": 200
+              },
+              {
+                "type": "increment",
+                "key": "unread"
+              }
+            ]
+          },
+          {
+            "when": {
+              "pointer": "/typing",
+              "exists": true
+            },
+            "actions": [
+              {
+                "type": "setState",
+                "key": "peerTyping",
+                "value": {
+                  "event": "/typing"
+                }
+              }
+            ]
+          },
+          {
+            "actions": [
+              {
+                "type": "appendData",
+                "path": "/data/messages",
+                "value": {
+                  "event": ""
+                },
+                "maxItems": 200
+              }
+            ]
+          }
+        ],
+        "onOpen": [],
+        "onClose": [],
+        "onError": []
+      }
+    },
+    "platform": {
+      "on": {
+        "realtime.frame": [
+          {
+            "type": "setData",
+            "path": "/data/latest",
+            "value": {
+              "event": ""
+            }
+          }
+        ],
+        "realtime.status": [
+          {
+            "type": "setState",
+            "key": "chatStatus",
+            "value": {
+              "event": "/status"
+            }
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Chat",
+      "visibleWhen": {
+        "platform": "/realtime/chat/status",
+        "equals": "open"
+      },
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "realtime.connect",
+          "args": {
+            "channel": "chat"
+          }
+        },
+        {
+          "type": "platform",
+          "call": "realtime.send",
+          "args": {
+            "channel": {
+              "value": "chat"
+            },
+            "body": {
+              "value": {
+                "text": "hello"
+              }
+            }
+          }
+        },
+        {
+          "type": "platform",
+          "call": "realtime.disconnect",
+          "args": {
+            "channel": "chat"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "channels.chat.headers",
+  "expectedMessage": "Record entry limit exceeded"
+}

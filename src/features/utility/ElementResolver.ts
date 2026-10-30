@@ -37,6 +37,12 @@ export type {
   ElementResolution,
 } from "./ElementResolverTypes";
 export { matchedSourceNode } from "./ElementResolverMatching";
+
+/** The node a search is confined to, and whether a container keeps its text scope. */
+interface NodeScope {
+  scope?: SearchableEntry;
+  preserveTextScope?: boolean;
+}
 export {
   isMissingContainerError,
   promoteClickableAncestor,
@@ -102,8 +108,7 @@ export class ElementResolver {
     selector: ResolverSelector,
     intent: ResolutionIntent,
     availableNodes: readonly SearchableEntry[],
-    boundary?: SearchableEntry,
-    preserveTextScope = false,
+    { scope: boundary, preserveTextScope }: NodeScope = {},
   ): ElementResolution {
     const seen = new Set<SearchableEntry["source"]>();
     let nodes = [...availableNodes]
@@ -124,8 +129,7 @@ export class ElementResolver {
         this.containerSelector(selector),
         { action: "inspect" },
         nodes,
-        scope,
-        true,
+        { scope, preserveTextScope: true },
       );
       if (!container.chosen) {
         return this.containerFailure(selector.container, container);
@@ -165,14 +169,10 @@ export class ElementResolver {
       intent,
       { nodes, candidateNodes: siblingCandidateNodes, scope },
     );
-    const matched = this.prepareMatches(
-      selectionMatches,
-      selector,
-      snapshot,
+    const matched = this.prepareMatches(selectionMatches, selector, snapshot, intent, {
       scope,
-      intent,
       preserveTextScope,
-    );
+    });
     const result: ElementResolution = {
       chosen: null,
       snapshotNodes: snapshot.nodes,
@@ -219,14 +219,10 @@ export class ElementResolver {
     if (siblingCandidateNodes) {
       // Preserve the complete observed candidate list without letting another
       // anchor's smaller target override the first anchor's chosen sibling.
-      const preparedAll = this.prepareMatches(
-        allMatches,
-        selector,
-        snapshot,
+      const preparedAll = this.prepareMatches(allMatches, selector, snapshot, intent, {
         scope,
-        intent,
         preserveTextScope,
-      );
+      });
       result.matches = preparedAll.matches;
       result.candidates = selectable(preparedAll.matches.map(({ node }) => node));
       if (result.chosen) {
@@ -327,9 +323,8 @@ export class ElementResolver {
     matched: Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason">,
     selector: ResolverSelector,
     snapshot: ResolverSnapshot,
-    scope: SearchableEntry | undefined,
     intent: ResolutionIntent,
-    preserveTextScope: boolean,
+    { scope, preserveTextScope }: NodeScope,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     matched.matches = preferVisibleMatches(matched.matches, snapshot.nodes);
     if (intent.preferToggle && selector.index === undefined && selector.elementId === undefined) {
@@ -532,13 +527,9 @@ export class ElementResolver {
     intent: ResolutionIntent,
     scope?: SearchableEntry,
   ): { nodes: SearchableEntry[]; candidateNodes?: SearchableEntry[]; error?: string } {
-    const anchors = this.resolveInNodes(
-      snapshot,
-      selector.sibling!,
-      { action: "inspect" },
-      nodes,
+    const anchors = this.resolveInNodes(snapshot, selector.sibling!, { action: "inspect" }, nodes, {
       scope,
-    );
+    });
     if (anchors.error) {
       return { nodes: [], error: anchors.error };
     }
@@ -553,14 +544,10 @@ export class ElementResolver {
     const allSiblings = new Set<SearchableEntry>();
     for (const chosen of anchors.candidates) {
       const anchor = this.siblingAnchor({ ...anchors, chosen }, snapshot);
-      for (const sibling of this.siblingsForAnchor(
-        snapshot,
-        nodes,
-        selector,
-        intent,
+      for (const sibling of this.siblingsForAnchor(snapshot, nodes, selector, intent, {
         scope,
         anchor,
-      )) {
+      })) {
         allSiblings.add(sibling);
         if (selectedAnchors.includes(chosen)) {
           siblings.add(sibling);
@@ -583,8 +570,7 @@ export class ElementResolver {
     nodes: SearchableEntry[],
     selector: ResolverSelector,
     intent: ResolutionIntent,
-    scope: SearchableEntry | undefined,
-    anchor: SearchableEntry | undefined,
+    { scope, anchor }: { scope?: SearchableEntry; anchor?: SearchableEntry },
   ): SearchableEntry[] {
     let parent = anchor?.parentIndex;
     let fallbackNodes: SearchableEntry[] = [];
@@ -716,14 +702,10 @@ export class ElementResolver {
     usedHintFallback?: boolean;
   } {
     if (selector.elementId !== undefined) {
-      return matchId(
-        nodes,
-        selector.elementId,
-        selector.match ?? "exact",
-        intent,
-        selector.caseSensitive,
-        guardNamespaceNodes(snapshot.nodes, intent, snapshot.searchedNodes),
-      );
+      return matchId(nodes, selector.elementId, selector.match ?? "exact", intent, {
+        caseSensitive: selector.caseSensitive,
+        captureNodes: guardNamespaceNodes(snapshot.nodes, intent, snapshot.searchedNodes),
+      });
     }
     if (selector.testTag !== undefined) {
       return { matches: matchTestTag(nodes, selector.testTag), matchMode: "exact" };
@@ -745,7 +727,7 @@ export class ElementResolver {
         matchMode: "exact",
       };
     }
-    const primary = this.matchText(nodes, selector, intent, textQuery, snapshot, { scope });
+    const primary = this.matchText(nodes, selector, intent, snapshot, { textQuery, scope });
     // Preserve every existing text match (including substrings) before considering
     // Android placeholders. Mixing the tiers would change targets and uniqueness.
     // Reuse the same exact/contains/regex rules within the hint-only tier.
@@ -757,7 +739,8 @@ export class ElementResolver {
       !primary.error
     ) {
       return {
-        ...this.matchText(nodes, selector, intent, textQuery, snapshot, {
+        ...this.matchText(nodes, selector, intent, snapshot, {
+          textQuery,
           scope,
           hintFallback: true,
         }),
@@ -797,11 +780,10 @@ export class ElementResolver {
     nodes: SearchableEntry[],
     selector: ResolverSelector,
     intent: ResolutionIntent,
-    textQuery: string,
     snapshot: ResolverSnapshot,
-    options: { scope?: SearchableEntry; hintFallback?: boolean },
+    options: { textQuery: string; scope?: SearchableEntry; hintFallback?: boolean },
   ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
-    const { scope, hintFallback } = options;
+    const { textQuery, scope, hintFallback } = options;
     const fields = (node: SearchableEntry) =>
       this.matchableTextFields(node, selector, hintFallback);
     const query = normalize(textQuery, selector.caseSensitive);

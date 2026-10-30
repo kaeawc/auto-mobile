@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "glass",
+    "state": {
+      "active": true
+    },
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "style": {
+        "surface": "glass",
+        "glass": {
+          "blur": 10
+        }
+      },
+      "children": []
+    }
+  },
+  "expectedPath": "root.style.glass.blur",
+  "expectedMessage": "Unknown property"
+}

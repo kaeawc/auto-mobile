@@ -1,0 +1,71 @@
+{
+  "spec": {
+    "id": "c",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["cast"]
+    },
+    "platform": {
+      "on": {
+        "cast.sessionStarted": [
+          {
+            "type": "emit",
+            "name": "cast_started"
+          }
+        ],
+        "cast.sessionFailed": [
+          {
+            "type": "emit",
+            "name": "cast_failed"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{platform:/cast/state} {platform:/cast/deviceName} {platform:/cast/protocol} {platform:/cast/volume}"
+        },
+        {
+          "type": "button",
+          "label": "Louder",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "cast.setVolume",
+              "args": {
+                "volume": {
+                  "value": 0.8
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Stop",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "cast.connect",
+              "args": {}
+            },
+            {
+              "type": "platform",
+              "call": "cast.stop",
+              "args": {}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[2].onTap[0].call",
+  "expectedMessage": "Unknown platform call"
+}

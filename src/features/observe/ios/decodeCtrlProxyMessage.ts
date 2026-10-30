@@ -10,6 +10,18 @@
 import type { CtrlProxyPerfTiming, WebSocketMessage } from "./types";
 import { rewriteUnknownCommandError as rewritePlatformUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import type { KeyValueEntry } from "../../storage/storageTypes";
+import type { ZodTypeAny } from "zod";
+import {
+  iosSdkActionResultSchema,
+  iosSdkBridgeFailure,
+  iosSdkObservationSchema,
+} from "./sdkObservationBridge";
+import {
+  iosSdkWebActionResultSchema,
+  iosSdkWebFailure,
+  iosSdkWebSnapshotSchema,
+  iosSdkWebViewsSchema,
+} from "./sdkWebViewBridge";
 
 /**
  * Decoded request/response message. Exactly one of `result` / `errorMessage` is
@@ -506,6 +518,68 @@ function decodeTableStructureResult(message: WebSocketMessage): unknown {
   };
 }
 
+/**
+ * `sdk_observation_result` / `sdk_action_result` (#5159). The relayed bridge value is validated
+ * here; a reply whose value does not match the schema becomes a typed `bad_reply` failure.
+ */
+function decodeSdkBridgeResult(
+  message: WebSocketMessage,
+  key: "observation" | "result",
+  schema: typeof iosSdkObservationSchema | typeof iosSdkActionResultSchema,
+): unknown {
+  const raw = message[key];
+  const parsed = raw === undefined ? undefined : schema.safeParse(raw);
+  const invalid = parsed !== undefined && !parsed.success;
+  return {
+    success: invalid ? false : (message.success ?? false),
+    available: message.available ?? false,
+    [key]: parsed?.success ? parsed.data : undefined,
+    failure: invalid ? "bad_reply" : iosSdkBridgeFailure(message.failure),
+    error: invalid ? `The runner relayed a malformed SDK ${key}.` : message.error,
+    totalTimeMs: message.totalTimeMs ?? 0,
+  };
+}
+
+/** The relayed web value, or `invalid` when present but off-schema. */
+function parseRelayed(raw: unknown, schema: ZodTypeAny): { value?: unknown; invalid: boolean } {
+  if (raw === undefined) {
+    return { invalid: false };
+  }
+  const parsed = schema.safeParse(raw);
+  return parsed.success ? { value: parsed.data, invalid: false } : { invalid: true };
+}
+
+/** The web-view identity fields a snapshot reply carries. */
+function webSnapshotFields(message: WebSocketMessage, webViews: unknown): Record<string, unknown> {
+  return {
+    ...(message.webViewId === undefined ? {} : { webViewId: message.webViewId }),
+    ...(webViews === undefined ? {} : { webViews }),
+  };
+}
+
+/**
+ * `sdk_web_snapshot_result` / `sdk_web_action_result` (#5162). The relayed web values are validated
+ * here; a reply whose value does not match the schema becomes a typed `bad_reply` failure.
+ */
+function decodeSdkWebResult(
+  message: WebSocketMessage,
+  key: "snapshot" | "result",
+  schema: typeof iosSdkWebSnapshotSchema | typeof iosSdkWebActionResultSchema,
+): unknown {
+  const value = parseRelayed(message[key], schema);
+  const webViews = parseRelayed(message.webViews, iosSdkWebViewsSchema);
+  const invalid = value.invalid || webViews.invalid;
+  return {
+    success: invalid ? false : (message.success ?? false),
+    available: message.available ?? false,
+    [key]: value.value,
+    ...(key === "snapshot" ? webSnapshotFields(message, webViews.value) : {}),
+    failure: invalid ? "bad_reply" : iosSdkWebFailure(message.failure),
+    error: invalid ? `The runner relayed a malformed SDK web ${key}.` : message.error,
+    totalTimeMs: message.totalTimeMs ?? 0,
+  };
+}
+
 function decodeSdkCapabilitiesResult(message: WebSocketMessage): unknown {
   // Foreground-app-scoped SDK availability (#6832). `available: false` is a
   // legitimate success reply — the foreground app simply embeds no SDK — so
@@ -515,6 +589,7 @@ function decodeSdkCapabilitiesResult(message: WebSocketMessage): unknown {
     available: message.available ?? false,
     bundleId: message.bundleId,
     capabilities: message.capabilities ?? [],
+    observationBridge: message.observationBridge,
     totalTimeMs: message.totalTimeMs ?? 0,
     error: message.error,
   };
@@ -549,6 +624,7 @@ const messageDecoders = new Map<
   ["rotate_result", decodeRotateResult],
   ["hinge_angle_result", decodeHingeAngleResult],
   ["location_result", decodeLocationResult],
+  ["siri_result", decodeLocationResult],
   ["appearance_result", decodeAppearanceResult],
   ["ime_action_result", decodeImeActionResult],
   ["action_result", decodeImeActionResult],
@@ -587,6 +663,22 @@ const messageDecoders = new Map<
       error: message.error,
       totalTimeMs: message.totalTimeMs ?? 0,
     }),
+  ],
+  [
+    "sdk_observation_result",
+    (message) => decodeSdkBridgeResult(message, "observation", iosSdkObservationSchema),
+  ],
+  [
+    "sdk_action_result",
+    (message) => decodeSdkBridgeResult(message, "result", iosSdkActionResultSchema),
+  ],
+  [
+    "sdk_web_snapshot_result",
+    (message) => decodeSdkWebResult(message, "snapshot", iosSdkWebSnapshotSchema),
+  ],
+  [
+    "sdk_web_action_result",
+    (message) => decodeSdkWebResult(message, "result", iosSdkWebActionResultSchema),
   ],
   ["voiceover_state_result", decodeVoiceoverStateResult],
   ["voiceover_set_result", decodeVoiceoverSetResult],

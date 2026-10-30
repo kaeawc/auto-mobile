@@ -1,5 +1,9 @@
+import {
+  SESSION_DEVICE_REBOUND_NOTIFICATION_METHOD,
+  type SessionDeviceRebound,
+} from "../sessionDeviceReboundBroadcast";
 import { logger } from "../../utils/logger";
-import { type DaemonClientLike } from "../client";
+import { type DaemonClientLike } from "../client/client";
 import {
   listChangedKindForMethod,
   RESOURCE_UPDATED_NOTIFICATION_METHOD,
@@ -54,12 +58,55 @@ type Runtime = Pick<
 
 /** Notifications operations on a single proxy runtime. */
 export class ProxyNotifications {
+  private readonly reboundListeners = new Set<(event: SessionDeviceRebound) => void>();
+
+  clearSessionDeviceReboundListeners(): void {
+    this.reboundListeners.clear();
+  }
+
+  onSessionDeviceRebound(listener: (event: SessionDeviceRebound) => void): () => void {
+    this.reboundListeners.add(listener);
+    return () => {
+      this.reboundListeners.delete(listener);
+    };
+  }
+
+  private handleSessionDeviceRebound(notification: DaemonNotification): void {
+    const { sessionId, previousDeviceId, deviceId, generation, stableDeviceId, avdName } =
+      notification;
+    if (!sessionId || !previousDeviceId || !deviceId || generation === undefined) {
+      return;
+    }
+    // A derived `${base}:${label}` session is held through its base.
+    const baseSessionId = sessionId.split(":", 1)[0] ?? sessionId;
+    const heldBy = (candidate: string): boolean =>
+      candidate === this.runtime.boundSessionUuid ||
+      this.runtime.ownedDeviceSessions.has(candidate) ||
+      this.runtime.otherHeldSessions.has(candidate) ||
+      this.runtime.claimableSessions.has(candidate) ||
+      this.runtime.brokerSessions.sessions.has(candidate);
+    const held = heldBy(sessionId) || heldBy(baseSessionId);
+    if (!held) {
+      return;
+    }
+    for (const listener of this.reboundListeners) {
+      try {
+        listener({ sessionId, previousDeviceId, deviceId, generation, stableDeviceId, avdName });
+      } catch (error) {
+        logger.warn("[DaemonMcpProxy] session-device rebound listener failed", error);
+      }
+    }
+  }
   constructor(
     private readonly runtime: Runtime,
     private readonly port: ProxyNotificationsPort,
   ) {}
 
   handleDaemonNotification(notification: DaemonNotification, sourceClient: DaemonClientLike): void {
+    if (notification.method === SESSION_DEVICE_REBOUND_NOTIFICATION_METHOD) {
+      this.handleSessionDeviceRebound(notification);
+      return;
+    }
     if (notification.method === RESOURCE_UPDATED_NOTIFICATION_METHOD) {
       this.port.handleResourceUpdated(notification, sourceClient);
       return;

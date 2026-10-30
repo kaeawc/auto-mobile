@@ -54,6 +54,7 @@ import {
   TapAnyElementOptions,
   TapOnElementResult,
   ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
 } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -143,6 +144,8 @@ export class TapAnyElement extends BaseVisualChange {
     "executeAndroidTap" | "retryAndroidTapIfNoChange"
   >;
   private readonly iosTapper: Pick<TapAnyIosTapper, "executeIosTap">;
+  /** tapAny drives only Android and iOS; a watch is rejected before any platform-specific step. */
+  private readonly tapPlatform = requireAndroidOrIosPlatform(this.device.platform, "tapAny");
   private readonly iosMultiPanel =
     this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1;
   private readonly lastRenderedObservation: RenderedObservationReader;
@@ -187,7 +190,7 @@ export class TapAnyElement extends BaseVisualChange {
     this.elementSelector =
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
-        platform: device.platform,
+        platform: this.tapPlatform,
         iosMultiPanel: this.iosMultiPanel,
       });
     this.accessibilityService =
@@ -197,7 +200,7 @@ export class TapAnyElement extends BaseVisualChange {
     this.hierarchyCapture =
       options.hierarchyCapture ??
       new DefaultHierarchyCapture(
-        device.platform,
+        this.tapPlatform,
         {
           readCached: (request) =>
             this.viewHierarchy.getViewHierarchy(
@@ -323,7 +326,7 @@ export class TapAnyElement extends BaseVisualChange {
         elementSelector: this.elementSelector,
         isContainerAvailable: (hierarchy, container) =>
           this.isContainerAvailable(hierarchy, container),
-        platform: this.device.platform,
+        platform: this.tapPlatform,
         iosMultiPanel: this.iosMultiPanel,
       },
       options,
@@ -339,7 +342,7 @@ export class TapAnyElement extends BaseVisualChange {
     return resolveTapAnyPoint(
       {
         geometry: this.geometry,
-        platform: this.device.platform,
+        platform: this.tapPlatform,
         iosMultiPanel: this.iosMultiPanel,
       },
       target,
@@ -383,14 +386,10 @@ export class TapAnyElement extends BaseVisualChange {
         timeoutMs,
         signal,
       });
-      identifyObservedHierarchy(
-        this.device.platform,
-        snapshot.hierarchy,
-        "fresh",
-        this.timer,
-        undefined,
-        { captureId: snapshot.captureId, iosMultiPanel: this.iosMultiPanel },
-      );
+      identifyObservedHierarchy(this.tapPlatform, snapshot.hierarchy, "fresh", this.timer, {
+        captureId: snapshot.captureId,
+        iosMultiPanel: this.iosMultiPanel,
+      });
       return snapshot.hierarchy;
     } catch (error) {
       throwIfAborted(signal);
@@ -464,11 +463,10 @@ export class TapAnyElement extends BaseVisualChange {
         }
 
         selectedCapture = identifyObservedHierarchy(
-          this.device.platform,
+          this.tapPlatform,
           refreshed,
           "fresh",
           this.timer,
-          undefined,
           { iosMultiPanel: this.iosMultiPanel },
         );
         const found = this.findClickableElement(options, selectedCapture.hierarchy, {
@@ -542,11 +540,10 @@ export class TapAnyElement extends BaseVisualChange {
       }
     }
     let selectedCapture = identifyObservedHierarchy(
-      this.device.platform,
+      this.tapPlatform,
       viewHierarchy,
       "cached-ok",
       this.timer,
-      undefined,
       { captureId: observeResult.observationId, iosMultiPanel: this.iosMultiPanel },
     );
     const searchDurationMs = this.getSearchUntilDuration(options);
@@ -592,7 +589,7 @@ export class TapAnyElement extends BaseVisualChange {
       observeResult.viewHierarchy = viewHierarchy;
       startTime = this.timer.now();
       selectedCapture = identifyObservedHierarchy(
-        this.device.platform,
+        this.tapPlatform,
         viewHierarchy,
         "fresh",
         this.timer,
@@ -767,8 +764,7 @@ export class TapAnyElement extends BaseVisualChange {
         } else {
           await this.androidTapper.executeAndroidTap(
             action,
-            tapPoint.x,
-            tapPoint.y,
+            tapPoint,
             longPressDuration,
             target,
             tapContext,
@@ -779,27 +775,25 @@ export class TapAnyElement extends BaseVisualChange {
           target,
           action,
           longPressDuration,
-          observeResult.screenSize,
-          { ...tapContext, selectionOptions: options, refresh, dispatch },
+          {
+            ...tapContext,
+            screenSize: observeResult.screenSize,
+            selectionOptions: options,
+            refresh,
+            dispatch,
+          },
         );
         break;
       }
       case "ios":
         targetDisplay?.assertCurrent();
         assertSelectedCapture(selectedCapture);
-        await this.iosTapper.executeIosTap(
-          action,
-          tapPoint.x,
-          tapPoint.y,
-          longPressDuration,
-          element,
-          {
-            signal,
-            displayFence: fence,
-            scoped: target.scoped,
-            voiceOverEnabled: target.talkBackState ?? undefined,
-          },
-        );
+        await this.iosTapper.executeIosTap(action, tapPoint, longPressDuration, element, {
+          signal,
+          displayFence: fence,
+          scoped: target.scoped,
+          voiceOverEnabled: target.talkBackState ?? undefined,
+        });
         break;
       default:
         throw unsupportedPlatformError(this.device.platform, "tap any element");

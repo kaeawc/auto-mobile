@@ -9,14 +9,12 @@ import Foundation
 enum PrototypeHostLayer: Equatable, Sendable {
     /// The spec's tree and its anchor layer.
     case page
-    /// Open dialogs and snackbars, the anchored nodes inside them, and the host dismiss control,
-    /// which an open dialog must leave reachable.
+    /// Open dialogs, snackbars, menus, drawers, tooltips and bottom sheets, their anchored nodes,
+    /// and the host dismiss control, which an open dialog must leave reachable.
     case top
 
-    /// The layer whose view reported the hit rect `key` (see `reportFrame`): `dismiss` and
-    /// `dismissBar` and `escape` (host chrome), `modal.<index>` (an open dialog or snackbar) and
-    /// `anchor.modal<index>…` (an anchored node inside one) are the top layer's; `content` and the
-    /// page's `anchor.root…` are the page's.
+    /// Host keys are `dismiss`, `dismissBar` and `escape`; `modal.select` is top-layer through `modal.`
+    /// too, as are `modal.<index>` and `anchor.modal<index>…`; `content` and `anchor.root…` stay on page.
     init(hitRectKey key: String) {
         let top = key == "dismiss" || key == "dismissBar" || key == "escape" || key.hasPrefix("modal.") || key
             .hasPrefix("anchor.modal")
@@ -62,7 +60,12 @@ struct PrototypeHostAccessibility: Equatable, Sendable {
             self = .hidden
             return
         }
-        let dialogOpen = spec.root.blocksPage(state: session.state, pages: session.pages, stacks: session.stacks)
+        let dialogOpen = spec.root.blocksPage(
+            state: session.state,
+            pages: session.pages,
+            stacks: session.stacks,
+            data: spec.data
+        )
         self.init(
             pageElementsHidden: dialogOpen,
             topIsModal: dialogOpen,

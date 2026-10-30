@@ -25,6 +25,7 @@ import type {
   BootedDevice,
   Element,
   ObserveResult,
+  Point,
   ViewHierarchyResult,
 } from "../../../src/models";
 import type { ElementContainerSelector } from "../../../src/models/PinchOnOptions";
@@ -171,8 +172,7 @@ class BoundaryTap extends TapOnElement {
   }
   override async executeAndroidTap(
     _action: string,
-    x: number,
-    y: number,
+    { x, y }: Point,
     _duration: number,
     _element: Element,
   ) {
@@ -324,10 +324,7 @@ async function sendKeys(scenario: Scenario): Promise<Outcome> {
   const result = await action.execute(
     [{ action: "type", text: "3" }],
     { elementId: request.elementId },
-    undefined,
-    undefined,
-    undefined,
-    { container: request.container, selectionStrategy: request.selectionStrategy },
+    { focus: { container: request.container, selectionStrategy: request.selectionStrategy } },
   );
   // A pre-focused field needs no extra tap. Record actual text dispatch at
   // the injected executor and return the element selected by real focus code.

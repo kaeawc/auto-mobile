@@ -1,3 +1,4 @@
+import { BindingRegistrySchemaUnsupportedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { BackgroundBindingRegistryUpgrade } from "../../../../src/daemon/sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import {
@@ -159,6 +160,28 @@ describe("background registry upgrade retries", () => {
     warn = spyOn(logger, "warn").mockImplementation(() => {});
   });
   afterEach(() => warn.mockRestore());
+
+  test("unknown migrations never retry or schedule a timer until restart", async () => {
+    const timer = new FakeTimer();
+    let opens = 0;
+    const upgrade = new BackgroundBindingRegistryUpgrade(
+      async () => {
+        opens++;
+        throw new BindingRegistrySchemaUnsupportedError("/fake/background.sqlite", ["future"]);
+      },
+      { timer },
+    );
+    upgrade.start();
+    await drainMicrotasks(20);
+    expect(opens).toBe(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    upgrade.start();
+    timer.advanceTime(1_000_000);
+    await drainMicrotasks(20);
+    expect(opens).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
+    await upgrade.close();
+  });
 
   test("two deferrals retry at injected backoff delays and stop after success", async () => {
     const timer = new FakeTimer();

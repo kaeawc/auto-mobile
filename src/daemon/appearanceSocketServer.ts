@@ -1,3 +1,4 @@
+import { isAndroidOrIosPlatform } from "../models/Platform";
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
@@ -81,11 +82,15 @@ export const defaultAppearanceDeviceSource: AppearanceDeviceSource = {
     if (!pool) {
       return [];
     }
-    return pool.getAllDevices().map((device) => ({
-      deviceId: device.id,
-      name: device.name,
-      platform: device.platform,
-    }));
+    // Appearance has no watchOS backend, so a pooled watch is never a target (#14908).
+    return pool
+      .getAllDevices()
+      .filter((device) => isAndroidOrIosPlatform(device.platform))
+      .map((device) => ({
+        deviceId: device.id,
+        name: device.name,
+        platform: device.platform,
+      }));
   },
   getSessionDevice: (sessionUuid) => {
     const normalizedSessionUuid = sessionUuid?.trim();
@@ -98,7 +103,7 @@ export const defaultAppearanceDeviceSource: AppearanceDeviceSource = {
     }
     const deviceId = manager.getDeviceForSession(normalizedSessionUuid);
     const device = deviceId ? defaultDaemonContext.devicePool()?.getDevice(deviceId) : undefined;
-    return device
+    return device && isAndroidOrIosPlatform(device.platform)
       ? { deviceId: device.id, name: device.name, platform: device.platform }
       : undefined;
   },
@@ -308,13 +313,14 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     const execution = executionTracker.startExecution(command, undefined, holderSessionUuid);
     target.execution = execution;
     executionTracker.bindDeviceExecution(execution.id, deviceId);
+    const signal = execution.abortController.signal;
     await admitInputOnHolderSession({
       deviceId,
       holderSessionUuid,
       sessionManager,
       execution: sessionExecutionMetadataOf(execution),
+      signal,
     });
-    const signal = execution.abortController.signal;
     if (signal.aborted) {
       // A release that landed while admission was awaited answers its own refusal.
       throw sessionReleaseThatCancelledCall(execution.cancelReason) ?? signal.reason;

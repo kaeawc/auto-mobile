@@ -5,7 +5,7 @@ import {
   DaemonClient,
   type DaemonClientLike,
   type DaemonMethodCallOptions,
-} from "../../src/daemon/client";
+} from "../../src/daemon/client/client";
 import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
@@ -707,6 +707,7 @@ export class LivenessScenario {
       deviceManager: this.discovery,
       foreignDeviceOwnership: this.peerAwareOwnership(clock),
       iosForeignDeviceOwnership: undefined,
+      watchForeignDeviceOwnership: undefined,
     });
     manager.onSessionRelease((sessionId, deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), sessionId, deviceId, reason: reason ?? "" });

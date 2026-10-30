@@ -55,8 +55,25 @@ export interface TapOnElementResult extends BaseActionResult {
     occurrence: number;
   };
   selectedElement?: TapOnSelectedElement;
+  /**
+   * iOS only, for a node merged from the app's SDK observation bridge (#5159): `sdk` when the bridge
+   * performed the tap, `xctest` when XCTest stood in.
+   */
+  backend?: import("./ObserveResult").ObservationBackend;
+  /** Why XCTest stood in for the bridge: it was unavailable, or it does not support the action. */
+  fallbackReason?: import("./ObserveResult").ObservationFallbackReason;
   debug?: ToolDebugInfo;
+  /**
+   * Heuristic: a context menu, text selection, or new window root appeared after the long press.
+   * False means none of those was seen, not that the press was delivered as a tap.
+   */
   pressRecognized?: boolean;
+  /**
+   * Android long press only: whether the pressed node advertises a long-click accessibility
+   * action. False means the node has no long-click handler, so the app handles the hold like a
+   * tap on release; handlers built on raw touch input (such as drag-to-reorder) are not visible.
+   */
+  longClickAdvertised?: boolean;
   contextMenuOpened?: boolean;
   selectionStarted?: boolean;
   /** Whether a focus action was confirmed on the resolved editable target. */

@@ -4,6 +4,7 @@ import { DragPath } from "../features/action/DragPath";
 import type { ProgressCallback } from "./toolRegistry";
 import { resolveTransportDeadlineMs } from "./formTools";
 import { hierarchyLayerSchema } from "../models/elementSelectorSchemas";
+import { pointerSchema } from "./pointerSchema";
 import {
   addDeviceTargetingToSchema,
   responseShapeControlFields,
@@ -34,17 +35,46 @@ const dragPathPointSchema = z
       .describe(
         `Milliseconds spent moving from the previous point to this one (default ${DRAG_PATH_DEFAULT_SEGMENT_MS}); ignored on the first point`,
       ),
+    pressure: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe("Stylus pressure 0-1 at this point (needs pointer); interpolated between points"),
+    tilt: z
+      .number()
+      .min(0)
+      .max(Math.PI / 2)
+      .optional()
+      .describe("Stylus tilt in radians at this point (needs pointer)"),
   })
   .strict();
 
 type DragPathValue = {
-  points: Array<{ x: number; y: number; durationMs?: number }>;
+  points: Array<{ x: number; y: number; durationMs?: number; pressure?: number; tilt?: number }>;
+  pointer?: unknown;
   coordinateSpace?: "absolute" | "normalized" | "percent";
   holdMs?: number;
   releaseHoldMs?: number;
 };
 
+/** Per-point pressure and tilt describe a stylus, so they need `pointer`. */
+function validateStylusPointFields(value: DragPathValue, context: z.RefinementCtx): void {
+  for (const [index, point] of value.points.entries()) {
+    for (const field of ["pressure", "tilt"] as const) {
+      if (point[field] !== undefined && value.pointer === undefined) {
+        context.addIssue({
+          code: "custom",
+          message: `${field} applies to a stylus; set pointer: { toolType: "stylus" }`,
+          path: ["points", index, field],
+        });
+      }
+    }
+  }
+}
+
 function validateDragPathPoints(value: DragPathValue, context: z.RefinementCtx): void {
+  validateStylusPointFields(value, context);
   const max =
     value.coordinateSpace === "normalized"
       ? 1
@@ -121,14 +151,14 @@ export const dragPathSchema = withJsonSchemaOverride(
             "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
           ),
         layer: hierarchyLayerSchema.optional(),
+        pointer: pointerSchema.optional(),
         ...responseShapeControlFields,
       })
-      .strict()
-      .superRefine(validateDragPathValue),
-  ),
+      .strict(),
+  ).superRefine(validateDragPathValue),
   (js) => {
     js.description =
-      "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag.";
+      'Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag. With pointer: { toolType: "stylus" } it draws with a stylus (Android 13+) with per-point pressure and tilt, and is refused instead of using a finger if the device cannot.';
   },
 );
 
@@ -148,6 +178,7 @@ export async function dragPathHandler(
       display: args.display,
       snapshotId: args.snapshotId,
       layer: args.layer,
+      pointer: args.pointer,
     },
     { progress, signal, deadlineMs: resolveTransportDeadlineMs(args) },
   );

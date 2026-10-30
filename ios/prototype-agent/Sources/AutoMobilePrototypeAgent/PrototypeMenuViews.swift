@@ -9,12 +9,15 @@
         @State private var frame: CGRect?
 
         private var needsBounds: Bool {
-            node.type == "select" || ((node.children ?? []) + [node.child].compactMap { $0 })
+            node.id != nil || node.type == "select" || ((node.children ?? []) + [node.child].compactMap { $0 })
                 .contains { $0.type == "menu" }
         }
 
         func body(content: Content) -> some View {
             content
+                .background {
+                    if node.id != nil { PrototypeOverlayFocusMarker(anchor: model.focusAnchor(for: node)) }
+                }
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { rect in
                     frame = rect
                     if needsBounds { model.menuBounds[ObjectIdentifier(node)] = rect }
@@ -30,6 +33,7 @@
     /// A small in-window surface; a bounded scrolling list handles even the largest authored menu.
     @MainActor
     private struct PrototypeMenuSurface<Content: View>: View {
+        let model: PrototypeModel
         let anchor: CGRect?
         var identifier: String?
         @ViewBuilder let content: () -> Content
@@ -59,7 +63,7 @@
                     .accessibilityElement(children: .contain)
                     .prototypeIdentifier(identifier)
                     .contentShape(Rectangle())
-                    .onTapGesture {} // Surface padding must not dismiss through to the outside layer.
+                    .onTapGesture { model.consumeDeadTap() } // Surface padding consumes without dismissing.
                 }
                 .environment(\.layoutDirection, .leftToRight)
             }
@@ -99,12 +103,13 @@
         let model: PrototypeModel
 
         var body: some View {
-            let parent = model.spec?.root.menuParent(of: node)
+            let parent = model.spec?.root.menuParent(of: node, data: model.spec?.data)
             ZStack {
                 Color.clear.contentShape(Rectangle())
                     .onTapGesture { model.closeModal(node) }
                     .accessibilityHidden(true)
                 PrototypeMenuSurface(
+                    model: model,
                     anchor: parent.flatMap { model.menuBounds[ObjectIdentifier($0)] },
                     identifier: node.identifier
                 ) {
@@ -160,6 +165,7 @@
             let value = node.stateKey.flatMap { model.state[$0]?.stringValue }
             let selected = node.options?.first { $0.value == value }?.label ?? ""
             Button {
+                model.consumeDeadTap()
                 model.expandedSelect = model.expandedSelect === node ? nil : node
             } label: {
                 HStack {
@@ -191,9 +197,12 @@
         var body: some View {
             ZStack {
                 Color.clear.contentShape(Rectangle())
-                    .onTapGesture { model.expandedSelect = nil }
+                    .onTapGesture {
+                        model.consumeDeadTap()
+                        model.expandedSelect = nil
+                    }
                     .accessibilityHidden(true)
-                PrototypeMenuSurface(anchor: model.menuBounds[ObjectIdentifier(node)]) {
+                PrototypeMenuSurface(model: model, anchor: model.menuBounds[ObjectIdentifier(node)]) {
                     ForEach(Array((node.options ?? []).enumerated()), id: \.offset) { _, option in
                         Button {
                             model.expandedSelect = nil

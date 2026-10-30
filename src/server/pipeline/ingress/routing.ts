@@ -30,6 +30,7 @@ import {
   rememberActionsCompactMetadata,
   rememberToolResultsNoStructuredContent,
 } from "./connectionPresentation";
+import type { Platform } from "../../../models";
 import type { CallContext } from "./callContext";
 import { namesLiveSessionOfBoundPlan } from "./namesLiveSessionOfBoundPlan";
 
@@ -98,14 +99,15 @@ export interface DeviceRouting {
   readonly resolvedImplicitAutolockSessionUuid: string | undefined;
 }
 
-function routeViaAutolock(
-  scope: RoutingScope,
+/** Route a call with no explicit target through the session this connection holds via autolock. */
+export function routeViaAutolock(
+  scope: Pick<RoutingScope, "tool" | "implicitAutolockMcpSessionId">,
   rawArgs: Record<string, unknown>,
-  pool: DevicePoolReads,
+  pool: Pick<DevicePoolReads, "resolveAutolockSessionForMcpSession">,
 ): DeviceRouting {
   // Loopback MCP clients are reused by execution scope, not by socket.
   // Their local bindings are partial; only the pool owns all acquisitions.
-  const { name, implicitAutolockMcpSessionId } = scope;
+  const { tool, implicitAutolockMcpSessionId } = scope;
   const platform = knownPlatform(rawArgs.platform);
   const deviceId = typeof rawArgs.deviceId === "string" ? rawArgs.deviceId : undefined;
   let routingSessionUuid = pool.resolveAutolockSessionForMcpSession(
@@ -114,7 +116,7 @@ function routeViaAutolock(
     undefined,
     deviceId,
   );
-  if (!routingSessionUuid && name === "setActiveDevice") {
+  if (!routingSessionUuid && tool.selectsActiveDevice === true) {
     routingSessionUuid = pool.resolveAutolockSessionForMcpSession(implicitAutolockMcpSessionId);
   }
   return { routingSessionUuid, resolvedImplicitAutolockSessionUuid: routingSessionUuid };
@@ -124,7 +126,7 @@ function knownPlatform(value: unknown): "android" | "ios" | undefined {
   return value === "android" || value === "ios" ? value : undefined;
 }
 
-function grantedPlatformOfSession(sessionUuid: string): "android" | "ios" | undefined {
+function grantedPlatformOfSession(sessionUuid: string): Platform | undefined {
   const session = defaultDaemonContext.sessionManager()?.peekSession(sessionUuid);
   return session?.assignedDevice
     ? defaultDaemonContext.devicePool()?.getDevice(session.assignedDevice)?.platform
@@ -166,9 +168,12 @@ function routeViaBinding(scope: RoutingScope, rawArgs: Record<string, unknown>):
     sessionId,
     toolParams,
     admittedSessionDevice,
-    name === "setActiveDevice",
-    name !== "setActiveDevice" && (readOnly || managedBinding !== undefined),
-    readOnly,
+    {
+      selectingActiveDevice: tool.selectsActiveDevice === true,
+      deferForeignDevice:
+        tool.selectsActiveDevice !== true && (readOnly || managedBinding !== undefined),
+      readOnly,
+    },
   );
   return { routingSessionUuid, resolvedImplicitAutolockSessionUuid: undefined };
 }
@@ -188,7 +193,7 @@ export function routeDeviceSession(
     routingSessionUuid: initialRoutingSessionUuid,
     resolvedImplicitAutolockSessionUuid: undefined,
   };
-  if (name === "setActiveDevice") {
+  if (tool.selectsActiveDevice === true) {
     // Refused here, before session routing: a bound session that does not match the target would
     // otherwise surface as a generic routing error instead of the typed refusal (#11268).
     assertBrokerConnectionPlainToolCall({
@@ -201,7 +206,10 @@ export function routeDeviceSession(
     });
   }
   if (
-    !((tool.requiresDevice && !isDeviceSessionAcquisitionTool(name)) || name === "setActiveDevice")
+    !(
+      (tool.requiresDevice && !isDeviceSessionAcquisitionTool(name)) ||
+      tool.selectsActiveDevice === true
+    )
   ) {
     return unrouted;
   }

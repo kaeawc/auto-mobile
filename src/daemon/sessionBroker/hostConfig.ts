@@ -2,6 +2,7 @@ import { ENV as ENV_SPECS } from "../../config/env";
 import { readFile } from "node:fs/promises";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../../utils/SystemTimer";
 import { z } from "zod";
+import { MIN_AVD_RAM_MB } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BindingScopeIdentity } from "./registry/bindingRegistry";
 
@@ -9,6 +10,8 @@ import type { BindingScopeIdentity } from "./registry/bindingRegistry";
 export const SESSION_BROKER_HOST_CONFIG_ENV = ENV_SPECS.SESSION_BROKER_CONFIG.name;
 export const SESSION_BROKER_EXPORT_CAPABILITY = "session-broker-export/v1";
 export const SESSION_BROKER_CAPABILITY = "session-broker/v1";
+/** Advertised only when the running broker's host configuration enables `capabilities.iosDuo`. */
+export const SESSION_BROKER_IOS_DUO_CAPABILITY = "session-broker/ios-duo/v1";
 
 /** One private allocation scope in the host-wide registry; no caller chooses these values. */
 export const SESSION_BROKER_SCOPE: BindingScopeIdentity = {
@@ -40,7 +43,7 @@ const modelReference = z
   })
   .strict();
 const archetype = z.enum(["phone", "tablet", "duo"]);
-const androidArchetype = z.enum(["phone", "tablet"]);
+const androidArchetype = z.enum(["phone", "tablet", "foldable"]);
 const version = z.string().regex(/^\d+(?:\.\d+)*$/);
 const osSelector = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("exact"), version }).strict(),
@@ -75,7 +78,17 @@ const androidDefaults = z
       .object({
         omitted: androidArchetype,
         profiles: z.array(
-          z.object({ archetype: androidArchetype, profileId: z.string().min(1) }).strict(),
+          z
+            .object({
+              archetype: androidArchetype,
+              profileId: z.string().min(1),
+              memoryMb: z
+                .number()
+                .int()
+                .min(MIN_AVD_RAM_MB, `memoryMb must be at least ${MIN_AVD_RAM_MB} MB`)
+                .optional(),
+            })
+            .strict(),
         ),
       })
       .strict(),
@@ -83,8 +96,20 @@ const androidDefaults = z
   })
   .strict();
 const cap = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+/**
+ * Recognized hardware this host may execute. Off by default: an unconfigured host keeps
+ * refusing Duo requests with a non-retryable `capability_disabled` failure.
+ */
+const capabilities = z
+  .object({
+    /** iPhone Duo simulators; the host needs an iOS 27.1+ runtime that supports them. */
+    iosDuo: z.boolean().default(false),
+  })
+  .strict();
 /** Keep-booted cleaning cannot revert everything, so every Nth release erases instead (#15017). */
 export const DEFAULT_IOS_KEEP_BOOTED_MAX_USES = 10;
+/** Minimal cleaning reverts less than keep-booted, so retire the simulator sooner (#14682). */
+export const DEFAULT_IOS_MINIMAL_MAX_USES = 5;
 const iosReuse = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("off") }).strict(),
   z
@@ -99,6 +124,17 @@ const iosReuse = z.discriminatedUnion("mode", [
       mode: z.literal("keep-booted"),
       maxUses: cap.positive().default(DEFAULT_IOS_KEEP_BOOTED_MAX_USES),
       fallback: z.enum(["erase", "destroy"]).default("erase"),
+    })
+    .strict(),
+  /**
+   * Keeps the simulator Booted and runs a fixed short reset (uninstall session apps, keychain and
+   * privacy reset, appearance/content size/pasteboard revert) with no baseline diff and no erase
+   * fallback: a failed step destroys the simulator instead (#14682).
+   */
+  z
+    .object({
+      mode: z.literal("minimal"),
+      maxUses: cap.positive().default(DEFAULT_IOS_MINIMAL_MAX_USES),
     })
     .strict(),
 ]);
@@ -135,7 +171,15 @@ const hostConfig = z
     androidResetTimeoutMs: z.number().int().positive().max(MAX_SETTIMEOUT_DELAY_MS).optional(),
     androidKeepBootedMaxUses: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
     androidKeepBootedFallback: z.enum(["snapshot", "destroy"]).optional(),
+    /** An idle pooled Android device is destroyed after this long unused (#14364); omitted keeps it. */
+    androidIdleTtlMs: z
+      .number()
+      .int("androidIdleTtlMs must be a whole number of milliseconds")
+      .positive("androidIdleTtlMs must be a positive number of milliseconds")
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional(),
     reuse: z.object({ ios: iosReuse }).strict().optional(),
+    capabilities: capabilities.default({}),
   })
   .strict()
   .refine((config) => config.defaults.ios !== undefined || config.defaults.android !== undefined, {
@@ -157,6 +201,14 @@ const hostConfig = z
     { message: "Android keep-booted keys require keep-booted mode" },
   )
   .refine(
+    (config) => config.androidIdleTtlMs === undefined || config.androidResetMode !== undefined,
+    {
+      path: ["androidIdleTtlMs"],
+      message:
+        "androidIdleTtlMs requires androidResetMode; without a reset mode no Android device is pooled",
+    },
+  )
+  .refine(
     (config) =>
       config.androidResetTimeoutMs === undefined ||
       config.androidResetMode === "snapshot" ||
@@ -170,14 +222,19 @@ const hostConfig = z
   .refine(
     (config) => !config.reuseCleanDevices || !config.reuse || config.reuse.ios.mode === "erase",
     {
-      message: "reuseCleanDevices: true selects iOS erase; remove it to select keep-booted or off",
+      message:
+        "reuseCleanDevices: true selects iOS erase; remove it to select minimal, keep-booted or off",
     },
   )
   .refine(
     (config) =>
       config.defaults.ios !== undefined || !config.reuse || config.reuse.ios.mode === "off",
     { message: "iOS reuse requires an explicit defaults.ios policy" },
-  );
+  )
+  .refine((config) => config.defaults.ios !== undefined || !config.capabilities.iosDuo, {
+    path: ["capabilities", "iosDuo"],
+    message: "capabilities.iosDuo requires an explicit defaults.ios policy",
+  });
 
 export type SessionBrokerHostConfig = z.infer<typeof hostConfig>;
 
@@ -205,4 +262,25 @@ export async function readSessionBrokerHostConfig(path: string): Promise<Session
   } catch (error) {
     throw toActionableError(error, `Cannot load session broker host configuration at ${path}`);
   }
+}
+
+/**
+ * Whether a booted Android emulator should skip the quick-boot snapshot save at exit (#15477,
+ * #15793): when the host config is read and no snapshot reset can use the saved state. That is no
+ * reset mode (released emulators are destroyed) or keep-booted without the snapshot fallback
+ * (`destroy` or omitted: a non-clean release deletes the AVD, a clean one keeps it running).
+ * Snapshot resets, keep-booted with the snapshot fallback, and an unread config keep the default.
+ */
+export function discardsAndroidSnapshotOnExit(
+  config:
+    | Pick<SessionBrokerHostConfig, "androidResetMode" | "androidKeepBootedFallback">
+    | undefined,
+): boolean {
+  if (config === undefined) {
+    return false;
+  }
+  return (
+    config.androidResetMode === undefined ||
+    (config.androidResetMode === "keep-booted" && config.androidKeepBootedFallback !== "snapshot")
+  );
 }

@@ -1,0 +1,41 @@
+{
+  "id": "platform-status-battery",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "changes": 0
+  },
+  "requires": {
+    "platform": ["battery"]
+  },
+  "platform": {
+    "on": {
+      "battery.changed": [
+        {
+          "type": "increment",
+          "key": "changes"
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "Battery {platform:/battery/level}% {platform:/battery/state} ({changes})"
+      },
+      {
+        "type": "text",
+        "text": "Charging",
+        "visibleWhen": {
+          "platform": "/battery/state",
+          "equals": "charging"
+        }
+      }
+    ]
+  }
+}

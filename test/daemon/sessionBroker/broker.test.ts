@@ -1,6 +1,7 @@
 import { InMemoryMutationRecordingGaps } from "../../../src/daemon/sessionBroker/mutations/recordingGaps";
 import { isSessionBrokerDeviceName } from "../../../src/daemon/sessionBroker/deviceNaming";
 import { FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
+import { nativeProfile } from "../../../src/daemon/sessionBroker/profile";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/sessionBroker/broker";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
@@ -20,7 +21,13 @@ import { parseSessionConfig, type SessionConfig } from "../../../src/devices/ses
 import { logger } from "../../../src/utils/logger";
 import type { SessionBrokerReleaseResult } from "../../../src/devices/sessionBrokerResult";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import {
+  androidCatalog,
+  androidDefaults,
+  IOS_DUO,
+  iosCatalog,
+  iosDefaults,
+} from "../../devices/sessionRequirements/fixtures";
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
@@ -459,6 +466,74 @@ describe("session-only broker lifecycle", () => {
     expect(devices.sessions.has(second)).toBe(true);
   });
 
+  test("foldable refusal precedes reservations and creation", async () => {
+    options.catalog = async () => androidCatalog();
+    options.defaults = () => androidDefaults();
+    const request: SessionConfig = {
+      ...config("fold-missing"),
+      device: {
+        schemaVersion: 1,
+        platform: "android",
+        hardware: { kind: "archetype", archetype: "foldable" },
+        os: { kind: "omitted" },
+      },
+    };
+    const result = await broker.prepare(request, "owner-token");
+    expect(result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "unsupported_hardware", retryable: false },
+    });
+    expect(JSON.stringify(result)).toContain("defaults.android.hardware.profiles");
+    expect(await options.store.listResources()).toEqual([]);
+    expect(devices.prepared).toEqual([]);
+  });
+
+  test.each([
+    [undefined, 4096],
+    [4096, undefined],
+    [4096, 4096],
+  ] as const)("idle fold RAM %s then %s", async (firstMemory, secondMemory) => {
+    let memoryMb: number | undefined = firstMemory;
+    options.catalog = async () =>
+      androidCatalog({
+        profiles: [
+          { profileId: "pixel_9_pro_fold", archetype: "foldable", metadataState: "current" },
+        ],
+      });
+    options.defaults = () =>
+      androidDefaults({
+        hardware: {
+          omitted: "foldable",
+          profiles: [
+            {
+              archetype: "foldable",
+              profileId: "pixel_9_pro_fold",
+              ...(memoryMb === undefined ? {} : { memoryMb }),
+            },
+          ],
+        },
+      });
+    broker = new SessionBroker({ ...options, reuseAndroidCleanDevices: true });
+    const request = (requestId: string): SessionConfig => ({
+      ...config(requestId),
+      device: {
+        schemaVersion: 1,
+        platform: "android",
+        hardware: { kind: "archetype", archetype: "foldable" },
+        os: { kind: "omitted" },
+      },
+    });
+    const first = await broker.prepare(request("fold-first"), "owner-token");
+    if (first.outcome !== "ready" || !first.sessionUuid) {
+      throw new Error(JSON.stringify(first));
+    }
+    await broker.release(first.sessionUuid);
+    memoryMb = secondMemory;
+    const second = await broker.prepare(request("fold-second"), "owner-token");
+    expect(second.outcome).toBe("ready");
+    expect(devices.prepared[0] === devices.prepared[1]).toBe(firstMemory === secondMemory);
+  });
+
   test("lost prepare reply replays original session despite unavailable catalog", async () => {
     const first = await ready("first");
     options.catalog = async () => {
@@ -763,6 +838,32 @@ describe("session-only broker lifecycle", () => {
       state: "failed",
       errorCode: "capability_disabled",
       resourceId: null,
+    });
+  });
+
+  test("an enabled Duo capability admits an exact Duo request and advertises support", async () => {
+    expect(broker.supportsIosDuo()).toBe(false);
+    await broker.close();
+    broker = new SessionBroker({
+      ...options,
+      limits: { totalDeviceCap: 2, sessionCap: 2, idlePoolCap: 0 },
+      capabilities: { iosDuo: true },
+    });
+    expect(broker.supportsIosDuo()).toBe(true);
+    const request = config("duo-enabled");
+    request.device.hardware = {
+      kind: "exact-model",
+      model: { namespace: "simulator-device-type", value: IOS_DUO.simulatorDeviceTypeIdentifier },
+    };
+    request.device.os = { kind: "exact", version: "28" };
+
+    const result = await broker.prepare(request, "owner-token");
+
+    expect(result.outcome).toBe("ready");
+    expect(nativeProfile(devices.sessions.get(result.sessionUuid!)!)).toMatchObject({
+      platform: "ios",
+      simulatorDeviceTypeIdentifier: IOS_DUO.simulatorDeviceTypeIdentifier,
+      archetype: "duo",
     });
   });
 
@@ -1395,7 +1496,7 @@ describe("session-only broker lifecycle", () => {
         },
       },
       timer,
-      new InMemoryMutationRecordingGaps(),
+      { recordingGaps: new InMemoryMutationRecordingGaps() },
     );
     const marked: string[] = [];
     const relinquish = options.store.relinquishForRestart.bind(options.store);
@@ -1529,7 +1630,7 @@ describe("session-only broker lifecycle", () => {
       "test-scope",
       { acquire: () => {}, release: () => {} },
       timer,
-      new InMemoryMutationRecordingGaps(),
+      { recordingGaps: new InMemoryMutationRecordingGaps() },
     );
     service.start();
     await entered.promise;

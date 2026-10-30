@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { DaemonBoundSessionExpiredError, DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_OWNED_SESSIONS_PARAM, DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import {
   withForeignOwnedSessionMeta,

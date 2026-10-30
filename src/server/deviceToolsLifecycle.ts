@@ -1,5 +1,12 @@
+import type { DeleteDeviceOptions } from "../features/deviceLifecycle/teardown/teardownContracts";
 import type { RestartStopIdentity } from "../daemon/devicePool";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
+import type { BootedDevice } from "../models";
+import {
+  deleteWatchDevice,
+  isWatchTeardownRequest,
+  type RegisteredTeardownArgs,
+} from "./deviceToolsWatchDelete";
 import type { DaemonStateLike } from "../daemon/daemonState";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { getAbortSignal } from "../utils/AbortContext";
@@ -69,6 +76,7 @@ import {
   resolveKillDeviceStableTarget,
   resolveTeardownTarget,
   retireStoppedTeardownOwnership,
+  refuseLiveStoppedAndroidTarget,
   shutdownTimeoutError,
   stopSegmentedVideoRecordingsBeforeDestroy,
   teardownDeadlineDevice,
@@ -192,25 +200,28 @@ export function typedTeardownRefusal(
   if (error instanceof EmulatorTeardownEscalationError) {
     // Soft retries and the SIGTERM/SIGKILL escalation both ran: a caller (the session broker's
     // journal) must be able to tell this terminal failure from an ordinary retryable one (#14018).
-    return createTeardownFailureResponse(args, phase, error.code, error.message, resolved, {
-      retryable: error.retryable,
-      reason: error.reason,
-      serial: error.serial,
-      softAttempts: error.softAttempts,
-      ...(error.pid !== undefined ? { pid: error.pid } : {}),
+    return createTeardownFailureResponse(args, phase, error.code, error.message, {
+      resolved,
+      details: {
+        retryable: error.retryable,
+        reason: error.reason,
+        serial: error.serial,
+        softAttempts: error.softAttempts,
+        ...(error.pid !== undefined ? { pid: error.pid } : {}),
+      },
     });
   }
   if (hasSimctlTimeoutCause(error)) {
     // `simctl` queues behind CoreSimulator under a delete burst: the command never ran to a
     // verdict, so the same delete can be retried (#15308).
-    return createTeardownFailureResponse(
-      args,
-      phase,
-      "operation_failed",
-      errorMessage(error),
+    return createTeardownFailureResponse(args, phase, "operation_failed", errorMessage(error), {
       resolved,
-      { retryable: true, retryAfterMs: SIMCTL_TIMEOUT_RETRY_AFTER_MS, reason: "simctl_timeout" },
-    );
+      details: {
+        retryable: true,
+        retryAfterMs: SIMCTL_TIMEOUT_RETRY_AFTER_MS,
+        reason: "simctl_timeout",
+      },
+    });
   }
   if (!isTypedToolRefusal(error)) {
     return undefined;
@@ -229,7 +240,7 @@ export function typedTeardownRefusal(
     return undefined;
   }
   delete fields.success;
-  return createTeardownFailureResponse(args, phase, code, message, resolved, fields);
+  return createTeardownFailureResponse(args, phase, code, message, { resolved, details: fields });
 }
 
 /**
@@ -300,6 +311,34 @@ async function assertKillDeviceCaller(
     force: args.force ?? false,
   });
   return stopIdentity;
+}
+
+/**
+ * deleteDevice's caller checks for an Apple Watch simulator (#15882): the same broker-binding,
+ * session-holder and other-daemon refusals killDevice applies, named for deleteDevice.
+ */
+export async function assertWatchDeleteCaller(
+  device: BootedDevice,
+  args: object,
+  force: boolean,
+): Promise<void> {
+  const requester = lifecycleRequester(args);
+  await assertLifecycleCallerNotOnForeignBinding({
+    toolName: "deleteDevice",
+    device,
+    requester,
+    stableIds: [device.deviceId],
+  });
+  assertLifecycleCallerHoldsDevice({
+    checkRestartHold: true,
+    toolName: "deleteDevice",
+    device,
+    requester,
+    force,
+    stableIds: [device.deviceId],
+    stopIdentity: undefined,
+  });
+  await assertLifecycleTargetNotHeldByOtherDaemon({ toolName: "deleteDevice", device, force });
 }
 
 type TeardownStopIdentities = Map<string, RestartStopIdentity | undefined>;
@@ -463,13 +502,30 @@ async function verifyDeleteDeviceTarget(
   return response;
 }
 
+async function prepareStoppedTeardownTarget(
+  context: TeardownContext,
+  target: TeardownResolvedTarget,
+): Promise<TeardownToolResponse | undefined> {
+  const refusal = await refuseLiveStoppedAndroidTarget(context, target);
+  if (refusal) {
+    return refusal;
+  }
+  await stopSegmentedVideoRecordingsBeforeDestroy(context, target);
+  await retireStoppedTeardownOwnership(context, target);
+  return undefined;
+}
+
+/** A delete's caller and private evidence, plus the stop identities its workflow records. */
+type DeleteDeviceWorkflowOptions = Omit<DeleteDeviceOptions, "lifecycleLease"> & {
+  stopIdentities: TeardownStopIdentities;
+};
+
 function createDeleteDeviceWorkflow(
   args: TeardownDeviceArgs,
   deps: DeviceToolsDependencies,
   deadlineMs: number,
   timeoutMs: number,
-  requester: LifecycleRequester | undefined,
-  stopIdentities: TeardownStopIdentities,
+  { stopIdentities, requester, internal }: DeleteDeviceWorkflowOptions,
 ): DeviceTeardownWorkflow<TeardownState, "accepted" | "not_required", TeardownToolResponse> {
   return {
     resolve: async (requestAbortSignal, lifecycleLease) => {
@@ -483,6 +539,7 @@ function createDeleteDeviceWorkflow(
         timeoutMs,
         cancelOnRequestAbort: args.cancellationPolicy === "cancel-on-request-abort",
         lifecycleLease,
+        unlaunchedCreatedAvd: internal?.unlaunchedCreatedAvd,
         mode: args.force === true ? "serial-only" : "named",
         initialScan: { serials: new Set(), pooledEntries: [] },
       };
@@ -562,14 +619,9 @@ function createDeleteDeviceWorkflow(
         );
         stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
       } else {
-        await stopSegmentedVideoRecordingsBeforeDestroy(context, target);
-        await retireStoppedTeardownOwnership(context, target);
+        state.earlyResponse = await prepareStoppedTeardownTarget(context, target);
       }
-
-      const restarted = await checkForRestartedTeardownTarget(context, target, "stop");
-      if (restarted) {
-        state.earlyResponse = restarted;
-      }
+      state.earlyResponse ??= await checkForRestartedTeardownTarget(context, target, "stop");
       return stop;
     },
     destroy: async (state, _requestAbortSignal, retainLeaseUntil) =>
@@ -607,14 +659,11 @@ function createDeleteDeviceWorkflow(
       return createTeardownFailureResponse(
         args,
         phase,
-        // The last-moment identity check refuses a target this daemon
-        // cannot tie to the runtime; that is an identity outcome, not a
-        // generic operation failure (#6863 review).
         effectiveError instanceof PooledAvdIdentityError
           ? "target_identity_unresolved"
           : "operation_failed",
         String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
-        state?.target.device,
+        { resolved: state?.target.device },
       );
     },
   };
@@ -649,8 +698,7 @@ async function runDeleteDevice(
   deps: DeviceToolsDependencies,
   callerSignal: AbortSignal | undefined,
   teardownService: DeviceTeardownService,
-  lifecycleLease?: VirtualDeviceLifecycleLease,
-  requester?: LifecycleRequester,
+  { lifecycleLease, requester, internal }: DeleteDeviceOptions = {},
 ): Promise<TeardownToolResponse> {
   const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
   const deadlineMs = deps.timer.now() + timeoutMs;
@@ -685,7 +733,11 @@ async function runDeleteDevice(
         cancellationPolicy: args.cancellationPolicy ? "cancel-on-caller-abort" : undefined,
         lifecycleLease,
       },
-      createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs, requester, stopIdentities),
+      createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs, {
+        stopIdentities,
+        requester,
+        internal,
+      }),
     );
   } catch (error) {
     return deleteDeviceCatchResponse(args, error, callerSignal);
@@ -792,9 +844,7 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
     deps: DeviceToolsDependencies,
     callerSignal: AbortSignal | undefined,
     teardownService: DeviceTeardownService,
-    lifecycleLease?: VirtualDeviceLifecycleLease,
-    /** The deleteDevice caller; omitted by internal rollbacks of a device the caller created. */
-    requester?: LifecycleRequester,
+    { lifecycleLease, requester, internal }: DeleteDeviceOptions = {},
   ): Promise<TeardownToolResponse> {
     // Queue before the deadline starts, so waiting for a turn never spends the delete's own budget.
     let permit: Awaited<ReturnType<BootConcurrencyPool["acquire"]>> | undefined;
@@ -807,32 +857,41 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
       }
     }
     try {
-      return await runDeleteDevice(
-        args,
-        deps,
-        callerSignal,
-        teardownService,
+      return await runDeleteDevice(args, deps, callerSignal, teardownService, {
         lifecycleLease,
         requester,
-      );
+        internal,
+      });
     } finally {
       permit?.release();
     }
   }
 
   const deleteDeviceHandler = async (
-    args: TeardownDeviceArgs,
+    args: RegisteredTeardownArgs,
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
+    if (isWatchTeardownRequest(args)) {
+      const force = args.force ?? false;
+      return await deleteWatchDevice(
+        args,
+        {
+          assertCaller: (device) => assertWatchDeleteCaller(device, args, force),
+          // killDevice judges the same caller (its internal params ride along) and stops the watch.
+          stop: (device, signal) =>
+            killDeviceHandler({ ...args, device, force }, undefined, signal),
+        },
+        abortSignal ?? getAbortSignal(),
+      );
+    }
     const deps = getDeviceToolsDependencies();
     return await executeDeleteDevice(
       args,
       deps,
       abortSignal ?? getAbortSignal(),
       getDeviceTeardownService(deps),
-      undefined,
-      lifecycleRequester(args),
+      { requester: lifecycleRequester(args) },
     );
   };
 

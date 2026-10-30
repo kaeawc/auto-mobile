@@ -49,7 +49,7 @@ struct RequestBudget: Sendable {
     }
 }
 
-/// Keep in sync with DAEMON_RESPONSE_GRACE_MS in src/daemon/client.ts.
+/// Keep in sync with DAEMON_RESPONSE_GRACE_MS in src/daemon/client/client.ts.
 private let daemonResponseGraceSeconds: TimeInterval = 2
 
 /// Follow budgets measured from the start of the send, not from notification receipt. Re-read after

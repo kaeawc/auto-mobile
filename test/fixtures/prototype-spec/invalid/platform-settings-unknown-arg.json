@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "s3",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["settings"]
+    },
+    "root": {
+      "type": "button",
+      "label": "Open settings",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "settings.open",
+          "args": {
+            "page": {
+              "value": "app"
+            },
+            "package": {
+              "value": "com.other"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.package"
+}

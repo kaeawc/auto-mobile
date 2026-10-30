@@ -1,3 +1,4 @@
+import { collectBoundedStdout, type BoundedStdout } from "./boundedChildOutput";
 import {
   resolveOwnAppDataContainer,
   resolveOwnAppGroupContainer,
@@ -27,9 +28,15 @@ import {
   type SessionLogProvider,
   type SessionLogSimctl,
   type ResetAppLogsRequest,
+  type SessionLogReadBounds,
+  type UnifiedLogReadBounds,
 } from "./DefaultSessionLogService";
 import { SessionLogTimeoutError } from "./SessionLogTimeoutError";
-import { logShowArgs, unifiedLogPredicate, unifiedLogWindowResult } from "./unifiedLogWindow";
+import {
+  logShowArgs,
+  unifiedLogPredicate,
+  streamedUnifiedLogWindowResult,
+} from "./unifiedLogWindow";
 import type {
   SessionLogAppGroupRequest,
   SessionLogAppGroupResult,
@@ -77,7 +84,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: SessionLogFilesRequest,
-    maxBytes: number,
+    { maxBytes }: SessionLogReadBounds,
   ): Promise<SessionLogFilesResult> {
     const root = await this.resolveContainerRoot(device, appId, request.container, "read", {
       container: "data",
@@ -117,7 +124,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: SessionLogAppGroupRequest,
-    maxBytes: number,
+    { maxBytes }: SessionLogReadBounds,
   ): Promise<SessionLogAppGroupResult> {
     const root = await this.resolveContainerRoot(device, appId, request.groupId, "read", {
       container: "group",
@@ -135,15 +142,14 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: UnifiedLogWindowRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
+    { maxBytes, signal, retain = "head" }: UnifiedLogReadBounds,
   ): Promise<UnifiedLogWindowResult> {
     this.requireSimulator(device, "collect the unified log");
     const predicate = unifiedLogPredicate(appId, request.processName);
     const args = ["spawn", device.deviceId, "log", ...logShowArgs(request, predicate)];
     const startedAt = this.timer.now();
-    const stdout = await this.runBounded(device, args, signal);
-    return unifiedLogWindowResult(request, stdout, maxBytes, {
+    const stdout = await this.runBounded(device, args, maxBytes, retain, signal);
+    return streamedUnifiedLogWindowResult(request, stdout, {
       predicate,
       mechanism: "simctl-log-show",
       collectionMs: this.timer.now() - startedAt,
@@ -159,28 +165,33 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
   private async runBounded(
     device: BootedDevice,
     args: string[],
+    maxBytes: number,
+    retain: "head" | "tail",
     callerSignal?: AbortSignal,
-  ): Promise<string> {
+  ): Promise<BoundedStdout> {
     const simctl = this.simctlFactory(device);
     const controller = new AbortController();
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, controller.signal])
       : controller.signal;
     // Arm the collection deadline before simctl so its typed timeout wins equal deadlines.
-    const run = () => simctl.executeCommandArgs(args, this.unifiedLogTimeoutMs, signal);
+    const run = async () => {
+      signal.throwIfAborted();
+      // The collector owns cancellation; native spawn signals also emit a late AbortError.
+      const child = await simctl.startCommandArgs(args, { stdio: ["ignore", "pipe", "pipe"] });
+      return collectBoundedStdout(child, { maxBytes, retain, signal });
+    };
     let timeoutError: SessionLogTimeoutError | undefined;
-    return (
-      await raceWithDeadline(run, {
-        timer: this.timer,
-        timeoutMs: this.unifiedLogTimeoutMs,
-        label: "Unified log collection",
-        timeoutError: () =>
-          (timeoutError = new SessionLogTimeoutError(
-            `Unified log collection timed out after ${this.unifiedLogTimeoutMs}ms on ${device.deviceId}.`,
-          )),
-        onTimeout: () => controller.abort(timeoutError),
-      })
-    ).stdout;
+    return raceWithDeadline(run, {
+      timer: this.timer,
+      timeoutMs: this.unifiedLogTimeoutMs,
+      label: "Unified log collection",
+      timeoutError: () =>
+        (timeoutError = new SessionLogTimeoutError(
+          `Unified log collection timed out after ${this.unifiedLogTimeoutMs}ms on ${device.deviceId}.`,
+        )),
+      onTimeout: () => controller.abort(timeoutError),
+    });
   }
 
   private requireSimulator(device: BootedDevice, action: string): void {

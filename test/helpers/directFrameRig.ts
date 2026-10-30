@@ -53,7 +53,7 @@ export interface DeviceClientFake {
   requestGestureStart?: (
     request: GestureStartRequest,
   ) => Promise<{ success: boolean; error?: string }>;
-  setPreference?: (...args: unknown[]) => Promise<void>;
+  setPreference?: (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => Promise<void>;
   clearPreferenceStore?: (...args: unknown[]) => Promise<void>;
   /** Awaited by every device discovery before it answers. */
   discovery?: () => Promise<void>;
@@ -118,8 +118,8 @@ export function createDirectFrameRig(
         return { totalTimeMs: 0, ...((await client.requestGestureEnd?.()) ?? { success: true }) };
       },
       setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
         }
         called("setPreference");
         await client.setPreference?.(...args);

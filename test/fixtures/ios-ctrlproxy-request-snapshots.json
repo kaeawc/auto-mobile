@@ -51,6 +51,42 @@
       }
     },
     {
+      "name": "request_sdk_observation",
+      "builder": "requestSdkObservation",
+      "wire": {
+        "type": "request_sdk_observation",
+        "requestId": "fixture-request-id"
+      }
+    },
+    {
+      "name": "request_sdk_action",
+      "builder": "requestSdkAction",
+      "wire": {
+        "type": "request_sdk_action",
+        "requestId": "fixture-request-id",
+        "actionJson": "{\"tap\":{\"observationIdentity\":41,\"elementId\":\"submit\"}}"
+      }
+    },
+    {
+      "name": "request_sdk_web_snapshot",
+      "builder": "requestSdkWebSnapshot",
+      "wire": {
+        "type": "request_sdk_web_snapshot",
+        "requestId": "fixture-request-id",
+        "webViewId": "main"
+      }
+    },
+    {
+      "name": "request_sdk_web_action",
+      "builder": "requestSdkWebAction",
+      "wire": {
+        "type": "request_sdk_web_action",
+        "requestId": "fixture-request-id",
+        "webViewId": "main",
+        "actionJson": "{\"click\":{\"snapshotId\":\"s1\",\"elementId\":\"submit\"}}"
+      }
+    },
+    {
       "name": "request_sdk_trigger",
       "builder": "requestSdkTrigger",
       "wire": {
@@ -413,6 +449,15 @@
         "type": "set_hinge_angle",
         "requestId": "fixture-request-id",
         "angle": 130
+      }
+    },
+    {
+      "name": "request_siri",
+      "builder": "CtrlProxyNavigation.requestSiri",
+      "wire": {
+        "type": "request_siri",
+        "requestId": "fixture-request-id",
+        "text": "Show my orders in Playground"
       }
     },
     {

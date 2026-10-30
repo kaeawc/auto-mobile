@@ -151,6 +151,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
     replaceOthers: Boolean,
+    locale: String?,
   ) = Unit
 
   override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) = Unit
@@ -185,6 +186,9 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
   override suspend fun listSavedPrototypes(requestId: String?) = Unit
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) = Unit
+
+  override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) =
+    Unit
 
   override suspend fun clearPrototypeStorage(requestId: String?, id: String) = Unit
 
@@ -460,7 +464,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
     replaceOthers: Boolean,
-  ) = record("showPrototype", requestId, spec, displayId, reset, appearance, replaceOthers)
+    locale: String?,
+  ) = record("showPrototype", requestId, spec, displayId, reset, appearance, replaceOthers, locale)
 
   override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) =
     record("dismissPrototype", requestId, id, all)
@@ -497,6 +502,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) =
     record("deleteSavedPrototype", requestId, id)
+
+  override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) =
+    record("advancePrototypeClock", requestId, id, advanceTimeMs)
 
   override suspend fun clearPrototypeStorage(requestId: String?, id: String) =
     record("clearPrototypeStorage", requestId, id)

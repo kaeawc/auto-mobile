@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -17,7 +17,7 @@ import {
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
 import { DAEMON_INSTANCE_CHANGED_CODE } from "../../src/daemon/types";
-import { DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/client/client";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

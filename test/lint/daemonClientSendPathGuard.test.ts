@@ -9,7 +9,7 @@ import { GuardVisitor, parseGuardSource, readGuardFile } from "./astGuard";
  * policies over it, so the client itself never registers a pending request or writes a
  * request frame.
  */
-const CLIENT = path.join(import.meta.dir, "..", "..", "src", "daemon", "client.ts");
+const CLIENT = path.join(import.meta.dir, "..", "..", "src", "daemon", "client", "client.ts");
 
 function isThisMember(expression: Expression, ...names: string[]): boolean {
   let current: Expression = expression;

@@ -1,4 +1,14 @@
+import { savedPrototypeFailure, type PrototypeSavedOutput } from "../prototypeSavedActions";
+import { shownBackdrop } from "../../features/prototype/prototypeBackdrop";
+import { cachedPrototypeShaderAssetProblem } from "../../features/prototype/prototypeShaders";
+import { defaultPrototypeAssetCache } from "../../features/prototype/prototypeAssetCache";
+import {
+  type DegradedEffect,
+  prototypeDegradedEffectsOutput,
+} from "../../features/prototype/prototypeDegradedEffects";
+import { prototypeTimerWarnings } from "../../features/prototype/prototypeTimers";
 import { prototypeAccessibilityOutput } from "../../features/prototype/prototypeAccessibilityLint";
+import { prototypePlaceholderOutput } from "../../features/prototype/prototypePlaceholderLint";
 import { pseudoLocalizeSpec } from "../../features/prototype/prototypePseudoLocale";
 import { z } from "zod/v4";
 import { createDeviceHierarchyCapture } from "../../features/observe/DeviceHierarchyCapture";
@@ -23,7 +33,11 @@ import { shownAppearance } from "../../features/prototype/prototypeAppearance";
 import { resolvePrototypeDisplayId } from "../../features/prototype/prototypeDisplay";
 import { prototypeGestureFields } from "../../features/prototype/prototypeGestures";
 import { parsePrototypeHiddenReason } from "../../features/prototype/prototypeHidden";
-import { prototypePlatformNotes } from "../../features/prototype/prototypePlatformNotes";
+import { PROTOTYPE_ZOOM_RENDERING_GATE } from "../../features/prototype/prototypeZoomTransition";
+import {
+  prototypePlatformNotes,
+  prototypeStringsFallbackNotes,
+} from "../../features/prototype/prototypePlatformNotes";
 import { type PrototypeSpec } from "../../features/prototype/prototypeSpec";
 import { recordPrototypeTextShow } from "../../features/prototype/prototypeTextTarget";
 import { type PrototypeWindowChrome } from "../../features/prototype/prototypeWindowChrome";
@@ -37,9 +51,9 @@ import { isIndeterminate, shownSpecOutcome } from "../prototypeShownOutcome";
 import { sendPrototype, stageAssets } from "./assets";
 import { appLayerGrant, preflightMutation, specCapabilityRefusal } from "./preflight";
 import { prototypeSchema } from "./schemas";
+import { prototypeFormFactorOutput, prototypeScreenShapeOutput } from "./screenShape";
 import type {
   AnchorStage,
-  AssetReaders,
   AssetStage,
   PreflightStage,
   PrototypeHandlerDependencies,
@@ -48,13 +62,17 @@ import type {
   PrototypeToolDependencies,
 } from "./types";
 
+interface MutationEventOutcome {
+  action: PrototypeMutation;
+  success: boolean;
+  clearFailedShow: boolean;
+}
+
 function clearMutationEvents(
   events: PrototypeEventCoordinator,
   scope: PrototypeScope,
   target: { id?: string; all?: true },
-  action: PrototypeMutation,
-  success: boolean,
-  clearFailedShow: boolean,
+  { action, success, clearFailedShow }: MutationEventOutcome,
 ): void {
   if ((action === "dismiss" && success) || (action === "show" && !success && clearFailedShow)) {
     events.dismiss(scope.deviceId, target.id);
@@ -108,14 +126,20 @@ function shownOnDevice(
 /** A refused display ends the call before any asset is uploaded. */
 async function stageUnlessRefused(
   failure: PrototypeResult | undefined,
-  target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
-  readers: AssetReaders,
+  dependencies: PrototypeHandlerDependencies,
+  device: BootedDevice,
   signal: AbortSignal | undefined,
 ): Promise<AssetStage> {
   return failure
     ? { uploaded: [], prepared: [], failure }
-    : stageAssets(target, args, readers, signal);
+    : stageAssets(
+        dependencies.target,
+        args,
+        dependencies.assetReaders,
+        signal,
+        shaderCacheContext(dependencies, device.deviceId),
+      );
 }
 
 export async function performPrototypeAction(
@@ -123,8 +147,7 @@ export async function performPrototypeAction(
   device: BootedDevice,
   args: Omit<z.infer<typeof prototypeSchema>, "action"> & { action: PrototypeMutation | "patch" },
   scope: PrototypeScope,
-  queue: PrototypePatchQueue,
-  signal?: AbortSignal,
+  { queue, signal }: { queue: PrototypePatchQueue; signal?: AbortSignal },
 ): Promise<PrototypeOutput> {
   if (args.action === "patch") {
     const { store, target, cacheInvalidator } = dependencies;
@@ -139,7 +162,13 @@ export async function performPrototypeAction(
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
         // A patched node may add or drop a via "device" localhost request (#12530): staged here.
         specRefusal: async (spec) =>
-          (await specCapabilityRefusal(target, spec, signal))?.error ?? patchReverse.stage(spec),
+          (await specCapabilityRefusal(target, spec, signal, undefined, dependencies.env))?.error ??
+          (await cachedPrototypeShaderAssetProblem(
+            spec,
+            device.deviceId,
+            dependencies.shaderAssetCache ?? defaultPrototypeAssetCache(),
+          )) ??
+          patchReverse.stage(spec),
         settleSpec: patchReverse.settle,
         platform: device.platform === "android" ? "android" : "ios",
         queue,
@@ -160,38 +189,35 @@ async function performMutation(
   scope: PrototypeScope,
   signal?: AbortSignal,
 ): Promise<PrototypeOutput> {
-  const { store, events, target: prototypeTarget, assetReaders, commits } = dependencies;
+  const { store, events, target: prototypeTarget, commits } = dependencies;
   const target = mutationTarget(args);
   const source = prototypeEventSource(prototypeTarget.transport);
   // The device holds one active prototype, so presence is device-wide, not per session.
   const shown = shownOnDevice(store, scope, target);
-  const previouslyShown = shown !== undefined;
   const inPlace = args.action === "show" && shown !== undefined && args.reset !== true;
   // An older CtrlProxy re-shows a same-id prototype fresh on the display it is sent, so its pages
   // restart. It still validates before replacing, so a refused show leaves the old prototype and its
   // events exactly as an in-place one does; only the caller needs telling.
   const legacy = await legacyInPlaceWarning(prototypeTarget, target, inPlace, signal);
-  const takenGeneration = beginShowGeneration(commits, scope, args.action, target);
+  const generation = beginShowGeneration(commits, scope, args.action, target);
   // Display lookups and window-option checks precede staging, so a refused show cannot reset the event epoch.
   const ordering: ShowOrdering = {
     commits,
     scope,
     target,
-    generation: takenGeneration,
+    generation: generation,
     sent: false,
     startedFreshEvents: false,
   };
   const reversing = reverseLifecycle(dependencies, device, args, target);
   try {
-    const generation = takenGeneration;
     const resolved = await preflightWithGeneration(ordering, () =>
       preflightMutation(
-        { inPlace, shownDisplayId: shown?.displayId },
+        { inPlace, shownDisplayId: shown?.displayId, signal },
         prototypeTarget,
         device,
         args,
         dependencies,
-        signal,
       ),
     );
     // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
@@ -208,17 +234,20 @@ async function performMutation(
     const stage = await withdrawOnAbort(
       ordering,
       signal,
-      stageUnlessRefused(resolved.failure, prototypeTarget, sendArgs, assetReaders, signal),
+      stageUnlessRefused(resolved.failure, sendArgs, dependencies, device, signal),
     );
     // A failed upload ends the call unsent, like a refusal: it must not supersede a valid show.
     if (stage.failure) {
       withdrawGeneration(ordering);
     }
     const reverseReport = await reversing.prepare([resolved.failure, stage.failure]);
-    const { result, warning } = await withdrawOnAbort(
+    const { result, warning, mutationReply } = await withdrawOnAbort(
       ordering,
       undefined,
-      sendPrototype(prototypeTarget, sendArgs, stage, signal, displayId, {
+      sendPrototype(prototypeTarget, sendArgs, stage, {
+        signal,
+        displayId,
+        env: dependencies.env,
         superseded: () => isSuperseded(commits, scope, target, generation),
         beforeSend: async () => {
           // Last abort check before the grant, the event epoch and the device send.
@@ -243,7 +272,7 @@ async function performMutation(
           }
         },
       }),
-    );
+    ).then(renderShowOutcome);
     endShownSpec(store, ordering, {
       action: args.action,
       success: result.success,
@@ -264,7 +293,7 @@ async function performMutation(
         all: sendArgs.all,
       },
     );
-    await reversing.settle(result.success, previouslyShown, isIndeterminate(result));
+    await reversing.settle(result.success, shown !== undefined, isIndeterminate(result));
     const placed = {
       ...placedDisplay(args, shown, comparable, result.success),
       chrome: resolved.chrome,
@@ -277,7 +306,7 @@ async function performMutation(
           result,
           placed,
           inPlace,
-          previouslyShown,
+          previouslyShown: shown !== undefined,
           startedFreshEvents: ordering.startedFreshEvents,
         });
     const { warning: visibilityWarning, ...visibility } = await prototypeAppLayerVisibilityOutput({
@@ -293,16 +322,16 @@ async function performMutation(
       displayId,
       signal,
     });
+    const spec = authoredArgs.spec;
     return {
-      success: result.success,
-      ...(result.error ? { error: result.error } : {}),
+      ...mutationReply,
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
-      ...showAdviceOutput(authoredArgs, device, prototypeTarget, result.success),
+      ...(await showAdviceOutput(authoredArgs, device, dependencies, result, signal)),
       ...visibility,
       ...reversing.output(reverseReport, result.success),
-      ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy),
+      ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, spec),
     };
   } catch (error) {
     recordPrototypeTextShow(device.deviceId, args.action, undefined, {
@@ -327,35 +356,90 @@ function pseudoLocalizedArgs<T extends { action: string; pseudoLocale?: boolean;
     : args;
 }
 
-/** Advisory platform notes and accessibility findings for a successful show. */
-function showAdviceOutput(
-  args: z.infer<typeof prototypeSchema>,
-  device: BootedDevice,
-  target: PrototypeTarget,
-  success: boolean,
-): Pick<PrototypeOutput, "platformNotes" | "accessibilityFindings" | "accessibilityFindingsTotal"> {
+/** A typed render refusal is definitive, even if a malformed device reply also says success. */
+function renderShowOutcome(outcome: Awaited<ReturnType<typeof sendPrototype>>): Awaited<
+  ReturnType<typeof sendPrototype>
+> & {
+  mutationReply: Pick<PrototypeSavedOutput, "success" | "error" | "errorCode">;
+} {
+  const failure =
+    outcome.result.errorCode === "render_failed"
+      ? savedPrototypeFailure(outcome.result)
+      : undefined;
   return {
-    ...platformNotesOutput(args, device, target, success),
-    ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
+    ...outcome,
+    result: failure ? { ...outcome.result, success: false, error: failure.error } : outcome.result,
+    mutationReply: failure ?? {
+      success: outcome.result.success,
+      error: outcome.result.error ?? undefined,
+    },
   };
 }
 
+/**
+ * Advisory platform notes, accessibility findings, watch screen shape and the car form factor for a
+ * successful show.
+ */
+async function showAdviceOutput(
+  args: z.infer<typeof prototypeSchema>,
+  device: BootedDevice,
+  dependencies: Pick<PrototypeHandlerDependencies, "target" | "screenRoundFactory" | "adbFactory">,
+  result: Pick<PrototypeResult, "success" | "screenRound">,
+  signal?: AbortSignal,
+): Promise<
+  Pick<
+    PrototypeOutput,
+    | "screenRound"
+    | "formFactor"
+    | "platformNotes"
+    | "accessibilityFindings"
+    | "accessibilityFindingsTotal"
+    | "placeholderFindings"
+    | "placeholderFindingsTotal"
+  >
+> {
+  const { success, screenRound: deviceScreenRound } = result;
+  return {
+    ...(await platformNotesOutput(args, device, dependencies.target, success)),
+    ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
+    ...(args.action === "show" && success ? prototypePlaceholderOutput(args.spec) : {}),
+    ...(await prototypeScreenShapeOutput(
+      { action: args.action, success, device, deviceScreenRound, signal },
+      dependencies,
+    )),
+    ...prototypeFormFactorOutput({ action: args.action, success, device }),
+  };
+}
+
+function deviceOsMajor(device: BootedDevice): number | undefined {
+  return Number.parseInt(device.iosVersion ?? device.osVersion ?? "", 10) || undefined;
+}
+
 /** Notes describe the expanded, anchor-resolved spec actually sent to the device. */
-function platformNotesOutput(
+async function platformNotesOutput(
   args: z.infer<typeof prototypeSchema>,
   device: BootedDevice,
   target: PrototypeTarget,
   success: boolean,
-): Pick<PrototypeOutput, "platformNotes"> {
-  if (args.action !== "show" || !success || device.platform !== "ios") {
+): Promise<Pick<PrototypeOutput, "platformNotes">> {
+  if (args.action !== "show" || !success) {
     return {};
   }
+  const androidZoom =
+    PROTOTYPE_ZOOM_RENDERING_GATE.fields(args.spec).length > 0
+      ? await target.android?.supportsCommand(PROTOTYPE_ZOOM_RENDERING_GATE.capability)
+      : false;
   const notes: NonNullable<PrototypeOutput["platformNotes"]> = prototypePlatformNotes(
     args.spec as PrototypeSpec,
-    "ios",
-    (capability) => target.ios?.supportsCapability(capability) === true,
+    device.platform === "ios" ? "ios" : "android",
+    (capability) =>
+      device.platform === "android"
+        ? capability === PROTOTYPE_ZOOM_RENDERING_GATE.capability && androidZoom === true
+        : target.ios?.supportsCapability(capability) === true,
+    deviceOsMajor(device),
   );
-  const gestures = prototypeGestureFields(args.spec);
+  notes.push(...prototypeStringsFallbackNotes(args.spec as PrototypeSpec, args.locale));
+  const gestures = device.platform === "ios" ? prototypeGestureFields(args.spec) : [];
   if (gestures.length > 0) {
     notes.push({
       platform: "ios",
@@ -544,18 +628,16 @@ function commitMutation(
   const { store, events } = dependencies;
   const { args, target, result, placed, inPlace, previouslyShown } = outcome;
   settleShowEvents(events, scope, source, { target, inPlace, success: result.success });
-  clearMutationEvents(
-    events,
-    scope,
-    target,
-    args.action,
-    result.success,
-    outcome.startedFreshEvents && !previouslyShown,
-  );
+  clearMutationEvents(events, scope, target, {
+    action: args.action,
+    success: result.success,
+    clearFailedShow: outcome.startedFreshEvents && !previouslyShown,
+  });
   if (args.action === "show" && result.success && target.id && args.replaceOthers !== false) {
     events.replaceShown(scope.deviceId, target.id);
   }
-  const lastResult = store.record(scope, args.action, target, result, placed.displayId, {
+  const lastResult = store.record(scope, args.action, target, result, {
+    displayId: placed.displayId,
     data: args.action === "show" ? (args.spec as PrototypeSpec | undefined)?.data : undefined,
     chrome: placed.chrome,
     replaceOthers: args.replaceOthers,
@@ -583,6 +665,7 @@ function supersededResult(
       ? { chrome: placed.chrome }
       : {}),
     ...shownAppearance(args.action, result),
+    ...shownBackdrop(args.action, result),
     success: result.success,
     ...(result.error ? { error: result.error } : {}),
     ...(result.totalTimeMs === undefined ? {} : { totalTimeMs: result.totalTimeMs }),
@@ -671,14 +754,35 @@ function missingAssetsOutput(
   result: PrototypeResult,
   warnings: readonly (string | undefined)[],
   landedWarning?: string,
-): { missingAssets?: string[]; warning?: string } {
-  const warning = [...warnings, result.success ? landedWarning : undefined]
+  spec?: unknown,
+): {
+  missingAssets?: string[];
+  warning?: string;
+  degradedEffects?: DegradedEffect[];
+} {
+  const degraded: ReturnType<typeof prototypeDegradedEffectsOutput> = result.success
+    ? prototypeDegradedEffectsOutput(result.degradedEffects)
+    : {};
+  const warning = [
+    ...warnings,
+    degraded.warning,
+    result.success ? landedWarning : undefined,
+    ...(result.success ? prototypeTimerWarnings(spec) : []),
+  ]
     .filter((entry) => entry !== undefined)
     .join(" ");
   return {
     ...(result.success && result.missingAssets?.length
       ? { missingAssets: result.missingAssets }
       : {}),
+    ...degraded,
     ...(warning ? { warning } : {}),
   };
+}
+
+function shaderCacheContext(
+  dependencies: PrototypeHandlerDependencies,
+  serial: string,
+): NonNullable<Parameters<typeof stageAssets>[4]> {
+  return { serial, cache: dependencies.shaderAssetCache ?? defaultPrototypeAssetCache() };
 }

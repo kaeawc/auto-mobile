@@ -4,6 +4,7 @@ import {
   SessionManager,
 } from "../../src/daemon/sessionManager";
 import { createDaemonTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
+import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import { BusyRewritePersistence } from "../fakes/BusyRewritePersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
@@ -127,7 +128,6 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     expect(refusalReads()).toBe(1);
     expect(released).toBe(false);
     expect(journal.loadUnconfirmed()).toHaveLength(1);
-    const snapshot = manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot(SESSION)!;
 
     // Replace rather than mutate the fake's row: the classifier already holds the old read.
     const peerRow = {
@@ -149,12 +149,14 @@ describe("terminal release waits for its own row statement settlement (#12547)",
       release_reason: null,
     });
     expect(store.failReleaseWrites).toBe(1);
-    expect(manager.testHooks.wiring.host.rowWriter.superseded.wasRefused(snapshot)).toBe(true);
     expect(journal.loadUnconfirmed()).toEqual([]);
     expect(manager.getSession(SESSION)).toBeNull();
   });
 
   test("an older release refuses a different incarnation's unsettled own write (#12515)", async () => {
+    // A volatile intent keeps the write-first order: the release wins with its row statement still
+    // unsettled (#11799 W5), and the fence it leaves is lifted for a different incarnation.
+    manager.attachTerminalReleaseJournal(new NoopTerminalReleaseJournal());
     const original = manager.getSession(SESSION)!;
     const gate = Promise.withResolvers<void>();
     store.park = gate.promise;
@@ -165,12 +167,13 @@ describe("terminal release waits for its own row statement settlement (#12547)",
       { commitFence: () => !superseded },
     );
     await settleMicrotasks();
-    const snapshot = manager.testHooks.wiring.host.sessionSlots.getTerminalSnapshot(SESSION)!;
     superseded = true;
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS, settleMicrotasks);
-    await expect(release).resolves.toEqual({ superseded: true });
+    await expect(release).resolves.toEqual({ superseded: false, deviceId: DEVICE });
+    expect(manager.getSession(SESSION)).toBeNull();
     store.park = undefined;
-    await manager.releaseSession(SESSION, "plan-auto-release");
+    const lift = Reflect.get(manager, "liftTerminalFence") as (uuid: string) => void;
+    lift.call(manager, SESSION);
     const replacement = await manager.createSession(SESSION, DEVICE, "android", {
       timeoutMs: 60_000,
     });
@@ -186,7 +189,6 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     await settleMicrotasks();
     // A pending write belonging to the replacement must not stall the old release's refusal.
     expect(refusalReads()).toBe(1);
-    expect(manager.testHooks.wiring.host.rowWriter.superseded.wasRefused(snapshot)).toBe(true);
     expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       stable_identity_generation: generation,

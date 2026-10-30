@@ -27,7 +27,12 @@ import {
   type HierarchyCaptureRequest,
 } from "./HierarchyCapture";
 import { logger } from "../../utils/logger";
-import { BootedDevice, ObserveResult, type ViewHierarchyResult } from "../../models";
+import {
+  BootedDevice,
+  ObserveResult,
+  requireAndroidOrIosPlatform,
+  type ViewHierarchyResult,
+} from "../../models";
 import type {
   ObserveScreenshotOptions,
   ScreenshotEncodingOptions,
@@ -655,12 +660,12 @@ export class RealObserveScreen implements ObserveScreen {
       !result.viewHierarchy.hierarchy?.error
     ) {
       identifyObservedHierarchy(
-        this.device.platform,
+        requireAndroidOrIosPlatform(this.device.platform, "Observing the view hierarchy"),
         result.viewHierarchy,
         freshness,
         this.timer,
-        this.idGenerator,
         {
+          ids: this.idGenerator,
           captureId: result.observationId,
           iosMultiPanel: this.platformTraits.isIosMultiPanel(),
         },
@@ -737,8 +742,7 @@ export class RealObserveScreen implements ObserveScreen {
         perf,
         signal,
         screenshot === "settled",
-        displayId,
-        screenshotOptions,
+        { displayId, screenshotOptions },
       );
     } else {
       await this.screenshotRecorder.captureFresh(

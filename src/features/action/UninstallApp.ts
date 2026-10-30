@@ -72,6 +72,15 @@ export interface UninstallGuardOptions {
   expectedSigningSha256: string[];
 }
 
+/** What one uninstall call asks for; threaded through the private platform steps (#11835). */
+interface UninstallRequest {
+  packageName: string;
+  keepData: boolean;
+  userId?: number;
+  signal?: AbortSignal;
+  guard?: UninstallGuardOptions;
+}
+
 export class UninstallApp {
   private device: BootedDevice;
   private adbFactory: AdbClientFactory;
@@ -142,7 +151,7 @@ export class UninstallApp {
     const nested = hasAmbientPerfTracker();
     const perf = nested ? getPerfTracker() : this.createPerformanceTracker();
     const result = await runWithNestedPerfTracker(perf, () =>
-      this.executeInner(packageName, keepData, userId, perf, signal, guard),
+      this.executeInner({ packageName, keepData, userId, signal, guard }, perf),
     );
     if (!nested && perf.isEnabled()) {
       const timings = perf.getTimings();
@@ -154,13 +163,10 @@ export class UninstallApp {
   }
 
   private async executeInner(
-    packageName: string,
-    keepData: boolean,
-    userId: number | undefined,
+    request: UninstallRequest,
     perf: PerformanceTracker,
-    signal?: AbortSignal,
-    guard?: UninstallGuardOptions,
   ): Promise<UninstallAppResult> {
+    const { packageName, keepData, signal, guard } = request;
     throwIfAborted(signal);
     perf.serial("uninstallApp");
 
@@ -186,7 +192,7 @@ export class UninstallApp {
       case "android":
         return perf.track("androidUninstall", () =>
           withAndroidPackageMutationLock(this.device.deviceId, signal, () =>
-            this.executeAndroidGuarded(packageName, keepData, userId, signal, guard),
+            this.executeAndroidGuarded(request),
           ),
         );
       default:
@@ -321,14 +327,9 @@ export class UninstallApp {
    * Runs the Android uninstall and, when a signing guard was requested, confirms the removal
    * with a fresh presence read so an unverifiable outcome is never reported as success.
    */
-  private async executeAndroidGuarded(
-    packageName: string,
-    keepData: boolean,
-    userId: number | undefined,
-    signal: AbortSignal | undefined,
-    guard: UninstallGuardOptions | undefined,
-  ): Promise<UninstallAppResult> {
-    const outcome = await this.executeAndroid(packageName, keepData, userId, signal, guard);
+  private async executeAndroidGuarded(request: UninstallRequest): Promise<UninstallAppResult> {
+    const { signal, guard } = request;
+    const outcome = await this.executeAndroid(request);
     if (!guard) {
       return outcome;
     }
@@ -384,13 +385,8 @@ export class UninstallApp {
    * @param keepData - Whether to keep app data
    * @param userId - Optional Android user ID (auto-detected if not provided)
    */
-  private async executeAndroid(
-    packageName: string,
-    keepData: boolean,
-    userId?: number,
-    signal?: AbortSignal,
-    guard?: UninstallGuardOptions,
-  ): Promise<UninstallAppResult> {
+  private async executeAndroid(request: UninstallRequest): Promise<UninstallAppResult> {
+    const { packageName, keepData, userId, signal, guard } = request;
     try {
       // Auto-detect target user if not specified
       const targetUserId = (
@@ -437,13 +433,7 @@ export class UninstallApp {
       } catch (error) {
         throwIfAborted(signal);
         if (error instanceof AdbCommandTimeoutError) {
-          return this.recoverTimedOutAndroidUninstall(
-            packageName,
-            keepData,
-            targetUserId,
-            cmd,
-            signal,
-          );
+          return this.recoverTimedOutAndroidUninstall({ ...request, userId: targetUserId }, cmd);
         }
         throw error;
       }
@@ -515,12 +505,10 @@ export class UninstallApp {
   }
 
   private async recoverTimedOutAndroidUninstall(
-    packageName: string,
-    keepData: boolean,
-    userId: number,
+    request: UninstallRequest & { userId: number },
     command: string,
-    signal?: AbortSignal,
   ): Promise<UninstallAppResult> {
+    const { packageName, keepData, userId, signal } = request;
     await this.markInstalledAppsCacheStale();
 
     let isStillInstalled: boolean;

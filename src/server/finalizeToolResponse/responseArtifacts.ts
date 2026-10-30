@@ -95,11 +95,14 @@ export function boundRenderedPayload(
   // mid-string into unparseable JSON. With a writer available, spill whatever
   // residue is still oversized and keep only the headline fields inline, so the
   // client always gets complete, parseable JSON plus a pointer to the rest.
+  // A caller that passes `resourceLink: true` asks for that spill (and its
+  // resource_link block) at any size (#13942).
   const boundedCandidate = sanitizedPayload ?? payload;
   if (
     ctx.artifactWriter &&
     !ctx.internal &&
-    exceedsInlineLimit(boundedCandidate, hasStructured, serialization)
+    (ctx.args?.resourceLink === true ||
+      exceedsInlineLimit(boundedCandidate, hasStructured, serialization))
   ) {
     try {
       sanitizedPayload = spillOversizedPayload(ctx, boundedCandidate, hasStructured, serialization);
@@ -428,6 +431,11 @@ function writeObserveDiffBodyArtifact(
   const body: Record<string, unknown> = { isDiff: true, added, removed, changed };
   if (fields !== undefined) {
     body.fields = fields;
+  }
+  // The artifact is fetched on its own through tool-output resources, so imported prototype
+  // text in the body must carry the same untrusted-content notice as the inline shell.
+  if (inline.importedPrototypeContent !== undefined) {
+    body.importedPrototypeContent = inline.importedPrototypeContent;
   }
   return { ...inline, ...writeObservationArtifact(ctx, body) };
 }

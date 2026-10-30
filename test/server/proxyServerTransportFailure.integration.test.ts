@@ -8,7 +8,7 @@ import {
   DAEMON_RESPONSE_GRACE_MS,
   DaemonClient,
   DaemonUnavailableError,
-} from "../../src/daemon/client";
+} from "../../src/daemon/client/client";
 import {
   DAEMON_SHUTTING_DOWN_ERROR_CODE,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,

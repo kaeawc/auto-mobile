@@ -263,14 +263,7 @@ describe("control socket discovery cache", () => {
       const restore = preserveToolRegistry();
       const h = harness();
       const store = new SessionToolBindingStore();
-      const binding = new SessionToolBinding(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        store,
-      );
+      const binding = new SessionToolBinding(undefined, undefined, undefined, { store });
       const profiles = new InMemoryToolSelectionProfileRegistry();
       const disabled = new Set<string>(["acquired"]);
       const service = {

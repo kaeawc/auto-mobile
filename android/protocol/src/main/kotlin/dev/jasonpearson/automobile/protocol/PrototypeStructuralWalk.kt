@@ -43,6 +43,7 @@ internal object PrototypeStructuralWalk {
       "record" -> visitRecord(value, rule, path, context, depth)
       "choice" -> visitChoice(value, rule, path, context, depth)
       "data" -> dataError(value)
+      "strings" -> PrototypeStringsRules.tableError(value)
       else ->
         if (primitiveValid(value, rule)) null
         else
@@ -68,6 +69,18 @@ internal object PrototypeStructuralWalk {
     if (rule.text("name") == "condition") return visitCondition(value, target, path, context, depth)
     if (rule.text("name") == "action") return visitAction(value, target, path, context, depth)
     if (rule.text("name") != "node") return walk(value, target, path, context, depth)
+    return visitNode(value, target, path, context, depth)
+  }
+
+  private fun visitNode(
+    value: JsonElement,
+    target: JsonObject,
+    path: String,
+    context: Context,
+    depth: Int,
+  ): PrototypeSpecError? {
+    if (onAppearNeedsVisibility(value, path))
+      return fail("$path.onAppear", "onAppear requires visibleWhen or the root")
     val node = value as? JsonObject ?: return fail(path, "Expected object")
     context.nodes.add(Located(node, path))
     if (context.nodes.size > MAX_PROTOTYPE_NODES) return fail(path, "Node limit exceeded")
@@ -75,8 +88,22 @@ internal object PrototypeStructuralWalk {
     if (node.text("type") == "image")
       context.images += maxOf(1, prototypeImageSlotUses(node["asset"]))
     if (context.images > MAX_PROTOTYPE_IMAGES) return fail(path, "Image limit exceeded")
+    if (
+      "keyframes" in node &&
+        ++context.keyframeNodes > PrototypeSpecValidator.MAX_PROTOTYPE_KEYFRAME_NODES
+    )
+      return fail("$path.keyframes", "Keyframe node limit exceeded")
+    PrototypeEffectRules.charge(node, path, context)?.let {
+      return it
+    }
     return walk(value, target, path, context, depth + 1)
   }
+
+  private fun onAppearNeedsVisibility(value: JsonElement, path: String): Boolean =
+    value is JsonObject &&
+      value["onAppear"] != null &&
+      path != "root" &&
+      value["visibleWhen"] == null
 
   fun visitContainer(
     value: JsonElement,

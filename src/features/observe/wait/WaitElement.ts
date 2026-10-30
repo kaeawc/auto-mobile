@@ -6,7 +6,7 @@ import {
   isScopedWaitResolutionError,
   waitResolutionFailure,
 } from "../ConditionPredicates";
-import { BootedDevice, Element, ViewHierarchyResult } from "../../../models";
+import type { AndroidOrIosPlatform, Element, ViewHierarchyResult } from "../../../models";
 import { isMissingContainerError, type MatchMode } from "../../utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import {
@@ -62,11 +62,13 @@ function isWaitSourceVisible(
 interface WaitForElementOptions extends ScreenSizeForOffscreenCheckOptions {
   negative?: boolean;
   evaluation?: ConditionEvaluation;
+  /** Per-wait selector match modes, carried across polls; a fresh map when omitted. */
+  modes?: Map<string, MatchMode>;
 }
 
 function resolveWaitForElementOptions(
   options: boolean | WaitForElementOptions,
-  context: { hierarchy: ViewHierarchyResult; platform?: BootedDevice["platform"] },
+  context: { hierarchy: ViewHierarchyResult; platform?: AndroidOrIosPlatform },
 ): { negative: boolean; screenSize: ScreenSize | undefined } {
   const resolved = typeof options === "boolean" ? { negative: options } : options;
   return {
@@ -195,11 +197,12 @@ export const findWaitForElement = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
-  platform?: BootedDevice["platform"],
-  modes = new Map<string, MatchMode>(),
+  platform?: AndroidOrIosPlatform,
   options: boolean | WaitForElementOptions = false,
 ): Element | null => {
   const evaluation = waitElementEvaluation(options);
+  const modes =
+    typeof options === "boolean" ? new Map<string, MatchMode>() : (options.modes ?? new Map());
   const scoped = usesScopedWait(waitFor);
   const selectionFinder = finder;
   if (scoped) {

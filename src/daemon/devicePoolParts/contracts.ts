@@ -7,6 +7,8 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { type ForeignDeviceOwnership } from "../foreignDeviceOwnership";
+import type { DeviceClaimMirror } from "../deviceClaims";
+import type { AutolockClient } from "../deviceAutolockManager";
 import { InMemoryDeviceHealthMarkers, type DeviceHealthMarkers } from "../deviceHealthMarkers";
 import { type BackoffPolicy } from "../../utils/Backoff";
 import type { AmbientExecutionIdReader } from "../../utils/interfaces/AmbientExecutionIdReader";
@@ -64,6 +66,7 @@ import {
 } from "../../devices/virtualDeviceLifecycleCoordinator";
 import { type OwnerDisconnectReleaseDeferral } from "../ownerDisconnectRelease";
 import type { PooledDevice } from "../devicePoolTypes";
+import { DeviceLossMisses, type DeviceLossMissPort } from "../deviceLossMisses";
 
 export type DeviceAutolockChildProcess = ChildProcess;
 
@@ -112,6 +115,16 @@ export interface ShutdownForeignClaim {
   force: boolean;
   /** What the refused caller can do instead. */
   remedy?: string;
+}
+
+/** How reserveDeviceForShutdown fences an unpooled stop and claims it against other daemons. */
+export interface ShutdownReservationOptions {
+  fenceUnpooled?: boolean;
+  /**
+   * Set by lifecycle tools that stop a device another daemon could be driving (killDevice,
+   * deleteDevice, #11200): the stop publishes this daemon's claim under the reservation.
+   */
+  foreignClaim?: ShutdownForeignClaim;
 }
 
 export function refreshFailureContext(failure: string | Error | undefined): string {
@@ -237,7 +250,7 @@ export interface DeviceReadyListener {
 }
 
 export interface DeviceRemovedListener {
-  (deviceId: string, platform: "android" | "ios"): void;
+  (deviceId: string, platform: Platform): void;
 }
 
 /** Fired after a pooled device's status or holding session changed and the change committed. */
@@ -310,6 +323,13 @@ export type DeviceReadinessReservation = (() => Promise<void>) & {
   readonly owner: symbol;
 };
 
+/** Who reserves a device for readiness and whether Android recovery handoffs exclude it. */
+export interface ReadinessReservationOptions {
+  autolockClient?: AutolockClient & { restartResumeSessionId?: string };
+  /** Defaults off: recovery handoffs reserve their target while ownership is still in flight. */
+  enforceAndroidRecoveryExclusion?: boolean;
+}
+
 export interface AdbServerResetRecoveryReservation {
   deviceId: string;
   image: DeviceInfo;
@@ -329,6 +349,14 @@ export interface AndroidStartupLeaseRequest {
   name?: string;
   exactName: boolean;
   ownsOfflineRecovery: boolean;
+}
+
+/** The publish hook and cancellation exemption of a System UI ANR replacement handoff. */
+export interface SystemUiAnrReplacementOptions {
+  /** Runs before the replacement becomes visible, so the caller's readiness marker covers it. */
+  beforeReplacementPublishes?: () => void;
+  /** The execution whose own work on the old device is not cancelled by the handoff. */
+  excludeExecutionId?: string;
 }
 
 export interface SystemUiAnrRecoveryHandoff {
@@ -398,6 +426,10 @@ export interface DevicePoolDependencies {
   foreignDeviceOwnership?: ForeignDeviceOwnership;
   /** The same for iOS simulators, claimed by UDID (#10980). */
   iosForeignDeviceOwnership?: ForeignDeviceOwnership;
+  /** The same for Apple Watch simulators, claimed by UDID (#14908). */
+  watchForeignDeviceOwnership?: ForeignDeviceOwnership;
+  /** Mirrors the claims `DevicePool.create` builds into the host-wide claims table (#11811 b). */
+  deviceClaimMirrors?: { android?: DeviceClaimMirror; ios?: DeviceClaimMirror };
   /**
    * Devices broker bindings hold (#11174, #11178). Generic allocation, auto-start and explicit binds
    * never lend one, even while it is idle. A directly built pool has none.
@@ -430,8 +462,8 @@ export interface DevicePoolDependencies {
   idGenerator?: IdGenerator;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
-  /** Shared with the daemon monitor so refresh and monitor count one streak. */
-  missingDeviceMisses?: Map<string, number>;
+  /** The daemon monitor's miss owner, seen through its port, so refresh and monitor count one streak. */
+  missingDeviceMisses?: DeviceLossMissPort;
   adbServerResetQuarantineFactory?: (
     pool: AdbServerResetQuarantinePoolPort,
   ) => AdbServerResetQuarantine;
@@ -472,8 +504,8 @@ export function createAndroidTransportAliases(factory?: AdbClientFactory): Andro
   return new AndroidTransportAliases(factory ?? androidTransportIdentityAdbFactory);
 }
 
-export function resolveMissingDeviceMisses(shared?: Map<string, number>): Map<string, number> {
-  return shared ?? new Map();
+export function resolveMissingDeviceMisses(shared?: DeviceLossMissPort): DeviceLossMissPort {
+  return shared ?? new DeviceLossMisses();
 }
 
 export function createDevicePoolRefresh(
@@ -505,6 +537,8 @@ export interface StopAndroidEmulatorRecoveryOptions {
   handoffOwner: symbol;
   preservedSessionId: string | undefined;
   preservedSession: Session | undefined;
+  /** The recovery's own cancellation signal, passed explicitly rather than read ambiently (#15671). */
+  signal: AbortSignal | undefined;
 }
 
 export interface RebindSameAvdReplacementSessionOptions {
@@ -537,4 +571,9 @@ export interface StopDiscoveredEmulatorOptions {
   handoffOwner: symbol;
   preservedSessionId: string | undefined;
   preservedSession: Session | undefined;
+  /**
+   * The caller's cancellation signal, combined with the shutdown deadline. Explicit (#15671): an
+   * abort reaches this shutdown only through this field, never through the ambient abort context.
+   */
+  signal: AbortSignal | undefined;
 }

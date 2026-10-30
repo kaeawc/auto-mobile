@@ -19,6 +19,13 @@ interface BarrierWaiter {
  * Ensures that devices wait at critical section boundaries and execute
  * their steps serially within the critical section.
  */
+/** How long, in which plan namespace, and under which cancellation one device waits at a barrier. */
+export interface BarrierWaitOptions {
+  timeout?: number;
+  namespace?: string;
+  signal?: AbortSignal;
+}
+
 export class CriticalSectionCoordinator {
   private static instance: CriticalSectionCoordinator;
   private locks: Map<string, Mutex>;
@@ -218,9 +225,7 @@ export class CriticalSectionCoordinator {
     lock: string,
     deviceId: string,
     deviceCount: number,
-    timeout: number = BARRIER_TIMEOUT_MS,
-    namespace?: string,
-    signal?: AbortSignal,
+    { timeout = BARRIER_TIMEOUT_MS, namespace, signal }: BarrierWaitOptions = {},
   ): Promise<void> {
     throwIfAborted(signal, true);
     this.registerExpectedDevices(lock, deviceCount, namespace);

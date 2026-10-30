@@ -111,8 +111,9 @@ parked accepts PARKED (0) or IDLING (1). Night mode uses the car service's day/n
 the effective UI night mode. A state that cannot be confirmed returns `unsupported`.
 
 When you `unset`, call `reset`, release the session or the lease expires, motion returns to the values
-before the first change and night mode returns to automatic sensor control. Motion reset can take about
-ten seconds while the last speed events expire. Phones, physical head units and iOS return `unsupported`.
+before the first change and night mode returns to automatic sensor control without preserving a prior
+manual override. Motion reset can take about ten seconds while the last speed events expire. Phones,
+physical head units and iOS return `unsupported`.
 
 ## Rotary input
 

@@ -100,7 +100,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
       const rowReason = (await persistence.getSession(SESSION))?.release_reason;
       // A device tool call naming the released UUID (requireIssuedSession) must not re-issue it.
       const laterCall = await sessions
-        .getOrCreateSession(SESSION, pool, undefined, undefined, true)
+        .getOrCreateSession(SESSION, pool, undefined, { requireIssuedSession: true })
         .then(
           (session) => `re-issued on ${session.assignedDevice}`,
           (error: unknown) =>
@@ -167,7 +167,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
       persistence.markReleased = async (...args) => {
         if (!raced) {
           raced = true;
-          await sessions.getOrCreateSession(SESSION, pool, "ios", undefined, true);
+          await sessions.getOrCreateSession(SESSION, pool, "ios", { requireIssuedSession: true });
           expect(pool.getDevice(SIM)?.sessionId).toBe(SESSION);
         }
         await markReleased(...args);

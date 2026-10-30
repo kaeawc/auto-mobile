@@ -128,7 +128,9 @@ for (const [platform, deviceId] of [
       expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       expect(b.sessions.getSession("b-session")).toBeNull();
 
-      await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "a-session", "explicit-release");
+      await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "a-session", {
+        reason: "explicit-release",
+      });
       expect(store.claims.has(deviceId)).toBe(false);
 
       await b.pool.bindOrReuseDeviceSession({ sessionId: "b-session", deviceId, platform });
@@ -199,7 +201,9 @@ for (const [platform, deviceId] of [
       expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       expect(b.pool.getDevice(deviceId)?.autolockSessionId).toBeUndefined();
 
-      await releaseSessionAndDevice(a.sessions, a.pool, deviceId, aSession!, "explicit-release");
+      await releaseSessionAndDevice(a.sessions, a.pool, deviceId, aSession!, {
+        reason: "explicit-release",
+      });
       const bSession = await autolock(b.pool, "mcp-b");
       expect(b.pool.getDevice(deviceId)?.sessionId).toBe(bSession!);
       expect(store.claims.get(deviceId)).toBe(DAEMON_B_PID);
@@ -376,7 +380,9 @@ for (const [platform, deviceId] of [
           const a = await daemon(DAEMON_A_PID);
           const receipt: AcquisitionReceipt = {};
           const first = (await acquire(a.pool, receipt))!;
-          await releaseSessionAndDevice(a.sessions, a.pool, deviceId, first, "explicit-release");
+          await releaseSessionAndDevice(a.sessions, a.pool, deviceId, first, {
+            reason: "explicit-release",
+          });
           await bind(a.pool, "second");
           const released = countReleases(a.sessions);
 
@@ -408,7 +414,9 @@ for (const [platform, deviceId] of [
 
         const first = bind(a.pool, "first", receipt);
         await untilPending(pending, 1);
-        await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "first", "explicit-release");
+        await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "first", {
+          reason: "explicit-release",
+        });
         const second = bind(a.pool, "second");
         await untilPending(pending, 2);
         pending[1]();

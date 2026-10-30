@@ -129,7 +129,9 @@ describe("managed execution recovery is gated before publication", () => {
       if (path === "startup") {
         await sessions.rehydratePersistedSessions(assigner(sessions));
       } else {
-        await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
+        await sessions.getOrCreateSession(ID, assigner(sessions), "ios", {
+          requireIssuedSession: true,
+        });
       }
       expect(called).toBe(true);
       expect(recoveryCompleted).toBe(true);
@@ -218,7 +220,7 @@ describe("managed execution recovery is gated before publication", () => {
         const recovery =
           path === "startup"
             ? sessions.rehydratePersistedSessions(delayed)
-            : sessions.getOrCreateSession(ID, delayed, "ios", undefined, true);
+            : sessions.getOrCreateSession(ID, delayed, "ios", { requireIssuedSession: true });
         // Observe failures immediately; startup reports them in its batch summary.
         const finished = recovery.then(
           () => "fulfilled",
@@ -262,7 +264,9 @@ describe("managed execution recovery is gated before publication", () => {
     sessions.setManagedExecutionRecoveryListener((id) => {
       calls.push(id);
     });
-    await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
+    await sessions.getOrCreateSession(ID, assigner(sessions), "ios", {
+      requireIssuedSession: true,
+    });
     await sessions.createSession("fresh", "fresh-ios", "ios");
     await sessions.claimLivenessOwnership("fresh", "fresh-token");
     await sessions.adoptManagedExecutionLivenessPolicy("fresh");
@@ -307,8 +311,7 @@ describe("managed execution recovery is gated before publication", () => {
         },
       },
       "ios",
-      undefined,
-      true,
+      { requireIssuedSession: true },
     );
     const failure = recovery.then(
       () => undefined,
@@ -332,7 +335,9 @@ describe("managed execution recovery is gated before publication", () => {
     sessions.setManagedExecutionRecoveryListener(() => {
       throw new Error("listener failure");
     });
-    await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
+    await sessions.getOrCreateSession(ID, assigner(sessions), "ios", {
+      requireIssuedSession: true,
+    });
     expect(sessions.isLiveManagedExecutionSession(ID)).toBe(true);
     expect(
       warn.mock.calls.some(([message]) => String(message).includes("Managed recovery hook failed")),
@@ -399,7 +404,9 @@ describe("managed execution recovery is gated before publication", () => {
     Reflect.set(daemon["runtime"], "bindingRegistry", registryWait.promise);
     const reowner = DaemonState.getInstance().getBrokerExecutionReowner()!;
     reowners.push(reowner);
-    await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
+    await sessions.getOrCreateSession(ID, assigner(sessions), "ios", {
+      requireIssuedSession: true,
+    });
     expect(reowner.automationRefusal(ID)).toBeInstanceOf(BindingOwnershipUnconfirmedError);
     registryWait.resolve({
       findExecutionAssignments: async () => [],
@@ -443,7 +450,9 @@ describe("managed execution recovery is gated before publication", () => {
       async () => {},
     );
     restores.push(() => poolReturn.mockRestore());
-    await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
+    await sessions.getOrCreateSession(ID, assigner(sessions), "ios", {
+      requireIssuedSession: true,
+    });
     registryWait.resolve({
       findExecutionAssignments: async () => [],
       claimExecution: async () => {
@@ -504,7 +513,9 @@ describe("managed execution recovery is gated before publication", () => {
       );
       const reowner = DaemonState.getInstance().getBrokerExecutionReowner()!;
       reowners.push(reowner);
-      await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
+      await sessions.getOrCreateSession(ID, assigner(sessions), "ios", {
+        requireIssuedSession: true,
+      });
       const devices = spyOn(daemon.getDevicePool(), "getAllDevices").mockReturnValue([
         {
           id: DEVICE,

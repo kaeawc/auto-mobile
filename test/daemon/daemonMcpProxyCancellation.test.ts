@@ -31,14 +31,10 @@ function config(clientFactory: () => FakeDaemonClient, timer = new FakeTimer()) 
 async function setup() {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const daemonClient = new DaemonClient(
-    "/fake/socket",
-    1000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    { idGenerator: new FakeIdGenerator() },
-  );
+  const daemonClient = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+    clientIdentity: null,
+    idGenerator: new FakeIdGenerator(),
+  });
   daemonClient.testHooks.attachSocket(socket);
   const fake = new FakeDaemonClient();
   fake.callTool = daemonClient.callTool.bind(daemonClient);

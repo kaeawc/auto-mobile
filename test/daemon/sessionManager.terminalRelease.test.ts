@@ -714,7 +714,9 @@ describe("explicit-release regression", () => {
       "Acquire a new device with getAndroid or getApple.";
     await expect(manager.admitIssuedSessionForAutomation("released-uuid")).rejects.toThrow(message);
     await expect(
-      manager.getOrCreateSession("released-uuid", assigner, "android", undefined, true),
+      manager.getOrCreateSession("released-uuid", assigner, "android", {
+        requireIssuedSession: true,
+      }),
     ).rejects.toThrow(TerminalSessionError);
     await expect(manager.createSession("released-uuid", "handset", "android")).rejects.toThrow(
       message,
@@ -772,7 +774,9 @@ describe("explicit-release regression", () => {
         TerminalSessionError,
       );
       await expect(
-        restarted.getOrCreateSession("released-uuid", assigner, "android", undefined, true),
+        restarted.getOrCreateSession("released-uuid", assigner, "android", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow("was released");
       expect(assignments).toBe(0);
     } finally {
@@ -801,7 +805,9 @@ describe("explicit-release regression", () => {
       };
       await restarted.admitIssuedSessionForAutomation("plan-uuid");
       await expect(
-        restarted.getOrCreateSession("plan-uuid", assigner, "android", undefined, true),
+        restarted.getOrCreateSession("plan-uuid", assigner, "android", {
+          requireIssuedSession: true,
+        }),
       ).resolves.toMatchObject({ assignedDevice: "handset" });
       await expect(manager.createSession("plan-uuid", "handset", "android")).resolves.toMatchObject(
         { assignedDevice: "handset" },
@@ -898,7 +904,9 @@ describe("terminal release of persisted restart recovery", () => {
         TerminalSessionError,
       );
       await expect(
-        owner.getOrCreateSession("persisted-session", undefined, undefined, undefined, true),
+        owner.getOrCreateSession("persisted-session", undefined, undefined, {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow(TerminalSessionError);
     }
   });
@@ -919,7 +927,9 @@ describe("terminal release of persisted restart recovery", () => {
       release_reason: "explicit-release",
     });
     await expect(
-      manager.getOrCreateSession("persisted-session", undefined, undefined, undefined, true),
+      manager.getOrCreateSession("persisted-session", undefined, undefined, {
+        requireIssuedSession: true,
+      }),
     ).rejects.toThrow(TerminalSessionError);
   });
 

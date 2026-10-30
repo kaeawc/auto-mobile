@@ -58,7 +58,9 @@ export function registerDerivedLabelSessionReleaseCascade(
     ).catch((error: unknown) => {
       logger.warn(`[DeviceLabelMap] Failed to cancel executions of ${cut.sessionId}`, error);
     });
-    await releaseSessionAndDevice(manager, pool, cut.deviceId, cut.sessionId, reason);
+    await releaseSessionAndDevice(manager, pool, cut.deviceId, cut.sessionId, {
+      reason,
+    });
   };
 
   const releaseDerived = async (

@@ -301,7 +301,7 @@ export function managedExecutionSessionsFrom(
     getKeepAwakeRestoreReport: (sessionId) => manager.getKeepAwakeRestoreReport?.(sessionId),
     releaseSession: async (sessionId) => {
       let deviceId = deviceOf(sessionId);
-      await releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {
+      await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
         release: async () => {
           deviceId = await manager.releaseSession(sessionId);
           return deviceId;

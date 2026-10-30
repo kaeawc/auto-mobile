@@ -29,7 +29,12 @@ import {
 } from "../../utils/audio/pcm";
 import type { IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
-import type { GuestAudioCapture, GuestAudioCaptureHandle } from "./GuestAudioCapture";
+import {
+  GUEST_CAPTURE_LEASE_MARGIN_MS,
+  GUEST_CAPTURE_MAX_LEASE_MS,
+  type GuestAudioCapture,
+  type GuestAudioCaptureHandle,
+} from "./GuestAudioCapture";
 
 /** The client calls the service needs; one client per injection or capture. */
 export interface EmulatorAudioSession {
@@ -399,7 +404,19 @@ export class EmulatorAudioService {
     request: StartInjectionRequest,
   ): Promise<OpenedInjection> {
     const pcm = applyGainDb(await this.loadSource(request.source), request.gainDb ?? 0);
-    const guestCapture = route.endpoint ? await this.deps.guestCapture.open(deviceId) : undefined;
+    const pcmDurationMs = Math.ceil((pcm.samples.length / pcm.channels / pcm.sampleRate) * 1000);
+    const injectionMaxMs =
+      request.maxDurationMs ?? (request.loop ? DEFAULT_LOOP_MAX_DURATION_MS : pcmDurationMs);
+    const leaseMs = (request.startDelayMs ?? 0) + injectionMaxMs + GUEST_CAPTURE_LEASE_MARGIN_MS;
+    if (route.endpoint && leaseMs > GUEST_CAPTURE_MAX_LEASE_MS) {
+      throw new ActionableError(
+        `Guest microphone capture lease exceeds the ${GUEST_CAPTURE_MAX_LEASE_MS} ms (62 minute) limit. ` +
+          "Reduce startDelayMs or maxDurationMs, or use a shorter clip.",
+      );
+    }
+    const guestCapture = route.endpoint
+      ? await this.deps.guestCapture.open(deviceId, { leaseMs })
+      : undefined;
     let session: EmulatorAudioSession | undefined;
     try {
       session = route.open();

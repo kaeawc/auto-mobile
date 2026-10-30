@@ -2016,7 +2016,11 @@ describe("LaunchApp", () => {
       expect(probes[0]).toBe(
         `shell cmd package query-activities --brief --user 10 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep '${packageName}'`,
       );
-      expect(probes).toHaveLength(2);
+      expect(probes).toEqual([
+        `shell cmd package query-activities --brief --user 10 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep '${packageName}'`,
+        `shell cmd package query-activities --brief --user 10 -a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER | grep '${packageName}'`,
+        `shell pm dump '${packageName}'`,
+      ]);
     });
 
     test("pm dump is a full un-grepped last resort", async () => {
@@ -2041,6 +2045,7 @@ describe("LaunchApp", () => {
           .filter((command) => command.includes("query-activities") || command.includes("pm dump")),
       ).toEqual([
         `shell cmd package query-activities --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep '${playgroundPackage}'`,
+        `shell cmd package query-activities --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER | grep '${playgroundPackage}'`,
         `shell pm dump '${playgroundPackage}'`,
       ]);
       expect(fakeAdb.getExecutedCommands()).toContain(

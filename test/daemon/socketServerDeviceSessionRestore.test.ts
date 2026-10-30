@@ -85,7 +85,9 @@ async function boundRecoveryHarness() {
         const sessionUuid = binding.effectiveSessionUuid("loopback", args)!;
         try {
           await manager.admitIssuedSessionForAutomation(sessionUuid);
-          await manager.getOrCreateSession(sessionUuid, pool, "android", undefined, true);
+          await manager.getOrCreateSession(sessionUuid, pool, "android", {
+            requireIssuedSession: true,
+          });
           return { content: [] };
         } catch (error) {
           recoveryErrors.push(error);

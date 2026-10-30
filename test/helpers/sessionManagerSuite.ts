@@ -437,7 +437,9 @@ export function recoverPersisted(
   row: DeviceSession,
   devicePool: SessionDeviceAssigner,
 ): ReturnType<SessionManager["getOrCreateSession"]> {
-  return manager.getOrCreateSession(row.session_uuid, devicePool, "android", undefined, true);
+  return manager.getOrCreateSession(row.session_uuid, devicePool, "android", {
+    requireIssuedSession: true,
+  });
 }
 
 /** A device pool that hands out `deviceId` and counts its assignments. */

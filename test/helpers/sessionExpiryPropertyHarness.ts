@@ -314,7 +314,9 @@ class ScheduleWorld {
       () => false,
       async (sessionId, reason) => {
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, reason);
+        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+          reason,
+        });
       },
       this.timer,
     );

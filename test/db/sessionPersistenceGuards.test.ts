@@ -114,10 +114,12 @@ describe("session persistence guards live in the statement, not in a prior read"
 
   async function nameSessionOnDaemonB(): Promise<string> {
     const { manager, pool } = daemon("daemon-b");
-    return await manager.getOrCreateSession(SESSION, pool, "android", undefined, true).then(
-      () => "issued",
-      (error: unknown) => (error instanceof Error ? error.message : String(error)),
-    );
+    return await manager
+      .getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true })
+      .then(
+        () => "issued",
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
   }
 
   // sessionManager.ts terminalizeExpiredPersistedSession: reads the row, judges
@@ -229,7 +231,7 @@ describe("session persistence guards live in the statement, not in a prior read"
     };
 
     await manager
-      .getOrCreateSession(SESSION, pool, "android", undefined, true)
+      .getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true })
       .catch(() => undefined);
 
     expect(racing.expiredReleases).toBe(1);

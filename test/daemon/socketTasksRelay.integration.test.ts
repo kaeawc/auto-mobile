@@ -173,7 +173,7 @@ class RecordingDaemonClient extends DaemonClient {
     private readonly forwarded: Array<{ name: string; args: Record<string, any> }>,
     private readonly methods: Array<{ method: string; params: Record<string, any> }>,
   ) {
-    super(socketPath, 10_000, defaultTimer, {}, null);
+    super(socketPath, 10_000, defaultTimer, {}, { clientIdentity: null });
   }
 
   override callTool(

@@ -430,8 +430,7 @@ describe("requests during device session release", () => {
             },
           },
           "android",
-          undefined,
-          true,
+          { requireIssuedSession: true },
         )
         .then(
           () => {
@@ -459,7 +458,7 @@ describe("requests during device session release", () => {
         alreadyReleased,
       );
       await expect(
-        manager.getOrCreateSession(sessionId, undefined, undefined, undefined, true),
+        manager.getOrCreateSession(sessionId, undefined, undefined, { requireIssuedSession: true }),
       ).rejects.toThrow(
         reason === "heartbeat-timeout" ? "is terminal after heartbeat-timeout" : "was released",
       );
@@ -481,8 +480,7 @@ describe("requests during device session release", () => {
           },
         },
         "android",
-        undefined,
-        true,
+        { requireIssuedSession: true },
       )
       .then((session) => {
         settled = true;
@@ -511,7 +509,9 @@ describe("requests during device session release", () => {
         };
         const admit = () =>
           method === "getOrCreateSession"
-            ? h.manager.getOrCreateSession(sessionId, pool, "android", undefined, true)
+            ? h.manager.getOrCreateSession(sessionId, pool, "android", {
+                requireIssuedSession: true,
+              })
             : h.manager.admitIssuedSessionForAutomation(sessionId);
         try {
           const session = await h.create();

@@ -464,7 +464,9 @@ class OwnershipWorld {
       () => false,
       async (sessionId, reason) => {
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, reason);
+        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+          reason,
+        });
       },
       timer,
     );
@@ -1013,14 +1015,9 @@ class OwnershipWorld {
       : undefined;
     this.log(`c${client.index} read ${sessionId}`);
     this.launch(`c${client.index} read ${sessionId}`, async () => {
-      const session = await this.manager.getOrCreateSession(
-        sessionId,
-        undefined,
-        undefined,
-        undefined,
-        false,
-        "read-only",
-      );
+      const session = await this.manager.getOrCreateSession(sessionId, undefined, undefined, {
+        access: "read-only",
+      });
       const ranAlone = alone && this.launches === launchesAtStart && this.timer.now() === startedAt;
       if (
         ranAlone &&
@@ -1190,14 +1187,9 @@ class OwnershipWorld {
     this.log(`c${client.index} ${label} as ${requester ?? "(none)"}`);
     this.launch(`c${client.index} ${label}`, async () => {
       if (requester) {
-        await this.manager.getOrCreateSession(
-          requester,
-          undefined,
-          undefined,
-          undefined,
-          false,
-          "read-only",
-        );
+        await this.manager.getOrCreateSession(requester, undefined, undefined, {
+          access: "read-only",
+        });
       }
       const ranAlone = alone && this.launches === launchesAtStart && this.timer.now() === startedAt;
       if (!ranAlone) {
@@ -1321,22 +1313,12 @@ class OwnershipWorld {
         this.log(`  disconnect ${device.deviceId}: stale target, session moved on`);
         return;
       } else if (liveSession) {
-        await releaseSessionAndDevice(
-          this.manager,
-          this.pool,
-          device.deviceId,
-          liveSession,
-          undefined,
-          {
-            // cancelAndReleaseSession frees the device the release returns, which is the session's
-            // assigned device, not necessarily the one that disconnected (a rebind may be in flight).
-            release: () =>
-              this.manager.releaseSession(
-                liveSession,
-                deviceLossCancellationReason(device.deviceId),
-              ),
-          },
-        );
+        await releaseSessionAndDevice(this.manager, this.pool, device.deviceId, liveSession, {
+          // cancelAndReleaseSession frees the device the release returns, which is the session's
+          // assigned device, not necessarily the one that disconnected (a rebind may be in flight).
+          release: () =>
+            this.manager.releaseSession(liveSession, deviceLossCancellationReason(device.deviceId)),
+        });
       }
       await this.pool.removeDisconnectedDevice(
         device.deviceId,
@@ -1597,13 +1579,9 @@ class OwnershipWorld {
         if (!session) {
           return;
         }
-        await releaseSessionAndDevice(
-          this.manager,
-          this.pool,
-          session.assignedDevice,
-          sessionId,
-          PLAN_AUTO_RELEASE_REASON,
-        );
+        await releaseSessionAndDevice(this.manager, this.pool, session.assignedDevice, sessionId, {
+          reason: PLAN_AUTO_RELEASE_REASON,
+        });
       });
     }
   }

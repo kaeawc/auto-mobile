@@ -67,6 +67,7 @@ type InitializationState = Pick<
   | "deviceAllocation"
   | "foreignDeviceOwnership"
   | "iosForeignDeviceOwnership"
+  | "watchForeignDeviceOwnership"
   | "bindingExclusion"
   | "managedExecutionOwnership"
   | "daemonSessionId"
@@ -196,6 +197,7 @@ export class DevicePoolInitialization {
     androidAdbFactory,
     foreignDeviceOwnership,
     iosForeignDeviceOwnership,
+    watchForeignDeviceOwnership,
     bindingExclusion,
     managedExecutionOwnership,
   }: DevicePoolDependencies): void {
@@ -211,6 +213,7 @@ export class DevicePoolInitialization {
     this.callbacks.registerMcpSessionOwnerCallReader();
     this.state.foreignDeviceOwnership = foreignDeviceOwnership;
     this.state.iosForeignDeviceOwnership = iosForeignDeviceOwnership;
+    this.state.watchForeignDeviceOwnership = watchForeignDeviceOwnership;
     this.state.bindingExclusion = bindingExclusion;
     this.state.managedExecutionOwnership = managedExecutionOwnership;
     this.state.daemonSessionId = daemonSessionId;

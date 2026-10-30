@@ -33,6 +33,7 @@ import {
 } from "../utils/ios-cmdline-tools/runtimeCompatibility";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
+import { androidSystemImageTagsFor, defaultAndroidProfileIdFor } from "../models/formFactor";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {
@@ -346,6 +347,67 @@ function tagRank(tag: string): number {
   return index === -1 ? ANDROID_TAG_PREFERENCE.length : index;
 }
 
+/** Which installed images a requested form factor may create an AVD from. */
+export interface AndroidImageFamily {
+  kind: "handheld" | "tv";
+  accepts(tag: string): boolean;
+  /** Lower is better; only compared between images of equal API level and ABI. */
+  rank(tag: string): number;
+  /** avdmanager `-d` profile; undefined keeps avdmanager's default hardware. */
+  deviceProfile?: string;
+  /** Base of a generated AVD name, before the API level. */
+  namePrefix: string;
+}
+
+const HANDHELD_IMAGE_FAMILY: AndroidImageFamily = {
+  kind: "handheld",
+  accepts: (tag) => HANDHELD_ANDROID_TAGS.has(tag),
+  rank: tagRank,
+  namePrefix: "android",
+};
+
+/**
+ * TV images, best first: `android-tv`, then `google-tv`, then the 16 KB-page `google-tv-ps16k`.
+ * `android-tv` leads for the same reason `google_apis` beats `google_apis_playstore` above:
+ * Google TV images ship the Play Store, whose builds usually refuse `adb root`. The order is a
+ * provisional choice until the TV baseline (#15899) confirms root on each image.
+ */
+const TV_ANDROID_TAGS = androidSystemImageTagsFor("tv");
+
+const TV_IMAGE_FAMILY: AndroidImageFamily = {
+  kind: "tv",
+  accepts: (tag) => TV_ANDROID_TAGS.includes(tag),
+  rank: (tag) => TV_ANDROID_TAGS.indexOf(tag),
+  deviceProfile: defaultAndroidProfileIdFor("tv"),
+  namePrefix: "android-tv",
+};
+
+/**
+ * The image family a request may be created from. Phone, tablet, foldable and an omitted form
+ * factor stay handheld-only (#14900); `tv` selects TV images only. Watch and automotive are
+ * refused: picking a handheld image would silently satisfy them with a phone.
+ */
+export function androidImageFamilyFor(formFactor: FormFactor | undefined): AndroidImageFamily {
+  if (formFactor === "tv") {
+    return TV_IMAGE_FAMILY;
+  }
+  if (formFactor === "watch" || formFactor === "automotive") {
+    throw new ActionableError(
+      `Creating a '${formFactor}' AVD is not supported yet; AutoMobile only creates ` +
+        "phone, tablet, foldable and TV AVDs. Create the AVD with avdmanager and the matching " +
+        "system image, or use provisionDevice with an explicit runtime and deviceType.",
+    );
+  }
+  return HANDHELD_IMAGE_FAMILY;
+}
+
+/**
+ * API level suggested in the missing-TV-image hint when the request names no bound. The SDK
+ * catalog publishes `android-tv` for every host ABI (arm64-v8a, x86_64, x86) at API 36; API 34
+ * has no x86_64 TV image.
+ */
+const SUGGESTED_TV_API_LEVEL = 36;
+
 /** ABIs that can run on the host, best first. */
 export function preferredAbis(architecture: string): string[] {
   return architecture === "arm64" ? ["arm64-v8a", "x86_64"] : ["x86_64", "x86"];
@@ -429,17 +491,91 @@ function describeBound(bound: string | undefined, apiLevel: number | undefined):
   return bound.trim() === String(apiLevel) ? bound : `${bound} (API ${apiLevel})`;
 }
 
+/** The resolved API range of one selection, for its errors. */
+interface ApiBounds {
+  criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion">;
+  requestedMin: number | undefined;
+  min: number;
+  max: number | undefined;
+}
+
+function describeRange(bounds: ApiBounds): string {
+  const { criteria, requestedMin, min, max } = bounds;
+  // When the runner-APK floor (not an explicit minOsVersion) is what set the minimum,
+  // describe the floor honestly rather than echoing a lower or absent requested bound.
+  const minDescription =
+    requestedMin !== undefined && requestedMin >= CTRL_PROXY_APK_MIN_SDK
+      ? describeBound(criteria.minOsVersion, min)
+      : `API ${CTRL_PROXY_APK_MIN_SDK} (CtrlProxy runner minSdk)`;
+  return `(min=${minDescription}, max=${describeBound(criteria.maxOsVersion, max)})`;
+}
+
+function describeInstalled(images: SystemImage[]): string {
+  return images.map((image) => image.packageName).join(", ") || "none";
+}
+
+function handheldImagesOrThrow(
+  images: SystemImage[],
+  inRange: SystemImage[],
+  bounds: ApiBounds,
+): SystemImage[] {
+  if (inRange.length === 0) {
+    throw new ActionableError(
+      `No installed Android system image matches the requested API range ${describeRange(bounds)}. ` +
+        `Installed images: ${describeInstalled(images)}. ` +
+        "Install one with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
+    );
+  }
+  const handheld = inRange.filter((image) => HANDHELD_IMAGE_FAMILY.accepts(image.tag));
+  if (handheld.length === 0) {
+    const { criteria, min, max } = bounds;
+    throw new ActionableError(
+      "No installed handheld (phone) Android system image matches the requested API range " +
+        `(min=${describeBound(criteria.minOsVersion, min)}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
+        "Only non-handheld images (Wear OS, TV, Automotive or similar) are installed in that range: " +
+        `${describeInstalled(inRange)}. ` +
+        "Default provisioning never creates an AVD from them. " +
+        "Install a phone image with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
+    );
+  }
+  return handheld;
+}
+
+/** TV images in range, or an error naming the exact sdkmanager command that installs one. */
+function tvImagesOrThrow(
+  images: SystemImage[],
+  inRange: SystemImage[],
+  bounds: ApiBounds,
+  architecture: string,
+): SystemImage[] {
+  const tv = inRange.filter((image) => TV_IMAGE_FAMILY.accepts(image.tag));
+  if (tv.length > 0) {
+    return tv;
+  }
+  const api = bounds.max ?? Math.max(bounds.min, SUGGESTED_TV_API_LEVEL);
+  const abis = preferredAbis(architecture);
+  throw new ActionableError(
+    `No installed Android TV system image (${TV_ANDROID_TAGS.join(", ")}) matches the requested ` +
+      `API range ${describeRange(bounds)}. Installed images: ${describeInstalled(images)}. ` +
+      "AutoMobile does not download system images. Install one with " +
+      `'sdkmanager "system-images;android-${api};android-tv;${abis[0]}"' (or google-tv in place of ` +
+      `android-tv), then retry. This host runs ${abis.join(" or ")} images; 'sdkmanager --list' ` +
+      "shows the ABIs published for each API level.",
+  );
+}
+
 /**
  * Choose an installed system image: newest exact API identifier within the
- * requested major-API range, preferring a host-runnable ABI and a Google APIs tag.
- * Only handheld (phone/tablet) images are candidates; Wear OS, TV and Automotive
- * images are never selected (#14900).
+ * requested major-API range, preferring a host-runnable ABI and the family's best tag.
+ * The form factor picks the family ({@link androidImageFamilyFor}): handheld requests never
+ * select Wear OS, TV or Automotive images (#14900), and a TV request selects only TV images.
  */
 export function pickAndroidSystemImage(
   images: SystemImage[],
-  criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion">,
+  criteria: Pick<DeviceMatchCriteria, "minOsVersion" | "maxOsVersion" | "formFactor">,
   architecture: string,
 ): SystemImage {
+  const family = androidImageFamilyFor(criteria.formFactor);
   const requestedMin = resolveApiLevelBound(criteria.minOsVersion, "min");
   const max = resolveApiLevelBound(criteria.maxOsVersion, "max");
 
@@ -470,37 +606,15 @@ export function pickAndroidSystemImage(
     return true;
   });
 
-  if (inRange.length === 0) {
-    // When the runner-APK floor (not an explicit minOsVersion) is what excluded
-    // every image, describe the floor honestly rather than echoing a lower or
-    // absent requested bound.
-    const minDescription =
-      requestedMin !== undefined && requestedMin >= CTRL_PROXY_APK_MIN_SDK
-        ? describeBound(criteria.minOsVersion, min)
-        : `API ${CTRL_PROXY_APK_MIN_SDK} (CtrlProxy runner minSdk)`;
-    throw new ActionableError(
-      "No installed Android system image matches the requested API range " +
-        `(min=${minDescription}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
-        `Installed images: ${images.map((image) => image.packageName).join(", ") || "none"}. ` +
-        "Install one with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
-    );
-  }
-
-  const handheld = inRange.filter((image) => HANDHELD_ANDROID_TAGS.has(image.tag));
-  if (handheld.length === 0) {
-    throw new ActionableError(
-      "No installed handheld (phone) Android system image matches the requested API range " +
-        `(min=${describeBound(criteria.minOsVersion, min)}, max=${describeBound(criteria.maxOsVersion, max)}). ` +
-        "Only non-handheld images (Wear OS, TV, Automotive or similar) are installed in that range: " +
-        `${inRange.map((image) => image.packageName).join(", ")}. ` +
-        "Default provisioning never creates an AVD from them. " +
-        "Install a phone image with 'sdkmanager \"system-images;android-<api>;google_apis;<abi>\"'.",
-    );
-  }
+  const bounds: ApiBounds = { criteria, requestedMin, min, max };
+  const familyImages =
+    family.kind === "tv"
+      ? tvImagesOrThrow(images, inRange, bounds, architecture)
+      : handheldImagesOrThrow(images, inRange, bounds);
 
   const preferences = preferredAbis(architecture);
-  const runnable = handheld.filter((image) => preferences.includes(image.abi));
-  const candidates = runnable.length > 0 ? runnable : handheld;
+  const runnable = familyImages.filter((image) => preferences.includes(image.abi));
+  const candidates = runnable.length > 0 ? runnable : familyImages;
 
   // Precedence is major API > ABI > tag > minor > packageName; keep capability
   // and rootability preferences ahead of point-release freshness.
@@ -513,7 +627,7 @@ export function pickAndroidSystemImage(
     if (abiDelta !== 0) {
       return abiDelta;
     }
-    const tagDelta = tagRank(a.tag) - tagRank(b.tag);
+    const tagDelta = family.rank(a.tag) - family.rank(b.tag);
     if (tagDelta !== 0) {
       return tagDelta;
     }
@@ -664,19 +778,8 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     signal?: AbortSignal,
     identityHooks?: DeviceProvisioningIdentityHooks,
   ): Promise<ProvisionedDevice> {
-    if (
-      criteria.formFactor === "tv" ||
-      criteria.formFactor === "watch" ||
-      criteria.formFactor === "automotive"
-    ) {
-      // pickAndroidSystemImage selects handheld images only; creating one here would silently
-      // satisfy a TV/watch/car request with a phone.
-      throw new ActionableError(
-        `Creating a '${criteria.formFactor}' AVD is not supported yet; AutoMobile only creates ` +
-          "phone, tablet and foldable AVDs. Create the AVD with avdmanager and the matching " +
-          "system image, or use provisionDevice with an explicit runtime and deviceType.",
-      );
-    }
+    // Refuses watch and automotive before listing images.
+    const family = androidImageFamilyFor(criteria.formFactor);
     const avdManager = this.dependencies.androidCreator();
 
     let installed: SystemImage[];
@@ -691,7 +794,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
 
     const image = pickAndroidSystemImage(installed, criteria, this.architecture);
     const name = buildCreatedDeviceName(
-      criteria.name ?? `android-${image.apiLevel}`,
+      criteria.name ?? `${family.namePrefix}-${image.apiLevel}`,
       this.idGenerator,
     );
     const identitySignal = await identityHooks?.reserveBeforeCreate({
@@ -706,7 +809,14 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
         ? AbortSignal.any([signal, identitySignal])
         : (signal ?? identitySignal);
 
-    const result = await avdManager.createAvd({ name, package: image.packageName }, creationSignal);
+    const result = await avdManager.createAvd(
+      {
+        name,
+        package: image.packageName,
+        ...(family.deviceProfile ? { device: family.deviceProfile } : {}),
+      },
+      creationSignal,
+    );
     if (!result.success) {
       // avdmanager exited cleanly without creating the AVD: nothing to roll back.
       throw new ProvisionDeviceCreateRejectedError(
@@ -723,7 +833,8 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     };
     logger.info(
       `[DeviceProvisioner] Created Android AVD '${name}' ` +
-        `(systemImage=${image.packageName}, api=${image.apiIdentifier}, tag=${image.tag}, abi=${image.abi}). ` +
+        `(systemImage=${image.packageName}, api=${image.apiIdentifier}, tag=${image.tag}, abi=${image.abi}` +
+        `${family.deviceProfile ? `, device=${family.deviceProfile}` : ""}). ` +
         `Delete it with 'avdmanager delete avd -n ${name}' when no longer needed.`,
     );
     await identityHooks?.bindAfterCreate(provisioned);

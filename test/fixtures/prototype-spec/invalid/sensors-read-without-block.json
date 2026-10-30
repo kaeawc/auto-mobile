@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "sensors-read-without-block",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {},
+    "requires": {
+      "platform": ["sensors"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "Too close",
+          "visibleWhen": {
+            "platform": "/sensors/proximityNear",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].visibleWhen.platform",
+  "expectedMessage": "Sensor proximity is not declared in the sensors block"
+}

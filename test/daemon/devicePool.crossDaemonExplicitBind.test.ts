@@ -9,7 +9,9 @@ import {
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   IOS_SIMULATOR_CLAIM_SCOPE,
+  WATCH_SIMULATOR_CLAIM_SCOPE,
   iosDeviceAllocationClaimPath,
+  watchDeviceAllocationClaimPath,
   type ForeignDeviceOwnership,
 } from "../../src/daemon/foreignDeviceOwnership";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
@@ -51,12 +53,26 @@ class SharedClaimStore {
   }
 }
 
+/** The pool dependency that carries `platform`'s claim store. */
+function ownershipDependency(platform: Platform, ownership: ForeignDeviceOwnership) {
+  switch (platform) {
+    case "android":
+      return { foreignDeviceOwnership: ownership };
+    case "ios":
+      return { iosForeignDeviceOwnership: ownership };
+    case "watchos":
+      return { watchForeignDeviceOwnership: ownership };
+  }
+}
+
 const DAEMON_A_PID = 1111;
 const DAEMON_B_PID = 2222;
 
 for (const [platform, deviceId] of [
   ["android", "emulator-5554"],
   ["ios", "8F2C1A9E-4B1D-4C3E-9A55-0D6E1F2A3B4C"],
+  // #14908: a watch is claimed by UDID too, so a second daemon can neither bind nor stop it.
+  ["watchos", "3D4E5F60-7182-4A93-B4C5-D6E7F8091A2B"],
 ] as const satisfies readonly (readonly [Platform, string])[]) {
   describe(`explicit binds across daemons on ${platform} (#10980)`, () => {
     let timer: FakeTimer;
@@ -72,9 +88,7 @@ for (const [platform, deviceId] of [
       const pool = makePool(sessions, `daemon-${pid}`, {
         timer,
         deviceManager: devices,
-        ...(platform === "android"
-          ? { foreignDeviceOwnership: ownership }
-          : { iosForeignDeviceOwnership: ownership }),
+        ...ownershipDependency(platform, ownership),
       });
       await pool.initializeWithDevices([device]);
       return { sessions, pool };
@@ -419,4 +433,53 @@ test("iOS claims are keyed by UDID under one host-wide scope (#10980)", () => {
   expect(iosDeviceAllocationClaimPath("ABC-123", { AUTOMOBILE_COORDINATION_DIR: "/x" }, "/h")).toBe(
     iosDeviceAllocationClaimPath("ABC-123", {}, "/h"),
   );
+});
+
+test("watch claims are keyed by UDID under their own host-wide scope (#14908)", () => {
+  const path = watchDeviceAllocationClaimPath("ABC-123", {}, "/home/someone");
+  expect(path).toContain(WATCH_SIMULATOR_CLAIM_SCOPE);
+  expect(path).not.toBe(iosDeviceAllocationClaimPath("ABC-123", {}, "/home/someone"));
+  expect(path.startsWith(resolve("/home/someone", ".auto-mobile") + sep)).toBe(true);
+  expect(
+    watchDeviceAllocationClaimPath("ABC-123", { AUTOMOBILE_COORDINATION_DIR: "/x" }, "/h"),
+  ).toBe(watchDeviceAllocationClaimPath("ABC-123", {}, "/h"));
+});
+
+test("an inventory refresh re-reads which idle watches another daemon claims (#14908)", async () => {
+  const timer = new FakeTimer();
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  const watch = { deviceId: "WATCH-UDID-14908", name: "Apple Watch", platform: "watchos" as const };
+  const peerClaims = new Map<string, number>();
+  const seen = new Map<string, number>();
+  // Like the claim-file reader: a peer's claim is visible only once a refresh has read it.
+  const ownership: ForeignDeviceOwnership = {
+    async refresh(ids) {
+      for (const id of ids) {
+        const owner = peerClaims.get(id);
+        if (owner === undefined) {
+          seen.delete(id);
+        } else {
+          seen.set(id, owner);
+        }
+      }
+    },
+    foreignOwnerPid: (id) => seen.get(id),
+    claim: async () => true,
+    release: () => {},
+  };
+  try {
+    const pool = makePool(sessions, "daemon-watch-refresh", {
+      timer,
+      watchForeignDeviceOwnership: ownership,
+    });
+    await pool.initializeWithDevices([watch]);
+    peerClaims.set(watch.deviceId, DAEMON_A_PID);
+
+    await pool.refreshInventoryOwnership();
+
+    expect(pool.genericAvailability(watch.deviceId)).not.toBe("free");
+  } finally {
+    sessions.stopCleanupTimer();
+    timer.reset();
+  }
 });

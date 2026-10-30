@@ -51,7 +51,7 @@ import { isIndeterminate, shownSpecOutcome } from "../prototypeShownOutcome";
 import { sendPrototype, stageAssets } from "./assets";
 import { appLayerGrant, preflightMutation, specCapabilityRefusal } from "./preflight";
 import { prototypeSchema } from "./schemas";
-import { prototypeScreenShapeOutput } from "./screenShape";
+import { prototypeFormFactorOutput, prototypeScreenShapeOutput } from "./screenShape";
 import type {
   AnchorStage,
   AssetStage,
@@ -372,7 +372,10 @@ function renderShowOutcome(outcome: Awaited<ReturnType<typeof sendPrototype>>): 
   };
 }
 
-/** Advisory platform notes, accessibility findings and watch screen shape for a successful show. */
+/**
+ * Advisory platform notes, accessibility findings, watch screen shape and the car form factor for a
+ * successful show.
+ */
 async function showAdviceOutput(
   args: z.infer<typeof prototypeSchema>,
   device: BootedDevice,
@@ -383,6 +386,7 @@ async function showAdviceOutput(
   Pick<
     PrototypeOutput,
     | "screenRound"
+    | "formFactor"
     | "platformNotes"
     | "accessibilityFindings"
     | "accessibilityFindingsTotal"
@@ -399,6 +403,7 @@ async function showAdviceOutput(
       { action: args.action, success, device, deviceScreenRound, signal },
       dependencies,
     )),
+    ...prototypeFormFactorOutput({ action: args.action, success, device }),
   };
 }
 

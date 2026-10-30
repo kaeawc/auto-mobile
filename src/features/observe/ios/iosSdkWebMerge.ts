@@ -1,7 +1,7 @@
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import { nodeAttributes, nodeBounds } from "../../../models/ViewHierarchyResult";
 import { boundsKey, childrenOf } from "./iosSdkObservationMerge";
-import type { IosSdkWebElement, IosSdkWebSnapshot } from "./sdkWebViewBridge";
+import type { IosSdkWebElement, IosSdkWebSnapshot, IosSdkWebViewport } from "./sdkWebViewBridge";
 import { WEB_SNAPSHOT_ID_ATTRIBUTE } from "../../../utils/hierarchyFingerprint";
 import { VALUE_REDACTED_ATTRIBUTE } from "../../../models/Element";
 
@@ -24,7 +24,8 @@ export const WEB_ORIGIN_ATTRIBUTE = "web-origin";
 /**
  * DOM roles of text entry fields. They are reported as an XCTest text field would be (`role:
  * textfield`, focusable, with an input type), so focus, sendKeys and setUIState still treat a merged
- * field as editable after its XCTest duplicate is removed. A snapshot carries no input type, so a non-text `<input>` counts too.
+ * field as editable after its XCTest duplicate is removed. An `<input>` counts only with a text-like
+ * type (see {@link TEXT_INPUT_TYPES}).
  */
 const EDITABLE_WEB_ROLES: ReadonlySet<string> = new Set([
   "input",
@@ -33,6 +34,27 @@ const EDITABLE_WEB_ROLES: ReadonlySet<string> = new Set([
   "searchbox",
   "combobox",
 ]);
+
+/**
+ * `<input>` types that take typed text. A checkbox, radio, range, file or button input is not a text
+ * field. An input without a reported type (an SDK that predates it) is taken as text, the HTML default.
+ */
+const TEXT_INPUT_TYPES: ReadonlySet<string> = new Set([
+  "text",
+  "search",
+  "email",
+  "url",
+  "tel",
+  "password",
+  "number",
+]);
+
+function isEditable(element: IosSdkWebElement, role: string): boolean {
+  if (role !== "input") {
+    return EDITABLE_WEB_ROLES.has(role);
+  }
+  return TEXT_INPUT_TYPES.has((element.inputType ?? "text").toLowerCase());
+}
 
 /** The value the SDK bridge reports in place of a DOM value when its policy redacts text. */
 const REDACTED_WEB_VALUE = "[REDACTED]";
@@ -130,20 +152,50 @@ function originOf(url: string | undefined): string | undefined {
   return origin === "null" ? undefined : origin;
 }
 
+/** How CSS pixels map onto the web view: an offset in CSS pixels, then points per CSS pixel. */
+interface CssToPoints {
+  offsetLeft: number;
+  offsetTop: number;
+  pointsPerPixel: number;
+}
+
 /**
- * The element's screen bounds: its `[x, y, width, height]` in the page's CSS pixels, offset by the
- * web view's origin and clipped to the web view, truncated to whole points as the runner reports
- * XCTest frames (`Int(value)`), so a DOM element and its XCTest twin get the same bounds.
+ * The visual viewport fills the web view, so its CSS width spans the web view's width in points.
+ * That ratio covers a page without a `device-width` viewport (a 980 px layout viewport in a 390 pt
+ * web view) and pinch zoom alike. Without a usable viewport, CSS pixels are taken as points.
  */
-function screenBounds(element: IosSdkWebElement, webView: Box): Box | null {
+function cssToPoints(viewport: IosSdkWebViewport | undefined, webView: Box): CssToPoints {
+  const usable =
+    viewport !== undefined &&
+    [viewport.offsetLeft, viewport.offsetTop, viewport.width].every(Number.isFinite) &&
+    viewport.width > 0;
+  if (!usable) {
+    return { offsetLeft: 0, offsetTop: 0, pointsPerPixel: 1 };
+  }
+  return {
+    offsetLeft: viewport.offsetLeft,
+    offsetTop: viewport.offsetTop,
+    pointsPerPixel: (webView.right - webView.left) / viewport.width,
+  };
+}
+
+/**
+ * The element's screen bounds: its `[x, y, width, height]` in the page's CSS pixels, converted to
+ * points relative to the visual viewport, offset by the web view's origin and clipped to the web
+ * view, truncated to whole points as the runner reports XCTest frames (`Int(value)`), so a DOM
+ * element and its XCTest twin get the same bounds.
+ */
+function screenBounds(element: IosSdkWebElement, webView: Box, scale: CssToPoints): Box | null {
   const [x, y, width, height] = element.bounds;
   if ([x, y, width, height].some((part) => part === undefined || !Number.isFinite(part))) {
     return null;
   }
-  const left = Math.trunc(Math.max(webView.left, webView.left + x));
-  const top = Math.trunc(Math.max(webView.top, webView.top + y));
-  const right = Math.trunc(Math.min(webView.right, webView.left + x + width));
-  const bottom = Math.trunc(Math.min(webView.bottom, webView.top + y + height));
+  const originX = webView.left + (x - scale.offsetLeft) * scale.pointsPerPixel;
+  const originY = webView.top + (y - scale.offsetTop) * scale.pointsPerPixel;
+  const left = Math.trunc(Math.max(webView.left, originX));
+  const top = Math.trunc(Math.max(webView.top, originY));
+  const right = Math.trunc(Math.min(webView.right, originX + width * scale.pointsPerPixel));
+  const bottom = Math.trunc(Math.min(webView.bottom, originY + height * scale.pointsPerPixel));
   return right > left && bottom > top ? { left, top, right, bottom } : null;
 }
 
@@ -180,7 +232,7 @@ function convertElement(
   native?: Record<string, unknown>,
 ): ViewHierarchyNode {
   const role = element.role ?? "element";
-  const editable = EDITABLE_WEB_ROLES.has(role);
+  const editable = isEditable(element, role);
   return {
     $: {
       class: role,
@@ -307,11 +359,12 @@ export function mergeIosSdkWebSnapshots(
     }
     const origin = originOf(snapshot.url);
     const ambiguous = duplicateIds(snapshot.elements);
+    const scale = cssToPoints(snapshot.viewport, webViewBox);
     const converted = snapshot.elements.flatMap((element) => {
       // An action names its element by id: with none it cannot be routed, and with two elements
       // sharing one it could act on either.
       const routable = element.id !== "" && !ambiguous.has(element.id);
-      const bounds = element.visible && routable ? screenBounds(element, webViewBox) : null;
+      const bounds = element.visible && routable ? screenBounds(element, webViewBox, scale) : null;
       return bounds ? [{ element, bounds }] : [];
     });
     if (converted.length === 0) {

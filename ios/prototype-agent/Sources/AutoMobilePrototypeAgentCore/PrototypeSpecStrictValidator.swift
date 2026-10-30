@@ -45,6 +45,7 @@ public enum PrototypeSpecStrictValidator {
                 commerce: fields["commerce"],
                 storage: fields["storage"],
                 location: fields["location"],
+                sensors: fields["sensors"],
                 notifications: fields["notifications"],
                 media: fields["media"],
                 root: root,

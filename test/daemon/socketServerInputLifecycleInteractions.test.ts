@@ -66,7 +66,10 @@ class LifecycleInputServer extends UnixSocketServerHarness {
     ownerSignal?: AbortSignal,
     requester?: () => string | undefined,
   ): Promise<T> {
-    return this.runTrackedDeviceInput(toolName, targetDevice, operation, ownerSignal, requester);
+    return this.runTrackedDeviceInput(toolName, targetDevice, operation, {
+      ownerSignal,
+      requester,
+    });
   }
 }
 

@@ -110,12 +110,12 @@ export class InputHoldServer extends UnixSocketServerHarness {
     sessionId: string,
     socket: Socket,
     request: DaemonRequest,
-    receivedAtMs: number,
-    handling?: SocketRequestHandling,
+    options?: { receivedAtMs?: number; handling?: SocketRequestHandling },
   ): Promise<DaemonResponse | undefined> {
     // Forwards only the admission hook, as before: the request context is rebuilt at receipt.
-    const result = super.handleRequest(sessionId, socket, request, receivedAtMs, {
-      onAdmitted: handling?.onAdmitted,
+    const result = super.handleRequest(sessionId, socket, request, {
+      receivedAtMs: options?.receivedAtMs,
+      handling: { onAdmitted: options?.handling?.onAdmitted },
     });
     this.handled.push(result);
     return result;
@@ -146,11 +146,13 @@ export class InputHoldServer extends UnixSocketServerHarness {
     toolName: string,
     targetDevice: BootedDevice,
     operation: (signal?: AbortSignal, dispatching?: () => void) => Promise<T>,
-    ownerSignal?: AbortSignal,
-    requester?: () => string | undefined,
+    {
+      ownerSignal,
+      requester,
+    }: { ownerSignal?: AbortSignal; requester?: () => string | undefined } = {},
   ): Promise<T> {
     return this.realTracking
-      ? super.runTrackedDeviceInput(toolName, targetDevice, operation, ownerSignal, requester)
+      ? super.runTrackedDeviceInput(toolName, targetDevice, operation, { ownerSignal, requester })
       : this.trackedInput(toolName, targetDevice, operation, ownerSignal);
   }
 

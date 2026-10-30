@@ -40,7 +40,8 @@ class TestServer extends BaseSocketServer {
     reachability?: DaemonSocketReachabilityLike,
     owner?: AuxiliarySocketOwner,
   ) {
-    super(socketPath, new FakeTimer(), "BindGuardTest", 0, {
+    super(socketPath, new FakeTimer(), "BindGuardTest", {
+      idleTimeoutMs: 0,
       socketReachability: reachability,
       socketOwner: owner,
     });

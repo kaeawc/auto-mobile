@@ -1170,7 +1170,7 @@ describe("handleDaemonRequest", () => {
           await handleDaemonRequest(
             buildRequest("daemon/releaseSession", { sessionId }),
             new FakeDaemonState(sessionManager, pool),
-            tracker,
+            { executions: tracker },
           ),
         ).toEqual({
           success: true,
@@ -1205,7 +1205,7 @@ describe("handleDaemonRequest", () => {
         await handleDaemonRequest(
           buildRequest("daemon/releaseSession", { sessionId: "missing", requireKnown: true }),
           new FakeDaemonState(sessionManager, pool),
-          tracker,
+          { executions: tracker },
         ),
       ).toMatchObject({
         success: false,
@@ -1229,7 +1229,7 @@ describe("handleDaemonRequest", () => {
       await handleDaemonRequest(
         buildRequest("daemon/releaseSession", { sessionId: "missing" }),
         new FakeDaemonState(sessionManager, pool),
-        tracker,
+        { executions: tracker },
       ),
     ).toMatchObject({
       success: true,
@@ -1249,7 +1249,7 @@ describe("handleDaemonRequest", () => {
       handleDaemonRequest(
         buildRequest("daemon/releaseSession", { sessionId: "released-once", requireKnown: true }),
         new FakeDaemonState(sessionManager, pool),
-        tracker,
+        { executions: tracker },
       );
     await release();
 
@@ -1279,7 +1279,7 @@ describe("handleDaemonRequest", () => {
     const pending = handleDaemonRequest(
       buildRequest("daemon/releaseSession", { sessionId }),
       state,
-      tracker,
+      { executions: tracker },
     );
     // The manager is reached synchronously, as before: no idle cancellation await.
     expect(release).toHaveBeenCalledWith(sessionId);

@@ -229,8 +229,7 @@ test("submit budget exhaustion retains its message and append progress", async (
     { requestImeAction: ime },
     "done",
     timer.now(),
-    1000,
-    { appendCharsSent: 2 },
+    { totalTimeoutMs: 1000, appendCharsSent: 2 },
   );
   expect(result).toEqual({
     success: false,
@@ -251,7 +250,8 @@ test.each([false, true])(
       error: reason,
     }));
     expect<object>(
-      await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, {
+      await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, {
+        totalTimeoutMs: 1000,
         appendCharsSent: append ? 2 : undefined,
       }),
     ).toEqual({
@@ -270,7 +270,8 @@ test("runImeActionWithinBudget keeps append rejection as a returned failure", as
     throw new Error(reason);
   });
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, {
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, {
+      totalTimeoutMs: 1000,
       appendCharsSent: 2,
     }),
   ).toEqual({ success: false, error: guidance, charsSent: 2 });
@@ -282,7 +283,9 @@ test("a non-Error IME rejection remains thrown with its reason and cause", async
     throw reason;
   });
   await expect(
-    handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000),
+    handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, {
+      totalTimeoutMs: 1000,
+    }),
   ).rejects.toMatchObject({ message: guidance, cause: reason });
 });
 
@@ -290,7 +293,9 @@ test("an IME failure with no runner reason uses the existing fallback", async ()
   const { handler } = createHandler();
   const ime = mock(async () => ({ success: false, action: "next", totalTimeMs: 0 }));
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "next", 1000, 1000),
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "next", 1000, {
+      totalTimeoutMs: 1000,
+    }),
   ).toMatchObject({
     success: false,
     error:
@@ -302,12 +307,14 @@ test("a successful IME action and an absent submit preserve append progress", as
   const { handler } = createHandler();
   const ime = mock(async () => ({ success: true, action: "done", totalTimeMs: 0 }));
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, 1000, {
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, "done", 1000, {
+      totalTimeoutMs: 1000,
       appendCharsSent: 2,
     }),
   ).toEqual({ success: true, action: "done", totalTimeMs: 0, charsSent: 2 });
   expect<object>(
-    await handler.runImeActionWithinBudget({ requestImeAction: ime }, undefined, 1000, 1000, {
+    await handler.runImeActionWithinBudget({ requestImeAction: ime }, undefined, 1000, {
+      totalTimeoutMs: 1000,
       appendCharsSent: 2,
     }),
   ).toEqual({ success: true, charsSent: 2 });

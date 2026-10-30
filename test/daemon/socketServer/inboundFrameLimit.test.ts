@@ -47,7 +47,7 @@ class RawServer extends BaseSocketServer {
   protected readonly maxFrameBytes = LIMIT;
 
   constructor() {
-    super("/fake/raw.sock", new FakeTimer(), "Raw", 0);
+    super("/fake/raw.sock", new FakeTimer(), "Raw", { idleTimeoutMs: 0 });
   }
 
   attach(socket: Socket): void {

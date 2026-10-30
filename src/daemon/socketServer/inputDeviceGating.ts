@@ -162,8 +162,7 @@ export interface InputDeviceGatingPorts {
     signal: AbortSignal | undefined,
     timeoutMs: number,
     send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-    onDispatch?: () => void,
-    label?: string,
+    options?: { onDispatch?: () => void; label?: string },
   ): Promise<T>;
   assertDeviceActionable: InputDeviceGating["assertDeviceActionable"];
   assertInputBindingGate: InputDeviceGating["assertInputBindingGate"];
@@ -237,15 +236,17 @@ export class InputDeviceGating {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: InputTargetAction,
-    { bypassAndroidDeviceListCache = false, requester }: InputTargetResolveOptions = {},
+    {
+      action,
+      bypassAndroidDeviceListCache = false,
+      requester,
+    }: InputTargetResolveOptions & { action: InputTargetAction },
   ): Promise<BootedDevice> {
     const targetDevice = await this.ports.selectInputTargetDevice(
       platform,
       deviceId,
       socketSessionId,
-      action,
-      bypassAndroidDeviceListCache,
+      { action, bypassAndroidDeviceListCache },
     );
     await this.ports.assertFrameTargetProven(targetDevice, action, requester);
     this.ports.assertBrokerConnectionInputTarget(socketSessionId, action, targetDevice.deviceId);
@@ -322,8 +323,10 @@ export class InputDeviceGating {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: InputTargetAction,
-    bypassAndroidDeviceListCache: boolean = false,
+    {
+      action,
+      bypassAndroidDeviceListCache = false,
+    }: { action: InputTargetAction; bypassAndroidDeviceListCache?: boolean },
   ): Promise<BootedDevice> {
     const { devices: bootedDevices, deviceId: canonicalDeviceId } =
       await this.ports.discoverInputTargetDevices(
@@ -391,8 +394,7 @@ export class InputDeviceGating {
           executionKey,
           gate?.chainWait,
         ),
-      gate?.ownerSignal,
-      gate?.requester,
+      { ownerSignal: gate?.ownerSignal, requester: gate?.requester },
     );
   }
 
@@ -405,8 +407,7 @@ export class InputDeviceGating {
     toolName: string,
     origin: string,
     totalTimeoutMs: number,
-    budgetStartMs: number,
-    input?: InputRequestContext,
+    { budgetStartMs, input }: { budgetStartMs: number; input?: InputRequestContext },
   ): InputDeviceGate {
     const remainingMs = () => totalTimeoutMs - (this.ports.timer().now() - budgetStartMs);
     return {
@@ -465,20 +466,22 @@ export class InputDeviceGating {
     gesture: "Tap" | "Swipe",
     signal: AbortSignal | undefined,
     timeoutMs: number,
-    send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-    onDispatch?: () => void,
+    {
+      send,
+      onDispatch,
+    }: {
+      send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>;
+      onDispatch?: () => void;
+    },
   ): Promise<T> {
     return this.ports.runHeldInputOperation(
       `input/${gesture.toLowerCase()}`,
       signal,
       (_signal, dispatch) =>
-        this.ports.holdDispatchedInputRequest(
-          signal,
-          timeoutMs,
-          send,
-          dispatch,
-          `${gesture} request`,
-        ),
+        this.ports.holdDispatchedInputRequest(signal, timeoutMs, send, {
+          onDispatch: dispatch,
+          label: `${gesture} request`,
+        }),
       () => onDispatch?.(),
     );
   }
@@ -540,8 +543,7 @@ export class InputDeviceGating {
     toolName: string,
     targetDevice: BootedDevice,
     operation: InputOperation<T>,
-    ownerSignal?: AbortSignal,
-    requester?: () => string | undefined,
+    { ownerSignal, requester }: { ownerSignal?: AbortSignal; requester?: () => string | undefined },
   ): Promise<T> {
     // FUNNEL 2, ahead of the session lookup: a device-addressed input on a
     // quarantined serial must be refused WITH OR WITHOUT a session. The

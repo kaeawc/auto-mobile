@@ -34,18 +34,22 @@ describe("SocketInput.toIosRunnerCoordinates", () => {
     const { input, client, legacy } = harness();
     client.screenScaleMetadata = { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 };
     legacy.add("sim-1");
-    expect(await input.toIosRunnerCoordinates(client, "sim-1", [300, 600], 100)).toEqual([
-      100, 200,
-    ]);
+    expect(
+      await input.toIosRunnerCoordinates(client, "sim-1", [300, 600], { probeTimeoutMs: 100 }),
+    ).toEqual([100, 200]);
     expect(legacy.has("sim-1")).toBe(false);
     expect(client.hierarchySyncRequests.length).toBe(0);
   });
 
   test("a runner that answers the probe without metadata passes through and is probed once", async () => {
     const { input, client, legacy } = harness();
-    expect(await input.toIosRunnerCoordinates(client, "sim-1", [10, 20], 100)).toEqual([10, 20]);
+    expect(
+      await input.toIosRunnerCoordinates(client, "sim-1", [10, 20], { probeTimeoutMs: 100 }),
+    ).toEqual([10, 20]);
     expect(legacy.has("sim-1")).toBe(true);
-    expect(await input.toIosRunnerCoordinates(client, "sim-1", [30, 40], 100)).toEqual([30, 40]);
+    expect(
+      await input.toIosRunnerCoordinates(client, "sim-1", [30, 40], { probeTimeoutMs: 100 }),
+    ).toEqual([30, 40]);
     expect(client.hierarchySyncRequests.length).toBe(1);
   });
 
@@ -56,17 +60,21 @@ describe("SocketInput.toIosRunnerCoordinates", () => {
       client.screenScaleMetadata = { nativeScale: 2, pixelWidth: 800, pixelHeight: 1600 };
       return probe(...args);
     };
-    expect(await input.toIosRunnerCoordinates(client, "sim-1", [100, 200], 100)).toEqual([50, 100]);
+    expect(
+      await input.toIosRunnerCoordinates(client, "sim-1", [100, 200], { probeTimeoutMs: 100 }),
+    ).toEqual([50, 100]);
     expect(legacy.has("sim-1")).toBe(false);
   });
 
   test("a probe that returns no hierarchy fails closed and is not cached", async () => {
     const { input, client, legacy } = harness();
     client.setHierarchyData(null);
-    const failure = await input.toIosRunnerCoordinates(client, "sim-1", [10, 20], 100).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const failure = await input
+      .toIosRunnerCoordinates(client, "sim-1", [10, 20], { probeTimeoutMs: 100 })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
     expect(failure).toBeInstanceOf(ActionableError);
     expect(legacy.has("sim-1")).toBe(false);
   });
@@ -74,10 +82,12 @@ describe("SocketInput.toIosRunnerCoordinates", () => {
   test("a probe that throws fails closed with the device named", async () => {
     const { input, client } = harness();
     client.setFailureMode("requestHierarchySync", new Error("socket closed"));
-    const failure = await input.toIosRunnerCoordinates(client, "sim-1", [10, 20], 100).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const failure = await input
+      .toIosRunnerCoordinates(client, "sim-1", [10, 20], { probeTimeoutMs: 100 })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
     expect(failure).toBeInstanceOf(ActionableError);
     expect((failure as Error).message).toContain("sim-1");
   });

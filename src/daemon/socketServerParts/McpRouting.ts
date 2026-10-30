@@ -210,7 +210,7 @@ export class McpRouting {
           socketSessionId,
           listSessionUuid,
           undefined,
-          toolSelectionProfileUuid,
+          { toolSelectionProfileUuid },
         );
       }
       if (toolSelectionProfileUuid) {
@@ -225,12 +225,9 @@ export class McpRouting {
     const sessionUuid = this.callbacks.getSessionUuid(request.params);
     const toolSelectionProfileUuid = this.callbacks.getToolSelectionProfileUuid(request.params);
     if (sessionUuid) {
-      return this.callbacks.sessionScopedForwardRoute(
-        socketSessionId,
-        sessionUuid,
-        undefined,
+      return this.callbacks.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined, {
         toolSelectionProfileUuid,
-      );
+      });
     }
     if (toolSelectionProfileUuid) {
       return this.callbacks.toolSelectionProfileScopedForwardRoute(
@@ -269,13 +266,9 @@ export class McpRouting {
     if (sessionUuid) {
       const releasedSessionUuid =
         request.params?.[DAEMON_RELEASED_SESSION_PARAM] === sessionUuid ? sessionUuid : undefined;
-      return this.callbacks.sessionScopedForwardRoute(
-        socketSessionId,
-        sessionUuid,
-        undefined,
-        undefined,
-        releasedSessionUuid === sessionUuid ? releasedSessionUuid : undefined,
-      );
+      return this.callbacks.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined, {
+        releasedSessionUuid: releasedSessionUuid === sessionUuid ? releasedSessionUuid : undefined,
+      });
     }
     const uri = request.params?.uri;
     return this.callbacks.sharedMcpForwardRoute(
@@ -374,12 +367,9 @@ export class McpRouting {
           scopedKey,
           boundRoute,
         }) ??
-        this.callbacks.sessionScopedForwardRoute(
-          socketSessionId,
-          sessionUuid,
-          scopedKey,
+        this.callbacks.sessionScopedForwardRoute(socketSessionId, sessionUuid, scopedKey, {
           toolSelectionProfileUuid,
-        )
+        })
       );
     }
     if (toolSelectionProfileUuid) {
@@ -458,7 +448,7 @@ export class McpRouting {
       socketSessionId,
       acquiredDeviceSessionUuid,
       scopedKey,
-      toolSelectionProfileUuid,
+      { toolSelectionProfileUuid },
     );
   }
   /**
@@ -548,8 +538,10 @@ export class McpRouting {
     socketSessionId: string,
     sessionUuid: string,
     scopedKey: string | undefined,
-    toolSelectionProfileUuid?: string,
-    releasedSessionUuid?: string,
+    {
+      toolSelectionProfileUuid,
+      releasedSessionUuid,
+    }: { toolSelectionProfileUuid?: string; releasedSessionUuid?: string } = {},
   ): McpForwardRoute {
     return {
       executionKey: scopedKey ?? `session:${sessionUuid}`,

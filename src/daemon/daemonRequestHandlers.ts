@@ -59,7 +59,9 @@ import type {
   DaemonMethodResult,
   ListedDeviceSessionRecord,
   DaemonRequestContext,
+  DaemonRequestOptions,
   InitializedDaemonMethodHandler,
+  InitializedDaemonMethodOptions,
 } from "./daemonRequestHandlersParts/contracts";
 import {
   reportedWallClock,
@@ -78,7 +80,9 @@ export type {
   DevicePoolStats,
   DaemonMethodResult,
   DaemonRequestContext,
+  DaemonRequestOptions,
   InitializedDaemonMethodHandler,
+  InitializedDaemonMethodOptions,
 } from "./daemonRequestHandlersParts/contracts";
 export {
   isTokenOwnedOrClaimPending,
@@ -103,10 +107,7 @@ export const INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream";
 export async function handleDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions?: ReleaseCutExecutions,
-  /** Aborts when the requesting socket closes or cancels this request. */
-  signal?: AbortSignal,
-  context: DaemonRequestContext = {},
+  options: DaemonRequestOptions = {},
 ): Promise<DaemonMethodResult> {
   if (!request.method.startsWith("daemon/")) {
     return {
@@ -144,7 +145,7 @@ export async function handleDaemonRequest(
     };
   }
 
-  return handleInitializedDaemonRequest(request, state, executions, signal, context);
+  return handleInitializedDaemonRequest(request, state, options);
 }
 
 /** Socket daemon methods served once the daemon is initialized, by method name. */
@@ -157,15 +158,14 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
     [DAEMON_TOKEN_OWNED_SESSIONS_METHOD, handleTokenOwnedSessions],
     [
       "daemon/refreshDevices",
-      (request, state, _executions, _signal, context) =>
-        handleRefreshDevices(request, state, context),
+      (request, state, { context }) => handleRefreshDevices(request, state, context),
     ],
     ["daemon/availableDevices", handleAvailableDevices],
     ["daemon/sessionInfo", (request, state) => handleSessionInfo(request, state)],
     ["daemon/activeSessions", (request, state) => handleActiveSessions(request, state)],
     [
       DAEMON_RELEASE_SESSION_METHOD,
-      (request, state, executions, _signal, context) =>
+      (request, state, { executions, context }) =>
         handleReleaseSession(request, state, executions, context),
     ],
     [DAEMON_LIST_DEVICE_SESSIONS_METHOD, handleListDeviceSessions],
@@ -176,9 +176,7 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
 async function handleInitializedDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions: ReleaseCutExecutions | undefined,
-  signal: AbortSignal | undefined,
-  context: DaemonRequestContext,
+  options: DaemonRequestOptions,
 ): Promise<DaemonMethodResult> {
   const handler = INITIALIZED_DAEMON_METHOD_HANDLERS.get(request.method);
   if (!handler) {
@@ -187,7 +185,7 @@ async function handleInitializedDaemonRequest(
       error: `Unsupported daemon method: ${request.method}`,
     };
   }
-  return await handler(request, state, executions, signal, context);
+  return await handler(request, state, { ...options, context: options.context ?? {} });
 }
 
 /**
@@ -469,7 +467,7 @@ async function handleReleaseSession(
       executions,
     );
   }
-  return releaseBoundSession(state, manager, sessionId, session, executions);
+  return releaseBoundSession(state, manager, sessionId, { session, executions });
 }
 
 /** An owner-scoped release is refused before any lookup that can stamp clocks or expire a session. */
@@ -514,13 +512,10 @@ async function releaseSessionWithoutDevice(
       },
     };
   }
-  return await releaseUnknownSession(
-    state,
-    state.getSessionManager(),
-    sessionId,
+  return await releaseUnknownSession(state, state.getSessionManager(), sessionId, {
     requireKnown,
     executions,
-  );
+  });
 }
 
 /** Restores a release reports in its result: keep-awake settings, the session's screen lock and power state. */
@@ -549,8 +544,7 @@ async function releaseUnknownSession(
   state: DaemonStateAccess,
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
-  requireKnown: boolean,
-  executions?: ReleaseCutExecutions,
+  { requireKnown, executions }: { requireKnown: boolean; executions?: ReleaseCutExecutions },
 ): Promise<DaemonMethodResult> {
   // Not in the session map is not the same as released (#11461): a restart handoff this daemon has
   // not recovered yet, or a session still being created, would come back after an "already
@@ -561,7 +555,7 @@ async function releaseUnknownSession(
     // A recovery that won the race published the session meanwhile: release it like any held one.
     const published = manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId);
     if (published || manager.hasSession(sessionId)) {
-      return releaseBoundSession(state, manager, sessionId, published, executions);
+      return releaseBoundSession(state, manager, sessionId, { session: published, executions });
     }
     if (deviceId !== null && deviceId !== undefined) {
       const pool = state.getDevicePool();
@@ -625,8 +619,10 @@ async function releaseBoundSession(
   state: DaemonStateAccess,
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
-  session: Session | null | undefined,
-  executions: ReleaseCutExecutions = executionTracker,
+  {
+    session,
+    executions = executionTracker,
+  }: { session: Session | null | undefined; executions?: ReleaseCutExecutions },
 ): Promise<DaemonMethodResult> {
   const pool = state.getDevicePool();
   // A failed terminal write hides routing identity while retaining ownership.
@@ -770,9 +766,7 @@ async function handleDeviceLeaseStatus(
 async function handleRelinquishDeviceLease(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  _executions?: ReleaseCutExecutions,
-  _signal?: AbortSignal,
-  context: DaemonRequestContext = {},
+  { context }: InitializedDaemonMethodOptions,
 ): Promise<DaemonMethodResult> {
   const parsed = z.object({ deviceId: z.string().min(1) }).safeParse(request.params);
   if (!parsed.success) {

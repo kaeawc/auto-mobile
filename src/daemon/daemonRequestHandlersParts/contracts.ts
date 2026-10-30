@@ -227,10 +227,22 @@ export interface DaemonRequestContext {
   socketSessionId?: string;
 }
 
+/** What a socket daemon request carries beyond the request itself and the daemon state. */
+export interface DaemonRequestOptions {
+  /** Executions an explicit release cuts; defaults to the daemon's execution tracker. */
+  executions?: ReleaseCutExecutions;
+  /** Aborts when the requesting socket closes or cancels this request. */
+  signal?: AbortSignal;
+  context?: DaemonRequestContext;
+}
+
+/** The request options a handler receives, with the requester context always present. */
+export interface InitializedDaemonMethodOptions extends DaemonRequestOptions {
+  context: DaemonRequestContext;
+}
+
 export type InitializedDaemonMethodHandler = (
   request: DaemonRequest,
   state: DaemonStateAccess,
-  executions: ReleaseCutExecutions | undefined,
-  signal: AbortSignal | undefined,
-  context: DaemonRequestContext,
+  options: InitializedDaemonMethodOptions,
 ) => DaemonMethodResult | Promise<DaemonMethodResult>;

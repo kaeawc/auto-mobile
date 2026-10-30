@@ -356,7 +356,9 @@ describe("the real reachability probe against a framer-backed server (#10107 x #
 
   beforeEach(async () => {
     dir = scratch.next();
-    target = new ProbeTarget(join(dir, "p.sock"), new FakeTimer(), "ProbeTarget", 0);
+    target = new ProbeTarget(join(dir, "p.sock"), new FakeTimer(), "ProbeTarget", {
+      idleTimeoutMs: 0,
+    });
     await target.start();
   });
 

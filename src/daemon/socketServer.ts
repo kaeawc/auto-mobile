@@ -435,25 +435,20 @@ export class UnixSocketServer {
     gesture: "Tap" | "Swipe",
     signal: AbortSignal | undefined,
     timeoutMs: number,
-    send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-    onDispatch?: () => void,
+    options: {
+      send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>;
+      onDispatch?: () => void;
+    },
   ): Promise<T> {
-    return this.operations.dispatchFencedInput<T>(gesture, signal, timeoutMs, send, onDispatch);
+    return this.operations.dispatchFencedInput<T>(gesture, signal, timeoutMs, options);
   }
   protected runTrackedDeviceInput<T>(
     toolName: string,
     targetDevice: BootedDevice,
     operation: InputOperation<T>,
-    ownerSignal?: AbortSignal,
-    requester?: () => string | undefined,
+    options: { ownerSignal?: AbortSignal; requester?: () => string | undefined } = {},
   ): Promise<T> {
-    return this.operations.runTrackedDeviceInput<T>(
-      toolName,
-      targetDevice,
-      operation,
-      ownerSignal,
-      requester,
-    );
+    return this.operations.runTrackedDeviceInput<T>(toolName, targetDevice, operation, options);
   }
   protected answeringSessionRelease<T>(
     execution: Pick<ActiveExecution, "cancelReason"> & Partial<Pick<ActiveExecution, "toolName">>,

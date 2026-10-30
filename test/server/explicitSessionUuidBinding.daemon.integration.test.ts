@@ -235,7 +235,10 @@ function connect(socket: UnixSocketServer, socketSessionId: string): DaemonMcpPr
       { name, arguments: forwarded },
       { timeout: 20_000 },
     );
-    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
+    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, {
+      sessionWasActiveBeforeForward: true,
+      response: result,
+    });
     return result;
   };
   const daemon = new FakeDaemonManager();

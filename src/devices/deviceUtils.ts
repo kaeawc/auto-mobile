@@ -1002,8 +1002,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           timeoutMs,
           childProcess,
           device.deviceId,
-          signal,
-          options,
+          { signal, options },
         );
       case "ios":
         if (!device.deviceId) {

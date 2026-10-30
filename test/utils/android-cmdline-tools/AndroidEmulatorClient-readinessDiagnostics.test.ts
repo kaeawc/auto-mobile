@@ -195,7 +195,7 @@ describe("Android emulator readiness diagnostics", () => {
       5_000,
       null,
       "emulator-5554",
-      controller.signal,
+      { signal: controller.signal },
     );
 
     while (!adb.releaseDiscovery) {
@@ -217,7 +217,7 @@ describe("Android emulator readiness diagnostics", () => {
       5_000,
       null,
       "emulator-5554",
-      controller.signal,
+      { signal: controller.signal },
     );
     let rejection: Error | undefined;
     const observedReadiness = readiness.catch((error: unknown) => {
@@ -260,7 +260,7 @@ describe("Android emulator readiness diagnostics", () => {
       5_000,
       null,
       "emulator-5554",
-      controller.signal,
+      { signal: controller.signal },
     );
     let rejection: Error | undefined;
     void readiness.catch((error: unknown) => {

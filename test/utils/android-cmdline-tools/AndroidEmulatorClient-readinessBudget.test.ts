@@ -100,8 +100,7 @@ describe("emulator readiness ADB work budget", () => {
         5_000,
         null,
         "emulator-5554",
-        undefined,
-        { skipWakeAndUnlock: true },
+        { options: { skipWakeAndUnlock: true } },
       );
 
       console.log(
@@ -205,14 +204,9 @@ describe("emulator readiness ADB work budget", () => {
       adb.snapshotFailureCall = 2;
 
       await expect(
-        clientWith(adb, timer).waitForEmulatorReady(
-          "Pixel_9_Pro",
-          20_000,
-          null,
-          "emulator-5554",
-          undefined,
-          { freshProvision: true },
-        ),
+        clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 20_000, null, "emulator-5554", {
+          options: { freshProvision: true },
+        }),
       ).rejects.toThrow();
 
       expect(adb.snapshotCalls.length).toBeGreaterThanOrEqual(3);

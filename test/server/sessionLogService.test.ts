@@ -620,7 +620,7 @@ describe("SessionLogService (#7006)", () => {
         simulator,
         "com.example.app",
         { lastSeconds: 300, level: "default" },
-        100,
+        { maxBytes: 100 },
       );
       await drainUntil(() => child.stdout.listenerCount("data") > 0, {
         description: "stream collector",
@@ -793,13 +793,13 @@ for (const proven of [true, false]) {
               simulator,
               "com.example.app",
               { container: "documents", paths: ["log.txt"] },
-              100,
+              { maxBytes: 100 },
             )
           : provider.readAppGroup(
               simulator,
               "com.example.app",
               { groupId: kind, paths: ["log.txt"] },
-              100,
+              { maxBytes: 100 },
             );
       if (!proven) {
         await expect(pending).rejects.toBeInstanceOf(SimulatorContainerOwnershipError);
@@ -858,9 +858,7 @@ for (const retain of ["head", "tail"] as const) {
       simulator,
       "com.apple.mobilesafari",
       { lastSeconds: 300, level: "debug" },
-      4 * 1024 * 1024,
-      undefined,
-      retain,
+      { maxBytes: 4 * 1024 * 1024, retain },
     );
     expect(simctl.children).toHaveLength(1);
     expect(result.truncated).toBe(true);
@@ -892,9 +890,7 @@ test("simulator caller cancellation kills the streamed child and preserves reaso
     simulator,
     "com.example.app",
     { lastSeconds: 300, level: "default" },
-    100,
-    controller.signal,
-    "tail",
+    { maxBytes: 100, signal: controller.signal, retain: "tail" },
   );
   await drainUntil(() => child.stdout.listenerCount("data") > 0, {
     description: "collector attached",
@@ -932,9 +928,7 @@ test("getLogs default 300s window reads newest lines from an oversized streamed 
           simulator,
           appId,
           { lastSeconds, level, processName },
-          4 * 1024 * 1024,
-          signal,
-          "tail",
+          { maxBytes: 4 * 1024 * 1024, signal, retain: "tail" },
         ),
     }),
   }).execute(simulator, { appId: "com.apple.mobilesafari", maxLines: 2 });

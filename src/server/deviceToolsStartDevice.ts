@@ -580,7 +580,7 @@ export async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Pro
           false,
           true,
           "runner-setup",
-          0,
+          { attempts: 0 },
         ),
     };
     const pool = getStartDevicePool(getDeviceToolsDependencies().daemonState);

@@ -124,7 +124,7 @@ describe("finalize cap with a wedged video stage and the released session's devi
       timer,
       new CountingIdGenerator("recording"),
       recorder,
-      OLD_HOLDER,
+      { ownerSessionUuid: OLD_HOLDER },
     );
     const manager = new FakeSessionManager();
     const deps: RecordingSessionCleanupDeps = {
@@ -160,7 +160,7 @@ describe("finalize cap with a wedged video stage and the released session's devi
       timer,
       new CountingIdGenerator("next"),
       recorder,
-      NEW_HOLDER,
+      { ownerSessionUuid: NEW_HOLDER },
     );
 
     expect(next.recordingId).not.toBe(oldRecordingId);

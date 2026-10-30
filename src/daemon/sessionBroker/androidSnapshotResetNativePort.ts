@@ -357,8 +357,7 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
       step.timeoutMs,
       launch.process,
       device.deviceId,
-      step.signal,
-      { freshProvision: true },
+      { signal: step.signal, options: { freshProvision: true } },
     );
   }
 
@@ -378,8 +377,7 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
             step.timeoutMs,
             null,
             device.deviceId,
-            signal,
-            { skipWakeAndUnlock: true },
+            { signal, options: { skipWakeAndUnlock: true } },
           ),
           watchEmulatorProcessDeath(
             { serial: device.deviceId, avdName: device.name },

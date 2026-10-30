@@ -993,7 +993,7 @@ describe("registerRecordingSessionCleanup", () => {
         timer,
         new FakeIdGenerator(["R1"]),
         recorder("R1"),
-        "session-a",
+        { ownerSessionUuid: "session-a" },
       );
       registerRecordingSessionCleanup(manager, {
         ...defaultRecordingSessionCleanupDeps,
@@ -1022,7 +1022,7 @@ describe("registerRecordingSessionCleanup", () => {
         timer,
         new FakeIdGenerator(["R2"]),
         recorder("R2"),
-        "session-a",
+        { ownerSessionUuid: "session-a" },
       );
       expect(second.recordingId).not.toBe(first.recordingId);
       wedge.resolve();
@@ -1083,7 +1083,7 @@ describe("registerRecordingSessionCleanup", () => {
                 return { steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 };
               },
             }),
-            "session-a",
+            { ownerSessionUuid: "session-a" },
           );
           registerRecordingSessionCleanup(manager, {
             ...defaultRecordingSessionCleanupDeps,

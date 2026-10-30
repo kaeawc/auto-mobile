@@ -5137,12 +5137,14 @@ describe("provisionDevice handler", () => {
           false,
           false,
           "runner-setup",
-          1,
-          new DeviceLostError(
-            "emulator-5554",
-            "error: device 'emulator-5554' not found",
-            "incident-6d",
-          ),
+          {
+            attempts: 1,
+            diagnosticCause: new DeviceLostError(
+              "emulator-5554",
+              "error: device 'emulator-5554' not found",
+              "incident-6d",
+            ),
+          },
         );
       },
     });

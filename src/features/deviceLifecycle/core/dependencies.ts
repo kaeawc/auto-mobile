@@ -1,3 +1,4 @@
+import type { WatchSimulatorProvisioner } from "../../../utils/ios-cmdline-tools/WatchSimulatorProvisioner";
 import type { WatchSimulatorLifecycle } from "../../../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { getDefaultSimulatorCreationService } from "../../iosTemplates/defaultSimulatorCreationService";
 import { type DevicePool } from "../../../daemon/devicePool";
@@ -111,6 +112,11 @@ export interface DeviceToolsDependencies {
   ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
   /** Apple Watch simulator lookup and boot for startDevice (#14908); defaults to simctl. */
   watchSimulatorLifecycleFactory?: () => Pick<WatchSimulatorLifecycle, "findWatch" | "boot">;
+  /** Apple Watch simulator adoption and creation for provisionDevice (#15882); defaults to simctl. */
+  watchSimulatorProvisionerFactory?: () => Pick<
+    WatchSimulatorProvisioner,
+    "provision" | "discardCreated"
+  >;
   deviceCreationGateFactory: () => DeviceCreationGate;
   deviceProvisionerFactory: () => DeviceProvisioner;
   exactDeviceProvisionerFactory: (

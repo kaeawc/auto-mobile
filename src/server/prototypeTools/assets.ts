@@ -55,11 +55,19 @@ export async function stageAssets(
   target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
   readers: AssetReaders,
-  signal: AbortSignal | undefined,
-  cached?: {
-    serial: string;
-    cache: Pick<import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache, "get">;
-  },
+  {
+    signal,
+    cached,
+  }: {
+    signal?: AbortSignal;
+    cached?: {
+      serial: string;
+      cache: Pick<
+        import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache,
+        "get"
+      >;
+    };
+  } = {},
 ): Promise<AssetStage> {
   const optIn = prototypeShaderOptInProblem(args.spec, readers.env);
   if (optIn) {
@@ -167,12 +175,17 @@ async function retryMissingAssets(
   target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
   stage: AssetStage,
-  first: PrototypeResult,
   {
+    first,
     signal,
     displayId,
     env,
-  }: { signal: AbortSignal | undefined; displayId: number | undefined; env?: NodeJS.ProcessEnv },
+  }: {
+    first: PrototypeResult;
+    signal: AbortSignal | undefined;
+    displayId: number | undefined;
+    env?: NodeJS.ProcessEnv;
+  },
 ): Promise<MissingAssetRetry | undefined> {
   const missing = new Set(first.missingAssets);
   const again = stage.prepared.filter((asset) => missing.has(asset.id));
@@ -248,7 +261,8 @@ export async function sendPrototype(
   if (!needsAssetResend(first, superseded)) {
     return { result: first };
   }
-  const retry = await retryMissingAssets(target, args, stage, first, {
+  const retry = await retryMissingAssets(target, args, stage, {
+    first,
     signal,
     displayId,
     env: send.env,

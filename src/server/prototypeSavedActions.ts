@@ -577,8 +577,7 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
           backend,
           device,
           { ...args, action: args.action },
-          dependencies,
-          signal,
+          { readers: dependencies, signal },
         );
       });
     }
@@ -596,8 +595,7 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
       backend,
       device,
       { ...args, action: args.action },
-      dependencies,
-      signal,
+      { readers: dependencies, signal },
     );
   };
 }
@@ -616,8 +614,7 @@ async function saveIosPrototype(
   backend: () => IosSavedPrototypeInstaller,
   udid: string,
   args: PrototypeSavedInput,
-  readers: IosSavedDependencies,
-  signal?: AbortSignal,
+  { readers, signal }: { readers: IosSavedDependencies; signal?: AbortSignal },
 ): Promise<PrototypeSavedOutput> {
   const shaderProblem = prototypeIosShaderProblem(args.spec, args.assets);
   if (shaderProblem) {
@@ -690,8 +687,7 @@ async function performIosSavedAction(
   backend: () => IosSavedPrototypeInstaller,
   device: BootedDevice,
   args: PrototypeSavedInput,
-  readers: IosSavedDependencies,
-  signal?: AbortSignal,
+  { readers, signal }: { readers: IosSavedDependencies; signal?: AbortSignal },
 ): Promise<PrototypeSavedOutput> {
   try {
     if (resolveIosDeviceKind(device) !== "simulator") {
@@ -699,7 +695,7 @@ async function performIosSavedAction(
     }
     signal?.throwIfAborted();
     if (args.action === "save") {
-      return await saveIosPrototype(backend, device.deviceId, args, readers, signal);
+      return await saveIosPrototype(backend, device.deviceId, args, { readers, signal });
     }
     const installer = backend();
     if (args.action === "listSaved") {

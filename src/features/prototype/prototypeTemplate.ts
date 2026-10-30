@@ -176,7 +176,12 @@ export type FieldVisitor = (
   dataCondition?: boolean,
 ) => unknown;
 
-function mapField(data: Raw, key: string, path: string, kind: FieldKind, visit: FieldVisitor) {
+function mapField(
+  data: Raw,
+  key: string,
+  path: string,
+  { kind, visit }: { kind: FieldKind; visit: FieldVisitor },
+) {
   if (data[key] !== undefined) {
     data[key] = visit(data[key], `${path}.${key}`, kind);
   }
@@ -213,20 +218,20 @@ function mapKeyList(data: Raw, key: string, path: string, visit: FieldVisitor): 
   if (Array.isArray(values)) {
     data[key] = values.map((value, index) => visit(value, `${path}.${key}[${index}]`, "key"));
   } else {
-    mapField(data, key, path, "key", visit);
+    mapField(data, key, path, { kind: "key", visit });
   }
 }
 
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
-  mapField(condition, "data", path, "routePointer", visit);
-  mapField(condition, "key", path, "key", visit);
+  mapField(condition, "data", path, { kind: "routePointer", visit });
+  mapField(condition, "key", path, { kind: "key", visit });
   mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
     visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
-  mapField(condition, "equals", path, "operand", operandVisit);
-  mapField(condition, "notEquals", path, "operand", operandVisit);
-  mapField(condition, "contains", path, "substring", operandVisit);
-  mapField(condition, "startsWith", path, "substring", operandVisit);
+  mapField(condition, "equals", path, { kind: "operand", visit: operandVisit });
+  mapField(condition, "notEquals", path, { kind: "operand", visit: operandVisit });
+  mapField(condition, "contains", path, { kind: "substring", visit: operandVisit });
+  mapField(condition, "startsWith", path, { kind: "substring", visit: operandVisit });
   mapObject(condition, "not", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   for (const form of ["all", "any"]) {
     mapList(condition, form, path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
@@ -246,8 +251,8 @@ function mapBinding(value: unknown, at: string, visit: FieldVisitor): unknown {
 }
 
 function mapEmitAction(action: Raw, path: string, visit: FieldVisitor): void {
-  mapField(action, "name", path, "emitName", visit);
-  mapField(action, "context", path, "emitContext", visit);
+  mapField(action, "name", path, { kind: "emitName", visit });
+  mapField(action, "context", path, { kind: "emitContext", visit });
   if (record(action.context)) {
     action.context = Object.fromEntries(
       Object.entries(record(action.context)!).map(([name, value]) => {
@@ -265,7 +270,7 @@ function mapDataAction(action: Raw, path: string, visit: FieldVisitor): void {
   if (action.type === "prependData") {
     visit(action, path, "prependData");
   }
-  mapField(action, "path", path, "dataPath", visit);
+  mapField(action, "path", path, { kind: "dataPath", visit });
   if (action.type !== "removeData" && action.value !== undefined) {
     action.value = mapBinding(action.value, `${path}.value`, visit);
   }
@@ -328,8 +333,8 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
   }
   switch (action.type) {
     case "setState":
-      mapField(action, "key", path, "key", visit);
-      mapField(action, "value", path, "operand", visit);
+      mapField(action, "key", path, { kind: "key", visit });
+      mapField(action, "value", path, { kind: "operand", visit });
       break;
     case "emit":
       mapEmitAction(action, path, visit);
@@ -337,7 +342,7 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
     case "toggle":
     case "increment":
     case "decrement":
-      mapField(action, "key", path, "key", visit);
+      mapField(action, "key", path, { kind: "key", visit });
       break;
     case "request":
       mapRequestAction(action, path, visit);
@@ -363,8 +368,8 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
 
 function mapNavigationTransition(action: Raw, path: string, visit: FieldVisitor): void {
   if (action.type === "push" || action.type === "replace") {
-    mapField(action, "transition", path, "stackTransition", visit);
-    mapField(action, "source", path, "stackSource", visit);
+    mapField(action, "transition", path, { kind: "stackTransition", visit });
+    mapField(action, "source", path, { kind: "stackSource", visit });
   }
 }
 
@@ -402,18 +407,18 @@ function mapRequestAction(action: Raw, path: string, visit: FieldVisitor): void 
   ) {
     visit(action, path, "uploadRequest");
   }
-  mapField(action, "url", path, "text", visit);
+  mapField(action, "url", path, { kind: "text", visit });
   mapRequestEntries(action, "headers", path, visit);
   mapRequestEntries(action, "query", path, visit);
   if (action.body !== undefined) {
     action.body = mapRequestBody(action.body, `${path}.body`, visit);
   }
-  mapField(action, "into", path, "requestInto", visit);
+  mapField(action, "into", path, { kind: "requestInto", visit });
   const append = record(action.append);
   if (append) {
-    mapField(append, "to", `${path}.append`, "requestInto", visit);
+    mapField(append, "to", `${path}.append`, { kind: "requestInto", visit });
   }
-  mapField(action, "statusKey", path, "key", visit);
+  mapField(action, "statusKey", path, { kind: "key", visit });
   for (const field of ["onSuccess", "onError"]) {
     mapList(action, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   }
@@ -461,8 +466,8 @@ function mapPlatformAction(action: Raw, path: string, visit: FieldVisitor): void
       ]),
     );
   }
-  mapField(action, "into", path, "requestInto", visit);
-  mapField(action, "statusKey", path, "key", visit);
+  mapField(action, "into", path, { kind: "requestInto", visit });
+  mapField(action, "statusKey", path, { kind: "key", visit });
   for (const field of ["onSuccess", "onError"]) {
     mapList(action, field, path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   }
@@ -483,7 +488,7 @@ function mapActions(data: Raw, path: string, visit: FieldVisitor): void {
 
 /** A `{label, onTap?}` part (dialog or snackbar button, app bar action): label and actions bind. */
 function mapPart(part: Raw, path: string, visit: FieldVisitor): Raw {
-  mapField(part, "label", path, "text", visit);
+  mapField(part, "label", path, { kind: "text", visit });
   mapActions(part, path, visit);
   return part;
 }
@@ -491,16 +496,16 @@ function mapPart(part: Raw, path: string, visit: FieldVisitor): Raw {
 /** Component fields that take placeholders besides a text node's `text`. */
 const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVisitor) => void> = {
   // A string `asset` binds a repeat row's media item id, e.g. "{item.thumbnail}" (#14192).
-  image: (node, path, visit) => mapField(node, "asset", path, "text", visit),
-  button: (node, path, visit) => mapField(node, "label", path, "text", visit),
-  fab: (node, path, visit) => mapField(node, "label", path, "text", visit),
+  image: (node, path, visit) => mapField(node, "asset", path, { kind: "text", visit }),
+  button: (node, path, visit) => mapField(node, "label", path, { kind: "text", visit }),
+  fab: (node, path, visit) => mapField(node, "label", path, { kind: "text", visit }),
   segmentedButton: (node, path, visit) =>
     mapList(node, "options", path, (entry, entryPath) => {
-      mapField(entry, "label", entryPath, "text", visit);
+      mapField(entry, "label", entryPath, { kind: "text", visit });
       return entry;
     }),
   topAppBar: (node, path, visit) => {
-    mapField(node, "title", path, "text", visit);
+    mapField(node, "title", path, { kind: "text", visit });
     mapObject(node, "navigationIcon", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapList(node, "actions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
   },
@@ -509,35 +514,35 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapList(node, "onSubmit", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   },
   searchBar: (node, path, visit) => {
-    mapField(node, "placeholder", path, "text", visit);
+    mapField(node, "placeholder", path, { kind: "text", visit });
     mapList(node, "trailingActions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapList(node, "onSubmit", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   },
   tooltip: (node, path, visit) => {
-    mapField(node, "text", path, "text", visit);
+    mapField(node, "text", path, { kind: "text", visit });
     mapList(node, "onDismiss", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
   },
   dialog: (node, path, visit) => {
-    mapField(node, "title", path, "text", visit);
-    mapField(node, "text", path, "text", visit);
+    mapField(node, "title", path, { kind: "text", visit });
+    mapField(node, "text", path, { kind: "text", visit });
     mapObject(node, "confirm", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapObject(node, "dismiss", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
   },
   menu: (node, path, visit) => {
     mapList(node, "items", path, (entry, entryPath) => {
-      mapField(entry, "trailingText", entryPath, "text", visit);
+      mapField(entry, "trailingText", entryPath, { kind: "text", visit });
       return mapPart(entry, entryPath, visit);
     });
   },
   select: (node, path, visit) => {
-    mapField(node, "label", path, "text", visit);
+    mapField(node, "label", path, { kind: "text", visit });
     mapList(node, "options", path, (entry, entryPath) => {
-      mapField(entry, "label", entryPath, "text", visit);
+      mapField(entry, "label", entryPath, { kind: "text", visit });
       return entry;
     });
   },
   snackbar: (node, path, visit) => {
-    mapField(node, "text", path, "text", visit);
+    mapField(node, "text", path, { kind: "text", visit });
     mapObject(node, "action", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
   },
   // Marker taps run actions like onTap; the marker templates bind only the marker's own item (#14309).
@@ -548,11 +553,11 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
 /** State-key fields a node binds besides its condition and action keys. */
 function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
   for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey", "atEndKey"]) {
-    mapField(node, field, path, "key", visit);
+    mapField(node, field, path, { kind: "key", visit });
   }
   for (const part of ["trailing", "openWhen", "refresh"]) {
     mapObject(node, part, path, (entry, entryPath) => {
-      mapField(entry, part === "openWhen" ? "key" : "stateKey", entryPath, "key", visit);
+      mapField(entry, part === "openWhen" ? "key" : "stateKey", entryPath, { kind: "key", visit });
       return entry;
     });
   }
@@ -575,33 +580,33 @@ export function mapBindableFields(
       : visitor(value, at, kind, dataCondition);
   const copy = { ...node };
   mapObject(copy, "semantics", path, (entry, entryPath) => {
-    mapField(entry, "label", entryPath, "text", visit);
-    mapField(entry, "hint", entryPath, "text", visit);
+    mapField(entry, "label", entryPath, { kind: "text", visit });
+    mapField(entry, "hint", entryPath, { kind: "text", visit });
     return entry;
   });
   mapObject(copy, "shared", path, (entry, entryPath) => {
-    mapField(entry, "key", entryPath, "operand", visit);
+    mapField(entry, "key", entryPath, { kind: "operand", visit });
     return entry;
   });
   if (copy.type === "text") {
-    mapField(copy, "text", path, "text", visit);
+    mapField(copy, "text", path, { kind: "text", visit });
     mapObject(copy, "linkify", path, (options, optionsPath) => {
       mapActions(options, optionsPath, visit);
       return options;
     });
     mapList(copy, "spans", path, (span, spanPath) => {
-      mapField(span, "text", spanPath, "text", visit);
+      mapField(span, "text", spanPath, { kind: "text", visit });
       mapActions(span, spanPath, visit);
       return span;
     });
   }
   const component = typeof copy.type === "string" ? COMPONENT_FIELDS[copy.type] : undefined;
   component?.(copy, path, visit);
-  mapField(copy, "errorText", path, "text", visit);
+  mapField(copy, "errorText", path, { kind: "text", visit });
   mapObject(copy, "errorWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   mapObject(copy, "enabledWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   mapList(copy, "checks", path, (entry, entryPath) => {
-    mapField(entry, "message", entryPath, "text", visit);
+    mapField(entry, "message", entryPath, { kind: "text", visit });
     return entry;
   });
   mapObject(copy, "visibleWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));

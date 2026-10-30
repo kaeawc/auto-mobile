@@ -307,12 +307,9 @@ describe("PrototypeRequestCoordinator", () => {
   test("dismissing the prototype cancels its request via the event coordinator", async () => {
     const timer = new FakeTimer();
     const requests = new PrototypeRequestCoordinator(new PendingExecutor());
-    const events = new PrototypeEventCoordinator(
-      timer,
-      new InMemoryPrototypeStatusStore(timer),
-      undefined,
+    const events = new PrototypeEventCoordinator(timer, new InMemoryPrototypeStatusStore(timer), {
       requests,
-    );
+    });
     events.show({ deviceId: "d" }, "p", { onPrototypeEvent: () => () => {} });
     const pending = requests.run({ deviceId: "d", prototypeId: "p" }, request);
     events.dismiss("d", "p");

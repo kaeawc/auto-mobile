@@ -884,7 +884,8 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
         {
           assertCaller: (device) => assertWatchDeleteCaller(device, args, force),
           // killDevice judges the same caller (its internal params ride along) and stops the watch.
-          stop: (device) => killDeviceHandler({ ...args, device, force }, undefined, abortSignal),
+          stop: (device, signal) =>
+            killDeviceHandler({ ...args, device, force }, undefined, signal),
         },
         abortSignal ?? getAbortSignal(),
       );

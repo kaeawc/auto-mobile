@@ -85,7 +85,7 @@ describe("deleteDevice on an Apple Watch simulator", () => {
     simctl.onStateChange = publishBootedWatches;
     // killDevice's platform kill for a watch is simctl shutdown, which the listing then reflects.
     deviceUtils.killDevice = async (device) => {
-      await simctl.killSimulator(device);
+      await new WatchSimulatorLifecycle(simctl, inventory).shutdown(device);
     };
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -197,6 +197,83 @@ describe("deleteDevice on an Apple Watch simulator", () => {
     expect(listed(simctl)).toContain(udid);
   });
 
+  test("an externally stopped watch its session still holds is released, then deleted", async () => {
+    const { simctl, pool, sessions } = await arrange();
+    const { sessionId } = sessionSchema.parse(toolJson(await provision({ device: WATCH })));
+    const udid = createdUdid(simctl);
+    await simctl.killSimulator({ name: NAME, platform: "watchos", deviceId: udid });
+    expect(pool.getDevice(udid)?.sessionId).toBe(sessionId);
+    simctl.commands.length = 0;
+
+    const result = toolJson(await remove({ ...target(udid), sessionUuid: sessionId }));
+
+    expect(result).toMatchObject({
+      state: "destroyed",
+      command: { stop: "not_required", destroy: "accepted" },
+    });
+    expect(pool.getDevice(udid)).toBeNull();
+    expect(sessions.getSession(sessionId)?.assignedDevice ?? null).toBeNull();
+    expect(simctl.commands).toEqual([`delete ${udid}`]);
+  });
+
+  test("timeoutMs bounds the whole delete, not just the lease wait", async () => {
+    const watch = watchDevice({ name: NAME });
+    const { simctl, timer } = await arrange([watch]);
+    afterListing(simctl, 1, () => timer.advanceTime(50));
+
+    const result = await remove({ ...target(watch.udid), timeoutMs: 10 });
+
+    expect(toolJson(result)).toMatchObject({
+      state: "failed",
+      failure: { code: "teardown_deadline_exceeded" },
+    });
+    expect(simctl.commands).toEqual([]);
+    expect(listed(simctl)).toContain(watch.udid);
+  });
+
+  test("an accepted delete continues after its caller goes away", async () => {
+    const watch = watchDevice({ name: NAME });
+    const { simctl } = await arrange([watch]);
+    const caller = new AbortController();
+    afterListing(simctl, 1, () => caller.abort(new Error("client disconnected")));
+
+    const result = toolJson(
+      await ToolRegistry.getTool("deleteDevice")!.handler(
+        { __mcpSessionId: "client-a", mode: "destroy", verifyAbsence: true, ...target(watch.udid) },
+        undefined,
+        caller.signal,
+      ),
+    );
+
+    expect(result).toMatchObject({ state: "destroyed" });
+    expect(listed(simctl)).not.toContain(watch.udid);
+  });
+
+  test("cancel-on-request-abort stops the delete when its caller goes away", async () => {
+    const watch = watchDevice({ name: NAME });
+    const { simctl } = await arrange([watch]);
+    const caller = new AbortController();
+    afterListing(simctl, 1, () => caller.abort(new Error("client disconnected")));
+
+    const outcome = await failure(
+      ToolRegistry.getTool("deleteDevice")!.handler(
+        {
+          __mcpSessionId: "client-a",
+          mode: "destroy",
+          verifyAbsence: true,
+          cancellationPolicy: "cancel-on-request-abort",
+          ...target(watch.udid),
+        },
+        undefined,
+        caller.signal,
+      ),
+    );
+
+    expect(String(outcome)).toContain("client disconnected");
+    expect(simctl.commands).toEqual([]);
+    expect(listed(simctl)).toContain(watch.udid);
+  });
+
   test("a watch that is not listed is already absent, with no simctl command", async () => {
     const { simctl } = await arrange([]);
 
@@ -268,4 +345,18 @@ function createdUdid(simctl: FakeWatchProvisionSimctl): string {
   return Object.values(simctl.listing.devices)
     .flat()
     .find((device) => device.name === NAME)!.udid;
+}
+
+/** Runs `effect` after the `count`-th watch listing read, before that read returns. */
+function afterListing(simctl: FakeWatchProvisionSimctl, count: number, effect: () => void): void {
+  const list = simctl.listSimulators.bind(simctl);
+  let reads = 0;
+  simctl.listSimulators = async () => {
+    const listing = await list();
+    reads += 1;
+    if (reads === count) {
+      effect();
+    }
+    return listing;
+  };
 }

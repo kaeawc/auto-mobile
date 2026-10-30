@@ -294,8 +294,7 @@ export class InstallApp {
       targetUserId,
       this.installRunner(plan, targetUserId),
       prior,
-      perf,
-      installStepOptions(guard, signal),
+      { ...installStepOptions(guard, signal), perf },
     );
     const installAttempt = installation.installAttempt;
     isInstalled = this.absorbInstallRecovery(installation, warnings, isInstalled);
@@ -488,8 +487,13 @@ export class InstallApp {
     targetUserId: number,
     install: AndroidInstallRunner,
     prior: AndroidPriorPackageState,
-    perf: PerformanceTracker,
-    { signal, allowDestructiveRecovery = true }: AndroidInstallStepOptions = {},
+    {
+      perf,
+      signal,
+      allowDestructiveRecovery = true,
+    }: AndroidInstallStepOptions & {
+      perf: PerformanceTracker;
+    },
   ): Promise<AndroidInstallRecovery> {
     const installAttempt = await perf.track("adbInstall", () => install(signal));
     if (installAttempt.success) {

@@ -47,8 +47,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
           _options,
           _progress,
           _signal,
-          transportDeadlineMs,
-          getLiveTransportDeadlineMs,
+          { transportDeadlineMs, getLiveTransportDeadlineMs } = {},
         ) => {
           capturedTransportDeadlineMs = transportDeadlineMs;
           capturedGetLiveTransportDeadlineMs = getLiveTransportDeadlineMs;
@@ -84,13 +83,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     let capturedGetLiveTransportDeadlineMs: (() => number | undefined) | undefined = () => 0;
     const setUIStateHandler = createSetUIStateHandler({
       setUIStateFactory: () => ({
-        execute: async (
-          _options,
-          _progress,
-          _signal,
-          _transportDeadlineMs,
-          getLiveTransportDeadlineMs,
-        ) => {
+        execute: async (_options, _progress, _signal, { getLiveTransportDeadlineMs } = {}) => {
           capturedGetLiveTransportDeadlineMs = getLiveTransportDeadlineMs;
           return { success: true, fields: [], totalAttempts: 0 };
         },
@@ -110,14 +103,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     let capturedSubscriber: LiveDeadlineSubscriber | undefined;
     const setUIStateHandler = createSetUIStateHandler({
       setUIStateFactory: () => ({
-        execute: async (
-          _options,
-          _progress,
-          _signal,
-          _transportDeadlineMs,
-          _getLiveTransportDeadlineMs,
-          subscribeLiveTransportDeadline,
-        ) => {
+        execute: async (_options, _progress, _signal, { subscribeLiveTransportDeadline } = {}) => {
           capturedSubscriber = subscribeLiveTransportDeadline;
           return { success: true, fields: [], totalAttempts: 0 };
         },
@@ -146,7 +132,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     let capturedSubscriber: LiveDeadlineSubscriber | undefined = () => undefined;
     const setUIStateHandler = createSetUIStateHandler({
       setUIStateFactory: () => ({
-        execute: async (_o, _p, _s, _t, _g, subscribeLiveTransportDeadline) => {
+        execute: async (_o, _p, _s, { subscribeLiveTransportDeadline } = {}) => {
           capturedSubscriber = subscribeLiveTransportDeadline;
           return { success: true, fields: [], totalAttempts: 0 };
         },
@@ -164,13 +150,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     let capturedGetLiveTransportDeadlineMs: (() => number | undefined) | undefined;
     const setUIStateHandler = createSetUIStateHandler({
       setUIStateFactory: () => ({
-        execute: async (
-          _options,
-          _progress,
-          _signal,
-          _transportDeadlineMs,
-          getLiveTransportDeadlineMs,
-        ) => {
+        execute: async (_options, _progress, _signal, { getLiveTransportDeadlineMs } = {}) => {
           capturedGetLiveTransportDeadlineMs = getLiveTransportDeadlineMs;
           return { success: true, fields: [], totalAttempts: 0 };
         },
@@ -201,7 +181,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     let capturedTransportDeadlineMs: number | undefined;
     const setUIStateHandler = createSetUIStateHandler({
       setUIStateFactory: () => ({
-        execute: async (_options, _progress, _signal, transportDeadlineMs) => {
+        execute: async (_options, _progress, _signal, { transportDeadlineMs } = {}) => {
           capturedTransportDeadlineMs = transportDeadlineMs;
           return { success: true, fields: [], totalAttempts: 0 };
         },
@@ -230,7 +210,7 @@ describe("setUIStateHandler transport-deadline wiring (issue #6222 P1 reopen)", 
     let capturedTransportDeadlineMs: number | undefined;
     const setUIStateHandler = createSetUIStateHandler({
       setUIStateFactory: () => ({
-        execute: async (_options, _progress, _signal, transportDeadlineMs) => {
+        execute: async (_options, _progress, _signal, { transportDeadlineMs } = {}) => {
           capturedTransportDeadlineMs = transportDeadlineMs;
           return { success: true, fields: [], totalAttempts: 0 };
         },

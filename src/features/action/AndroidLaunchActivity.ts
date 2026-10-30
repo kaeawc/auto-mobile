@@ -25,6 +25,12 @@ const LAUNCHER_CATEGORY = "android.intent.category.LAUNCHER";
 /** Launcher categories in resolution order; TV-only apps declare only the leanback one. */
 const LAUNCHER_CATEGORIES = [LAUNCHER_CATEGORY, "android.intent.category.LEANBACK_LAUNCHER"];
 
+/** The abort signal and optional explicit intent for one Android launch. */
+export interface AndroidPerformLaunchOptions {
+  signal?: AbortSignal;
+  intent?: AndroidLaunchIntent;
+}
+
 /** Budget for the Android a11y service to answer a launch-intent request. */
 const A11Y_LAUNCH_INTENT_TIMEOUT_MS = 3_000;
 export function amStartReportedFailure(stdout: string, stderr: string): boolean {
@@ -379,9 +385,9 @@ export class AndroidLaunchActivity {
     activityName: string | undefined,
     userId: number,
     perf: PerformanceTracker,
-    signal?: AbortSignal,
-    intent?: AndroidLaunchIntent,
+    options: AndroidPerformLaunchOptions = {},
   ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
+    const { signal, intent } = options;
     this.assertLaunchNotAborted(signal);
     if (intent) {
       const launched = await perf.track("explicitIntentLaunch", () =>
@@ -390,6 +396,17 @@ export class AndroidLaunchActivity {
       perf.end();
       return launched;
     }
+    return this.performDiscoveredLaunch(packageName, activityName, userId, perf, signal);
+  }
+
+  /** Launch without an explicit intent: intent, monkey, then launcher-activity discovery. */
+  private async performDiscoveredLaunch(
+    packageName: string,
+    activityName: string | undefined,
+    userId: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
     let targetActivity = activityName;
 
     // Try am start with intent first (alternative to monkey)

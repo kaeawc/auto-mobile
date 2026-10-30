@@ -176,8 +176,7 @@ export class OverlayDetector implements OverlayAnalyzer {
       bounds,
       overlayBounds,
       candidates,
-      primaryStart,
-      primaryEnd,
+      { start: primaryStart, end: primaryEnd },
     );
 
     if (!bestCandidate) {
@@ -229,8 +228,7 @@ export class OverlayDetector implements OverlayAnalyzer {
     bounds: Element["bounds"],
     overlayBounds: Element["bounds"][],
     candidates: number[],
-    primaryStart: number,
-    primaryEnd: number,
+    primary: Pick<SwipeInterval, "start" | "end">,
   ): { coordinate: number; interval: SwipeInterval } | null {
     let bestCandidate: { coordinate: number; interval: SwipeInterval } | null = null;
 
@@ -239,7 +237,7 @@ export class OverlayDetector implements OverlayAnalyzer {
         ? this.getBlockedIntervalsForX(overlayBounds, bounds, coordinate)
         : this.getBlockedIntervalsForY(overlayBounds, bounds, coordinate);
 
-      const largestGap = this.findLargestGap(primaryStart, primaryEnd, blocked);
+      const largestGap = this.findLargestGap(primary.start, primary.end, blocked);
       if (!largestGap) {
         continue;
       }

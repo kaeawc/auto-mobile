@@ -239,8 +239,7 @@ export class NavigationGraphRecorder {
       appId,
       previousScreen,
       screenName,
-      toolName,
-      toolArgs,
+      { toolName, toolArgs },
       timestamp,
     );
     // The action just led from this screen to that one, so a remembered replay

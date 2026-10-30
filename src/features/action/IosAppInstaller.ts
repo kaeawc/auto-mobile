@@ -217,14 +217,12 @@ export class IosAppInstaller {
     const afterBundleIds = this.extractBundleIds(afterApps);
 
     const newBundles = diffInstalledPackages(beforeBundleIds, afterBundleIds);
-    const packageName = await this.resolveInstalledIosSimulatorBundle(
-      appPath,
-      perf,
+    const packageName = await this.resolveInstalledIosSimulatorBundle(appPath, perf, {
       afterApps,
       afterBundleIds,
       newBundles,
       postListingWarning,
-    );
+    });
     const warnings = this.iosSimulatorInstallWarnings(
       postListingWarning,
       downgraded,
@@ -245,11 +243,14 @@ export class IosAppInstaller {
   private async resolveInstalledIosSimulatorBundle(
     appPath: string,
     perf: PerformanceTracker,
-    afterApps: any[],
-    afterBundleIds: Set<string>,
-    newBundles: string[],
-    postListingWarning?: string,
+    listing: {
+      afterApps: any[];
+      afterBundleIds: Set<string>;
+      newBundles: string[];
+      postListingWarning?: string;
+    },
   ): Promise<string | undefined> {
+    const { afterApps, afterBundleIds, newBundles, postListingWarning } = listing;
     let packageName = this.findBundleIdByPath(afterApps, appPath);
     if (!packageName && newBundles.length === 1) {
       packageName = newBundles[0];

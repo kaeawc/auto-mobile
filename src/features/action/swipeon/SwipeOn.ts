@@ -735,14 +735,11 @@ export class SwipeOn extends BaseVisualChange {
         { x: result.x1, y: result.y1 },
         requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
       );
-    const assessment = await settleSdkRouteAssessment(
-      assess(),
-      previous,
-      result.observation,
+    const assessment = await settleSdkRouteAssessment(assess(), previous, result.observation, {
       swipeEndedAtMs,
-      sdkRoutes,
-      assess,
-    );
+      source: sdkRoutes,
+      reassess: assess,
+    });
     if (!assessment) {
       return;
     }

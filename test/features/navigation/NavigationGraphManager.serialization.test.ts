@@ -289,7 +289,13 @@ describe("NavigationGraphManager navigation write ordering", () => {
       sessionUuidX: "keep",
       session: "keep",
     };
-    await repository.createEdge(appId, "Other", "Home", "tapOn", args, 4000);
+    await repository.createEdge(
+      appId,
+      "Other",
+      "Home",
+      { toolName: "tapOn", toolArgs: args },
+      4000,
+    );
     const expected = { text: "Continue", _foo: "keep", sessionUuidX: "keep", session: "keep" };
     expect((await manager.getEdgesFrom("Other"))[0].interaction?.args).toEqual(expected);
     expect((await manager.findPath("Home")).path[0].interaction?.args).toEqual(expected);
@@ -298,7 +304,13 @@ describe("NavigationGraphManager navigation write ordering", () => {
 
   for (const variant of ["empty", "selected", "scroll", "combined"] as const) {
     test(`edge conversion preserves ${variant} UI state, empty identifiers and modal stacks`, async () => {
-      const edge = await repository.createEdge(appId, "Other", "Home", "tapOn", null, 4000);
+      const edge = await repository.createEdge(
+        appId,
+        "Other",
+        "Home",
+        { toolName: "tapOn", toolArgs: null },
+        4000,
+      );
       const selected = await repository.getOrCreateUIElement(
         appId,
         { text: "", resourceId: "id/tab", contentDescription: "" },
@@ -318,13 +330,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
         await repository.linkUIElementsToEdge(edge.id, [selected.id]);
       }
       if (variant === "scroll" || variant === "combined") {
-        await repository.setScrollPosition(
-          edge.id,
-          target.id,
-          "down",
-          variant === "combined" ? container.id : undefined,
-          variant === "combined" ? "fast" : undefined,
-        );
+        await repository.setScrollPosition(edge.id, target.id, "down", {
+          containerElementId: variant === "combined" ? container.id : undefined,
+          speed: variant === "combined" ? "fast" : undefined,
+        });
       }
       await repository.setEdgeModals(edge.id, "from", ["dialog", "menu"]);
       await repository.setEdgeModals(edge.id, "to", ["sheet"]);
@@ -372,7 +381,13 @@ describe("NavigationGraphManager navigation write ordering", () => {
   }
 
   test("unknown edges skip interaction reads but retain modal stacks", async () => {
-    const edge = await repository.createEdge(appId, "Other", "Home", null, null, 4000);
+    const edge = await repository.createEdge(
+      appId,
+      "Other",
+      "Home",
+      { toolName: null, toolArgs: null },
+      4000,
+    );
     await repository.setEdgeModals(edge.id, "to", ["sheet"]);
     const ui = spyOn(repository, "getUIElementsForEdge");
     const scroll = spyOn(repository, "getScrollPosition");
@@ -392,8 +407,20 @@ describe("NavigationGraphManager navigation write ordering", () => {
   });
 
   test("edge reads await UI, scroll, from modals and to modals before starting the next edge", async () => {
-    const first = await repository.createEdge(appId, "Other", "Home", "tapOn", {}, 4000);
-    const second = await repository.createEdge(appId, "Other", "Home", "swipeOn", {}, 5000);
+    const first = await repository.createEdge(
+      appId,
+      "Other",
+      "Home",
+      { toolName: "tapOn", toolArgs: {} },
+      4000,
+    );
+    const second = await repository.createEdge(
+      appId,
+      "Other",
+      "Home",
+      { toolName: "swipeOn", toolArgs: {} },
+      5000,
+    );
     const gates = Array.from({ length: 4 }, () => deferred());
     const started = Array.from({ length: 4 }, () => deferred());
     const calls: string[] = [];
@@ -456,7 +483,13 @@ describe("NavigationGraphManager navigation write ordering", () => {
   });
 
   test("invalid stored JSON throws before any interaction or modal reads", async () => {
-    const edge = await repository.createEdge(appId, "Other", "Home", "tapOn", {}, 4000);
+    const edge = await repository.createEdge(
+      appId,
+      "Other",
+      "Home",
+      { toolName: "tapOn", toolArgs: {} },
+      4000,
+    );
     await harness.db
       .updateTable("navigation_edges")
       .set({ tool_args: "{" })
@@ -478,7 +511,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
   });
 
   test("a UI read rejection propagates unchanged before scroll or modal reads", async () => {
-    await repository.createEdge(appId, "Other", "Home", "tapOn", {}, 4000);
+    await repository.createEdge(appId, "Other", "Home", { toolName: "tapOn", toolArgs: {} }, 4000);
     const failure = new Error("UI read failed");
     const ui = spyOn(repository, "getUIElementsForEdge").mockRejectedValue(failure);
     const scroll = spyOn(repository, "getScrollPosition");

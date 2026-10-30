@@ -56,7 +56,7 @@ permission is missing, reinstall the AutoMobile app on the emulator. AutoMobile 
 Only one injection may start or run per device. On Android, AutoMobile stops only its own
 recording when injection stops, finishes, reaches its duration limit, or fails, including on
 session release. Cleanup is skipped if the emulator restarted; a restarted app no longer holds
-the recording.
+the recording. Android injection is refused if its start delay, maximum duration (or clip length), and one-minute capture margin exceed 62 minutes.
 
 | Parameter       | Description                                                                     |
 | --------------- | ------------------------------------------------------------------------------- |

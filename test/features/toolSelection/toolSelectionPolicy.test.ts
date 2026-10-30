@@ -214,14 +214,9 @@ describe("exact-tool selection union policy", () => {
     // a new one the retry (ide/setKeyValue etc.) never rechecks, and the tool would stay
     // disabled. There is nothing to advertise — tell the caller to acquire a session first.
     await expect(
-      assertToolEnabledForAnySession(
-        "systemTray",
-        false,
-        [undefined],
-        disabled,
-        undefined,
-        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
-      ),
+      assertToolEnabledForAnySession("systemTray", false, [undefined], disabled, {
+        remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      }),
     ).rejects.toThrow(
       "Tool systemTray is disabled for device session (not yet bound). " +
         "No device session owns this device yet, so there is nothing ide/setSessionToolEnabled could enable " +
@@ -230,14 +225,9 @@ describe("exact-tool selection union policy", () => {
         'ide/setSessionToolEnabled { toolName: "systemTray", enabled: true, sessionUuid: "<uuid from getAndroid/getApple>" }.',
     );
     await expect(
-      assertToolEnabledForAnySession(
-        "systemTray",
-        false,
-        [],
-        disabled,
-        undefined,
-        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
-      ),
+      assertToolEnabledForAnySession("systemTray", false, [], disabled, {
+        remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      }),
     ).rejects.toThrow(/Acquire a device session with getAndroid \{ deviceId \}/);
   });
 
@@ -274,7 +264,7 @@ describe("exact-tool selection union policy", () => {
         false,
         ["connection", "base", "base:label"],
         disabled,
-        "connection",
+        { connectionProfileUuid: "connection" },
       ),
     ).rejects.toThrow(
       "Tool systemTray is disabled for device session connection / base / base:label. " +
@@ -317,8 +307,7 @@ describe("exact-tool selection union policy", () => {
         false,
         ["base-session", "base-session:label"],
         disabled,
-        undefined,
-        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+        { remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD },
       ),
     ).rejects.toThrow(
       'Enable it with ide/setSessionToolEnabled { toolName: "setKeyValue", enabled: true, sessionUuid: "base-session" }.',
@@ -358,7 +347,9 @@ describe("exact-tool selection union policy", () => {
     // form (which targets the connection profile) still works and must be preferred over the
     // "acquire a session" message.
     await expect(
-      assertToolEnabledForAnySession("observe", true, [], disabled, "connection"),
+      assertToolEnabledForAnySession("observe", true, [], disabled, {
+        connectionProfileUuid: "connection",
+      }),
     ).rejects.toThrow('Enable it with setToolEnabled { toolName: "observe", enabled: true }.');
   });
 

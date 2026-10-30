@@ -24,16 +24,13 @@ export const DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS = 2_000;
  */
 export function devicePreparedForOtherRequestError(deviceId: string): InputDeviceOwnedError {
   const retryAfterMs = DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS;
-  return new InputDeviceOwnedError(
-    "setActiveDevice",
-    deviceId,
-    undefined,
-    undefined,
-    `Device '${deviceId}' is being prepared for another request, which has not bound it to a ` +
+  return new InputDeviceOwnedError("setActiveDevice", deviceId, undefined, undefined, {
+    message:
+      `Device '${deviceId}' is being prepared for another request, which has not bound it to a ` +
       `session yet. Retry in about ${retryAfterMs}ms, once that request has bound the device or ` +
       "failed, or use another device.",
     retryAfterMs,
-  );
+  });
 }
 
 /**
@@ -46,13 +43,9 @@ export function deviceAssignedToOtherSessionError(
   holderSessionUuid: string,
   requesterSessionUuid: string | undefined,
 ): InputDeviceOwnedError {
-  return new InputDeviceOwnedError(
-    "setActiveDevice",
-    deviceId,
-    requesterSessionUuid,
-    undefined,
-    `Device '${deviceId}' is already assigned to session ${holderSessionUuid}`,
-  );
+  return new InputDeviceOwnedError("setActiveDevice", deviceId, requesterSessionUuid, undefined, {
+    message: `Device '${deviceId}' is already assigned to session ${holderSessionUuid}`,
+  });
 }
 
 /** The pool read is optional so older daemon-state and autolock fakes keep their contracts. */
@@ -83,14 +76,10 @@ export function heldDeviceBindRefusal(
   if (retryAfterMs === undefined) {
     return original;
   }
-  return new InputDeviceOwnedError(
-    "acquire",
-    deviceId,
-    requesterSessionUuid,
-    undefined,
-    `${original.message}${original.message.endsWith(".") ? "" : "."} The holder is being released; retry in about ${retryAfterMs}ms.`,
+  return new InputDeviceOwnedError("acquire", deviceId, requesterSessionUuid, undefined, {
+    message: `${original.message}${original.message.endsWith(".") ? "" : "."} The holder is being released; retry in about ${retryAfterMs}ms.`,
     retryAfterMs,
-  );
+  });
 }
 
 /** Keep held-device wording while explaining the bounded restart-recovery refusal. */
@@ -99,16 +88,13 @@ export function deviceReservedForRestartRecoveryError(
   holderSessionUuid: string,
   retryAfterMs: number,
 ): InputDeviceOwnedError {
-  return new InputDeviceOwnedError(
-    "acquire",
-    deviceId,
-    undefined,
-    undefined,
-    `Device '${deviceId}' is already assigned to session ${holderSessionUuid}; ` +
+  return new InputDeviceOwnedError("acquire", deviceId, undefined, undefined, {
+    message:
+      `Device '${deviceId}' is already assigned to session ${holderSessionUuid}; ` +
       `it is reserved for that session's device-restart recovery. Retry in ${retryAfterMs}ms, ` +
       "or acquire another device.",
     retryAfterMs,
-  );
+  });
 }
 
 /**
@@ -119,14 +105,11 @@ export function deviceReservedForRestartRecoveryError(
 export function deviceAlreadyAssignedToAnotherSessionError(
   deviceId: string,
 ): InputDeviceOwnedError {
-  return new InputDeviceOwnedError(
-    "acquire",
-    deviceId,
-    undefined,
-    undefined,
-    `Device '${deviceId}' is already assigned to another session. ` +
+  return new InputDeviceOwnedError("acquire", deviceId, undefined, undefined, {
+    message:
+      `Device '${deviceId}' is already assigned to another session. ` +
       "Acquire a different device or wait for its owner to release it.",
-  );
+  });
 }
 
 /** True when the requester is the holder, a derived `${base}:${label}` session counting as its base. */

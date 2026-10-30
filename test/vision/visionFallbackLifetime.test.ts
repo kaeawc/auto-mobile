@@ -86,7 +86,9 @@ describe("vision result cache lifetime across tool calls", () => {
     capturer: FakeScreenshotCapturer,
     cfg: VisionFallbackConfig,
   ): Promise<string> =>
-    getVisionEnrichedError(capturer, null, { text: "Login" }, cfg, "Element not found");
+    getVisionEnrichedError(capturer, null, { text: "Login" }, cfg, {
+      baseError: "Element not found",
+    });
 
   /**
    * Stands in for one tool call: a fresh capturer writing to a never-before-seen
@@ -177,10 +179,10 @@ describe("vision result cache lifetime across tool calls", () => {
   test("differing criteria against one screenshot do not share an entry", async () => {
     const capturer = capture(UNCHANGED_SCREEN);
     const cfg = config();
-    await getVisionEnrichedError(capturer, null, { text: "Login" }, cfg, "e");
+    await getVisionEnrichedError(capturer, null, { text: "Login" }, cfg, { baseError: "e" });
 
     const second = capture(UNCHANGED_SCREEN);
-    await getVisionEnrichedError(second, null, { text: "Logout" }, cfg, "e");
+    await getVisionEnrichedError(second, null, { text: "Logout" }, cfg, { baseError: "e" });
 
     expect(client.calls).toBe(2);
   });

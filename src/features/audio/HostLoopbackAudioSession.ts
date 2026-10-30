@@ -43,6 +43,13 @@ export interface HostLoopbackAudioSessionDeps {
 
 type EarlyEnd = Exclude<InjectionResult["reason"], "completed">;
 
+/** How `feed` learns the injection ended and reports playback progress. */
+interface FeedControl {
+  ended: Promise<void>;
+  isEnded: () => boolean;
+  progress: { started(): void; queued(frames: number): void };
+}
+
 function helperMissing(code: EmulatorAudioErrorCode, envName: string): EmulatorAudioError {
   return new EmulatorAudioError(
     code,
@@ -130,12 +137,16 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
         : this.timer.setTimeout(() => end("max_duration"), options.maxDurationMs);
     let framesQueued = 0;
     let playbackStartMs: number | undefined;
-    const feeding = this.feed(helper, pcm, options, ended, () => halted, {
-      started: () => {
-        playbackStartMs ??= this.timer.monotonicNow?.() ?? this.timer.now();
-      },
-      queued: (frames) => {
-        framesQueued += frames;
+    const feeding = this.feed(helper, pcm, options, {
+      ended,
+      isEnded: () => halted,
+      progress: {
+        started: () => {
+          playbackStartMs ??= this.timer.monotonicNow?.() ?? this.timer.now();
+        },
+        queued: (frames) => {
+          framesQueued += frames;
+        },
       },
     });
     const done = (async (): Promise<InjectionResult> => {
@@ -314,10 +325,9 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
     helper: RunningLoopbackHelper,
     pcm: PcmAudio,
     options: InjectAudioOptions,
-    ended: Promise<void>,
-    isEnded: () => boolean,
-    progress: { started(): void; queued(frames: number): void },
+    control: FeedControl,
   ): Promise<void> {
+    const { ended, isEnded, progress } = control;
     const delayMs = options.startDelayMs;
     if (delayMs) {
       // Ends early when the injection does, so stop() never waits out a start delay.

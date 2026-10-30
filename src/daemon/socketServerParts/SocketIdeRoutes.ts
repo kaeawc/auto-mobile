@@ -374,8 +374,7 @@ export class SocketIdeRoutes {
         this.state.sessionToolSelectionService,
         // No connectionProfileUuid on this channel — a caller here is on the direct IDE
         // socket, which has no MCP connection profile and cannot invoke an MCP tool.
-        undefined,
-        IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+        { remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD },
       );
       return;
     }
@@ -398,8 +397,7 @@ export class SocketIdeRoutes {
       // formatToolEnabledRemediationSentence in toolSelectionPolicy.ts) — the remediation must
       // name the daemon's own `ide/setSessionToolEnabled` method, not the MCP `setToolEnabled`
       // tool, since a caller on this channel cannot invoke an MCP tool (issue #6259).
-      undefined,
-      IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      { remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD },
     );
   }
   private inputDeviceGatingInstance?: InputDeviceGating;

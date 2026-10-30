@@ -353,11 +353,9 @@ describe("PerformanceAudit.measureTouchLatency skip (#6167 P1)", function () {
       "com.example",
       { width: 1080, height: 1920 },
       new NoOpPerformanceTracker(),
-      undefined,
       // A caller that still supplied a touch point despite asking to skip
       // must not have it used - `skipTouchLatency` takes precedence.
-      { x: 540, y: 960 },
-      skipTouchLatency,
+      { touchPoint: { x: 540, y: 960 }, skipTouchLatency },
     );
 
   // Regression: when the caller (PerformanceAuditor) found no point known

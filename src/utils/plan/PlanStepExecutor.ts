@@ -181,8 +181,10 @@ function skippedAnsweredFailure(
   };
 }
 
-/** Which derived session a failure observation targets and the plan signal that can cancel it. */
+/** Which device/session a failure observation targets and the plan signal that can cancel it. */
 interface FailureObservationScope {
+  deviceId?: string;
+  sessionUuid?: string;
   targetDevice?: BootedDevice;
   deviceLabel?: string;
   signal?: AbortSignal;
@@ -354,9 +356,7 @@ export class DefaultPlanStepExecutor<
 
   private async captureFailureObservation(
     platform: string,
-    deviceId: string | undefined,
-    sessionUuid: string | undefined,
-    { deviceLabel, signal, targetDevice }: FailureObservationScope = {},
+    { deviceId, sessionUuid, deviceLabel, signal, targetDevice }: FailureObservationScope = {},
   ): Promise<FailureObservationSummary | undefined> {
     const observeTool = this.tools.getTool("observe");
     // A plan cancelled by a session release no longer owns the device, so a
@@ -426,8 +426,6 @@ export class DefaultPlanStepExecutor<
     failedTool: string,
     failureToolResponse: unknown | undefined,
     platform: string | undefined,
-    deviceId: string | undefined,
-    sessionUuid: string | undefined,
     scope: FailureObservationScope = {},
   ): Promise<FailureObservationSummary | undefined> {
     try {
@@ -444,7 +442,7 @@ export class DefaultPlanStepExecutor<
       if (!platform) {
         return undefined;
       }
-      return await this.captureFailureObservation(platform, deviceId, sessionUuid, scope);
+      return await this.captureFailureObservation(platform, scope);
     } catch (error) {
       return {
         capturedAtMs: Date.now(),
@@ -671,9 +669,13 @@ export class DefaultPlanStepExecutor<
       step.tool,
       response,
       context.platform,
-      context.deviceId,
-      context.sessionUuid,
-      { deviceLabel, signal: context.signal, targetDevice: context.targetDevice },
+      {
+        deviceId: context.deviceId,
+        sessionUuid: context.sessionUuid,
+        deviceLabel,
+        signal: context.signal,
+        targetDevice: context.targetDevice,
+      },
     );
     const details: Record<string, unknown> = {
       params: redactToolSecrets(step.tool, step.params),
@@ -739,14 +741,13 @@ export class DefaultPlanStepExecutor<
     const deviceLabel = typeof step.params?.device === "string" ? step.params.device : undefined;
     const buildFailureObservationContext =
       context.buildFailureObservationContext ?? this.buildFailureObservationContext.bind(this);
-    return buildFailureObservationContext(
-      step.tool,
-      undefined,
-      context.platform,
-      context.deviceId,
-      context.sessionUuid,
-      { deviceLabel, signal: context.signal, targetDevice: context.targetDevice },
-    );
+    return buildFailureObservationContext(step.tool, undefined, context.platform, {
+      deviceId: context.deviceId,
+      sessionUuid: context.sessionUuid,
+      deviceLabel,
+      signal: context.signal,
+      targetDevice: context.targetDevice,
+    });
   }
 
   private async resultFromThrownError(

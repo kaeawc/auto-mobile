@@ -85,10 +85,14 @@ export function* checkRetainedLock(
   path: string,
   options: ExclusiveLockOptions,
   generation: string | undefined,
-  reclaimed: LockSample | undefined,
-  publishedContent: string,
-  tmp?: string,
+  publication: {
+    reclaimed: LockSample | undefined;
+    publishedContent: string;
+    /** The private temp name, while it still exists. */
+    tmp?: string;
+  },
 ): Steps<boolean> {
+  const { reclaimed, publishedContent, tmp } = publication;
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const retained = yield* sampleRetainedLock(`${path}.displaced`, fileSystem);
   if (retained === "absent") {
@@ -215,7 +219,10 @@ function* removeRememberedRetained(
   const name = `${path}.displaced`;
   const removed = sameSample(doomed, retained)
     ? (yield* removeInstance(path, name, doomed, pid, fileSystem)) === "removed"
-    : (yield* backOutBytesAtName(path, name, doomed.raw, pid, fileSystem, true)) === "removed";
+    : (yield* backOutBytesAtName(path, name, doomed.raw, pid, {
+        fileSystem,
+        protectGenuine: true,
+      })) === "removed";
   if (!removed) {
     return retained;
   }
@@ -423,7 +430,9 @@ function* removeDoomedCopy(
       ? retained
       : yield* removeRememberedRetained(path, retained, pid, fileSystem, true);
   // A successful byte removal ends the entry. A later private-marker restore is the R2 residual.
-  const removed = (yield* backOutBytesAtName(path, name, raw, pid, fileSystem, true)) === "removed";
+  const removed =
+    (yield* backOutBytesAtName(path, name, raw, pid, { fileSystem, protectGenuine: true })) ===
+    "removed";
   return removed && remaining !== "unreadable" && (remaining === "absent" || remaining.raw !== raw);
 }
 
@@ -538,7 +547,7 @@ function* backOutAttempt(
   if (read.value !== raw) {
     return "unfound";
   }
-  return yield* backOutBytesAtName(path, path, raw, pid, fileSystem, protectGenuine);
+  return yield* backOutBytesAtName(path, path, raw, pid, { fileSystem, protectGenuine });
 }
 
 function* backOutBytesAtName(
@@ -546,9 +555,9 @@ function* backOutBytesAtName(
   name: string,
   raw: string,
   pid: number,
-  fileSystem: LockFileSystem,
-  protectGenuine = false,
+  options: { fileSystem: LockFileSystem; protectGenuine?: boolean },
 ): Steps<"removed" | "unfound" | "failed"> {
+  const { fileSystem, protectGenuine = false } = options;
   const marker = `${path}.${pid}.release.${++lockState.releaseMarkerCounter}`;
   const claim = yield* retryLockStep({ op: "rename", path: name }, () => {
     if (protectGenuine && hasProtectedPublication(path, raw, fileSystem)) {

@@ -792,8 +792,7 @@ export class TapTargetResolver {
           description: `Interactive element for tapping (action: ${options.action})`,
         },
         this.host.visionConfig(),
-        baseError,
-        { signal, visionAnalyzer: this.host.visionAnalyzer() },
+        { baseError, signal, visionAnalyzer: this.host.visionAnalyzer() },
       );
       throw new TapTargetUnavailableError(enrichedMsg, "not-found");
     }

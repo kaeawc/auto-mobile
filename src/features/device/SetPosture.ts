@@ -554,11 +554,13 @@ export class SetPosture {
       adb,
       requested,
       { states, notFoldable },
-      this.timer,
-      () => {
-        operation.assertCurrent();
-        ObservedAndroidDisplayCache.clear(this.device.deviceId);
-        return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+      {
+        timer: this.timer,
+        observe: () => {
+          operation.assertCurrent();
+          ObservedAndroidDisplayCache.clear(this.device.deviceId);
+          return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+        },
       },
       operation,
     );

@@ -474,19 +474,19 @@ function* writeExclusiveLockFile(
     yield* drainRetainedBeforePublication(path, pid, fileSystem);
     rememberInFlightPublication(path, content, fileSystem, options.publications);
     let acquired = false;
-    const publication = yield* publishFile(
-      path,
-      content,
-      pid,
-      fileSystem,
-      options.idGenerator,
-      function* (tmp): Steps<void> {
-        acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content, tmp);
+    const publication = yield* publishFile(path, content, pid, fileSystem, {
+      idGenerator: options.idGenerator,
+      postPublish: function* (tmp): Steps<void> {
+        acquired = yield* checkRetainedLock(path, options, generation, {
+          reclaimed,
+          publishedContent: content,
+          tmp,
+        });
         if (acquired) {
           yield* settleAcquiredBackOuts(path, content, fileSystem, tmp);
         }
       },
-    );
+    });
     const published =
       typeof publication === "string"
         ? publication === "created"
@@ -495,7 +495,10 @@ function* writeExclusiveLockFile(
       return { acquired: false, generation, swept: sweep };
     }
     if (typeof publication !== "string") {
-      acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content);
+      acquired = yield* checkRetainedLock(path, options, generation, {
+        reclaimed,
+        publishedContent: content,
+      });
       if (acquired) {
         yield* settleAcquiredBackOuts(path, content, fileSystem, path);
       }

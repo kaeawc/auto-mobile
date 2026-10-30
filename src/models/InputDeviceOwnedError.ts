@@ -13,6 +13,14 @@ export const INPUT_REMEDY =
 export const TOOL_CALL_REMEDY =
   "acquire the device (setActiveDevice) and call the tool with that session's sessionUuid, or wait for the holder to release it.";
 
+/** Trailing options for `InputDeviceOwnedError`. */
+export interface InputDeviceOwnedErrorOptions {
+  /** Replaces the composed message where a caller's existing wording must stay stable. */
+  message?: string;
+  /** Set only when the refusal ends without the caller or a holder doing anything. */
+  retryAfterMs?: number;
+}
+
 /**
  * `input/*` drives a device directly, so it follows device ownership (#10698): a device a session
  * holds takes input only from that session. A frame names its session with the optional
@@ -36,11 +44,9 @@ export class InputDeviceOwnedError extends ActionableError {
     readonly deviceId: string,
     requesterSessionUuid: string | undefined,
     remedy = INPUT_REMEDY,
-    /** Replaces the composed message where a caller's existing wording must stay stable. */
-    message?: string,
-    /** Set only when the refusal ends without the caller or a holder doing anything. */
-    retryAfterMs?: number,
+    options: InputDeviceOwnedErrorOptions = {},
   ) {
+    const { message, retryAfterMs } = options;
     super(
       message ??
         `${action} refused: device '${deviceId}' is held by another session. ` +

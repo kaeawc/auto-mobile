@@ -37,14 +37,9 @@ describe("simulator workload profile reconciliation (#6694)", () => {
     timer.enableAutoAdvance();
     store = new FakeDeviceResourceApplicationStore();
     const readDirectory = (path: string) => plist.readDirectory(path);
-    controller = new DefaultDeviceResourceController(
-      simctl,
-      plist,
-      timer,
-      readDirectory,
-      undefined,
-      { applications: store },
-    );
+    controller = new DefaultDeviceResourceController(simctl, plist, timer, readDirectory, {
+      applications: store,
+    });
     reconciler = new DefaultDeviceResourceReconciler({
       controller,
       observer: new DefaultDeviceResourceObserver({ simctl, plist, timer, readDirectory }),

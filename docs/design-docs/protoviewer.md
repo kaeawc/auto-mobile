@@ -420,10 +420,12 @@ listing):
 
 - Android: a signed APK as a release asset next to CtrlProxy, with a pinned checksum. Prepare Release
   builds it (`build-protoviewer-apk.yml`, release keystore, fail-closed signing), pins it as
-  `protoViewerApkSha256` and Release re-verifies and attaches `automobile-protoviewer-<version>.apk`
-  plus a `.sha256`; see [Installing ProtoViewer](../using/protoviewer-install.md).
-- iOS: dev-signed builds installed on the owner's iPhones (an Apple Developer team is configured).
-  The simulator template remains available.
+  `protoViewerApkSha256` in `src/constants/release.ts`, and Release checks it against
+  `RELEASE_CHECKSUM_REGISTRY` before publishing `automobile-protoviewer-<version>.apk` plus a
+  `.sha256`; see [Installing ProtoViewer](../using/protoviewer-install.md).
+- iOS: the simulator template remains available. A physical-iPhone build is not part of the release
+  yet: the Apple Developer signing certificate and provisioning profile are not configured as
+  repository secrets.
 
 ### 8.1 Release-artifact policy gate (#14154)
 
@@ -474,14 +476,23 @@ manual, advisory Android lane that downloads the previous release's APK; it is n
 release workflow. All of this is unverified on devices until someone runs it (label
 `needs-device-verify` on #15387). The iOS forbidden-symbol rule stays advisory until #14150 lands.
 
-### 8.2 Play-ready Android artifact (#14146)
+### 8.2 Android release signing and versioning (#14146)
+
+The GitHub release APK is signed with the same release keystore as CtrlProxy because no separate
+key exists yet. This key is permanent for the package's update path: moving to its own key or a Play
+upload key (#14146) requires uninstalling the existing app first. Its `versionCode` is fixed at `1`,
+which `adb install -r` accepts when equal. A tag-derived scheme (#14146) must be wired into the
+release workflow before any flow requiring strictly increasing codes.
+
+#### Play-ready artifact configuration
 
 The Android module builds a Play-uploadable AAB next to the APK. The Gradle side is the
 `automobile.protoviewer-play-release` convention in `android/build-logic`; it replaces the shared
 `automobile.android-app-signing` for ProtoViewer, which falls back open to the debug key.
 
-**Dedicated keystore.** ProtoViewer has its own signing key, never CtrlProxy's `RELEASE_KEYSTORE_*`.
-Inputs are read from the environment (CI) or `gradle.properties` (local):
+**Dedicated keystore inputs.** The convention accepts a separate ProtoViewer key; the GitHub release
+workflow does not supply these inputs. They are read from the environment (CI) or
+`gradle.properties` (local):
 
 | Input                                 | Purpose                                                   | CI secret                       |
 | ------------------------------------- | --------------------------------------------------------- | ------------------------------- |
@@ -492,20 +503,23 @@ Inputs are read from the environment (CI) or `gradle.properties` (local):
 | `PROTOVIEWER_RELEASE_VERSION`         | plain `MAJOR.MINOR.PATCH` of the release tag              | (workflow input)                |
 | `PROTOVIEWER_REQUIRE_RELEASE_SIGNING` | `true` in release workflows: fail closed                  | (workflow env)                  |
 
-The workflow decodes `PROTOVIEWER_KEYSTORE_BASE64` to a file and exports its path as
-`PROTOVIEWER_KEYSTORE_PATH`. Whether this key is the Play upload key or the app-signing key is
-decided at Play App Signing enrolment; record it next to the key.
+Wiring the dedicated key requires decoding `PROTOVIEWER_KEYSTORE_BASE64` to a file and exporting its
+path as `PROTOVIEWER_KEYSTORE_PATH`. Whether this key is the Play upload key or the app-signing key
+is decided at Play App Signing enrolment; record it next to the key.
 
-**Fail closed.** With `PROTOVIEWER_REQUIRE_RELEASE_SIGNING=true`, `verifyProtoViewerReleaseInputs`
+**Fail closed.** The release workflow sets `PROTOVIEWER_REQUIRE_RELEASE_SIGNING=true`, so a release
+assemble without complete signing inputs fails instead of falling back to the debug key.
+`verifyProtoViewerReleaseInputs`
 (a `preReleaseBuild` dependency, so it fails before compilation) rejects a missing signing input, a
 missing keystore file, a missing `PROTOVIEWER_RELEASE_VERSION`, or a `-SNAPSHOT`/suffixed version.
-Without it (local and pull-request builds) an incomplete keystore falls back to the debug key and
-the version code stays `1`. Debug builds always use the debug key, never the release key.
+Local and pull-request builds stay debug-signed without complete signing inputs and keep version
+code `1`. Debug builds always use the debug key, never the release key.
 
-**versionCode.** `major * 1_000_000 + minor * 1_000 + patch` of `PROTOVIEWER_RELEASE_VERSION`
+**Tag-derived versionCode.** When `PROTOVIEWER_RELEASE_VERSION` is supplied, the convention uses
+`major * 1_000_000 + minor * 1_000 + patch`
 (`ProtoViewerVersioning`). It is strictly monotonic in version order, bounded under Play's
 2,100,000,000 cap (major <= 2099, minor and patch <= 999), and `0.0.89` gives `89`. The release
-`versionName` is the same plain version, so a published build never carries `-SNAPSHOT`.
+`versionName` is the same plain version.
 
 **AAB, R8 and mapping.** `:protoviewer:bundleRelease` writes
 `build/outputs/bundle/release/protoviewer-release.aab` and is finalized by

@@ -68,27 +68,21 @@ internal class GuestAudioCaptureController(private val port: GuestAudioCapturePo
             when (op) {
               "start" -> start(leaseId, disposals)
               "status" -> status(leaseId, disposals)
-              "stop" -> {
-                val lease = held
-                if (lease?.id != leaseId) {
-                  if (failure?.first == leaseId) failure = null
-                  "absent"
-                } else {
-                  detach(lease)
-                  disposals.add(lease)
-                  "stopped"
-                }
-              }
+              "stop" -> stop(leaseId, disposals)
               else -> failed("unknown capture operation")
             }
           }
-        } catch (error: Exception) {
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+          // Port calls and timeout cancellation have no exception contract; preserve protocol
+          // replies.
           failed(error.message ?: error.javaClass.simpleName)
         }
       try {
         val disposalFailure = disposals.firstNotNullOfOrNull { dispose(it) }
         if (disposalFailure == null) result else failed(disposalFailure)
-      } catch (error: Exception) {
+      } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+        // AudioRecord teardown and reader await (including interruption) must become failed
+        // replies.
         failed(error.message ?: error.javaClass.simpleName)
       }
     }
@@ -120,7 +114,8 @@ internal class GuestAudioCaptureController(private val port: GuestAudioCapturePo
         }
       lease.reader = port.launchReader { drain(lease) }
       return "running"
-    } catch (error: Exception) {
+    } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+      // Record creation/start and port scheduling can throw unspecified exceptions; retain cleanup.
       val lease = held
       if (lease != null) {
         detach(lease)
@@ -139,7 +134,8 @@ internal class GuestAudioCaptureController(private val port: GuestAudioCapturePo
         try {
           if (lease.record.isRecording()) return "running"
           "record is not RECORDING"
-        } catch (error: Exception) {
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+          // The record port has no exception contract; report any failure and release its lease.
           error.message ?: error.javaClass.simpleName
         }
       detach(lease)
@@ -154,13 +150,26 @@ internal class GuestAudioCaptureController(private val port: GuestAudioCapturePo
     return "absent"
   }
 
+  private fun stop(id: String, disposals: MutableList<Lease>): String {
+    val lease = held
+    return if (lease?.id != id) {
+      if (failure?.first == id) failure = null
+      "absent"
+    } else {
+      detach(lease)
+      disposals.add(lease)
+      "stopped"
+    }
+  }
+
   private fun drain(lease: Lease) {
     while (synchronized(this) { held === lease }) {
       val reason =
         try {
           val count = lease.record.read()
           if (count < 0) "capture read returned $count" else null
-        } catch (error: Exception) {
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+          // The record port may throw unspecified exceptions; the owner must see why reading ended.
           error.message ?: error.javaClass.simpleName
         }
       if (reason != null) {

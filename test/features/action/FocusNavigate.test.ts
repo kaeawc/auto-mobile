@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import {
   FocusNavigate,
   directionToward,
+  directionsToward,
   elementMatchesTarget,
   type FocusKeyPresser,
   type FocusObserver,
@@ -33,6 +34,9 @@ class FakeGrid implements FocusObserver, FocusKeyPresser {
   failPress: string | undefined;
   /** Indices whose entry is blocked, so a press toward them leaves focus unchanged. */
   blocked = new Set<number>();
+  /** Custom layout: replaces the grid, with explicit per-element key transitions. */
+  elements: Element[] = LABELS.map((_, index) => tile(index));
+  moves: Record<number, Partial<Record<InputKeyName, number>>> | undefined;
 
   constructor(start: number | null) {
     this.focusIndex = start;
@@ -40,8 +44,8 @@ class FakeGrid implements FocusObserver, FocusKeyPresser {
 
   async read(): Promise<FocusScreen> {
     return {
-      focused: this.focusIndex === null ? null : tile(this.focusIndex),
-      elements: LABELS.map((_, index) => tile(index)),
+      focused: this.focusIndex === null ? null : (this.elements[this.focusIndex] ?? null),
+      elements: this.elements,
     };
   }
 
@@ -50,6 +54,10 @@ class FakeGrid implements FocusObserver, FocusKeyPresser {
       return { success: false, error: this.failPress };
     }
     this.presses.push(key);
+    if (this.moves && this.focusIndex !== null) {
+      this.focusIndex = this.moves[this.focusIndex]?.[key] ?? this.focusIndex;
+      return { success: true };
+    }
     if (this.focusIndex === null) {
       this.focusIndex = 0;
       return { success: true };
@@ -119,12 +127,27 @@ describe("FocusNavigate", () => {
     expect(grid.presses).toEqual(["arrow_down"]);
   });
 
-  test("exits stuck after two presses leave focus unchanged", async () => {
+  test("exits stuck once the only direction toward the target did not move focus", async () => {
     const grid = new FakeGrid(0);
     grid.blocked.add(1);
     const result = await navigator(grid).execute({ until: { text: "Music" } });
-    expect(result).toMatchObject({ success: false, status: "stuck", steps: 2 });
+    expect(result).toMatchObject({ success: false, status: "stuck", steps: 1 });
+    expect(result.message).toContain("Focus did not move after 1 press;");
     expect(result.focusedElement?.text).toBe("Home");
+  });
+
+  test("an explicit direction still exits stuck after two unmoved presses", async () => {
+    const grid = new FakeGrid(0);
+    grid.blocked.add(1);
+    const result = await navigator(grid).execute({ until: { text: "Music" }, direction: "right" });
+    expect(result).toMatchObject({ status: "stuck", steps: 2 });
+    expect(grid.presses).toEqual(["arrow_right", "arrow_right"]);
+  });
+
+  test("steering sequence for a reachable grid target is unchanged", async () => {
+    const grid = new FakeGrid(0);
+    await navigator(grid).execute({ until: { text: "Search" } });
+    expect(grid.presses).toEqual(["arrow_right", "arrow_down", "arrow_right"]);
   });
 
   test("exits max_steps when focus keeps moving without reaching the target", async () => {
@@ -173,6 +196,86 @@ describe("FocusNavigate", () => {
     await expect(
       navigator(new FakeGrid(0)).execute({ until: { text: "Music" }, signal: controller.signal }),
     ).rejects.toThrow();
+  });
+});
+
+function box(text: string, cx: number, cy: number): Element {
+  return { text, bounds: { left: cx - 50, top: cy - 25, right: cx + 50, bottom: cy + 25 } };
+}
+
+/**
+ * TV launcher Home (#15958): focus starts on a one-item row. The target is far right and a little
+ * up, so right is a dead end and only up leaves the row.
+ */
+function launcherGrid(): FakeGrid {
+  const grid = new FakeGrid(0);
+  grid.elements = [
+    box("Add app to favorites", 100, 450),
+    box("Search", 300, 270),
+    box("Home", 900, 270),
+    box("Settings, button", 1600, 270),
+  ];
+  grid.moves = {
+    0: { arrow_up: 1 },
+    1: { arrow_right: 2, arrow_down: 0 },
+    2: { arrow_right: 3, arrow_left: 1 },
+    3: { arrow_left: 2 },
+  };
+  return grid;
+}
+
+describe("FocusNavigate blocked directions", () => {
+  let timer: FakeTimer;
+
+  beforeEach(() => {
+    timer = new FakeTimer();
+    timer.enableAutoAdvance();
+  });
+
+  const navigator = (grid: FakeGrid) => new FocusNavigate(grid, grid, timer);
+
+  test("tries up after right is a dead end, then reaches the target", async () => {
+    const grid = launcherGrid();
+    const result = await navigator(grid).execute({ until: { text: "Settings, button" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 4 });
+    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right", "arrow_right"]);
+    expect(result.steps).toBe(grid.presses.length);
+  });
+
+  test("reports stuck when every direction toward the target is blocked", async () => {
+    const grid = launcherGrid();
+    grid.moves = { 0: {} };
+    const result = await navigator(grid).execute({ until: { text: "Settings, button" } });
+    expect(result).toMatchObject({ success: false, status: "stuck", steps: 2 });
+    expect(grid.presses).toEqual(["arrow_right", "arrow_up"]);
+    expect(result.message).toContain("Focus did not move after 2 presses;");
+    expect(result.focusedElement?.text).toBe("Add app to favorites");
+  });
+
+  test("blocked directions reset once focus moves to another element", async () => {
+    const grid = launcherGrid();
+    // Right is blocked on the first element and must be retried on the next one.
+    grid.moves = { 0: { arrow_up: 1 }, 1: { arrow_right: 3 }, 3: {} };
+    const result = await navigator(grid).execute({ until: { text: "Settings, button" } });
+    expect(result.status).toBe("focused");
+    expect(grid.presses).toEqual(["arrow_right", "arrow_up", "arrow_right"]);
+  });
+
+  test("blocked-direction retries count against maxSteps", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements = [box("Low", 50, 450), box("High", 50, 50), box("Target", 1050, 250)];
+    grid.moves = { 0: { arrow_up: 1 }, 1: { arrow_down: 0 } };
+    const result = await navigator(grid).execute({ until: { text: "Target" }, maxSteps: 6 });
+    expect(result).toMatchObject({ status: "max_steps", steps: 6 });
+    expect(grid.presses).toHaveLength(6);
+  });
+});
+
+describe("directionsToward", () => {
+  test("ranks the dominant axis first and omits axes with no offset", () => {
+    expect(directionsToward(tile(0), [tile(5)])).toEqual(["right", "down"]);
+    expect(directionsToward(tile(0), [tile(2)])).toEqual(["right"]);
+    expect(directionsToward(null, [tile(2)])).toEqual(["down"]);
   });
 });
 

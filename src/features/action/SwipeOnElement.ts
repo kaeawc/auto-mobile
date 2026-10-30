@@ -97,10 +97,7 @@ export class SwipeOnElement extends BaseVisualChange {
         try {
           const result = await perf.track("executeSwipe", () =>
             this.executeGesture.swipe(
-              flooredStartX,
-              flooredStartY,
-              flooredEndX,
-              flooredEndY,
+              { x1: flooredStartX, y1: flooredStartY, x2: flooredEndX, y2: flooredEndY },
               options,
               { perf, signal },
             ),

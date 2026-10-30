@@ -351,7 +351,7 @@ void call13(...args13, { assertCurrent: 1 });
 declare const call14: ExecuteGesture["executeA11ySwipe"];
 declare const args14: Parameters<typeof call14>;
 void call14(...args14);
-const options14 = call14.bind(undefined, args14[0], args14[1], args14[2], args14[3], args14[4]);
+const options14 = call14.bind(undefined, args14[0], args14[1]);
 void options14();
 void options14({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -373,7 +373,7 @@ void call14(...args14, { assertCurrent: 1 });
 declare const call15: ExecuteGesture["executeXCTestSwipe"];
 declare const args15: Parameters<typeof call15>;
 void call15(...args15);
-const options15 = call15.bind(undefined, args15[0], args15[1], args15[2], args15[3]);
+const options15 = call15.bind(undefined, args15[0]);
 void options15();
 void options15({ displayFence: fence });
 void options15({ displayFence: fence, lockScreen: true, timeoutMs: 5000 });

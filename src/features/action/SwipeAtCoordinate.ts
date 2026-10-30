@@ -321,10 +321,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     if (displayId === undefined || displayId === 0) {
       // The gesture reports its own outcomeIndeterminate; a throw before sending is a plain failure.
       return this.executeGesture.swipe(
-        from.x,
-        from.y,
-        to.x,
-        to.y,
+        { x1: from.x, y1: from.y, x2: to.x, y2: to.y },
         { duration, displayFence: { assertCurrent: target.assertCurrent } },
         { perf, signal },
       );
@@ -505,10 +502,12 @@ export class SwipeAtCoordinate extends BaseVisualChange {
             options.pointer
               ? this.dispatchStylus(resolved, duration, fence, options.pointer, signal)
               : this.executeGesture.swipe(
-                  resolved.from.x,
-                  resolved.from.y,
-                  resolved.to.x,
-                  resolved.to.y,
+                  {
+                    x1: resolved.from.x,
+                    y1: resolved.from.y,
+                    x2: resolved.to.x,
+                    y2: resolved.to.y,
+                  },
                   {
                     duration,
                     // A display change since the pre-dispatch read refuses just before the finger goes down.

@@ -276,7 +276,7 @@ export async function createStressHarness(): Promise<StressHarness> {
     accessibilityService: fakeA11yClient,
     featureFlags: FeatureFlagService.getInstance(),
     executeGesture: {
-      async swipe(x1, y1, x2, y2, options) {
+      async swipe({ x1, y1, x2, y2 }, options) {
         return {
           success: true,
           totalTimeMs: 1,

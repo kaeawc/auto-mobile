@@ -233,14 +233,14 @@ export class SwipeOn extends BaseVisualChange {
       dependencies.voiceOverExecutor ??
       deviceIosSdkBridgeSwipeRunner(
         device,
-        new VoiceOverSwipeExecutor(
+        new VoiceOverSwipeExecutor({
           device,
-          this.executeGesture,
-          IOSCtrlProxyClient.getInstance(device),
+          executeGesture: this.executeGesture,
+          iosClient: IOSCtrlProxyClient.getInstance(device),
           iosVoiceOverDetector,
-          this.timer,
+          timer: this.timer,
           featureFlags,
-        ),
+        }),
       );
     this.scrollUntilVisible = new ScrollUntilVisible({
       device,

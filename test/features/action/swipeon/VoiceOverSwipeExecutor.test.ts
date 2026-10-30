@@ -40,7 +40,7 @@ function makeFakeGestureExecutor(): {
     options?: { duration?: number };
   }> = [];
   const executor: GestureExecutor = {
-    swipe: async (x1, y1, x2, y2, options) => {
+    swipe: async ({ x1, y1, x2, y2 }, options) => {
       calls.push({ x1, y1, x2, y2, options });
       return makeSwipeResult({ x1, y1, x2, y2, duration: options?.duration ?? 300 });
     },
@@ -71,13 +71,13 @@ describe("VoiceOverSwipeExecutor", () => {
 
   test("unsafe return duration rejects before either gesture", async () => {
     const { executor: gesture, calls } = makeFakeGestureExecutor();
-    const executor = new VoiceOverSwipeExecutor(
-      { platform: "android", deviceId: "fake", name: "fake" },
-      gesture,
-      fakeIosClient,
-      fakeVoiceOverDetector,
-      fakeTimer,
-    );
+    const executor = new VoiceOverSwipeExecutor({
+      device: { platform: "android", deviceId: "fake", name: "fake" },
+      executeGesture: gesture,
+      iosClient: fakeIosClient,
+      iosVoiceOverDetector: fakeVoiceOverDetector,
+      timer: fakeTimer,
+    });
     for (const returnSpeed of [1e-320, 0.02, Infinity, NaN]) {
       await expect(
         executor.executeBoomerangGesture({
@@ -100,13 +100,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        ANDROID_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: ANDROID_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       const result = await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -130,13 +130,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        ANDROID_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: ANDROID_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       const result = await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -164,14 +164,14 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
       const sentinelFlags = { __sentinel: true, isEnabled: () => false };
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-        sentinelFlags,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+        featureFlags: sentinelFlags,
+      });
 
       await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -193,13 +193,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       const result = await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -221,13 +221,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       const result = await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -255,13 +255,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const controlledTimer = new FakeTimer();
       controlledTimer.enableAutoAdvance();
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        controlledTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: controlledTimer,
+      });
 
       await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -282,13 +282,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -309,13 +309,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -351,13 +351,13 @@ describe("VoiceOverSwipeExecutor", () => {
         const { executor, calls } = makeFakeGestureExecutor();
         fakeVoiceOverDetector.setPersistentResolvedState(null);
 
-        const result = await new VoiceOverSwipeExecutor(
-          iosDevice,
-          executor,
-          fakeIosClient,
-          fakeVoiceOverDetector,
-          fakeTimer,
-        ).executeSwipeGesture({
+        const result = await new VoiceOverSwipeExecutor({
+          device: iosDevice,
+          executeGesture: executor,
+          iosClient: fakeIosClient,
+          iosVoiceOverDetector: fakeVoiceOverDetector,
+          timer: fakeTimer,
+        }).executeSwipeGesture({
           x1: 100,
           y1: 500,
           x2: 100,
@@ -379,13 +379,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setPersistentResolvedState(false);
 
-      const result = await new VoiceOverSwipeExecutor(
-        iosDevice,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      ).executeSwipeGesture({
+      const result = await new VoiceOverSwipeExecutor({
+        device: iosDevice,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      }).executeSwipeGesture({
         x1: 100,
         y1: 500,
         x2: 100,
@@ -404,13 +404,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setPersistentResolvedState(true);
 
-      const result = await new VoiceOverSwipeExecutor(
-        iosDevice,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      ).executeSwipeGesture({
+      const result = await new VoiceOverSwipeExecutor({
+        device: iosDevice,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      }).executeSwipeGesture({
         x1: 100,
         y1: 500,
         x2: 100,
@@ -431,13 +431,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       const result = await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -463,13 +463,13 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       const container = makeContainerElement({ "resource-id": "com.example:id/list" });
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       const result = await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -494,13 +494,13 @@ describe("VoiceOverSwipeExecutor", () => {
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       const container = makeContainerElement({ "content-desc": "My Scrollable List" });
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       const result = await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -542,13 +542,13 @@ describe("VoiceOverSwipeExecutor", () => {
       arrange();
       const container = makeContainerElement({ "resource-id": "com.example:id/list" });
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       const result = await voiceOverExecutor.executeSwipeGesture({
         x1: 100,
@@ -573,13 +573,13 @@ describe("VoiceOverSwipeExecutor", () => {
       const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
 
-      const voiceOverExecutor = new VoiceOverSwipeExecutor(
-        IOS_DEVICE,
-        executor,
-        fakeIosClient,
-        fakeVoiceOverDetector,
-        fakeTimer,
-      );
+      const voiceOverExecutor = new VoiceOverSwipeExecutor({
+        device: IOS_DEVICE,
+        executeGesture: executor,
+        iosClient: fakeIosClient,
+        iosVoiceOverDetector: fakeVoiceOverDetector,
+        timer: fakeTimer,
+      });
 
       const result = await voiceOverExecutor.executeSwipeGesture({
         x1: 100,

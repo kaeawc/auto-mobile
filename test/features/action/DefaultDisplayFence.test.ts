@@ -1113,17 +1113,20 @@ test("review: explicit adb search preserves the default-display dispatch fence",
   let checks = 0;
   const gesture = new ExecuteGesture(h.device, h.adb, h.timer);
   expect(
-    await gesture.swipe(50, 180, 50, 20, {
-      searchScroll: true,
-      scrollMode: "adb",
-      duration: 1,
-      searchScrollBounds: { left: 0, top: 0, right: 100, bottom: 200 },
-      displayFence: {
-        assertCurrent: () => {
-          checks++;
+    await gesture.swipe(
+      { x1: 50, y1: 180, x2: 50, y2: 20 },
+      {
+        searchScroll: true,
+        scrollMode: "adb",
+        duration: 1,
+        searchScrollBounds: { left: 0, top: 0, right: 100, bottom: 200 },
+        displayFence: {
+          assertCurrent: () => {
+            checks++;
+          },
         },
       },
-    }),
+    ),
   ).toMatchObject({ success: true });
   expect(h.inputs()).toEqual(["shell input swipe 50 180 50 30 600"]);
   expect(h.android.getDragHistory()).toEqual([]);

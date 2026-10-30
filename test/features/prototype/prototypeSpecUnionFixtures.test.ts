@@ -8,8 +8,7 @@ for (const [name, value] of unionFixtures) {
   test(`migrated ${name} satisfies the existing contract interpreter`, () => {
     const spec = {
       id: "models",
-      requires: { platform: ["test", "clipboard", "media", "map"] },
-      requires: { platform: ["test", "clipboard", "media", "cast"] },
+      requires: { platform: ["test", "clipboard", "media", "map", "cast"] },
       state: {
         enabled: true,
         text: "Text",

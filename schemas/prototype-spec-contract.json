@@ -23490,7 +23490,10 @@
               "optional": true,
               "value": {
                 "kind": "array",
-                "item": { "kind": "enum", "values": ["name", "phone", "email"] },
+                "item": {
+                  "kind": "enum",
+                  "values": ["name", "phone", "email"]
+                },
                 "min": 1,
                 "max": 3,
                 "unique": true
@@ -24505,9 +24508,7 @@
         },
         "blocked": {
           "platforms": ["android", "ios"],
-          "value": {
-            "kind": "boolean"
-          }
+          "value": { "kind": "boolean" }
         }
       }
     },
@@ -25312,13 +25313,13 @@
       "ios": "material",
       "android": "material"
     },
-    "map": {
-      "ios": "neutral",
-      "android": "neutral"
-    },
     "castButton": {
       "ios": "material",
       "android": "material"
+    },
+    "map": {
+      "ios": "neutral",
+      "android": "neutral"
     }
   },
   "stringFields": [

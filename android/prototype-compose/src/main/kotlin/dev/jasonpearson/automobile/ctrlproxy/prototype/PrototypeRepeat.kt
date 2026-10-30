@@ -744,9 +744,17 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
       )
+    is PrototypeCastButtonNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
     // Contract only (#14309): no renderer draws a map yet.
     is PrototypeMapNode ->
-    is PrototypeCastButtonNode ->
       copy(
         semantics = semantics,
         onAppear = onAppear,

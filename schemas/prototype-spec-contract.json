@@ -16,7 +16,9 @@
     "uploadContentType": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+/[!#$%&'*+.^_`|~0-9A-Za-z-]+$(?![\\s\\S])",
     "openUrl": "^(?:https?|mailto|tel|sms|geo|maps):[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
     "reservedEmail": "^[A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\\.)*(?:example\\.test|example\\.com|[A-Za-z0-9-]+\\.invalid)$(?![\\s\\S])",
-    "mediaUrl": "^https?://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])"
+    "mediaUrl": "^https?://[^\\u0000-\\u0020\\u007F-\\u009F]+$(?![\\s\\S])",
+    "decimalAmount": "^(?:0|[1-9][0-9]{0,8})(?:\\.[0-9]{1,2})?$(?![\\s\\S])",
+    "isoPeriod": "^P[1-9][0-9]{0,2}[DWMY]$(?![\\s\\S])"
   },
   "limits": {
     "MIN_PROTOTYPE_TIMER_MS": 100,
@@ -16051,6 +16053,13 @@
           },
           "optional": true
         },
+        "commerce": {
+          "rule": {
+            "kind": "ref",
+            "name": "commerceBlock"
+          },
+          "optional": true
+        },
         "location": {
           "rule": {
             "kind": "ref",
@@ -22510,6 +22519,102 @@
             }
           },
           "optional": true
+        }
+      }
+    },
+    "commerceBlock": {
+      "kind": "object",
+      "fields": {
+        "backend": {
+          "rule": {
+            "kind": "enum",
+            "values": ["fake"]
+          },
+          "optional": false
+        },
+        "products": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "commerceProduct"
+            }
+          },
+          "optional": false
+        }
+      }
+    },
+    "commerceProduct": {
+      "kind": "object",
+      "fields": {
+        "id": {
+          "rule": {
+            "kind": "string",
+            "pattern": "stateKey",
+            "max": 64
+          },
+          "optional": false
+        },
+        "title": {
+          "rule": {
+            "kind": "string",
+            "nonblank": true,
+            "max": 64
+          },
+          "optional": false
+        },
+        "kind": {
+          "rule": {
+            "kind": "enum",
+            "values": ["consumable", "nonConsumable", "subscription"]
+          },
+          "optional": false
+        },
+        "price": {
+          "rule": {
+            "kind": "ref",
+            "name": "commercePrice"
+          },
+          "optional": false
+        },
+        "period": {
+          "rule": {
+            "kind": "string",
+            "pattern": "isoPeriod",
+            "max": 8
+          },
+          "optional": true
+        },
+        "trialPeriod": {
+          "rule": {
+            "kind": "string",
+            "pattern": "isoPeriod",
+            "max": 8
+          },
+          "optional": true
+        }
+      }
+    },
+    "commercePrice": {
+      "kind": "object",
+      "fields": {
+        "amount": {
+          "rule": {
+            "kind": "string",
+            "pattern": "decimalAmount",
+            "max": 12
+          },
+          "optional": false
+        },
+        "currency": {
+          "rule": {
+            "kind": "string",
+            "pattern": "currencyCode",
+            "max": 3
+          },
+          "optional": false
         }
       }
     }

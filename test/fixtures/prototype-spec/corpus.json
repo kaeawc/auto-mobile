@@ -34,6 +34,7 @@
     "clipboard-paste.json",
     "clipboard-sensitive-copy.json",
     "color-role-and-corner-tokens.json",
+    "commerce-catalog.json",
     "component-gallery.json",
     "content-description.json",
     "content-transition-crossfade.json",
@@ -672,6 +673,19 @@
     "color-pair-missing-light.json",
     "color-pair-nested.json",
     "color-pair-unknown-key.json",
+    "commerce-catalog-amount-format.json",
+    "commerce-catalog-backend-unknown.json",
+    "commerce-catalog-currency-lowercase.json",
+    "commerce-catalog-duplicate-id.json",
+    "commerce-catalog-merchant-id.json",
+    "commerce-catalog-no-products.json",
+    "commerce-catalog-period-format.json",
+    "commerce-catalog-period-on-consumable.json",
+    "commerce-catalog-product-url.json",
+    "commerce-catalog-trial-on-non-consumable.json",
+    "commerce-catalog-undeclared-module.json",
+    "commerce-purchase-unknown-product.json",
+    "commerce-purchase-without-catalog.json",
     "condition-comparison-without-key.json",
     "condition-depth-limit.json",
     "condition-empty-all.json",
@@ -3271,6 +3285,11 @@
       "prototype_platform_secureStorage_v1",
       "prototype_platform_v1",
       "prototype_storage_v1"
+    ],
+    "commerce-catalog.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_commerce_v1",
+      "prototype_platform_v1"
     ]
   }
 }

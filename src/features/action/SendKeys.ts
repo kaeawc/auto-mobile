@@ -54,6 +54,7 @@ import { Keyboard } from "./Keyboard";
 import type { RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
+import { iosSdkWebValueTarget } from "../observe/ios/iosSdkWebMerge";
 import { type KeyboardIdentity } from "./AndroidImeCatalog";
 
 export { DefaultSendKeysCommandExecutor };
@@ -224,7 +225,7 @@ export interface SendKeysCommandExecutor {
   setTargetPasswordField?(passwordField: boolean): void;
   /** iOS: the focused field's SDK observation-bridge identity, when it is a bridge node (#5159). */
   setIosSdkTextTarget?(
-    target: import("../observe/ios/iosSdkObservationMerge").IosSdkBridgeTarget | undefined,
+    target: import("./sendkeys/IosSdkTextRouting").IosSdkTextTarget | undefined,
   ): void;
   isPasswordTarget?(): boolean;
   resetCaretState?(): void;
@@ -268,7 +269,7 @@ export interface SendKeysTargetFocuser {
       /** Layer of the resolved element, when known. */
       layer?: HierarchyLayer;
       /** iOS: the resolved element's SDK observation-bridge identity (#5159). */
-      sdkTarget?: import("../observe/ios/iosSdkObservationMerge").IosSdkBridgeTarget;
+      sdkTarget?: import("./sendkeys/IosSdkTextRouting").IosSdkTextTarget;
     }
   >;
 }
@@ -393,11 +394,15 @@ export interface SendKeysInputKey {
 }
 
 /** The focused element's SDK bridge identity, so text entry can follow it to the bridge (#5159). */
-function sdkTargetField(
+export function sdkTargetField(
   device: Pick<BootedDevice, "platform">,
   element: Record<string, unknown> | undefined,
-): { sdkTarget?: import("../observe/ios/iosSdkObservationMerge").IosSdkBridgeTarget } {
-  const sdkTarget = device.platform === "ios" && element ? iosSdkBridgeTarget(element) : null;
+): { sdkTarget?: import("./sendkeys/IosSdkTextRouting").IosSdkTextTarget } {
+  if (device.platform !== "ios" || !element) {
+    return {};
+  }
+  // A native bridge node, else a DOM input or textarea merged from an opted-in web view (#5162).
+  const sdkTarget = iosSdkBridgeTarget(element) ?? iosSdkWebValueTarget(element);
   return sdkTarget ? { sdkTarget } : {};
 }
 

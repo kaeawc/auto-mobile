@@ -138,4 +138,12 @@ describe("scrolling a web-view DOM element into view (#5162)", () => {
     const { web } = scroller([element("e1", { label: "Pay" })], { client });
     await expect(web.scroll({ text: "Pay" }, screen())).rejects.toBeInstanceOf(ActionableError);
   });
+
+  test("a disabled or hidden element is left to the swipe search, since the page will not scroll it", async () => {
+    const disabled = scroller([element("e1", { label: "Pay", enabled: false })]);
+    expect(await disabled.web.scroll({ text: "Pay" }, screen())).toBeNull();
+    const hidden = scroller([element("e1", { label: "Pay", visible: false })]);
+    expect(await hidden.web.scroll({ text: "Pay" }, screen())).toBeNull();
+    expect([...(disabled.client?.actions ?? []), ...(hidden.client?.actions ?? [])]).toEqual([]);
+  });
 });

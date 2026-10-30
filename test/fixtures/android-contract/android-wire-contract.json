@@ -9061,6 +9061,12 @@
         "hasDefault": true
       },
       {
+        "name": "commerce",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "location",
         "type": "json",
         "nullable": true,

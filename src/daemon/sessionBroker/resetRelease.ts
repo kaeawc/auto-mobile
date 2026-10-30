@@ -92,7 +92,7 @@ export class BrokerResetRelease {
       const resetDevice = async () => {
         this.setResetActive(resource.resourceId, true);
         try {
-          // Shutdown cancels queued erase work, not a started native reset.
+          // Shutdown cancels queued erase work, not a started native reset, so reset gets no signal.
           const runResetBoot: ResetBootRunner | undefined = this.options.devices
             .managesResetBootSlots
             ? async <Result>(operation: () => Promise<Result>) => {

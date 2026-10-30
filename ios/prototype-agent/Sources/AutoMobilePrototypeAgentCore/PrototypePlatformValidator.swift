@@ -132,6 +132,8 @@ enum PrototypePlatformValidator {
         var channels: [String: JSONValue] = [:]
         /// Whether the spec has a root `auth` block for `auth.*` calls (#14303).
         var hasAuth = false
+        /// The root `commerce` catalog's product ids, or nil without the block (#14314).
+        var products: Set<String>?
         /// The root `notifications` block's channel ids (#14280).
         var notificationChannels: Set<String> = []
         /// `state:` keys kept in secure storage, which an emit context may not carry (#14321).
@@ -144,6 +146,7 @@ enum PrototypePlatformValidator {
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
         requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, auth: JSONValue? = nil,
+        commerce: JSONValue? = nil,
         storage: JSONValue? = nil, location: JSONValue? = nil, sensors: JSONValue? = nil,
         notifications: JSONValue? = nil,
         media: JSONValue? = nil, root: JSONValue,
@@ -153,6 +156,7 @@ enum PrototypePlatformValidator {
     {
         try PrototypeChannels.validate(channels?.objectFields, requires: requires, state: state)
         try PrototypeAuthRules.validateBlock(auth, requires: requires)
+        try PrototypeCommerceRules.validateBlock(commerce, requires: requires)
         try PrototypeSecureStorageRules.validateBlock(storage, requires: requires, state: state)
         try PrototypeLocationRules.validateBlock(location, requires: requires)
         try PrototypeSensorRules.validateBlock(sensors, requires: requires)
@@ -161,6 +165,7 @@ enum PrototypePlatformValidator {
         var declared = try validateRequires(requires)
         declared.channels = channels?.objectFields ?? [:]
         declared.hasAuth = auth?.objectFields != nil
+        declared.products = PrototypeCommerceRules.products(commerce)
         declared.notificationChannels = PrototypeNotificationRules.channels(notifications)
         declared.secureKeys = PrototypeSecureStorageRules.secureKeys(storage)
         declared.sensors = sensors
@@ -463,6 +468,7 @@ enum PrototypePlatformValidator {
         }
         try PrototypeChannels.call(action, path: path, channels: declared.channels)
         try PrototypeAuthRules.validateCall(call, path: path, hasAuth: declared.hasAuth)
+        try PrototypeCommerceRules.validateCall(call, args: args, path: path, products: declared.products)
         try PrototypeNotificationRules.validateCall(
             call, args: args, path: path, channels: declared.notificationChannels
         )

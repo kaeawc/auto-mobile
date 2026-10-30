@@ -1335,7 +1335,8 @@ public struct AutoMobileWebSnapshot: Codable, Sendable, Equatable
   public let title: String?
   public let elements: [AutoMobileWebElement]
   public let viewport: AutoMobileWebViewport?
-  public init( snapshotId: String = UUID().uuidString, url: String? = nil, title: String? = nil, elements: [AutoMobileWebElement] = [], viewport: AutoMobileWebViewport? = nil )
+  public let documentId: String?
+  public init( snapshotId: String = UUID().uuidString, url: String? = nil, title: String? = nil, elements: [AutoMobileWebElement] = [], viewport: AutoMobileWebViewport? = nil, documentId: String? = nil )
 public struct AutoMobileWebSnapshotRequest: Codable, Equatable, Sendable
   public let webViewId: String?
   public init(webViewId: String? = nil)

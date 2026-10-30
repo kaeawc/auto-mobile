@@ -314,7 +314,8 @@ describe("typed explicit-display fences G", () => {
         });
       }
       const run = async () => {
-        const target = await prepareTargetDisplayAction(h.targetDevice, "inner", h.observe, h.adb, {
+        const target = await prepareTargetDisplayAction(h.targetDevice, "inner", h.observe, {
+          adb: h.adb,
           lastRenderedObservation: previous,
           transitions: h.transitions,
         });
@@ -359,7 +360,8 @@ describe("typed explicit-display fences G", () => {
         display: { key: "inner", generation: h.screen.display.generation },
         displayRevision: reads++ === 0 ? 41 : later,
       });
-      const prepare = prepareTargetDisplayAction(device, "inner", h.observe, h.adb, {
+      const prepare = prepareTargetDisplayAction(device, "inner", h.observe, {
+        adb: h.adb,
         lastRenderedObservation: reader,
         transitions: h.transitions,
       });
@@ -374,7 +376,8 @@ describe("typed explicit-display fences G", () => {
   test("G still requires observation of the requested panel", async () => {
     const h = harness(cases[4]);
     await expect(
-      prepareTargetDisplayAction(device, "inner", h.observe, h.adb, {
+      prepareTargetDisplayAction(device, "inner", h.observe, {
+        adb: h.adb,
         lastRenderedObservation: () => undefined,
         transitions: h.transitions,
       }),

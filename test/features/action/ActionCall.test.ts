@@ -7,8 +7,6 @@ import {
   resolveActionCallWithPerf,
   resolveDeadlineActionCall,
   resolveTapAtCall,
-  resolveTapOnCall,
-  resolveRotateCall,
 } from "../../../src/features/action/ActionCall";
 
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
@@ -27,24 +25,6 @@ describe("resolveActionCall", () => {
   });
 });
 
-describe("resolveRotateCall", () => {
-  test("maps the positional rotate tail including the orientation lock and display", () => {
-    const progress = async () => {};
-    const signal = new AbortController().signal;
-    expect(resolveRotateCall(progress, true, signal, 4)).toEqual({
-      progress,
-      lockOrientation: true,
-      signal,
-      display: 4,
-    });
-  });
-
-  test("returns the rotate call context unchanged", () => {
-    const call = { lockOrientation: false, display: 2 };
-    expect(resolveRotateCall(call)).toBe(call);
-  });
-});
-
 describe("resolveActionCallWithPerf", () => {
   test("maps the deprecated positional progress, perf and signal", () => {
     const progress = async () => {};
@@ -60,19 +40,6 @@ describe("resolveActionCallWithPerf", () => {
 });
 
 describe("tap call resolvers", () => {
-  test("tapOn maps the positional recovery and request deadline onto the call", () => {
-    const progress = async () => {};
-    const signal = new AbortController().signal;
-    const recovery = { throwOnKeyboardOcclusion: true };
-    expect(resolveTapOnCall(progress, signal, recovery, { requestDeadlineMs: 99 })).toEqual({
-      progress,
-      signal,
-      recovery,
-      deadlineMs: 99,
-    });
-    expect(resolveTapOnCall(undefined, signal).deadlineMs).toBeUndefined();
-  });
-
   test("tapAny maps the positional request deadline onto the call", () => {
     expect(resolveDeadlineActionCall(undefined, undefined, { requestDeadlineMs: 7 })).toEqual({
       progress: undefined,

@@ -21,7 +21,7 @@ import {
   type DisplayTransitionReader,
   type DisplayTransitionTracker,
 } from "../observe/DisplayTransition";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import { BaseVisualChange } from "./BaseVisualChange";
 import {
   ActionableError,
   BootedDevice,
@@ -62,7 +62,7 @@ import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctr
 import { resolveTapAccessibilityDependencies } from "./tapAccessibilityDependencies";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { type RenderedObservationReader } from "./TargetDisplayAction";
-import { resolveTapOnCall, type TapOnCall } from "./ActionCall";
+import type { TapOnCall } from "./ActionCall";
 import { tapPlatformTraits, type TapPlatformTraits } from "./strategies/tapPlatformTraits";
 
 /**
@@ -822,27 +822,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   /**
    * Execute a tap on text
    * @param options - Command options
-   * @param progress - Optional progress callback
+   * @param call - Optional progress callback, cancellation, recovery policy and deadline
    * @returns Result of the command
    */
-  async execute(options: TapOnElementOptions, call?: TapOnCall): Promise<TapOnFocusResult>;
-  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
-  async execute(
-    options: TapOnElementOptions,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    recovery?: { throwOnKeyboardOcclusion?: boolean },
-    request?: { requestDeadlineMs?: number },
-  ): Promise<TapOnFocusResult>;
-
-  async execute(
-    options: TapOnElementOptions,
-    progressOrCall?: ProgressCallback | TapOnCall,
-    signalArg?: AbortSignal,
-    recoveryArg?: { throwOnKeyboardOcclusion?: boolean },
-    requestArg?: { requestDeadlineMs?: number },
-  ): Promise<TapOnFocusResult> {
-    const call = resolveTapOnCall(progressOrCall, signalArg, recoveryArg, requestArg);
+  async execute(options: TapOnElementOptions, call: TapOnCall = {}): Promise<TapOnFocusResult> {
     return withObservationReadScope(() => this.executeWithReadScope(options, call));
   }
 

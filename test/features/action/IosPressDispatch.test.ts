@@ -148,13 +148,11 @@ for (const action of [
           action === "recentApps tool"
             ? new RecentApps(device, null, h.timer)["executeIosRecentApps"](controller.signal)
             : action === "input/key"
-              ? new InputKey(
-                  device,
-                  new FakeAdbClientFactory(),
-                  undefined,
-                  h.timer,
-                  () => client,
-                ).press("enter", 50, undefined, {
+              ? new InputKey(device, {
+                  adbFactory: new FakeAdbClientFactory(),
+                  timer: h.timer,
+                  iosClientFactory: () => client,
+                }).press("enter", 50, undefined, {
                   modifiers: [],
                   signal: controller.signal,
                   onDispatch: () => dispatchCount++,

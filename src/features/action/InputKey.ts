@@ -183,13 +183,29 @@ export class InputKey {
     );
   }
 
+  private readonly adbFactory: AdbClientFactory;
+  private readonly frameContextValidator?: FrameContextValidator;
+  private readonly timer: Timer;
+  private readonly iosClientFactory: InputKeyIosClientFactory;
+
   constructor(
     device: BootedDevice,
-    private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    private readonly frameContextValidator?: FrameContextValidator,
-    private readonly timer: Timer = defaultTimer,
-    private readonly iosClientFactory: InputKeyIosClientFactory = defaultInputKeyIosClientFactory,
+    {
+      adbFactory = defaultAdbClientFactory,
+      frameContextValidator,
+      timer = defaultTimer,
+      iosClientFactory = defaultInputKeyIosClientFactory,
+    }: {
+      adbFactory?: AdbClientFactory;
+      frameContextValidator?: FrameContextValidator;
+      timer?: Timer;
+      iosClientFactory?: InputKeyIosClientFactory;
+    } = {},
   ) {
+    this.adbFactory = adbFactory;
+    this.frameContextValidator = frameContextValidator;
+    this.timer = timer;
+    this.iosClientFactory = iosClientFactory;
     this.device = device;
     this.adb = adbFactory.create(device);
   }

@@ -222,8 +222,8 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.device,
       display,
       this.observeScreen,
-      this.adb,
       {
+        adb: this.adb,
         lastRenderedObservation: this.lastRenderedObservation,
         signal,
         transitions: this.displayTransitionReader,

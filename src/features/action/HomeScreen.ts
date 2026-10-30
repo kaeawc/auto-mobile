@@ -94,17 +94,27 @@ export class HomeScreen extends BaseVisualChange {
 
   private readonly globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
 
+  private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
+
   constructor(
     device: BootedDevice,
-    adb: AdbExecutor | null = null,
-    timer: Timer = defaultTimer,
-    private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
-    collaborators: DisplayFenceDependencies & {
-      /** Defaults to the device's real CtrlProxy client. */
-      globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+    {
+      adb = null,
+      timer = defaultTimer,
+      simctl = new SimCtlClient(device),
+      collaborators = {},
+    }: {
+      adb?: AdbExecutor | null;
+      timer?: Timer;
+      simctl?: Pick<SimCtl, "executeCommandArgs">;
+      collaborators?: DisplayFenceDependencies & {
+        /** Defaults to the device's real CtrlProxy client. */
+        globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+      };
     } = {},
   ) {
     super(device, adb, timer, undefined, collaborators);
+    this.simctl = simctl;
     this.device = device;
     this.globalActionClient = collaborators.globalActionClient;
   }

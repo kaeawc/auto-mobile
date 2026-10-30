@@ -172,7 +172,7 @@ test.each(ownerCommands)(
                   { signal: owner.signal },
                 )
               : command === ownerCommands[4]
-                ? new InputKey(device, factory, undefined, timer).press(
+                ? new InputKey(device, { adbFactory: factory, timer }).press(
                     "enter",
                     undefined,
                     undefined,

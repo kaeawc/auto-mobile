@@ -116,10 +116,10 @@ describe("shared foreground cache invalidation", () => {
       const adb = new FakeAdbExecutor();
       const action =
         name === "openLink"
-          ? new OpenURL(device, adb, null, null, timer)
+          ? new OpenURL(device, { adb, simctl: null, devicectl: null, timer })
           : name === "recentApps"
             ? new RecentApps(device, adb, timer)
-            : new HomeScreen(device, adb, timer);
+            : new HomeScreen(device, { adb, timer });
       const invalidator = wire(action);
       const execute = action.observeScreen.execute.bind(action.observeScreen);
       let postActionCaptures = 0;

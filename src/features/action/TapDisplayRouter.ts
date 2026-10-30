@@ -546,8 +546,8 @@ export class TapDisplayRouter {
           this.host.device(),
           display,
           this.host.observeScreen(),
-          this.host.adb(),
           {
+            adb: this.host.adb(),
             lastRenderedObservation: this.host.lastRenderedObservation(),
             signal,
             transitions: this.host.displayTransitionReader(),

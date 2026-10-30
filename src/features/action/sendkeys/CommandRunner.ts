@@ -311,12 +311,14 @@ export class CommandRunner {
       case "key":
         if (displayId !== undefined && !this.deps.isSemanticKey(command.key)) {
           this.deps.executor.resetCaretState?.();
-          const result = await new InputKey(this.deps.device, this.deps.adbFactory).press(
-            command.key,
-            undefined,
-            undefined,
-            { modifiers: command.modifiers, displayId, signal, onDispatch },
-          );
+          const result = await new InputKey(this.deps.device, {
+            adbFactory: this.deps.adbFactory,
+          }).press(command.key, undefined, undefined, {
+            modifiers: command.modifiers,
+            displayId,
+            signal,
+            onDispatch,
+          });
           return {
             index: -1,
             action: "key",

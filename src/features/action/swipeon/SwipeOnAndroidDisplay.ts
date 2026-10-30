@@ -857,8 +857,8 @@ export class SwipeOnAndroidDisplay {
           this.ctx().device,
           options.display,
           this.ctx().observeScreen,
-          this.ctx().adb,
           {
+            adb: this.ctx().adb,
             lastRenderedObservation: this.ctx().lastRenderedObservation,
             signal,
             transitions: this.ctx().displayTransitionReader,

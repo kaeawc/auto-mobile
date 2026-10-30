@@ -104,16 +104,21 @@ export class LaunchApp extends BaseVisualChange {
   /**
    * Create an LaunchApp instance
    * @param device - Optional device
-   * @param adb - Optional ADB executor for testing
-   * @param simctl - Optional SimCtlClient instance for testing
-   * @param timer - Optional Timer instance for testing
+   * @param options - Optional ADB executor, SimCtlClient, Timer and collaborators for testing
    */
   constructor(
     device: BootedDevice,
-    adb: AdbExecutor | null = null,
-    simctl: LaunchAppSimctl | null = null,
-    timer: Timer = defaultTimer,
-    dependencies: LaunchAppDependencies = {},
+    {
+      adb = null,
+      simctl,
+      timer = defaultTimer,
+      dependencies = {},
+    }: {
+      adb?: AdbExecutor | null;
+      simctl?: LaunchAppSimctl | null;
+      timer?: Timer;
+      dependencies?: LaunchAppDependencies;
+    } = {},
   ) {
     super(device, adb, timer);
     this.device = device;

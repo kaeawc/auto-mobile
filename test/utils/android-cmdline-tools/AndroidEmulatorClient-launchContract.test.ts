@@ -16,6 +16,10 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { PortAvailabilityChecker } from "../../../src/utils/PortManager";
+import { DefaultEmulatorPortReservations } from "../../../src/utils/android-cmdline-tools/EmulatorPortReservations";
+import { FakeEmulatorGrpcPortRegistry } from "../../fakes/FakeEmulatorGrpcPortRegistry";
+
+const grpcPortRegistry = new FakeEmulatorGrpcPortRegistry();
 
 const execResult = (stdout = ""): ExecResult => ({
   stdout,
@@ -53,6 +57,12 @@ function createClient(
     adbFactory,
     avdConfigReader: { readConfig: async () => ({ ramSizeMb: 2048 }) },
     hostPortAvailabilityChecker,
+    reservations: new DefaultEmulatorPortReservations({
+      timer: () => timer,
+      adbFactory: () => adbFactory,
+      hostPortAvailabilityChecker: () => hostPortAvailabilityChecker,
+      grpcPortRegistry,
+    }),
     posterFileSystem,
   });
   client.listAvds = async () => [{ name: avdName, platform: "android", isRunning: false }];

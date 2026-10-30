@@ -678,7 +678,10 @@ export class SocketInput {
           totalTimeoutMs,
         }) => {
           return await this.callbacks.executeSocketInputKey(
-            new InputKey(targetDevice, defaultAdbClientFactory, undefined, this.state.timer),
+            new InputKey(targetDevice, {
+              adbFactory: defaultAdbClientFactory,
+              timer: this.state.timer,
+            }),
             {
               key: args.key,
               frameContext: args.frameContext,

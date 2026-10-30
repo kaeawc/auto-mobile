@@ -24,7 +24,10 @@ const androidDevice: BootedDevice = {
 
 function iosHandlers(sender: FakeIosSdkTriggerSender) {
   const makeTelephony = (device: BootedDevice) =>
-    new Telephony(device, new FakeAdbExecutor(), undefined, () => sender);
+    new Telephony(device, {
+      adbFactoryOrExecutor: new FakeAdbExecutor(),
+      iosSdkTriggers: () => sender,
+    });
   return {
     phoneCall: createPhoneCallHandler(makeTelephony),
     sendSms: createSendSmsHandler(makeTelephony),

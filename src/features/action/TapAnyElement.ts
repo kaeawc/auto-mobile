@@ -855,17 +855,12 @@ export class TapAnyElement extends BaseVisualChange {
       const targetDisplay =
         options.display === undefined
           ? undefined
-          : await prepareTargetDisplayAction(
-              this.device,
-              options.display,
-              this.observeScreen,
-              this.adb,
-              {
-                lastRenderedObservation: this.lastRenderedObservation,
-                signal,
-                transitions: this.displayTransitionReader,
-              },
-            );
+          : await prepareTargetDisplayAction(this.device, options.display, this.observeScreen, {
+              adb: this.adb,
+              lastRenderedObservation: this.lastRenderedObservation,
+              signal,
+              transitions: this.displayTransitionReader,
+            });
       const refresh: RefreshViewHierarchy =
         targetDisplay && this.device.platform === "android"
           ? (timeoutMs, _screenSize, refreshSignal) =>

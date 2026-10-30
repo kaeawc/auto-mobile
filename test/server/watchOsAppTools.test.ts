@@ -167,7 +167,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       },
     };
     registerAppTools({
-      watchApps: (device) => new WatchAppManager(device, watchSimctl, plist, undefined, dataWipe),
+      watchApps: (device) => new WatchAppManager(device, { simctl: watchSimctl, plist, dataWipe }),
     });
     const resumed: string[] = [];
     ToolRegistry.register(

@@ -150,11 +150,16 @@ describe("tapOn cached element resolution", () => {
     screen.execute = (options) =>
       execute({ ...options, skipScreenshot: true, skipBackStack: true });
     h.tap.observeScreen = screen;
-    const launch = new LaunchApp(device, h.adb, null, h.timer, {
-      installedAppsProvider: new FakeInstalledAppsProvider(h.timer, {
-        installedApps: ["com.example.app"],
-      }),
-      targetUserDetector: new FakeTargetUserDetector(h.timer),
+    const launch = new LaunchApp(device, {
+      adb: h.adb,
+      simctl: null,
+      timer: h.timer,
+      dependencies: {
+        installedAppsProvider: new FakeInstalledAppsProvider(h.timer, {
+          installedApps: ["com.example.app"],
+        }),
+        targetUserDetector: new FakeTargetUserDetector(h.timer),
+      },
     });
     launch.observeScreen = screen;
     launch.awaitIdle = new FakeAwaitIdle();

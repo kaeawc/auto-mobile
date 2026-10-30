@@ -576,8 +576,8 @@ export class PinchOn extends BaseVisualChange {
       this.device,
       options.display!,
       this.observeScreen,
-      this.adb,
       {
+        adb: this.adb,
         lastRenderedObservation: this.lastRenderedObservation,
         signal,
         transitions: this.displayTransitionReader,

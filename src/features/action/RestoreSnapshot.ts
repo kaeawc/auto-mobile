@@ -464,7 +464,9 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     let applied = false;
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const a11yResult = await a11y.requestSettingsPut(settingsType, key, value, "string");
+      const a11yResult = await a11y.requestSettingsPut(settingsType, key, value, {
+        valueType: "string",
+      });
       if (a11yResult.success) {
         applied = true;
       }

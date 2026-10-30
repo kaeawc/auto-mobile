@@ -611,11 +611,10 @@ describe("AndroidCtrlProxyClient", function () {
     // Bind at push time the way the client binds at request time; the binding under test is
     // whatever the geometry cache currently vouches for.
     const binding = accessibilityServiceClient.screenGeometry.bind() ?? undefined;
-    accessibilityServiceClient.pushScreenshotToObservationStream(
-      base64,
-      { screenshotMimeType: "image/png", screenshotFormat: "png" },
+    accessibilityServiceClient.pushScreenshotToObservationStream(base64, {
+      metadata: { screenshotMimeType: "image/png", screenshotFormat: "png" },
       binding,
-    );
+    });
   };
 
   const setAdbPngScreenshotResponse = (screenshotBase64: string = pngFrame(1, 1)): void => {
@@ -6886,11 +6885,10 @@ describe("AndroidCtrlProxyClient", function () {
       socket.resetWrittenData();
 
       // The in-flight frame lands and is pushed with the binding taken at initiation.
-      accessibilityServiceClient.pushScreenshotToObservationStream(
-        pngFrame(1080, 2340),
-        { screenshotMimeType: "image/png", screenshotFormat: "png" },
-        boundToScreenA,
-      );
+      accessibilityServiceClient.pushScreenshotToObservationStream(pngFrame(1080, 2340), {
+        metadata: { screenshotMimeType: "image/png", screenshotFormat: "png" },
+        binding: boundToScreenA,
+      });
 
       const updates = await getScreenshotUpdates(socket);
       expect(updates).toHaveLength(1);

@@ -139,7 +139,7 @@ describe("UnixSocketServer input/gesture*", () => {
     });
 
     expect(move.success).toBe(true);
-    expect(requestGestureMove).toHaveBeenCalledWith("g1", 100.5, 400, 1234);
+    expect(requestGestureMove).toHaveBeenCalledWith("g1", 100.5, 400, { timeoutMs: 1234 });
 
     expect(end.success).toBe(true);
     expect(end.result).toMatchObject({
@@ -147,7 +147,10 @@ describe("UnixSocketServer input/gesture*", () => {
       gestureId: "g1",
       cancel: false,
     });
-    expect(requestGestureEnd).toHaveBeenCalledWith("g1", 100.5, 500, false, { timeoutMs: 1234 });
+    expect(requestGestureEnd).toHaveBeenCalledWith("g1", 100.5, 500, {
+      cancel: false,
+      timeoutMs: 1234,
+    });
   });
 
   test("cancels a still-open gesture when its owning socket disconnects mid-drag", async () => {
@@ -171,7 +174,7 @@ describe("UnixSocketServer input/gesture*", () => {
     // stroke with no duration ceiling, so the daemon must lift it with a cancelling end on close.
     conn.close();
     await waitUntil(() => requestGestureEnd.mock.calls.length > 0);
-    expect(requestGestureEnd).toHaveBeenCalledWith("g9", 0, 0, true, { timeoutMs: 5000 });
+    expect(requestGestureEnd).toHaveBeenCalledWith("g9", 0, 0, { cancel: true, timeoutMs: 5000 });
   });
 
   test("does not cancel a gesture that was already ended before the socket closed", async () => {
@@ -201,7 +204,10 @@ describe("UnixSocketServer input/gesture*", () => {
 
     // Exactly the one real end frame — no synthetic cancel, because the gesture was already closed.
     expect(requestGestureEnd).toHaveBeenCalledTimes(1);
-    expect(requestGestureEnd).toHaveBeenCalledWith("g10", 3, 4, false, { timeoutMs: 30_000 });
+    expect(requestGestureEnd).toHaveBeenCalledWith("g10", 3, 4, {
+      cancel: false,
+      timeoutMs: 30_000,
+    });
   });
 
   test("carries the cancel flag through on end", async () => {
@@ -221,7 +227,10 @@ describe("UnixSocketServer input/gesture*", () => {
 
     expect(end.success).toBe(true);
     expect(end.result).toMatchObject({ cancel: true });
-    expect(requestGestureEnd).toHaveBeenCalledWith("g2", 10, 20, true, { timeoutMs: 30_000 });
+    expect(requestGestureEnd).toHaveBeenCalledWith("g2", 10, 20, {
+      cancel: true,
+      timeoutMs: 30_000,
+    });
   });
 
   test("rejects iOS: streaming gestures are Android-only", async () => {

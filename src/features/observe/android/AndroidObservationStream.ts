@@ -34,10 +34,12 @@ export interface AndroidObservationStreamContext {
   startScreenshotBackoff(): void;
   pushScreenshotToObservationStream(
     screenshotBase64: string,
-    metadata?: ScreenshotMetadata,
-    binding?: ScreenGeometryBinding,
-    frameContext?: string,
-    rotation?: number,
+    options?: {
+      metadata?: ScreenshotMetadata;
+      binding?: ScreenGeometryBinding;
+      frameContext?: string;
+      rotation?: number;
+    },
   ): void;
   createScreenshotBackoffScheduler(
     capture: () => Promise<ScreenshotCaptureResult>,
@@ -137,10 +139,17 @@ export class AndroidObservationStream {
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   pushScreenshotToObservationStream(
     screenshotBase64: string,
-    metadata: ScreenshotMetadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
-    binding?: ScreenGeometryBinding,
-    frameContext?: string,
-    rotation?: number,
+    {
+      metadata = ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
+      binding,
+      frameContext,
+      rotation,
+    }: {
+      metadata?: ScreenshotMetadata;
+      binding?: ScreenGeometryBinding;
+      frameContext?: string;
+      rotation?: number;
+    } = {},
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
@@ -252,13 +261,12 @@ export class AndroidObservationStream {
 
   private emitBackoffScreenshot(result: ScreenshotCaptureResult): void {
     if (result.data) {
-      this.context.pushScreenshotToObservationStream(
-        result.data,
-        result,
-        result.captureBinding,
-        result.frameContext,
-        result.rotation,
-      );
+      this.context.pushScreenshotToObservationStream(result.data, {
+        metadata: result,
+        binding: result.captureBinding,
+        frameContext: result.frameContext,
+        rotation: result.rotation,
+      });
     }
   }
 

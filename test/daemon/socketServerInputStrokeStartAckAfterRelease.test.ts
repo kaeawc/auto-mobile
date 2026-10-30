@@ -116,7 +116,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
         strokes.push("move");
         return { success: true, totalTimeMs: 0 };
       },
-      requestGestureEnd: async (_id, _x, _y, cancel) => {
+      requestGestureEnd: async (_id, _x, _y, { cancel } = {}) => {
         strokes.push(cancel === true ? "cancel" : "end");
         return { success: true, totalTimeMs: 0 };
       },

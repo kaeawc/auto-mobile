@@ -83,10 +83,12 @@ describe("CtrlProxyHierarchy requestHierarchySync single flight", () => {
     const h = await createHarness();
     const firstDiagnostics: HierarchySyncDiagnostics = {};
     const secondDiagnostics: HierarchySyncDiagnostics = {};
-    const first = h.hierarchy.requestHierarchySync(undefined, false, undefined, 10000, {
+    const first = h.hierarchy.requestHierarchySync(undefined, false, undefined, {
+      timeoutMs: 10000,
       diagnostics: firstDiagnostics,
     });
-    const second = h.hierarchy.requestHierarchySync(undefined, false, undefined, 10000, {
+    const second = h.hierarchy.requestHierarchySync(undefined, false, undefined, {
+      timeoutMs: 10000,
       diagnostics: secondDiagnostics,
     });
     await drain();

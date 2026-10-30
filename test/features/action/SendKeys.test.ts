@@ -4760,8 +4760,11 @@ describe("SendKeys Android non-idempotent outcomes", () => {
             return { success: true, caretPlaced: false };
           }
           attempts.push(value);
-          const pending = text.requestInsertText(value, 5000, undefined, undefined, {
-            abortSignal: options?.abortSignal,
+          const pending = text.requestInsertText(value, {
+            timeoutMs: 5000,
+            transport: {
+              abortSignal: options?.abortSignal,
+            },
           });
           await Promise.resolve();
           if (failure === "timeout") {
@@ -5021,8 +5024,11 @@ describe("Android insertion stops mixed typing after an unconfirmed suffix or ru
       let attempts = 0;
       h.client.insert = async (inserted, options) => {
         attempts++;
-        const pending = text.requestInsertText(inserted, 5000, undefined, undefined, {
-          abortSignal: options?.abortSignal,
+        const pending = text.requestInsertText(inserted, {
+          timeoutMs: 5000,
+          transport: {
+            abortSignal: options?.abortSignal,
+          },
         });
         await Promise.resolve();
         if (failure === "abort") {

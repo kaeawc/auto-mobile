@@ -17,6 +17,7 @@ import type { SetTextOptions } from "../DeviceService";
 import type { TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
 import type {
   AndroidAccessibilityActionRequest,
+  AndroidActionRequestOptions,
   AndroidActivateAccessibilityLinkRequest,
 } from "./AndroidActionDispatcher";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
@@ -131,8 +132,7 @@ export interface AndroidCtrlProxy
     waitForFresh?: boolean,
     timeout?: number,
     perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    options?: LatestHierarchyOptions,
+    options?: LatestHierarchyOptions & { skipWaitForFresh?: boolean },
   ): Promise<AccessibilityHierarchyResponse>;
 
   requestHierarchySync(
@@ -176,22 +176,23 @@ export interface AndroidCtrlProxy
 
   requestInsertText(
     text: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: {
-      expectedSuffix?: string;
-      acceptsCaretNotPlaced?: boolean;
-      precedingState?: InsertTextState;
+    opts?: {
+      timeoutMs?: number;
+      perf?: PerformanceTracker;
+      options?: {
+        expectedSuffix?: string;
+        acceptsCaretNotPlaced?: boolean;
+        precedingState?: InsertTextState;
+      };
+      transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">;
     },
-    transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
   ): Promise<A11ySetTextResult>;
 
   commitViaIme(
     text: string,
     priorImeId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: ImeCommitOptions,
+    options?: ImeCommitOptions & { perf?: PerformanceTracker },
   ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
@@ -230,7 +231,7 @@ export interface AndroidCtrlProxy
     action: string,
     resourceId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
+    options?: AndroidActionRequestOptions & { perf?: PerformanceTracker },
   ): Promise<A11yActionResult>;
 
   requestClickFocusedInput(
@@ -242,9 +243,7 @@ export interface AndroidCtrlProxy
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    options?: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal },
   ): Promise<A11yActionResult>;
 
   supportsNodeActionSelectors(perf?: PerformanceTracker, signal?: AbortSignal): Promise<boolean>;
@@ -271,17 +270,14 @@ export interface AndroidCtrlProxy
   requestSettingsGet(
     namespace: SettingsNamespace,
     key: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    options?: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal },
   ): Promise<A11ySettingsGetResult>;
 
   requestSettingsPut(
     namespace: SettingsNamespace,
     key: string,
     value: string | null,
-    valueType?: SettingsValueType,
-    options?: AndroidSettingsPutOptions,
+    options?: AndroidSettingsPutOptions & { valueType?: SettingsValueType },
   ): Promise<A11ySettingsPutResult>;
 
   requestSettingsList(

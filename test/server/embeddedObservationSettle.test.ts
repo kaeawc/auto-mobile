@@ -458,7 +458,11 @@ function deviceLikeObserveScreen(h: Awaited<ReturnType<typeof deviceLikeAndroidH
       hierarchyCapture: createDeviceHierarchyCapture(h.device, {
         timer: h.timer,
         syncClientFactory: () => ({
-          requestHierarchySync: (...args) => h.hierarchy.requestHierarchySync(...args),
+          requestHierarchySync: (perf, disableAllFiltering, signal, timeoutMs, options) =>
+            h.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, {
+              timeoutMs,
+              ...options,
+            }),
           convertToViewHierarchyResult: (value) =>
             h.hierarchy.convertToViewHierarchyResult(value as AccessibilityHierarchy),
         }),

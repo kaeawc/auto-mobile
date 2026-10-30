@@ -63,9 +63,11 @@ async function harness() {
   const advertise = (commands: string[]) =>
     receive({ type: "connected", supportedCommands: commands });
   const waitForHierarchy = (requestId: string) =>
-    client["hierarchy"]["waitForFreshData"](500, timer.now(), false, undefined, {
-      requestId,
-      allowStaleResponse: true,
+    client["hierarchy"]["waitForFreshData"](500, timer.now(), false, {
+      options: {
+        requestId,
+        allowStaleResponse: true,
+      },
     });
   const pushHierarchy = (label: string, requestId?: string) => {
     const data: AccessibilityHierarchy = {

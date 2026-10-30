@@ -106,7 +106,8 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
         return startAck ? await startAck.promise : { success: true, totalTimeMs: 0 };
       },
       requestGestureMove: () => stroke("move"),
-      requestGestureEnd: (_id, _x, _y, cancel) => stroke(cancel === true ? "cancel" : "end"),
+      requestGestureEnd: (_id, _x, _y, { cancel } = {}) =>
+        stroke(cancel === true ? "cancel" : "end"),
     });
     const serverState: DaemonStateAccess = {
       ...createFakeDaemonState(),

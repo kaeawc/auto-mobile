@@ -113,7 +113,12 @@ export function createDirectFrameRig(
         called("move");
         return { success: true, totalTimeMs: 0 };
       },
-      requestGestureEnd: async (_id: string, _x: number, _y: number, cancel?: boolean) => {
+      requestGestureEnd: async (
+        _id: string,
+        _x: number,
+        _y: number,
+        { cancel }: { cancel?: boolean } = {},
+      ) => {
         called(cancel === true ? "cancel" : "end");
         return { totalTimeMs: 0, ...((await client.requestGestureEnd?.()) ?? { success: true }) };
       },

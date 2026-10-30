@@ -220,8 +220,14 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
 
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const stroke =
-      (kind: string) => async (_id: string, _x: number, _y: number, last?: unknown) => {
-        strokes.push(kind === "end" && last === true ? "cancel" : kind);
+      (kind: string) =>
+      async (
+        _id: string,
+        _x: number,
+        _y: number,
+        last?: { cancel?: boolean; timeoutMs?: number },
+      ) => {
+        strokes.push(kind === "end" && last?.cancel === true ? "cancel" : kind);
         return { success: true, totalTimeMs: 0 };
       };
     spyOnAndroidClientInstance(androidDevice, {

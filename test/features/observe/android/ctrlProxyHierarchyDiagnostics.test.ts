@@ -34,7 +34,8 @@ async function harness() {
   const hierarchy = new CtrlProxyHierarchy(context);
   const diagnostics: HierarchySyncDiagnostics = {};
   const request = (signal?: AbortSignal, details = diagnostics) =>
-    hierarchy.requestHierarchySync(undefined, false, signal, 250, {
+    hierarchy.requestHierarchySync(undefined, false, signal, {
+      timeoutMs: 250,
       diagnostics: details,
       displayId: 2,
     });

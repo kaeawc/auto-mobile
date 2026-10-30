@@ -147,7 +147,7 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
     waitForFresh?: boolean,
     timeout?: number,
     _perf?: unknown,
-    skipWaitForFresh?: boolean,
+    { skipWaitForFresh }: { skipWaitForFresh?: boolean } = {},
   ): Promise<AccessibilityHierarchyResponse> {
     this.latestHierarchyCalls.push({ waitForFresh, timeout, skipWaitForFresh });
     return {

@@ -154,7 +154,7 @@ const methods = [
   {
     operation: "get",
     invoke: (client: AndroidCtrlProxyClient, signal?: AbortSignal) =>
-      client.requestSettingsGet("secure", "key", 50, perf, signal),
+      client.requestSettingsGet("secure", "key", { timeoutMs: 50, perf, signal }),
     oldFrame: (requestId: string) =>
       serializeCtrlProxyRequest(
         ctrlProxyRequests.requestSettingsGet({ requestId, namespace: "secure", key: "key" }),
@@ -166,7 +166,12 @@ const methods = [
   {
     operation: "put",
     invoke: (client: AndroidCtrlProxyClient, signal?: AbortSignal) =>
-      client.requestSettingsPut("secure", "key", null, "string", { timeoutMs: 50, perf, signal }),
+      client.requestSettingsPut("secure", "key", null, {
+        valueType: "string",
+        timeoutMs: 50,
+        perf,
+        signal,
+      }),
     oldFrame: (requestId: string) =>
       serializeCtrlProxyRequest(
         ctrlProxyRequests.requestSettingsPut({

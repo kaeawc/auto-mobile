@@ -785,13 +785,10 @@ export class AndroidCtrlProxyClient
     if (remaining <= 0) {
       throw new ObserverPendingRequestTimeoutError();
     }
-    return this.hierarchy.requestHierarchySyncForObserver(
-      perf,
-      disableAllFiltering,
-      signal,
-      remaining,
+    return this.hierarchy.requestHierarchySyncForObserver(perf, disableAllFiltering, signal, {
+      timeoutMs: remaining,
       display,
-    );
+    });
   }
 
   async subscribeStorage(

@@ -243,8 +243,10 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     gestureId: string,
     x: number,
     y: number,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    {
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+    }: { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11ySwipeResult> {
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_move",
@@ -265,8 +267,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     gestureId: string,
     x: number,
     y: number,
-    cancel: boolean = false,
-    options: GestureEndOptions = {},
+    { cancel = false, ...options }: GestureEndOptions & { cancel?: boolean } = {},
   ): Promise<A11ySwipeResult> {
     const { timeoutMs = 5000, perf = new NoOpPerformanceTracker() } = options;
     return sendCommand<A11ySwipeResult>(this.context, {

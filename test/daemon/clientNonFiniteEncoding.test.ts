@@ -20,7 +20,8 @@ function createCapturingSocket(writes: string[]): Duplex {
 }
 
 function createConnectedClient(fakeTimer: FakeTimer, writes: string[]): DaemonClient {
-  const client = new DaemonClient("/fake/socket", 1000, fakeTimer, ISOLATED_DAEMON_RECOVERY, null, {
+  const client = new DaemonClient("/fake/socket", 1000, fakeTimer, ISOLATED_DAEMON_RECOVERY, {
+    clientIdentity: null,
     idGenerator: new CountingIdGenerator("req"),
   });
   client.testHooks.attachSocket(createCapturingSocket(writes));

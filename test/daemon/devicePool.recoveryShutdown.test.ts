@@ -396,7 +396,9 @@ test("restart recovery remains pending after 60 seconds and recovers at 120 seco
   const { timer, sessions, manager, pool } = await setupPassiveRestart();
   sessions.stopCleanupTimer();
   let settled = false;
-  const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+  const resume = sessions.getOrCreateSession("session", pool, "android", {
+    requireIssuedSession: true,
+  });
   void resume.then(
     () => {
       settled = true;
@@ -440,12 +442,14 @@ test.each(["not-attempted", "exhausted"] as const)(
       recoveryPolicy: { onLoss: true, maxAttempts: 2 },
     });
     let failure: unknown;
-    const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true).then(
-      () => {},
-      (error: unknown) => {
-        failure = error;
-      },
-    );
+    const resume = sessions
+      .getOrCreateSession("session", pool, "android", { requireIssuedSession: true })
+      .then(
+        () => {},
+        (error: unknown) => {
+          failure = error;
+        },
+      );
     await flush();
     // The handoff hold outlives this caller; its three-minute expiry is still armed.
     expect(timer.getPendingTimeouts()).toEqual([180_000, 1_000]);
@@ -485,7 +489,9 @@ test("restart assignment keeps waiting while the loss incident has no recovery o
     },
   });
   let settled = false;
-  const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+  const resume = sessions.getOrCreateSession("session", pool, "android", {
+    requireIssuedSession: true,
+  });
   void resume.then(() => {
     settled = true;
   });
@@ -513,7 +519,8 @@ test.each([
     sessions.stopCleanupTimer();
     try {
       const acquire = (requestDeadlineMs: number | undefined) =>
-        sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+        sessions.getOrCreateSession("session", pool, "android", {
+          requireIssuedSession: true,
           requestDeadlineMs,
         });
       let firstResult: unknown;
@@ -580,7 +587,10 @@ test("last joined restart waiter aborts slow discovery and fences its late devic
   manager.getBootedDevicesDetailed = () => discovery.promise;
   const acquire = (requestDeadlineMs: number) =>
     sessions
-      .getOrCreateSession("session", pool, "android", undefined, true, { requestDeadlineMs })
+      .getOrCreateSession("session", pool, "android", {
+        requireIssuedSession: true,
+        requestDeadlineMs,
+      })
       .then(
         () => undefined,
         (error: unknown) => error,
@@ -626,7 +636,8 @@ test.each([
     timer.simulateSleepCountingMonotonicClock();
     timer.stepWallClock(stepMs);
     const acquisition = sessions
-      .getOrCreateSession("session", pool, "android", undefined, true, {
+      .getOrCreateSession("session", pool, "android", {
+        requireIssuedSession: true,
         requestDeadlineMs: timer.now() + 3_500,
       })
       .then(
@@ -682,7 +693,8 @@ test.each([
     >;
     const acquire = (deadline: number | undefined) =>
       sessions
-        .getOrCreateSession("session", pool, "android", undefined, true, {
+        .getOrCreateSession("session", pool, "android", {
+          requireIssuedSession: true,
           requestDeadlineMs: deadline,
         })
         .then(
@@ -747,7 +759,8 @@ test.each(["deadline", "abort"] as const)(
     try {
       const acquire = (requestDeadlineMs: number | undefined, signal?: AbortSignal) =>
         sessions
-          .getOrCreateSession("session", pool, "android", undefined, true, {
+          .getOrCreateSession("session", pool, "android", {
+            requireIssuedSession: true,
             requestDeadlineMs,
             signal,
           })
@@ -826,15 +839,17 @@ test("restart assignment waits until a recorded outcome's cleanup is settled", a
   await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured);
   await incidents.completeRecovery(incidentId, "exhausted", { sessionState: "awaiting-device" });
   let settled = false;
-  const assignment = sessions.getOrCreateSession("session", pool, "android", undefined, true).then(
-    () => {
-      settled = true;
-    },
-    (error: unknown) => {
-      settled = true;
-      return error;
-    },
-  );
+  const assignment = sessions
+    .getOrCreateSession("session", pool, "android", { requireIssuedSession: true })
+    .then(
+      () => {
+        settled = true;
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
   await drainUntilQuiescent(timer);
   timer.advanceTime(1_000);
   await drainUntilQuiescent(timer);
@@ -852,7 +867,8 @@ test("restart assignment bounds slow discovery and fences its late device claim"
   const originalDiscovery = manager.getBootedDevicesDetailed.bind(manager);
   manager.getBootedDevicesDetailed = () => discovery.promise;
   const assignment = sessions
-    .getOrCreateSession("session", pool, "android", undefined, true, {
+    .getOrCreateSession("session", pool, "android", {
+      requireIssuedSession: true,
       requestDeadlineMs: 2_500,
     })
     .then(

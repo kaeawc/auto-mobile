@@ -146,7 +146,7 @@ describe("idle release ignores in-flight reads (#11381)", () => {
       const arriving = startCall("tapOn");
       const execution = { executionId: arriving.id, startTime: arriving.startTime };
       const refusal = await manager
-        .getOrCreateSession(SESSION, undefined, undefined, execution)
+        .getOrCreateSession(SESSION, undefined, undefined, { execution })
         .then(
           () => undefined,
           (error: unknown) => error,

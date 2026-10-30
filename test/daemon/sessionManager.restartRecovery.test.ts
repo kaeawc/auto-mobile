@@ -106,7 +106,9 @@ describe("SessionManager", () => {
     };
 
     await expect(
-      restarted.getOrCreateSession("restarted-ios-session", devicePool, "ios", undefined, true),
+      restarted.getOrCreateSession("restarted-ios-session", devicePool, "ios", {
+        requireIssuedSession: true,
+      }),
     ).resolves.toMatchObject({
       assignedDevice: "simulator-uuid",
       stableDeviceId: "simulator-uuid",
@@ -169,13 +171,9 @@ describe("SessionManager", () => {
     };
 
     await expect(
-      restarted.getOrCreateSession(
-        "restarted-android-session",
-        devicePool,
-        "android",
-        undefined,
-        true,
-      ),
+      restarted.getOrCreateSession("restarted-android-session", devicePool, "android", {
+        requireIssuedSession: true,
+      }),
     ).resolves.toMatchObject({
       assignedDevice: "emulator-5560",
       stableDeviceId: "Pixel_8_API_35",
@@ -471,13 +469,9 @@ describe("SessionManager", () => {
       },
     };
     try {
-      const recovery = restarted.getOrCreateSession(
-        "slow-owner-recovery",
-        devicePool,
-        "android",
-        undefined,
-        true,
-      );
+      const recovery = restarted.getOrCreateSession("slow-owner-recovery", devicePool, "android", {
+        requireIssuedSession: true,
+      });
       await sessionCreated.promise;
       // The persisted owner's lease must lapse or the reconnect claim is rejected (#10050).
       fakeTimer.advanceTime(persisted.heartbeat_timeout_ms + SUSPECT_GRACE_MS + 1);
@@ -814,7 +808,10 @@ describe("restart recovery idle window counts control calls only (#11281)", () =
         }),
     };
     void manager
-      .getOrCreateSession(SESSION, pool, "android", undefined, true, "read-only")
+      .getOrCreateSession(SESSION, pool, "android", {
+        requireIssuedSession: true,
+        access: "read-only",
+      })
       .catch(() => {});
     await settle();
     return { timer, persistence, manager, tracker, failRecovery };

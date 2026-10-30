@@ -159,8 +159,10 @@ async function startVideoRecordingSessionHeartbeat(
     defaultTimer,
     {},
     {
-      version: DAEMON_VERSION,
-      build: computeBuildIdentity(LOCAL_CLI_ENTRYPOINT),
+      clientIdentity: {
+        version: DAEMON_VERSION,
+        build: computeBuildIdentity(LOCAL_CLI_ENTRYPOINT),
+      },
     },
   );
   await client.connect();

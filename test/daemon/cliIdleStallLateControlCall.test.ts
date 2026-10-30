@@ -62,8 +62,10 @@ describe("a control call on a cli-idle session inside its stall-forgiven idle wi
   const controlCallNow = () =>
     sessionManager
       .getOrCreateSession(SESSION, undefined, undefined, {
-        executionId: "cli-call-after-stall",
-        startTime: timer.now(),
+        execution: {
+          executionId: "cli-call-after-stall",
+          startTime: timer.now(),
+        },
       })
       .then(
         (session) => `admitted ${session.sessionId}`,

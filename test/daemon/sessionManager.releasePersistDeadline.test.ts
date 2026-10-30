@@ -116,13 +116,9 @@ type Harness = Awaited<ReturnType<typeof harness>>;
 /** The heartbeat monitor's reap: a terminal release followed by the pool release. */
 function reap(h: Harness): { done: Promise<void>; settled: () => boolean } {
   let settled = false;
-  const done = releaseSessionAndDevice(
-    h.manager,
-    h.pool,
-    device.deviceId,
-    "old",
-    "heartbeat-timeout",
-  ).finally(() => {
+  const done = releaseSessionAndDevice(h.manager, h.pool, device.deviceId, "old", {
+    reason: "heartbeat-timeout",
+  }).finally(() => {
     settled = true;
   });
   return { done, settled: () => settled };
@@ -261,7 +257,9 @@ describe("a release whose DB write never settles is bounded by a deadline (#1083
       gate.resolve();
       await flush();
       h.persistence.park = undefined;
-      await releaseSessionAndDevice(h.manager, h.pool, device.deviceId, "old", "heartbeat-timeout");
+      await releaseSessionAndDevice(h.manager, h.pool, device.deviceId, "old", {
+        reason: "heartbeat-timeout",
+      });
       await flush();
 
       expect(h.pool.getDevice(device.deviceId)?.sessionId).toBe("next");
@@ -306,7 +304,7 @@ describe("a terminal release write that times out and then fails is retried (#10
       TerminalSessionError,
     );
     await expect(
-      restarted.getOrCreateSession("old", h.pool, "android", undefined, true),
+      restarted.getOrCreateSession("old", h.pool, "android", { requireIssuedSession: true }),
     ).rejects.toBeInstanceOf(TerminalSessionError);
   }
 
@@ -436,7 +434,7 @@ describe("a crash while a terminal release write is parked does not revive the U
         TerminalSessionError,
       );
       await expect(
-        restarted.getOrCreateSession("old", h.pool, "android", undefined, true),
+        restarted.getOrCreateSession("old", h.pool, "android", { requireIssuedSession: true }),
       ).rejects.toBeInstanceOf(TerminalSessionError);
       expect(h.pool.getDevice(device.deviceId)?.sessionId).toBeNull();
 

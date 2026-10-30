@@ -112,7 +112,7 @@ describe("a session waiting in flight for its restarting device", () => {
       );
     const holderCall = record(
       HOLDER,
-      sessions.getOrCreateSession(HOLDER, pool, "ios", undefined, true),
+      sessions.getOrCreateSession(HOLDER, pool, "ios", { requireIssuedSession: true }),
     );
     await drainUntil(() => timer.getPendingTimeouts().includes(1_000), {
       description: "holder's first restart retry",

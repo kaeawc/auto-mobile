@@ -240,14 +240,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
             { access: "read-only" },
           ),
         () =>
-          sessionManager.getOrCreateSession(
-            SESSION,
-            undefined,
-            undefined,
-            undefined,
-            false,
-            "read-only",
-          ),
+          sessionManager.getOrCreateSession(SESSION, undefined, undefined, { access: "read-only" }),
       ]) {
         expect(await admitRead()).toMatchObject({ sessionId: SESSION, assignedDevice: DEVICE });
       }

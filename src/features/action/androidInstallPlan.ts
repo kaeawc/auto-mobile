@@ -131,8 +131,7 @@ async function bundletoolPlan(
   artifactPath: string,
   route: "apk-set" | "bundle",
   request: AndroidInstallRequest,
-  deps: AndroidInstallPlanDependencies,
-  signal?: AbortSignal,
+  { deps, signal }: { deps: AndroidInstallPlanDependencies; signal?: AbortSignal },
 ): Promise<BundletoolInstallPlan> {
   const { artifactHost: host, bundletool } = deps;
   await bundletool.resolve(route === "bundle" ? ".aab" : ".apks");
@@ -183,13 +182,10 @@ export async function resolveAndroidInstallPlan(
     return adbPlan(splits.length > 0 ? "split-apks" : "apk", [artifactPath, ...splits], request);
   }
   if (ext === ".apks" || ext === ".aab") {
-    return bundletoolPlan(
-      artifactPath,
-      ext === ".aab" ? "bundle" : "apk-set",
-      request,
+    return bundletoolPlan(artifactPath, ext === ".aab" ? "bundle" : "apk-set", request, {
       deps,
       signal,
-    );
+    });
   }
   if (await deps.artifactHost.isDirectory(artifactPath)) {
     return splitDirectoryPlan(artifactPath, request, deps.artifactHost);

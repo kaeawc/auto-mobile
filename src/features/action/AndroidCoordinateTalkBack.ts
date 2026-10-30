@@ -65,12 +65,17 @@ export class AndroidCoordinateTalkBack {
     options: TapAtOptions,
     point: { x: number; y: number },
     frameContext: string | undefined,
-    signal: AbortSignal | undefined,
-    context: {
-      assertCurrent: () => void;
-      onTapDelivered: () => void;
-      onDispatched?: () => void;
-      onActivationWarnings?: (warnings?: string[]) => void;
+    {
+      signal,
+      context,
+    }: {
+      signal?: AbortSignal;
+      context: {
+        assertCurrent: () => void;
+        onTapDelivered: () => void;
+        onDispatched?: () => void;
+        onActivationWarnings?: (warnings?: string[]) => void;
+      };
     },
   ): Promise<void> {
     const fence: DisplayFence = {

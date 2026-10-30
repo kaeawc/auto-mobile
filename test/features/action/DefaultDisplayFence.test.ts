@@ -1018,14 +1018,14 @@ describe("display fence options preserve public call shapes", () => {
                     "tap",
                     { x: 50, y: 70 },
                     50,
-                    element,
-                    { isTalkBackEnabled: false },
+                    { element, isTalkBackEnabled: false },
                     [],
                   ])
               : shape === "legacy"
-                ? () => tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element)
+                ? () => tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, { element })
                 : () =>
-                    tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element, {
+                    tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, {
+                      element,
                       options: { action: "tap", ...options },
                       isTalkBackEnabled: false,
                     });
@@ -1035,8 +1035,8 @@ describe("display fence options preserve public call shapes", () => {
             hash,
             { x: 50, y: 70 },
             "tap",
-            50,
             {
+              longPressDuration: 50,
               tapElement: element,
               options: { action: "tap", ...options },
               isTalkBackEnabled: false,

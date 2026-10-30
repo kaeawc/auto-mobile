@@ -131,8 +131,8 @@ export class TapGestureDispatcher {
     action: string,
     point: Point,
     durationMs: number,
-    element: Element,
     {
+      element,
       signal,
       options,
       isTalkBackEnabled,
@@ -140,7 +140,7 @@ export class TapGestureDispatcher {
       signal?: AbortSignal;
       options?: TapOnElementOptions & ResolvedAndroidTapOptions;
       isTalkBackEnabled?: boolean;
-    } = {},
+    } & { element: Element },
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const { x, y } = point;
     const { displayFence: fence, resolvedHierarchy, onActivationWarning } = options ?? {};
@@ -299,11 +299,15 @@ export class TapGestureDispatcher {
       ) {
         return;
       }
-      await this.host.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, {
-        displayFence: fence,
+      await this.host.dispatchCoordinateTapOrAdbFallback(x, y, element, {
+        signal,
+        fenceOptions: {
+          displayFence: fence,
+        },
       });
     } else if (action === "longPress") {
-      await this.host.executeAndroidLongPress(x, y, durationMs, element, {
+      await this.host.executeAndroidLongPress(x, y, durationMs, {
+        element,
         signal,
         skipSemanticAction,
         ...fenceOptions,
@@ -318,8 +322,11 @@ export class TapGestureDispatcher {
         assertCurrent: () => fence?.assertCurrent(),
         onWarning: fenceOptions.onActivationWarning,
         tap: () =>
-          this.host.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, {
-            displayFence: fence,
+          this.host.dispatchCoordinateTapOrAdbFallback(x, y, element, {
+            signal,
+            fenceOptions: {
+              displayFence: fence,
+            },
           }),
       });
     }
@@ -363,8 +370,7 @@ export class TapGestureDispatcher {
     x: number,
     y: number,
     element: Element,
-    signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption = {},
+    { signal, fenceOptions = {} }: { signal?: AbortSignal; fenceOptions?: DisplayFenceOption } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     throwIfAborted(signal);
@@ -376,8 +382,7 @@ export class TapGestureDispatcher {
         this.host.accessibilityService(),
         this.host.adb(),
         { x, y },
-        10,
-        { signal },
+        { durationMs: 10, options: { signal } },
       );
       return;
     }
@@ -472,8 +477,8 @@ export class TapGestureDispatcher {
     preTapHash: string | null,
     tapPoint: { x: number; y: number },
     action: string,
-    longPressDuration: number,
     {
+      longPressDuration,
       tapElement,
       options,
       isTalkBackEnabled,
@@ -487,7 +492,7 @@ export class TapGestureDispatcher {
       screenSize: ObserveResult["screenSize"];
       signal?: AbortSignal;
       selection?: ElementSelectionResult;
-    },
+    } & { longPressDuration: number },
   ): Promise<void> {
     const probe = await checkAndroidTapHierarchyChange(
       this.host.timer(),
@@ -497,8 +502,7 @@ export class TapGestureDispatcher {
         signal,
       }),
       (hierarchy) => this.host.hashViewHierarchy(hierarchy),
-      preTapHash,
-      signal,
+      { preTapHash, signal },
     );
 
     if (probe.status === "unavailable") {
@@ -543,9 +547,7 @@ export class TapGestureDispatcher {
         ? refreshedSelection
         : (selection ?? { ...refreshedSelection, element: retryTarget }),
       probe.hierarchy,
-      retryScreenSize,
-      retryOptions,
-      retryTarget,
+      { screenSize: retryScreenSize, options: retryOptions, tapTarget: retryTarget },
     );
     if (!retryBounds) {
       logger.warn(
@@ -576,7 +578,8 @@ export class TapGestureDispatcher {
       await options.verification.dispatch(retryPoint);
       return;
     }
-    await this.host.executeAndroidTap(action, retryPoint, longPressDuration, retryTarget, {
+    await this.host.executeAndroidTap(action, retryPoint, longPressDuration, {
+      element: retryTarget,
       signal,
       options: { ...options, resolvedHierarchy: probe.hierarchy },
       isTalkBackEnabled,
@@ -795,8 +798,11 @@ export class TapGestureDispatcher {
     action: string,
     point: Point,
     durationMs: number,
-    element?: Element,
-    { isVoiceOverEnabled, ...fenceOptions }: IosTapOptions & { isVoiceOverEnabled?: boolean } = {},
+    {
+      element,
+      isVoiceOverEnabled,
+      ...fenceOptions
+    }: IosTapOptions & { isVoiceOverEnabled?: boolean } & { element?: Element } = {},
   ): Promise<void> {
     const { x, y } = point;
     if (isVoiceOverEnabled && element) {
@@ -804,21 +810,19 @@ export class TapGestureDispatcher {
         action,
         element,
         { x, y },
-        durationMs,
-        fenceOptions,
+        { durationMs, fenceOptions },
       );
       return;
     }
 
-    await this.host.executeiOSTapWithCoordinates(action, x, y, durationMs, fenceOptions);
+    await this.host.executeiOSTapWithCoordinates(action, x, y, { durationMs, fenceOptions });
   }
 
   async executeiOSTapWithCoordinates(
     action: string,
     x: number,
     y: number,
-    durationMs: number,
-    fenceOptions: IosTapOptions = {},
+    { durationMs, fenceOptions = {} }: { durationMs: number; fenceOptions?: IosTapOptions },
   ): Promise<void> {
     const { displayFence: fence, signal } = fenceOptions;
     // Use short duration (50ms) for tap/doubleTap, full duration for longPress
@@ -828,13 +832,21 @@ export class TapGestureDispatcher {
 
     if (action === "doubleTap") {
       fence?.assertCurrent();
-      await dispatchIosDoubleTap(client, { x, y }, tapDuration, undefined, { signal });
+      await dispatchIosDoubleTap(
+        client,
+        { x, y },
+        { durationMs: tapDuration, options: { signal } },
+      );
       IOSCtrlProxyClient.getExistingInstance(this.host.device().deviceId)?.invalidateCache();
     } else {
       // Single tap or long press
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, { x, y }, tapDuration, undefined, { signal });
+      await dispatchIosCoordinateTap(
+        client,
+        { x, y },
+        { durationMs: tapDuration, options: { signal } },
+      );
       IOSCtrlProxyClient.getExistingInstance(this.host.device().deviceId)?.invalidateCache();
     }
   }
@@ -843,8 +855,7 @@ export class TapGestureDispatcher {
     action: string,
     element: Element,
     point: Point,
-    durationMs: number,
-    fenceOptions?: IosTapOptions,
+    { durationMs, fenceOptions }: { durationMs: number; fenceOptions?: IosTapOptions },
   ): Promise<void> {
     const { x, y } = point;
     return tapViaVoiceOver({
@@ -855,7 +866,7 @@ export class TapGestureDispatcher {
       durationMs,
       fenceOptions: fenceOptions ?? {},
       coordinateTap: (opts) =>
-        this.host.executeiOSTapWithCoordinates(action, x, y, durationMs, opts),
+        this.host.executeiOSTapWithCoordinates(action, x, y, { durationMs, fenceOptions: opts }),
     });
   }
 
@@ -875,12 +886,14 @@ export class TapGestureDispatcher {
     x: number,
     y: number,
     durationMs: number,
-    element: Element,
     {
+      element,
       signal,
       skipSemanticAction = false,
       ...fenceOptions
-    }: ResolvedAndroidTapOptions & { signal?: AbortSignal; skipSemanticAction?: boolean } = {},
+    }: ResolvedAndroidTapOptions & { signal?: AbortSignal; skipSemanticAction?: boolean } & {
+      element: Element;
+    },
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     throwIfAborted(signal);

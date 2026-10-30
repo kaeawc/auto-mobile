@@ -22,12 +22,9 @@ test.each([false, "unknown"] as const)(
       failFastWhenPackageRemoved: async () => {},
     });
     await expect(
-      launch.performLaunch(
-        "com.example.app",
-        undefined,
-        0,
-        new DefaultPerformanceTracker(new FakeTimer()),
-      ),
+      launch.performLaunch("com.example.app", undefined, 0, {
+        perf: new DefaultPerformanceTracker(new FakeTimer()),
+      }),
     ).rejects.toBe(typed);
     expect(adb.getExecutedCommands()).toHaveLength(1);
   },

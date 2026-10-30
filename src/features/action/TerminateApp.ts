@@ -247,7 +247,10 @@ export class TerminateApp extends BaseVisualChange {
 
         if (!options?.skipObservation) {
           await perf.track("awaitTerminated", () =>
-            this.awaitTerminated(packageName, targetUserId, isForeground, signal, runningPids),
+            this.awaitTerminated(packageName, targetUserId, isForeground, {
+              signal,
+              baselinePids: runningPids,
+            }),
           );
         }
 
@@ -352,8 +355,10 @@ export class TerminateApp extends BaseVisualChange {
     packageName: string,
     userId: number,
     wasForeground: boolean,
-    signal?: AbortSignal,
-    baselinePids: ReadonlySet<number> = new Set(),
+    {
+      signal,
+      baselinePids = new Set(),
+    }: { signal?: AbortSignal; baselinePids?: ReadonlySet<number> } = {},
   ): Promise<void> {
     const startedAt = this.timer.now();
     const deadline = startedAt + TERMINATE_VERIFY_BUDGET_MS;
@@ -364,7 +369,10 @@ export class TerminateApp extends BaseVisualChange {
     while (this.timer.now() < deadline) {
       throwIfAborted(signal);
       attempts++;
-      state = await this.isAndroidAppGone(packageName, userId, wasForeground, signal, baselinePids);
+      state = await this.isAndroidAppGone(packageName, userId, wasForeground, {
+        signal,
+        baselinePids,
+      });
       throwIfAborted(signal);
       if (state) {
         break;
@@ -397,8 +405,10 @@ export class TerminateApp extends BaseVisualChange {
     packageName: string,
     userId: number,
     wasForeground: boolean,
-    signal?: AbortSignal,
-    baselinePids: ReadonlySet<number> = new Set(),
+    {
+      signal,
+      baselinePids = new Set(),
+    }: { signal?: AbortSignal; baselinePids?: ReadonlySet<number> },
   ): Promise<boolean | "restarted"> {
     try {
       const [processes, foreground] = await Promise.all([

@@ -279,7 +279,7 @@ describe("Android post-tap wait with the real CtrlProxy cache (#9618)", () => {
         expect(result.observation).toBeDefined();
         expect(dispatch).toHaveBeenCalledTimes(1);
         expect(retry).toHaveBeenCalledTimes(1);
-        expect(retry.mock.calls[0]?.[4].options.retryIfNoChange).toBe(true);
+        expect(retry.mock.calls[0]?.[3].options.retryIfNoChange).toBe(true);
         expect(dispatch.mock.invocationCallOrder[0]).toBeLessThan(
           retry.mock.invocationCallOrder[0]!,
         );
@@ -370,15 +370,15 @@ describe("Android post-tap wait with the real CtrlProxy cache (#9618)", () => {
     let verified: Awaited<ReturnType<TapOnElement["deriveTapEffectAfterPostTapObservation"]>>;
     try {
       const element = { text: "B", bounds: { left: 0, top: 100, right: 200, bottom: 160 } };
-      await h.tap.executeAndroidTap("tap", { x: 100, y: 130 }, 0, element, {});
+      await h.tap.executeAndroidTap("tap", { x: 100, y: 130 }, 0, { element });
       // The existing retry seam refreshes its evidence before deciding whether
       // to dispatch again. Supply the real post-tap waiter, not a scripted verdict.
       await h.tap.retryTapIfNoChange(
         hierarchyFingerprint(h.current.viewHierarchy ?? null),
         { x: 100, y: 130 },
         "tap",
-        0,
         {
+          longPressDuration: 0,
           tapElement: element,
           options: {
             action: "tap",

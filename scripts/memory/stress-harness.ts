@@ -307,7 +307,7 @@ export async function createStressHarness(): Promise<StressHarness> {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         "resource-id": "com.example:id/button",
       };
-      await tapOnElement.executeAndroidTap("tap", { x: 10, y: 10 }, 50, element);
+      await tapOnElement.executeAndroidTap("tap", { x: 10, y: 10 }, 50, { element });
     },
     swipeOn: async () => {
       await swipeExecutor.executeSwipeGesture({

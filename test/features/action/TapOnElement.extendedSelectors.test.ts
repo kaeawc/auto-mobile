@@ -82,7 +82,8 @@ describe("TapOnElement extended selectors", () => {
       new Error("touchscreen input unavailable"),
     );
 
-    await tapOn.testHooks.executeAndroidLongPress(50, 25, 20_000, makeElement(), {
+    await tapOn.testHooks.executeAndroidLongPress(50, 25, 20_000, {
+      element: makeElement(),
       skipSemanticAction: true,
     });
 
@@ -429,7 +430,8 @@ describe("TapOnElement extended selectors", () => {
       const options = { action: "longPress" as const, resolvedHierarchy: notificationHierarchy };
       const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
       try {
-        await tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, uniqueIdElement, {
+        await tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, {
+          element: uniqueIdElement,
           options: options,
           isTalkBackEnabled: false,
         });
@@ -458,7 +460,8 @@ describe("TapOnElement extended selectors", () => {
         const options = { action: "longPress" as const, resolvedHierarchy };
         const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
         try {
-          await harness.tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, element, {
+          await harness.tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, {
+            element,
             options: options,
             isTalkBackEnabled: false,
           });
@@ -482,7 +485,8 @@ describe("TapOnElement extended selectors", () => {
         const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(raw);
         const read = spyOn(proxy, "getAccessibilityHierarchy");
         try {
-          await tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, uniqueIdElement, {
+          await tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, {
+            element: uniqueIdElement,
             signal: controller.signal,
             options: options,
             isTalkBackEnabled: false,
@@ -513,7 +517,8 @@ describe("TapOnElement extended selectors", () => {
       });
       try {
         await expect(
-          tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, uniqueIdElement, {
+          tapOn.executeAndroidTap("longPress", { x: 50, y: 25 }, 1000, {
+            element: uniqueIdElement,
             signal: controller.signal,
             isTalkBackEnabled: false,
           }),
@@ -575,10 +580,10 @@ describe("TapOnElement extended selectors", () => {
           });
           expect(result.success).toBe(true);
           expect(stable).toHaveBeenCalledTimes(1);
-          expect(dispatch.mock.calls[0]?.[4]?.options).toMatchObject({
+          expect(dispatch.mock.calls[0]?.[3]?.options).toMatchObject({
             resolvedHierarchy: notificationHierarchy,
           });
-          expect(dispatch.mock.calls[0]?.[4]?.options?.resolvedHierarchy).toBe(
+          expect(dispatch.mock.calls[0]?.[3]?.options?.resolvedHierarchy).toBe(
             notificationHierarchy,
           );
           expect(proxy.getHierarchyRequestCount()).toBe(0);
@@ -605,7 +610,7 @@ describe("TapOnElement extended selectors", () => {
       const { proxy, internals } = setup();
       const read = spyOn(proxy, "getAccessibilityHierarchy");
       try {
-        await internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+        await internals.executeAndroidLongPress(50, 25, 1000, { element: uniqueIdElement });
         expect(read).toHaveBeenCalledWith(undefined, {
           skipWaitForFresh: true,
           disableAllFiltering: true,
@@ -623,8 +628,10 @@ describe("TapOnElement extended selectors", () => {
     test("uses a stable test-tag selector for a repeated resource id", async () => {
       const { proxy, internals } = setup();
       await internals.executeAndroidLongPress(50, 25, 1000, {
-        ...repeatedIdElement,
-        "test-tag": "message_row_42",
+        element: {
+          ...repeatedIdElement,
+          "test-tag": "message_row_42",
+        },
       });
       expect(proxy.getNodeActionHistory()).toMatchObject([
         {
@@ -639,7 +646,7 @@ describe("TapOnElement extended selectors", () => {
 
     test("uses coordinates for a repeated resource id without a stable node selector", async () => {
       const harness = setup();
-      await harness.internals.executeAndroidLongPress(50, 25, 1000, repeatedIdElement);
+      await harness.internals.executeAndroidLongPress(50, 25, 1000, { element: repeatedIdElement });
       expectCoordinateFallback(harness);
     });
 
@@ -660,7 +667,7 @@ describe("TapOnElement extended selectors", () => {
         if (!hierarchy) {
           harness.proxy.setHierarchyData(null);
         }
-        await harness.internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+        await harness.internals.executeAndroidLongPress(50, 25, 1000, { element: uniqueIdElement });
         expectCoordinateFallback(harness);
       },
     );
@@ -668,15 +675,17 @@ describe("TapOnElement extended selectors", () => {
     test("uses coordinates when the hierarchy reader throws", async () => {
       const harness = setup();
       harness.proxy.setFailureMode("getHierarchy", new Error("capture unavailable"));
-      await harness.internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+      await harness.internals.executeAndroidLongPress(50, 25, 1000, { element: uniqueIdElement });
       expectCoordinateFallback(harness);
     });
 
     test("uses coordinates when the resource id is absent from the hierarchy", async () => {
       const harness = setup();
       await harness.internals.executeAndroidLongPress(50, 25, 1000, {
-        ...uniqueIdElement,
-        "resource-id": "com.android.systemui:id/absent_row",
+        element: {
+          ...uniqueIdElement,
+          "resource-id": "com.android.systemui:id/absent_row",
+        },
       });
       expectCoordinateFallback(harness);
     });
@@ -689,9 +698,9 @@ describe("TapOnElement extended selectors", () => {
         retry: "observe",
       });
       proxy.setFailureMode("getHierarchy", stale);
-      await expect(internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement)).rejects.toBe(
-        stale,
-      );
+      await expect(
+        internals.executeAndroidLongPress(50, 25, 1000, { element: uniqueIdElement }),
+      ).rejects.toBe(stale);
       expect(proxy.getActionHistory()).toEqual([]);
       expect(proxy.getNodeActionHistory()).toEqual([]);
       expect(internals.adb.getAllCommands()).toEqual([]);
@@ -701,7 +710,7 @@ describe("TapOnElement extended selectors", () => {
       const { proxy, internals } = setup();
       proxy.setActionResult(longClickResult(false, "service unavailable"));
       await expect(
-        internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement),
+        internals.executeAndroidLongPress(50, 25, 1000, { element: uniqueIdElement }),
       ).rejects.toThrow("Semantic long press failed for the selected element: service unavailable");
       expect(proxy.getActionHistory()).toHaveLength(1);
       expect(proxy.getNodeActionHistory()).toEqual([]);
@@ -718,7 +727,7 @@ describe("TapOnElement extended selectors", () => {
       );
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        await internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+        await internals.executeAndroidLongPress(50, 25, 1000, { element: uniqueIdElement });
         expect(proxy.getActionHistory()).toHaveLength(1);
         expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
       } finally {
@@ -737,7 +746,7 @@ describe("TapOnElement extended selectors", () => {
         proxy.setActionResult(longClickResult(false, notFound));
         const warning = spyOn(logger, "warn").mockImplementation(() => {});
         try {
-          await internals.executeAndroidLongPress(120, 130, 1000, row);
+          await internals.executeAndroidLongPress(120, 130, 1000, { element: row });
           expect(proxy.getNodeActionHistory()).toHaveLength(1);
           expect(internals.adb.getAllCommands()).toEqual([rowCommand]);
         } finally {
@@ -761,9 +770,9 @@ describe("TapOnElement extended selectors", () => {
           proxy.setActionResult(longClickResult(false, notFound));
           const warning = spyOn(logger, "warn").mockImplementation(() => {});
           try {
-            await expect(internals.executeAndroidLongPress(120, 130, 1000, row)).rejects.toThrow(
-              `Semantic long press failed for the selected element: ${notFound}`,
-            );
+            await expect(
+              internals.executeAndroidLongPress(120, 130, 1000, { element: row }),
+            ).rejects.toThrow(`Semantic long press failed for the selected element: ${notFound}`);
             expect(proxy.getNodeActionHistory()).toHaveLength(1);
             expect(internals.adb.getAllCommands()).toEqual([]);
           } finally {
@@ -778,7 +787,7 @@ describe("TapOnElement extended selectors", () => {
       proxy.setFailureMode("requestAction", new Error("runner disconnected"));
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        await internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+        await internals.executeAndroidLongPress(50, 25, 1000, { element: uniqueIdElement });
         expect(warning).toHaveBeenCalledWith(
           "[TapOnElement] Accessibility long click error: Error: runner disconnected",
         );
@@ -790,7 +799,7 @@ describe("TapOnElement extended selectors", () => {
 
     test("uses ACTION_LONG_CLICK with a stable test-tag selector", async () => {
       const { proxy, internals } = setup();
-      await internals.executeAndroidLongPress(50, 25, 1000, testTagElement);
+      await internals.executeAndroidLongPress(50, 25, 1000, { element: testTagElement });
       expect(proxy.getNodeActionHistory()).toMatchObject([
         { action: "long_click", selector: { testTag: "message_row_42" } },
       ]);
@@ -803,7 +812,7 @@ describe("TapOnElement extended selectors", () => {
       const support = spyOn(proxy, "supportsNodeActionSelectors");
       const info = spyOn(logger, "info").mockImplementation(() => {});
       try {
-        await internals.executeAndroidLongPress(50, 25, 1000, testTagElement);
+        await internals.executeAndroidLongPress(50, 25, 1000, { element: testTagElement });
         expect(support).toHaveBeenCalledTimes(1);
         expect(info).toHaveBeenCalledWith(
           "[TapOnElement] Runner does not support stable node selectors; using coordinate long press",
@@ -818,9 +827,9 @@ describe("TapOnElement extended selectors", () => {
     test("does not fall back after an advertised semantic long click fails", async () => {
       const { proxy, internals } = setup();
       proxy.setActionResult(longClickResult(false, "service unavailable"));
-      await expect(internals.executeAndroidLongPress(50, 25, 1000, testTagElement)).rejects.toThrow(
-        "Semantic long press failed for the selected element: service unavailable",
-      );
+      await expect(
+        internals.executeAndroidLongPress(50, 25, 1000, { element: testTagElement }),
+      ).rejects.toThrow("Semantic long press failed for the selected element: service unavailable");
       expect(proxy.getNodeActionHistory()).toHaveLength(1);
       expect(internals.adb.getAllCommands()).toEqual([]);
     });
@@ -830,7 +839,9 @@ describe("TapOnElement extended selectors", () => {
       proxy.setActionResult(longClickResult(false, "not supported"));
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
-        await internals.executeAndroidLongPress(50, 25, 1000, { ...testTagElement, actions: [] });
+        await internals.executeAndroidLongPress(50, 25, 1000, {
+          element: { ...testTagElement, actions: [] },
+        });
         expect(warning).toHaveBeenCalledWith(
           "[TapOnElement] Accessibility long click failed: not supported",
         );
@@ -851,8 +862,10 @@ describe("TapOnElement extended selectors", () => {
         const warning = spyOn(logger, "warn").mockImplementation(() => {});
         try {
           await internals.executeAndroidLongPress(50, 25, 1000, {
-            ...testTagElement,
-            actions: advertised ? ["long_click"] : [],
+            element: {
+              ...testTagElement,
+              actions: advertised ? ["long_click"] : [],
+            },
           });
           expect(warning).toHaveBeenCalledWith(
             "[TapOnElement] Accessibility long click error: Error: runner disconnected",
@@ -921,8 +934,7 @@ describe("capture-local container ids", () => {
     await expect(
       tapOn["handleElementNotFound"](
         { action: "tap", text: "Discover", container: { elementId: "s2-3340048129449c01-2" } },
-        undefined,
-        false,
+        { containerFound: false },
       ),
     ).rejects.toThrow("Container element id 's2-3340048129449c01-2' is stale; re-observe");
   });

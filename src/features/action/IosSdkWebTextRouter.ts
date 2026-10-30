@@ -61,13 +61,10 @@ export function createIosSdkWebTextRouter(
       if (!enabled()) {
         return null;
       }
-      return performIosSdkWebAction(
-        options.client(),
-        request.target,
-        webTextAction(request),
-        VERBS[request.action],
-        request.signal,
-      );
+      return performIosSdkWebAction(options.client(), request.target, webTextAction(request), {
+        verb: VERBS[request.action],
+        signal: request.signal,
+      });
     },
   };
 }

@@ -39,7 +39,7 @@ describe("app ID device-shell boundaries", () => {
       const launch = new LaunchApp(device, adb);
       const perf = new NoOpPerformanceTracker();
 
-      await launch.performLaunch(appId, undefined, 0, perf);
+      await launch.performLaunch(appId, undefined, 0, { perf });
 
       expect(adb.getExecutedCommands()).toEqual([
         `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LAUNCHER ${quoted}`,

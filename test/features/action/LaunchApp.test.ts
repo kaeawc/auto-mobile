@@ -1901,12 +1901,9 @@ describe("LaunchApp", () => {
   });
 
   const performFallbackLaunch = (launchPackage = packageName, userId = 0) =>
-    launchApp.performLaunch(
-      launchPackage,
-      undefined,
-      userId,
-      new DefaultPerformanceTracker(fakeTimer),
-    );
+    launchApp.performLaunch(launchPackage, undefined, userId, {
+      perf: new DefaultPerformanceTracker(fakeTimer),
+    });
 
   test("warns with the intent launch exception before continuing to monkey", async () => {
     fakeAdb.setCommandError(

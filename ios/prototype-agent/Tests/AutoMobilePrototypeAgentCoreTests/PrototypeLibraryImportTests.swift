@@ -32,6 +32,115 @@ final class PrototypeLibraryImportTests: XCTestCase {
         )
     }
 
+    func testSameSpecDigestReturnsExistingEntryWithoutWritingOrRelabelling() throws {
+        let files = PrototypeLibraryFakeFileSystem()
+        let library = try store(files)
+        let importer = PrototypeLibraryImporter(store: library)
+        let first = try importer.importData(spec, source: .mcp, label: "First")
+        let before = files.data
+        let directories = files.directories
+        let archive = try PrototypeBundle.export(.init(spec: spec, assets: { _ in nil }, fonts: { _ in nil }))
+        let second = try importer.importData(archive, source: .mcp, label: "Retry")
+        XCTAssertEqual(second, first)
+        XCTAssertEqual(try library.list().entries.count, 1)
+        XCTAssertEqual(files.data, before)
+        XCTAssertEqual(files.directories, directories)
+    }
+
+    func testSameSpecWithChangedImageBytesCreatesEntryWithNewImage() throws {
+        let files = PrototypeLibraryFakeFileSystem()
+        let library = try store(files)
+        let importer = PrototypeLibraryImporter(store: library, imageProbe: PrototypeLibraryFakeImageProbe())
+        let firstBundle = try imageBundle()
+        let changed = png + Data([1])
+        let secondBundle = try PrototypeBundle.export(.init(
+            spec: PrototypeBundle.read(firstBundle).spec,
+            assets: { _ in .init(mediaType: "image/png", bytes: changed) }, fonts: { _ in nil }
+        ))
+        XCTAssertEqual(try PrototypeBundle.read(firstBundle).spec, try PrototypeBundle.read(secondBundle).spec)
+        let first = try importer.importData(firstBundle, source: .file)
+        let second = try importer.importData(secondBundle, source: .share)
+        XCTAssertNotEqual(second.libraryId, first.libraryId)
+        XCTAssertEqual(try library.list().entries.count, 2)
+        XCTAssertEqual(try library.load(first.libraryId).assets.images["image0"], png)
+        XCTAssertEqual(try library.load(second.libraryId).assets.images["image0"], changed)
+        let before = files.data
+        XCTAssertEqual(try importer.importData(secondBundle, source: .paste), second)
+        XCTAssertEqual(files.data, before)
+    }
+
+    func testSameSpecWithChangedFontBytesCreatesEntryWithNewFont() throws {
+        let files = PrototypeLibraryFakeFileSystem()
+        let library = try store(files)
+        let importer = PrototypeLibraryImporter(store: library)
+        let fontSpec = Data("""
+        {"id":"font","window":{"placement":{"type":"fullscreen"}},
+        "root":{"type":"text","text":"Hello","style":{"fontFamily":{"asset":"face"}}}}
+        """.utf8)
+        let original = Data([0, 1, 0, 0])
+        let changed = original + Data([1])
+        let bundles = try [original, changed].map { bytes in
+            try PrototypeBundle.export(.init(
+                spec: fontSpec, assets: { _ in nil }, fonts: { _ in .init(mediaType: "font/ttf", bytes: bytes) }
+            ))
+        }
+        XCTAssertEqual(try PrototypeBundle.read(bundles[0]).spec, try PrototypeBundle.read(bundles[1]).spec)
+        let first = try importer.importData(bundles[0], source: .file)
+        let second = try importer.importData(bundles[1], source: .share)
+        XCTAssertNotEqual(second.libraryId, first.libraryId)
+        XCTAssertEqual(try library.list().entries.count, 2)
+        XCTAssertEqual(try library.load(first.libraryId).assets.fonts["face"], original)
+        XCTAssertEqual(try library.load(second.libraryId).assets.fonts["face"], changed)
+        let before = files.data
+        XCTAssertEqual(try importer.importData(bundles[1], source: .paste), second)
+        XCTAssertEqual(files.data, before)
+    }
+
+    func testIdenticalResourcesReturnExistingEntryWithoutWritingOrRelabelling() throws {
+        let files = PrototypeLibraryFakeFileSystem()
+        let library = try store(files)
+        let importer = PrototypeLibraryImporter(store: library, imageProbe: PrototypeLibraryFakeImageProbe())
+        let archive = try imageBundle()
+        let first = try importer.importData(archive, source: .file, label: "First")
+        let storageURL = try library.storageURL(first.libraryId).appendingPathComponent("values.json")
+        files.data[storageURL.path] = Data("existing storage".utf8)
+        let before = files.data
+        let directories = files.directories
+        let second = try importer.importData(archive, source: .share, label: "Retry")
+        XCTAssertEqual(second, first)
+        XCTAssertEqual(try library.list().entries.count, 1)
+        XCTAssertEqual(files.data, before)
+        XCTAssertEqual(files.directories, directories)
+    }
+
+    func testUnreadableCandidateIsSkippedAndLaterMatchingCandidateIsReused() throws {
+        let files = PrototypeLibraryFakeFileSystem()
+        let library = try store(files)
+        let importer = PrototypeLibraryImporter(store: library, imageProbe: PrototypeLibraryFakeImageProbe())
+        let archive = try imageBundle()
+        let first = try importer.importData(archive, source: .file)
+        let specURL = root.appendingPathComponent(first.libraryId).appendingPathComponent("spec.json")
+        files.unreadable.insert(specURL.path)
+        let second = try importer.importData(archive, source: .share)
+        XCTAssertNotEqual(second.libraryId, first.libraryId)
+        let before = files.data
+        XCTAssertEqual(try importer.importData(archive, source: .paste), second)
+        XCTAssertEqual(try library.list().entries.count, 2)
+        XCTAssertEqual(files.data, before)
+    }
+
+    func testImageValidationStillRunsBeforeIdenticalBundleDedupe() throws {
+        let files = PrototypeLibraryFakeFileSystem()
+        let probe = PrototypeLibraryFakeImageProbe()
+        let importer = try PrototypeLibraryImporter(store: store(files), imageProbe: probe)
+        let archive = try imageBundle()
+        try importer.importData(archive, source: .file)
+        let before = files.data
+        probe.fails = true
+        XCTAssertThrowsError(try importer.importData(archive, source: .share))
+        XCTAssertEqual(files.data, before)
+    }
+
     private func imageSpec(_ count: Int = 1) throws -> Data {
         try JSONEncoder().encode([
             "id": JSONValue.string("images"),
@@ -64,17 +173,22 @@ final class PrototypeLibraryImportTests: XCTestCase {
         let files = PrototypeLibraryFakeFileSystem()
         let library = try store(files)
         let importer = PrototypeLibraryImporter(store: library)
-        let archive = try PrototypeBundle.export(.init(spec: spec, assets: { _ in nil }, fonts: { _ in nil }))
+        var fields = try JSONDecoder().decode([String: JSONValue].self, from: spec)
+        fields["id"] = .string("shared")
+        let sharedSpec = try JSONEncoder().encode(fields)
+        fields["id"] = .string("pasted")
+        let pastedSpec = try JSONEncoder().encode(fields)
+        let archive = try PrototypeBundle.export(.init(spec: sharedSpec, assets: { _ in nil }, fonts: { _ in nil }))
         let first = try importer.importData(spec, source: .file)
         let second = try importer.importData(archive, source: .share)
-        let third = try importer.importData(spec, source: .paste)
+        let third = try importer.importData(pastedSpec, source: .paste)
         XCTAssertEqual([first.source, second.source, third.source], [.file, .share, .paste])
         XCTAssertEqual(first.label, "demo")
         XCTAssertNotEqual(first.libraryId, "demo")
         XCTAssertNotEqual(first.libraryId, second.libraryId)
         XCTAssertEqual(try library.list().entries.count, 3)
-        for entry in [first, second, third] {
-            XCTAssertEqual(try library.load(entry.libraryId).spec, spec)
+        for (entry, expectedSpec) in [(first, spec), (second, sharedSpec), (third, pastedSpec)] {
+            XCTAssertEqual(try library.load(entry.libraryId).spec, expectedSpec)
             XCTAssertEqual(try files.children(library.storageURL(entry.libraryId)), [])
         }
     }

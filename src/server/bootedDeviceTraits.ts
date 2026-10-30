@@ -74,6 +74,24 @@ async function readTraits(
   }
 }
 
+/** Resolve Android form factor before constructing a device-specific app lister. */
+export async function resolveFormFactor(
+  device: BootedDevice,
+  timer: Timer,
+  deps: Dependencies,
+): Promise<BootedDevice> {
+  if (device.platform !== "android" || deps.injectedDeviceTraits === null) {
+    return device;
+  }
+  const traits = await readTraits(
+    deps.injectedDeviceTraits ?? defaultDeviceTraits,
+    defaultAdbClientFactory,
+    device,
+    timer,
+  );
+  return traits?.formFactor ? { ...device, formFactor: traits.formFactor } : device;
+}
+
 /** Attach {@link BootedDeviceTraits} to every probeable Android entry, in place. */
 export async function enrich<T extends { platform: Platform } & WithTraits>(
   devices: T[],

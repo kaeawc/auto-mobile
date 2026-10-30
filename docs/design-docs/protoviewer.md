@@ -228,11 +228,13 @@ is a zip, MIME `application/vnd.automobile.prototype+zip`, iOS UTI
   share about credential-like headers and query keys and private or loopback hosts. No thumbnails in
   the first release.
 - Importing a prototype whose `spec.id` already exists creates a new entry with its own library id
-  and empty storage. Replace and keep-both are later work.
+  and empty storage. On iOS, a matching spec SHA-256 plus identical image and font resource IDs,
+  media types and byte SHA-256 values instead reuses the existing entry, preserving its label,
+  provenance and storage. Unreadable candidates are skipped. Replace and keep-both are later work.
 - Not in the first release: user-facing URL import, universal links, compact `?spec=` links, QR. The
-  one custom URL scheme in the first release is the internal launch scheme `automobile-proto://`
-  (section 7): it imports a host-staged inbox bundle or opens an existing library entry.
-  The scheme never fetches or carries spec bytes.
+  internal scheme `automobile-proto://` remains for legacy callers (section 7): it imports a
+  host-staged inbox bundle or opens an existing library entry. Simulator hosts use the file inbox
+  instead. The scheme never fetches or carries spec bytes.
 
 Bundle limits (shared TS/Kotlin/Swift transport contract):
 
@@ -343,10 +345,10 @@ Per-host consent is later work. MCP-direct `show` keeps today's behaviour. When 
   sets up `adb reverse`.
 - A provenance indicator lives in an app-reserved region outside the spec's drawable bounds and
   stays visible while network is enabled.
-- Storage is keyed by library id; a new import starts empty. The bundle carries no prototype id (its
-  identity is `specSha256` plus the `spec.id` inside `spec.json`), so there is no bundle-id
-  comparison; the only identity checks are `bundle.json.specSha256` against the inflated
-  `spec.json` and the app-assigned library id.
+- Storage is keyed by library id; a new entry starts empty. The bundle carries `spec.id` inside
+  `spec.json` but no app-assigned library id, so there is no bundle-id comparison. The transport
+  verifies `bundle.json.specSha256` against the inflated `spec.json` before the composite import
+  identity comparison described above.
 - Imported-prototype content is marked as imported in `observe` and `awaitEvent`; `open` states
   when an entry is imported; host attach is off by default for imported prototypes.
 - Limits: 200 prototypes and 100 MiB per library, enforced at commit and on load, plus a render
@@ -383,25 +385,31 @@ The shared request-policy and storage work is tracked in #13622.
   folders cannot be prepared, the push is refused, or the app answers `rejected` at `inbox` (it
   cannot see the pushed file), nothing was imported and the host keeps the CtrlProxy save path
   with a logged warning instead of failing the call.
-- iOS simulators use the host filesystem and `simctl openurl`, without a new socket or broadcast.
-  The host first brings ProtoViewer to the foreground with `simctl launch`; if launch fails,
-  it raises `ProtoViewerForegroundError` without opening the URL or polling for a result, since
-  `openurl` can succeed while an unanswered "Open in ProtoViewer?" alert blocks delivery.
+- iOS simulators use the host filesystem inbox without a socket or custom-scheme launch.
   The host resolves the app's own data container and creates
   `Library/Application Support/ProtoViewer/mcp/inbox/` and `results/` (same host uid as the app);
   the app also creates them idempotently on start and never purges this inbox at launch.
-  Import writes `inbox/<request>.automobile-proto.tmp` then renames it, and delivers
-  `automobile-proto://import?request=<request>&label=<percent-encoded-label>` (label optional).
-  Open delivers `automobile-proto://open?request=<request>&id=<libraryId>`.
-  Request ids match `[A-Za-z0-9_-]{1,64}`. The scheme carries no spec bytes. The app validates the
-  full import, sets `source: mcp` itself, removes the inbox file after every attempt, and atomically
-  publishes `results/<request>.json` using the same result shapes as Android. Rejections are
-  reported in that file rather than an alert. Open reports `opened` only after the viewer loads.
+  Import writes `inbox/<request>.automobile-proto.tmp` then renames it. The host foregrounds
+  ProtoViewer with `simctl launch` and waits within the call budget for `mcp/delivery` to contain
+  `file-inbox-v1`; a missing capability returns `unsupported_capability` with rebuild/install
+  guidance, without publishing a command or falling back to URL delivery.
+  It then atomically publishes `inbox/<request>.request` via a `.tmp` file: JSON with
+  `action: "import"` and optional `label`, or `action: "open"` and `libraryId`.
+  Request ids match `[A-Za-z0-9_-]{1,64}` and come from filenames. On activation and every
+  250 ms while active, the app consumes final request files through the same handler as legacy
+  URLs. It validates imports, sets `source: mcp` for new entries, and removes each command and bundle
+  after the attempt, including malformed commands. Malformed JSON produces a typed rejected
+  result. Imports with identical spec bytes and image/font resource identity return the existing
+  entry without writes or label changes.
+  The app atomically publishes `results/<request>.json` using the same result shapes as Android.
+  Rejections are reported in that file rather than an alert. Open reports `opened` only after
+  the viewer loads. Polling stops when the scene becomes inactive.
   Host polling treats a missing result as pending until the timer deadline; finally it removes
-  results and leftover inbox files even after cancellation, with an independent cleanup timeout.
-  An absent app, unresolved container, unusable inbox, or nonzero `openurl` exit keeps the template
-  save path with a logged warning. Command timeout or result deadline after delivery is a hard
-  failure: the save may still have landed, so check ProtoViewer before retrying.
+  results, commands, bundles and temporary files even after cancellation, with an independent
+  cleanup timeout. The app sweeps inbox and result files older than ten minutes; fresh files,
+  folders and files with unknown ages are retained. An absent app, unresolved container, or
+  unusable inbox keeps the template save path with a logged warning. A result deadline is a
+  hard failure; retrying the same bundle is safe because imports are idempotent.
   Physical devices keep the template path's existing behavior; `open` needs an iOS simulator.
   `devicectl` delivery to dev-signed physical devices remains later work.
 - `prototype save`: on Android (for the current user) or an iOS simulator, when ProtoViewer is installed, build a

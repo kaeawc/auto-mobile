@@ -145,46 +145,59 @@ export const killDeviceSchema = z
   })
   .strict();
 
-export const teardownDeviceSchema = addSessionUuidToSchema(
-  z
-    .object({
-      target: z
-        .object({
-          platform: platformSchema.describe("Platform reported by automobile:devices/booted"),
-          isVirtual: z
-            .literal(true)
-            .describe("Virtual-device flag reported by automobile:devices/booted"),
-          stableId: z
-            .string()
-            .min(1)
-            .describe("Stable platform device identity from automobile:devices/booted"),
-          stableName: z
-            .string()
-            .min(1)
-            .optional()
-            .describe("Stable platform representation name when available"),
-        })
-        .strict(),
-      mode: z
-        .literal("destroy")
-        .describe("Stop and permanently delete the platform device representation"),
-      verifyAbsence: z
-        .literal(true)
-        .describe("Require a complete inventory observation proving durable absence"),
-      timeoutMs: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_DEVICE_READY_TIMEOUT_MS)
-        .optional()
-        .describe("Total bounded teardown timeout in ms"),
-      cancellationPolicy: z
-        .literal("cancel-on-request-abort")
-        .optional()
-        .describe(
-          "Cancel the accepted teardown if this MCP request is aborted. Use only for deadline-critical, caller-owned cleanup that must not continue in the background after its caller stops waiting.",
-        ),
-      force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
-    })
-    .strict(),
+/** deleteDevice's request; the target's platform enum is the only part that varies. */
+function teardownSchemaFor<P extends z.ZodType<string>>(platform: P) {
+  return addSessionUuidToSchema(
+    z
+      .object({
+        target: z
+          .object({
+            platform: platform.describe("Platform reported by automobile:devices/booted"),
+            isVirtual: z
+              .literal(true)
+              .describe("Virtual-device flag reported by automobile:devices/booted"),
+            stableId: z
+              .string()
+              .min(1)
+              .describe("Stable platform device identity from automobile:devices/booted"),
+            stableName: z
+              .string()
+              .min(1)
+              .optional()
+              .describe("Stable platform representation name when available"),
+          })
+          .strict(),
+        mode: z
+          .literal("destroy")
+          .describe("Stop and permanently delete the platform device representation"),
+        verifyAbsence: z
+          .literal(true)
+          .describe("Require a complete inventory observation proving durable absence"),
+        timeoutMs: z
+          .number()
+          .int()
+          .positive()
+          .max(MAX_DEVICE_READY_TIMEOUT_MS)
+          .optional()
+          .describe("Total bounded teardown timeout in ms"),
+        cancellationPolicy: z
+          .literal("cancel-on-request-abort")
+          .optional()
+          .describe(
+            "Cancel the accepted teardown if this MCP request is aborted. Use only for deadline-critical, caller-owned cleanup that must not continue in the background after its caller stops waiting.",
+          ),
+        force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
+      })
+      .strict(),
+  );
+}
+
+export const teardownDeviceSchema = teardownSchemaFor(platformSchema);
+
+/**
+ * deleteDevice as registered: its own platform enum, because it deletes Apple Watch simulators too
+ * (#15882). The Android and iOS workflow keeps {@link teardownDeviceSchema}'s narrower type.
+ */
+export const teardownDeviceRegistrationSchema = teardownSchemaFor(
+  z.enum(["android", "ios", "watchos"]),
 );

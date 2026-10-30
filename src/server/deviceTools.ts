@@ -31,6 +31,7 @@ import {
   listDevicesOutputSchema,
   listDevicesSchema,
   provisionDeviceOutputSchema,
+  teardownDeviceRegistrationSchema,
   teardownDeviceSchema,
 } from "../features/deviceLifecycle/core/toolSchemas";
 export * from "../features/deviceLifecycle/deviceLifecycleCore";
@@ -163,7 +164,7 @@ export function registerDeviceTools() {
   ToolRegistry.register(
     "deleteDevice",
     "Stop and permanently delete a device, with verified platform-inventory absence",
-    teardownDeviceSchema,
+    teardownDeviceRegistrationSchema,
     deleteDeviceHandler,
     { defaultEnabled: false, transportRecovery: "connect" },
   );

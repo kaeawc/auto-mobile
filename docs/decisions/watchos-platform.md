@@ -50,6 +50,11 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   `simctl create` (never cloned; a named UDID is never created). With `boot` it boots and binds
   like `startDevice`, and a watch it created is deleted again if boot or bind fails. `resources`,
   `enableTools` and `readiness: "automation"` are refused; readiness defaults to `"none"`.
+  `deleteDevice` with `target.platform: "watchos"` resolves the watch by UDID from the watch
+  listing (absent means already deleted), applies killDevice's caller checks under the
+  `deleteDevice` name, stops a running watch through killDevice before taking its teardown lease
+  (killDevice's own lease would otherwise wait on it), then runs `simctl delete` and requires a
+  fresh watch listing that no longer shows it.
 - **`"either"` keeps meaning Android or iOS.** Listing `scanned` flags carry a `watchos` entry;
   until watch inventory exists it is `false`, so a watch is never treated as a freshly listed
   device.

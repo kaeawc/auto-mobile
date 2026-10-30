@@ -1016,17 +1016,16 @@ describe("display fence options preserve public call shapes", () => {
               ? () =>
                   Reflect.apply(tap.executeAndroidTap, tap, [
                     "tap",
-                    50,
-                    70,
+                    { x: 50, y: 70 },
                     50,
                     element,
                     { isTalkBackEnabled: false },
                     [],
                   ])
               : shape === "legacy"
-                ? () => tap.executeAndroidTap("tap", 50, 70, 50, element)
+                ? () => tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element)
                 : () =>
-                    tap.executeAndroidTap("tap", 50, 70, 50, element, {
+                    tap.executeAndroidTap("tap", { x: 50, y: 70 }, 50, element, {
                       options: { action: "tap", ...options },
                       isTalkBackEnabled: false,
                     });
@@ -1037,8 +1036,8 @@ describe("display fence options preserve public call shapes", () => {
             { x: 50, y: 70 },
             "tap",
             50,
-            element,
             {
+              tapElement: element,
               options: { action: "tap", ...options },
               isTalkBackEnabled: false,
               screenSize: h.screen.screenSize,
@@ -1063,33 +1062,38 @@ describe("display fence options preserve public call shapes", () => {
             shape === "extra"
               ? () =>
                   Reflect.apply(strategy.executeCoordinateFallback, strategy, [
-                    50,
-                    70,
+                    { x: 50, y: 70 },
                     "longPress",
                     500,
                     driver,
                     [],
                   ])
               : shape === "legacy"
-                ? () => strategy.executeCoordinateFallback(50, 70, "longPress", 500, driver)
+                ? () =>
+                    strategy.executeCoordinateFallback({ x: 50, y: 70 }, "longPress", 500, driver)
                 : () =>
-                    strategy.executeCoordinateFallback(50, 70, "longPress", 500, driver, options);
+                    strategy.executeCoordinateFallback(
+                      { x: 50, y: 70 },
+                      "longPress",
+                      500,
+                      driver,
+                      options,
+                    );
           break;
         case "longPress":
           invoke =
             shape === "extra"
               ? () =>
                   Reflect.apply(strategy.executeLongPress, strategy, [
-                    50,
-                    70,
+                    { x: 50, y: 70 },
                     500,
                     element,
                     driver,
                     [],
                   ])
               : shape === "legacy"
-                ? () => strategy.executeLongPress(50, 70, 500, element, driver)
-                : () => strategy.executeLongPress(50, 70, 500, element, driver, options);
+                ? () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, driver)
+                : () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, driver, options);
           break;
       }
       if (shape === "stale") {

@@ -25,6 +25,7 @@ import type {
   BootedDevice,
   Element,
   ObserveResult,
+  Point,
   ViewHierarchyResult,
 } from "../../../src/models";
 import type { ElementContainerSelector } from "../../../src/models/PinchOnOptions";
@@ -171,8 +172,7 @@ class BoundaryTap extends TapOnElement {
   }
   override async executeAndroidTap(
     _action: string,
-    x: number,
-    y: number,
+    { x, y }: Point,
     _duration: number,
     _element: Element,
   ) {

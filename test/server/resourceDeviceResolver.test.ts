@@ -280,6 +280,34 @@ describe("read listing status preserves incomplete discovery", () => {
       discoveryErrors: { ios: error },
     });
   });
+  test("a watchOS read scope lists watches and reports the watch source as scanned", async () => {
+    const watch: BootedDevice = {
+      deviceId: "6B1F3C2E-0000-4000-8000-00000000A7C1",
+      name: "Apple Watch Series 10 (46mm)",
+      platform: "watchos",
+    };
+    const asked: SomePlatform[] = [];
+    installManager({
+      getBootedDevicesDetailed: async (platform: SomePlatform) => {
+        asked.push(platform);
+        return {
+          devices: platform === "watchos" ? [watch] : [],
+          succeededPlatforms: new Set<Platform>(
+            platform === "watchos" ? ["watchos"] : ["android", "ios"],
+          ),
+        };
+      },
+    });
+
+    expect(
+      await defaultDeviceObservationAccess.listBootedWithStatus!(undefined, "watchos"),
+    ).toEqual({ devices: [watch], scanned: { android: false, ios: false, watchos: true } });
+    expect(await defaultDeviceObservationAccess.listBootedWithStatus!(undefined)).toMatchObject({
+      scanned: { android: true, ios: true, watchos: false },
+    });
+    expect(asked).toEqual(["watchos", "either"]);
+  });
+
   test("a successful empty listing is authoritative and source-compatible legacy access stays available", async () => {
     const manager = {
       getBootedDevicesDetailed: async () => ({

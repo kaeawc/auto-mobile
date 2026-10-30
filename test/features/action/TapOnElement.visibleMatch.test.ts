@@ -144,7 +144,7 @@ async function run(
     observation,
   });
   tap.refreshViewHierarchy = async () => refreshed;
-  tap.executeAndroidTap = async (_action, x, y) => {
+  tap.executeAndroidTap = async (_action, { x, y }) => {
     points.push({ x, y });
   };
   tap.testHooks.setIosCoordinateTap(async (_action, x, y) => {
@@ -471,18 +471,12 @@ describe("tapOn visible matched element", () => {
     const refreshed = hierarchy(label, row);
     const { result, points, tap } = await run("android", refreshed);
     expect(result.success).toBe(true);
-    await tap.retryTapIfNoChange(
-      hierarchyFingerprint(refreshed)!,
-      { x: 141, y: 394 },
-      "tap",
-      0,
-      result.element!,
-      {
-        options: { text: "Forms & Input", action: "tap" },
-        isTalkBackEnabled: false,
-        screenSize: { width: 402, height: 874 },
-      },
-    );
+    await tap.retryTapIfNoChange(hierarchyFingerprint(refreshed)!, { x: 141, y: 394 }, "tap", 0, {
+      tapElement: result.element!,
+      options: { text: "Forms & Input", action: "tap" },
+      isTalkBackEnabled: false,
+      screenSize: { width: 402, height: 874 },
+    });
     expect(points).toEqual([
       { x: 261, y: 394 },
       { x: 261, y: 394 },

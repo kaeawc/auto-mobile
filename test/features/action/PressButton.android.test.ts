@@ -381,6 +381,72 @@ describe("PressButton Android keycode dispatch", () => {
   // the foreground app actually became the launcher before trusting either
   // the global action or the ADB keyevent fallback.
   describe("home button (issue #6147)", () => {
+    test.each([
+      ["automotive", "com.android.car.mapsplaceholder", true],
+      ["automotive", "com.android.car.mapsplaceholder.fake", false],
+      ["automotive", "com.android.car.settings", false],
+      ["phone", "com.android.car.mapsplaceholder", false],
+    ] as const)("%s Home verifies %s with result %s", async (formFactor, appId, success) => {
+      fakeAdb.setCommandResponse(
+        "resolve-activity",
+        createExecResult("com.android.car.carlauncher/.CarLauncher", ""),
+      );
+      const action = new PressButton(
+        { ...androidDevice, formFactor },
+        fakeAdb,
+        fakeTimer,
+        undefined,
+        undefined,
+        {
+          window: sequencedWindow([appId]),
+          globalActionClient: {
+            requestGlobalAction: async () => ({ success: false, action: "home", totalTimeMs: 0 }),
+          },
+        },
+      );
+      const result = await dispatch(action, "home");
+      expect(result.success).toBe(success);
+      expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+    });
+
+    test("AAOS Home on an unchanged launcher host succeeds as a no-op", async () => {
+      const appId = "com.android.car.mapsplaceholder";
+      fakeAdb.setCommandResponse(
+        "resolve-activity",
+        createExecResult("com.android.car.carlauncher/.CarLauncher", ""),
+      );
+      const window = new FakeWindow();
+      window.configureCachedActiveWindow(null);
+      window.configureActiveWindow({ appId, activityName: "Main", layoutSeqSum: 1 });
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult(
+        buildObserveResult({
+          updatedAt: 1,
+          screenSize: { width: 1080, height: 1920 },
+          systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          viewHierarchy: { packageName: appId, hierarchy: { node: {} } },
+        }),
+      );
+      const action = new PressButton(
+        { ...androidDevice, formFactor: "automotive" },
+        fakeAdb,
+        fakeTimer,
+        undefined,
+        undefined,
+        {
+          window,
+          observeScreen: observe,
+          awaitIdle: new FakeAwaitIdle(),
+          globalActionClient: {
+            requestGlobalAction: async () => ({ success: true, action: "home", totalTimeMs: 0 }),
+          },
+        },
+      );
+      const result = await action.execute("home");
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+    });
+
     test("falls back to keyevent 3 and succeeds once the launcher is confirmed foreground", async () => {
       globalActionClient = {
         requestGlobalAction: async () => {

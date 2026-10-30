@@ -67,6 +67,7 @@ internal object PrototypeMedia {
       ?: positionKey
         ?.takeUnless { (state[it] as? JsonPrimitive)?.let(::isNumber) == true }
         ?.let { fail("$path.positionKey", "positionKey must name a declared number state key") }
+      ?: feedFieldError(node, path)
   }
 
   /**
@@ -89,6 +90,14 @@ internal object PrototypeMedia {
         }
       }
   }
+
+  /** `visibleThreshold` and `resumePosition` tune `autoplay: "whenVisible"` only (#14258). */
+  private fun feedFieldError(node: JsonObject, path: String): PrototypeSpecError? =
+    if (node.text("autoplay") == "whenVisible") null
+    else
+      listOf("visibleThreshold", "resumePosition")
+        .firstOrNull { it in node }
+        ?.let { fail("$path.$it", "$it needs autoplay whenVisible") }
 
   private fun isNumber(value: JsonPrimitive): Boolean =
     !value.isString && value.doubleOrNull != null

@@ -313,9 +313,14 @@ describe("EmulatorAudioClient.streamCapture", () => {
       };
     };
     const received: number[] = [];
-    const stream = await client.streamCapture((pcm) => received.push(...pcm), {
-      sampleRate: 16_000,
-    });
+    const stream = await client.streamCapture(
+      (pcm) => {
+        received.push(...pcm);
+      },
+      {
+        sampleRate: 16_000,
+      },
+    );
     while (received.length < 6) {
       await Promise.resolve();
     }
@@ -324,6 +329,38 @@ describe("EmulatorAudioClient.streamCapture", () => {
     expect(stream.sampleRate).toBe(16_000);
     expect(received).toEqual([1, 0, 2, 0, 3, 0]);
     expect(transport.calls[0].cancelled).toBe(true);
+  });
+
+  test("a busy sink holds the next packet until it settles", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = undefined;
+      call.onWrite = () => {
+        call.respond(audioPacket([1, 0]));
+        call.respond(audioPacket([2, 0]));
+      };
+    };
+    const received: number[] = [];
+    let release: () => void = () => {};
+    const stream = await client.streamCapture((pcm) => {
+      received.push(...pcm);
+      if (received.length === 2) {
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return undefined;
+    });
+    for (let turn = 0; turn < 10; turn++) {
+      await Promise.resolve();
+    }
+    expect(received).toEqual([1, 0]);
+    release();
+    while (received.length < 4) {
+      await Promise.resolve();
+    }
+    expect(received).toEqual([1, 0, 2, 0]);
+    await stream.stop();
   });
 
   test("a stream the emulator refuses before any audio fails at stop", async () => {
@@ -345,7 +382,9 @@ describe("EmulatorAudioClient.streamCapture", () => {
       };
     };
     const received: number[] = [];
-    const stream = await client.streamCapture((pcm) => received.push(...pcm));
+    const stream = await client.streamCapture((pcm) => {
+      received.push(...pcm);
+    });
     while (received.length < 2) {
       await Promise.resolve();
     }
@@ -373,6 +412,15 @@ describe("SilenceFiller", () => {
     expect(filler.before(packet(nowUs))?.byteLength).toBe(32_000);
     nowUs += 30_000;
     expect(filler.before(packet(nowUs))).toBeUndefined();
+  });
+
+  test("contiguous packets that waited out a slow consumer add no silence", () => {
+    let nowUs = START_US;
+    const filler = new SilenceFiller(16_000, () => nowUs);
+    expect(filler.before(packet(START_US))).toBeUndefined();
+    // An 11 s disk stall delays processing; the next packet's timestamp is still contiguous.
+    nowUs += 11_000_000;
+    expect(filler.before(packet(START_US + 20_000))).toBeUndefined();
   });
 
   test("a timestamp that disagrees with the host clock falls back to arrival time", () => {

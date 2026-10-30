@@ -5,7 +5,7 @@ import {
   resolveCoordinateTapCtrlProxyTimeoutMs,
   resolveGestureCtrlProxyTimeoutMs,
 } from "./gestureTransportTimeout";
-import { ActionableError } from "../../models";
+import { ActionableError, type Point } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
 import { logger } from "../../utils/logger";
@@ -85,11 +85,11 @@ export interface AndroidCoordinateTapOptions {
 export async function dispatchAndroidCoordinateTap(
   accessibilityService: CoordinateTapClient,
   adb: AdbExecutor,
-  x: number,
-  y: number,
+  point: Point,
   durationMs: number,
   options: AndroidCoordinateTapOptions = {},
 ): Promise<void> {
+  const { x, y } = point;
   const { frameContext, signal, assertCurrent, onTapDelivered } = options;
   throwIfAborted(signal);
   let dispatched = false;
@@ -163,25 +163,23 @@ type InternalIosCoordinateTapOptions = IosCoordinateTapOptions & { doubleTap?: b
  */
 export async function dispatchIosCoordinateTap(
   client: IosCoordinateTapClient,
-  x: number,
-  y: number,
+  point: Point,
   durationMs: number,
   frameContext?: string,
   options: IosCoordinateTapOptions = {},
 ): Promise<void> {
-  return dispatchIosTap(client, x, y, durationMs, frameContext, options);
+  return dispatchIosTap(client, point, durationMs, frameContext, options);
 }
 
 /** One runner command owns the full double tap; a missing reply proves no partial count. */
 export async function dispatchIosDoubleTap(
   client: IosCoordinateTapClient,
-  x: number,
-  y: number,
+  point: Point,
   durationMs: number = 50,
   frameContext?: string,
   options: IosCoordinateTapOptions = {},
 ): Promise<void> {
-  return dispatchIosTap(client, x, y, durationMs, frameContext, {
+  return dispatchIosTap(client, point, durationMs, frameContext, {
     ...options,
     failureLabel: "double tap",
     doubleTap: true,
@@ -190,12 +188,12 @@ export async function dispatchIosDoubleTap(
 
 async function dispatchIosTap(
   client: IosCoordinateTapClient,
-  x: number,
-  y: number,
+  point: Point,
   durationMs: number,
   frameContext: string | undefined,
   options: InternalIosCoordinateTapOptions,
 ): Promise<void> {
+  const { x, y } = point;
   const { failureLabel = "tap", signal, doubleTap = false } = options;
   if (doubleTap) {
     throwIfAborted(signal, true);
@@ -323,8 +321,7 @@ function talkBackDisplayTapDispatch(
       action === "tap"
         ? await talkBack.strategy.executePreciseTap(x, y, talkBack.driver, fence)
         : await talkBack.strategy.executeCoordinateFallback(
-            x,
-            y,
+            { x, y },
             action,
             durationMs,
             talkBack.driver,

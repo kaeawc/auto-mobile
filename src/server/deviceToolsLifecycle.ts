@@ -1,6 +1,12 @@
 import type { InternalTeardownOptions } from "../features/deviceLifecycle/teardown/teardownContracts";
 import type { RestartStopIdentity } from "../daemon/devicePool";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
+import type { BootedDevice } from "../models";
+import {
+  deleteWatchDevice,
+  isWatchTeardownRequest,
+  type RegisteredTeardownArgs,
+} from "./deviceToolsWatchDelete";
 import type { DaemonStateLike } from "../daemon/daemonState";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { getAbortSignal } from "../utils/AbortContext";
@@ -302,6 +308,34 @@ async function assertKillDeviceCaller(
     force: args.force ?? false,
   });
   return stopIdentity;
+}
+
+/**
+ * deleteDevice's caller checks for an Apple Watch simulator (#15882): the same broker-binding,
+ * session-holder and other-daemon refusals killDevice applies, named for deleteDevice.
+ */
+export async function assertWatchDeleteCaller(
+  device: BootedDevice,
+  args: object,
+  force: boolean,
+): Promise<void> {
+  const requester = lifecycleRequester(args);
+  await assertLifecycleCallerNotOnForeignBinding({
+    toolName: "deleteDevice",
+    device,
+    requester,
+    stableIds: [device.deviceId],
+  });
+  assertLifecycleCallerHoldsDevice({
+    checkRestartHold: true,
+    toolName: "deleteDevice",
+    device,
+    requester,
+    force,
+    stableIds: [device.deviceId],
+    stopIdentity: undefined,
+  });
+  await assertLifecycleTargetNotHeldByOtherDaemon({ toolName: "deleteDevice", device, force });
 }
 
 type TeardownStopIdentities = Map<string, RestartStopIdentity | undefined>;
@@ -839,10 +873,23 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
   }
 
   const deleteDeviceHandler = async (
-    args: TeardownDeviceArgs,
+    args: RegisteredTeardownArgs,
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
+    if (isWatchTeardownRequest(args)) {
+      const force = args.force ?? false;
+      return await deleteWatchDevice(
+        args,
+        {
+          assertCaller: (device) => assertWatchDeleteCaller(device, args, force),
+          // killDevice judges the same caller (its internal params ride along) and stops the watch.
+          stop: (device, signal) =>
+            killDeviceHandler({ ...args, device, force }, undefined, signal),
+        },
+        abortSignal ?? getAbortSignal(),
+      );
+    }
     const deps = getDeviceToolsDependencies();
     return await executeDeleteDevice(
       args,

@@ -78,6 +78,8 @@ const videoPlayerShape = {
   loop: z.boolean().optional(),
   startMs: z.number().int().min(0).max(86_400_000).optional(),
   positionKey: keySchema.optional(),
+  visibleThreshold: z.number().min(0.1).max(1).optional(),
+  resumePosition: z.boolean().optional(),
   captions: z.array(prototypeMediaCaptionSchema).min(1).max(8).optional(),
 };
 

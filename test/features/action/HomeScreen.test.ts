@@ -1428,6 +1428,57 @@ describe("HomeScreen", () => {
   // never becomes the launcher. Home must verify the actual foreground app
   // instead of trusting a dispatch method's self-reported result.
   describe("home-press verification (issue #6147)", () => {
+    test.each([true, false])(
+      "AAOS map-host Home is verified after global action success %s",
+      async (globalSuccess) => {
+        mockDevice = { ...mockDevice, formFactor: "automotive" };
+        fakeAdb.setCommandResponse(
+          "resolve-activity",
+          createExecResult("com.android.car.carlauncher/.CarLauncher", ""),
+        );
+        homeScreen = createHomeScreen(sequencedWindow(["com.android.car.mapsplaceholder"]), {
+          requestGlobalAction: async () => globalActionResult({ success: globalSuccess }),
+        });
+        const result = await homeScreen.execute();
+        expect(result.success).toBe(true);
+        expect(fakeAdb.getExecutedCommands().includes("shell input keyevent 3")).toBe(
+          !globalSuccess,
+        );
+      },
+    );
+
+    test.each(["automotive", "phone"] as const)(
+      "unchanged map host is already Home only on %s",
+      async (formFactor) => {
+        mockDevice = { ...mockDevice, formFactor };
+        const observation = createObserveResult();
+        observation.viewHierarchy = {
+          packageName: "com.android.car.mapsplaceholder",
+          hierarchy: { node: {} },
+        };
+        fakeObserveScreen.setObserveResult(observation);
+        fakeWindow.configureActiveWindow({
+          appId: "com.android.car.mapsplaceholder",
+          activityName: "Main",
+          layoutSeqSum: 1,
+        });
+        fakeAdb.setCommandResponse(
+          "resolve-activity",
+          createExecResult("com.android.car.carlauncher/.CarLauncher", ""),
+        );
+        homeScreen = createHomeScreen(fakeWindow, {
+          requestGlobalAction: async () => globalActionResult({ success: true }),
+        });
+        if (formFactor === "automotive") {
+          const result = await homeScreen.execute();
+          expect(result.success).toBe(true);
+          expect(result.message).toBe("Already on the home screen");
+        } else {
+          await expect(homeScreen.execute()).rejects.toThrow("did not background");
+        }
+      },
+    );
+
     test("reports success when the accessibility global action actually backgrounds the app", async () => {
       const globalActionClient = {
         requestGlobalAction: async () => globalActionResult({ success: true }),

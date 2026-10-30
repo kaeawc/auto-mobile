@@ -16647,6 +16647,18 @@
         "hasDefault": true
       },
       {
+        "name": "visibleThreshold",
+        "type": "double",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "resumePosition",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "captions",
         "type": "list",
         "nullable": true,

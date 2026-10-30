@@ -4,6 +4,7 @@ import type {
   Element,
   ElementSelectionResult,
   ObserveResult,
+  Point,
   TapOnSelectedElement,
   ViewHierarchyResult,
 } from "../../../src/models";
@@ -256,8 +257,7 @@ async function executeFocusWithDuplicateEmail(
   tap.refreshViewHierarchy = async () => (moveDuringStability ? stableHierarchy : before);
   tap.executeAndroidTap = async (
     _action: string,
-    _x: number,
-    _y: number,
+    _point: Point,
     _duration: number,
     element: Element,
   ) => {

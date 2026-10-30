@@ -1098,7 +1098,7 @@ describe("tapOn targeted display resolution", () => {
       { observation: { ...h.observation(), viewHierarchy: before } },
     );
     const points: Array<{ x: number; y: number }> = [];
-    h.action.executeAndroidTap = async (_action, x, y) => {
+    h.action.executeAndroidTap = async (_action, { x, y }) => {
       points.push({ x, y });
     };
     h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
@@ -1135,7 +1135,7 @@ describe("tapOn targeted display resolution", () => {
       { observation: { ...h.observation(), viewHierarchy: before } },
     );
     const points: Array<{ x: number; y: number }> = [];
-    h.action.executeAndroidTap = async (_action, x, y) => {
+    h.action.executeAndroidTap = async (_action, { x, y }) => {
       points.push({ x, y });
     };
     h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({

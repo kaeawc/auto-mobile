@@ -54,7 +54,7 @@ async function foldResourceDiscovery(
   const pool = defaultDaemonContext.devicePool();
   const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
   const devices =
-    platform === "ios"
+    platform === "ios" || platform === "watchos"
       ? rawDevices
       : pool
         ? pool.mapAndroidDiscovery(rawDevices)
@@ -147,8 +147,8 @@ export async function listBootedDevicesForReadWithStatus(
           scanned: {
             android: discovery.succeededPlatforms.has("android"),
             ios: discovery.succeededPlatforms.has("ios"),
-            // Watch inventory is not scanned yet, so a watch is never treated as freshly listed.
-            watchos: false,
+            // Only a read that names watchOS lists watches; "either" never scans them.
+            watchos: discovery.succeededPlatforms.has("watchos"),
           },
           discoveryErrors: discovery.discoveryErrors,
         };

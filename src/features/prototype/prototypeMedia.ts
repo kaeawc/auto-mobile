@@ -79,7 +79,18 @@ function videoPlayerError(
   if (typeof node.positionKey === "string" && typeof scope.state[node.positionKey] !== "number") {
     return fail(`${path}.positionKey`, "positionKey must name a declared number state key");
   }
-  return undefined;
+  return feedFieldError(node, path);
+}
+
+/** `visibleThreshold` and `resumePosition` tune `autoplay: "whenVisible"` only (#14258). */
+function feedFieldError(node: Raw, path: string): PrototypePlatformError | undefined {
+  if (node.autoplay === "whenVisible") {
+    return undefined;
+  }
+  const field = ["visibleThreshold", "resumePosition"].find((name) => node[name] !== undefined);
+  return field === undefined
+    ? undefined
+    : { path: `${path}.${field}`, message: `${field} needs autoplay whenVisible` };
 }
 
 /**

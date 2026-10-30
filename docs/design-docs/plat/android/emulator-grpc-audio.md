@@ -73,10 +73,14 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
 
 - Before the video capture starts it opens an open-ended capture on the device's route (gRPC
   `streamAudio` with no deadline, or the loopback helper's `--until-stopped`) and appends the PCM to
-  `<recording>.audio.pcm`, so a long recording never sits in memory. A silent guest sends no
-  packets, so the gRPC route writes silence for the time between packets (from the packet
-  timestamps, or arrival time when a timestamp disagrees with the host clock by over 10 s) to keep
-  the track in step with the video.
+  `<recording>.audio.pcm`, so a long recording never sits in memory. Writes apply backpressure: when
+  the file's buffer is full the sink returns a promise. The gRPC route then stops reading packets,
+  and the call's message queue pauses the HTTP/2 stream at 64 queued messages (resuming at 16), so
+  flow control holds the emulator. The loopback route pauses the helper's stdout. A stalled disk
+  bounds memory instead of queueing audio. A silent guest sends no packets, so the gRPC route writes
+  silence for the time between packets (from the packet timestamps, or arrival time when a timestamp
+  is over 10 s from both the host clock and where the stream had reached, so audio that waited out a
+  slow disk is not mistaken for silence) to keep the track in step with the video.
 - At stop, after the video is final, it ends the capture and muxes with ffmpeg: video copied, audio
   AAC, the audio captured between the stream opening and the video launch skipped (`-ss`), and the
   track padded with silence to the video's length (`apad` + `-shortest`). An empty capture becomes
@@ -86,8 +90,10 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
   than OK or CANCELLED is a failed capture even after some audio arrived, and so is a PCM file
   write error (kept from the first failed write and raised at close). The PCM file is closed
   before it is removed on every path, including a failed audio stop.
-- A force stop that arrives while the video is still finalizing stops the audio and discards its
-  file right away; the pending stop then reports `hasAudioTrack: false`.
+- A force stop abandons the audio: chunks are dropped, a write waiting on a slow disk is released,
+  and the video is torn down without waiting for the PCM file to close. One that arrives while the
+  video is still finalizing does this right away; the pending stop then reports
+  `hasAudioTrack: false`.
 - A video stop that fails discards the audio. When the backend keeps the recording active for a
   retry (Android finalization), the retried stop reports `hasAudioTrack: false` with a warning; a
   force stop forgets that state.

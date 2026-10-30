@@ -1883,6 +1883,8 @@ data class PrototypeVideoPlayerNode(
   val loop: Boolean? = null,
   val startMs: Int? = null,
   val positionKey: String? = null,
+  val visibleThreshold: Double? = null,
+  val resumePosition: Boolean? = null,
   val captions: List<JsonObject>? = null,
 ) : PrototypeNode()
 

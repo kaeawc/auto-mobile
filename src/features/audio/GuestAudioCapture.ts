@@ -8,6 +8,7 @@ import type { IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { parseBroadcastOutput } from "../intent/SendBroadcast";
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
 import {
@@ -66,7 +67,10 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     private readonly adbFor: (deviceId: string) => Pick<AdbExecutor, "execute">,
     private readonly discovery: EmulatorGrpcDiscovery,
     private readonly ids: IdGenerator,
-    private readonly timer: Pick<Timer, "now" | "monotonicNow" | "sleep"> = defaultTimer,
+    private readonly timer: Pick<
+      Timer,
+      "now" | "monotonicNow" | "sleep" | "setTimeout" | "clearTimeout"
+    > = defaultTimer,
     private readonly options: GuestAudioCaptureOptions = {},
   ) {
     this.now = timer.monotonicNow?.bind(timer) ?? timer.now.bind(timer);
@@ -256,7 +260,15 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
     let userId: number | undefined;
     try {
       timeout();
-      userId = await this.options.resolveSetupUser?.(deviceId);
+      const resolveSetupUser = this.options.resolveSetupUser;
+      if (resolveSetupUser) {
+        userId = await raceWithDeadline(() => resolveSetupUser(deviceId), {
+          timer: this.timer,
+          timeoutMs: deadline - this.now(),
+          label: "CtrlProxy setup user resolution",
+          timeoutError: () => unavailable(deviceId, "capture verification deadline expired"),
+        });
+      }
       timeout();
     } catch (error) {
       throw unverifiable(error, "read");

@@ -1,5 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { adbFailureOutput } from "../utils/android-cmdline-tools/adbFailureOutput";
 import { outputLooksLikeShellFailure } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../utils/logger";
 import { CTRL_PROXY_PACKAGE } from "./constants";
@@ -41,6 +42,13 @@ export async function grantRecordAudioPermission(
         throw new Error(result.error);
       }
     } catch (error) {
+      const { stdout, stderr } = adbFailureOutput(error);
+      const output = `${stdout}\n${stderr}`;
+      if (/unknown permission/i.test(output) || outputLooksLikeShellFailure(stdout, stderr)) {
+        const reason = output.trim();
+        logger.warn(`[CTRL_PROXY] ${RECORD_AUDIO_PERMISSION} not grantable: ${reason}`);
+        return { granted: false, reason };
+      }
       if (attempt === 0 && isTimeout(error)) {
         // Retrying is safe: pm grant is idempotent and no device refusal was observed.
         logger.debug(`[CTRL_PROXY] Retrying ${RECORD_AUDIO_PERMISSION} after a grant timeout`);

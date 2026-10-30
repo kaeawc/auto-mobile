@@ -12,6 +12,7 @@ import type {
 } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { settleWithFakeTime } from "../../helpers/fakeTimerStepping";
 import { EmulatorAudioService } from "../../../src/features/audio/EmulatorAudioService";
 import { FakeEmulatorAudioSession } from "../../fakes/FakeEmulatorAudioSession";
 import { EmulatorAudioError } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
@@ -127,6 +128,23 @@ describe("AdbGuestAudioCapture", () => {
       expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
     },
   );
+
+  test("rejected pm grant refusal reports the permission code before any broadcast", async () => {
+    const { adb, capture } = setup();
+    adb.setCommandResponse(DUMP_COMMAND, permissionDump(false));
+    const refusal = "java.lang.SecurityException: permission cannot be granted";
+    adb.setCommandError(
+      GRANT_COMMAND,
+      new Error("Command failed", {
+        cause: Object.assign(new Error("exit code 1"), { stderr: refusal }),
+      }),
+    );
+    await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toMatchObject({
+      code: "audio_record_permission_not_granted",
+      message: expect.stringContaining(refusal),
+    });
+    expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+  });
 
   test.each([
     "read result",
@@ -262,6 +280,31 @@ describe("AdbGuestAudioCapture", () => {
       1,
     );
     expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+  });
+
+  test("unresolved setup user cannot exceed the capture deadline", async () => {
+    const { adb, discovery } = setup();
+    const timer = new FakeTimer();
+    const capture = new AdbGuestAudioCapture(
+      () => adb,
+      discovery,
+      new CountingIdGenerator("capture"),
+      timer,
+      { resolveSetupUser: () => new Promise<number | undefined>(() => {}) },
+    );
+    const opening = capture.open("emulator-5554", { leaseMs: 60_000 });
+    await expect(
+      settleWithFakeTime(timer, opening, {
+        stepMs: 1_000,
+        maxSteps: 8,
+        description: "setup user resolution deadline",
+      }),
+    ).rejects.toMatchObject({
+      code: "audio_guest_capture_unavailable",
+      message: expect.stringContaining("capture verification deadline expired"),
+    });
+    expect(timer.monotonicNow()).toBe(8_000);
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
   test("permission retry uses the reduced remaining deadline budget", async () => {

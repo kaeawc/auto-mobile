@@ -116,6 +116,35 @@ describe("grantRecordAudioPermission", () => {
     });
     expect(adb.getExecutedCommands()).toHaveLength(1);
   });
+
+  test.each([
+    "Unknown permission: android.permission.RECORD_AUDIO",
+    "java.lang.SecurityException: permission cannot be granted",
+    "Error: permission grant refused",
+  ])("rejected pm grant with %s is a device refusal without retry", async (output) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError(
+      "pm grant",
+      new Error("Command failed", {
+        cause: Object.assign(new Error("exit code 1"), { stderr: output }),
+      }),
+    );
+    expect(await grantRecordAudioPermission(adb)).toEqual({ granted: false, reason: output });
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+  });
+
+  test("rejected pm grant with a plain transport error preserves transportError", async () => {
+    const adb = new FakeAdbExecutor();
+    const error = new Error("transport reset");
+    adb.setCommandError("pm grant", error);
+    expect(await grantRecordAudioPermission(adb)).toEqual({
+      granted: false,
+      reason: "transport reset",
+      transportError: error,
+    });
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+  });
+
   test("a thrown error warns without rejecting", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDefaultError(new Error("transport reset"));

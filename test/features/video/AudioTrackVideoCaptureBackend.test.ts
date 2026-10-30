@@ -32,7 +32,16 @@ function config(audio: boolean): VideoCaptureConfig {
   };
 }
 
+/** Lets fire-and-forget teardown run to completion. */
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 10; turn++) {
+    await Promise.resolve();
+  }
+}
+
 interface SetupOptions {
+  /** PCM writes never drain, as on a stalled disk. */
+  stalledWrite?: boolean;
   /** The video stop fails once, then succeeds. */
   videoStopFailsOnce?: boolean;
   muxFails?: boolean;
@@ -118,6 +127,7 @@ function setup(options: SetupOptions = {}) {
       return {
         write: (chunk) => {
           files.get(path)?.push(...chunk);
+          return options.stalledWrite ? new Promise<void>(() => {}) : undefined;
         },
         close: async () => {
           events.push("pcm-close");
@@ -206,8 +216,20 @@ describe("AudioTrackVideoCaptureBackend", () => {
     const { backend, events, removed } = setup();
     const handle = await backend.start(config(true));
     await backend.forceStop(handle);
-    expect(events.slice(-3)).toEqual(["audio-stop", "pcm-close", "video-force-stop"]);
+    await settle();
+    // The video teardown does not wait for the abandoned audio file to close.
+    expect(events.slice(-3)).toEqual(["audio-stop", "video-force-stop", "pcm-close"]);
     expect(removed).toEqual(["/rec/rec-1.mp4.audio.pcm"]);
+  });
+
+  test("a force stop tears down the video while an audio write waits on a stalled disk", async () => {
+    const { backend, events, emit } = setup({ stalledWrite: true });
+    const handle = await backend.start(config(true));
+    const writing = emit([1, 2]);
+    await backend.forceStop(handle);
+    expect(events).toContain("video-force-stop");
+    // Abandoning the track released the waiting write, so the audio source is not held either.
+    await writing;
   });
 
   test("an audio stop that fails still closes the PCM file before removing it", async () => {
@@ -236,7 +258,8 @@ describe("AudioTrackVideoCaptureBackend", () => {
     const stopping = backend.stop(handle);
     await Promise.resolve();
     await backend.forceStop(handle);
-    expect(events.slice(-3)).toEqual(["audio-stop", "pcm-close", "video-force-stop"]);
+    await settle();
+    expect(events.slice(-3)).toEqual(["audio-stop", "video-force-stop", "pcm-close"]);
     expect(removed).toEqual(["/rec/rec-1.mp4.audio.pcm"]);
     releaseVideoStop();
     const result = await stopping;

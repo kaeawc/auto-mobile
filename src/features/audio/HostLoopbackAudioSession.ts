@@ -253,11 +253,19 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
 
   /**
    * Waits for the last PCM after exit, bounded so a pipe that never closes cannot hang the call.
-   * Resolves true when the output ended, false when the wait ran out.
+   * The bound counts only time the consumer is idle: output held back by a busy sink (a slow disk)
+   * is not a stuck pipe. Resolves true when the output ended, false when the wait ran out.
    */
   private untilOutputEnded(helper: RunningLoopbackHelper): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      const handle = this.timer.setTimeout(() => resolve(false), CAPTURE_DRAIN_MS);
+      let handle: ReturnType<Timer["setTimeout"]>;
+      const arm = () => {
+        handle = this.timer.setTimeout(
+          () => (helper.sinkBusy() ? arm() : resolve(false)),
+          CAPTURE_DRAIN_MS,
+        );
+      };
+      arm();
       void helper.outputEnded.then(() => {
         this.timer.clearTimeout(handle);
         resolve(true);

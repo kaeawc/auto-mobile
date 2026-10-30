@@ -57,6 +57,8 @@ export interface AudioTrackDependencies {
 
 interface AudioTrack {
   stream: AudioStream;
+  /** Stops writing and releases a write waiting on a slow disk, so teardown never waits on it. */
+  abandon: () => void;
   file: PcmFile;
   pcmPath: string;
   leadMs: number;
@@ -130,9 +132,10 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
     await this.deps.muxer.ensureAvailable();
     const pcmPath = audioTrackPcmPath(config.outputPath);
     const file = this.deps.openPcmFile(pcmPath);
+    const writer = abandonableWriter(file);
     let stream: AudioStream;
     try {
-      stream = await this.deps.source.startStream(deviceId, (chunk) => file.write(chunk));
+      stream = await this.deps.source.startStream(deviceId, writer.sink);
     } catch (error) {
       await this.discardFile(file, pcmPath);
       throw error;
@@ -145,11 +148,17 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
     try {
       handle = await this.inner.start(config);
     } catch (error) {
-      await this.discard({ stream, file, pcmPath, leadMs: 0 });
+      await this.discard({ stream, abandon: writer.abandon, file, pcmPath, leadMs: 0 });
       throw error;
     }
     const leadMs = Math.max(0, videoStartedAt - audioStartedAt);
-    this.tracks.set(handle.recordingId, { stream, file, pcmPath, leadMs });
+    this.tracks.set(handle.recordingId, {
+      stream,
+      abandon: writer.abandon,
+      file,
+      pcmPath,
+      leadMs,
+    });
     // The PCM grows beside the video, so the in-progress size cap counts it too.
     return {
       ...handle,
@@ -181,7 +190,8 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
     const track = this.tracks.get(handle.recordingId);
     if (track) {
       this.tracks.delete(handle.recordingId);
-      await this.discardOnce(track);
+      // Video teardown does not wait for abandoned audio to reach a possibly stalled disk.
+      void this.discardOnce(track);
     }
     await this.inner.forceStop?.(handle, options);
   }
@@ -242,6 +252,7 @@ export class AudioTrackVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   private async discard(track: AudioTrack): Promise<void> {
+    track.abandon();
     await track.stream.stop().catch((error: unknown) => {
       // The recording is being abandoned; a failed audio stop changes nothing for the caller.
       logger.debug(`audio track stop during discard: ${errorMessage(error)}`);
@@ -273,5 +284,33 @@ function withAudioOutcome(result: RecordingResult, warning: string | undefined):
     ...(warning ? {} : { sizeBytes: undefined }),
     hasAudioTrack: warning === undefined,
     warnings: warnings.length > 0 ? warnings : undefined,
+  };
+}
+
+/** A PCM sink over `file` that can be abandoned: later chunks are dropped and a waiting write is released. */
+function abandonableWriter(file: PcmFile): { sink: PcmSink; abandon: () => void } {
+  let abandoned = false;
+  let release: () => void = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    sink: (chunk) => {
+      if (abandoned) {
+        return undefined;
+      }
+      const busy = file.write(chunk);
+      if (!(busy instanceof Promise)) {
+        return undefined;
+      }
+      return new Promise<void>((resolve) => {
+        void busy.then(resolve, resolve);
+        void released.then(resolve);
+      });
+    },
+    abandon: () => {
+      abandoned = true;
+      release();
+    },
   };
 }

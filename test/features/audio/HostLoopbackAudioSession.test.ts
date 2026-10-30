@@ -269,6 +269,28 @@ describe("HostLoopbackAudioSession capture", () => {
     await stream.stop();
   });
 
+  test("a sink still busy after the helper exits extends the output wait instead of failing", async () => {
+    const { session, helpers, timer } = setup();
+    let release: () => void = () => {};
+    const stream = await session.streamCapture(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    helpers[0].stdin.on("finish", () => {
+      helpers[0].stdout.write(pcmBytes([1]));
+      helpers[0].exit(0);
+    });
+    const stopping = stream.stop();
+    await turns(3);
+    // Three drain windows pass while the disk is slow; the stop keeps waiting.
+    timer.advanceTime(CAPTURE_DRAIN_MS * 3);
+    await turns(1);
+    release();
+    await expect(stopping).resolves.toBeUndefined();
+  });
+
   test("less audio than asked for is timedOut, not an error", async () => {
     const { session } = setup((helper) => {
       helper.ready();

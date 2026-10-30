@@ -90,8 +90,10 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
   than OK or CANCELLED is a failed capture even after some audio arrived, and so is a PCM file
   write error (kept from the first failed write and raised at close). The PCM file is closed
   before it is removed on every path, including a failed audio stop.
-- A force stop that arrives while the video is still finalizing stops the audio and discards its
-  file right away; the pending stop then reports `hasAudioTrack: false`.
+- A force stop abandons the audio: chunks are dropped, a write waiting on a slow disk is released,
+  and the video is torn down without waiting for the PCM file to close. One that arrives while the
+  video is still finalizing does this right away; the pending stop then reports
+  `hasAudioTrack: false`.
 - A video stop that fails discards the audio. When the backend keeps the recording active for a
   retry (Android finalization), the retried stop reports `hasAudioTrack: false` with a warning; a
   force stop forgets that state.

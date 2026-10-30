@@ -36,6 +36,8 @@ export interface RunningLoopbackHelper {
    * last bytes, so output is complete only after this.
    */
   outputEnded: Promise<void>;
+  /** Whether stdout is paused on a busy consumer (backpressure), so a slow pipe is expected. */
+  sinkBusy(): boolean;
   /** The error the helper reported, as a typed tool error. */
   failure(): EmulatorAudioError;
 }
@@ -111,16 +113,19 @@ export async function startLoopbackHelper(options: {
     }
   });
   const { onStdout } = options;
+  let sinkBusy = false;
   if (onStdout) {
     child.stdout.on("data", (chunk: Uint8Array) => {
       const busy = onStdout(chunk);
       if (busy instanceof Promise) {
+        sinkBusy = true;
         child.stdout.pause();
+        const resume = () => {
+          sinkBusy = false;
+          child.stdout.resume();
+        };
         // A rejected write is the consumer's to report; reading resumes either way.
-        void busy.then(
-          () => child.stdout.resume(),
-          () => child.stdout.resume(),
-        );
+        void busy.then(resume, resume);
       }
     });
   }
@@ -147,6 +152,7 @@ export async function startLoopbackHelper(options: {
     process: child,
     exited,
     outputEnded,
+    sinkBusy: () => sinkBusy,
     failure: () => loopbackError(options.operation, report, exitCode),
   };
   await waitForReady(helper, ready, options, () => report);

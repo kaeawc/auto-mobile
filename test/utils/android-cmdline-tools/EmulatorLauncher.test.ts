@@ -23,6 +23,12 @@ import {
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakePortAvailabilityChecker } from "../../fakes/FakePortAvailabilityChecker";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeEmulatorGrpcPortRegistry } from "../../fakes/FakeEmulatorGrpcPortRegistry";
+
+let grpcPortRegistry: FakeEmulatorGrpcPortRegistry;
+beforeEach(() => {
+  grpcPortRegistry = new FakeEmulatorGrpcPortRegistry();
+});
 import { defaultEmulatorOutputTail } from "../../../src/utils/android-cmdline-tools/EmulatorOutputTail";
 import { EmulatorAudioService } from "../../../src/features/audio/EmulatorAudioService";
 import { FakeEmulatorAudioSession } from "../../fakes/FakeEmulatorAudioSession";
@@ -50,6 +56,7 @@ describe("DefaultEmulatorLauncher pre-flight", () => {
       timer: () => timer,
       adbFactory: () => new FakeAdbClientFactory(),
       hostPortAvailabilityChecker: () => new FakePortAvailabilityChecker(),
+      grpcPortRegistry,
     });
   });
 
@@ -104,6 +111,7 @@ function startupHarness(
     timer: () => timer,
     adbFactory: () => new FakeAdbClientFactory(),
     hostPortAvailabilityChecker: () => new FakePortAvailabilityChecker(),
+    grpcPortRegistry,
   });
   reservations.addReservedEmulatorPort = async () => undefined;
   const overrides = {
@@ -538,6 +546,17 @@ describe("existing stdout startup markers", () => {
 });
 
 describe("DefaultEmulatorLauncher gRPC port", () => {
+  test("spawn failure releases the gRPC lease", async () => {
+    const harness = startupHarness(
+      async () => false,
+      () => {
+        throw new Error("spawn failed");
+      },
+    );
+    await expect(harness.launcher.startEmulatorProcess("Pixel_9")).rejects.toThrow("spawn failed");
+    expect((await harness.reservations.reserveEmulatorGrpcPort()).port).toBe(8554);
+  });
+
   test("pre-spawn cancellation releases the gRPC lease on consecutive launches", async () => {
     let spawned = false;
     const harness = startupHarness(
@@ -608,6 +627,7 @@ describe("DefaultEmulatorLauncher gRPC port", () => {
       timer: () => new FakeTimer(),
       adbFactory: () => new FakeAdbClientFactory(),
       hostPortAvailabilityChecker: () => new FakePortAvailabilityChecker(),
+      grpcPortRegistry,
     });
     expect((await reservations.reserveEmulatorGrpcPort()).port).toBe(8555);
   });

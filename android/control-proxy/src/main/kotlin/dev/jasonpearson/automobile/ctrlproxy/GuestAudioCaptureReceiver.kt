@@ -62,7 +62,7 @@ private class AndroidGuestAudioCapturePort(private val context: Context) : Guest
         PackageManager.PERMISSION_GRANTED
     ) {
       throw IllegalStateException(
-        "RECORD_AUDIO is not granted to CtrlProxy; reinstall the CtrlProxy APK"
+        "RECORD_AUDIO is not granted to CtrlProxy; reinstall the CtrlProxy APK",
       )
     }
     val record =

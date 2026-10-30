@@ -469,6 +469,45 @@ describe("pickAndroidSystemImage automotive selection (#15879)", () => {
     ).toThrow(/below API 24/);
   });
 
+  it("picks an installed SDK extension image such as android-34-ext9 (#15959)", () => {
+    const listing = [
+      "Installed packages:",
+      "  Path                                                        | Version | Description",
+      "  -------                                                     | ------- | -------",
+      "  system-images;android-34-ext9;android-automotive;arm64-v8a  | 3       | Android Automotive",
+      "  system-images;android-36;google_apis;arm64-v8a              | 7       | Google APIs",
+    ].join("\n");
+    const installed = parseSystemImages(listing, undefined, "installed");
+
+    const picked = pickAndroidSystemImage(installed, { formFactor: "automotive" }, "arm64");
+
+    expect(picked).toMatchObject({
+      packageName: "system-images;android-34-ext9;android-automotive;arm64-v8a",
+      apiLevel: 34,
+      extensionLevel: 9,
+    });
+  });
+
+  it("prefers the newer SDK extension of the same API level", () => {
+    const images = [
+      car(34),
+      {
+        ...car(34),
+        packageName: "system-images;android-34-ext9;android-automotive;x86_64",
+        extensionLevel: 9,
+      },
+      {
+        ...car(34),
+        packageName: "system-images;android-34-ext8;android-automotive;x86_64",
+        extensionLevel: 8,
+      },
+    ];
+
+    expect(pickAndroidSystemImage(images, { formFactor: "automotive" }, "x64").extensionLevel).toBe(
+      9,
+    );
+  });
+
   it("does not pick a distant-display or other non-car image for a car request", () => {
     const images = [
       systemImage(36, "android-automotive-distant-display-playstore", "x86_64"),

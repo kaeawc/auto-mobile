@@ -93,6 +93,7 @@ function imageSourceMatches(
   return (
     packageMetadata.apiLevel === image.apiLevel &&
     packageMetadata.apiIdentifier === image.apiIdentifier &&
+    packageMetadata.extensionLevel === image.extensionLevel &&
     packageMetadata.tag === image.tag &&
     packageMetadata.abi === image.abi
   );

@@ -667,7 +667,7 @@ export function pickAndroidSystemImage(
   const runnable = familyImages.filter((image) => preferences.includes(image.abi));
   const candidates = runnable.length > 0 ? runnable : familyImages;
 
-  // Precedence is major API > ABI > tag > minor > packageName; keep capability
+  // Precedence is major API > ABI > tag > minor > SDK extension > packageName; keep capability
   // and rootability preferences ahead of point-release freshness.
   return [...candidates].sort((a, b) => {
     const apiDelta = b.apiLevel - a.apiLevel;
@@ -685,6 +685,10 @@ export function pickAndroidSystemImage(
     const minorDelta = compareStrictNumericVersions(b.apiIdentifier, a.apiIdentifier);
     if (minorDelta !== 0) {
       return minorDelta;
+    }
+    const extensionDelta = (b.extensionLevel ?? 0) - (a.extensionLevel ?? 0);
+    if (extensionDelta !== 0) {
+      return extensionDelta;
     }
     return a.packageName.localeCompare(b.packageName);
   })[0];

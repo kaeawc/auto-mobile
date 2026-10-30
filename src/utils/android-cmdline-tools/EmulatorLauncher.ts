@@ -35,7 +35,7 @@ import {
   leaseEmulatorGrpcPort,
 } from "./emulatorGrpc/emulatorGrpcLaunchLease";
 import { ENV, readEnvRaw } from "../../config/env";
-import { indexEmulatorOutputTail } from "./EmulatorOutputTail";
+import * as tails from "./EmulatorOutputTail";
 
 export * from "./EmulatorLaunchSupport";
 
@@ -313,12 +313,13 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       // Keep only a redacted tail for launch diagnostics and failure classification.
       const stdoutRedactor = new AndroidCommandOutputStreamRedactor();
       const stderrRedactor = new AndroidCommandOutputStreamRedactor();
+      const redactors = [stdoutRedactor, stderrRedactor];
 
       const state = this.createLaunchState();
       perf.startOperation("panicDetection");
 
       const {
-        appendRedactedLaunchOutput,
+        appendRedactedLaunchOutput: append,
         currentLaunchOutput,
         flushLaunchOutput,
         recordEarlyExitCategory,
@@ -327,7 +328,8 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
         snapshot: currentLaunchOutput,
         flush: flushLaunchOutput,
       });
-      indexEmulatorOutputTail(child, context, currentLaunchOutput, this.host);
+      tails.indexEmulatorOutputTail(child, context, currentLaunchOutput, this.host);
+      const appendRedactedLaunchOutput = tails.observeEmulatorOutput(child, append, redactors);
       const { beginPostValidationExit, finalizePostValidationExit } =
         this.createPostValidationExitHandlers({
           avdName,
@@ -577,6 +579,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     child.stderr?.on("data", monitorStderrHandler);
 
     child.on("exit", (code, signal) => {
+      tails.removeEmulatorOutputTail(child);
       this.host.timer().clearTimeout(startupTimeout);
       startupValidation.cancelEarlySignals();
       this.host.reservations().releaseLaunchChild(child);
@@ -601,6 +604,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     });
 
     child.on("close", (code, signal) => {
+      tails.removeEmulatorOutputTail(child);
       this.host.timer().clearTimeout(startupTimeout);
       startupValidation.cancelEarlySignals();
       this.host.reservations().releaseLaunchChild(child);

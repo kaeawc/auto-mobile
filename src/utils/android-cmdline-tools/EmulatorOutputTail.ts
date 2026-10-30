@@ -1,8 +1,11 @@
 import type { HostChildProcess } from "../HostCommandExecutor";
+import { classifyHostMicrophoneFailure } from "./emulatorGrpc/classifyHostMicrophoneFailure";
+import type { AndroidCommandOutputStreamRedactor } from "./redactAndroidCommandOutput";
 
 /** Only output captured for this exact emulator incarnation; external launches have none. */
 export interface EmulatorOutputTail {
   tailFor(deviceId: string, pid: number): string | undefined;
+  hostMicrophoneFailed(deviceId: string, pid: number): boolean;
 }
 
 export const MAX_EMULATOR_OUTPUT_SOURCES = 64;
@@ -15,6 +18,11 @@ interface OutputSource {
   alive?(): boolean;
 }
 
+interface IndexedOutputSource {
+  source: OutputSource;
+  hostMicrophoneFailed: boolean;
+}
+
 /**
  * Indexes the launcher's existing redacted, bounded live tails without copying a second log.
  * At most 64 sources (oldest evicted); each existing source retains at most 50 lines / 16,384
@@ -22,11 +30,12 @@ interface OutputSource {
  * No timers, files or process probes are needed.
  */
 export class EmulatorOutputTailRegistry implements EmulatorOutputTail {
-  private readonly sources = new Map<number, OutputSource>();
+  private readonly sources = new Map<number, IndexedOutputSource>();
 
   register(pid: number, source: OutputSource): () => void {
+    const indexed = { source, hostMicrophoneFailed: false };
     this.sources.delete(pid);
-    this.sources.set(pid, source);
+    this.sources.set(pid, indexed);
     while (this.sources.size > MAX_EMULATOR_OUTPUT_SOURCES) {
       const oldest = this.sources.keys().next().value;
       if (oldest !== undefined) {
@@ -34,18 +43,36 @@ export class EmulatorOutputTailRegistry implements EmulatorOutputTail {
       }
     }
     return () => {
-      if (this.sources.get(pid) === source) {
+      if (this.sources.get(pid) === indexed) {
         this.sources.delete(pid);
       }
     };
   }
 
-  tailFor(deviceId: string, pid: number): string | undefined {
-    const source = this.sources.get(pid);
-    if (source?.alive?.() === false) {
+  /** Observe redacted chunks before tail trimming; log churn cannot undo a host failure (#15902). */
+  observe(pid: number, chunk: string): void {
+    const indexed = this.liveSource(pid);
+    if (indexed && !indexed.hostMicrophoneFailed) {
+      indexed.hostMicrophoneFailed = classifyHostMicrophoneFailure(chunk);
+    }
+  }
+
+  hostMicrophoneFailed(deviceId: string, pid: number): boolean {
+    const indexed = this.liveSource(pid);
+    return indexed?.source.deviceId() === deviceId && indexed.hostMicrophoneFailed;
+  }
+
+  private liveSource(pid: number): IndexedOutputSource | undefined {
+    const indexed = this.sources.get(pid);
+    if (indexed?.source.alive?.() === false) {
       this.sources.delete(pid);
       return undefined;
     }
+    return indexed;
+  }
+
+  tailFor(deviceId: string, pid: number): string | undefined {
+    const source = this.liveSource(pid)?.source;
     if (!source || source.deviceId() !== deviceId) {
       return undefined;
     }
@@ -60,6 +87,30 @@ export class EmulatorOutputTailRegistry implements EmulatorOutputTail {
 }
 
 export const defaultEmulatorOutputTail = new EmulatorOutputTailRegistry();
+const removals = new WeakMap<HostChildProcess, () => void>();
+
+/** Wraps the shared stdout/stderr append path without adding child listeners. */
+export function observeEmulatorOutput(
+  child: HostChildProcess,
+  append: (output: string) => void,
+  redactors: readonly AndroidCommandOutputStreamRedactor[],
+): (output: string) => void {
+  return (output) => {
+    if (child.pid !== undefined && removals.has(child)) {
+      // Include each safe pending suffix without inserting the other stream into a split failure.
+      for (const redactor of redactors) {
+        defaultEmulatorOutputTail.observe(child.pid, output + redactor.snapshot());
+      }
+    }
+    append(output);
+  };
+}
+
+/** Called by the launcher's existing exit/close handlers; stale cleanup cannot remove a new PID. */
+export function removeEmulatorOutputTail(child: HostChildProcess): void {
+  removals.get(child)?.();
+  removals.delete(child);
+}
 
 /**
  * Registers a launched emulator's live output for lookups by PID and serial, removed on exit or
@@ -74,8 +125,8 @@ export function indexEmulatorOutputTail(
   if (child.pid === undefined) {
     return;
   }
-  // No exit listeners on the child: lookups prune a source whose process has exited.
-  defaultEmulatorOutputTail.register(child.pid, {
+  // Existing exit/close handlers remove this source; lookups also prune exited processes.
+  const remove = defaultEmulatorOutputTail.register(child.pid, {
     deviceId: () =>
       context.reservedEmulator?.deviceId ??
       context.expectedDeviceId ??
@@ -83,4 +134,5 @@ export function indexEmulatorOutputTail(
     snapshot,
     alive: () => (child.exitCode ?? null) === null && (child.signalCode ?? null) === null,
   });
+  removals.set(child, remove);
 }

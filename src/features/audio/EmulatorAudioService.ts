@@ -21,7 +21,6 @@ import type {
   EmulatorGrpcDiscovery,
   EmulatorGrpcEndpoint,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
-import { classifyHostMicrophoneFailure } from "../../utils/android-cmdline-tools/emulatorGrpc/classifyHostMicrophoneFailure";
 import type { EmulatorOutputTail } from "../../utils/android-cmdline-tools/EmulatorOutputTail";
 import {
   analyzeLevels,
@@ -451,8 +450,7 @@ export class EmulatorAudioService {
     if (!endpoint) {
       return;
     }
-    const output = this.deps.outputTail?.tailFor(deviceId, endpoint.pid);
-    if (output !== undefined && classifyHostMicrophoneFailure(output)) {
+    if (this.deps.outputTail?.hostMicrophoneFailed(deviceId, endpoint.pid)) {
       throw hostMicrophoneUnavailable(deviceId);
     }
     // No reliable positive host-voice success line is known (#15902). Guest capture is not proof.

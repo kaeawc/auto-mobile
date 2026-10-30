@@ -12,6 +12,7 @@ import { EmulatorAudioError } from "../../../src/utils/android-cmdline-tools/emu
 import type { EmulatorGrpcEndpoint } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 import { encodeWav, sineTone } from "../../../src/utils/audio/pcm";
 import { FakeEmulatorOutputTail } from "../../fakes/FakeEmulatorOutputTail";
+import { EmulatorOutputTailRegistry } from "../../../src/utils/android-cmdline-tools/EmulatorOutputTail";
 import { CountingIdGenerator } from "../../../src/utils/CountingIdGenerator";
 
 const ENDPOINT: EmulatorGrpcEndpoint = {
@@ -73,6 +74,45 @@ function setup(
 }
 
 describe("EmulatorAudioService host microphone safety", () => {
+  test("real registry refuses an ingested host failure after tail eviction", async () => {
+    const outputTail = new EmulatorOutputTailRegistry();
+    let snapshot = "";
+    outputTail.register(ENDPOINT.pid, {
+      deviceId: () => "emulator-5554",
+      snapshot: () => snapshot,
+    });
+    const observe = (chunk: string) => {
+      outputTail.observe(ENDPOINT.pid, chunk);
+      snapshot = (snapshot + chunk).slice(-16 * 1024);
+    };
+    observe("Failed to create voice virtio-snd-mic0\n");
+    const info = `INFO | ${"ordinary output ".repeat(24)}\n`;
+    expect(Buffer.byteLength(info) * 60).toBeGreaterThan(16 * 1024);
+    for (let line = 0; line < 60; line++) {
+      observe(info);
+    }
+    expect(outputTail.tailFor("emulator-5554", ENDPOINT.pid)).not.toContain("virtio-snd-mic0");
+    expect(outputTail.hostMicrophoneFailed("emulator-5554", ENDPOINT.pid)).toBe(true);
+    const session = new FakeSession(ENDPOINT);
+    const guestCapture = new FakeGuestAudioCapture();
+    const service = new EmulatorAudioService({
+      discovery: { findByConsolePort: async () => ENDPOINT },
+      outputTail,
+      guestCapture,
+      createSession: () => session,
+      readFile: async () => new Uint8Array(),
+      ids: new CountingIdGenerator("churn"),
+    });
+    // Repeated refusals must keep rule 1's reason and never consume an injection attempt.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(
+        service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 1 } }),
+      ).rejects.toMatchObject({ code: "audio_host_microphone_unavailable", retryable: false });
+    }
+    expect(guestCapture.opened).toEqual([]);
+    expect(session.injected).toEqual([]);
+  });
+
   for (const failure of [
     "Failed to create voice virtio-snd-mic0",
     "coreaudio: Could not initialize record",

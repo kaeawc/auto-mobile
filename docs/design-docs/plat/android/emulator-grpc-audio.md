@@ -69,8 +69,9 @@ cannot reach the gRPC port.
   lifetime, including stdout and stderr after startup. The index holds at most 64 sources (oldest
   evicted) and removes a source on exit or close. Existing snapshots retain at most 50 lines /
   16,384 characters; audio lookups additionally cap the tail at 16 KiB of UTF-8. No extra log file
-  is written. `Failed to create voice virtio-snd-mic0`, `Could not initialize record`, or
-  `kAudioHardwareIllegalOperation` in that incarnation's tail indicates host microphone failure.
+  is written. Host microphone failure (`Failed to create voice virtio-snd-mic0`,
+  `Could not initialize record`, or `kAudioHardwareIllegalOperation`) is latched per incarnation
+  at ingestion before tail trimming and stays refused until exit or source eviction.
   Emulators launched outside AutoMobile have no captured tail, so only the repeat rule applies.
 - Injection history is local to the audio service lifetime and retains at most 128 serial + PID
   entries, evicting the oldest at capacity. An attempt is counted immediately before `injectAudio`,

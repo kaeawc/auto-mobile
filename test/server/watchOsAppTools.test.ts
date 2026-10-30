@@ -68,7 +68,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     cleanup();
   });
 
-  async function arrange(connected: BootedDevice[] = [iphone]) {
+  async function arrange(connected: BootedDevice[] = [iphone], { untypedListing = false } = {}) {
     const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
     const timer = new FakeTimer();
     const deviceUtils = new FakeDeviceUtils();
@@ -122,7 +122,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     const watchSimctl = new FakeWatchAppsSimctl(plist);
     watchSimctl.seed(watch.deviceId, {
       CFBundleIdentifier: "com.apple.NanoSettings",
-      ApplicationType: "System",
+      ...(untypedListing ? {} : { ApplicationType: "System" }),
       CFBundleDisplayName: "Settings",
     });
     registerAppTools({ watchApps: (device) => new WatchAppManager(device, watchSimctl, plist) });
@@ -264,6 +264,15 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       bundles: ["com.apple.NanoSettings"],
       type: "launchable",
     });
+  });
+
+  test("a watch listing with no ApplicationType lists user apps and refuses type=launchable", async () => {
+    await arrange([iphone], { untypedListing: true });
+    const target = { platform: "watchos", deviceId: watch.deviceId };
+
+    expect(await listedBundles(target)).toMatchObject({ platform: "watchos", type: "user" });
+    const error = await failure(call("listApps", { ...target, type: "launchable" }));
+    expect(String(error)).toContain("launchability is unknown");
   });
 
   test("sessionless listApps naming the watch id without platform never reaches the watch", async () => {

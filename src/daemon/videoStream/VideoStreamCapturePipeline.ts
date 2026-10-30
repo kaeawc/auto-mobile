@@ -166,7 +166,8 @@ export class VideoStreamCapturePipeline {
           }
           const packet = encodeDroppedFrames(droppedFrames);
           for (const subscriber of capture.subscribers) {
-            this.writePacketToSubscriber(deviceId, capture, subscriber, packet, {
+            this.writePacketToSubscriber(deviceId, capture, subscriber, {
+              packet,
               isConfig: false,
               isKeyFrame: false,
             });
@@ -252,7 +253,7 @@ export class VideoStreamCapturePipeline {
     );
 
     for (const subscriber of capture.subscribers) {
-      this.writePacketToSubscriber(deviceId, capture, subscriber, packet, { isConfig, isKeyFrame });
+      this.writePacketToSubscriber(deviceId, capture, subscriber, { packet, isConfig, isKeyFrame });
     }
   }
 
@@ -310,24 +311,20 @@ export class VideoStreamCapturePipeline {
     if (!capture.sps || !capture.pps || !capture.latestKeyFrameAu) {
       return;
     }
-    this.writePacketToSubscriber(
-      deviceId,
-      capture,
-      socket,
-      encodePacket(
+    this.writePacketToSubscriber(deviceId, capture, socket, {
+      packet: encodePacket(
         encodePtsAndFlags(this.deps.nowUs(), { isKeyFrame: true }),
         capture.latestKeyFrameAu,
       ),
-      { isConfig: false, isKeyFrame: true },
-    );
+      isConfig: false,
+      isKeyFrame: true,
+    });
     for (const au of capture.latestInterFrameAus) {
-      this.writePacketToSubscriber(
-        deviceId,
-        capture,
-        socket,
-        encodePacket(encodePtsAndFlags(this.deps.nowUs(), {}), au),
-        { isConfig: false, isKeyFrame: false },
-      );
+      this.writePacketToSubscriber(deviceId, capture, socket, {
+        packet: encodePacket(encodePtsAndFlags(this.deps.nowUs(), {}), au),
+        isConfig: false,
+        isKeyFrame: false,
+      });
     }
   }
 
@@ -356,8 +353,7 @@ export class VideoStreamCapturePipeline {
     deviceId: string,
     capture: DeviceCapture,
     subscriber: Socket,
-    packet: Buffer,
-    { isConfig, isKeyFrame }: { isConfig: boolean; isKeyFrame: boolean },
+    { packet, isConfig, isKeyFrame }: { packet: Buffer; isConfig: boolean; isKeyFrame: boolean },
   ): void {
     if (subscriber.destroyed) {
       this.host.detach(subscriber);

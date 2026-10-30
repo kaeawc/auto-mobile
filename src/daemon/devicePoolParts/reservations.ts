@@ -40,8 +40,7 @@ export interface ReservationsOperations {
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
-    assertHolder?: () => void,
-    options?: ShutdownReservationOptions,
+    options?: ShutdownReservationOptions & { assertHolder?: () => void },
   ): Promise<ShutdownDeviceReservation | undefined>;
   claimShutdownAgainstOtherDaemons(
     reservation: ShutdownDeviceReservation,
@@ -193,15 +192,17 @@ export class DevicePoolReservations {
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
-    assertHolder?: () => void,
-    { foreignClaim, ...coordinatorOptions }: ShutdownReservationOptions = {},
+    {
+      assertHolder,
+      foreignClaim,
+      ...coordinatorOptions
+    }: ShutdownReservationOptions & { assertHolder?: () => void } = {},
   ): Promise<ShutdownDeviceReservation | undefined> {
     const reserved = await this.state.shutdownReservationCoordinator.reserveDeviceForShutdown(
       deviceId,
       abortSignal,
       autolockClient,
-      assertHolder,
-      coordinatorOptions,
+      { assertHolder, ...coordinatorOptions },
     );
     const reservation = reserved && this.notifyingShutdownReservation(reserved);
     if (!reservation || !foreignClaim) {

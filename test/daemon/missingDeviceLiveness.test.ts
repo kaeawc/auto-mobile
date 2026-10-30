@@ -160,7 +160,8 @@ function harness() {
 }
 
 function emptyRefresh(h: ReturnType<typeof harness>) {
-  return h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), new Set(), {
+  return h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), {
+    bootedPlatforms: new Set(),
     succeededPlatforms: new Set(["android"]),
   });
 }
@@ -324,7 +325,8 @@ describe("MissingDeviceLiveness", () => {
           candidatePlatforms: new Map([[deviceId, "android" as const]]),
         });
       const refresh = (sourceSucceeded: boolean) =>
-        h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), bootedPlatforms, {
+        h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), {
+          bootedPlatforms,
           succeededPlatforms: new Set(sourceSucceeded ? ["android" as const] : []),
         });
 
@@ -363,7 +365,8 @@ describe("MissingDeviceLiveness", () => {
     const device = pooled();
     h.devices.set(deviceId, device);
     expect(
-      await h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), new Set(), {
+      await h.liveness.removeMissingDevicesForRefresh(false, 1, new Set(), {
+        bootedPlatforms: new Set(),
         succeededPlatforms: new Set(),
       }),
     ).toBe(0);
@@ -386,7 +389,9 @@ describe("MissingDeviceLiveness", () => {
     const device = pooled();
     h.devices.set(deviceId, device);
     h.delayIncident();
-    const checking = h.liveness.ensurePooledDevicePresent(device, false, false, true);
+    const checking = h.liveness.ensurePooledDevicePresent(device, false, false, {
+      idleEviction: true,
+    });
     await flushUntil(() => h.timer.getPendingSleepCount() === 1);
     expect(statusOf(device)).toBe("error");
     expect(h.devices.get(deviceId)).toBe(device);
@@ -401,7 +406,9 @@ describe("MissingDeviceLiveness", () => {
     const device = pooled();
     h.devices.set(deviceId, device);
     h.setReboot();
-    expect(await h.liveness.ensurePooledDevicePresent(device, true, false, false)).toBe(false);
+    expect(
+      await h.liveness.ensurePooledDevicePresent(device, true, false, { idleEviction: false }),
+    ).toBe(false);
     await flushUntil(() => h.calls.includes("disconnect"));
     expect(device.status).toBe("idle");
     expect(h.calls).toEqual(["record", "finish preparation", "disconnect"]);
@@ -650,7 +657,9 @@ describe("MissingDeviceLiveness", () => {
     };
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      expect(await h.liveness.ensurePooledDevicePresent(device, true, false, false)).toBe(false);
+      expect(
+        await h.liveness.ensurePooledDevicePresent(device, true, false, { idleEviction: false }),
+      ).toBe(false);
       await flushUntil(() => h.timer.getPendingSleepCount() === 1);
       expect(statusOf(device)).toBe("error");
       h.timer.advanceTime(5);

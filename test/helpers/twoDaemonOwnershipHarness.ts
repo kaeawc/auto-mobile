@@ -1141,7 +1141,6 @@ export class TwoDaemonWorld {
           device.deviceId,
           undefined,
           undefined,
-          undefined,
           { foreignClaim: { toolName: "killDevice", force: false } },
         );
         if (!reservation || process.dead) {

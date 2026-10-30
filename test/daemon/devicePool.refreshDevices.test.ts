@@ -570,7 +570,6 @@ describe("DevicePool", () => {
             reservation.device,
             replacement,
             sourceImage,
-            undefined,
             { excludeExecutionId },
           );
         } finally {
@@ -695,7 +694,6 @@ describe("DevicePool", () => {
           shutdownReservation.device,
           replacement,
           sourceImage,
-          undefined,
           {
             beforeReplacementPublishes: () => {
               // Session work can discover the replacement inside addDevice, so
@@ -975,7 +973,7 @@ describe("DevicePool", () => {
           shutdownReservation.device,
           replacement,
           sourceImage,
-          manager.childProcess,
+          { childProcess: manager.childProcess },
         );
         await persistence.waitForUpsert();
         manager.childProcess.emit("exit", 0, null);
@@ -1019,7 +1017,7 @@ describe("DevicePool", () => {
             shutdownReservation.device,
             replacement,
             sourceImage,
-            manager.childProcess,
+            { childProcess: manager.childProcess },
           ),
         ).rejects.toThrow("exited before process tracking completed");
 

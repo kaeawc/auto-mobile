@@ -388,14 +388,11 @@ export class DevicePoolLifecycleWiring {
         this.callbacks.clearAutoStartSuppressionForBootedDevice(device),
       foldObservationIntoPooledEntry: (pooled, device, source) =>
         this.callbacks.foldObservationIntoPooledEntry(pooled, device, source),
-      removeMissingDevicesForRefresh: (held, generation, ids, platforms, discovery) =>
-        this.state.missingDeviceLiveness.removeMissingDevicesForRefresh(
-          held,
-          generation,
-          ids,
-          platforms,
-          discovery,
-        ),
+      removeMissingDevicesForRefresh: (held, generation, ids, { platforms, discovery }) =>
+        this.state.missingDeviceLiveness.removeMissingDevicesForRefresh(held, generation, ids, {
+          bootedPlatforms: platforms,
+          ...discovery,
+        }),
       notifyDeviceReady: (id) => this.callbacks.notifyDeviceReady(id),
       liftUnconfirmedRecoveringAndroidImages: (discovery, generation) =>
         this.state.recoveryCoordinator.liftUnconfirmedRecoveringAndroidImages(
@@ -477,7 +474,12 @@ export class DevicePoolLifecycleWiring {
                 stableIds: [platform === "android" ? sourceImage?.name : undefined],
               })
           : undefined,
-        claimAcquiredDevice: async (sessionId, deviceId, heldBefore, platform, createdSession) => {
+        claimAcquiredDevice: async (
+          sessionId,
+          deviceId,
+          heldBefore,
+          { platform, createdSession },
+        ) => {
           if (this.callbacks.foreignOwnershipFor(platform)) {
             await this.callbacks.claimExplicitlyBoundDevice(
               sessionId,

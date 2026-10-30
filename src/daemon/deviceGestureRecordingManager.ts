@@ -272,8 +272,7 @@ const buildPlanFromSteps = (
   steps: PlanStep[],
   session: RecordingSession,
   planName: string,
-  stoppedAt: number,
-  omittedInput?: string,
+  { stoppedAt, omittedInput }: { stoppedAt: number; omittedInput?: string },
 ): { plan: Plan; stepCount: number } => {
   if (steps.length === 0) {
     throw new NoUserInputCapturedError(omittedInput);
@@ -572,13 +571,10 @@ async function stopAndBuildResult(
 
   const stoppedAt = timer.now();
   const resolvedPlanName = formatPlanName(planName);
-  const { plan, stepCount } = buildPlanFromSteps(
-    steps,
-    session,
-    resolvedPlanName,
+  const { plan, stepCount } = buildPlanFromSteps(steps, session, resolvedPlanName, {
     stoppedAt,
-    exportMessage,
-  );
+    omittedInput: exportMessage,
+  });
   const planContent = yaml.dump(plan, {
     indent: 2,
     lineWidth: -1,

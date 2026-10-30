@@ -117,8 +117,10 @@ export interface DevicePoolRefreshPort {
     assignmentLockHeld: boolean,
     refreshGeneration: number,
     bootedDeviceIds: Set<string>,
-    bootedPlatforms: Set<Platform>,
-    discovery: Pick<BootedDeviceDiscovery, "succeededPlatforms" | "succeededSources">,
+    options: {
+      platforms: Set<Platform>;
+      discovery: Pick<BootedDeviceDiscovery, "succeededPlatforms" | "succeededSources">;
+    },
   ): Promise<number | undefined>;
   notifyDeviceReady(deviceId: string): void;
   /** Lift recovery reservations a fresh observation of this generation decides. */
@@ -212,10 +214,12 @@ export class DevicePoolRefresh {
         assignmentLockHeld,
         refreshGeneration,
         bootedDeviceIds,
-        bootedPlatforms,
         {
-          succeededPlatforms: discovery.succeededPlatforms,
-          succeededSources: discovery.succeededSources,
+          platforms: bootedPlatforms,
+          discovery: {
+            succeededPlatforms: discovery.succeededPlatforms,
+            succeededSources: discovery.succeededSources,
+          },
         },
       );
       if (removed === undefined) {

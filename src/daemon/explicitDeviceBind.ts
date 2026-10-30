@@ -378,7 +378,7 @@ export class ExplicitDeviceBind {
           }
         }
 
-        await this.assignDeviceToBoundSession(device, sessionId, platform, caller, options);
+        await this.assignDeviceToBoundSession(device, sessionId, platform, { caller, ...options });
         logger.info(`Bound device ${deviceId} to session ${sessionId}`);
         return sessionId;
       },
@@ -494,8 +494,7 @@ export class ExplicitDeviceBind {
     device: PooledDevice,
     sessionId: string,
     platform: Platform,
-    caller: AutolockClient,
-    options: ExplicitBindOptions,
+    { caller, ...options }: ExplicitBindOptions & { caller: AutolockClient },
   ): Promise<void> {
     const deviceId = device.id;
     const { allowSessionRebind, expectedExistingSessionDeviceId } = options;
@@ -506,13 +505,10 @@ export class ExplicitDeviceBind {
     const previousPlatform = previousSession?.platform;
     // Copied before the rebind: it replaces the session's cache and its restores edit the old one.
     const previousCacheData = previousSession ? { ...previousSession.cacheData } : undefined;
-    this.assertExpectedRecoverySession(
-      previousSession,
-      sessionId,
-      deviceId,
+    this.assertExpectedRecoverySession(previousSession, sessionId, deviceId, {
       platform,
-      expectedExistingSessionDeviceId,
-    );
+      expectedDeviceId: expectedExistingSessionDeviceId,
+    });
     bindDevice(device, sessionId);
     device.lastUsedAt = this.port.nextLastUsedAt();
     device.assignmentCount++;
@@ -521,22 +517,25 @@ export class ExplicitDeviceBind {
     const session = await this.port.createSessionOrRestore(
       device,
       assignmentSnapshot,
-      this.createSessionForBinding(previousSession, sessionId, deviceId, platform, {
-        allowSessionRebind,
-        stableDeviceId: this.port.stableDeviceIdFor(device),
-        deferCleanup: options.deferRebindCleanup
-          ? (cleanup) => {
-              options.receipt.deferredRebindCleanup = cleanup;
-            }
-          : undefined,
-        persistenceSource: creatorPersistenceSource(
-          caller,
+      this.createSessionForBinding(previousSession, sessionId, deviceId, {
+        platform,
+        creation: {
           allowSessionRebind,
-          expectedExistingSessionDeviceId,
-        ),
-        recoveryTarget: options.recoveryTarget,
-        recovery: recoveryRebindFlag(expectedExistingSessionDeviceId),
-        signal: options.signal,
+          stableDeviceId: this.port.stableDeviceIdFor(device),
+          deferCleanup: options.deferRebindCleanup
+            ? (cleanup) => {
+                options.receipt.deferredRebindCleanup = cleanup;
+              }
+            : undefined,
+          persistenceSource: creatorPersistenceSource(
+            caller,
+            allowSessionRebind,
+            expectedExistingSessionDeviceId,
+          ),
+          recoveryTarget: options.recoveryTarget,
+          recovery: recoveryRebindFlag(expectedExistingSessionDeviceId),
+          signal: options.signal,
+        },
       }),
     );
     // A restored session predates this call. A session minted under the id its client chose is
@@ -752,8 +751,7 @@ export class ExplicitDeviceBind {
     session: Session | null,
     sessionId: string,
     deviceId: string,
-    platform: Platform,
-    expectedDeviceId: string | undefined,
+    { platform, expectedDeviceId }: { platform: Platform; expectedDeviceId?: string },
   ): void {
     if (
       expectedDeviceId !== undefined &&
@@ -782,16 +780,21 @@ export class ExplicitDeviceBind {
     previousSession: Session | null,
     sessionId: string,
     deviceId: string,
-    platform: Platform,
-    creation: {
-      allowSessionRebind: boolean;
-      stableDeviceId: string | undefined;
-      persistenceSource: string | undefined;
-      deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
-      recoveryTarget?: SessionRecoveryTarget;
-      /** An Android loss recovery moving its own session, not a client-chosen device. */
-      recovery?: boolean;
-      signal?: AbortSignal;
+    {
+      platform,
+      creation,
+    }: {
+      platform: Platform;
+      creation: {
+        allowSessionRebind: boolean;
+        stableDeviceId: string | undefined;
+        persistenceSource: string | undefined;
+        deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
+        recoveryTarget?: SessionRecoveryTarget;
+        /** An Android loss recovery moving its own session, not a client-chosen device. */
+        recovery?: boolean;
+        signal?: AbortSignal;
+      };
     },
   ): () => Promise<Session> {
     const { allowSessionRebind, stableDeviceId, persistenceSource, signal } = creation;

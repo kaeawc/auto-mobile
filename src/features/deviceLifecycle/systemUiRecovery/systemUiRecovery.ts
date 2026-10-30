@@ -254,8 +254,8 @@ export async function handoffSystemUiAnrReplacement(
     shutdownReservation.device,
     replacementBoot.device,
     sourceImage,
-    replacementBoot.processHandle,
     {
+      childProcess: replacementBoot.processHandle,
       beforeReplacementPublishes: () => publishReplacementReadinessMarker?.(replacementBoot.device),
       excludeExecutionId: getShutdownInitiatingExecutionId(),
     },
@@ -507,12 +507,9 @@ export async function reserveSystemUiAnrShutdown(
   if (!devicePool) {
     return undefined;
   }
-  const reservation = await devicePool.reserveDeviceForShutdown(
-    deviceId,
-    signal,
-    autolockClient,
+  const reservation = await devicePool.reserveDeviceForShutdown(deviceId, signal, autolockClient, {
     assertHolder,
-  );
+  });
   if (reservation) {
     // Unnamed: rebooting on the session's behalf is not the session giving the device up.
     devicePool.markIntentionalShutdown(deviceId);

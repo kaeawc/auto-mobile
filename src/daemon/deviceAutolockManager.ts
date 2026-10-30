@@ -123,8 +123,7 @@ export interface DeviceAutolockPoolPort {
     sessionId: string,
     deviceId: string,
     heldBefore: string | null,
-    platform: Platform,
-    createdSession?: Session,
+    options: { platform: Platform; createdSession?: Session },
   ): Promise<void>;
 }
 
@@ -219,13 +218,10 @@ export class DeviceAutolockManager {
         }),
     });
     if (sessionId) {
-      await this.pool.claimAcquiredDevice(
-        sessionId,
-        deviceId,
-        heldBefore,
+      await this.pool.claimAcquiredDevice(sessionId, deviceId, heldBefore, {
         platform,
-        receipt.minted?.session,
-      );
+        createdSession: receipt.minted?.session,
+      });
     }
     return sessionId;
   }

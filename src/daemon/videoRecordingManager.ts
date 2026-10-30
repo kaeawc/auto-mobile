@@ -339,8 +339,7 @@ function beginRecordingDisplaySession(
   recordingId: string,
   device: BootedDevice,
   display: AndroidRecordingDisplay,
-  startedAt: string,
-  timer: Timer,
+  { startedAt, timer }: { startedAt: string; timer: Timer },
 ): void {
   const startedAtMs = Date.parse(startedAt);
   const session: RecordingDisplaySession = {
@@ -1303,8 +1302,10 @@ function videoRecordingStartOptions(
   request: StartVideoRecordingRequest,
   configInput: VideoRecordingConfigInput,
   maxDurationSeconds: number,
-  abortSignal: AbortSignal,
-  recordingDisplay: AndroidRecordingDisplay | undefined,
+  {
+    abortSignal,
+    recordingDisplay,
+  }: { abortSignal: AbortSignal; recordingDisplay?: AndroidRecordingDisplay },
 ): StartVideoRecordingOptions {
   return {
     outputName: request.outputName,
@@ -1390,13 +1391,10 @@ export async function startVideoRecording(
     }
 
     active = await videoRecorderService.startRecording(
-      videoRecordingStartOptions(
-        request,
-        configInput,
-        maxDurationSeconds,
-        start.abortSignal,
+      videoRecordingStartOptions(request, configInput, maxDurationSeconds, {
+        abortSignal: start.abortSignal,
         recordingDisplay,
-      ),
+      }),
     );
     start.abortSignal.throwIfAborted();
     applyRecordingDisplayWarning(active, recordingDisplay);
@@ -1404,13 +1402,10 @@ export async function startVideoRecording(
     await persistStartedVideoRecording(deps, request, active, start.abortSignal);
 
     if (recordingDisplay && active.recordedPanel) {
-      beginRecordingDisplaySession(
-        active.recordingId,
-        request.device,
-        recordingDisplay,
-        active.startedAt,
+      beginRecordingDisplaySession(active.recordingId, request.device, recordingDisplay, {
+        startedAt: active.startedAt,
         timer,
-      );
+      });
     }
 
     const highlightSession = createHighlightSession(

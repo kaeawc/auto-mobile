@@ -667,18 +667,24 @@ export class DaemonManager implements DaemonManagerLike {
 
   waitForReady(
     timeout: number,
-    signal?: AbortSignal,
-    shouldContinueWaiting: () => boolean = () => true,
-    maxProbeDurationMs?: number,
-    launchedProcess?: { pid: number | undefined; launchNonce?: string },
+    {
+      signal,
+      shouldContinueWaiting = () => true,
+      maxProbeDurationMs,
+      launchedProcess,
+    }: {
+      signal?: AbortSignal;
+      shouldContinueWaiting?: () => boolean;
+      maxProbeDurationMs?: number;
+      launchedProcess?: { pid: number | undefined; launchNonce?: string };
+    } = {},
   ): Promise<boolean> {
-    return this.collaborators.daemonReadiness.waitForReady(
-      timeout,
+    return this.collaborators.daemonReadiness.waitForReady(timeout, {
       signal,
       shouldContinueWaiting,
       maxProbeDurationMs,
       launchedProcess,
-    );
+    });
   }
 
   private tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean> {
@@ -994,9 +1000,11 @@ export interface DaemonManagerLike {
   restartAdmitted(options: DaemonOptions, maintenanceToken: string): Promise<DaemonRestartResult>;
   waitForReady(
     timeout: number,
-    signal?: AbortSignal,
-    shouldContinueWaiting?: () => boolean,
-    maxProbeDurationMs?: number,
+    options?: {
+      signal?: AbortSignal;
+      shouldContinueWaiting?: () => boolean;
+      maxProbeDurationMs?: number;
+    },
   ): Promise<boolean>;
   /**
    * Whether the daemon startup lock is held by a still-live process — used as the

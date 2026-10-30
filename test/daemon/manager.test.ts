@@ -4697,7 +4697,7 @@ describe("Daemon manager process detection", () => {
       });
 
       // A liveness predicate that reports the holder gone forces the capped probe.
-      const ready = await manager.waitForReady(5000, undefined, () => false);
+      const ready = await manager.waitForReady(5000, { shouldContinueWaiting: () => false });
 
       expect(ready).toBe(false);
       // The healthy daemon's socket must survive the capped probe; unlinking it
@@ -5609,7 +5609,10 @@ describe("Daemon manager process detection", () => {
         return { running: false };
       }
 
-      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+      override async waitForReady(
+        _timeout: number,
+        { signal }: { signal?: AbortSignal } = {},
+      ): Promise<boolean> {
         await Promise.resolve();
         if (!signal?.aborted) {
           return neverReadyAfterExit(child, 75);
@@ -5675,7 +5678,10 @@ describe("Daemon manager process detection", () => {
         return { running: false };
       }
 
-      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+      override async waitForReady(
+        _timeout: number,
+        { signal }: { signal?: AbortSignal } = {},
+      ): Promise<boolean> {
         waitCalls++;
         await Promise.resolve();
         if (waitCalls === 1 && !signal?.aborted) {
@@ -5807,7 +5813,10 @@ describe("Daemon manager process detection", () => {
         return { running: false };
       }
 
-      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+      override async waitForReady(
+        _timeout: number,
+        { signal }: { signal?: AbortSignal } = {},
+      ): Promise<boolean> {
         waitCalls++;
         await Promise.resolve();
         if (waitCalls === 1 && !signal?.aborted) {
@@ -5873,7 +5882,10 @@ describe("Daemon manager process detection", () => {
         return { running: false };
       }
 
-      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+      override async waitForReady(
+        _timeout: number,
+        { signal }: { signal?: AbortSignal } = {},
+      ): Promise<boolean> {
         await Promise.resolve();
         if (!signal?.aborted) {
           return neverReadyAfterExit(children[children.length - 1], 75);
@@ -5924,7 +5936,10 @@ describe("Daemon manager process detection", () => {
         return { running: false };
       }
 
-      override async waitForReady(_timeout: number, signal?: AbortSignal): Promise<boolean> {
+      override async waitForReady(
+        _timeout: number,
+        { signal }: { signal?: AbortSignal } = {},
+      ): Promise<boolean> {
         await Promise.resolve();
         if (!signal?.aborted) {
           return neverReadyAfterExit(child, 1);

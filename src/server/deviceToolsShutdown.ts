@@ -844,13 +844,11 @@ export async function shutdownDevice(
             detail: "shutdown preparation did not complete",
             requestAbortSignal: requestAbortSignal,
             operation: async (signal) =>
-              await devicePool?.reserveDeviceForShutdown(
-                device.deviceId,
-                signal,
-                undefined,
+              await devicePool?.reserveDeviceForShutdown(device.deviceId, signal, undefined, {
                 assertHolder,
-                { foreignClaim: options.foreignClaim, fenceUnpooled: true },
-              ),
+                foreignClaim: options.foreignClaim,
+                fenceUnpooled: true,
+              }),
             timeoutMs: timeoutMs,
           },
         );

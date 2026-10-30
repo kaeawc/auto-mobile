@@ -295,13 +295,13 @@ export class DevicePoolInitialization {
     this.state.disconnectHandler = this.callbacks.createDisconnectHandler();
     this.state.releaseSessionForDisconnectedDevice =
       releaseSessionForDisconnectedDevice ??
-      (async (sessionId, _deviceId, releaseReason, shouldCommit, options) => {
+      (async (sessionId, _deviceId, releaseReason, { shouldCommit, releaseOptions } = {}) => {
         // The session manager re-evaluates the fence immediately before it
         // removes the session, after its setup/restoration awaits (#7031).
         const release = await this.state.sessionManager.releaseSessionUnlessSuperseded(
           sessionId,
           releaseReason,
-          { commitFence: shouldCommit, ...options },
+          { commitFence: shouldCommit, ...releaseOptions },
         );
         return !release.superseded;
       });

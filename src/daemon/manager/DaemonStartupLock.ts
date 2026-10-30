@@ -43,9 +43,11 @@ export interface DaemonStartupLockHost {
   readSettledStartupLockHolder(deadline: number, signal?: AbortSignal): Promise<StartupLockHolder>;
   waitForReady(
     timeout: number,
-    signal?: AbortSignal,
-    shouldContinueWaiting?: () => boolean,
-    maxProbeDurationMs?: number,
+    options?: {
+      signal?: AbortSignal;
+      shouldContinueWaiting?: () => boolean;
+      maxProbeDurationMs?: number;
+    },
   ): Promise<boolean>;
   sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void>;
   socketPathObservable(): boolean;
@@ -224,9 +226,11 @@ export class DaemonStartupLock {
     if (!holder.recovering) {
       const ready = await this.host.waitForReady(
         Math.min(remaining, this.host.remainingTime(deadline)),
-        signal,
-        stillWaiting,
-        LOCK_HOLDER_PROBE_TIMEOUT_MS,
+        {
+          signal,
+          shouldContinueWaiting: stillWaiting,
+          maxProbeDurationMs: LOCK_HOLDER_PROBE_TIMEOUT_MS,
+        },
       );
       // The holder may enter replacement while the ordinary readiness probe awaits.
       const current = await this.host.readSettledStartupLockHolder(deadline, signal);
@@ -438,12 +442,10 @@ export class DaemonStartupLock {
     let waitedOnHolder = this.host.readStartupLockHolder();
 
     while (this.host.remainingTime(deadline) > 0) {
-      const ready = await this.host.waitForReady(
-        this.host.remainingTime(deadline),
-        undefined,
-        () => this.isStillWaitingOnStartupLockHolder(waitedOnHolder),
-        LOCK_HOLDER_PROBE_TIMEOUT_MS,
-      );
+      const ready = await this.host.waitForReady(this.host.remainingTime(deadline), {
+        shouldContinueWaiting: () => this.isStillWaitingOnStartupLockHolder(waitedOnHolder),
+        maxProbeDurationMs: LOCK_HOLDER_PROBE_TIMEOUT_MS,
+      });
       if (ready) {
         return true;
       }

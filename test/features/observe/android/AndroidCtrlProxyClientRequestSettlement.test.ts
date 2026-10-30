@@ -154,7 +154,8 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestClipboard",
-    invoke: (h, s) => h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) =>
+      h.client.requestClipboard("get", undefined, LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestSettingsGet",
@@ -280,7 +281,7 @@ const methods: RequestMethod[] = [
   },
   {
     name: "commitViaIme",
-    invoke: (h, s) => h.client.commitViaIme("hi", undefined, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) => h.client.commitViaIme("hi", undefined, LONG_TIMEOUT_MS, perf, { signal: s }),
   },
   {
     name: "requestImeAction",

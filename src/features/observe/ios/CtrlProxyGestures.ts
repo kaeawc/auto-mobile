@@ -1,5 +1,9 @@
 import type { TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
-import { sendIOSPressCommand, type IOSDispatchResult } from "./CtrlProxyDispatch";
+import {
+  sendIOSPressCommand,
+  type IOSDispatchResult,
+  type IosFrameDispatchOptions,
+} from "./CtrlProxyDispatch";
 /**
  * CtrlProxyGestures - iOS gesture delegate.
  *
@@ -103,9 +107,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     x: number,
     y: number,
     timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { frameContext, signal, onDispatch }: IosFrameDispatchOptions = {},
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
     return sendIOSPressCommand(
       this.getDoubleTapFeatures

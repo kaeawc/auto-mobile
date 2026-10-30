@@ -196,22 +196,12 @@ async function executeFocusWithDuplicateEmail(
     hierarchy: { node: { $: {}, node: [hierarchyNode(clickable), hierarchyNode(focused)] } },
   };
   if (moveDuringStability) {
-    identifyObservedHierarchy(
-      "android",
-      before,
-      "cached-ok",
-      undefined,
-      undefined,
-      "initial-capture",
-    );
-    identifyObservedHierarchy(
-      "android",
-      stableHierarchy,
-      "fresh",
-      undefined,
-      undefined,
-      "stable-capture",
-    );
+    identifyObservedHierarchy("android", before, "cached-ok", undefined, {
+      captureId: "initial-capture",
+    });
+    identifyObservedHierarchy("android", stableHierarchy, "fresh", undefined, {
+      captureId: "stable-capture",
+    });
   }
   const selector = new FakeElementSelector();
   const selectionIntents: string[] = [];

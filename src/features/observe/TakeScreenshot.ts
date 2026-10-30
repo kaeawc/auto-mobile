@@ -165,14 +165,10 @@ export class TakeScreenshot implements ScreenshotService {
             return this.captureScreenshotBase64(finalPath, options, captureSignal, true);
           }
           const capture = await this.captureIosObserverScreenshot(captureSignal);
-          return this.writeiOSScreenshot(
-            finalPath,
-            capture,
-            startedAt,
-            options,
-            captureSignal,
-            false,
-          );
+          return this.writeiOSScreenshot(finalPath, capture, startedAt, options, {
+            signal: captureSignal,
+            pushToStream: false,
+          });
         },
         {
           timer: this.timer,
@@ -670,7 +666,10 @@ export class TakeScreenshot implements ScreenshotService {
           signal,
         );
       const result = await this.requestiOSScreenshot(request, options);
-      const written = await this.writeiOSScreenshot(finalPath, result, startTime, options, signal);
+      const written = await this.writeiOSScreenshot(finalPath, result, startTime, options, {
+        signal,
+        pushToStream: true,
+      });
       return options.hidePrototypes === true && written.success
         ? { ...written, prototypesHidden: true }
         : written;
@@ -728,8 +727,7 @@ export class TakeScreenshot implements ScreenshotService {
     result: CtrlProxyScreenshotResult,
     startTime: number,
     options: ScreenshotOptions,
-    signal?: AbortSignal,
-    pushToStream = true,
+    { signal, pushToStream }: { signal?: AbortSignal; pushToStream: boolean },
   ): Promise<ScreenshotResult> {
     if (signal?.aborted) {
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
@@ -760,14 +758,9 @@ export class TakeScreenshot implements ScreenshotService {
     logger.info(`[SCREENSHOT] iOS screenshot captured in ${durationMs}ms, saved to ${finalPath}`);
 
     const screenshotImageSize = readImageHeaderDimensions(encoded) ?? undefined;
-    this.pushiOSScreenshotIfAllowed(
-      result,
-      imageBuffer,
-      encoded,
-      format,
-      pushToStream,
-      screenshotImageSize,
-    );
+    if (pushToStream) {
+      this.pushiOSScreenshot(result, imageBuffer, encoded, format, screenshotImageSize);
+    }
 
     return {
       success: true,
@@ -777,15 +770,14 @@ export class TakeScreenshot implements ScreenshotService {
     };
   }
 
-  private pushiOSScreenshotIfAllowed(
+  private pushiOSScreenshot(
     result: CtrlProxyScreenshotResult,
     original: Buffer,
     encoded: Buffer,
     format: "png" | "jpeg" | "webp",
-    allowed: boolean,
     dimensions: { width: number; height: number } | undefined,
   ): void {
-    if (allowed && result.data) {
+    if (result.data) {
       this.pushScreenshotToStream(
         encoded === original ? result.data : encoded.toString("base64"),
         encoded,

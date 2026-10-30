@@ -62,6 +62,8 @@ function isWaitSourceVisible(
 interface WaitForElementOptions extends ScreenSizeForOffscreenCheckOptions {
   negative?: boolean;
   evaluation?: ConditionEvaluation;
+  /** Per-wait selector match modes, carried across polls; a fresh map when omitted. */
+  modes?: Map<string, MatchMode>;
 }
 
 function resolveWaitForElementOptions(
@@ -196,10 +198,11 @@ export const findWaitForElement = (
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
   platform?: AndroidOrIosPlatform,
-  modes = new Map<string, MatchMode>(),
   options: boolean | WaitForElementOptions = false,
 ): Element | null => {
   const evaluation = waitElementEvaluation(options);
+  const modes =
+    typeof options === "boolean" ? new Map<string, MatchMode>() : (options.modes ?? new Map());
   const scoped = usesScopedWait(waitFor);
   const selectionFinder = finder;
   if (scoped) {

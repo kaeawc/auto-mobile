@@ -55,8 +55,7 @@ describe("FileSystemObserveCacheStore", function () {
       cacheDir,
       (file, data) => fs.writeFile(file, data),
       idGenerator,
-      (file) => fs.unlink(String(file)),
-      fs,
+      { unlinkFile: (file) => fs.unlink(String(file)), diskMetadata: fs },
     );
     return { fs, cache, readdir, stat };
   }
@@ -156,8 +155,7 @@ describe("FileSystemObserveCacheStore", function () {
         await fs.writeFile(file, data);
       },
       idGenerator,
-      (file) => fs.unlink(String(file)),
-      fs,
+      { unlinkFile: (file) => fs.unlink(String(file)), diskMetadata: fs },
     );
     const pending = cache.put("device-1", makeResult("stale"), cache.currentGeneration("device-1"));
     await started.promise;
@@ -555,13 +553,9 @@ describe("FileSystemObserveCacheStore", function () {
       throw new Error("denied");
     };
     try {
-      const reader = new FileSystemObserveCacheStore(
-        timer,
-        cacheDir,
-        undefined,
-        idGenerator,
+      const reader = new FileSystemObserveCacheStore(timer, cacheDir, undefined, idGenerator, {
         unlinkFile,
-      );
+      });
       expect(await reader.getMostRecent("device-1")).toBeUndefined();
       expect(existsSync(path.join(cacheDir, foreignName))).toBe(true);
       expect(debug).toHaveBeenCalledWith(
@@ -584,13 +578,9 @@ describe("FileSystemObserveCacheStore", function () {
       throw new Error("denied");
     };
     try {
-      store = new FileSystemObserveCacheStore(
-        timer,
-        cacheDir,
-        writeAfterClear,
-        idGenerator,
+      store = new FileSystemObserveCacheStore(timer, cacheDir, writeAfterClear, idGenerator, {
         unlinkFile,
-      );
+      });
       const generation = store.currentGeneration("device-1");
       await store.put("device-1", makeResult("stale"), generation);
 

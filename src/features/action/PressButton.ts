@@ -783,14 +783,11 @@ export class PressButton extends BaseVisualChange {
             signal,
             timeoutMs,
             (fenced, dispatch) =>
-              client.requestPressButton(
-                normalizedButton,
-                timeoutMs,
-                undefined,
+              client.requestPressButton(normalizedButton, timeoutMs, undefined, {
                 frameContext,
-                fenced,
-                dispatch,
-              ),
+                signal: fenced,
+                onDispatch: dispatch,
+              }),
             onDispatch,
           );
       this.assertHeldRequestLive(signal);

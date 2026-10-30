@@ -1,4 +1,8 @@
-import { sendIOSPressCommand, type IOSDispatchResult } from "./CtrlProxyDispatch";
+import {
+  sendIOSPressCommand,
+  type IOSDispatchResult,
+  type IosFrameDispatchOptions,
+} from "./CtrlProxyDispatch";
 /**
  * CtrlProxy iOSNavigation - Delegate for navigation operations.
  *
@@ -116,9 +120,7 @@ export class CtrlProxyNavigation {
     button: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { frameContext, signal, onDispatch }: IosFrameDispatchOptions = {},
   ): Promise<IOSDispatchResult<CtrlProxyPressButtonResult>> {
     return sendIOSPressCommand(
       this.context,

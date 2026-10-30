@@ -103,8 +103,7 @@ const matchesAbsent = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
-  platform: AndroidOrIosPlatform | undefined,
-  sizeOptions: ScreenSizeForOffscreenCheckOptions,
+  sizeOptions: ScreenSizeForOffscreenCheckOptions & { platform: AndroidOrIosPlatform | undefined },
   evaluation: ConditionEvaluation,
 ): boolean => {
   if (!waitFor.absent) {
@@ -116,7 +115,7 @@ const matchesAbsent = (
     selectionStrategy: waitFor.absent.selectionStrategy ?? waitFor.selectionStrategy,
   } as ObserveWaitForOptions;
   return (
-    findWaitForElement(finder, absentAsWaitFor, viewHierarchy, platform, new Map(), {
+    findWaitForElement(finder, absentAsWaitFor, viewHierarchy, sizeOptions.platform, {
       ...sizeOptions,
       negative: true,
       evaluation,
@@ -163,8 +162,15 @@ export const evaluateWaitForObservation = (
   waitFor: WaitForWithSettled,
   observation: ObserveResult,
   devicePlatform: BootedDevice["platform"] | undefined,
-  displayInventory: DisplayInventoryClassification,
-  { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
+  {
+    displayInventory,
+    modes,
+    iosMultiPanel,
+  }: {
+    displayInventory: DisplayInventoryClassification;
+    modes: Map<string, MatchMode>;
+    iosMultiPanel: boolean;
+  },
 ): ObserveConditionEvaluation & { awaitedElement?: Element } => {
   const platform =
     devicePlatform === undefined
@@ -191,9 +197,10 @@ export const evaluateWaitForObservation = (
   const needsElementMatch = hasElementPredicate(waitFor);
   const awaitedElement =
     needsElementMatch && observation.viewHierarchy
-      ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform, modes, {
+      ? findWaitForElement(finder, waitFor, observation.viewHierarchy, platform, {
           ...sizeOptions,
           evaluation,
+          modes,
         })
       : null;
   // The shared admission guard above ensures absence is evaluated only on a
@@ -202,14 +209,7 @@ export const evaluateWaitForObservation = (
     waitFor.absent === undefined
       ? true
       : observation.viewHierarchy
-        ? matchesAbsent(
-            finder,
-            waitFor,
-            observation.viewHierarchy,
-            platform,
-            sizeOptions,
-            evaluation,
-          )
+        ? matchesAbsent(finder, waitFor, observation.viewHierarchy, sizeOptions, evaluation)
         : false;
 
   const matched = [

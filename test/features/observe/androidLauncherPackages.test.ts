@@ -64,7 +64,7 @@ describe("androidLauncherPackages", () => {
 
       // A shrinking home-verification deadline (e.g. 250ms left) must cap the
       // launcher resolve so it cannot spend the full RESOLVE_HOME_TIMEOUT_MS.
-      await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, undefined, 250);
+      await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, { timeoutMs: 250 });
 
       const resolveCall = fakeAdb
         .getCommandCalls()
@@ -78,7 +78,7 @@ describe("androidLauncherPackages", () => {
         createExecResult("com.example.launcher/.LauncherActivity", ""),
       );
 
-      await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, undefined, -5);
+      await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, { timeoutMs: -5 });
 
       const resolveCall = fakeAdb
         .getCommandCalls()
@@ -100,7 +100,7 @@ describe("androidLauncherPackages", () => {
       const controller = new AbortController();
       controller.abort();
       await expect(
-        resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, controller.signal),
+        resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, { signal: controller.signal }),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     });
 
@@ -207,9 +207,13 @@ describe("androidLauncherPackages", () => {
         createExecResult("com.launcher.a/.Main", ""),
       );
 
-      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
+      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, {
+        incarnationToken: "epoch-1",
+      });
       fakeTimer.setCurrentTime(29_000);
-      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
+      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, {
+        incarnationToken: "epoch-1",
+      });
 
       expect(first).toBe("com.launcher.a");
       expect(second).toBe("com.launcher.a");
@@ -225,7 +229,9 @@ describe("androidLauncherPackages", () => {
         RESOLVE_HOME_PATTERN,
         createExecResult("com.launcher.a/.Main", ""),
       );
-      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
+      const first = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, {
+        incarnationToken: "epoch-1",
+      });
 
       // The user changes their default HOME app while the daemon keeps
       // running.
@@ -234,7 +240,9 @@ describe("androidLauncherPackages", () => {
         createExecResult("com.launcher.b/.Main", ""),
       );
       fakeTimer.setCurrentTime(30_001);
-      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
+      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, {
+        incarnationToken: "epoch-1",
+      });
 
       expect(first).toBe("com.launcher.a");
       expect(second).toBe("com.launcher.b");
@@ -375,9 +383,13 @@ describe("androidLauncherPackages", () => {
         RESOLVE_HOME_PATTERN,
         createExecResult("com.launcher.a/.Main", ""),
       );
-      await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
+      await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, {
+        incarnationToken: "epoch-1",
+      });
       fakeTimer.setCurrentTime(2_001);
-      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, "epoch-1");
+      const second = await resolveConfiguredHomePackage(fakeAdb, "device-1", fakeTimer, {
+        incarnationToken: "epoch-1",
+      });
 
       expect(second).toBe("com.launcher.a");
       expect(
@@ -398,12 +410,9 @@ describe("androidLauncherPackages", () => {
         RESOLVE_HOME_PATTERN,
         createExecResult("com.example.launcher/.LauncherActivity", ""),
       );
-      const first = await resolveConfiguredHomePackage(
-        fakeAdb,
-        "emulator-5554",
-        undefined,
-        "epoch-1",
-      );
+      const first = await resolveConfiguredHomePackage(fakeAdb, "emulator-5554", undefined, {
+        incarnationToken: "epoch-1",
+      });
       expect(first).toBe("com.example.launcher");
 
       // A fresh AVD reincarnates the same serial within the TTL, with a
@@ -417,7 +426,7 @@ describe("androidLauncherPackages", () => {
         reincarnatedAdb,
         "emulator-5554",
         undefined,
-        "epoch-2",
+        { incarnationToken: "epoch-2" },
       );
 
       expect(second).toBe("com.other.launcher");
@@ -434,13 +443,12 @@ describe("androidLauncherPackages", () => {
         RESOLVE_HOME_PATTERN,
         createExecResult("com.example.launcher/.LauncherActivity", ""),
       );
-      await resolveConfiguredHomePackage(fakeAdb, "emulator-5554", undefined, "epoch-1");
-      const second = await resolveConfiguredHomePackage(
-        fakeAdb,
-        "emulator-5554",
-        undefined,
-        "epoch-1",
-      );
+      await resolveConfiguredHomePackage(fakeAdb, "emulator-5554", undefined, {
+        incarnationToken: "epoch-1",
+      });
+      const second = await resolveConfiguredHomePackage(fakeAdb, "emulator-5554", undefined, {
+        incarnationToken: "epoch-1",
+      });
 
       expect(second).toBe("com.example.launcher");
       expect(
@@ -543,13 +551,9 @@ describe("androidLauncherPackages", () => {
       );
       const controller = new AbortController();
 
-      await resolveConfiguredHomePackage(
-        fakeAdb,
-        "device-1",
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      await resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, {
+        signal: controller.signal,
+      });
 
       const call = fakeAdb.getCommandCalls().find((c) => c.command.includes(RESOLVE_HOME_PATTERN));
       // Bounded (RESOLVE_HOME_TIMEOUT_MS) and cancellable.
@@ -570,7 +574,7 @@ describe("androidLauncherPackages", () => {
       // A cancelled resolve must REJECT (propagate) rather than return null and
       // downgrade the caller to the fallback launcher list.
       await expect(
-        resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, undefined, controller.signal),
+        resolveConfiguredHomePackage(fakeAdb, "device-1", undefined, { signal: controller.signal }),
       ).rejects.toThrow();
 
       // The abort must not have poisoned the cache: a later resolve with a live

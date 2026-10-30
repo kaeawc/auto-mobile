@@ -379,8 +379,8 @@ describe("TapAtCoordinate", () => {
     };
     // The iOS client takes its abort signal before the dispatch marker.
     const iosClient: IosCoordinateTapClient = {
-      requestDoubleTapCoordinates: (_x, _y, _timeout, frame, _signal, onDispatch) =>
-        request(frame, onDispatch),
+      requestDoubleTapCoordinates: (_x, _y, _timeout, { frameContext, onDispatch } = {}) =>
+        request(frameContext, onDispatch),
       requestTapCoordinates: (tap: TapCoordinatesRequest) =>
         request(tap.frameContext, tap.onDispatch),
     };

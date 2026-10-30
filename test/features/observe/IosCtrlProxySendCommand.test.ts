@@ -167,7 +167,7 @@ const methods: Method[] = [
   {
     type: "get_table_data",
     database: true,
-    invoke: (h) => h.database.getTableData("app", "db", "table", 7, 2, 50),
+    invoke: (h) => h.database.getTableData("app", "db", "table", { limit: 7, offset: 2 }, 50),
     literal:
       '{"type":"get_table_data","requestId":"get_table_data_wire-1","appId":"app","databasePath":"db","table":"table","limit":7,"offset":2}',
     timeout: "Get table data timeout after 50ms",

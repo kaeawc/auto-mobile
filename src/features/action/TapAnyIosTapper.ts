@@ -202,20 +202,13 @@ export class TapAnyIosTapper {
     let dispatched = false;
     let result: Awaited<ReturnType<IosCtrlProxy["requestAction"]>>;
     try {
-      result = await xcTestClient.requestAction(
-        voiceOverAction,
-        resourceId,
-        undefined,
-        timeoutMs,
-        undefined,
-        {
-          ...(duration === undefined ? {} : { duration }),
-          abortSignal: signal,
-          onDispatch: () => {
-            dispatched = true;
-          },
+      result = await xcTestClient.requestAction(voiceOverAction, resourceId, undefined, timeoutMs, {
+        ...(duration === undefined ? {} : { duration }),
+        abortSignal: signal,
+        onDispatch: () => {
+          dispatched = true;
         },
-      );
+      });
     } catch (error) {
       // A socket failure after the write is unconfirmed; a refusal or the caller's abort is not.
       if (dispatched && !(error instanceof ActionableError) && error !== signal?.reason) {

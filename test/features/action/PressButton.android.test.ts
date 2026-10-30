@@ -553,7 +553,9 @@ describe("PressButton Android keycode dispatch", () => {
 
       fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.b/.Main", ""));
       expect(
-        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
+        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, {
+          incarnationToken: "1",
+        }),
       ).toBe("com.launcher.b");
     });
 
@@ -569,7 +571,9 @@ describe("PressButton Android keycode dispatch", () => {
 
       fakeAdb.setCommandResponse("resolve-activity", createExecResult("com.launcher.b/.Main", ""));
       expect(
-        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, "1"),
+        await resolveConfiguredHomePackage(fakeAdb, androidDevice.deviceId, fakeTimer, {
+          incarnationToken: "1",
+        }),
       ).toBe("com.launcher.a");
     });
   });

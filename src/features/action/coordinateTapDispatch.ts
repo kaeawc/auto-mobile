@@ -85,8 +85,7 @@ export async function dispatchAndroidCoordinateTap(
   accessibilityService: CoordinateTapClient,
   adb: AdbExecutor,
   point: Point,
-  durationMs: number,
-  options: AndroidCoordinateTapOptions = {},
+  { durationMs, options = {} }: { durationMs: number; options?: AndroidCoordinateTapOptions },
 ): Promise<void> {
   const { x, y } = point;
   const { frameContext, signal, assertCurrent, onTapDelivered } = options;
@@ -163,34 +162,44 @@ type InternalIosCoordinateTapOptions = IosCoordinateTapOptions & { doubleTap?: b
 export async function dispatchIosCoordinateTap(
   client: IosCoordinateTapClient,
   point: Point,
-  durationMs: number,
-  frameContext?: string,
-  options: IosCoordinateTapOptions = {},
+  {
+    durationMs,
+    frameContext,
+    options = {},
+  }: { durationMs: number; frameContext?: string; options?: IosCoordinateTapOptions },
 ): Promise<void> {
-  return dispatchIosTap(client, point, durationMs, frameContext, options);
+  return dispatchIosTap(client, point, { durationMs, frameContext, options });
 }
 
 /** One runner command owns the full double tap; a missing reply proves no partial count. */
 export async function dispatchIosDoubleTap(
   client: IosCoordinateTapClient,
   point: Point,
-  durationMs: number = 50,
-  frameContext?: string,
-  options: IosCoordinateTapOptions = {},
+  {
+    durationMs = 50,
+    frameContext,
+    options = {},
+  }: { durationMs?: number; frameContext?: string; options?: IosCoordinateTapOptions } = {},
 ): Promise<void> {
-  return dispatchIosTap(client, point, durationMs, frameContext, {
-    ...options,
-    failureLabel: "double tap",
-    doubleTap: true,
+  return dispatchIosTap(client, point, {
+    durationMs,
+    frameContext,
+    options: {
+      ...options,
+      failureLabel: "double tap",
+      doubleTap: true,
+    },
   });
 }
 
 async function dispatchIosTap(
   client: IosCoordinateTapClient,
   point: Point,
-  durationMs: number,
-  frameContext: string | undefined,
-  options: InternalIosCoordinateTapOptions,
+  {
+    durationMs,
+    frameContext,
+    options,
+  }: { durationMs: number; frameContext?: string; options: InternalIosCoordinateTapOptions },
 ): Promise<void> {
   const { x, y } = point;
   const { failureLabel = "tap", signal, doubleTap = false } = options;

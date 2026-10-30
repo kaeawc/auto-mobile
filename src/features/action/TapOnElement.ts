@@ -498,9 +498,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         this.validateOptions = validate;
       },
       /** Replaces the iOS coordinate-tap transport so the VoiceOver fallback is observable. */
-      setIosCoordinateTap: (
-        tap: (action: string, x: number, y: number, durationMs: number) => Promise<void>,
-      ): void => {
+      setIosCoordinateTap: (tap: TapGestureDispatcher["executeiOSTapWithCoordinates"]): void => {
         this.executeiOSTapWithCoordinates = tap;
       },
       /** Replaces the terminal-screenshot capture performed after effect polling. */

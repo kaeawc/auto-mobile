@@ -158,7 +158,7 @@ export class TapPointPlanner {
     if (!isUsableScreenSize(screenSize)) {
       return false;
     }
-    return !this.visibleTapBounds(selection, viewHierarchy, screenSize, options);
+    return !this.visibleTapBounds(selection, viewHierarchy, { screenSize, options });
   }
 
   invisibleMatchError(
@@ -192,8 +192,7 @@ export class TapPointPlanner {
     selection: ElementSelectionResult,
     options: TapOnElementOptions,
     hierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-    fallback?: string,
+    { screenSize, fallback }: { screenSize?: ObserveResult["screenSize"]; fallback?: string } = {},
   ): TapTargetUnavailableError {
     const reason = this.visibilityFailureReason(selection, hierarchy, screenSize);
     return new TapTargetUnavailableError(
@@ -233,9 +232,15 @@ export class TapPointPlanner {
   visibleTapBounds(
     selection: ElementSelectionResult,
     hierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-    options?: TapOnElementOptions,
-    tapTarget?: Element,
+    {
+      screenSize,
+      options,
+      tapTarget,
+    }: {
+      screenSize?: ObserveResult["screenSize"];
+      options?: TapOnElementOptions;
+      tapTarget?: Element;
+    } = {},
   ): ElementBounds | null {
     const target = tapTarget ?? selection.element;
     if (!target?.bounds) {
@@ -422,22 +427,18 @@ export class TapPointPlanner {
       observationScreenSize: observeResult.screenSize,
       display: observeResult.viewHierarchy,
     });
-    const visibleBounds = this.visibleTapBounds(
-      finalSelection,
-      viewHierarchy,
+    const visibleBounds = this.visibleTapBounds(finalSelection, viewHierarchy, {
       screenSize,
-      requestedAction === "focus" ? { ...options, action: "focus" } : options,
-      tapElement,
-    );
+      options: requestedAction === "focus" ? { ...options, action: "focus" } : options,
+      tapTarget: tapElement,
+    });
     if (!visibleBounds) {
-      throw this.invisibleMatchFailure(
-        finalSelection,
-        options,
-        viewHierarchy,
+      throw this.invisibleMatchFailure(finalSelection, options, viewHierarchy, {
         screenSize,
-        "Matched element has no visible tap area on this screen. " +
+        fallback:
+          "Matched element has no visible tap area on this screen. " +
           "Scroll it into view with swipeOn, then retry tapOn.",
-      );
+      });
     }
     const visibleTapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
       options,
@@ -452,14 +453,12 @@ export class TapPointPlanner {
       ],
     });
     if (!visibleTapPoint) {
-      throw this.invisibleMatchFailure(
-        finalSelection,
-        options,
-        viewHierarchy,
+      throw this.invisibleMatchFailure(finalSelection, options, viewHierarchy, {
         screenSize,
-        "Matched element has no unobstructed visible tap area. " +
+        fallback:
+          "Matched element has no unobstructed visible tap area. " +
           "Dismiss the keyboard or scroll it into view, then retry tapOn.",
-      );
+      });
     }
     const clearPoint = this.pointClearOfHostControls(
       viewHierarchy,

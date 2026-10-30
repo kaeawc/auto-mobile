@@ -483,13 +483,10 @@ export class UninstallApp {
     guard: UninstallGuardOptions,
     signal?: AbortSignal,
   ): Promise<void> {
-    const inspection = await checkSigningIdentity(
-      this.signingInspector,
-      packageName,
-      userId,
-      guard.expectedSigningSha256,
+    const inspection = await checkSigningIdentity(this.signingInspector, packageName, userId, {
+      expectedSha256: guard.expectedSigningSha256,
       signal,
-    );
+    });
     if (inspection.presence === "absent") {
       throw new SigningGuardError(
         "absent",

@@ -253,7 +253,7 @@ export class InstallApp {
     );
     try {
       return await withAndroidPackageMutationLock(this.device.deviceId, signal, () =>
-        this.executeAndroid(plan, userId, perf, signal, guard),
+        this.executeAndroid(plan, userId, perf, { signal, guard }),
       );
     } finally {
       await plan.cleanup();
@@ -275,26 +275,21 @@ export class InstallApp {
     plan: AndroidInstallPlan,
     userId: number | undefined,
     perf: PerformanceTracker,
-    signal?: AbortSignal,
-    guard?: InstallGuardOptions,
+    { signal, guard }: { signal?: AbortSignal; guard?: InstallGuardOptions },
   ): Promise<InstallAppResult> {
     const preparation = await this.prepareAndroidInstall(plan, userId, perf, signal);
     let { packageName, isInstalled } = preparation;
     const { targetUserId, beforePackages, warnings, prior } = preparation;
-    const signingGuard = await this.applySigningGuard(
-      guard,
-      packageName,
-      targetUserId,
+    const signingGuard = await this.applySigningGuard(guard, packageName, targetUserId, {
       isInstalled,
       signal,
-    );
+    });
 
     const installation = await this.installAndroidWithRecovery(
       packageName,
       targetUserId,
       this.installRunner(plan, targetUserId),
-      prior,
-      { ...installStepOptions(guard, signal), perf },
+      { prior, ...installStepOptions(guard, signal), perf },
     );
     const installAttempt = installation.installAttempt;
     isInstalled = this.absorbInstallRecovery(installation, warnings, isInstalled);
@@ -311,8 +306,7 @@ export class InstallApp {
         packageName,
         beforePackages,
         targetUserId,
-        perf,
-        signal,
+        { perf, signal },
       );
       packageName = verification.packageName;
       if (verification.warning) {
@@ -345,19 +339,15 @@ export class InstallApp {
     guard: InstallGuardOptions | undefined,
     packageName: string | undefined,
     targetUserId: number,
-    isInstalled: boolean,
-    signal?: AbortSignal,
+    { isInstalled, signal }: { isInstalled: boolean; signal?: AbortSignal },
   ): Promise<InstallAppResult["signingGuard"]> {
     if (!guard?.expectedSigningSha256) {
       return undefined;
     }
-    return this.requireExpectedSigningBeforeReplace(
-      packageName,
-      targetUserId,
-      isInstalled,
-      guard.expectedSigningSha256,
+    return this.requireExpectedSigningBeforeReplace(packageName, targetUserId, isInstalled, {
+      expectedSha256: guard.expectedSigningSha256,
       signal,
-    );
+    });
   }
 
   /**
@@ -369,8 +359,7 @@ export class InstallApp {
     packageName: string | undefined,
     targetUserId: number,
     installedForTarget: boolean,
-    expectedSha256: string[],
-    signal?: AbortSignal,
+    { expectedSha256, signal }: { expectedSha256: string[]; signal?: AbortSignal },
   ): Promise<NonNullable<InstallAppResult["signingGuard"]>> {
     const expected = normalizeSignerSet(expectedSha256);
     if (!packageName) {
@@ -397,13 +386,10 @@ export class InstallApp {
     if (holder === undefined) {
       return { status: "no-existing-package" };
     }
-    const inspection = await checkSigningIdentity(
-      this.signingInspector,
-      packageName,
-      holder,
-      expected,
+    const inspection = await checkSigningIdentity(this.signingInspector, packageName, holder, {
+      expectedSha256: expected,
       signal,
-    );
+    });
     return inspection.presence === "absent"
       ? { status: "no-existing-package" }
       : { status: "matched", matchedSha256: expected };
@@ -486,14 +472,14 @@ export class InstallApp {
     packageName: string | undefined,
     targetUserId: number,
     install: AndroidInstallRunner,
-    prior: AndroidPriorPackageState,
     {
+      prior,
       perf,
       signal,
       allowDestructiveRecovery = true,
     }: AndroidInstallStepOptions & {
       perf: PerformanceTracker;
-    },
+    } & { prior: AndroidPriorPackageState },
   ): Promise<AndroidInstallRecovery> {
     const installAttempt = await perf.track("adbInstall", () => install(signal));
     if (installAttempt.success) {
@@ -501,13 +487,10 @@ export class InstallApp {
       await this.markInstalledAppsCacheStale(true);
     }
     if (installAttempt.timedOut) {
-      return this.recoverTimedOutAndroidInstall(
-        installAttempt,
-        packageName,
-        targetUserId,
+      return this.recoverTimedOutAndroidInstall(installAttempt, packageName, targetUserId, {
         prior,
         signal,
-      );
+      });
     }
     if (installAttempt.success || !this.isAndroidDowngradeError(installAttempt)) {
       return { installAttempt };
@@ -527,7 +510,7 @@ export class InstallApp {
           "but the package name could not be determined in order to uninstall it first.",
       );
     }
-    return this.recoverAndroidDowngrade(packageName, targetUserId, install, perf, signal);
+    return this.recoverAndroidDowngrade(packageName, targetUserId, install, { perf, signal });
   }
 
   /**
@@ -539,8 +522,7 @@ export class InstallApp {
     installAttempt: AndroidInstallAttempt,
     packageName: string | undefined,
     targetUserId: number,
-    prior: AndroidPriorPackageState,
-    signal?: AbortSignal,
+    { prior, signal }: { prior: AndroidPriorPackageState; signal?: AbortSignal },
   ): Promise<AndroidInstallRecovery> {
     const verdict = await this.resolveTimedOutInstallState(
       packageName,
@@ -621,8 +603,7 @@ export class InstallApp {
     packageName: string | undefined,
     beforePackages: Set<string>,
     userId: number,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<{ packageName?: string; warning?: string; upgrade?: boolean }> {
     let afterPackages: Set<string>;
     try {
@@ -715,8 +696,7 @@ export class InstallApp {
     packageName: string,
     targetUserId: number,
     install: AndroidInstallRunner,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<AndroidInstallRecovery> {
     const inventory = await this.listAndroidPackageUsers(packageName, targetUserId, signal);
     const { installedUserIds } = inventory;
@@ -832,7 +812,10 @@ export class InstallApp {
       await this.confirmAndroidPackageUsers(packageName, progress, signal);
       signal?.throwIfAborted();
     } catch (error) {
-      throw this.androidRestoreStoppedError(packageName, targetUserId, inventory, progress, error);
+      throw this.androidRestoreStoppedError(packageName, targetUserId, inventory, {
+        progress,
+        error,
+      });
     }
     const originalWarning = `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`;
     if (installedUserIds.every((id) => id === targetUserId)) {
@@ -852,8 +835,7 @@ export class InstallApp {
     packageName: string,
     targetUserId: number,
     inventory: AndroidPackageUsers,
-    progress: AndroidRestoreProgress,
-    error: unknown,
+    { progress, error }: { progress: AndroidRestoreProgress; error: unknown },
   ): ActionableError {
     const notRestored = inventory.installedUserIds.filter(
       (id) =>

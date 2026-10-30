@@ -292,16 +292,16 @@ export class FocusNavigate {
       return { success: true, status: "focused", steps, path, focusedElement: pathEntry(focused) };
     }
     if (stuck > 0) {
-      return this.stopped(
-        "stuck",
-        steps,
-        path,
+      return this.stopped("stuck", steps, path, {
         focused,
-        `Focus did not move after ${stuck} ${stuck === 1 ? "press" : "presses"}`,
-      );
+        message: `Focus did not move after ${stuck} ${stuck === 1 ? "press" : "presses"}`,
+      });
     }
     if (steps >= maxSteps) {
-      return this.stopped("max_steps", steps, path, focused, `Reached maxSteps (${maxSteps})`);
+      return this.stopped("max_steps", steps, path, {
+        focused,
+        message: `Reached maxSteps (${maxSteps})`,
+      });
     }
     return undefined;
   }
@@ -332,8 +332,7 @@ export class FocusNavigate {
     status: "stuck" | "max_steps",
     steps: number,
     path: FocusPathEntry[],
-    focused: Element | null,
-    message: string,
+    { focused, message }: { focused: Element | null; message: string },
   ): FocusNavigateResult {
     return {
       success: false,

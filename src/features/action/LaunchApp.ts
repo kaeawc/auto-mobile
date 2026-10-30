@@ -242,9 +242,12 @@ export class LaunchApp extends BaseVisualChange {
         ) {
           throw new ActionableError("A launch environment is supported on iOS simulators only.");
         }
-        return this.executeiOS(packageName, clearAppData, coldBoot, signal, {
-          launchArguments,
-          launchEnvironment,
+        return this.executeiOS(packageName, clearAppData, coldBoot, {
+          signal,
+          processOptions: {
+            launchArguments,
+            launchEnvironment,
+          },
         });
       case "android":
         if (launchArguments?.length) {
@@ -290,8 +293,10 @@ export class LaunchApp extends BaseVisualChange {
     bundleId: string,
     clearAppData: boolean,
     coldBoot: boolean,
-    signal?: AbortSignal,
-    processOptions: IosLaunchProcessOptions = {},
+    {
+      signal,
+      processOptions = {},
+    }: { signal?: AbortSignal; processOptions?: IosLaunchProcessOptions } = {},
   ): Promise<LaunchAppResult> {
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
@@ -337,8 +342,7 @@ export class LaunchApp extends BaseVisualChange {
     installedApps: string[],
     packageName: string,
     userId: number,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<boolean> {
     if (installedApps.includes(packageName)) {
       return true;
@@ -545,13 +549,10 @@ export class LaunchApp extends BaseVisualChange {
     logger.info(`[LaunchApp] Looking for package: ${packageName}`);
     logger.info(`[LaunchApp] Installed apps: ${installedApps.join(", ")}`);
     if (
-      !(await this.isInstalledOrLiveConfirmed(
-        installedApps,
-        packageName,
-        targetUserId,
+      !(await this.isInstalledOrLiveConfirmed(installedApps, packageName, targetUserId, {
         perf,
         signal,
-      ))
+      }))
     ) {
       logger.error(`[LaunchApp] App ${packageName} is not installed`);
       logger.error(`[LaunchApp] DEBUG: installedApps.length = ${installedApps.length}`);
@@ -768,13 +769,10 @@ export class LaunchApp extends BaseVisualChange {
             this.adb.getDeviceTimestampMs(),
           );
         }
-        const launchOutcome = await this.performLaunch(
-          packageName,
-          activityName,
-          targetUserId,
+        const launchOutcome = await this.performLaunch(packageName, activityName, targetUserId, {
           perf,
-          { signal, intent },
-        );
+          options: { signal, intent },
+        });
         signal?.throwIfAborted();
         const foregroundReady = await this.waitForAppForeground(packageName, targetUserId, {
           timeoutMs: foregroundWaitTimeoutMs,

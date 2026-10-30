@@ -147,9 +147,12 @@ export async function supplementAndroidHierarchy(
     await execute(["shell", "uiautomator", "dump", path]);
     const result = await execute(["shell", "cat", path]);
     throwIfAborted(signal);
-    return await verifyAndMergeDump(original, result.stdout, foreground, deps, {
-      deadline,
-      signal,
+    return await verifyAndMergeDump(original, result.stdout, foreground, {
+      deps,
+      bound: {
+        deadline,
+        signal,
+      },
     });
   } catch (error) {
     throwIfAborted(signal);
@@ -211,8 +214,7 @@ async function verifyAndMergeDump(
   original: ViewHierarchyResult,
   contents: string,
   foreground: { packageName: string; userId: number },
-  deps: AndroidHierarchyFallbackDeps,
-  bound: DumpBound,
+  { deps, bound }: { deps: AndroidHierarchyFallbackDeps; bound: DumpBound },
 ): Promise<ViewHierarchyResult> {
   const { deadline, signal } = bound;
   const parsed: { hierarchy?: XmlNode } = await parseStringPromise(contents, {

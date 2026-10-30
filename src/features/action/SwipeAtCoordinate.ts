@@ -390,8 +390,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     resolved: { from: NativePoint; to: NativePoint },
     duration: number,
     fence: { assertCurrent: () => void } | undefined,
-    pointer: PointerOption | undefined,
-    signal?: AbortSignal,
+    { pointer, signal }: { pointer?: PointerOption; signal?: AbortSignal } = {},
   ): Promise<SwipeResult> {
     const { from, to } = resolved;
     const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
@@ -498,7 +497,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
             options.durationMs ?? this.geometry.getSwipeDurationFromSpeed(options.speed);
           const result = await perf.track("executeSwipe", () =>
             options.pointer
-              ? this.dispatchStylus(resolved, duration, fence, options.pointer, signal)
+              ? this.dispatchStylus(resolved, duration, fence, { pointer: options.pointer, signal })
               : this.executeGesture.swipe(
                   {
                     x1: resolved.from.x,

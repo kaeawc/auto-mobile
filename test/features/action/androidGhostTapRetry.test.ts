@@ -39,7 +39,7 @@ describe("checkAndroidTapHierarchyChange", () => {
           hashed.push(tree);
           return postHash;
         },
-        preHash,
+        { preTapHash: preHash },
       );
       expect(result).toEqual(expected);
       if (result.status === "unchanged") {
@@ -64,7 +64,7 @@ describe("checkAndroidTapHierarchyChange", () => {
             throw failure;
           },
           () => "before",
-          "before",
+          { preTapHash: "before" },
         ),
       ).toEqual({ status: "unavailable" });
       expect(warning).toHaveBeenCalledWith(expect.stringContaining(failure.message), failure);
@@ -89,7 +89,7 @@ describe("checkAndroidTapHierarchyChange", () => {
             throw failure;
           },
           () => "before",
-          "before",
+          { preTapHash: "before" },
         ),
       ).rejects.toBe(failure);
     });
@@ -110,8 +110,7 @@ describe("checkAndroidTapHierarchyChange", () => {
               throw failure;
             },
             () => "before",
-            "before",
-            ambient ? undefined : controller.signal,
+            { preTapHash: "before", signal: ambient ? undefined : controller.signal },
           ),
         ),
       ).rejects.toBe(failure);

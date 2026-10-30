@@ -76,7 +76,7 @@ export class AndroidLaunchActivity {
       for (let i = 0; i < approaches.length; i++) {
         this.assertLaunchNotAborted(signal);
         activities.push(
-          ...(await this.runActivityApproach(approaches[i], i, packageName, perf, signal)),
+          ...(await this.runActivityApproach(approaches[i], i, packageName, { perf, signal })),
         );
         if (activities.length > 0) {
           break;
@@ -140,8 +140,7 @@ export class AndroidLaunchActivity {
     command: string,
     index: number,
     packageName: string,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<string[]> {
     try {
       logger.info(`[LaunchApp] Trying approach ${index + 1}: ${command}`);
@@ -386,8 +385,7 @@ export class AndroidLaunchActivity {
     packageName: string,
     activityName: string | undefined,
     userId: number,
-    perf: PerformanceTracker,
-    options: AndroidPerformLaunchOptions = {},
+    { perf, options = {} }: { perf: PerformanceTracker; options?: AndroidPerformLaunchOptions },
   ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
     const { signal, intent } = options;
     this.assertLaunchNotAborted(signal);
@@ -398,7 +396,7 @@ export class AndroidLaunchActivity {
       perf.end();
       return launched;
     }
-    return this.performDiscoveredLaunch(packageName, activityName, userId, perf, signal);
+    return this.performDiscoveredLaunch(packageName, activityName, userId, { perf, signal });
   }
 
   /** Launch without an explicit intent: intent, monkey, then launcher-activity discovery. */
@@ -406,8 +404,7 @@ export class AndroidLaunchActivity {
     packageName: string,
     activityName: string | undefined,
     userId: number,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
   ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
     let targetActivity = activityName;
 

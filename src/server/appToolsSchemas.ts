@@ -182,11 +182,24 @@ const installBundleSchema = z
   })
   .strict();
 
+/**
+ * installApp, uninstallApp and listApps accept an Apple Watch simulator (#14908), so their
+ * `platform` names "watchos" too. Every other tool keeps the shared Android/iOS enum.
+ */
+const watchAwarePlatformSchema = () =>
+  z
+    .enum(["android", "ios", "watchos"])
+    .optional()
+    .describe(
+      'Device platform. Name "watchos" to target an Apple Watch simulator, unless sessionUuid is a watch session',
+    );
+
 const installAppInput = z.object({
+  platform: watchAwarePlatformSchema(),
   artifactPath: z
     .string()
     .describe(
-      "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa",
+      "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa; watchOS: .app",
     ),
   splits: z
     .array(z.string().min(1))
@@ -242,10 +255,13 @@ export const uninstallAppSchema = withAppIdAliases(
     z
       .object({
         appId: z.string(),
+        platform: watchAwarePlatformSchema(),
         keepData: z
           .boolean()
           .optional()
-          .describe("Keep app data after uninstall (Android only, default false)"),
+          .describe(
+            "Keep app data after uninstall (Android only, default false; refused on watchOS)",
+          ),
         expectedSigningSha256: expectedSigningSha256Schema
           .optional()
           .describe(
@@ -403,6 +419,7 @@ export const resetKeychainSchema = withAppIdAliases(
 // a call such as `listApps({ appId: "com.example" })` had the unsupported
 // filter silently dropped and returned the full unfiltered listing.
 const listAppsInput = z.object({
+  platform: watchAwarePlatformSchema(),
   type: z
     .enum(["launchable", "user", "system", "all"])
     .optional()

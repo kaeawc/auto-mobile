@@ -493,7 +493,11 @@ export function assertInternalCallWithinBrokerGrant(
   }
 }
 
-/** The platforms a target may be on: the pool's record, else the call's platform, else both. */
+/**
+ * The platforms a target may be on: the pool's record, else the call's platform, else Android and
+ * iOS. A call names watchOS to reach a watch at all, so an unpooled watch it names is judged
+ * against watch ownership (#14908); a call naming no platform never lands on a watch.
+ */
 export function bindingPlatformsFor(
   pooledPlatform: Platform | undefined,
   requestedPlatform: unknown,
@@ -501,7 +505,9 @@ export function bindingPlatformsFor(
   if (pooledPlatform) {
     return [pooledPlatform];
   }
-  return requestedPlatform === "android" || requestedPlatform === "ios"
+  return requestedPlatform === "android" ||
+    requestedPlatform === "ios" ||
+    requestedPlatform === "watchos"
     ? [requestedPlatform]
     : ["android", "ios"];
 }

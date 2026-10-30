@@ -14813,8 +14813,13 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "artifactPath": {
-          "description": "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa",
+          "description": "Android: .apk, .apks, .aab (needs bundletool), or a directory of split APKs; iOS: .app or .ipa; watchOS: .app",
           "type": "string"
         },
         "splits": {
@@ -14895,10 +14900,6 @@
         "allowDestructiveRecovery": {
           "description": "Android: false refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
           "type": "boolean"
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -17587,6 +17588,11 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "type": {
           "description": "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) are visible while content providers and RRO overlays are not. 'user' and 'system' keep their meaning and must be asked for explicitly; 'all' returns every installed package. The default degrades to 'user' when the device reports no launchability signal, and an explicit 'launchable' is then rejected rather than silently empty. On a physical iOS device, where user/system classification is unavailable (devicectl reports no such signal), an omitted type returns every app (reported as 'all') and an explicit 'user' or 'system' filter is rejected rather than silently honored.",
           "type": "string",
@@ -17601,10 +17607,6 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -17767,7 +17769,7 @@
       "$defs": {
         "__schema0": {
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": ["android", "ios", "watchos"]
         }
       }
     },
@@ -49293,8 +49295,9 @@
           ]
         },
         "platform": {
+          "description": "Inferred from the device; \"watchos\" is required to select an Apple Watch simulator",
           "type": "string",
-          "enum": ["android", "ios"]
+          "enum": ["android", "ios", "watchos"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -65445,8 +65448,13 @@
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
+        "platform": {
+          "description": "Device platform. Name \"watchos\" to target an Apple Watch simulator, unless sessionUuid is a watch session",
+          "type": "string",
+          "enum": ["android", "ios", "watchos"]
+        },
         "keepData": {
-          "description": "Keep app data after uninstall (Android only, default false)",
+          "description": "Keep app data after uninstall (Android only, default false; refused on watchOS)",
           "type": "boolean"
         },
         "expectedSigningSha256": {
@@ -65458,10 +65466,6 @@
             "type": "string",
             "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
           }
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
         },
         "sessionUuid": {
           "description": "Session",

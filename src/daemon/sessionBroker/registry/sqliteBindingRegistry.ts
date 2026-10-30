@@ -12,10 +12,7 @@ import type { IdGenerator } from "../../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../../utils/tempDir";
 import { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
-import {
-  BindingDiscoveryIncompleteError,
-  BindingRegistrySchemaUnsupportedError,
-} from "../provisioning/refusal";
+import { BindingDiscoveryIncompleteError } from "../provisioning/refusal";
 import { SqliteSessionBrokerStore } from "../sqliteStore";
 import { SqliteDeviceMutationJournal } from "../mutations/sqliteJournal";
 import {
@@ -71,7 +68,6 @@ import {
 import {
   assertBindingRegistryCurrent,
   assertSupportedRegistrySchema,
-  BINDING_REGISTRY_MIGRATIONS,
   migrateBindingRegistry,
 } from "./bindingRegistryMigrations";
 import {
@@ -92,6 +88,7 @@ import type { LegacySlotDeviceRetirement } from "./legacySlotDeviceRetirement";
 import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import { createRegistryDatabase } from "./RegistryDatabase";
 import { RegistrySqliteDialect } from "./RegistrySqliteDialect";
+import { createRegistryWriteGuard } from "./registryWriteGuard";
 import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
 export { type BindingRegistryDatabase, parseJournalTarget } from "./bindingRegistryRows";
 
@@ -237,56 +234,18 @@ export class SqliteBindingRegistry implements BindingRegistry {
   private readonly timer: Timer;
   private readonly isExecOwnerLive: BindingExecOwnerLiveness;
   private readonly claims: SqliteDeviceClaims;
+  private readonly writeTransaction: ReturnType<typeof createRegistryWriteGuard>;
 
   constructor(
     private readonly db: Kysely<BindingRegistryDatabase>,
     options: SqliteBindingRegistryOptions = {},
     private readonly dbPath: string = ":memory:",
-    private readonly sqlite?: RegistrySqliteHandle,
+    sqlite?: RegistrySqliteHandle,
   ) {
     this.timer = options.timer ?? defaultTimer;
     this.isExecOwnerLive = options.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
+    this.writeTransaction = createRegistryWriteGuard({ db, sqlite, dbPath });
     this.claims = new SqliteDeviceClaims(this.db, (write) => this.writeTransaction(write));
-  }
-
-  /** Recheck after BEGIN IMMEDIATE: a peer may have migrated since this handle opened. */
-  private writeTransaction<T>(
-    write: (trx: Kysely<BindingRegistryDatabase>) => Promise<T>,
-  ): Promise<T> {
-    if (this.sqlite) {
-      const sqlite = this.sqlite;
-      return this.db.transaction().execute((trx) => {
-        // The factory owns this same physical connection. Probe synchronously after BEGIN
-        // so the guard adds no promise hops to ownership release or other write paths.
-        const statement = sqlite.prepare("SELECT name FROM kysely_migration ORDER BY name");
-        try {
-          const unknownMigrations = statement
-            .all()
-            .map((row) => {
-              if (
-                typeof row !== "object" ||
-                row === null ||
-                !("name" in row) ||
-                typeof row.name !== "string"
-              ) {
-                throw new Error("Invalid binding registry migration name");
-              }
-              return row.name;
-            })
-            .filter((name) => !Object.hasOwn(BINDING_REGISTRY_MIGRATIONS, name));
-          if (unknownMigrations.length > 0) {
-            throw new BindingRegistrySchemaUnsupportedError(this.dbPath, unknownMigrations);
-          }
-        } finally {
-          statement.finalize();
-        }
-        return write(trx);
-      });
-    }
-    return this.db.transaction().execute(async (trx) => {
-      await assertSupportedRegistrySchema(trx, this.dbPath);
-      return write(trx);
-    });
   }
 
   assertSupportedSchema(): Promise<void> {

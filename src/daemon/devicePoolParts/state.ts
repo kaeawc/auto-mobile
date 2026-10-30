@@ -8,6 +8,7 @@ import type { AmbientExecutionIdReader } from "../../utils/interfaces/AmbientExe
 import type { HostChildProcess as ChildProcess } from "../../utils/HostCommandExecutor";
 import { SessionManager, type Session } from "../sessionManager";
 import { BootedDevice } from "../../models";
+import type { DeviceLossMissPort } from "../deviceLossMisses";
 import { Mutex } from "async-mutex";
 import { PlatformDeviceManager } from "../../devices/deviceUtils";
 import { Timer } from "../../utils/SystemTimer";
@@ -102,7 +103,7 @@ export class DevicePoolState {
   >();
   // #11999: only socket tool-call claims can have an answer still awaiting delivery.
   mcpSessionUndeliveredMints = new Map<string, Set<string>>();
-  refreshMissingDeviceMisses!: Map<string, number>;
+  refreshMissingDeviceMisses!: DeviceLossMissPort;
   androidTransportAliases!: AndroidTransportAliases;
   androidAliasObservation = 0;
   androidAliasAppliedObservation = 0;

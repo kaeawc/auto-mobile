@@ -4,17 +4,17 @@ import {
   type DisconnectCandidateIncarnation,
   type OfflineEpisode,
 } from "../../src/daemon/disconnectMonitor";
-import { observeMissingDevice } from "../../src/daemon/missingDeviceLiveness";
 import type { Platform } from "../../src/models";
 import type { DiscoverySource } from "../../src/utils/discoverySource";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
 
 const DEVICE = "sim-held";
 const BUDGET_MS = 20_000;
 
 function harness(platform: Platform = "ios") {
   const timer = new FakeTimer();
-  const misses = new Map<string, number>();
+  const misses = new DeviceLossMisses();
   const incarnations = new Map<string, DisconnectCandidateIncarnation>([[DEVICE, 1]]);
   const countedIncarnations = new Map<string, DisconnectCandidateIncarnation>();
   const episodes = new Map<string, OfflineEpisode>();
@@ -156,17 +156,17 @@ describe("disconnect monitor source-unavailable evidence (#13793)", () => {
   });
 
   test("the shared observer holds unknown evidence but only presence resets it", () => {
-    const misses = new Map<string, number>();
-    expect(observeMissingDevice(misses, DEVICE, "source-unavailable")).toEqual({
+    const misses = new DeviceLossMisses();
+    expect(misses.observe(DEVICE, "source-unavailable")).toEqual({
       misses: 0,
       confirmedGone: false,
     });
-    observeMissingDevice(misses, DEVICE, "missing");
-    expect(observeMissingDevice(misses, DEVICE, "source-unavailable")).toEqual({
+    misses.observe(DEVICE, "missing");
+    expect(misses.observe(DEVICE, "source-unavailable")).toEqual({
       misses: 1,
       confirmedGone: false,
     });
-    expect(observeMissingDevice(misses, DEVICE, "present")).toEqual({
+    expect(misses.observe(DEVICE, "present")).toEqual({
       misses: 0,
       confirmedGone: false,
     });

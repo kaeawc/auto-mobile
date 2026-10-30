@@ -34,6 +34,12 @@ export class ScenarioDaemon extends Daemon {
 
   /** Devices the monitor is counting absent misses for. */
   disconnectMisses(): Map<string, number> {
-    return new Map(this.deviceLoss.misses);
+    const misses = this.deviceLoss.misses;
+    return new Map(
+      [...misses.deviceIds()].flatMap((deviceId): Array<[string, number]> => {
+        const count = misses.get(deviceId);
+        return count === undefined ? [] : [[deviceId, count]];
+      }),
+    );
   }
 }

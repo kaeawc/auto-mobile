@@ -35,6 +35,7 @@ import {
   leaseEmulatorGrpcPort,
 } from "./emulatorGrpc/emulatorGrpcLaunchLease";
 import { ENV, readEnvRaw } from "../../config/env";
+import { indexEmulatorOutputTail } from "./EmulatorOutputTail";
 
 export * from "./EmulatorLaunchSupport";
 
@@ -326,6 +327,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
         snapshot: currentLaunchOutput,
         flush: flushLaunchOutput,
       });
+      indexEmulatorOutputTail(child, context, currentLaunchOutput, this.host);
       const { beginPostValidationExit, finalizePostValidationExit } =
         this.createPostValidationExitHandlers({
           avdName,

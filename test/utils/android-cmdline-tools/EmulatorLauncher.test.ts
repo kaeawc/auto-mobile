@@ -9,7 +9,8 @@ import {
   accelerationCheckCategory,
 } from "../../../src/utils/android-cmdline-tools/emulatorLaunchFailure";
 import type { HostChildProcess } from "../../../src/utils/HostCommandExecutor";
-import type { DeviceInfo } from "../../../src/models";
+import { ActionableError, type DeviceInfo } from "../../../src/models";
+import { formatEarlyExitError } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchDiagnostics";
 import {
   DefaultEmulatorLauncher,
   type EmulatorLauncherHost,
@@ -22,6 +23,7 @@ import {
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakePortAvailabilityChecker } from "../../fakes/FakePortAvailabilityChecker";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { defaultEmulatorOutputTail } from "../../../src/utils/android-cmdline-tools/EmulatorOutputTail";
 
 /** Members the launch pre-flight touches; everything else fails loudly if reached. */
 function createHost(overrides: Partial<EmulatorLauncherHost>): EmulatorLauncherHost {
@@ -92,6 +94,8 @@ function startupHarness(
   const timer = new FakeTimer();
   const child = new FakeChildProcess(timer);
   const targets = new WeakMap<HostChildProcess, string>();
+  const errors = new WeakMap<HostChildProcess, ActionableError>();
+  const finalizations = new WeakMap<HostChildProcess, Promise<ActionableError | undefined>>();
   const reservations = new DefaultEmulatorPortReservations({
     timer: () => timer,
     adbFactory: () => new FakeAdbClientFactory(),
@@ -115,6 +119,9 @@ function startupHarness(
       return child;
     },
     launchTargetDeviceIds: () => targets,
+    launchErrors: () => errors,
+    launchErrorFinalizations: () => finalizations,
+    formatEarlyExitError,
     captureLaunchTargetDeviceId: (_child: HostChildProcess, output: string) => {
       const serial = detectDeviceIdFromEmulatorOutput(output);
       if (serial) {
@@ -154,6 +161,39 @@ function expectNoStartupTimers(timer: FakeTimer) {
   expect(timer.getPendingTimeoutCount()).toBe(0);
   expect(timer.getPendingIntervalCount()).toBe(0);
 }
+
+test("indexes redacted stdout and stderr throughout the launch and prunes on exit", async () => {
+  const harness = startupHarness();
+  const { launch } = await launchStartup(harness, "emulator-5554");
+  const pid = harness.child.pid;
+  if (pid === undefined) {
+    throw new Error("Fake child must have a PID");
+  }
+  harness.child.stdout.emit("data", Buffer.from("coreaudio: Could not initialize record\n"));
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid)).toContain(
+    "Could not initialize record",
+  );
+  harness.timer.advanceTime(5_000);
+  await launch;
+  // Short, chunk-split output is visible through safe redactor snapshots after startup too.
+  harness.child.stderr.emit("data", Buffer.from("\ntoken=private-"));
+  harness.child.stderr.emit("data", Buffer.from("credential\nFailed to create voice virtio-"));
+  harness.child.stderr.emit("data", Buffer.from("snd-mic0\n"));
+  const output = defaultEmulatorOutputTail.tailFor("emulator-5554", pid);
+  expect(output).toContain("Failed to create voice virtio-snd-mic0");
+  expect(output).not.toContain("private-");
+  expect(output).not.toContain("credential");
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid + 1)).toBeUndefined();
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5556", pid)).toBeUndefined();
+  // A real ChildProcess sets exitCode before it emits exit.
+  harness.child.exitCode = 0;
+  harness.child.emit("exit", 0, null);
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid)).toBeUndefined();
+  // Draining stdio after exit cannot re-register this incarnation.
+  harness.child.stderr.emit("data", Buffer.from("late output\n"));
+  harness.child.emit("close", 0, null);
+  expect(defaultEmulatorOutputTail.tailFor("emulator-5554", pid)).toBeUndefined();
+});
 
 test("wipe-data arguments append to operator GPU and memory arguments rather than replacing them", async () => {
   const previous = process.env.AUTOMOBILE_EMULATOR_ARGS;

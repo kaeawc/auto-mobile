@@ -3,6 +3,7 @@ import { open, stat } from "node:fs/promises";
 import { ENV } from "../../config/env";
 import { ActionableError } from "../../models/ActionableError";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultEmulatorOutputTail } from "../../utils/android-cmdline-tools/EmulatorOutputTail";
 import { EmulatorAudioClient } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { createGrpcAuthorizer } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcAuth";
 import { FileEmulatorGrpcDiscovery } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
@@ -64,6 +65,7 @@ export function createEmulatorAudioService(): EmulatorAudioService {
   const discovery = new FileEmulatorGrpcDiscovery(fs);
   return new EmulatorAudioService({
     discovery,
+    outputTail: defaultEmulatorOutputTail,
     guestCapture: new AdbGuestAudioCapture(
       (deviceId) =>
         defaultAdbClientFactory.create({

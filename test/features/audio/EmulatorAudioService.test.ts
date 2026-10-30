@@ -5,11 +5,13 @@ import {
   DEFAULT_LOOP_MAX_DURATION_MS,
   EmulatorAudioService,
   FINISHED_INJECTIONS_KEPT,
+  INJECTION_INCARNATIONS_KEPT,
 } from "../../../src/features/audio/EmulatorAudioService";
 import { FakeEmulatorAudioSession as FakeSession } from "../../fakes/FakeEmulatorAudioSession";
 import { EmulatorAudioError } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
 import type { EmulatorGrpcEndpoint } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
 import { encodeWav, sineTone } from "../../../src/utils/audio/pcm";
+import { FakeEmulatorOutputTail } from "../../fakes/FakeEmulatorOutputTail";
 import { CountingIdGenerator } from "../../../src/utils/CountingIdGenerator";
 
 const ENDPOINT: EmulatorGrpcEndpoint = {
@@ -30,12 +32,17 @@ function setup(
   const sessions: FakeSession[] = [];
   const lookups: number[] = [];
   const guestCapture = new FakeGuestAudioCapture();
+  const incarnation = { pid: ENDPOINT.pid };
+  const outputTail = new FakeEmulatorOutputTail();
   const service = new EmulatorAudioService({
     guestCapture,
+    outputTail,
     discovery: {
       findByConsolePort: async (port) => {
         lookups.push(port);
-        return consolePorts.includes(port) ? { ...ENDPOINT, consolePort: port } : undefined;
+        return consolePorts.includes(port)
+          ? { ...ENDPOINT, pid: incarnation.pid, consolePort: port }
+          : undefined;
       },
     },
     createSession: (endpoint) => {
@@ -62,8 +69,161 @@ function setup(
     ids: new CountingIdGenerator("inj"),
     maxSourceBytes,
   });
-  return { service, sessions, lookups, guestCapture, consolePorts };
+  return { service, sessions, lookups, guestCapture, consolePorts, incarnation, outputTail };
 }
+
+describe("EmulatorAudioService host microphone safety", () => {
+  for (const failure of [
+    "Failed to create voice virtio-snd-mic0",
+    "coreaudio: Could not initialize record",
+    "coreaudio: Reason: kAudioHardwareIllegalOperationError",
+  ]) {
+    test(`refuses host failure before guest capture or gRPC: ${failure}`, async () => {
+      const { service, sessions, guestCapture, outputTail } = setup();
+      outputTail.text = failure;
+      await expect(
+        service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } }),
+      ).rejects.toMatchObject({
+        code: "audio_host_microphone_unavailable",
+        retryable: false,
+        remedy: expect.stringMatching(/Microphone.*restart the emulator/),
+        message: expect.stringMatching(/^\[audio_host_microphone_unavailable\]/),
+      });
+      expect(guestCapture.opened).toEqual([]);
+      expect(sessions).toEqual([]);
+      expect(outputTail.reads[0]).toEqual({ deviceId: "emulator-5554", pid: 1 });
+    });
+  }
+
+  test("refuses a repeat after stop even without captured output", async () => {
+    const { service, sessions, guestCapture } = setup();
+    const first = await service.startInjection("emulator-5554", {
+      source: { kind: "tone", durationMs: 10 },
+    });
+    await service.stopInjection(first.injectionId);
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } }),
+    ).rejects.toMatchObject({
+      code: "audio_repeat_injection_unsafe",
+      retryable: false,
+      remedy: expect.stringMatching(/Microphone.*restart the emulator/),
+      message: expect.stringMatching(/^\[audio_repeat_injection_unsafe\]/),
+    });
+    expect(guestCapture.opened).toEqual(["emulator-5554"]);
+    expect(sessions).toHaveLength(1);
+  });
+
+  test("ordinary startup output cannot prove a repeat safe", async () => {
+    const { service, outputTail } = setup();
+    outputTail.text = "INFO | boot completed; audio enabled";
+    const first = await service.startInjection("emulator-5554", {
+      source: { kind: "tone", durationMs: 10 },
+    });
+    await service.stopInjection(first.injectionId);
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } }),
+    ).rejects.toMatchObject({ code: "audio_repeat_injection_unsafe" });
+  });
+
+  test("the optional output dependency may be omitted and repeats are still refused", async () => {
+    const session = new FakeSession(ENDPOINT);
+    const guestCapture = new FakeGuestAudioCapture();
+    const service = new EmulatorAudioService({
+      discovery: { findByConsolePort: async () => ENDPOINT },
+      guestCapture,
+      createSession: () => session,
+      readFile: async () => new Uint8Array(),
+      ids: new CountingIdGenerator("external"),
+    });
+    const first = await service.startInjection("emulator-5554", {
+      source: { kind: "tone", durationMs: 10 },
+    });
+    await service.stopInjection(first.injectionId);
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } }),
+    ).rejects.toMatchObject({ code: "audio_repeat_injection_unsafe" });
+    expect(guestCapture.opened).toHaveLength(1);
+    expect(session.injected).toHaveLength(1);
+  });
+
+  test("rechecks after reading a source before opening guest capture", async () => {
+    const file = {
+      get "/clip.wav"() {
+        onRead();
+        return encodeWav(sineTone({ durationMs: 1 }));
+      },
+    };
+    let onRead = () => {};
+    const { service, outputTail, guestCapture, sessions } = setup(file);
+    onRead = () => {
+      outputTail.text = "Could not initialize record";
+    };
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "file", path: "/clip.wav" } }),
+    ).rejects.toMatchObject({ code: "audio_host_microphone_unavailable" });
+    expect(guestCapture.opened).toEqual([]);
+    expect(sessions).toEqual([]);
+  });
+
+  test("pre-stream failures do not consume the first injection", async () => {
+    const { service, guestCapture, outputTail, sessions } = setup();
+    outputTail.text = "Could not initialize record";
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } }),
+    ).rejects.toMatchObject({ code: "audio_host_microphone_unavailable" });
+    outputTail.text = undefined;
+    guestCapture.failure = new EmulatorAudioError("audio_guest_capture_unavailable", "no capture");
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } }),
+    ).rejects.toMatchObject({ code: "audio_guest_capture_unavailable" });
+    guestCapture.failure = undefined;
+    await service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } });
+    expect(sessions).toHaveLength(1);
+  });
+
+  test("incarnation history evicts the oldest entry at its documented cap", async () => {
+    const { service, incarnation } = setup();
+    for (let pid = 1; pid <= INJECTION_INCARNATIONS_KEPT + 1; pid++) {
+      incarnation.pid = pid;
+      const started = await service.startInjection("emulator-5554", {
+        source: { kind: "tone", durationMs: 1 },
+      });
+      await service.stopInjection(started.injectionId);
+    }
+    incarnation.pid = 2;
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 1 } }),
+    ).rejects.toMatchObject({ code: "audio_repeat_injection_unsafe" });
+    incarnation.pid = 1;
+    const started = await service.startInjection("emulator-5554", {
+      source: { kind: "tone", durationMs: 1 },
+    });
+    await service.stopInjection(started.injectionId);
+  });
+
+  test("a new discovered PID permits a first injection on the same serial", async () => {
+    const { service, incarnation, sessions } = setup();
+    const first = await service.startInjection("emulator-5554", {
+      source: { kind: "tone", durationMs: 10 },
+    });
+    await service.stopInjection(first.injectionId);
+    incarnation.pid++;
+    await service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } });
+    expect(sessions.map((session) => session.endpoint.pid)).toEqual([1, 2]);
+  });
+
+  test("rechecks output after guest capture settles and closes it on refusal", async () => {
+    const { service, guestCapture, sessions, outputTail } = setup();
+    guestCapture.onOpen = async () => {
+      outputTail.text = "Failed to create voice virtio-snd-mic0";
+    };
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone", durationMs: 10 } }),
+    ).rejects.toMatchObject({ code: "audio_host_microphone_unavailable" });
+    expect(guestCapture.closed).toEqual(["emulator-5554"]);
+    expect(sessions).toHaveLength(0);
+  });
+});
 
 describe("EmulatorAudioService injection", () => {
   test("starts a tone on the emulator matching the serial's console port", async () => {
@@ -193,9 +353,11 @@ describe("EmulatorAudioService injection", () => {
   });
 
   test("only the most recent ended injections stay stoppable", async () => {
-    const { service } = setup();
+    const { service, incarnation } = setup();
     const ids: string[] = [];
     for (let index = 0; index <= FINISHED_INJECTIONS_KEPT; index++) {
+      // Each simulated boot permits one injection.
+      incarnation.pid++;
       // A 10 ms tone keeps 65 starts well inside the unit-test time budget.
       const { injectionId } = await service.startInjection("emulator-5554", {
         source: { kind: "tone", durationMs: 10 },
@@ -257,14 +419,16 @@ describe("EmulatorAudioService session ownership and limits", () => {
   });
 
   test("a loop without its own limit is capped; a single pass is not", async () => {
-    const { service, sessions } = setup();
+    const { service, sessions, incarnation } = setup();
     const first = await service.startInjection("emulator-5554", {
       source: { kind: "tone" },
       loop: true,
     });
     await service.stopInjection(first.injectionId);
+    incarnation.pid++;
     const second = await service.startInjection("emulator-5554", { source: { kind: "tone" } });
     await service.stopInjection(second.injectionId);
+    incarnation.pid++;
     await service.startInjection("emulator-5554", {
       source: { kind: "tone" },
       loop: true,
@@ -427,18 +591,19 @@ describe("verified guest capture guard", () => {
     expect(guestCapture.closed).toEqual(["emulator-5554"]);
   });
 
-  test("closes the recorder on failed start and allows retry", async () => {
+  test("closes the recorder on failed stream start and refuses an unsafe retry", async () => {
     const { service, guestCapture, sessions } = setup({}, (session) => {
       session.injectAudio = async () => {
         throw new Error("start failed");
       };
     });
-    for (let i = 0; i < 2; i++) {
-      await expect(
-        service.startInjection("emulator-5554", { source: { kind: "tone" } }),
-      ).rejects.toThrow("start failed");
-    }
-    expect(guestCapture.closed).toEqual(["emulator-5554", "emulator-5554"]);
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone" } }),
+    ).rejects.toThrow("start failed");
+    await expect(
+      service.startInjection("emulator-5554", { source: { kind: "tone" } }),
+    ).rejects.toMatchObject({ code: "audio_repeat_injection_unsafe" });
+    expect(guestCapture.closed).toEqual(["emulator-5554"]);
     expect(sessions.every((session) => session.closed === 1)).toBe(true);
   });
 

@@ -13,12 +13,16 @@ import type {
 import {
   EmulatorAudioError,
   emulatorExitedDuringInjection,
+  hostMicrophoneUnavailable,
+  repeatInjectionUnsafe,
   type EmulatorAudioErrorCode,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
 import type {
   EmulatorGrpcDiscovery,
   EmulatorGrpcEndpoint,
 } from "../../utils/android-cmdline-tools/emulatorGrpc/emulatorGrpcDiscovery";
+import { classifyHostMicrophoneFailure } from "../../utils/android-cmdline-tools/emulatorGrpc/classifyHostMicrophoneFailure";
+import type { EmulatorOutputTail } from "../../utils/android-cmdline-tools/EmulatorOutputTail";
 import {
   analyzeLevels,
   applyGainDb,
@@ -91,6 +95,8 @@ const DEFAULT_TONE_MS = 2_000;
 export const DEFAULT_LOOP_MAX_DURATION_MS = 10 * 60 * 1000;
 /** Ended injections kept so a late or repeated stop still returns the result. */
 export const FINISHED_INJECTIONS_KEPT = 64;
+/** Oldest incarnation evicted at this cap; state is local to this service's lifetime. */
+export const INJECTION_INCARNATIONS_KEPT = 128;
 
 /** The resources one started injection owns until it settles. */
 interface OpenedInjection {
@@ -112,6 +118,8 @@ interface ActiveInjection {
 export interface EmulatorAudioServiceDeps {
   discovery: EmulatorGrpcDiscovery;
   guestCapture: GuestAudioCapture;
+  /** Redacted live output, absent for emulators launched outside AutoMobile. */
+  outputTail?: EmulatorOutputTail;
   createSession: EmulatorAudioSessionFactory;
   /** A session over the host loopback devices, for iOS Simulators; absent where there is none. */
   createHostLoopbackSession?: () => EmulatorAudioSession;
@@ -149,6 +157,7 @@ function unsupported(code: EmulatorAudioErrorCode, reason: string): EmulatorAudi
  * release can stop everything still playing into a device.
  */
 export class EmulatorAudioService {
+  private readonly injectionStarts = new Map<string, number>();
   private readonly reservedDevices = new Set<string>();
   private readonly active = new Map<string, ActiveInjection>();
   /** A host-loopback start is between its busy check and registration. */
@@ -185,6 +194,7 @@ export class EmulatorAudioService {
     request: StartInjectionRequest,
   ): Promise<StartedInjection> {
     const route = await this.routeFor(deviceId, "audio_injection_unsupported");
+    this.assertInjectionSafe(deviceId, route.endpoint);
     const release = this.reserveHostLoopback(route.route);
     let opened: OpenedInjection;
     try {
@@ -399,11 +409,18 @@ export class EmulatorAudioService {
     request: StartInjectionRequest,
   ): Promise<OpenedInjection> {
     const pcm = applyGainDb(await this.loadSource(request.source), request.gainDb ?? 0);
+    this.assertInjectionSafe(deviceId, route.endpoint);
     const guestCapture = route.endpoint ? await this.deps.guestCapture.open(deviceId) : undefined;
     let session: EmulatorAudioSession | undefined;
     try {
+      // Guest capture settling can expose a host voice failure; recheck before opening gRPC.
+      this.assertInjectionSafe(deviceId, route.endpoint);
       session = route.open();
       const injectionId = this.deps.ids.next();
+      if (route.endpoint) {
+        // A rejected injectAudio may already have opened the unsafe stream. Do not undo this.
+        this.recordInjectionStart(deviceId, route.endpoint);
+      }
       const injection = await session.injectAudio(pcm, {
         loop: request.loop,
         startDelayMs: request.startDelayMs,
@@ -416,6 +433,31 @@ export class EmulatorAudioService {
       throw route.endpoint
         ? await this.classifyInjectionError(deviceId, route.endpoint, error)
         : toActionableError(error, `Audio injection on ${deviceId} failed`);
+    }
+  }
+
+  private recordInjectionStart(deviceId: string, endpoint: EmulatorGrpcEndpoint): void {
+    const key = `${deviceId}:${endpoint.pid}`;
+    this.injectionStarts.set(key, (this.injectionStarts.get(key) ?? 0) + 1);
+    while (this.injectionStarts.size > INJECTION_INCARNATIONS_KEPT) {
+      const oldest = this.injectionStarts.keys().next().value;
+      if (oldest !== undefined) {
+        this.injectionStarts.delete(oldest);
+      }
+    }
+  }
+
+  private assertInjectionSafe(deviceId: string, endpoint?: EmulatorGrpcEndpoint): void {
+    if (!endpoint) {
+      return;
+    }
+    const output = this.deps.outputTail?.tailFor(deviceId, endpoint.pid);
+    if (output !== undefined && classifyHostMicrophoneFailure(output)) {
+      throw hostMicrophoneUnavailable(deviceId);
+    }
+    // No reliable positive host-voice success line is known (#15902). Guest capture is not proof.
+    if ((this.injectionStarts.get(`${deviceId}:${endpoint.pid}`) ?? 0) > 0) {
+      throw repeatInjectionUnsafe(deviceId);
     }
   }
 

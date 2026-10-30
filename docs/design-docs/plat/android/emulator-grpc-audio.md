@@ -15,11 +15,11 @@ emulator's own audio forwarder:
 | `injectAudio(stream AudioPacket) returns (Empty)`       | client stream | host to guest microphone |
 | `streamAudio(AudioFormat) returns (stream AudioPacket)` | server stream | guest output to host     |
 
-Each emulator has its own gRPC port, so two emulators cannot hear each other's audio. Nothing
-touches a host audio stack, so this works the same on a laptop, a Linux CI host with no
-`/dev/snd` and no PulseAudio/PipeWire, and inside a container. Host-mic passthrough
-(`-allow-host-audio`) is not used. A per-emulator PulseAudio/PipeWire sink is a fallback that
-is only worth building if some supported environment cannot reach the gRPC port.
+Each emulator has its own gRPC port, so two emulators cannot hear each other's audio. The emulator's
+forwarder can still depend on host microphone voice initialization; guest recording alone does not
+prove that voice is healthy. Host-mic passthrough (`-allow-host-audio`) is not used. A per-emulator
+PulseAudio/PipeWire sink is a fallback that is only worth building if some supported environment
+cannot reach the gRPC port.
 
 ## Wire contract
 
@@ -54,9 +54,29 @@ is only worth building if some supported environment cannot reach the gRPC port.
   restart also loses the lease. No broadcast waits for PCM reads or joins the reader thread.
 - The host requires `running` from start and every status poll (100 ms by default) throughout
   a three-second settle window, within an eight-second total deadline. Any other answer
-  immediately refuses injection with `audio_guest_capture_unavailable`. Each broadcast uses
+  immediately refuses injection with `audio_guest_capture_unavailable`. Before guest capture and
+  again before opening the gRPC session, injection also refuses captured host microphone failures
+  with `audio_host_microphone_unavailable`, and a repeat injection in the same serial + discovered
+  endpoint PID incarnation with `audio_repeat_injection_unsafe`. Both host safety errors carry
+  `retryable: false` and a remedy to grant macOS Microphone permission to the emulator's host app
+  (System Settings > Privacy and Security > Microphone) or restart the emulator. Permission alone
+  does not clear repeat history: another injection requires a new emulator incarnation. No reliable
+  positive host-voice success line is known, so repeats remain refused even after successful guest
+  capture or a completed injection. Each broadcast uses
   no retries and at most two seconds of the remaining deadline. A missing receiver requires
   reinstalling CtrlProxy. Refusals include at most 2048 characters of the broadcast reply.
+- The launcher indexes its existing redacted output snapshots by PID and serial for the process
+  lifetime, including stdout and stderr after startup. The index holds at most 64 sources (oldest
+  evicted) and removes a source on exit or close. Existing snapshots retain at most 50 lines /
+  16,384 characters; audio lookups additionally cap the tail at 16 KiB of UTF-8. No extra log file
+  is written. `Failed to create voice virtio-snd-mic0`, `Could not initialize record`, or
+  `kAudioHardwareIllegalOperation` in that incarnation's tail indicates host microphone failure.
+  Emulators launched outside AutoMobile have no captured tail, so only the repeat rule applies.
+- Injection history is local to the audio service lifetime and retains at most 128 serial + PID
+  entries, evicting the oldest at capacity. An attempt is counted immediately before `injectAudio`,
+  including attempts whose RPC fails, because it may already have opened a stream. Source or guest
+  capture failures before that point do not count. A new PID permits a first injection; stopping an
+  injection does not clear history. Service restarts and capacity eviction forget older history.
 - Failure after start attempts best-effort stop with a separate two-second cleanup budget.
   Close runs once and accepts `stopped` or `absent`. Before cleanup the host verifies the
   emulator PID still matches its starting incarnation; otherwise it skips cleanup. Ownership

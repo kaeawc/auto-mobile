@@ -2,6 +2,7 @@ import path from "path";
 import type { BootedDevice, InstallAppResult } from "../../../models";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
 import type { UninstallAppResult } from "../../../models/UninstallAppResult";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../../utils/workingDirectory";
 import { PlistClient, type PlistReader } from "../../../utils/ios-cmdline-tools/PlistClient";
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import {
@@ -33,7 +34,7 @@ function androidOnlyInstallOptions(call: InstallAppCall): string[] {
 
 /** A watch simulator installs only a `.app` bundle built for the watchOS simulator. */
 function assertAppBundle(artifactPath: string): void {
-  const extension = path.extname(artifactPath.replace(/[\\/]+$/, "")).toLowerCase();
+  const extension = path.posix.extname(artifactPath.replace(/[\\/]+$/, "")).toLowerCase();
   if (extension !== ".app") {
     throw new ActionableError(
       `installApp on watchOS needs a .app bundle built for the watchOS simulator; ` +
@@ -52,6 +53,9 @@ export class WatchAppManager {
     private readonly device: BootedDevice,
     private readonly simctl: WatchAppsSimctl = new SimCtlClient(device),
     private readonly plist: WatchBundleIdReader = new PlistClient(),
+    /** The daemon chdirs at startup, so a relative path names the directory it was launched in. */
+    private readonly resolveArtifactPath: (artifactPath: string) => string = (artifactPath) =>
+      resolvePathFromDaemonLaunchWorkingDirectory(artifactPath),
   ) {}
 
   async install(artifactPath: string, call: InstallAppCall = {}): Promise<InstallAppResult> {
@@ -62,11 +66,12 @@ export class WatchAppManager {
       );
     }
     assertAppBundle(artifactPath);
-    const bundleId = await this.readBundleId(artifactPath, call.signal);
+    const appPath = this.resolveArtifactPath(artifactPath);
+    const bundleId = await this.readBundleId(appPath, call.signal);
     const upgrade = await this.isInstalled(bundleId, call.signal);
     call.signal?.throwIfAborted();
-    await this.simctl.installApp(artifactPath, this.device.deviceId, { signal: call.signal });
-    return { success: true, artifactPath, packageName: bundleId, upgrade };
+    await this.simctl.installApp(appPath, this.device.deviceId, { signal: call.signal });
+    return { success: true, artifactPath: appPath, packageName: bundleId, upgrade };
   }
 
   async uninstall(appId: string, call: UninstallAppCall = {}): Promise<UninstallAppResult> {
@@ -103,9 +108,13 @@ export class WatchAppManager {
     let bundleId = "";
     try {
       bundleId = (
-        await this.plist.extractRawFile("CFBundleIdentifier", path.join(appPath, "Info.plist"), {
-          signal,
-        })
+        await this.plist.extractRawFile(
+          "CFBundleIdentifier",
+          path.posix.join(appPath, "Info.plist"),
+          {
+            signal,
+          },
+        )
       ).trim();
     } catch (error) {
       throw toActionableError(error, `Could not read CFBundleIdentifier from ${appPath}`);

@@ -55,6 +55,24 @@ describe("WatchAppManager", () => {
     ]);
   });
 
+  test("a relative bundle path resolves against the daemon launch directory", async () => {
+    const plist = new FakeWatchBundleIds();
+    const launched = `/launch-dir/${APP.slice(1)}`;
+    plist.byPath.set(launched, BUNDLE);
+    const simctl = new FakeWatchAppsSimctl(plist);
+    const fromLaunchDir = (artifactPath: string) =>
+      artifactPath.startsWith("/") ? artifactPath : `/launch-dir/${artifactPath}`;
+    const apps = new WatchAppManager(watch, simctl, plist, fromLaunchDir);
+
+    expect(await apps.install(APP.slice(1))).toMatchObject({
+      success: true,
+      artifactPath: launched,
+      packageName: BUNDLE,
+    });
+    expect(plist.reads).toEqual([`CFBundleIdentifier ${launched}/Info.plist`]);
+    expect(simctl.commands).toEqual([`install ${watch.deviceId} ${launched}`]);
+  });
+
   test("a reinstall of a listed bundle reports upgrade", async () => {
     const { apps } = arrange();
     await apps.install(APP);

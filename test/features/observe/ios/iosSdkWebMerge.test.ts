@@ -425,3 +425,55 @@ describe("coordinate quantization (#5162)", () => {
     expect(elements[0].bounds).toEqual({ left: 10, top: 120, right: 110, bottom: 160 });
   });
 });
+
+describe("redaction over a readable native value (#5162)", () => {
+  test("a replaced native field whose value XCTest reads stays verifiable", () => {
+    const native: ViewHierarchyNode = {
+      $: {
+        class: "UITextField",
+        "content-desc": "Email",
+        value: "correct",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const hierarchy = screen(webView([native]));
+    mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([{ ...submit, role: "input", label: "Email", value: "[REDACTED]" }]),
+      },
+    ]);
+    const element = webElements(findWebViewNodes(hierarchy)[0])[0] as Element;
+    expect(element.value).toBe("correct");
+    expect(element["value-redacted"]).toBeUndefined();
+    const detector = new FieldTypeDetector();
+    expect(detector.shouldSkipVerification(element, detector.detect(element))).toBe(false);
+  });
+});
+
+describe("a native leaf matching two DOM elements by different attributes (#5162)", () => {
+  test("is kept, so neither DOM element takes its identifiers", () => {
+    const native: ViewHierarchyNode = {
+      $: {
+        class: "XCUIElementTypeButton",
+        "resource-id": "checkout",
+        "content-desc": "Pay",
+        bounds: { left: 10, top: 120, right: 110, bottom: 160 },
+      },
+    };
+    const hierarchy = screen(webView([native]));
+    const summary = mergeIosSdkWebSnapshots(hierarchy, [
+      {
+        webViewId: "checkout",
+        snapshot: snapshot([
+          { ...submit, id: "e0", label: "checkout" },
+          { ...submit, id: "e1", label: "Pay" },
+        ]),
+      },
+    ]);
+    expect(summary?.deduplicated).toBe(0);
+    const elements = webElements(findWebViewNodes(hierarchy)[0]);
+    expect(elements.map((element) => element["web-element-id"])).toEqual(["e0", "e1"]);
+    expect(elements.some((element) => element["resource-id"] === "checkout")).toBe(false);
+  });
+});

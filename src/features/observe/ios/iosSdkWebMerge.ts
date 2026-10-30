@@ -157,6 +157,20 @@ function duplicateIds(elements: readonly IosSdkWebElement[]): Set<string> {
   return duplicates;
 }
 
+/**
+ * The element's value as text. A redacted value is not the page's text, so it is reported as
+ * present but unreadable, unless a replaced XCTest leaf reports a readable `value` of its own.
+ */
+function valueAttributes(
+  element: IosSdkWebElement,
+  native: Record<string, unknown> | undefined,
+): Record<string, string> {
+  if (element.value !== REDACTED_WEB_VALUE) {
+    return element.value ? { text: element.value } : {};
+  }
+  return typeof native?.value === "string" ? {} : { [VALUE_REDACTED_ATTRIBUTE]: "true" };
+}
+
 function convertElement(
   element: IosSdkWebElement,
   bounds: Box,
@@ -167,7 +181,6 @@ function convertElement(
 ): ViewHierarchyNode {
   const role = element.role ?? "element";
   const editable = EDITABLE_WEB_ROLES.has(role);
-  const redacted = element.value === REDACTED_WEB_VALUE;
   return {
     $: {
       class: role,
@@ -176,9 +189,7 @@ function convertElement(
       ...(editable ? { focusable: "true", "input-type": "text" } : {}),
       enabled: String(element.enabled),
       ...(element.label ? { "content-desc": element.label } : {}),
-      // A redacted value is not the page's text, so it is reported as present but unreadable.
-      ...(element.value && !redacted ? { text: element.value } : {}),
-      ...(redacted ? { [VALUE_REDACTED_ATTRIBUTE]: "true" } : {}),
+      ...valueAttributes(element, native),
       ...(element.enabled ? { clickable: "true" } : {}),
       // The snapshot's focus can be older than the fresh XCTest read, which reports focus by
       // omission, so a replaced leaf's focus is the leaf's alone.
@@ -252,15 +263,16 @@ function coveringElement(
     return undefined;
   }
   const attributes = nodeAttributes(leaf);
-  for (const name of ["resource-id", "content-desc", "text"]) {
-    const value = attributes[name];
-    const position =
-      typeof value === "string" && value ? covering.get(`${key}|${value}`) : undefined;
-    if (position !== undefined) {
-      return position;
-    }
-  }
-  return undefined;
+  const positions = new Set(
+    ["resource-id", "content-desc", "text"].flatMap((name) => {
+      const value = attributes[name];
+      const position =
+        typeof value === "string" && value ? covering.get(`${key}|${value}`) : undefined;
+      return position === undefined ? [] : [position];
+    }),
+  );
+  // A leaf whose attributes match different DOM elements could be either one, so it is not replaced.
+  return positions.size === 1 ? [...positions][0] : undefined;
 }
 
 export interface IosSdkWebMergeSummary {

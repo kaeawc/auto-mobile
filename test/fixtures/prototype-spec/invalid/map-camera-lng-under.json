@@ -1,0 +1,78 @@
+{
+  "spec": {
+    "id": "map-limits",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "route": [
+        {
+          "lat": 0,
+          "lng": 0
+        }
+      ]
+    },
+    "requires": {
+      "platform": ["map"]
+    },
+    "root": {
+      "type": "map",
+      "camera": {
+        "lat": 90,
+        "lng": -180.5,
+        "zoom": 22,
+        "bearing": 360,
+        "tilt": 60
+      },
+      "mapStyle": "plain",
+      "fit": "route",
+      "markers": {
+        "path": "/route",
+        "as": "p",
+        "id": "{index}",
+        "lat": "{p.lat}",
+        "lng": "{p.lng}",
+        "title": "Stop {index}",
+        "animateMs": 2000
+      },
+      "polylines": [
+        {
+          "path": "/route",
+          "width": 1
+        },
+        {
+          "path": "/route",
+          "width": 16
+        },
+        {
+          "path": "/route",
+          "width": 2
+        },
+        {
+          "path": "/route",
+          "width": 3
+        },
+        {
+          "path": "/route",
+          "width": 4
+        },
+        {
+          "path": "/route",
+          "width": 5
+        },
+        {
+          "path": "/route",
+          "width": 6
+        },
+        {
+          "path": "/route",
+          "width": 7
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.camera.lng",
+  "expectedMessage": "Invalid number value"
+}

@@ -234,13 +234,20 @@ enum PrototypeMenus {
 
 extension PrototypeNode {
     /// Root menus fall back to the window; nested menus anchor to their immediate parent.
-    func menuParent(of menu: PrototypeNode) -> PrototypeNode? {
-        let nested = (children ?? []) + [child].compactMap { $0 }
+    func menuParent(of menu: PrototypeNode, data: [String: JSONValue]?) -> PrototypeNode? {
+        let nested = (children ?? []) + [child].compactMap { $0 } + lazyModalRows.nodes(of: self, data: data)
         if nested.contains(where: { $0 === menu }) { return self }
-        return nested.lazy.compactMap { $0.menuParent(of: menu) }.first
+        return nested.lazy.compactMap { $0.menuParent(of: menu, data: data) }.first
     }
 
-    func visibleSelect(_ selected: PrototypeNode, state: [String: JSONValue], pages: [String: Int]) -> Bool {
+    func visibleSelect(
+        _ selected: PrototypeNode,
+        state: [String: JSONValue],
+        pages: [String: Int],
+        data: [String: JSONValue]?
+    )
+        -> Bool
+    {
         if let visibleWhen, !visibleWhen.holds(state) { return false }
         if prototypeModalTypes.contains(type), !(openWhen?.holds(state) ?? false) { return false }
         if self === selected { return type == "select" }
@@ -250,6 +257,7 @@ extension PrototypeNode {
             nested = nested.indices.contains(page) ? [nested[page]] : []
         }
         if let child { nested.append(child) }
-        return nested.contains { $0.visibleSelect(selected, state: state, pages: pages) }
+        nested += lazyModalRows.nodes(of: self, data: data)
+        return nested.contains { $0.visibleSelect(selected, state: state, pages: pages, data: data) }
     }
 }

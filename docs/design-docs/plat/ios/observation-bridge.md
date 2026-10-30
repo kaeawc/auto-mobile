@@ -128,8 +128,8 @@ Failures add these to the observation commands' codes:
 `success: false`: `stale_snapshot` (the snapshot is not one of the current document's four most
 recent), `element_not_actionable` (missing, disabled or hidden in that snapshot), `disallowed_origin`,
 `web_process_unavailable` (also when the web view has been deallocated or detached), or
-`javascript_error` when the bounded script raised. The snapshot command feeds `observe` (below); the
-action tools do not use the action command yet.
+`javascript_error` when the bounded script raised. The snapshot command feeds `observe` and the
+action command serves `tapOn` (below); the other action tools do not use it yet.
 
 ## Backend selection
 
@@ -147,28 +147,29 @@ sdkBridge` in `extras`. The result reports `backend: sdk`, or `backend: xctest` 
 `fallbackReason: unavailable` when a registered bridge did not answer. A failed discovery probe
 reports neither.
 
-**Observe: web views.** When the projected hierarchy contains a `WKWebView` node, the collector
-also reads the app's opted-in web views with one unnamed snapshot read (2 s budget), which answers
-with the registered list and the first web view's snapshot. A
-screen without a `WKWebView` makes no read. A snapshot is merged only when the app registered
+**Observe: web views.** When the projected hierarchy contains exactly one outermost `WKWebView`,
+the collector also reads the app's opted-in web views with one unnamed snapshot read (2 s budget),
+which answers with the registered list and the first web view's snapshot. Any other screen makes no
+read, since only that one can merge; a reply that cannot be read (`bad_reply`) is logged and the
+observation stays XCTest-only. A snapshot is merged only when the app registered
 exactly one web view and the screen shows exactly one outermost `WKWebView`: nothing ties a
 registration to its native view, and the registry orders web views by registration rather than by
 screen position, so with two or more the pairing is ambiguous and they stay XCTest-only. Each
 visible DOM element of the merged snapshot is attached as a
 child of its `WKWebView` node, offset by the web view's origin, clipped to it and truncated to whole
 points as the runner truncates XCTest frames; one wholly outside the web view is dropped, as are elements whose id occurs more than once in the snapshot, since an action naming that id could reach either. Elements map onto the existing attributes
-(`label` → `content-desc`, `value` → `text`, `role` → `class`; a redacted value is not reported as text but as `value-redacted: "true"`, which text verification treats as unverifiable; `enabled` elements are `clickable`;
+(`label` → `content-desc`, `value` → `text`, `role` → `class`; a redacted value is not reported as text but as `value-redacted: "true"`, which text verification treats as unverifiable (unless the replaced XCTest leaf reports a readable `value`); `enabled` elements are `clickable`;
 text entry roles such as `input` and `textarea` report `role: textfield`, so focus and `sendKeys`
 targeting treat them as editable) and carry `web-view-id`, `web-snapshot-id`, `web-element-id` and, when the page URL has one,
-`web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with the same bounds and the same label, value or id as a DOM element are replaced by it in the leaf's place (so container-scoped selectors still find it), and every attribute the fresh leaf reports wins over the snapshot's (its `resource-id`, native `class`, input properties, focus and the rest), so native selectors, field detection and verification keep working; the DOM element adds its web identity and what the leaf does not report, but never its focus, since the snapshot can be older than the XCTest read. A leaf that two DOM elements both match (a wrapper and the control it wraps) is not replaced. A web view
+`web-origin`, with `sdk.source: sdkWebBridge` in `extras`. XCTest leaves inside the web view with the same bounds and the same label, value or id as a DOM element are replaced by it in the leaf's place (so container-scoped selectors still find it), and every attribute the fresh leaf reports wins over the snapshot's (its `resource-id`, native `class`, input properties, focus and the rest), so native selectors, field detection and verification keep working; the DOM element adds its web identity and what the leaf does not report, but never its focus, since the snapshot can be older than the XCTest read. A leaf that two DOM elements both match (a wrapper and the control it wraps), or whose attributes match different DOM elements, is not replaced. A web view
 without a snapshot (none posted yet, a disallowed origin, a terminated process) keeps only its
 XCTest nodes. A merge reports `backend: sdk` unless the native bridge already set `backend`. The
 snapshot id is the DOM elements' capture identity: the web view rejects an action naming one that
 is no longer among its four most recent as `stale_snapshot`, as the native bridge rejects a stale
 observation.
 
-The tap-time fresh read merges the bridge the same way, so a revalidated target keeps its bridge
-identity. Cached hierarchy reads outside observe are XCTest-only: a target resolved from one has no
+The tap-time fresh read merges the bridge and the web views the same way, so a revalidated target
+keeps its bridge or web identity. Cached hierarchy reads outside observe are XCTest-only: a target resolved from one has no
 bridge identity and taps through XCTest.
 
 **tapOn.** A target that carries a bridge identity is tapped through the bridge, naming the
@@ -181,6 +182,15 @@ bridge's reason: `stale_observation`, `unknown_element`, `element_not_actionable
 `action_in_flight`, `action_queue_overloaded`, `action_cancelled`, `app_not_active`, `bad_reply`,
 and a timeout after the action may have run. Tapping whatever XCTest now finds at those
 coordinates could act on a different element.
+
+**tapOn on a DOM element.** A target that carries a web identity is clicked through its web view:
+`tap` maps to `click`, naming the snapshot the element came from (5 s budget). A long press or a
+double tap has no web form: XCTest runs it and reports `fallbackReason: unsupported`. XCTest also
+stands in when the web view bridge is unavailable (`fallbackReason: unavailable`). Every web
+rejection fails closed with its reason (`stale_snapshot`, `element_not_actionable`,
+`disallowed_origin`, `web_process_unavailable`, `javascript_error`), as does any other failure,
+including a timeout after the click may have run. A `sendKeys` focus tap on a DOM element stays on
+XCTest.
 
 **sendKeys.** When the field `sendKeys` focused is a bridge node, its text entry goes through the
 bridge's `insertText` and its clear (the `clear` command and the clear before a replace) through

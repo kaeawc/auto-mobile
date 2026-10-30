@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { join } from "node:path";
 import {
   DefaultEmulatorPortReservations,
   resetEmulatorLaunchReservations,
@@ -21,6 +22,7 @@ import { FakeLockFileSystem } from "../../fakes/FakeLockFileSystem";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { parseLockContent } from "../../../src/utils/fileLock";
 import { logger } from "../../../src/utils/logger";
+import { testOverrides } from "../../../src/utils/testOverrides";
 
 function reservationsWithHostPorts(
   hostPorts: FakePortAvailabilityChecker,
@@ -189,13 +191,13 @@ describe("FileEmulatorGrpcPortRegistry", () => {
       const lease = await reservations.reserveEmulatorGrpcPort();
       expect(lease.port).toBe(port);
       reservations.trackEmulatorGrpcLease(new FakeChildProcess(), lease);
-      expect(files.exists(`${directory}/${port}.lock`)).toBe(true);
+      expect(files.exists(join(directory, `${port}.lock`))).toBe(true);
     }
 
     resetEmulatorLaunchReservations();
 
-    expect(files.exists(`${directory}/8554.lock`)).toBe(false);
-    expect(files.exists(`${directory}/8555.lock`)).toBe(false);
+    expect(files.exists(join(directory, `8554.lock`))).toBe(false);
+    expect(files.exists(join(directory, `8555.lock`))).toBe(false);
     const fresh = reservationsWithHostPorts(new FakePortAvailabilityChecker(), view());
     expect((await fresh.reserveEmulatorGrpcPort()).port).toBe(8554);
   });
@@ -217,7 +219,7 @@ describe("FileEmulatorGrpcPortRegistry", () => {
   test("records the owner PID and launch time using the existing lock format", () => {
     const { files, directory, view } = harness();
     expect(view().claim(8554, { pid: 101, launchedAt: 1234 })?.port).toBe(8554);
-    const owner = parseLockContent(files.readText(`${directory}/8554.lock`));
+    const owner = parseLockContent(files.readText(join(directory, `8554.lock`)));
     expect(owner.pid).toBe(101);
     expect(owner.metadata).toBe("1234");
     expect(owner.token).toBeDefined();
@@ -269,7 +271,7 @@ describe("FileEmulatorGrpcPortRegistry", () => {
     const { files, directory, view } = harness();
     view().claim(8554, { pid: 101, launchedAt: 10 });
     files.failure = (op, path) =>
-      op === "readText" && path === `${directory}/8554.lock` ? "EACCES" : undefined;
+      op === "readText" && path === join(directory, `8554.lock`) ? "EACCES" : undefined;
     const warn = spyOn(logger, "warn");
     try {
       const lease = await reservationsWithHostPorts(
@@ -284,5 +286,11 @@ describe("FileEmulatorGrpcPortRegistry", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("unit-test preload gRPC registry", () => {
+  test("launches without an injected registry use an in-memory registry, not the lock directory", () => {
+    expect(typeof testOverrides.emulatorGrpcPortRegistry).toBe("function");
   });
 });

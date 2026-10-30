@@ -6,6 +6,7 @@ import { raceWithDeadline } from "../raceWithDeadline";
 import type { Timer } from "../SystemTimer";
 import type { AdbClientFactory } from "./AdbClientFactory";
 import { ENV, readEnvRaw, readEnvTrimmed } from "../../config/env";
+import { testOverrides } from "../testOverrides";
 import {
   EMULATOR_GRPC_PORT_FIRST,
   EMULATOR_GRPC_PORT_LAST,
@@ -332,7 +333,10 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
   private readonly grpcPortRegistry: EmulatorGrpcPortRegistry;
 
   constructor(private readonly deps: EmulatorPortReservationDeps) {
-    this.grpcPortRegistry = deps.grpcPortRegistry ?? new FileEmulatorGrpcPortRegistry();
+    this.grpcPortRegistry =
+      deps.grpcPortRegistry ??
+      testOverrides.emulatorGrpcPortRegistry?.() ??
+      new FileEmulatorGrpcPortRegistry();
   }
 
   async reserveEmulatorGrpcPort(): Promise<EmulatorGrpcPortLease> {

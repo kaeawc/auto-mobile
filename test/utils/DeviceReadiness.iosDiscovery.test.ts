@@ -125,6 +125,7 @@ describe("DeviceReadiness iOS readiness discovery (#11063)", () => {
         android: true,
         "ios-simulator": true,
         "ios-physical": true,
+        "watchos-simulator": false,
       });
       // A second scan inside the lister's TTL reuses its cached sweep.
       await manager.detectConnectedPlatformsWithStatus();

@@ -726,10 +726,12 @@ export class SocketInput {
       signal,
       (_signal, dispatch) =>
         this.callbacks.runInputOperationWithTimeout(
-          "input/key",
-          totalTimeoutMs,
-          remainingTimeoutMs,
-          "UnixSocketServer.handleInputKey",
+          {
+            toolName: "input/key",
+            origin: "UnixSocketServer.handleInputKey",
+            totalTimeoutMs,
+            remainingTimeoutMs,
+          },
           () =>
             this.callbacks.holdDispatchedInputRequest(
               signal,

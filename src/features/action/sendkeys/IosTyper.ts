@@ -51,12 +51,12 @@ export class IosTyper {
       signal?.throwIfAborted();
     }
 
-    const before = await readIosTypedTextField(
-      this.deps.observer,
-      this.deps.timer,
+    const before = await readIosTypedTextField({
+      observer: this.deps.observer,
+      timer: this.deps.timer,
       signal,
       display,
-    );
+    });
     this.deps.session.typingPasswordField = before?.secure === true;
     signal?.throwIfAborted();
 
@@ -93,14 +93,12 @@ export class IosTyper {
       ...this.deps.withTextWarnings(
         this.deps.targetLayer() === "prototype"
           ? result
-          : await verifyIosTypedText(
-              text,
-              before,
-              this.deps.observer,
-              this.deps.timer,
+          : await verifyIosTypedText(text, before, {
+              observer: this.deps.observer,
+              timer: this.deps.timer,
               signal,
               display,
-            ),
+            }),
         [clearWarning],
       ),
       resolvedMode,

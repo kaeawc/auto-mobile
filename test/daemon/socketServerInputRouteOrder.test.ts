@@ -56,11 +56,11 @@ function harness(options: { frameRefusal?: boolean; budgetRefusal?: boolean } = 
     options.dispatching?.();
     return { success: true };
   }) as never;
-  server.executeInputTypeText = (async (...args: unknown[]) => {
+  server.executeInputTypeText = async (_platform, _device, _text, typeTextOptions) => {
     events.push("dispatch:typeText");
-    (args[args.length - 1] as (() => void) | undefined)?.();
+    typeTextOptions.dispatching?.();
     return { success: true };
-  }) as never;
+  };
   server.liftingStrokeOnSessionRefusal = async (kind, _session, _device, _id, run) => {
     events.push(`lift:${kind}`);
     return await run();

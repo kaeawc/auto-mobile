@@ -51,10 +51,12 @@ function budgeted(h: ReturnType<typeof harness>, list = commands) {
 test("budget exhaustion between commands reports delivered and not-sent counts and releases IME lock", async () => {
   const h = harness();
   const result = await runWithTextRequestContext({ getDeadlineMs: () => 120_000 }, () =>
-    h.action.execute(commands, undefined, async (index) => {
-      if (index > 0) {
-        h.timer.advanceTime(1500);
-      }
+    h.action.execute(commands, undefined, {
+      progress: async (index) => {
+        if (index > 0) {
+          h.timer.advanceTime(1500);
+        }
+      },
     }),
   );
   expect(result).toMatchObject({ success: false, completedCommands: 66, failedIndex: 66 });
@@ -155,7 +157,7 @@ test.each(["abort", "device error"])(
       throw new Error("device error");
     };
     const pending = runWithAbortSignal(controller.signal, () =>
-      action.execute([type], undefined, undefined, controller.signal),
+      action.execute([type], undefined, { signal: controller.signal }),
     );
     if (exit === "abort") {
       await expect(pending).rejects.toThrow();
@@ -378,15 +380,17 @@ test.each(["continuous", "stopped"])("progress extension: %s", async (progress) 
   const h = harness();
   let deadlineMs = 120_000;
   const result = await runWithTextRequestContext({ getDeadlineMs: () => deadlineMs }, () =>
-    h.action.execute(commands, undefined, async (index) => {
-      if (index === commands.length) {
-        return;
-      }
-      // FakeTimer callbacks deliberately run without AsyncLocalStorage's request context.
-      runOutsideRequestContext(() => h.timer.advanceTime(1350));
-      if (progress === "continuous" || index < 20) {
-        deadlineMs = Math.min(300_000, h.timer.now() + 120_000);
-      }
+    h.action.execute(commands, undefined, {
+      progress: async (index) => {
+        if (index === commands.length) {
+          return;
+        }
+        // FakeTimer callbacks deliberately run without AsyncLocalStorage's request context.
+        runOutsideRequestContext(() => h.timer.advanceTime(1350));
+        if (progress === "continuous" || index < 20) {
+          deadlineMs = Math.min(300_000, h.timer.now() + 120_000);
+        }
+      },
     }),
   );
   if (progress === "continuous") {

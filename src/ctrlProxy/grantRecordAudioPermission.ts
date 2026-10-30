@@ -22,6 +22,14 @@ function isTimeout(error: unknown): boolean {
   );
 }
 
+function refusalFromOutput(stdout: string, stderr: string): string | undefined {
+  const output = `${stdout}\n${stderr}`;
+  if (/unknown permission/i.test(output) || outputLooksLikeShellFailure(stdout, stderr)) {
+    return output.trim();
+  }
+  return undefined;
+}
+
 /** Best effort: microphone capture is optional and a failed grant must never fail installation. */
 export async function grantRecordAudioPermission(
   adb: Pick<AdbExecutor, "execute">,
@@ -43,9 +51,8 @@ export async function grantRecordAudioPermission(
       }
     } catch (error) {
       const { stdout, stderr } = adbFailureOutput(error);
-      const output = `${stdout}\n${stderr}`;
-      if (/unknown permission/i.test(output) || outputLooksLikeShellFailure(stdout, stderr)) {
-        const reason = output.trim();
+      const reason = refusalFromOutput(stdout, stderr);
+      if (reason !== undefined) {
         logger.warn(`[CTRL_PROXY] ${RECORD_AUDIO_PERMISSION} not grantable: ${reason}`);
         return { granted: false, reason };
       }

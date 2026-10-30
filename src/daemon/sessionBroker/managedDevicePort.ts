@@ -616,7 +616,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         );
       }
       const device = this.androidResetTarget(resource, assignment, name);
-      return android.reset(resource.resourceId, device, profile, assertOwned);
+      return android.reset(resource.resourceId, device, profile, assertOwned, signal);
     });
     await assertOwned();
     return result;

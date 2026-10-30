@@ -14,7 +14,6 @@ import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/s
 import { isUnknownEmulatorName } from "../../utils/android-cmdline-tools/emulatorReadinessEvaluation";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { getAbortSignal } from "../../utils/AbortContext";
 import { logger } from "../../utils/logger";
 import type { BrokerNativeProfile } from "./profile";
 import type { ExecutionTracker } from "../executionTracker";
@@ -341,6 +340,7 @@ export class AndroidBaselineReset {
     device: BootedDevice,
     profile: AndroidResetProfile,
     assertOwned: () => Promise<void>,
+    signal?: AbortSignal,
   ): Promise<"clean" | ResetOutcome> {
     const timing: ResetOutcome = { outcome: "pending", mode: "none", phases: {} };
     const timer = this.dependencies.timer ?? this.baselines.get(resourceId)?.timer ?? defaultTimer;
@@ -350,19 +350,16 @@ export class AndroidBaselineReset {
     }
     const deadlineMs = timer.now() + timeoutMs;
     const controller = new AbortController();
-    const ambientSignal = getAbortSignal();
-    const signal = ambientSignal
-      ? AbortSignal.any([ambientSignal, controller.signal])
-      : controller.signal;
+    const resetSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const owned = async () => {
-      signal.throwIfAborted();
+      resetSignal.throwIfAborted();
       await assertOwned();
-      signal.throwIfAborted();
+      resetSignal.throwIfAborted();
     };
     try {
       return await raceWithDeadline(
         () =>
-          this.resetWithinDeadline(resourceId, device, profile, owned, signal, {
+          this.resetWithinDeadline(resourceId, device, profile, owned, resetSignal, {
             deadlineMs,
             timing,
             timer,
@@ -370,7 +367,7 @@ export class AndroidBaselineReset {
         {
           timer,
           timeoutMs,
-          signal,
+          signal: resetSignal,
           label: "Android baseline reset",
           onTimeout: () =>
             controller.abort(new ActionableError("Android baseline reset deadline exceeded")),

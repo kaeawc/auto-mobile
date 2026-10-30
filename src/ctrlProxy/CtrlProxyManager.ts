@@ -175,7 +175,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         AndroidCtrlProxyManager.consumeCompletedPrefetchedApk(destinationPath),
       clearAvailabilityCache: () => this.clearAvailabilityCache(),
       executeApkStage: (command, stage) => this.executeApkStage(command, stage),
-      grantLocalNetworkAfterInstall: () => this.grantLocalNetworkAfterInstall(),
+      grantPostInstallPermissions: () => this.grantPostInstallPermissions(),
       install: (apkPath) => this.install(apkPath),
       enable: () => this.enable(),
       get savedPrototypes() {
@@ -215,6 +215,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         return manager.timer;
       },
       executeApkStage: (command, stage) => this.executeApkStage(command, stage),
+      grantPostInstallPermissions: () => this.grantPostInstallPermissions(),
       grantLocalNetworkAfterInstall: () => this.grantLocalNetworkAfterInstall(),
       statusInspectionDeviceError: (error) => this.statusInspectionDeviceError(error),
       getApiLevel: () => this.getApiLevel(),
@@ -714,6 +715,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   async install(apkPath: string): Promise<void> {
     return this.apkInstaller.install(apkPath);
+  }
+
+  private async grantPostInstallPermissions(): Promise<void> {
+    return this.apkInstaller.grantPostInstallPermissions();
   }
 
   private async grantLocalNetworkAfterInstall(): Promise<void> {

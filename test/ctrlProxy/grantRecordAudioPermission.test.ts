@@ -26,13 +26,15 @@ function installer(adb: FakeAdbExecutor, userId?: number) {
     assertNotDrivenByOtherDaemon: async () => {},
     clearAvailabilityCache: () => {},
     executeApkStage: async (command) => adb.executeCommand(command),
+    grantPostInstallPermissions: () => apkInstaller.grantPostInstallPermissions(),
     grantLocalNetworkAfterInstall: async () => {},
     statusInspectionDeviceError: () => undefined,
     getApiLevel: async () => [36, true],
     setupUser: async () => userId,
     device: { name: "test", deviceId: "emulator-5554", platform: "android" },
   };
-  return new AndroidCtrlProxyApkInstaller(host);
+  const apkInstaller = new AndroidCtrlProxyApkInstaller(host);
+  return apkInstaller;
 }
 
 describe("grantRecordAudioPermission", () => {
@@ -70,25 +72,38 @@ describe("grantRecordAudioPermission", () => {
       warn.mockRestore();
     }
   });
-  test("unknown permissions are logged at debug", async () => {
+  test("unknown permissions are logged at warn", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDefaultResponse(
       createExecResult("", "Unknown permission: android.permission.RECORD_AUDIO"),
     );
-    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       await grantRecordAudioPermission(adb);
-      expect(debug).toHaveBeenCalledWith(expect.stringContaining("not grantable"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("not grantable"));
     } finally {
-      debug.mockRestore();
+      warn.mockRestore();
     }
   });
-  test("grant failure does not fail installation", async () => {
-    const adb = new FakeAdbExecutor();
-    adb.setCommandResponse("install ", createExecResult("Success", ""));
-    adb.setCommandError("pm grant", new Error("transport reset"));
-    await installer(adb).install("/fake/control-proxy.apk");
-  });
+  test.each(["transport", "unknown permission"])(
+    "%s grant failure warns without failing installation",
+    async (failure) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("install ", createExecResult("Success", ""));
+      if (failure === "transport") {
+        adb.setCommandError("pm grant", new Error("transport reset"));
+      } else {
+        adb.setCommandResponse("pm grant", createExecResult("", "Unknown permission"));
+      }
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await installer(adb).install("/fake/control-proxy.apk");
+        expect(warn).toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
   test("failed installation does not grant", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("install ", createExecResult("Failure", ""));

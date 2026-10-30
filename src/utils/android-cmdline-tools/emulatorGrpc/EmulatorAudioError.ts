@@ -5,6 +5,7 @@ import { GrpcStatus, type GrpcStatusResult } from "./grpcFraming";
 export type EmulatorAudioErrorCode =
   | "audio_emulator_exited"
   | "audio_guest_capture_unavailable"
+  | "audio_record_permission_not_granted"
   | "audio_injection_busy"
   | "audio_injection_unsupported"
   | "audio_capture_unsupported"

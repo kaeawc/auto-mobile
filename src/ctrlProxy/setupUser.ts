@@ -61,7 +61,9 @@ export function isForegroundUserPending(error: unknown): boolean {
  * the one `UserManager.isHeadlessSystemUserMode()` reads; it is read only on an automotive device that
  * reports user 0, so a running driver user costs nothing extra.
  */
-async function assertNotHeadlessSystemUser(adb: Pick<AdbExecutor, "executeCommand">): Promise<void> {
+async function assertNotHeadlessSystemUser(
+  adb: Pick<AdbExecutor, "executeCommand">,
+): Promise<void> {
   const headless = await adb.executeCommand("shell getprop ro.fw.mu.headless_system_user", {
     noRetry: true,
   });

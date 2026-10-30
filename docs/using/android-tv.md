@@ -83,7 +83,9 @@ emulator -avd tv-36
 
 A device is `tv` when its AVD uses a TV system image or a `tv_*` profile, so `formFactor: "tv"`
 appears in `listDevices` and can be asked for in a device `requires` clause or a broker
-`deviceFamily`.
+`deviceFamily`. The booted device resources also report `traits.formFactor: "tv"` when the build
+announces `tv` in `ro.build.characteristics`, which covers a TV emulator whose AVD config can't be
+read.
 
 ## Lifecycle
 

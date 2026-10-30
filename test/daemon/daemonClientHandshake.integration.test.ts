@@ -76,8 +76,10 @@ function startCapturingServer(socketPath: string): {
       undefined,
       {},
       {
-        version: "0.0.40+gtest",
-        build: { entryScript: "/repo/dist/index.js", buildId: "clientbuild123" },
+        clientIdentity: {
+          version: "0.0.40+gtest",
+          build: { entryScript: "/repo/dist/index.js", buildId: "clientbuild123" },
+        },
       },
     );
     await client.connect();
@@ -101,8 +103,10 @@ function startCapturingServer(socketPath: string): {
       undefined,
       {},
       {
-        version: "0.0.40",
-        build: { entryScript: "/repo/dist/index.js", buildId: "clientbuild123" },
+        clientIdentity: {
+          version: "0.0.40",
+          build: { entryScript: "/repo/dist/index.js", buildId: "clientbuild123" },
+        },
       },
     );
     await client.connect();
@@ -119,7 +123,7 @@ function startCapturingServer(socketPath: string): {
     server = capture.server;
     await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
-    const client = new DaemonClient(socketPath, 5000, undefined, {}, null);
+    const client = new DaemonClient(socketPath, 5000, undefined, {}, { clientIdentity: null });
     await client.connect();
     await client.callTool("doctor", {});
 

@@ -59,7 +59,9 @@ describe("daemon shutdown while a multi-device plan runs", () => {
     for (const sessionId of sessionManager.getAllKnownSessionIds()) {
       const deviceId = sessionManager.getSession(sessionId)?.assignedDevice ?? null;
       void cancelAndReleaseSession(sessionId, "daemon-shutdown", () =>
-        releaseSessionAndDevice(sessionManager, pool, deviceId, sessionId, "daemon-shutdown"),
+        releaseSessionAndDevice(sessionManager, pool, deviceId, sessionId, {
+          reason: "daemon-shutdown",
+        }),
       );
     }
   };
@@ -73,7 +75,9 @@ describe("daemon shutdown while a multi-device plan runs", () => {
       if (labelDeviceRestarting && labelDevice) {
         // Label B's device went away for a restart first: its session waits out that handoff.
         const reason = deviceRestartReleaseReason(labelDevice);
-        await releaseSessionAndDevice(sessionManager, pool, labelDevice, LABEL_B, reason);
+        await releaseSessionAndDevice(sessionManager, pool, labelDevice, LABEL_B, {
+          reason,
+        });
       }
       shutDown(hunt.daemon());
       // The shutdown aborted this call; the step unwinds on its next turn.
@@ -124,7 +128,7 @@ describe("daemon shutdown while a multi-device plan runs", () => {
 
       // Naming the label session does not recover it either: only a plan run mints it.
       await expect(
-        sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true),
+        sessionManager.getOrCreateSession(LABEL_B, pool, "ios", { requireIssuedSession: true }),
       ).rejects.toBeInstanceOf(TerminalSessionError);
       await expect(sessionManager.getOrCreateSession(LABEL_B, pool, "ios")).rejects.toBeInstanceOf(
         TerminalSessionError,
@@ -134,7 +138,7 @@ describe("daemon shutdown while a multi-device plan runs", () => {
       sessionManager.setDeviceLabels(BASE, { A: BASE, B: LABEL_B });
       expect(sessionManager.getBaseSessionOfDerivedLabel(LABEL_B)).toBe(BASE);
       await expect(
-        sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true),
+        sessionManager.getOrCreateSession(LABEL_B, pool, "ios", { requireIssuedSession: true }),
       ).rejects.toBeInstanceOf(TerminalSessionError);
       expect(hunt.poolHolder(labelDevice)).toBeUndefined();
       expect((await hunt.persistence.getSession(LABEL_B))?.release_reason).toBe(rowReason);
@@ -154,7 +158,9 @@ describe("daemon shutdown while a multi-device plan runs", () => {
       () => false,
       async (sessionId, reason) => {
         const deviceId = sessionManager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(sessionManager, restarted.pool, deviceId, sessionId, reason);
+        await releaseSessionAndDevice(sessionManager, restarted.pool, deviceId, sessionId, {
+          reason,
+        });
       },
       hunt.timer,
     );

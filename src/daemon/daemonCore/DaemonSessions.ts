@@ -443,8 +443,8 @@ export class DaemonSessions {
         this.host.services.devicePool(),
         assignedDeviceId,
         sessionId,
-        releaseReason,
         {
+          // `release` below owns the session release (and its reason), so no `reason` here.
           deferFailureFallback: options?.deferFailureFallback,
           release: async () => {
             if (expectedSession) {

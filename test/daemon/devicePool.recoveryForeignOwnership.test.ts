@@ -148,10 +148,12 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
   };
 
   const resume = async (a: Awaited<ReturnType<typeof restartedDaemonA>>) =>
-    await a.sessions.getOrCreateSession(SESSION, a.pool, "android", undefined, true).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    await a.sessions
+      .getOrCreateSession(SESSION, a.pool, "android", { requireIssuedSession: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
 
   test("a live foreign claim refuses recovery with device_owned_by_other_daemon and leaves it unassigned", async () => {
     const store = new SharedClaimStore();

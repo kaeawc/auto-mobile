@@ -229,8 +229,8 @@ export class DevicePoolLifecycleWiring {
           this.callbacks,
           terminalRelease.deviceId,
           sessionId,
-          reason,
           {
+            reason,
             release: async () => {
               releasedDeviceId = await attempt();
               return releasedDeviceId;

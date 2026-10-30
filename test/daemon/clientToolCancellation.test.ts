@@ -13,7 +13,8 @@ import { daemonRequestFrameSchema } from "../helpers/wireMessageSchemas";
 function setup() {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null, {
+  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+    clientIdentity: null,
     idGenerator: new FakeIdGenerator(),
   });
   client.testHooks.attachSocket(socket);

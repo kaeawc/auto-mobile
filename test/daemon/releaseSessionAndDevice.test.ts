@@ -151,7 +151,9 @@ describe("releaseSessionAndDevice", () => {
     try {
       await manager.createSession("session", "device", "android");
       persistence.failure = "release";
-      const result = releaseSessionAndDevice(manager, pool, "device", "session", reason);
+      const result = releaseSessionAndDevice(manager, pool, "device", "session", {
+        reason,
+      });
       await expect(result).rejects.toThrow(message);
       await expect(result).rejects.toBe(originalError);
       expect(manager.getSession("session")).toBeNull();
@@ -178,7 +180,9 @@ describe("releaseSessionAndDevice", () => {
         pool.failure = poolFailure;
       }
       await expect(
-        releaseSessionAndDevice(manager, pool, "device", "session", "superseded"),
+        releaseSessionAndDevice(manager, pool, "device", "session", {
+          reason: "superseded",
+        }),
       ).rejects.toBe(failure);
       expect(manager.calls).toEqual([["session", "superseded"]]);
       expect(manager.getSession()).toBeNull();
@@ -197,14 +201,16 @@ describe("releaseSessionAndDevice", () => {
     const pool = new FakeReleasePool(manager);
     manager.failure = new Error("persistence failed");
     await expect(
-      releaseSessionAndDevice(manager, pool, "device", "session", "superseded", {
+      releaseSessionAndDevice(manager, pool, "device", "session", {
+        reason: "superseded",
         deferFailureFallback: true,
       }),
     ).rejects.toBe(manager.failure);
     expect(manager.hasSession()).toBe(false);
     expect(pool.calls).toEqual([]);
     manager.failure = undefined;
-    await releaseSessionAndDevice(manager, pool, "device", "session", "superseded", {
+    await releaseSessionAndDevice(manager, pool, "device", "session", {
+      reason: "superseded",
       deferFailureFallback: true,
     });
     expect(pool.calls).toEqual([["device", "session"]]);
@@ -213,7 +219,9 @@ describe("releaseSessionAndDevice", () => {
   test("successful release preserves ordering and the supplied reason", async () => {
     const manager = new FakeReleaseManager();
     const pool = new FakeReleasePool(manager);
-    await releaseSessionAndDevice(manager, pool, "device", "session", "plan-auto-release");
+    await releaseSessionAndDevice(manager, pool, "device", "session", {
+      reason: "plan-auto-release",
+    });
     expect(manager.calls).toEqual([["session", "plan-auto-release"]]);
     expect(pool.calls).toEqual([["device", "session"]]);
   });
@@ -221,7 +229,8 @@ describe("releaseSessionAndDevice", () => {
   test("a conditional release returning no device retains ownership", async () => {
     const manager = new FakeReleaseManager();
     const pool = new FakeReleasePool(manager);
-    await releaseSessionAndDevice(manager, pool, "device", "session", "superseded", {
+    await releaseSessionAndDevice(manager, pool, "device", "session", {
+      reason: "superseded",
       release: async () => null,
     });
     expect(manager.hasSession()).toBe(true);
@@ -232,7 +241,8 @@ describe("releaseSessionAndDevice", () => {
   test("a custom release uses its returned device even without a known failure fallback", async () => {
     const manager = new FakeReleaseManager();
     const pool = new FakeReleasePool(manager);
-    await releaseSessionAndDevice(manager, pool, null, "session", "superseded", {
+    await releaseSessionAndDevice(manager, pool, null, "session", {
+      reason: "superseded",
       release: () => manager.releaseSession("session", "superseded"),
     });
     expect(pool.calls).toEqual([["device", "session"]]);

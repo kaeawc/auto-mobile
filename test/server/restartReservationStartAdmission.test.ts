@@ -325,7 +325,7 @@ describe("start admission and owner resume for restart reservations", () => {
       let answered = false;
       let pending: unknown;
       const recovery = f.sessions
-        .getOrCreateSession(HOLDER, f.pool, undefined, undefined, true)
+        .getOrCreateSession(HOLDER, f.pool, undefined, { requireIssuedSession: true })
         .then(
           (value) => {
             answered = true;
@@ -1017,8 +1017,11 @@ describe("start admission and owner resume for restart reservations", () => {
       deviceId: f.device.deviceId,
     });
     expect(
-      (await f.sessions.getOrCreateSession(f.holder, f.pool, f.device.platform, undefined, true))
-        .assignedDevice,
+      (
+        await f.sessions.getOrCreateSession(f.holder, f.pool, f.device.platform, {
+          requireIssuedSession: true,
+        })
+      ).assignedDevice,
     ).toBe(f.device.deviceId);
     await expect(
       f.start({

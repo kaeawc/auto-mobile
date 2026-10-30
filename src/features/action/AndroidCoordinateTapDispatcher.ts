@@ -38,6 +38,16 @@ interface AndroidCoordinateTapDispatcherDependencies {
   timer: Timer;
 }
 
+/** The display fence, tracker and delivery hooks for one Android coordinate tap action. */
+export interface AndroidTapsContext {
+  transitionRevision: { revision: number; observedGeneration: number };
+  perf: PerformanceTracker;
+  signal?: AbortSignal;
+  onTapDelivered: () => void;
+  talkBackEnabled: boolean;
+  onActivationWarnings: (warnings?: string[]) => void;
+}
+
 /** Outcome of the first Android tap: whether a single-gesture double tap already finished. */
 type AndroidFirstTap = { doubleTapDelivered: boolean; startedAt: number };
 
@@ -50,21 +60,13 @@ export class AndroidCoordinateTapDispatcher {
     options: TapAtOptions,
     resolved: { x: number; y: number },
     observeResult: ObserveResult,
-    transitionRevision: { revision: number; observedGeneration: number },
-    perf: PerformanceTracker,
-    context: {
-      signal?: AbortSignal;
-      onTapDelivered: () => void;
-      talkBackEnabled: boolean;
-      onActivationWarnings: (warnings?: string[]) => void;
-    },
+    context: AndroidTapsContext,
   ): Promise<void> {
+    const { transitionRevision } = context;
     const firstTap = await this.dispatchAndroidTapWithOneFreshRetry(
       options,
       resolved,
       observeResult,
-      transitionRevision,
-      perf,
       context,
     );
     if (!context.talkBackEnabled) {
@@ -79,16 +81,9 @@ export class AndroidCoordinateTapDispatcher {
     options: TapAtOptions,
     resolved: { x: number; y: number },
     observeResult: ObserveResult,
-    transitionRevision: { revision: number; observedGeneration: number },
-    perf: PerformanceTracker,
-    context: {
-      signal?: AbortSignal;
-      onTapDelivered: () => void;
-      talkBackEnabled: boolean;
-      onActivationWarnings: (warnings?: string[]) => void;
-    },
+    context: AndroidTapsContext,
   ): Promise<AndroidFirstTap> {
-    const { signal } = context;
+    const { signal, transitionRevision, perf } = context;
     const frameContext = observeResult.viewHierarchy?.frameContext;
     let delivered = false;
     let talkBackDispatched = false;
@@ -261,8 +256,7 @@ export class AndroidCoordinateTapDispatcher {
     await this.dependencies.androidCoordinateTap(
       this.dependencies.androidClient,
       this.dependencies.host.adb,
-      point.x,
-      point.y,
+      point,
       duration,
       {
         frameContext,

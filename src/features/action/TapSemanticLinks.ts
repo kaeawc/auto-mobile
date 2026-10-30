@@ -275,10 +275,17 @@ export class TapSemanticLinks {
   async activateAccessibilityLinkPhase(
     options: TapOnElementOptions,
     linkText: string,
-    observeResult: ObserveResult,
-    viewHierarchy: ViewHierarchyResult,
-    activationWarnings: string[],
-    signal?: AbortSignal,
+    {
+      observeResult,
+      viewHierarchy,
+      activationWarnings,
+      signal,
+    }: {
+      observeResult: ObserveResult;
+      viewHierarchy: ViewHierarchyResult;
+      activationWarnings: string[];
+      signal?: AbortSignal;
+    },
   ): Promise<TapOnFocusOutcome | ObservedActionResult> {
     const occurrence = options.index ?? 0;
     const owner = this.host.resolveContainerElement(

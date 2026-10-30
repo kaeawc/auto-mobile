@@ -57,6 +57,14 @@ exclude = [
   # prefix, not a page: GitHub answers 404 for it. Only this exact URL is
   # excluded; real download links under it are still checked.
   "^https://github\\.com/kaeawc/auto-mobile/releases/download/?$",
+  # shields.io dynamic-endpoint badges whose JSON is our own gh-pages
+  # <name>-badge.json (README test/coverage badges). shields.io fetches that
+  # JSON server-side and answers 200 with an "invalid" image even when it is
+  # missing, so a 200 proves nothing about the badge, while the endpoint
+  # intermittently exceeds the request timeout in CI and failed On Merge with
+  # a lone [TIMEOUT] (#15952). Only this URL shape is excluded: static
+  # img.shields.io/badge/... badges and any other endpoint URL stay checked.
+  "^https://img\\.shields\\.io/endpoint\\?url=https://kaeawc\\.github\\.io/auto-mobile/[A-Za-z0-9_-]+-badge\\.json$",
 ]
 
 # Exclude specific input paths. These are regexes matched against each input

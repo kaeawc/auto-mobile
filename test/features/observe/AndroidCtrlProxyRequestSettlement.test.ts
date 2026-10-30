@@ -80,7 +80,7 @@ const methods: Method[] = [
     name: "settings put",
     signal: true,
     invoke: (h, signal) =>
-      h.client.requestSettingsPut("system", "key", null, "string", 50, perf, signal),
+      h.client.requestSettingsPut("system", "key", null, "string", { timeoutMs: 50, perf, signal }),
   },
   {
     name: "settings list",
@@ -90,7 +90,7 @@ const methods: Method[] = [
   {
     name: "action",
     signal: true,
-    invoke: (h, signal) => h.client.requestAction("click", "id", 50, perf, undefined, signal),
+    invoke: (h, signal) => h.client.requestAction("click", "id", 50, perf, { signal }),
   },
   {
     name: "node action",
@@ -124,7 +124,7 @@ const methods: Method[] = [
   {
     name: "global action",
     signal: true,
-    invoke: (h, signal) => h.client.requestGlobalAction("back", 50, perf, undefined, signal),
+    invoke: (h, signal) => h.client.requestGlobalAction("back", 50, perf, { signal }),
   },
   {
     name: "frame validation",
@@ -224,7 +224,8 @@ const methods: Method[] = [
   },
   {
     name: "gesture end",
-    invoke: (h) => h.client.testHooks.gestures().requestGestureEnd("g", 1, 2, false, 50),
+    invoke: (h) =>
+      h.client.testHooks.gestures().requestGestureEnd("g", 1, 2, false, { timeoutMs: 50 }),
   },
   {
     name: "set text",

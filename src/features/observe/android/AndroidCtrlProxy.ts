@@ -21,12 +21,13 @@ import type {
 } from "./AndroidActionDispatcher";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import type { ImeCommitActionResult } from "./CtrlProxyText";
+import type { AndroidSettingsPutOptions } from "./AndroidClientRequests";
+import type { AndroidScreenshotRequestOptions } from "./AndroidScreenshotRequester";
 import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import type { PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
 import type {
-  PrototypeAppearanceOverride,
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
@@ -60,7 +61,8 @@ import type {
   A11yPackageInfoResult,
   A11yLaunchIntentResult,
   AndroidPerfTiming,
-  HierarchySyncDiagnostics,
+  HierarchySyncRequestOptions,
+  LatestHierarchyOptions,
 } from "./types";
 import type { AndroidCtrlProxyClient } from "./AndroidCtrlProxyClient";
 
@@ -129,7 +131,7 @@ export interface AndroidCtrlProxy
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number,
+    options?: LatestHierarchyOptions,
   ): Promise<AccessibilityHierarchyResponse>;
 
   requestHierarchySync(
@@ -137,8 +139,7 @@ export interface AndroidCtrlProxy
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-    diagnostics?: HierarchySyncDiagnostics,
-    displayId?: number,
+    options?: HierarchySyncRequestOptions,
   ): Promise<{
     hierarchy: AccessibilityHierarchy;
     perfTiming?: AndroidPerfTiming[];
@@ -281,9 +282,7 @@ export interface AndroidCtrlProxy
     key: string,
     value: string | null,
     valueType?: SettingsValueType,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    options?: AndroidSettingsPutOptions,
   ): Promise<A11ySettingsPutResult>;
 
   requestSettingsList(
@@ -327,9 +326,7 @@ export interface AndroidCtrlProxy
     spec: PrototypeSpec,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
+    overrides?: PrototypeShowOverrides,
   ): Promise<PrototypeResult>;
   requestDismissPrototype(
     target: PrototypeDismiss,
@@ -393,10 +390,7 @@ export interface AndroidCtrlProxy
   requestScreenshot(
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    suppressObservationStreamPush?: boolean,
-    signal?: AbortSignal,
-    displayId?: number,
-    hidePrototypes?: boolean,
+    options?: AndroidScreenshotRequestOptions,
   ): Promise<ScreenshotResult>;
 
   requestScreenshotWithoutObservationStreamPush(

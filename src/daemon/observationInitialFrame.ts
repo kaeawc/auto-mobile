@@ -9,6 +9,7 @@ import type {
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
 } from "../features/observe/android";
+import type { LatestHierarchyOptions } from "../features/observe/android/types";
 import type { ScreenshotCaptureResult } from "../features/observe/ScreenshotBackoffScheduler";
 import type {
   CtrlProxyHierarchy,
@@ -62,7 +63,7 @@ export interface ObservationStreamAndroidClient {
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number,
+    options?: LatestHierarchyOptions,
   ): Promise<AccessibilityHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,

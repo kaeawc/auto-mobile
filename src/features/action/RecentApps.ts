@@ -210,8 +210,11 @@ export class RecentApps extends BaseVisualChange {
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
       throwIfAborted(signal);
       const result = await awaitWhileRequestIsLive(
-        client.requestGlobalAction("recent", 3000, undefined, undefined, signal, () => {
-          dispatched = true;
+        client.requestGlobalAction("recent", 3000, undefined, {
+          signal,
+          onDispatch: () => {
+            dispatched = true;
+          },
         }),
         signal,
       );

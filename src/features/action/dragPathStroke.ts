@@ -21,7 +21,7 @@ export interface StrokeClient {
     x: number,
     y: number,
     cancel?: boolean,
-    timeoutMs?: number,
+    options?: { timeoutMs?: number },
   ): Promise<A11ySwipeResult>;
 }
 

@@ -185,8 +185,8 @@ describe("display read routing", () => {
     });
     const capture = createDeviceHierarchyCapture(device, {
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, _signal, _timeout, _diagnostics, displayId) => {
-          requestedDisplayId = displayId;
+        requestHierarchySync: async (_perf, _raw, _signal, _timeout, options) => {
+          requestedDisplayId = options?.displayId;
           return { hierarchy };
         },
         convertToViewHierarchyResult: () => hierarchy,
@@ -217,20 +217,13 @@ describe("display read routing", () => {
         },
       },
       syncClientFactory: () => ({
-        requestHierarchySync: async (
-          _perf,
-          _raw,
-          actualSignal,
-          timeout,
-          diagnostics,
-          displayId,
-        ) => {
+        requestHierarchySync: async (_perf, _raw, actualSignal, timeout, options) => {
           syncReads++;
           expect(actualSignal).toBe(signal);
           expect(timeout).toBe(750);
-          expect(displayId).toBe(2);
-          if (diagnostics) {
-            Object.assign(diagnostics, { runnerError: "selected panel extraction failed" });
+          expect(options?.displayId).toBe(2);
+          if (options?.diagnostics) {
+            Object.assign(options.diagnostics, { runnerError: "selected panel extraction failed" });
           }
           return null;
         },

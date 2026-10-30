@@ -311,13 +311,9 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     expect(cacheHit?.fresh).toBe(false);
     expect(deviceRequests).toBe(0);
 
-    const timestampCacheHit = await h.hierarchy.getLatestHierarchy(
-      false,
-      1000,
-      undefined,
-      false,
-      50,
-    );
+    const timestampCacheHit = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, false, {
+      minTimestamp: 50,
+    });
     expect(timestampCacheHit.fresh).toBe(false);
     expect(deviceRequests).toBe(0);
 
@@ -430,14 +426,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     let releaseProbe!: () => void;
     h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
     const controller = new AbortController();
-    const latestPromise = h.hierarchy.getLatestHierarchy(
-      false,
-      1000,
-      undefined,
-      false,
-      0,
-      controller.signal,
-    );
+    const latestPromise = h.hierarchy.getLatestHierarchy(false, 1000, undefined, false, {
+      minTimestamp: 0,
+      signal: controller.signal,
+    });
     await h.waitForProbeStart();
     // adb itself must receive the caller's signal so it can stop the probe, not just the caller's
     // post-probe check.

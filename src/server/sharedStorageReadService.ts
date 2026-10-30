@@ -84,22 +84,18 @@ export interface SharedStorageReadServiceDependencies {
   iosFixtureReader?: Pick<SimctlIosFilesFixtureContainer, "listNamespace" | "readNamespaceFile">;
 }
 
+/** One file's identity in the hash cache: a size or mtime change is a different key. */
+export interface SharedStorageHashKey {
+  deviceId: string;
+  namespace: string;
+  path: string;
+  byteCount: number;
+  modifiedSeconds: number;
+}
+
 export interface SharedStorageHashCache {
-  get(
-    deviceId: string,
-    namespace: string,
-    path: string,
-    byteCount: number,
-    modifiedSeconds: number,
-  ): string | undefined;
-  set(
-    deviceId: string,
-    namespace: string,
-    path: string,
-    byteCount: number,
-    modifiedSeconds: number,
-    sha256: string,
-  ): void;
+  get(key: SharedStorageHashKey): string | undefined;
+  set(key: SharedStorageHashKey, sha256: string): void;
   retainNamespacePaths(deviceId: string, namespace: string, paths: ReadonlySet<string>): void;
 }
 
@@ -217,14 +213,10 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
         namespace,
         new Set(statEntries.map((entry) => entry.absolutePath)),
       );
-      const hashes = await listHashes(
-        adb,
-        statEntries,
-        request,
-        namespace,
+      const hashes = await listHashes(adb, statEntries, request, namespace, {
         directory,
-        this.hashCache,
-      );
+        cache: this.hashCache,
+      });
       return {
         ...resolved,
         observation: "complete",
@@ -531,18 +523,18 @@ async function listHashes(
   entries: readonly ParsedStatEntry[],
   request: ListSharedStorageRequest,
   namespace: string,
-  directory: string,
-  cache: SharedStorageHashCache,
+  { directory, cache }: { directory: string; cache: SharedStorageHashCache },
 ): Promise<Map<string, string>> {
   const hashes = new Map<string, string>();
+  const keyFor = (entry: ParsedStatEntry): SharedStorageHashKey => ({
+    deviceId: request.deviceId,
+    namespace,
+    path: entry.absolutePath,
+    byteCount: entry.byteCount,
+    modifiedSeconds: entry.modifiedSeconds,
+  });
   const pending = entries.filter((entry) => {
-    const cached = cache.get(
-      request.deviceId,
-      namespace,
-      entry.absolutePath,
-      entry.byteCount,
-      entry.modifiedSeconds,
-    );
+    const cached = cache.get(keyFor(entry));
     if (cached) {
       hashes.set(entry.absolutePath, cached);
     }
@@ -570,14 +562,7 @@ async function listHashes(
         continue;
       }
       hashes.set(entry.absolutePath, sha256);
-      cache.set(
-        request.deviceId,
-        namespace,
-        entry.absolutePath,
-        entry.byteCount,
-        entry.modifiedSeconds,
-        sha256,
-      );
+      cache.set(keyFor(entry), sha256);
     }
     // Hash lines for paths absent from stat output are ignored because only requested paths are read.
   }

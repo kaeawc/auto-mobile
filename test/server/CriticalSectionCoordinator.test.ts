@@ -32,7 +32,7 @@ describe("CriticalSectionCoordinator", () => {
       const start = (signal: AbortSignal, device = "A") => {
         coordinator.registerExpectedDevices("abort-lock", 2);
         return kind === "barrier"
-          ? coordinator.awaitBarrier("abort-lock", device, 2, 120000, undefined, signal)
+          ? coordinator.awaitBarrier("abort-lock", device, 2, { timeout: 120000, signal })
           : coordinator.enterCriticalSection("abort-lock", device, 120000, undefined, signal);
       };
 
@@ -123,22 +123,22 @@ describe("CriticalSectionCoordinator", () => {
       const controller = new AbortController();
       const reason = new Error("A left");
       const a = coordinator
-        .awaitBarrier("peers", "A", 3, 120000, undefined, controller.signal)
+        .awaitBarrier("peers", "A", 3, { timeout: 120000, signal: controller.signal })
         .then(undefined, (error: unknown) => error);
       let entered = false;
-      const b = coordinator.awaitBarrier("peers", "B", 3, 120000).then(() => {
+      const b = coordinator.awaitBarrier("peers", "B", 3, { timeout: 120000 }).then(() => {
         entered = true;
       });
       controller.abort(reason);
       await drainMicrotasks(40);
       expect(entered).toBe(false);
       expect(fakeTimer.getPendingTimeouts()).toEqual([120000]);
-      const c = coordinator.awaitBarrier("peers", "C", 3, 120000);
+      const c = coordinator.awaitBarrier("peers", "C", 3, { timeout: 120000 });
       await drainMicrotasks(40);
       try {
         expect(entered).toBe(false);
         expect(await a).toBe(reason);
-        await coordinator.awaitBarrier("peers", "D", 3, 120000);
+        await coordinator.awaitBarrier("peers", "D", 3, { timeout: 120000 });
         await Promise.all([b, c]);
         expect(entered).toBe(true);
       } finally {
@@ -222,13 +222,13 @@ describe("CriticalSectionCoordinator", () => {
       const controller = new AbortController();
       const reason = new Error("A cancelled");
       const a = coordinator
-        .awaitBarrier("all-peers", "A", 4, 120000, undefined, controller.signal)
+        .awaitBarrier("all-peers", "A", 4, { timeout: 120000, signal: controller.signal })
         .then(
           () => "entered",
           (error: unknown) => error,
         );
       const peers = ["B", "C"].map((device) =>
-        coordinator.awaitBarrier("all-peers", device, 4, 120000).then(
+        coordinator.awaitBarrier("all-peers", device, 4, { timeout: 120000 }).then(
           () => "entered",
           (error: unknown) => error,
         ),
@@ -247,13 +247,13 @@ describe("CriticalSectionCoordinator", () => {
         const controller = new AbortController();
         const removed = spyOn(controller.signal, "removeEventListener");
         const pending = coordinator
-          .awaitBarrier("listener", "A", 2, 50, undefined, controller.signal)
+          .awaitBarrier("listener", "A", 2, { timeout: 50, signal: controller.signal })
           .then(
             () => "released",
             (error: unknown) => error,
           );
         if (outcome === "release") {
-          await coordinator.awaitBarrier("listener", "B", 2, 50);
+          await coordinator.awaitBarrier("listener", "B", 2, { timeout: 50 });
         }
         if (outcome === "timeout") {
           fakeTimer.advanceTime(50);
@@ -381,7 +381,7 @@ describe("CriticalSectionCoordinator", () => {
 
   test("barrier timeout removes the waiter and its arrival before a later round", async () => {
     const lockName = "lock-timeout-clean-state";
-    const firstRound = coordinator.awaitBarrier(lockName, "device-1", 2, 100);
+    const firstRound = coordinator.awaitBarrier(lockName, "device-1", 2, { timeout: 100 });
     fakeTimer.advanceTime(100);
     await expect(firstRound).rejects.toThrow(/Timeout waiting for critical section/);
 
@@ -389,12 +389,12 @@ describe("CriticalSectionCoordinator", () => {
     expect(state.arrivedDeviceIds).not.toContain("device-1");
     expect(state.waiterCount).toBe(0);
 
-    const device2 = coordinator.awaitBarrier(lockName, "device-2", 2, 100);
+    const device2 = coordinator.awaitBarrier(lockName, "device-2", 2, { timeout: 100 });
     let device2Entered = false;
     void device2.then((release) => {
       device2Entered = true;
     });
-    await coordinator.awaitBarrier(lockName, "device-3", 2, 100);
+    await coordinator.awaitBarrier(lockName, "device-3", 2, { timeout: 100 });
     await device2;
     expect(device2Entered).toBe(true);
   });
@@ -694,12 +694,16 @@ describe("CriticalSectionCoordinator", () => {
       let aReleased = false;
       let bReleased = false;
 
-      const a1 = coordinator.awaitBarrier("sync", "planA-device-1", 2, 30000).then(() => {
-        aReleased = true;
-      });
-      const b1 = coordinator.awaitBarrier("sync", "planB-device-1", 2, 30000).then(() => {
-        bReleased = true;
-      });
+      const a1 = coordinator
+        .awaitBarrier("sync", "planA-device-1", 2, { timeout: 30000 })
+        .then(() => {
+          aReleased = true;
+        });
+      const b1 = coordinator
+        .awaitBarrier("sync", "planB-device-1", 2, { timeout: 30000 })
+        .then(() => {
+          bReleased = true;
+        });
 
       await flush();
 
@@ -718,12 +722,12 @@ describe("CriticalSectionCoordinator", () => {
       // namespaces. Neither barrier should lift: each still needs its own second
       // device.
       const a1 = coordinator
-        .awaitBarrier("sync", "planA-device-1", 2, 30000, "session-A")
+        .awaitBarrier("sync", "planA-device-1", 2, { timeout: 30000, namespace: "session-A" })
         .then(() => {
           aReleased = true;
         });
       const b1 = coordinator
-        .awaitBarrier("sync", "planB-device-1", 2, 30000, "session-B")
+        .awaitBarrier("sync", "planB-device-1", 2, { timeout: 30000, namespace: "session-B" })
         .then(() => {
           bReleased = true;
         });
@@ -733,13 +737,19 @@ describe("CriticalSectionCoordinator", () => {
       expect(bReleased).toBe(false);
 
       // Plan A's second device arrives -> only plan A's barrier lifts.
-      const a2 = coordinator.awaitBarrier("sync", "planA-device-2", 2, 30000, "session-A");
+      const a2 = coordinator.awaitBarrier("sync", "planA-device-2", 2, {
+        timeout: 30000,
+        namespace: "session-A",
+      });
       await flush();
       expect(aReleased).toBe(true);
       expect(bReleased).toBe(false);
 
       // Plan B's second device arrives -> plan B's barrier lifts.
-      const b2 = coordinator.awaitBarrier("sync", "planB-device-2", 2, 30000, "session-B");
+      const b2 = coordinator.awaitBarrier("sync", "planB-device-2", 2, {
+        timeout: 30000,
+        namespace: "session-B",
+      });
       await flush();
       expect(bReleased).toBe(true);
 
@@ -751,7 +761,7 @@ describe("CriticalSectionCoordinator", () => {
 
       // Plan A parks one device at the barrier.
       const a1 = coordinator
-        .awaitBarrier("sync", "planA-device-1", 2, 30000, "session-A")
+        .awaitBarrier("sync", "planA-device-1", 2, { timeout: 30000, namespace: "session-A" })
         .then(() => {
           aReleased = true;
         });
@@ -764,7 +774,10 @@ describe("CriticalSectionCoordinator", () => {
       expect(aReleased).toBe(false);
 
       // Plan A's second device still completes the barrier normally.
-      const a2 = coordinator.awaitBarrier("sync", "planA-device-2", 2, 30000, "session-A");
+      const a2 = coordinator.awaitBarrier("sync", "planA-device-2", 2, {
+        timeout: 30000,
+        namespace: "session-A",
+      });
       await flush();
       expect(aReleased).toBe(true);
 

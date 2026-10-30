@@ -378,9 +378,9 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
       const waitOutcome = observeWaitRequested(deviceRead, args)
         ? await waitForObservation(
-            ...observeWaitParameters(observeScreen, args, signal, dependencies, device, {
-              mode: screenshotMode,
-              options: screenshotOptions,
+            ...observeWaitParameters(observeScreen, args, signal, dependencies, {
+              device,
+              screenshot: { mode: screenshotMode, options: screenshotOptions },
             }),
           )
         : null;
@@ -598,8 +598,13 @@ function observeWaitParameters(
   args: ObserveArgs & { waitFor: NonNullable<ObserveArgs["waitFor"]> },
   signal: AbortSignal | undefined,
   dependencies: ObserveToolDependencies,
-  device: BootedDevice,
-  screenshot: { mode: ScreenshotMode | undefined; options: ObserveScreenshotOptions | undefined },
+  {
+    device,
+    screenshot,
+  }: {
+    device: BootedDevice;
+    screenshot: { mode: ScreenshotMode | undefined; options: ObserveScreenshotOptions | undefined };
+  },
 ): Parameters<typeof waitForObservation> {
   return [
     observeScreen,

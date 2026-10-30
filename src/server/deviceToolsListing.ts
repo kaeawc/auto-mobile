@@ -137,10 +137,15 @@ function selectBootedDevices(
 
 function listingDiscoveryObservation(
   requestedPlatforms: Platform[],
-  succeededPlatforms: Set<Platform>,
-  succeededSources: Set<DiscoverySource> | undefined,
-  discoveryErrors: BootedDeviceDiscovery["discoveryErrors"],
-  sourceErrors: BootedDeviceDiscovery["sourceErrors"],
+  {
+    succeededPlatforms,
+    succeededSources,
+    discoveryErrors,
+    sourceErrors,
+  }: Pick<
+    BootedDeviceDiscovery,
+    "succeededPlatforms" | "succeededSources" | "discoveryErrors" | "sourceErrors"
+  >,
   pool: { getAllDevices(): Iterable<{ platform: Platform; id: string }> } | null | undefined,
 ) {
   // One classifier for every inventory surface (#11605): a source whose tooling is not installed
@@ -290,10 +295,7 @@ export function createListingHandlers() {
 
     const discovery = listingDiscoveryObservation(
       requestedPlatforms,
-      succeededPlatforms,
-      succeededSources,
-      discoveryErrors,
-      sourceErrors,
+      { succeededPlatforms, succeededSources, discoveryErrors, sourceErrors },
       pool,
     );
 

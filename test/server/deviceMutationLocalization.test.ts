@@ -84,19 +84,15 @@ describe("changeLocalization journal priors on Android", () => {
   });
 
   test("the journal prior reader takes the app-locale prior and keeps calendarSystem's", async () => {
-    const reader = new DefaultMutationPriorReader(
-      { read: async () => ({ calendarSystem: "gregory" }) },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({ calendarSystem: "gregory" }) },
+      observationReaders: {
         dataReader: new LocalizationMutationPriorReader(() =>
           source({}, { userId: 0, locales: "" }),
         ),
         deviceStateReader: { read: async (_device, mutations) => mutations.map(() => UNOBSERVED) },
       },
-    );
+    });
     expect(
       await reader.read(ANDROID, [APP_LOCALE, { kind: "device-setting", key: "calendarSystem" }]),
     ).toEqual([

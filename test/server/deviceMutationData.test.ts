@@ -83,14 +83,10 @@ class FakeDataReaders implements MutationDataReaders {
 function harness() {
   const readers = new FakeDataReaders();
   const reader = new DataMutationPriorReader(readers);
-  const defaultReader = new DefaultMutationPriorReader(
-    { read: async () => ({}) },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { dataReader: reader },
-  );
+  const defaultReader = new DefaultMutationPriorReader({
+    settingsAccess: { read: async () => ({}) },
+    observationReaders: { dataReader: reader },
+  });
   const journal = new FakeDeviceMutationJournal(new FakeTimer());
   const recording = new SessionDeviceMutationRecording(
     () => new SessionMutationRecorder(journal, SCOPE),

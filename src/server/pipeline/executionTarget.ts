@@ -225,14 +225,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private async resolveImplicitSession(state: TargetResolution): Promise<void> {
     const { args, options, deviceReadiness, signal } = state.input;
     const { platform, providedDeviceId, execution, mcpSessionId, autolockEnabled } = state;
-    const implicitSessionUuid = this.resolveImplicitAutolockSession(
-      platform,
-      state.sessionUuid,
-      providedDeviceId,
-      mcpSessionId,
-      execution,
-      autolockEnabled,
-    );
+    const implicitSessionUuid = this.resolveImplicitAutolockSession(state);
     if (implicitSessionUuid) {
       state.sessionUuid = implicitSessionUuid;
       if (execution) {
@@ -646,8 +639,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
         getConnectedPlatforms: state.getConnectedPlatforms,
       },
-      options.sessionlessDeviceRead ?? this.defaultDeviceRead,
-      readinessTarget,
+      { read: options.sessionlessDeviceRead ?? this.defaultDeviceRead, readinessTarget },
     );
   }
 
@@ -922,14 +914,22 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     return explicitPin;
   }
 
-  private resolveImplicitAutolockSession(
-    platform: SomePlatform,
-    sessionUuid: string | undefined,
-    providedDeviceId: string | undefined,
-    mcpSessionId: string | undefined,
-    execution: import("../../daemon/sessionManager").SessionExecutionMetadata | undefined,
-    autolockEnabled: boolean,
-  ): string | undefined {
+  private resolveImplicitAutolockSession({
+    platform,
+    sessionUuid,
+    providedDeviceId,
+    mcpSessionId,
+    execution,
+    autolockEnabled,
+  }: Pick<
+    TargetResolution,
+    | "platform"
+    | "sessionUuid"
+    | "providedDeviceId"
+    | "mcpSessionId"
+    | "execution"
+    | "autolockEnabled"
+  >): string | undefined {
     if (sessionUuid) {
       return undefined;
     }

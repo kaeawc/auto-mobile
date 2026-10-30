@@ -252,8 +252,8 @@ describe("barrier tool", () => {
     const coordinator = CriticalSectionCoordinator.getInstance();
     const loss = new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554");
     const wait = spyOn(coordinator, "awaitBarrier").mockImplementation(
-      async (lock, _device, count, _timeout, namespace) => {
-        coordinator.registerExpectedDevices(lock, count, namespace);
+      async (lock, _device, count, options) => {
+        coordinator.registerExpectedDevices(lock, count, options?.namespace);
         throw loss;
       },
     );

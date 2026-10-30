@@ -112,8 +112,11 @@ export class IosProtoViewer implements ProtoViewerDevice {
         () => this.deps.files.read(resultPath),
         this.deps.timer,
         pollMs,
-        signal,
-        "Retrying the same spec is safe: imports are idempotent. Open ProtoViewer and unlock the simulator if it is locked.",
+        {
+          signal,
+          timeoutGuidance:
+            "Retrying the same spec is safe: imports are idempotent. Open ProtoViewer and unlock the simulator if it is locked.",
+        },
       );
       if (result.request !== request) {
         throw new ActionableError(

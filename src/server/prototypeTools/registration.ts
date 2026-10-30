@@ -304,13 +304,11 @@ function createPrototypeHost(dependencies: PrototypeToolDependencies): Prototype
     dependencies.channelExecutor,
   );
   const recorder = createTestSessionRecorder(dependencies, store);
-  const events = new PrototypeEventCoordinator(
-    timer,
-    store,
-    TelemetryRecorder.getInstance(),
-    channelWiring.combinedPrototypeCancellation(requests, channels),
+  const events = new PrototypeEventCoordinator(timer, store, {
+    telemetry: TelemetryRecorder.getInstance(),
+    requests: channelWiring.combinedPrototypeCancellation(requests, channels),
     recorder,
-  );
+  });
   const reverses = new PrototypeAdbReverseManager();
   const cleanup = subscribePrototypeCleanup(
     dependencies.lifecycle ?? defaultPrototypeLifecycle(),
@@ -599,11 +597,14 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
     const { action } = args;
     if (isDeviceRequestAction(action)) {
       const host = { store, events, reverses };
-      return responseFor(await deviceRequestAction(args, host, device, target, { scope, signal }));
+      return responseFor(await deviceRequestAction(args, host, device, { target, scope, signal }));
     }
     if (action === "awaitEvent") {
       const source = prototypeEventSource(target.transport);
-      const waited = await waitForPrototypeEvent(events, scope, source, args, { progress, signal });
+      const waited = await waitForPrototypeEvent(events, scope, source, {
+        query: args,
+        context: { progress, signal },
+      });
       return responseFor({
         success: true,
         ...waited,
@@ -636,14 +637,16 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
             client: target.android!,
             ...savedAdbDependencies(device, dependencies),
             signal: savedSignal,
-            stageAssets: () => stageAssets(target, args, assetReaders, savedSignal),
+            stageAssets: () => stageAssets(target, args, assetReaders, { signal: savedSignal }),
           };
         },
         (action) =>
-          performPrototypeAction(handlerDependencies, device, { ...args, action }, scope, {
-            queue: host.patchQueue,
-            signal: combineWithAmbientAbort(signal),
-          }),
+          performPrototypeAction(
+            handlerDependencies,
+            device,
+            { ...args, action },
+            { scope, queue: host.patchQueue, signal: combineWithAmbientAbort(signal) },
+          ),
       ),
     );
     return responseFor(dispatched);

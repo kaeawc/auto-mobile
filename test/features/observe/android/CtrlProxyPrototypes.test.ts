@@ -195,13 +195,12 @@ describe("saved prototype host recorder", () => {
     const error = new Error("root unavailable");
     context.prototypeAssetCache = {
       serial: "prototype-test",
-      cache: new FilePrototypeAssetCache(
-        new FakeMirrorFileSystem(),
-        () => {
+      cache: new FilePrototypeAssetCache(new FakeMirrorFileSystem(), {
+        rootDir: () => {
           throw error;
         },
-        () => 0,
-      ),
+        now: () => 0,
+      }),
     };
     const delegate = new CtrlProxyPrototypes(context);
     const warn = spyOn(logger, "warn").mockImplementation(() => {});

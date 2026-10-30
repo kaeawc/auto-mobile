@@ -351,9 +351,11 @@ test("status snapshot replays extend and maxItems", () => {
     scope,
     "show",
     { id: "shop" },
-    { success: true },
     {
-      data: { cart: [{ sku: "a" }] },
+      result: { success: true },
+      details: {
+        data: { cart: [{ sku: "a" }] },
+      },
     },
   );
   store.recordEvent(
@@ -417,9 +419,11 @@ test("status snapshot replays prepend and maxItems", () => {
     scope,
     "show",
     { id: "shop" },
-    { success: true },
     {
-      data: { cart: [{ sku: "a" }] },
+      result: { success: true },
+      details: {
+        data: { cart: [{ sku: "a" }] },
+      },
     },
   );
   store.recordEvent(

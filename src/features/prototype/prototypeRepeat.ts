@@ -553,8 +553,7 @@ function expandedErrors(
   node: Raw,
   path: string,
   budget: Budget,
-  data: PrototypeRepeatData,
-  repeatPath?: string,
+  { data, repeatPath }: { data: PrototypeRepeatData; repeatPath?: string },
 ): RepeatError | undefined {
   const overflow = chargeExpandedNode(node, path, budget, repeatPath ?? path);
   if (overflow) {
@@ -565,7 +564,10 @@ function expandedErrors(
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
     for (const child of childrenOf(node, path)) {
-      const error = expandedErrors(child.node, child.path, budget, data, nestedPath);
+      const error = expandedErrors(child.node, child.path, budget, {
+        data,
+        repeatPath: nestedPath,
+      });
       if (error) {
         return error;
       }
@@ -589,8 +591,7 @@ export function repeatErrors(
       root,
       "root",
       { nodes: 0, images: 0, effects: 0, animatedEffects: 0, keyframeNodes: 0 },
-      data,
-      undefined,
+      { data },
     )
   );
 }

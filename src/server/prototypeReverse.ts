@@ -61,7 +61,7 @@ export function reverseLifecycle(
   };
   return {
     prepare: async (refusals: readonly (PrototypeResult | undefined)[]) => {
-      const claim = await reverseLoopbackPorts(dependencies, device, args, target, refusals);
+      const claim = await reverseLoopbackPorts(dependencies, device, args, { target, refusals });
       staged = claim;
       return claim?.report;
     },
@@ -125,8 +125,10 @@ export async function reverseLoopbackPorts(
   dependencies: ReverseDependencies,
   device: BootedDevice,
   args: ReverseInput,
-  target: { id?: string },
-  refusals: readonly (PrototypeResult | undefined)[],
+  {
+    target,
+    refusals,
+  }: { target: { id?: string }; refusals: readonly (PrototypeResult | undefined)[] },
 ): Promise<StagedReverses | undefined> {
   if (
     refusals.some((refusal) => refusal !== undefined) ||

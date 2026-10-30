@@ -47,11 +47,8 @@ class ReleaseManager implements CleanupManager {
     this.pending.push(cleanup);
   }
   release(): void {
-    this.releaseCallback?.(
-      "A",
-      device.deviceId,
-      "idle-timeout",
-      {
+    this.releaseCallback?.("A", device.deviceId, "idle-timeout", {
+      snapshot: {
         sessionId: "A",
         deviceId: device.deviceId,
         releaseReason: "idle-timeout",
@@ -59,8 +56,8 @@ class ReleaseManager implements CleanupManager {
         terminal: false,
         heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
       },
-      { deviceIdentityReplaced: true },
-    );
+      deviceIdentityReplaced: true,
+    });
   }
 }
 

@@ -108,7 +108,7 @@ async function setup(saved = true) {
   });
   sessions.stopCleanupTimer();
   const releases: Array<{ reason: string; identityReplaced: boolean }> = [];
-  sessions.onSessionRelease((_id, _deviceId, reason, _snapshot, options) => {
+  sessions.onSessionRelease((_id, _deviceId, reason, options) => {
     releases.push({ reason, identityReplaced: options.deviceIdentityReplaced === true });
   });
   const manager = new FakeDeviceManager([], [original]);

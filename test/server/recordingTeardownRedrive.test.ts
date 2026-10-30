@@ -107,11 +107,8 @@ describe("restart recorder teardown redrive", () => {
     const mark = spyOn(manager, "markDeviceNeedsRecorderTeardown");
     const fire = (options: { upgradeOnly?: boolean; deviceIdentityReplaced?: boolean } = {}) => {
       holder.mockReturnValue(null);
-      release.mock.calls[0]?.[0](
-        "holder",
-        device.deviceId,
-        "idle-timeout",
-        {
+      release.mock.calls[0]?.[0]("holder", device.deviceId, "idle-timeout", {
+        snapshot: {
           sessionId: "holder",
           deviceId: device.deviceId,
           releaseReason: "idle-timeout",
@@ -119,8 +116,8 @@ describe("restart recorder teardown redrive", () => {
           terminal: false,
           heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
         },
-        options,
-      );
+        ...options,
+      });
     };
     const restore = () => {
       for (const spy of [holder, release, unbound, pending, mark]) {

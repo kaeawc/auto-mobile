@@ -40,7 +40,7 @@ test.each(["cleanup", "lookup"] as const)(
     const { timer, persistence, manager, pool, device } = await setup();
     const reasons: Array<string | undefined> = [];
     const unsubscribe = SessionReleaseBroadcaster.subscribe((_id, reason) => reasons.push(reason));
-    manager.onSessionRelease((id, _device, reason, snapshot) => {
+    manager.onSessionRelease((id, _device, reason, { snapshot }) => {
       SessionReleaseBroadcaster.emit(id, reason, snapshot);
     });
     try {

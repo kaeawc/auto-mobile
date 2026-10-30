@@ -306,7 +306,7 @@ function subscribePendingRedrive(
       INCOMPLETE_MARK_GRACE_MS,
     );
   };
-  manager.onSessionRelease((_sessionId, deviceId, _reason, _snapshot, options) => {
+  manager.onSessionRelease((_sessionId, deviceId, _reason, options) => {
     if (!options?.upgradeOnly) {
       consume(deviceId, options?.deviceIdentityReplaced);
     }

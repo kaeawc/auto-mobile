@@ -41,7 +41,7 @@ describe("SessionManager", () => {
     await sessionManager.createSession("lost-session", "emulator-5554", "android");
     const released = Promise.withResolvers<void>();
     let releaseSnapshot: unknown;
-    sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot) => {
+    sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, { snapshot }) => {
       releaseSnapshot = snapshot;
       released.resolve();
     });
@@ -108,7 +108,7 @@ describe("SessionManager", () => {
 
     await manager.createSession("killed-session", "emulator-5554", "android");
     let callbackSnapshot: unknown;
-    manager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot) => {
+    manager.onSessionRelease((_sessionId, _deviceId, _reason, { snapshot }) => {
       callbackSnapshot = snapshot;
     });
     const ordinaryRelease = manager.releaseSession("killed-session", "explicit-release");

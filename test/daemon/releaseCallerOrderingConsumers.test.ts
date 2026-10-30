@@ -14,7 +14,6 @@ import {
 import type {
   SessionReleaseCallback,
   SessionReleaseSnapshot,
-  SessionReleaseOptions,
 } from "../../src/daemon/sessionManager";
 import { logger } from "../../src/utils/logger";
 
@@ -88,13 +87,7 @@ describe("daemon release pool consumers", () => {
         },
         { cancelDeviceSessionExecutions: async () => 0, cancelDeviceExecutions: async () => 0 },
       );
-      callback(
-        "base",
-        "base-device",
-        baseReason,
-        {} as SessionReleaseSnapshot,
-        {} as SessionReleaseOptions,
-      );
+      callback("base", "base-device", baseReason, { snapshot: {} as SessionReleaseSnapshot });
       await cascade.settled();
       expect(events).toEqual([
         [
@@ -142,13 +135,9 @@ describe("daemon release pool consumers", () => {
           },
           { cancelDeviceSessionExecutions: async () => 0, cancelDeviceExecutions: async () => 0 },
         );
-        callback(
-          "base",
-          "base-device",
-          "explicit-release",
-          {} as SessionReleaseSnapshot,
-          {} as SessionReleaseOptions,
-        );
+        callback("base", "base-device", "explicit-release", {
+          snapshot: {} as SessionReleaseSnapshot,
+        });
         await cascade.settled();
         expect(events).toEqual([
           ["session.releaseSession", "base:label", "explicit-release"],

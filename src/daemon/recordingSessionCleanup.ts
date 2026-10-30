@@ -693,7 +693,7 @@ export function registerRecordingSessionCleanup(
     );
   };
   // A terminal upgrade of a finished release would stop the device's next owner's recording (#10825).
-  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+  manager.onSessionRelease((sessionId, deviceId, _reason, releaseOptions) => {
     if (!releaseOptions?.upgradeOnly) {
       const ids = [...new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId))];
       if (ids.length > 0) {

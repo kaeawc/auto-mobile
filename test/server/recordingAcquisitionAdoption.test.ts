@@ -304,7 +304,7 @@ describe("ownerless recording acquisition adoption", () => {
       const recording = await startVideoRecording({ device });
       await manager.createSession("holder", device.deviceId, "android");
       const announced: string[][] = [];
-      manager.onSessionRelease((id, _deviceId, reason, snapshot) => {
+      manager.onSessionRelease((id, _deviceId, reason, { snapshot }) => {
         announceSessionRelease(
           {
             takeRecordingIds: takeRecordingIdsFinalizedByRelease,
@@ -425,7 +425,7 @@ describe("ownerless recording acquisition adoption", () => {
           }
           expect(backend.stopCalls).toEqual([]);
           const announced: string[][] = [];
-          manager.onSessionRelease((id, _deviceId, reason, snapshot) => {
+          manager.onSessionRelease((id, _deviceId, reason, { snapshot }) => {
             announceSessionRelease(
               {
                 takeRecordingIds: takeRecordingIdsFinalizedByRelease,

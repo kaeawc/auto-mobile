@@ -18,7 +18,7 @@ test.each<[number, "monitor" | "lookup"]>([[60_000, "monitor"]])(
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       emitted.push({ sessionId, reason });
     });
-    manager.onSessionRelease((sessionId, _deviceId, reason, snapshot) => {
+    manager.onSessionRelease((sessionId, _deviceId, reason, { snapshot }) => {
       SessionReleaseBroadcaster.emit(sessionId, reason, snapshot);
     });
     const monitor = new SessionHeartbeatMonitor(

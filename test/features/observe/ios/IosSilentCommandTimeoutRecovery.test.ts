@@ -36,13 +36,11 @@ describe("IOSCtrlProxyClient silent command timeout recovery (#11247)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const manager = new FakeIOSCtrlProxyManager(timer);
-    client = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      createSuccessWebSocketFactory(timer, pongMode),
+    client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: createSuccessWebSocketFactory(timer, pongMode),
       timer,
-      { serviceManagerFactory: () => manager },
-    );
+      serviceManagerFactory: () => manager,
+    });
     expect(await client.ensureConnected()).toBe(true);
     // Commands follow the handshake; the handshake itself is the last proof of life.
     timer.advanceTime(100);

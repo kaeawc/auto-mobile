@@ -399,8 +399,7 @@ test("default pusher lets the iOS push decide when a stray Android client shares
   const ios = IOSCtrlProxyClient.createForTesting(
     { deviceId: IOS_UDID, platform: "ios", name: "fake" },
     8765,
-    () => new FakeOpenSocket(),
-    new FakeTimer(),
+    { wsFactory: () => new FakeOpenSocket(), timer: new FakeTimer() },
   );
   const android = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(stray);
   const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(ios);
@@ -428,8 +427,7 @@ test("default pusher still runs the Android push when a stray iOS client shares 
   const stray = IOSCtrlProxyClient.createForTesting(
     { deviceId: "emulator-5554", platform: "ios", name: "fake" },
     8765,
-    () => new FakeOpenSocket(),
-    new FakeTimer(),
+    { wsFactory: () => new FakeOpenSocket(), timer: new FakeTimer() },
   );
   const androidExisting = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(
     android,

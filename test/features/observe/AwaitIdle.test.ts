@@ -79,7 +79,9 @@ function createAwaitIdle(adb: AdbExecutor, timer: FakeTimer): AwaitIdle {
 
 /** Fixed 17 ms rotation polling, so deadline mechanics tests can assert exact sleeps. */
 function createFixedPollAwaitIdle(adb: AdbExecutor, timer: FakeTimer): AwaitIdle {
-  return new AwaitIdle(device, { create: () => adb }, timer, undefined, fixedBackoff(17));
+  return new AwaitIdle(device, { create: () => adb }, timer, {
+    rotationPollBackoff: fixedBackoff(17),
+  });
 }
 
 /** Reports window-manager rotation 1 only once the fake clock has reached `rotatesAtMs`. */

@@ -88,12 +88,10 @@ function androidClient(): AndroidCtrlProxyClient {
 function iosClient(): IOSCtrlProxyClient {
   const timer = new FakeTimer();
   IOSCtrlProxyClient.resetInstances();
-  return IOSCtrlProxyClient.createForTesting(
-    iosDevice,
-    8765,
-    (url) => new FakeWebSocket(url, "none", 0, timer),
+  return IOSCtrlProxyClient.createForTesting(iosDevice, 8765, {
+    wsFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
     timer,
-  );
+  });
 }
 
 describe("CtrlProxy command support", () => {

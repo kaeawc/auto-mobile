@@ -41,12 +41,10 @@ describe("iOS service status command applicability", () => {
           isVirtual,
         };
         const manager = IOSCtrlProxyManager.getInstance(device, timer);
-        const client = IOSCtrlProxyClient.createForTesting(
-          device,
-          18547,
-          createInstantFailureWebSocketFactory(),
+        const client = IOSCtrlProxyClient.createForTesting(device, 18547, {
+          wsFactory: createInstantFailureWebSocketFactory(),
           timer,
-        );
+        });
         const installed = spyOn(manager, "isInstalled").mockResolvedValue(true);
         const running = spyOn(manager, "checkRunningWithReason").mockResolvedValue({ ok: true });
         const cachedClient = spyOnIosExistingInstance(client);

@@ -41,14 +41,12 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
     const timer = new FakeTimer();
-    iosClient = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      () => {
+    iosClient = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: () => {
         throw new Error("database resource tests stub the client methods and never open a socket");
       },
       timer,
-    );
+    });
     getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(iosClient);
   });
 

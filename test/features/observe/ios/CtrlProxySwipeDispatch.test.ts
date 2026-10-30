@@ -150,8 +150,7 @@ describe("IOSCtrlProxyClient.requestSwipe option forwarding", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "physical-iphone", platform: "ios", name: "iPhone" },
       8765,
-      (url) => new FakeWebSocket(url, "none", 0, h.timer),
-      h.timer,
+      { wsFactory: (url) => new FakeWebSocket(url, "none", 0, h.timer), timer: h.timer },
     );
     try {
       const request = {

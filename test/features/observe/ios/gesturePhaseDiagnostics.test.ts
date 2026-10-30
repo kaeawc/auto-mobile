@@ -153,12 +153,10 @@ describe("iOS gesture phase diagnostics", () => {
 
   test("late reply warns with phases after the request timer removed pending state", async () => {
     const timer = new FakeTimer();
-    const client = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      createSuccessWebSocketFactory(timer),
+    const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: createSuccessWebSocketFactory(timer),
       timer,
-    );
+    });
     const hooks = client.connectionTestHooks;
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
@@ -187,12 +185,10 @@ describe("iOS gesture phase diagnostics", () => {
 
   test("pending failed reply logs its phase summary at debug", async () => {
     const timer = new FakeTimer();
-    const client = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      createSuccessWebSocketFactory(timer),
+    const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: createSuccessWebSocketFactory(timer),
       timer,
-    );
+    });
     const hooks = client.connectionTestHooks;
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     try {

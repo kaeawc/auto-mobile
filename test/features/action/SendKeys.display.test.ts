@@ -77,7 +77,7 @@ describe("sendKeys selector-less display focus", () => {
   // Session pins are passed to SendKeys as the resolved display argument.
   for (const route of ["pin", "explicit"] as const) {
     const run = (h: ReturnType<typeof harness>, display: string) => {
-      const execute = () => h.action.execute(commands, undefined, undefined, undefined, display);
+      const execute = () => h.action.execute(commands, undefined, { display });
       return route === "pin"
         ? runWithSelectedDisplayPin({ pin: display, inventory: h.device.displays }, execute)
         : execute();
@@ -102,24 +102,20 @@ describe("sendKeys selector-less display focus", () => {
     };
     for (const display of ["inside", "inner", "active"]) {
       const h = harness(device, "inside");
-      expect(
-        (await h.action.execute(commands, undefined, undefined, undefined, display)).success,
-      ).toBe(true);
+      expect((await h.action.execute(commands, undefined, { display })).success).toBe(true);
       expect(h.clientCalls).toEqual(["insert:hello", "clear", "ime"]);
     }
   });
 
   test("focused logical display maps to its physical panel for a role selector", async () => {
     const h = harness(multiDisplay, "outside", [{ isFocused: true, displayId: 2 }]);
-    expect(
-      (await h.action.execute(commands, undefined, undefined, undefined, "cover")).success,
-    ).toBe(true);
+    expect((await h.action.execute(commands, undefined, { display: "cover" })).success).toBe(true);
     expect(h.inserted).toEqual(["hello"]);
   });
 
   test("multi-display unknown focus refuses even when the captured field reports focused", async () => {
     const h = harness(multiDisplay, "outside");
-    const result = await h.action.execute(commands, undefined, undefined, undefined, "outside");
+    const result = await h.action.execute(commands, undefined, { display: "outside" });
     expect(result.success).toBe(false);
     expect(result.error).toContain('display "outside"');
     expect(result.error).toContain("focused panel is unknown");
@@ -130,7 +126,7 @@ describe("sendKeys selector-less display focus", () => {
 
   test("a focused window without panel identity does not inherit the requested panel", async () => {
     const h = harness(multiDisplay, "outside", [{ isFocused: true }]);
-    const result = await h.action.execute(commands, undefined, undefined, undefined, "outside");
+    const result = await h.action.execute(commands, undefined, { display: "outside" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("focused panel is unknown");
     expect(h.clientCalls).toEqual([]);
@@ -146,7 +142,7 @@ describe("sendKeys selector-less display focus", () => {
       }
       return execute(...args);
     };
-    const result = await h.action.execute(commands, undefined, undefined, undefined, "outside");
+    const result = await h.action.execute(commands, undefined, { display: "outside" });
     expect(result.success).toBe(false);
     expect(result.staleDisplay?.retry).toBe("observe");
     expect(h.clientCalls).toEqual([]);
@@ -167,9 +163,7 @@ describe("sendKeys selector-less display focus", () => {
   test("a selector still focuses the selected field when panel focus is unknown", async () => {
     const h = harness(multiDisplay, "outside");
     const selector = { text: "Field" };
-    expect(
-      (await h.action.execute(commands, selector, undefined, undefined, "outside")).success,
-    ).toBe(true);
+    expect((await h.action.execute(commands, selector, { display: "outside" })).success).toBe(true);
     expect(h.focusedSelectors).toEqual([selector]);
     expect(h.inserted).toEqual(["hello"]);
   });
@@ -263,9 +257,7 @@ describe("sendKeys Android focus read routing", () => {
           h.action.execute(
             [command],
             route === "explicit selector" ? { text: "Search" } : undefined,
-            undefined,
-            undefined,
-            display,
+            { display },
           );
         const result = await runWithSelectedDisplayPin(
           route === "pin" ? { pin: "cover", inventory: multiDisplay.displays } : undefined,
@@ -306,9 +298,7 @@ describe("sendKeys Android focus read routing", () => {
     const result = await h.action.execute(
       [{ action: "type", text: "abc", mode: "eventOnly", operation: "replace" }],
       undefined,
-      undefined,
-      undefined,
-      "cover",
+      { display: "cover" },
     );
     expect(result.success).toBe(true);
     expect(h.reads.length).toBe(5);
@@ -329,14 +319,7 @@ describe("sendKeys Android focus read routing", () => {
     const h = recordingHarness("cover");
     const result = await runWithSelectedDisplayPin(
       { pin: "inner", inventory: multiDisplay.displays },
-      () =>
-        h.action.execute(
-          [{ action: "key", key: "done" }],
-          undefined,
-          undefined,
-          undefined,
-          "cover",
-        ),
+      () => h.action.execute([{ action: "key", key: "done" }], undefined, { display: "cover" }),
     );
     expect(result.success).toBe(true);
     expect(h.reads.every((options) => options?.display === "cover")).toBe(true);
@@ -367,7 +350,7 @@ describe("sendKeys Android focus read routing", () => {
       };
       const result = await runWithSelectedDisplayPin(
         route === "pin" ? { pin: "cover", inventory: multiDisplay.displays } : undefined,
-        () => h.action.execute(commands, undefined, undefined, undefined, "cover"),
+        () => h.action.execute(commands, undefined, { display: "cover" }),
       );
       expect(result.success).toBe(false);
       expect(result.error).toBe(
@@ -400,7 +383,7 @@ describe("sendKeys Android focus read routing", () => {
       );
       const result = await runWithSelectedDisplayPin(
         route === "pin" ? { pin: "cover", inventory: multiDisplay.displays } : undefined,
-        () => h.action.execute(commands, undefined, undefined, undefined, "cover"),
+        () => h.action.execute(commands, undefined, { display: "cover" }),
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain('Display "outside" (cover) is not connected');

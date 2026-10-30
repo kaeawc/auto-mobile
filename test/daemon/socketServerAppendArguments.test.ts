@@ -41,17 +41,12 @@ test.each([false, true])(
     const signal = present ? new AbortController().signal : undefined;
     const frameContext = present ? "frame" : undefined;
     expect(
-      await server.executeInputTypeText(
-        "android",
-        device,
-        "AB",
-        undefined,
-        1000,
-        true,
+      await server.executeInputTypeText("android", device, "AB", {
+        timeoutMs: 1000,
+        append: true,
         frameContext,
-        undefined,
         signal,
-      ),
+      }),
     ).toEqual({ success: true, charsSent: 2 });
     expect(calls).toHaveLength(1);
     expect(calls[0].length).toBe(5);
@@ -86,7 +81,11 @@ test.each(["append", "validation"] as const)(
     );
     server.getAppendTextInput = () => ({ input: { appendText }, fromCache: false });
     expect(
-      await server.executeInputTypeText("android", device, "AB", undefined, 1000, true, "frame"),
+      await server.executeInputTypeText("android", device, "AB", {
+        timeoutMs: 1000,
+        append: true,
+        frameContext: "frame",
+      }),
     ).toEqual({
       success: false,
       error: `input/typeText exceeded 1000ms budget before append ${phase === "append" ? "key events" : "frame context validation"}`,
@@ -129,18 +128,12 @@ test.each([false, true])(
     });
     // The declared result omits the IME action fields the append path also returns.
     expect<object>(
-      await server.executeInputTypeText(
-        "android",
-        device,
-        "AB",
-        "done",
-        1000,
-        true,
-        undefined,
-        undefined,
-        undefined,
-        () => marks++,
-      ),
+      await server.executeInputTypeText("android", device, "AB", {
+        imeAction: "done",
+        timeoutMs: 1000,
+        append: true,
+        dispatching: () => marks++,
+      }),
     ).toEqual({ success: true, charsSent: 2, action: "done", totalTimeMs: 0 });
     expect(attempts).toBe(2);
     expect(marks).toBe(1);
@@ -164,18 +157,12 @@ test("submit is the first dispatch when append sends no keyevents", async () => 
   });
   // The declared result omits the IME action fields the append path also returns.
   expect<object>(
-    await server.executeInputTypeText(
-      "android",
-      device,
-      "",
-      "done",
-      1000,
-      true,
-      undefined,
-      undefined,
-      undefined,
-      () => marks++,
-    ),
+    await server.executeInputTypeText("android", device, "", {
+      imeAction: "done",
+      timeoutMs: 1000,
+      append: true,
+      dispatching: () => marks++,
+    }),
   ).toEqual({ success: true, charsSent: 0, action: "done", totalTimeMs: 0 });
   expect(marks).toBe(1);
 });

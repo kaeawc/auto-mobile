@@ -650,12 +650,9 @@ test("cancellation during clear capability lookup does not dispatch the fallback
     return false;
   };
   await expect(
-    h.action.execute(
-      [{ ...type("new"), operation: "replace" }],
-      undefined,
-      undefined,
-      controller.signal,
-    ),
+    h.action.execute([{ ...type("new"), operation: "replace" }], undefined, {
+      signal: controller.signal,
+    }),
   ).rejects.toThrow("The operation was aborted");
   expect(h.clientCalls).toEqual([]);
   expect(h.selections()).toEqual([activate, restore]);
@@ -896,16 +893,14 @@ test("unbounded cancellation with a failed restore returns structured recovery g
   h.adb.setCommandError(restore, new Error("restore rejected"));
   try {
     const result = await runWithAbortSignal(controller.signal, () =>
-      h.action.execute(
-        [type("a"), type("b"), type("c")],
-        undefined,
-        async (index) => {
+      h.action.execute([type("a"), type("b"), type("c")], undefined, {
+        progress: async (index) => {
           if (index === 2) {
             controller.abort(new Error("cancelled between commands"));
           }
         },
-        controller.signal,
-      ),
+        signal: controller.signal,
+      }),
     );
     expect(result).toMatchObject({ success: false, completedCommands: 2, failedIndex: 2 });
     expect(result.commands).toHaveLength(2);
@@ -975,16 +970,14 @@ test("cancellation between commands restores once outside the request context", 
   const cancellation = new Error("cancelled between commands");
   await expect(
     runWithAbortSignal(controller.signal, () =>
-      h.action.execute(
-        [type("a"), type("b"), type("c")],
-        undefined,
-        async (index) => {
+      h.action.execute([type("a"), type("b"), type("c")], undefined, {
+        progress: async (index) => {
           if (index === 2) {
             controller.abort(cancellation);
           }
         },
-        controller.signal,
-      ),
+        signal: controller.signal,
+      }),
     ),
   ).rejects.toBe(cancellation);
   expect(h.committed).toEqual(["a", "b"]);
@@ -1031,10 +1024,12 @@ test("budget cancellation between IME commands still reports a restore failure",
   h.adb.setCommandError(restore, new Error("restore rejected"));
   try {
     const result = await runWithTextRequestContext({ getDeadlineMs: () => 120_000 }, () =>
-      h.action.execute([type("a"), type("b"), type("c")], undefined, async (index) => {
-        if (index === 2) {
-          h.timer.advanceTime(99_000);
-        }
+      h.action.execute([type("a"), type("b"), type("c")], undefined, {
+        progress: async (index) => {
+          if (index === 2) {
+            h.timer.advanceTime(99_000);
+          }
+        },
       }),
     );
     expect(result.success).toBe(false);
@@ -1082,8 +1077,7 @@ test("cancellation during a failed mode-switch restore retains recovery guidance
     const result = await h.action.execute(
       [type("a"), { action: "type", text: "b", mode: "a11y" }],
       undefined,
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
     expect(result).toMatchObject({ success: false, completedCommands: 1, failedIndex: 1 });
     expect(h.clientCalls).toEqual(["commit:a"]);

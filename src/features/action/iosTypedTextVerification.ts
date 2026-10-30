@@ -161,6 +161,14 @@ export interface IosTypedTextObserver {
   execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult>;
 }
 
+/** Where and how a focused-field read-back runs. */
+export interface IosTypedTextRead {
+  observer: IosTypedTextObserver;
+  timer: Timer;
+  signal?: AbortSignal;
+  display?: string;
+}
+
 /** Request budget left for a read, capped by `maxWaitMs` when given; undefined means unbounded. */
 function readBudgetMs(timer: Timer, maxWaitMs?: number): number | undefined {
   const deadline = getTextRequestDeadlineMs();
@@ -172,13 +180,11 @@ function readBudgetMs(timer: Timer, maxWaitMs?: number): number | undefined {
 
 /** One fresh hierarchy-only read, bounded even when a client ignores cancellation. */
 export async function readIosTypedTextField(
-  observer: IosTypedTextObserver,
-  timer: Timer,
-  signal?: AbortSignal,
-  display?: string,
+  read: IosTypedTextRead,
   options: FocusedTextFieldOptions = {},
   maxWaitMs?: number,
 ): Promise<FocusedTextField | undefined> {
+  const { observer, timer, signal, display } = read;
   const requestSignal = combineWithAmbientAbort(signal);
   const remaining = readBudgetMs(timer, maxWaitMs);
   if (requestSignal?.aborted || (remaining !== undefined && remaining <= 0)) {
@@ -226,15 +232,13 @@ export const IOS_TOKEN_SETTLE_POLL_MS = 250;
 export async function verifyIosTypedText(
   text: string,
   before: FocusedTextField | undefined,
-  observer: IosTypedTextObserver,
-  timer: Timer,
-  signal?: AbortSignal,
-  display?: string,
+  read: IosTypedTextRead,
 ): Promise<IosTypedTextVerificationResult> {
+  const { timer, signal } = read;
   if (before?.secure) {
     return compareIosTypedText(text, before, undefined);
   }
-  let after = await readIosTypedTextField(observer, timer, signal, display);
+  let after = await readIosTypedTextField(read);
   let result = compareIosTypedText(text, before, after);
   // A recipient/token field can settle after the keystrokes land; re-read it, bounded, before
   // reporting that nothing was typed.
@@ -242,14 +246,7 @@ export async function verifyIosTypedText(
   while (!result.success && isIosTokenField(before, after) && timer.now() < settleDeadline) {
     signal?.throwIfAborted();
     await timer.sleep(IOS_TOKEN_SETTLE_POLL_MS);
-    after = await readIosTypedTextField(
-      observer,
-      timer,
-      signal,
-      display,
-      {},
-      Math.max(0, settleDeadline - timer.now()),
-    );
+    after = await readIosTypedTextField(read, {}, Math.max(0, settleDeadline - timer.now()));
     result = compareIosTypedText(text, before, after);
   }
   return result;
@@ -266,25 +263,13 @@ export async function explainIosIndeterminateText(
   error: string | undefined,
   text: string,
   before: FocusedTextField | undefined,
-  read: {
-    observer: IosTypedTextObserver;
-    timer: Timer;
-    signal?: AbortSignal;
-    display?: string;
-  },
+  read: IosTypedTextRead,
 ): Promise<string | undefined> {
   if (!isTextIndeterminateMessage(error)) {
     return error;
   }
   const after = before?.secure
     ? before
-    : await readIosTypedTextField(
-        read.observer,
-        read.timer,
-        read.signal,
-        read.display,
-        {},
-        IOS_INDETERMINATE_READBACK_MAX_MS,
-      );
+    : await readIosTypedTextField(read, {}, IOS_INDETERMINATE_READBACK_MAX_MS);
   return `${error} Observed afterwards: ${describeIosCommittedText(text, before, after)}`;
 }

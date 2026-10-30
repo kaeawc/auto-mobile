@@ -681,15 +681,8 @@ describe("explicit action display", () => {
       lastRenderedObservation: sessionRenderedObservation,
     });
     expect(
-      (
-        await keys.execute(
-          [{ action: "key", key: "enter" }],
-          undefined,
-          undefined,
-          undefined,
-          "external",
-        )
-      ).success,
+      (await keys.execute([{ action: "key", key: "enter" }], undefined, { display: "external" }))
+        .success,
     ).toBe(true);
   });
 
@@ -1484,13 +1477,9 @@ describe("explicit action display", () => {
       timestampProvider: { now: async () => 1 },
       lastRenderedObservation: () => observation,
     });
-    const result = await action.execute(
-      [{ action: "key", key: "enter" }],
-      undefined,
-      undefined,
-      undefined,
-      "external",
-    );
+    const result = await action.execute([{ action: "key", key: "enter" }], undefined, {
+      display: "external",
+    });
     expect(result.success).toBe(true);
     expect(executor.getExecutedArgv()).toContainEqual([
       "shell",
@@ -1653,9 +1642,7 @@ describe("explicit action display", () => {
       const result = await action.execute(
         [{ action: "type", text: "hello" }, { action: "clear" }, { action: "key", key: "done" }],
         { text: "Field" },
-        undefined,
-        undefined,
-        "external",
+        { display: "external" },
       );
       expect(result.success).toBe(true);
       expect(tap).toHaveBeenCalledTimes(1);
@@ -1702,9 +1689,7 @@ describe("explicit action display", () => {
     const result = await action.execute(
       [{ action: "type", text: "hello" }],
       { text: "Field" },
-      undefined,
-      undefined,
-      "external",
+      { display: "external" },
     );
     expect(result.success).toBe(true);
     expect(focused).toEqual(["external"]);

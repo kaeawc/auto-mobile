@@ -32,9 +32,7 @@ export const TIER2_CONSUMED_ENV: readonly string[] = [
 /**
  * Read by the Android build but deliberately not hashed: where a host keeps things (a path
  * differing between machines does not change a result), the commit stamp (the commit is already
- * the attestation's subject), CI context, the release-only switch that fails incomplete signing
- * configurations without changing the bytes of a build that completes, and secrets, which must
- * never reach a hash input.
+ * the attestation's subject), CI context, and secrets, which must never reach a hash input.
  */
 export const TIER2_EXCLUDED_ENV: readonly string[] = [
   "ANDROID_HOME",
@@ -58,7 +56,6 @@ export const TIER2_EXCLUDED_ENV: readonly string[] = [
   "PATHEXT",
   "PROJECT_ROOT",
   "PROTOTYPE_SCROLL_MEASURE_OUT",
-  "PROTOVIEWER_REQUIRE_RELEASE_SIGNING",
   "RELEASE_KEYSTORE_PASSWORD",
   "RELEASE_KEYSTORE_PATH",
   "RELEASE_KEY_ALIAS",

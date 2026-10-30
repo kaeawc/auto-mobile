@@ -23,7 +23,7 @@ import type {
 import type { Logger } from "../../../utils/logger";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
-import type { DelegateContext } from "../shared/types";
+import type { DelegateContext, DispatchOptions } from "../shared/types";
 import type { AndroidActionDispatcher } from "./AndroidActionDispatcher";
 
 /** Client-backed accessors resolve live state on every use, including after awaits. */
@@ -60,8 +60,7 @@ export class AndroidClientRequests {
     text?: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    { signal, onDispatch }: DispatchOptions = {},
   ): Promise<A11yClipboardResult & { acknowledged?: boolean }> {
     const startTime = this.context.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);

@@ -428,12 +428,9 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_press_button",
     builder: "CtrlProxyNavigation.requestPressButton",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestPressButton(
-        "volume_up",
-        5000,
-        undefined,
-        "frame-context",
-      ),
+      new CtrlProxyNavigation(h.context).requestPressButton("volume_up", 5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_press_home",
@@ -672,8 +669,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
         "com.example.app",
         "/Documents/app.sqlite",
         "users",
-        25,
-        10,
+        { limit: 25, offset: 10 },
       ),
     resolveWith: { success: true, totalTimeMs: 1, columns: [], rows: [], total: 0 },
   },

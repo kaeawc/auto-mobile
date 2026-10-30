@@ -663,8 +663,7 @@ export class PinchOn extends BaseVisualChange {
           scoped,
           snapshot.requestedFreshness,
           this.timer,
-          undefined,
-          snapshot.captureId,
+          { captureId: snapshot.captureId },
         );
   }
 

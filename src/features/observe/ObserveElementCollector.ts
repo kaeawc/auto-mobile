@@ -86,7 +86,8 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
 
     for (const [group, entries] of rootGroups) {
       keyboardPackage =
-        this.collectFromRoot(entries, group, platform, provenanceState, keyboardWindows, {
+        this.collectFromRoot(entries, group, platform, provenanceState, {
+          keyboardWindows,
           clickable,
           scrollable,
           flattenedEntries,
@@ -153,8 +154,9 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     group: number,
     platform: "android" | "ios",
     provenanceState: ProvenanceState,
-    keyboardWindows: ReadonlyMap<number, ElementBounds>,
     collections: {
+      /** Keyboard window frames by window rank; read-only context, not a collection. */
+      keyboardWindows: ReadonlyMap<number, ElementBounds>;
       clickable: Element[];
       scrollable: Element[];
       flattenedEntries: FlattenedElementEntry[];
@@ -162,6 +164,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       nextIndex: () => number;
     },
   ): string | undefined {
+    const { keyboardWindows } = collections;
     // Stack of enclosing parsed nodes (by tree depth) so each parsed node links
     // to its nearest parsed ancestor — bounds-less nodes are skipped in the
     // arrays but must not break ancestry between the nodes that survive.

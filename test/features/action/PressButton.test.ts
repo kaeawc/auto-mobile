@@ -316,7 +316,12 @@ describe("PressButton", () => {
       let marks = 0;
       const request = async (...args: unknown[]) => {
         expect(marks).toBe(0);
-        const hook = args.at(-1);
+        // Navigation presses take the hook last; requestPressButton takes it in its options.
+        const last = args.at(-1);
+        const hook =
+          typeof last === "object" && last !== null && "onDispatch" in last
+            ? last.onDispatch
+            : last;
         expect(typeof hook).toBe("function");
         if (typeof hook === "function") {
           hook();
@@ -440,9 +445,9 @@ describe("PressButton", () => {
         _button: string,
         _timeoutMs?: number,
         _perf?: unknown,
-        frameContext?: string,
+        options?: { frameContext?: string },
       ) => {
-        contexts.push(frameContext ?? "");
+        contexts.push(options?.frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
       },
     });

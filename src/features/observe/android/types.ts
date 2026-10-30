@@ -219,6 +219,15 @@ export interface LatestHierarchyOptions {
   signal?: AbortSignal;
 }
 
+/** Trailing options for `commitViaIme`. */
+export interface ImeCommitOptions {
+  signal?: AbortSignal;
+  /** How the IME applies the text; `"commit"` (the default) sends no delivery field. */
+  delivery?: "commit" | "keyEvents" | "clearField";
+  /** Opt in to the IME's commit trace fields. */
+  trace?: boolean;
+}
+
 /** Trailing options for `requestHierarchySync`. */
 export interface HierarchySyncRequestOptions {
   /** Out-parameter populated with the failure detail; see {@link HierarchySyncDiagnostics}. */

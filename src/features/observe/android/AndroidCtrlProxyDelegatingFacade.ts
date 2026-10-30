@@ -36,6 +36,7 @@ import type {
   AccessibilityNodeSelector,
   AndroidPerfTiming,
   HierarchySyncRequestOptions,
+  ImeCommitOptions,
   ScreenshotResult,
   TwoFingerSwipeRequest,
 } from "./types";
@@ -237,10 +238,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     priorImeId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    ...[delivery, trace]: [delivery?: "commit" | "keyEvents" | "clearField", trace?: boolean]
+    options?: ImeCommitOptions,
   ): Promise<ImeCommitActionResult> {
-    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal, delivery, trace);
+    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, options);
   }
 
   async setKeyboardProfile(

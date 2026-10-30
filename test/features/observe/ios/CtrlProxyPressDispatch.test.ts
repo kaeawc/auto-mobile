@@ -57,12 +57,18 @@ const cases: PressCase[] = [
     name: `button ${button}`,
     home: button === "home",
     request: (h, s, d) =>
-      new CtrlProxyNavigation(h.context).requestPressButton(button, 50, undefined, undefined, s, d),
+      new CtrlProxyNavigation(h.context).requestPressButton(button, 50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   })),
   {
     name: "input/key",
     request: (h, s, d) =>
-      new CtrlProxyKeyboard(h.context).requestPressKey("enter", [], 50, undefined, s, d),
+      new CtrlProxyKeyboard(h.context).requestPressKey("enter", [], 50, undefined, {
+        signal: s,
+        onDispatch: d,
+      }),
   },
   {
     name: "multi-finger swipe",
@@ -306,13 +312,21 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
       );
       expect(recent).toHaveBeenCalledWith(50, undefined, "frame", signal, onDispatch);
       expect(
-        await client.requestPressButton("power", 50, undefined, "frame", signal, onDispatch),
+        await client.requestPressButton("power", 50, undefined, {
+          frameContext: "frame",
+          signal,
+          onDispatch,
+        }),
       ).toBe(result);
-      expect(button).toHaveBeenCalledWith("power", 50, undefined, "frame", signal, onDispatch);
-      expect(await client.requestPressKey("enter", [], 50, undefined, signal, onDispatch)).toBe(
+      expect(button).toHaveBeenCalledWith("power", 50, undefined, {
+        frameContext: "frame",
+        signal,
+        onDispatch,
+      });
+      expect(await client.requestPressKey("enter", [], 50, undefined, { signal, onDispatch })).toBe(
         result,
       );
-      expect(key).toHaveBeenCalledWith("enter", [], 50, undefined, signal, onDispatch);
+      expect(key).toHaveBeenCalledWith("enter", [], 50, undefined, { signal, onDispatch });
       expect(
         await client.requestMultiFingerSwipe({
           x1: 1,

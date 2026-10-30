@@ -86,7 +86,7 @@ export interface ObservationStreamIosClient {
     timeout?: number,
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
-    minTimestamp?: number,
+    options?: LatestHierarchyOptions,
   ): Promise<CtrlProxyHierarchyResponse>;
   requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,

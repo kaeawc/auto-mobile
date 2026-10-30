@@ -36,6 +36,12 @@ interface ListDatabasesResult extends DatabaseResultBase {
   databases?: DatabaseInfo[];
 }
 
+/** One page of table rows; defaults to the first 50. */
+export interface TablePage {
+  limit?: number;
+  offset?: number;
+}
+
 export interface StorageCapabilities {
   readOnly: boolean;
   mutationAuthorized: boolean;
@@ -175,8 +181,7 @@ export class CtrlProxyDatabase {
     appId: string,
     databasePath: string,
     table: string,
-    limit: number = 50,
-    offset: number = 0,
+    { limit = 50, offset = 0 }: TablePage = {},
     timeout: number | SdkCapabilityQueryOptions = 5000,
   ): Promise<TableDataResult> {
     const result = await this.request<TableDataResponseResult>(

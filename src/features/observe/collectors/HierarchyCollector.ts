@@ -38,6 +38,13 @@ export interface HierarchyCollectorOptions {
   ) => Pick<AndroidCtrlProxy, "requestHierarchySync" | "invalidateCache">;
 }
 
+/** A numeric read budget is the request's `timeoutMs`; a read policy object is spread as is. */
+function hierarchyReadPolicy(
+  readOptions: number | HierarchyReadOptions | undefined,
+): HierarchyReadOptions | undefined {
+  return typeof readOptions === "number" ? { timeoutMs: readOptions } : readOptions;
+}
+
 /**
  * Collects view hierarchy + raw view hierarchy data into an ObserveResult.
  * Encapsulates Android/iOS branching and structured error reporting.
@@ -90,14 +97,13 @@ export class HierarchyCollector {
       const viewHierarchyStart = timer.now();
       const hierarchy =
         capturedHierarchy ??
-        (await viewHierarchy.getViewHierarchy(
-          queryOptions,
+        (await viewHierarchy.getViewHierarchy(queryOptions, {
           perf,
           skipWaitForFresh,
           minTimestamp,
           signal,
-          readOptions,
-        ));
+          ...hierarchyReadPolicy(readOptions),
+        }));
       logger.debug("Accessibility service availability cached as: true");
 
       if (hierarchy) {

@@ -37,6 +37,47 @@ test("sensitive warnings retain each sink path and message with the warning-only
   ]);
 });
 
+test("sensitive warnings explain when analysis stopped at the expanded-byte budget", () => {
+  const spec = {
+    id: "sensitive-budget",
+    window: { placement: { type: "fullscreen" } },
+    requires: { platform: ["clipboard"] },
+    root: {
+      type: "column",
+      children: [
+        { type: "pasteButton", into: "/data/code" },
+        {
+          type: "column",
+          repeat: { items: Array.from({ length: 128 }, () => ({})), as: "row" },
+          children: [
+            {
+              type: "button",
+              label: "Send",
+              onTap: [
+                {
+                  type: "request",
+                  url: "https://example.com/submit",
+                  via: "device",
+                  query: {
+                    a: "界".repeat(4096),
+                    b: "界".repeat(4096),
+                    q: "界".repeat(4096),
+                    z: { data: "/code" },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  expect(validatePrototypeSpec(spec)).toMatchObject({ success: true });
+  expect(prototypeSensitiveWarnings(spec)).toEqual([
+    "root.children[1].children[0].onTap[0].query.q: sensitive sink analysis stopped at the 4194304 expanded-byte budget at this path, so the sinks in this spec are unchecked and no sink findings are listed; this is a warning only and does not block the show.",
+  ]);
+});
+
 describe("library request policy", () => {
   test.each([
     {

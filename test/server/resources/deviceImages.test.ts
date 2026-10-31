@@ -149,6 +149,7 @@ describe("Device Image Resources with Fakes", () => {
         "automobile:devices/images/android",
         "automobile:devices/images/ios",
         "automobile:devices/images/watchos",
+        "automobile:devices/images/tvos",
       ]);
     } finally {
       notify.mockRestore();

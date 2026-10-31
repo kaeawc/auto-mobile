@@ -173,10 +173,10 @@ describe("watchOS device images", () => {
   });
 
   test("names watchos among the valid platforms", async () => {
-    const content = await handler().getDeviceImagesByPlatform({ platform: "tvos" });
+    const content = await handler().getDeviceImagesByPlatform({ platform: "invalid" });
 
     expect(JSON.parse(content.text ?? "{}")).toEqual({
-      error: "Invalid platform: tvos. Must be 'android', 'ios' or 'watchos'.",
+      error: "Invalid platform: invalid. Must be 'android', 'ios', 'watchos' or 'tvos'.",
     });
   });
 

@@ -31,9 +31,9 @@ describe("tvOS platform model (#15886)", () => {
     expect(matchesPlatformSelector("tvos", "tvos")).toBe(true);
   });
 
-  test("no discovery source or booted sweep lists Apple TVs yet", () => {
-    expect(sourcesForPlatform("tvos")).toEqual([]);
-    expect(bootedSweepsFor("tvos", {}).tvos).toBe(false);
+  test("only an explicit tvos sweep lists Apple TVs", () => {
+    expect(sourcesForPlatform("tvos")).toEqual(["tvos-simulator"]);
+    expect(bootedSweepsFor("tvos", {}).tvos).toBe(true);
     expect(bootedSweepsFor("either", { includeWatchOs: true }).tvos).toBe(false);
   });
 

@@ -232,15 +232,17 @@ describe("Plan execution lock through session routing", () => {
       toolName,
       "Plan lock routing probe",
       z.object({ device: z.string().optional(), sessionUuid: z.string().optional() }),
-      async () => response(),
-      { nonDeviceHandler: async () => response() },
+      { handler: async () => response(), nonDeviceHandler: async () => response() },
     );
     ToolRegistry.registerDeviceAware(
       readToolName,
       "Plan lock read probe",
       z.object({ device: z.string().optional(), sessionUuid: z.string().optional() }),
-      async () => response(),
-      { nonDeviceHandler: async () => response(), deviceReadOnly: true },
+      {
+        handler: async () => response(),
+        nonDeviceHandler: async () => response(),
+        deviceReadOnly: true,
+      },
     );
     explicitFixture = new McpTestFixture({
       planExecutionLock: lock,

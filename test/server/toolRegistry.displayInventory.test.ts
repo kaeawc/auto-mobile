@@ -63,11 +63,13 @@ describe("ToolRegistry display inventory resolution", () => {
       "displayInventoryProbe",
       "Inspect resolved inventory",
       z.object({ sessionUuid: z.string().optional(), deviceId: z.string().optional() }),
-      async (device) => ({
-        displays: device.displays,
-        hasDisplays: Object.hasOwn(device, "displays"),
-      }),
-      { deviceReadiness: "booted" },
+      {
+        handler: async (device) => ({
+          displays: device.displays,
+          hasDisplays: Object.hasOwn(device, "displays"),
+        }),
+        deviceReadiness: "booted",
+      },
     );
   }
 

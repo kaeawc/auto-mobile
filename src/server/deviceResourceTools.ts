@@ -41,40 +41,45 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
     "setDeviceResources",
     "Set selected device resources and verify native state, including disabled iOS service impacts. All settings are opt-in; omitted resources stay unchanged. iOS Simulator services and Android optional apps/settings are runtime-dependent. Android changes return a restore receipt for exact restoration during the same boot. Disabling Google infrastructure changes push/auth behavior. Disabling calendarServices on a booted simulator is refused with code unsafe_device_resource_combination unless its service is not running. Request it when provisioning a new simulator so it applies before first boot, or leave it enabled. Preboot is unaffected; unsafeWith lists the applicable phases.",
     setDeviceResourcesSchema,
-    async (device, args: z.infer<typeof setDeviceResourcesSchema>, _progress, signal) => {
-      const callerSignal = signal ?? getAbortSignal();
-      callerSignal?.throwIfAborted();
-      const external: Record<string, unknown> = { ...args };
-      const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
-      deleteInternalToolParams(external);
-      const parsed = setDeviceResourcesSchema.parse(external);
-      const deps = dependencies();
-      const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);
-      return withDeviceResourceLease(deps, device, deadlineMs, {
-        callerSignal,
-        operation: async (operationSignal) => {
-          const configured = await withDeviceReadiness(device, operationSignal, () =>
-            deps.deviceResourceControllerFactory().setResources({
+    {
+      handler: async (
+        device,
+        args: z.infer<typeof setDeviceResourcesSchema>,
+        _progress,
+        signal,
+      ) => {
+        const callerSignal = signal ?? getAbortSignal();
+        callerSignal?.throwIfAborted();
+        const external: Record<string, unknown> = { ...args };
+        const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+        deleteInternalToolParams(external);
+        const parsed = setDeviceResourcesSchema.parse(external);
+        const deps = dependencies();
+        const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);
+        return withDeviceResourceLease(deps, device, deadlineMs, {
+          callerSignal,
+          operation: async (operationSignal) => {
+            const configured = await withDeviceReadiness(device, operationSignal, () =>
+              deps.deviceResourceControllerFactory().setResources({
+                device,
+                resources: parsed.resources ?? {},
+                restore: parsed.restore,
+                deadlineMs,
+                signal: operationSignal,
+              }),
+            );
+            const result = await observeConfiguredDeviceResources(deps, configured, {
               device,
-              resources: parsed.resources ?? {},
-              restore: parsed.restore,
               deadlineMs,
               signal: operationSignal,
-            }),
-          );
-          const result = await observeConfiguredDeviceResources(deps, configured, {
-            device,
-            deadlineMs,
-            signal: operationSignal,
-          });
-          return withIsErrorOnFailure(
-            createStructuredToolResponse({ device, ...result }),
-            result.success,
-          );
-        },
-      });
-    },
-    {
+            });
+            return withIsErrorOnFailure(
+              createStructuredToolResponse({ device, ...result }),
+              result.success,
+            );
+          },
+        });
+      },
       defaultEnabled: false,
       outputSchema: setDeviceResourcesResultSchema,
       deviceResourceBudget: true,
@@ -86,36 +91,41 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
     "reconcileDeviceResources",
     "Compare an iOS Simulator with a requested resource map (workload profile) and report typed drift: missingRequested, ownedExtra (overrides AutoMobile applied earlier), unsupported, commandFailure. Report-only by default; repair applies only the drifted delta, re-reads, and succeeds only when every requested resource is proven.",
     reconcileDeviceResourcesSchema,
-    async (device, args: z.infer<typeof reconcileDeviceResourcesSchema>, _progress, signal) => {
-      const callerSignal = signal ?? getAbortSignal();
-      callerSignal?.throwIfAborted();
-      const external: Record<string, unknown> = { ...args };
-      const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
-      deleteInternalToolParams(external);
-      const parsed = reconcileDeviceResourcesSchema.parse(external);
-      const deps = dependencies();
-      const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);
-      return withDeviceResourceLease(deps, device, deadlineMs, {
-        callerSignal,
-        operation: async (operationSignal) => {
-          const result = await withDeviceReadiness(device, operationSignal, () =>
-            deps.deviceResourceReconcilerFactory().reconcile({
-              device,
-              profile: { resources: parsed.resources },
-              repair: parsed.repair ?? false,
-              releaseOwnedExtras: parsed.releaseOwnedExtras ?? false,
-              deadlineMs,
-              signal: operationSignal,
-            }),
-          );
-          return withIsErrorOnFailure(
-            createStructuredToolResponse({ device, ...result }),
-            result.success,
-          );
-        },
-      });
-    },
     {
+      handler: async (
+        device,
+        args: z.infer<typeof reconcileDeviceResourcesSchema>,
+        _progress,
+        signal,
+      ) => {
+        const callerSignal = signal ?? getAbortSignal();
+        callerSignal?.throwIfAborted();
+        const external: Record<string, unknown> = { ...args };
+        const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+        deleteInternalToolParams(external);
+        const parsed = reconcileDeviceResourcesSchema.parse(external);
+        const deps = dependencies();
+        const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);
+        return withDeviceResourceLease(deps, device, deadlineMs, {
+          callerSignal,
+          operation: async (operationSignal) => {
+            const result = await withDeviceReadiness(device, operationSignal, () =>
+              deps.deviceResourceReconcilerFactory().reconcile({
+                device,
+                profile: { resources: parsed.resources },
+                repair: parsed.repair ?? false,
+                releaseOwnedExtras: parsed.releaseOwnedExtras ?? false,
+                deadlineMs,
+                signal: operationSignal,
+              }),
+            );
+            return withIsErrorOnFailure(
+              createStructuredToolResponse({ device, ...result }),
+              result.success,
+            );
+          },
+        });
+      },
       defaultEnabled: false,
       outputSchema: reconcileDeviceResourcesResultSchema,
       deviceResourceBudget: true,

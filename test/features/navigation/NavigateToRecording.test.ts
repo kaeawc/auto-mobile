@@ -66,17 +66,19 @@ describe("NavigateTo replay through navigation recording", () => {
         selector: z.object({ elementId: z.string().optional(), text: z.string().optional() }),
         action: z.string().optional(),
       }),
-      async (_device, args) => {
-        dispatchedArgs.push(args);
-        reportToolDispatched();
-        await navigate(
-          args.selector.elementId === "demo_index_back"
-            ? "HomeDestination"
-            : "DemoIndexDestination",
-        );
-        return { success: true };
+      {
+        handler: async (_device, args) => {
+          dispatchedArgs.push(args);
+          reportToolDispatched();
+          await navigate(
+            args.selector.elementId === "demo_index_back"
+              ? "HomeDestination"
+              : "DemoIndexDestination",
+          );
+          return { success: true };
+        },
+        recordsNavigation: true,
       },
-      { recordsNavigation: true },
     );
   });
 

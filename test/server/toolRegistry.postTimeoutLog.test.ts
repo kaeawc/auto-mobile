@@ -25,8 +25,7 @@ describe("ToolRegistry post-timeout result logging", () => {
       "postTimeoutProbe",
       "Resolves with success regardless of caller state",
       z.object({}),
-      handler,
-      { shouldEnsureDevice: () => false, nonDeviceHandler: handler },
+      { handler, shouldEnsureDevice: () => false, nonDeviceHandler: handler },
     );
   }
 
@@ -95,16 +94,11 @@ describe("ToolRegistry post-timeout result logging", () => {
   for (const fixture of clientCases) {
     test(`client logging preserves ${fixture.name}`, async () => {
       const handler = async () => fixture.response;
-      ToolRegistry.registerDeviceAware(
-        "postTimeoutProbe",
-        "synthetic envelope",
-        z.object({}),
+      ToolRegistry.registerDeviceAware("postTimeoutProbe", "synthetic envelope", z.object({}), {
         handler,
-        {
-          shouldEnsureDevice: () => false,
-          nonDeviceHandler: handler,
-        },
-      );
+        shouldEnsureDevice: () => false,
+        nonDeviceHandler: handler,
+      });
       const info = spyOn(logger, "info").mockImplementation(() => {});
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const error = spyOn(logger, "error").mockImplementation(() => {});

@@ -645,8 +645,8 @@ export function registerVideoRecordingTools(
     "videoRecording",
     "Start or stop device video recording. resourceLink on stop links its full result; required fields stay inline, bounded.",
     videoRecordingSchema,
-    videoRecordingHandler,
     {
+      handler: videoRecordingHandler,
       defaultEnabled: false,
       shouldEnsureDevice: (args) => !(args.action === "stop" && args.recordingId),
       deviceReadiness: (args) =>

@@ -173,8 +173,8 @@ export function registerBiometricTools() {
     "biometricAuth",
     "Simulate biometric auth: Android emulator/SDK hook, or iOS via the app's AutoMobile SDK or Simulator.",
     biometricAuthSchema,
-    biometricAuthHandler,
     {
+      handler: biometricAuthHandler,
       defaultEnabled: false,
       supportsProgress: true,
       outputSchema: biometricAuthResultSchema,

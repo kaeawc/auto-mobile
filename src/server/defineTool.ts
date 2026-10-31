@@ -98,8 +98,7 @@ export function defineDeviceTool<I extends ObjectSchema>(
         definition.name,
         definition.description,
         erased<ZodType<z.output<DeviceToolSchema<I>>>>(schema),
-        requireHandler(definition.name, handler),
-        definition.options,
+        { handler: requireHandler(definition.name, handler), ...definition.options },
       );
     },
   };

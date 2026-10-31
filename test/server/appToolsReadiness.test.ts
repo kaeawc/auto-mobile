@@ -12,7 +12,7 @@ test("installApp requires only a booted device, not CtrlProxy automation", () =>
 
   registry.registerDeviceAware = (...args: any[]) => {
     if (args[0] === "installApp") {
-      installReadiness = args[4]?.deviceReadiness;
+      installReadiness = args[3]?.deviceReadiness;
     }
   };
 

@@ -253,12 +253,21 @@ export class RealObserveScreen implements ObserveScreen {
 
   // ---------- Constructor ----------
 
+  /**
+   * @param device - Device to observe
+   * @param adbFactory - Factory for creating AdbClient instances
+   * @param dependencies - Optional collaborators; each defaults to the production one
+   * @param options.timer - Injected clock (defaults to the shared timer)
+   * @param options.idGenerator - Injected id source (defaults to the shared generator)
+   */
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     dependencies?: ObserveScreenDependencies,
-    timer: Timer = defaultTimer,
-    idGenerator: IdGenerator = defaultIdGenerator,
+    {
+      timer = defaultTimer,
+      idGenerator = defaultIdGenerator,
+    }: { timer?: Timer; idGenerator?: IdGenerator } = {},
   ) {
     this.device = device;
     this.adbFactory = adbFactory;

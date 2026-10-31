@@ -156,7 +156,7 @@ async function harness(platform: "android" | "ios" = "android", iosFlightCeiling
         stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 0 }),
       },
     },
-    base.timer,
+    { timer: base.timer },
   );
   return {
     ...base,

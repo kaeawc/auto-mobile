@@ -70,7 +70,7 @@ function setup(hierarchy: ViewHierarchyResult, platform: "ios" | "android" = "io
       cacheStore,
       screenshotStateStore: new FakeScreenshotStateStore(timer),
     },
-    timer,
+    { timer },
   );
   spyOn(screen["performanceAuditor"], "run").mockResolvedValue(undefined);
   spyOn(screen["accessibilityAuditor"], "run").mockResolvedValue(undefined);

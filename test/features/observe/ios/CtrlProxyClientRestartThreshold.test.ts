@@ -437,7 +437,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
         testDevice,
         new FakeAdbClientFactory(),
         {} as AndroidCtrlProxyClient,
-        timer,
+        { timer },
       );
       const result = await vh.getViewHierarchy();
       expect(reads).toBe(1);

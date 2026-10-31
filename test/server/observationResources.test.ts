@@ -677,8 +677,7 @@ describe("unscoped latest observation resources", () => {
       device,
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       { cacheStore },
-      cacheTimer,
-      observationIdGenerator,
+      { timer: cacheTimer, idGenerator: observationIdGenerator },
     );
     const observation: ObserveResult = {
       ...observeScreen.createBaseResult(),
@@ -1116,8 +1115,7 @@ describe("unscoped latest observation resources", () => {
       deviceA,
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       { cacheStore },
-      cacheTimer,
-      new CountingIdGenerator("observation"),
+      { timer: cacheTimer, idGenerator: new CountingIdGenerator("observation") },
     );
     const first = { ...screen.createBaseResult(), updatedAt: "reused-hierarchy-timestamp" };
     const second = { ...screen.createBaseResult(), updatedAt: "reused-hierarchy-timestamp" };

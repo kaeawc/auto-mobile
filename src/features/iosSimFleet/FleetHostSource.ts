@@ -58,15 +58,39 @@ export function parseMemoryPressureLevel(stdout: string): MemoryPressureLevel {
 
 /** Host source backed by `ps`, `sysctl` and `xcrun simctl list` (all read-only). */
 export class CommandFleetHostSource implements FleetHostSource {
+  private readonly executor: HostCommandExecutor;
+  private readonly timer: Timer;
+  private readonly os: HostOsInfo;
+  /** The canonical simctl reader; the inventory is read through it, not a second `xcrun` path. */
+  private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
+  /** Footprints come from one shared, cached `top` run, never one per snapshot (#15307). */
+  private readonly footprintReader: FootprintReader;
+
+  /**
+   * @param executor - Runs the read-only host commands
+   * @param timer - Clock for snapshot timestamps and the footprint cache
+   * @param os - Host totals source (defaults to Node's `os`)
+   * @param options.simctl - simctl reader (defaults to a fresh `SimCtlClient`)
+   * @param options.footprintReader - footprint reader (defaults to a cached `top` reader)
+   */
   constructor(
-    private readonly executor: HostCommandExecutor,
-    private readonly timer: Timer,
-    private readonly os: HostOsInfo = nodeHostOsInfo,
-    /** The canonical simctl reader; the inventory is read through it, not a second `xcrun` path. */
-    private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(null),
-    /** Footprints come from one shared, cached `top` run, never one per snapshot (#15307). */
-    private readonly footprintReader: FootprintReader = new CachedFootprintReader(executor, timer),
-  ) {}
+    executor: HostCommandExecutor,
+    timer: Timer,
+    os: HostOsInfo = nodeHostOsInfo,
+    {
+      simctl = new SimCtlClient(null),
+      footprintReader = new CachedFootprintReader(executor, timer),
+    }: {
+      simctl?: Pick<SimCtl, "executeCommandArgs">;
+      footprintReader?: FootprintReader;
+    } = {},
+  ) {
+    this.executor = executor;
+    this.timer = timer;
+    this.os = os;
+    this.simctl = simctl;
+    this.footprintReader = footprintReader;
+  }
 
   async readHostSnapshot(options: FleetReadOptions = {}): Promise<HostSnapshot> {
     // Host totals come from `os`, independent of `ps`: a failed process read must not discard

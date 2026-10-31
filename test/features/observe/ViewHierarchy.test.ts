@@ -571,7 +571,7 @@ describe("ViewHierarchy", function () {
           iosDevice,
           new FakeAdbClientFactory(fakeAdb),
           mockCtrlProxyClient,
-          new FakeTimer(),
+          { timer: new FakeTimer() },
         );
         const result = await subject.getViewHierarchy();
         expect(result.hierarchy.unavailableReason).toBe("runner_launch_queued");
@@ -611,7 +611,7 @@ describe("ViewHierarchy", function () {
           iosDevice,
           new FakeAdbClientFactory(fakeAdb),
           mockCtrlProxyClient,
-          new FakeTimer(),
+          { timer: new FakeTimer() },
         );
         const result = await vh.getViewHierarchy();
         expect([reads, waits]).toEqual([2, 1]);
@@ -657,7 +657,7 @@ describe("ViewHierarchy", function () {
           iosDevice,
           new FakeAdbClientFactory(fakeAdb),
           mockCtrlProxyClient,
-          timer,
+          { timer },
         );
         const result = await vh.getViewHierarchy();
         expect([reads, waits]).toEqual([2, 1]);
@@ -697,12 +697,9 @@ describe("ViewHierarchy", function () {
       };
       const spy = spyOnIosClientInstance(client);
       try {
-        const vh = new ViewHierarchy(
-          iosDevice,
-          new FakeAdbClientFactory(),
-          mockCtrlProxyClient,
+        const vh = new ViewHierarchy(iosDevice, new FakeAdbClientFactory(), mockCtrlProxyClient, {
           timer,
-        );
+        });
         const result = await vh.getViewHierarchy();
         expect(reads).toBe(1);
         expect(result.hierarchy.unavailableReason).toBe("service_recovering");
@@ -1904,7 +1901,8 @@ describe("Offscreen Node Filtering", function () {
         new FakeAdbExecutor(),
         { timer },
       );
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), connectedClient, timer, {
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), connectedClient, {
+        timer,
         observeAccessibilityManagerFactory: () => recoveryManager,
       });
       const result = await vh.getViewHierarchy();
@@ -1932,7 +1930,8 @@ describe("Offscreen Node Filtering", function () {
         },
         waitForAccessibilityServiceBinding: async () => "unhealthy" as const,
       };
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer, {
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, {
+        timer,
         observeAccessibilityManagerFactory: () => manager,
       });
       const result = await vh.getViewHierarchy(undefined, {
@@ -1953,7 +1952,8 @@ describe("Offscreen Node Filtering", function () {
         getAccessibilityHierarchy: async () => null,
         isConnected: () => true,
       });
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer, {
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, {
+        timer,
         observeAccessibilityManagerFactory: () => ({
           isAccessibilityServiceHealthy: async () => true,
           rebindIfUnhealthy: async () => {
@@ -2087,7 +2087,7 @@ describe("Offscreen Node Filtering", function () {
           return "recovered";
         },
       });
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, { timer });
       await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
         minTimestamp: 0,
@@ -2115,7 +2115,7 @@ describe("Offscreen Node Filtering", function () {
         },
         isRecoveryInFlight: () => false,
       });
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, { timer });
       await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
         minTimestamp: 0,
@@ -2137,7 +2137,7 @@ describe("Offscreen Node Filtering", function () {
           return "recovered";
         },
       });
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, { timer });
       await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
         minTimestamp: 0,
@@ -2228,7 +2228,8 @@ describe("ViewHierarchy queued runner launch typing (#15291)", () => {
       },
       awaitRecovery: async () => "timed_out" as const,
     });
-    const subject = new ViewHierarchy(iosDevice, adbFactory(), androidClient(), new FakeTimer(), {
+    const subject = new ViewHierarchy(iosDevice, adbFactory(), androidClient(), {
+      timer: new FakeTimer(),
       launchQueue: gate,
     });
     return {

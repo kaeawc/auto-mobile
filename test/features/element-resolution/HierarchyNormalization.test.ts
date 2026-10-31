@@ -20,7 +20,7 @@ const normalizer = () =>
     { deviceId: "ios-test", platform: "ios", name: "test" },
     undefined,
     unusedAndroidProxy,
-    new FakeTimer(),
+    { timer: new FakeTimer() },
   );
 const capture = {
   packageName: "com.example",

@@ -38,7 +38,7 @@ function setup(capture: ScreenshotResult) {
       screenshotEvidenceFiles: { stat: async () => ({ isFile: () => true, size: 1, mtimeMs: 0 }) },
       screenshotRecorder: recorder,
     },
-    timer,
+    { timer },
   );
   return { timer, protection, screen, result: screen.createBaseResult() };
 }

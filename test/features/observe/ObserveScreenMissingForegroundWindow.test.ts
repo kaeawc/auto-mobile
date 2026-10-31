@@ -91,7 +91,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         accessibilityAuditor: { run: async () => undefined },
         accessibilityStateDetector: { run: async () => undefined },
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -139,7 +139,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         accessibilityAuditor: { run: async () => undefined },
         accessibilityStateDetector: { run: async () => undefined },
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -199,7 +199,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         accessibilityAuditor: { run: async () => undefined },
         accessibilityStateDetector: { run: async () => undefined },
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -258,7 +258,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         accessibilityAuditor: { run: async () => undefined },
         accessibilityStateDetector: { run: async () => undefined },
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -313,7 +313,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         accessibilityAuditor: { run: async () => undefined },
         accessibilityStateDetector: { run: async () => undefined },
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -378,7 +378,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         accessibilityAuditor: { run: async () => undefined },
         accessibilityStateDetector: { run: async () => undefined },
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -451,7 +451,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         accessibilityAuditor: { run: async () => undefined },
         accessibilityStateDetector: { run: async () => undefined },
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -515,7 +515,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         accessibilityAuditor: { run: async () => undefined },
         accessibilityStateDetector: { run: async () => undefined },
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -568,7 +568,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         accessibilityAuditor: { run: async () => undefined },
         accessibilityStateDetector: { run: async () => undefined },
       },
-      timer,
+      { timer },
     );
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });

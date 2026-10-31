@@ -89,6 +89,7 @@ function androidReadDefaults({
 
 /** Optional collaborators for {@link ViewHierarchy}; each defaults to the shared production one. */
 export interface ViewHierarchyCollaborators {
+  timer?: Timer;
   observeAccessibilityManagerFactory?: ObserveAccessibilityManagerFactory;
   launchQueue?: IosRunnerLaunchQueueView;
 }
@@ -108,13 +109,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * @param device - Device to get view hierarchy from
    * @param adbFactory - Factory for creating AdbClient instances
    * @param accessibilityServiceClient - Optional AndroidCtrlProxyClient instance for testing
+   * @param options.timer - Injected clock; other seams are {@link ViewHierarchyCollaborators}
    */
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     accessibilityServiceClient: ViewHierarchyAndroidCtrlProxy | null = null,
-    timer: Timer = defaultTimer,
     {
+      timer = defaultTimer,
       observeAccessibilityManagerFactory = defaultObserveAccessibilityManagerFactory,
       launchQueue = getSharedIosRunnerLaunchQueueView(),
     }: ViewHierarchyCollaborators = {},

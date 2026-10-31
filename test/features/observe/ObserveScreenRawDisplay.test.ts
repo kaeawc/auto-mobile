@@ -83,7 +83,7 @@ function buildScreen(options: { display?: string; displays: string }) {
         androidRawClient: () => recorder.client,
       }),
     },
-    timer,
+    { timer },
   );
   return { screen, capture, ...recorder };
 }

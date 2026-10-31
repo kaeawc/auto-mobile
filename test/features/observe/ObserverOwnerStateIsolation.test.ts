@@ -203,12 +203,9 @@ test.each(["active", "all"])(
       pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
     });
     directory = mkdtempSync(join(tmpdir(), "observer-owner-state-"));
-    const store = new FileSystemObserveCacheStore(
-      timer,
-      directory,
-      async () => {},
-      new CountingIdGenerator("cache"),
-    );
+    const store = new FileSystemObserveCacheStore(timer, directory, async () => {}, {
+      idGenerator: new CountingIdGenerator("cache"),
+    });
     setObserveCacheStore(store);
     const screenshotState = new InMemoryScreenshotStateStore(timer);
     setScreenshotStateStore(screenshotState);
@@ -232,8 +229,7 @@ test.each(["active", "all"])(
           stat: async () => ({ isFile: () => true, size: 12, mtimeMs: timer.now() }),
         },
       },
-      timer,
-      new CountingIdGenerator("read"),
+      { timer, idGenerator: new CountingIdGenerator("read") },
     );
     const baseline = (Reflect.get(screen, "createBaseResult") as () => ObserveResult).call(screen);
     baseline.screenSize = { width: 100, height: 100 };
@@ -441,7 +437,7 @@ test.each(["display", "posture"] as const)(
           }),
         },
       },
-      timer,
+      { timer },
     );
     const read = screen.executeDeviceRead(undefined, "none");
     await adb.started.get(heldCommand)!.promise;
@@ -578,7 +574,7 @@ test("session all read preserves expired display/posture caches and recaptured b
         }),
       },
     },
-    timer,
+    { timer },
   );
   const result = await screen.execute({
     skipScreenshot: true,
@@ -634,7 +630,7 @@ test("observer readOnly flag is independent of recomposition skipping and logica
         }),
       },
     },
-    timer,
+    { timer },
   );
   const collect = spyOn(screen, "collectAllData");
   try {

@@ -2386,7 +2386,7 @@ describe("post-action screenshot resolved display", () => {
         android,
         new FakeAdbClientFactory(executor),
         { screenshotRecorder: new CaptureRecorder() },
-        timer,
+        { timer },
       );
       const fakeObserve = new FakeObserveScreen();
       fakeObserve.setObserveResult(

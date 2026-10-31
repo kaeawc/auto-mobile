@@ -85,7 +85,7 @@ test.each(["android", "ios"] as const)(
             stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 0 }),
           },
         },
-        timer,
+        { timer },
       );
       const result = await screen.executeDeviceRead();
       expect(result.freshness).toMatchObject({
@@ -173,7 +173,7 @@ test.each([
         hierarchyCapture: createDeviceHierarchyCapture(device, { adbFactory: factory, timer }),
         screenshot,
       },
-      timer,
+      { timer },
     );
     try {
       const result = await screen.executeDeviceRead();

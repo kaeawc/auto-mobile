@@ -65,15 +65,14 @@ export class Window implements WindowInterface {
    * @param timer - Injected clock; used to derive one absolute deadline shared
    *   across the getActive sub-reads (kept as a seam so FakeTimer can drive the
    *   budget deterministically in tests).
-   * @param env - Environment controlling disk-cache opt-in under unit tests
-   * @param homeDir - Optional home-directory seam for isolated path tests
+   * @param options.env - Environment controlling disk-cache opt-in under unit tests
+   * @param options.homeDir - Optional home-directory seam for isolated path tests
    */
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
-    env: NodeJS.ProcessEnv = process.env,
-    homeDir?: string,
+    { env = process.env, homeDir }: { env?: NodeJS.ProcessEnv; homeDir?: string } = {},
   ) {
     // Match the resolver's precedence and trimming: an empty primary override
     // must not opt into the default directory via the secondary alias (#9474).

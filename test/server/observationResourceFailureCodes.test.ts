@@ -183,8 +183,7 @@ describe("observation resource failure envelopes", () => {
       device,
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       { cacheStore: cache },
-      timer,
-      ids,
+      { timer, idGenerator: ids },
     );
     const result = { ...screen.createBaseResult(), viewHierarchy: markedHierarchy(device.name) };
     await screen.cacheObserveResult(result);

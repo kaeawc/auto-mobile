@@ -14,12 +14,9 @@ runObserveCacheStoreContract("FakeObserveCacheStore", async (timer) => ({
 runObserveCacheStoreContract("FileSystemObserveCacheStore (temp directory)", async (timer) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "am-observe-cache-contract-"));
   return {
-    store: new FileSystemObserveCacheStore(
-      timer,
-      root,
-      undefined,
-      new CountingIdGenerator("contract"),
-    ),
+    store: new FileSystemObserveCacheStore(timer, root, undefined, {
+      idGenerator: new CountingIdGenerator("contract"),
+    }),
     dispose: () => rm(root, { recursive: true, force: true }),
   };
 });

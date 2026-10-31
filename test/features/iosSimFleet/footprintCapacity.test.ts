@@ -123,7 +123,7 @@ function sources(options: { topError?: Error } = {}) {
     executor,
     new FakeTimer(),
     { totalMemoryBytes: () => 128 * GIB, cpuCount: () => 16, loadAverage1m: () => 1 },
-    new FakeSimctl(),
+    { simctl: new FakeSimctl() },
   );
   const collector = new IosSimFleetCostCollector(
     { readHostSnapshot: (o) => source.readHostSnapshot(o), readInventory: async () => inventory },

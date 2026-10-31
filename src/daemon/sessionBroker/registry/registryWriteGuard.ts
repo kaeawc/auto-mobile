@@ -4,6 +4,7 @@ import { BindingRegistrySchemaUnsupportedError } from "../provisioning/refusal";
 import {
   assertSupportedRegistrySchema,
   BINDING_REGISTRY_MIGRATIONS,
+  readBindingRegistryWriterVersionsSync,
 } from "./bindingRegistryMigrations";
 import type { BindingRegistryDatabase } from "./bindingRegistryRows";
 
@@ -39,7 +40,11 @@ export function createRegistryWriteGuard({
             })
             .filter((name) => !Object.hasOwn(BINDING_REGISTRY_MIGRATIONS, name));
           if (unknownMigrations.length > 0) {
-            throw new BindingRegistrySchemaUnsupportedError(dbPath, unknownMigrations);
+            throw new BindingRegistrySchemaUnsupportedError(
+              dbPath,
+              unknownMigrations,
+              readBindingRegistryWriterVersionsSync(trx, sqlite, unknownMigrations),
+            );
           }
         } finally {
           statement.finalize();

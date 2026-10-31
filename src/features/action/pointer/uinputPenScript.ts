@@ -46,7 +46,7 @@ export const UINPUT_REGISTRATION_SETTLE_MS = 4000;
 /** Keeps the device open long enough for the reader to consume the last events. */
 const CLOSE_SETTLE_MS = 50;
 
-/** The default display in its current rotation; `width` and `height` are the natural size. */
+/** The default display in its current rotation; `width` and `height` are its size in rotation 0. */
 export interface UinputDisplayGeometry {
   width: number;
   height: number;

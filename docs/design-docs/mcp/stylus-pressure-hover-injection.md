@@ -231,7 +231,7 @@ uid 0 (`id -u`), so a runner that injects without root always wins. AutoMobile n
 
 **Shape.** `uinputPenScript` writes the command script Android's `uinput` tool reads: a `register`
 of the pen the probe verified (`INPUT_PROP_DIRECT`; `BTN_TOOL_PEN`, `BTN_TOOL_RUBBER`, `BTN_TOUCH`,
-`BTN_STYLUS`, `BTN_STYLUS2`; `ABS_X`/`Y` sized to the natural display, `ABS_PRESSURE` 0..4095,
+`BTN_STYLUS`, `BTN_STYLUS2`; `ABS_X`/`Y` sized to the display in rotation 0, a `wm size` override winning over the physical size, `ABS_PRESSURE` 0..4095,
 `ABS_DISTANCE` 0..255, `ABS_TILT_X`/`Y` ±90), a 4 s wait for the device to attach (the probe's
 value), then the request as frames every 16 ms with the instrumentation planner's interpolation. A
 stroke is `BTN_TOOL_PEN` and `BTN_TOUCH` down with pressure, then touch up and pen out; a hover is

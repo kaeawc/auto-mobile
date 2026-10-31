@@ -4,7 +4,11 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import { readWindowManagerRotation } from "../../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
-import { queryDisplaySize } from "../../record/android/AxisRanges";
+import {
+  effectiveSize,
+  parseWmSize,
+  wmSizeReadCommand,
+} from "../../utility/androidDisplayGeometryCommands";
 import type { PointerDispatch } from "./DispatchingRoute";
 import { PointerNotSentError } from "./instrumentationDispatch";
 import { uinputPenScript, uinputPlannedMs, type UinputDisplayGeometry } from "./uinputPenScript";
@@ -33,12 +37,25 @@ export interface UinputDispatchDeps {
 
 const dispatchLocks = new WeakMap<AdbExecutor, Mutex>();
 
-/** The default display's natural size (`wm size`) and current rotation. */
-async function readAdbGeometry(
+/**
+ * The default display's size in rotation 0 and its current rotation. A `wm size` override wins over
+ * the physical size: gesture points are resolved in the overridden display's coordinates, and the
+ * framework maps the pen's raw range linearly onto that display.
+ */
+export async function readAdbUinputGeometry(
   adb: AdbExecutor,
   signal?: AbortSignal,
 ): Promise<UinputDisplayGeometry> {
-  const size = await queryDisplaySize(adb, { timeoutMs: GEOMETRY_READ_TIMEOUT_MS });
+  const { stdout } = await adb.executeCommand(wmSizeReadCommand(0), {
+    timeoutMs: GEOMETRY_READ_TIMEOUT_MS,
+    noRetry: true,
+    signal,
+  });
+  const parsed = parseWmSize(stdout);
+  const size = parsed ? effectiveSize(parsed) : undefined;
+  if (!size) {
+    throw new Error(`Could not parse the display size from wm size output: ${stdout.trim()}`);
+  }
   const rotation = await readWindowManagerRotation(adb, {
     timeoutMs: GEOMETRY_READ_TIMEOUT_MS,
     signal,
@@ -97,7 +114,7 @@ function scriptFailure(result: UinputScriptResult): ActionableError {
 export function createUinputDispatch(
   adb: AdbExecutor,
   deps: UinputDispatchDeps = {
-    readGeometry: (signal) => readAdbGeometry(adb, signal),
+    readGeometry: (signal) => readAdbUinputGeometry(adb, signal),
     runScript: (script, timeoutMs, signal) => runAdbUinputScript(adb, script, timeoutMs, signal),
   },
 ): PointerDispatch {

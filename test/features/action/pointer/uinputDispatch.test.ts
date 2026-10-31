@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { PointerNotSentError } from "../../../../src/features/action/pointer/instrumentationDispatch";
 import type { PointerRequest } from "../../../../src/features/action/pointer/PointerInjector";
 import {
   createUinputDispatch,
+  readAdbUinputGeometry,
   runAdbUinputScript,
   type UinputScriptResult,
 } from "../../../../src/features/action/pointer/uinputDispatch";
@@ -139,5 +142,41 @@ describe("runAdbUinputScript", () => {
       exitCode: 1,
       stderr: "Failed to open /dev/uinput: Permission denied",
     });
+  });
+});
+
+describe("readAdbUinputGeometry", () => {
+  const portrait = readFileSync(
+    join(
+      __dirname,
+      "..",
+      "..",
+      "observe",
+      "windowDumps",
+      "dumpsys-window-displays-mirror-portrait.txt",
+    ),
+    "utf8",
+  );
+  const device = (wmSize: string) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell wm size", createExecResult(wmSize, ""));
+    adb.setCommandResponse("shell dumpsys window displays", createExecResult(portrait, ""));
+    return adb;
+  };
+
+  test("sizes the pen to a wm size override, the coordinates gestures are resolved in", async () => {
+    const adb = device("Physical size: 1080x2400\nOverride size: 720x1600\n");
+    expect(await readAdbUinputGeometry(adb)).toEqual({ width: 720, height: 1600, rotation: 0 });
+  });
+
+  test("uses the physical size when there is no override", async () => {
+    const adb = device("Physical size: 1080x2400\n");
+    expect(await readAdbUinputGeometry(adb)).toEqual({ width: 1080, height: 2400, rotation: 0 });
+  });
+
+  test("refuses unreadable wm size output instead of guessing", async () => {
+    await expect(readAdbUinputGeometry(device("Physical size: garbage\n"))).rejects.toThrow(
+      "wm size",
+    );
   });
 });

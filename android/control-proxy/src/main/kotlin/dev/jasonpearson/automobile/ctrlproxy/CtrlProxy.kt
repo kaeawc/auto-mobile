@@ -93,7 +93,6 @@ import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
-import dev.jasonpearson.automobile.protocol.PermissionResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.RequestCommitText
@@ -633,6 +632,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
   private lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
+  private val permissionController by lazy {
+    PermissionController(
+      permissions = { permission, request ->
+        permissionManager.getPermissionState(permission, request)
+      },
+      asyncActionRunner = asyncActionRunner,
+      timeProvider = timeProvider,
+      resultSender = resultSender,
+    )
+  }
   private lateinit var overlayDrawer: OverlayDrawer
   private val clipboardManager by lazy {
     getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -2289,7 +2298,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     requestId: String?,
     permission: String?,
     requestPermission: Boolean?,
-  ) = handleGetPermission(requestId, permission, requestPermission)
+  ) = permissionController.getPermission(requestId, permission, requestPermission)
 
   override suspend fun setRecompositionTracking(enabled: Boolean) =
     sdkControlController.setRecompositionTrackingEnabled(enabled)
@@ -2954,31 +2963,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /** Broadcast permission result to WebSocket clients */
-  private suspend fun broadcastPermissionResult(
-    requestId: String?,
-    result: PermissionManager.PermissionState,
-    totalTimeMs: Long,
-  ) {
-    resultSender.send(requestId, "permission_result") { perfTiming ->
-      PermissionResult(
-        timestamp = System.currentTimeMillis(),
-        requestId = requestId,
-        success = result.error == null,
-        permission = result.permission,
-        granted = result.granted,
-        requestLaunched = result.requestLaunched,
-        canRequest = result.canRequest,
-        requiresSettings = result.requiresSettings,
-        instructions = result.instructions,
-        adbCommand = result.adbCommand,
-        totalTimeMs = totalTimeMs,
-        error = result.error,
-        perfTiming = perfTiming,
-      )
-    }
-  }
-
   /** Broadcast screenshot to WebSocket clients */
   private fun broadcastScreenshot(
     requestId: String?,
@@ -3068,25 +3052,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
         prototypeExcluded = true,
       )
-
-  /** Get permission state and optionally request missing permissions. */
-  private fun handleGetPermission(
-    requestId: String?,
-    permission: String?,
-    requestPermission: Boolean?,
-  ) {
-    val startTime = System.currentTimeMillis()
-    Log.d(
-      TAG,
-      "handleGetPermission (requestId: $requestId, permission: $permission, requestPermission: $requestPermission)",
-    )
-
-    asyncActionRunner.launch(requestId, "get_permission") {
-      val result = permissionManager.getPermissionState(permission, requestPermission ?: true)
-      val totalTime = System.currentTimeMillis() - startTime
-      broadcastPermissionResult(requestId, result, totalTime)
-    }
-  }
 }
 
 internal data class ImeFocusCandidate(

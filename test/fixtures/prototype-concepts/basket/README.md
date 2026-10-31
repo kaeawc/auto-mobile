@@ -5,6 +5,9 @@ gallery, a size picker and a currency price, a persisted cart, a checked checkou
 timed order tracker. `today.json` is the slice that runs on today's vocabulary: the catalog is
 literal `data` standing in for the mock backend, and the order moves on a timer.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+The empty cart uses `shopping_cart` (`cart` on iOS); its label identifies the empty state.
+
 ## Capabilities used
 
 - `prototype_stack_v1`: shop, product, cart, checkout and order screens.

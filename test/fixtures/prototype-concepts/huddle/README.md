@@ -6,6 +6,10 @@ thread screen, sending with a "sending" state, a teammate typing and replying, a
 sheet. `today.json` is the slice that runs on today's vocabulary: the teammate and the huddle are
 timers over literal `data`.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+Workspace choices use `groups` (`person.3` on iOS), paused notifications use
+`notifications_off` (`bell.slash`), and the huddle action uses `headset` (`headphones`).
+
 ## Capabilities used
 
 - `prototype_stack_v1`: home, channel, thread and link screens.

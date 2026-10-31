@@ -5,6 +5,10 @@ reply quotes and delivery ticks, hold-to-record voice notes, a voice call with a
 auto-advancing status updates and a call log. `today.json` is the slice that runs on today's
 vocabulary: the peer, the delivery receipts and the call are timers over literal `data`.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+Chats uses `forum` (`bubble.left.and.bubble.right` on iOS). Delivery and read receipts use
+`done` (`checkmark.circle`); their existing labels and tint distinguish the states.
+
 ## Capabilities used
 
 - `prototype_stack_v1`: home, conversation and call screens.

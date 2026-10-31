@@ -17,6 +17,7 @@ claims needing a device are marked **unverified** and carried into the
 | Label          | Meaning                                                                                 |
 | -------------- | --------------------------------------------------------------------------------------- |
 | **Source**     | Read from the platform source or header quoted below.                                   |
+| **Measured**   | Run against the Playground Pointer Probe on an emulator; the issue named holds the log. |
 | **Reported**   | Described by a third party (forum, tracker); not reproduced here.                       |
 | **Unverified** | Plausible from the above, but needs a run on a device or emulator before relying on it. |
 
@@ -62,35 +63,40 @@ continuation, the only per-gesture knob is the target display
 It runs as the shell user, so it needs neither root nor an installed helper. The tool type
 is only set from the source from Android 12 (API 31): `Input.java` from `android-7.0.0_r36`
 through `android-11.0.0_r48` builds the event with the legacy `MotionEvent.obtain` overload,
-which carries no tool type, while `android-12.0.0_r1` assigns it (#13081). **Not checked:**
-`motionevent` across releases, and releases before API 24.
+which carries no tool type, while `android-12.0.0_r1` assigns it (#13081). **Measured**
+(#13082): on API 30 `input stylus` arrives as source `STYLUS` with tool type `UNKNOWN`; on API 31,
+32, 33 and 37 it arrives as `TOOL_TYPE_STYLUS`. `motionevent` accepts only `DOWN`, `UP`, `MOVE`
+and, from API 31, `CANCEL`; `HOVER_MOVE` is rejected as `Unknown action`. **Not checked:**
+releases before API 24.
 
 So `adb shell input` can produce a _binary_ stylus (stylus tool type, full pressure
 for the whole stroke). It cannot produce a pressure curve, tilt, an eraser or hover.
 
 ### Routes to richer input
 
-| Route                                             | Pressure curve             | Tilt / buttons / eraser | Hover           | Needs                                                                  |
-| ------------------------------------------------- | -------------------------- | ----------------------- | --------------- | ---------------------------------------------------------------------- |
-| Accessibility `dispatchGesture` (today)           | No (**Source**)            | No (**Source**)         | No (**Source**) | Accessibility service                                                  |
-| `adb shell input stylus ...`                      | No, fixed 1.0 (**Source**) | No (**Source**)         | No (**Source**) | `adb` only                                                             |
-| Virtual stylus through `uinput` (kernel evdev)    | **Unverified**             | **Unverified**          | **Unverified**  | `/dev/uinput` write access; likely root or an emulator/userdebug image |
-| Emulator console `event send` raw evdev           | **Unverified**             | **Unverified**          | **Unverified**  | Emulator only                                                          |
-| `UiAutomation.injectInputEvent` (instrumentation) | **Unverified**             | **Unverified**          | **Unverified**  | An instrumentation process; documented to work across app boundaries   |
-| `Instrumentation.sendPointerSync` and similar     | n/a                        | n/a                     | n/a             | Own process only                                                       |
+Measured on an API 37 `google_apis` userdebug emulator against the Pointer Probe (#13082) unless a
+cell says **Source**:
 
-`uinput` and emulator-console are expected to work because both inject at the evdev
-layer, where pressure, tilt and `BTN_TOOL_PEN` hover are ordinary axes (a
-hypothesis). In-process `Instrumentation` injectors reach only the instrumented
-app's own windows, which does not fit the black-box model. `UiAutomation.injectInputEvent`
-is documented to work across app boundaries with arbitrary `InputEvent`s, so a
-constructed `MotionEvent` could carry stylus tool type, pressure, tilt and buttons
-without root; whether the shell can host that, and its cost beside CtrlProxy, is
-unverified (#13082) and should be settled before `uinput` is the only richer route.
+| Route                                               | Tool type           | Pressure curve            | Tilt           | Buttons                              | Eraser                                    | Hover                                    | Needs                                                   |
+| --------------------------------------------------- | ------------------- | ------------------------- | -------------- | ------------------------------------ | ----------------------------------------- | ---------------------------------------- | ------------------------------------------------------- |
+| Accessibility `dispatchGesture` (today)             | Finger (**Source**) | No (**Source**)           | No             | No                                   | No                                        | No (**Source**)                          | Accessibility service                                   |
+| `adb shell input stylus tap/swipe/motionevent`      | Stylus (API 31+)    | No, fixed 1.0             | No             | No                                   | No                                        | No                                       | `adb` only                                              |
+| `adb shell input mouse tap`                         | Mouse               | No, fixed 1.0             | No             | No                                   | No                                        | One `HOVER_ENTER` before `DOWN` only     | `adb` only                                              |
+| `UiAutomation.injectInputEvent` (instrumentation)   | Stylus or mouse     | Yes, any 0-1              | Yes            | `STYLUS_PRIMARY`                     | No (the route rejects it)                 | Yes, enter/move/exit, stylus or mouse    | `am instrument --no-restart`: API 31+, no root          |
+| Virtual stylus through `uinput` (kernel evdev)      | Stylus and eraser   | Yes, scaled from the axis | Yes            | `BTN_STYLUS` as `STYLUS_PRIMARY`     | Yes (`BTN_TOOL_RUBBER`)                   | Yes (`BTN_TOOL_PEN` without `BTN_TOUCH`) | `adb root` (userdebug or emulator); no idc or keylayout |
+| Emulator gRPC `streamInputEvent` with a `pen_event` | Stylus              | Yes, scaled from 0-1024   | No             | `button_pressed` as `STYLUS_PRIMARY` | No (`rubber_pointer` arrives as a finger) | No (pressure 0 delivers nothing)         | Emulator started with `-grpc <port>`; no root, no auth  |
+| Emulator console `event send` raw evdev             | **Unverified**      | **Unverified**            | **Unverified** | **Unverified**                       | **Unverified**                            | **Unverified**                           | Emulator only                                           |
+| `Instrumentation.sendPointerSync` and similar       | n/a                 | n/a                       | n/a            | n/a                                  | n/a                                       | n/a                                      | Own process only                                        |
 
-Whether the emulator exposes a stylus-capable input device to apps (an
-`InputDevice` with `SOURCE_STYLUS`) depends on the AVD hardware profile and is
-**unverified**.
+So the instrumentation route is the only non-root route with tilt and hover, and `uinput` is the only
+route with an eraser. The emulator has no `sendPen` RPC: pen input goes through
+`EmulatorController/streamInputEvent` with `InputEvent.pen_event`
+(`emulator/lib/emulator_controller.proto`). In-process `Instrumentation` injectors reach only the
+instrumented app's own windows, which does not fit the black-box model.
+
+Every emulator `virtio_input_multi_touch_N` device reports `Sources: KEYBOARD | TOUCHSCREEN |
+STYLUS` with pressure 0-1024 and no `BTN_TOOL_PEN`; tilt and distance have no range. So an AVD
+advertises a stylus-capable `InputDevice` but no tilt or distance axes (**Measured**, API 37).
 
 ### What the recorder sees
 
@@ -184,13 +190,13 @@ platforms), so there is no iOS recorder representation to extend.
 
 ## Capability matrix
 
-| Capability                          | Android emulator                                                                                    | Android device                                     | iOS simulator                                                         | iOS device                  |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------- | --------------------------- |
-| Stylus tool type, constant pressure | Supported via `adb shell input stylus` on API 31+; earlier releases drop the tool type (**Source**) | Same (**Source**)                                  | No-go: no Pencil tool type; accepted pressure leaves force 0 (#13083) | Unverified                  |
-| Pressure curve                      | Unverified (`uinput`/console)                                                                       | Unverified (`UiAutomation`; `uinput` is root-only) | No-go: accepted pressure leaves force 0 (#13083)                      | Unverified                  |
-| Tilt, eraser, barrel button         | Unverified                                                                                          | Unverified (`UiAutomation`; `uinput` is root-only) | No-go via known paths: no pen or tool-type selectors (#13083)         | Impossible without a Pencil |
-| Hover                               | Unverified (evdev only)                                                                             | Unverified (`UiAutomation`; `uinput` is root-only) | Observed on mouse pointer paths; Pencil hover not observed (#13083)   | Unverified                  |
-| Records the above                   | Partly: tool type, pressure, buttons (#13101); not hover or replay (**Source**)                     | Same (**Source**)                                  | No (**Source**, Android-only recorder)                                | No (**Source**)             |
+| Capability                          | Android emulator                                                                                     | Android device                                     | iOS simulator                                                         | iOS device                  |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------- | --------------------------- |
+| Stylus tool type, constant pressure | Supported via `adb shell input stylus` on API 31+; API 30 reports tool type `UNKNOWN` (**Measured**) | Same (**Source**)                                  | No-go: no Pencil tool type; accepted pressure leaves force 0 (#13083) | Unverified                  |
+| Pressure curve                      | Instrumentation, `uinput` (root) and gRPC pen (**Measured**)                                         | Unverified (`UiAutomation`; `uinput` is root-only) | No-go: accepted pressure leaves force 0 (#13083)                      | Unverified                  |
+| Tilt, eraser, barrel button         | Tilt and button via instrumentation; eraser via `uinput` only (**Measured**)                         | Unverified (`UiAutomation`; `uinput` is root-only) | No-go via known paths: no pen or tool-type selectors (#13083)         | Impossible without a Pencil |
+| Hover                               | Instrumentation (stylus or mouse) and `uinput` (**Measured**)                                        | Unverified (`UiAutomation`; `uinput` is root-only) | Observed on mouse pointer paths; Pencil hover not observed (#13083)   | Unverified                  |
+| Records the above                   | Partly: tool type, pressure, buttons (#13101); not hover or replay (**Source**)                      | Same (**Source**)                                  | No (**Source**, Android-only recorder)                                | No (**Source**)             |
 
 "Supported" means a documented path exists in source. Mouse pointer hover is
 observed on the iOS simulator; pressure and Pencil injection are a no-go there.
@@ -222,14 +228,11 @@ specified and reviewed when the work is picked up.
 
 Open items are answered by running them, each as a follow-up issue (below):
 
-1. **Android emulator and device:** run `adb shell input stylus swipe` and
-   `motionevent` against a small app that logs `MotionEvent` tool type, pressure and
-   source; confirm the lowest supported API level; confirm how a panel key or role maps
-   onto `-d DISPLAY_ID` and whether two shell invocations hold a double-tap interval;
-   check `InputDevice` capability on an AVD; try `UiAutomation.injectInputEvent`,
-   `uinput` and emulator-console evdev for a pressure curve, tilt, `BTN_TOOL_PEN`
-   hover, `BTN_TOOL_RUBBER` (eraser) and `BTN_STYLUS`/`BTN_STYLUS2` (barrel buttons),
-   recording the root and image requirements for each.
+1. **Android emulator:** the probe in #13082 (API 30, 31, 32, 33 and 37 `google_apis`
+   arm64 userdebug AVDs, base `f8d061423c9`) fills the route table above. Still open: a
+   physical pen device's `dumpsys input` axes, emulator-console `event send`, how a panel
+   key or role maps onto `-d DISPLAY_ID`, and whether two shell invocations hold a
+   double-tap interval.
 2. **iOS simulator:** the probe in #13083 (Xcode 26.6, iPad Pro 13-inch (M5),
    iOS 26.5, base `f8d061423c9`) establishes pressure and Pencil injection as a
    no-go: accepted pressure leaves `UITouch.force` at 0, and no Pencil tool type

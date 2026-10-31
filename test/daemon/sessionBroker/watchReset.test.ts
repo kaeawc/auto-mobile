@@ -13,10 +13,17 @@ import {
   WatchSimulatorReset,
   type WatchResetPolicy,
 } from "../../../src/daemon/sessionBroker/watchReset";
-import { watchResetPolicy } from "../../../src/daemon/sessionBroker/watchResetNative";
+import {
+  reserveWatchResetBoot,
+  watchResetPolicy,
+} from "../../../src/daemon/sessionBroker/watchResetNative";
+import { installBootAdmissionServices } from "../../../src/devices/bootAdmissionServices";
+import { InMemoryBootDurationHistory } from "../../../src/features/iosSimFleet/BootDurationHistory";
+import { FleetBootInstrumentation } from "../../../src/features/iosSimFleet/IosBootInstrumentation";
 import { WatchSimulatorInventory } from "../../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
 import { WatchSimulatorLifecycle } from "../../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeSimulatorCapacityGate } from "../../fakes/FakeSimulatorCapacityGate";
 import {
   FakeWatchLifecycleSimctl,
   WATCH_DEVICE_TYPE,
@@ -96,6 +103,40 @@ function rig(
 }
 
 describe("watch release reset follows the iOS reuse mode", () => {
+  test("the native reservation preserves the fleet instrumentation receiver and holds capacity until released", async () => {
+    const timer = new FakeTimer();
+    const gate = new FakeSimulatorCapacityGate(timer, {
+      outcome: "allow",
+      limits: {
+        maxBooted: 1,
+        source: "derived",
+        bootConcurrency: 1,
+        bootConcurrencySource: "derived",
+      },
+      bootedCount: 0,
+    });
+    const previous = installBootAdmissionServices({
+      androidColdBootAdmitter: () => undefined,
+      assertBootCapacityAvailable: async () => {},
+      iosBootInstrumentation: () =>
+        new FleetBootInstrumentation({ history: new InMemoryBootDurationHistory(), timer, gate }),
+    });
+    try {
+      const reservation = await reserveWatchResetBoot({
+        replacingDeviceId: UDID,
+        timeoutMs: 1_000,
+        reason: "reset",
+      });
+
+      expect(reservation).toBeDefined();
+      expect(gate.admitted).toBe(1);
+      reservation.release();
+      expect(gate.admitted).toBe(0);
+    } finally {
+      installBootAdmissionServices(previous);
+    }
+  });
+
   test("erase: stops, erases while shut down, boots through the simulator gate and confirms Booted", async () => {
     const r = rig({ mode: "erase" });
 

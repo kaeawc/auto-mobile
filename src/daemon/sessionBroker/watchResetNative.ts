@@ -1,4 +1,11 @@
-import { bootAdmissionServices } from "../../devices/bootAdmissionServices";
+import {
+  bootAdmissionServices,
+  type BootAdmissionServices,
+} from "../../devices/bootAdmissionServices";
+import type {
+  BootReservationOptions,
+  BootSlotReservation,
+} from "../../devices/bootAdmission/BootSlotReservation";
 import { ActionableError } from "../../models/ActionableError";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { WatchSimulatorInventory } from "../../utils/ios-cmdline-tools/WatchSimulatorInventory";
@@ -31,6 +38,20 @@ export function watchResetPolicy(config: SessionBrokerHostConfig): WatchResetPol
   }
 }
 
+export function reserveWatchResetBoot(
+  options: BootReservationOptions,
+  services: Pick<BootAdmissionServices, "iosBootInstrumentation"> = bootAdmissionServices,
+): Promise<BootSlotReservation> {
+  const instrumentation = services.iosBootInstrumentation();
+  return instrumentation.reserveBoot
+    ? instrumentation.reserveBoot(options)
+    : Promise.resolve({
+        run: (operation) => operation(),
+        markReplacedDeviceGone: () => {},
+        release: () => {},
+      });
+}
+
 /** The production watch reset: simctl, the simulator boot gate and killDevice's watch path. */
 export function nativeWatchReset(config: SessionBrokerHostConfig, timer: Timer): WatchResetPort {
   const policy = watchResetPolicy(config);
@@ -45,16 +66,7 @@ export function nativeWatchReset(config: SessionBrokerHostConfig, timer: Timer):
     lifecycle: new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl), {
       run: (request, boot) => bootAdmissionServices.iosBootInstrumentation().run(request, boot),
     }),
-    reserveBoot: (options) => {
-      const reserve = bootAdmissionServices.iosBootInstrumentation().reserveBoot;
-      return reserve
-        ? reserve(options)
-        : Promise.resolve({
-            run: (operation) => operation(),
-            markReplacedDeviceGone: () => {},
-            release: () => {},
-          });
-    },
+    reserveBoot: reserveWatchResetBoot,
     stopDevice: async (device) => {
       // As for an iPhone: the lifecycle handler ends the watch's sessions before the erase.
       const result = readToolPayload(

@@ -108,7 +108,8 @@ export class ResetReadiness {
         resource.state === "resetting" &&
         this.canWait(resource.resourceId) &&
         matches(resource.profile) &&
-        nativeProfile(resource).platform === "ios",
+        // A watch reset also re-boots through the simulator boot gate; it is waited on like iOS.
+        nativeProfile(resource).platform !== "android",
     );
     if (resources.length === 0) {
       return undefined;

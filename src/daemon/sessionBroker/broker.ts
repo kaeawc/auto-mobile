@@ -41,6 +41,7 @@ import { SessionBrokerFailureError } from "./devicePort";
 import { assertDeviceProfileEmulatable, requestedDeviceProfile } from "./deviceProfile";
 import type { SessionBrokerOptions } from "./brokerOptions";
 import { nativeProfile } from "./profile";
+import { sessionReadiness, watchAdmissionInput } from "./watchAdmission";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
 import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
 import {
@@ -187,7 +188,7 @@ export class SessionBroker {
       }
       const input = await this.admissionInput(config, fingerprint, signal, exportIdentity);
       input.timingStartedAtMs = startedAtMs;
-      if (this.options.reuseCleanDevices && config.device.platform === "ios") {
+      if (this.options.reuseCleanDevices && config.device.platform !== "android") {
         input.resetReadiness = await this.resetReadiness.snapshot(input.matches);
       }
       const admission = await this.options.store.admit(input);
@@ -358,6 +359,9 @@ export class SessionBroker {
     exportIdentity?: BrokerExportIdentity,
   ): Promise<BrokerAdmissionInput> {
     signal.throwIfAborted();
+    if (config.device.platform === "watchos") {
+      return watchAdmissionInput(this.options, config, { fingerprint, signal, exportIdentity });
+    }
     const catalog = await this.options.catalog(config.device.platform, signal);
     const defaults = this.options.defaults(config.device.platform);
     const capabilities = this.options.capabilities ?? {};
@@ -1008,6 +1012,7 @@ export class SessionBroker {
               : "pending",
       sessionUuid: request.sessionId,
       profile: resource ? nativeProfile(resource) : null,
+      ...sessionReadiness(request.state === "active", resource),
       cleanupPending: this.cleanupIsPending(request, resource),
       ...(request.timing ? { timing: request.timing } : {}),
       ...(request.error

@@ -81,8 +81,8 @@ describe("session requirement parsing", () => {
       }),
     );
 
-    expect(exact.os).toEqual({ kind: "exact", version: "027.0.0" });
-    expect(minimum.os).toEqual({ kind: "minimum", version: "27.0.0" });
+    expect(exact).toMatchObject({ os: { kind: "exact", version: "027.0.0" } });
+    expect(minimum).toMatchObject({ os: { kind: "minimum", version: "27.0.0" } });
   });
 
   test.each([

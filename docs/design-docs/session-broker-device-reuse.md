@@ -250,7 +250,9 @@ to the snapshot fallback if configured, else destroys).
   iPhone/iPad simulators (a CarPlay screen is a display of its iPhone, not a
   device) and Apple Watch simulators (`watchos` bindings and running
   `ambroker-` watches are charged). A watch binding is created, reused and
-  deleted like an iOS simulator binding and is ready once booted; see
+  deleted like an iOS simulator binding and is ready once booted. A released
+  watch follows `reuse.ios.mode`: erase is `simctl erase` plus a gated reboot,
+  keep-booted runs its fallback, minimal destroys; see
   `docs/decisions/watchos-platform.md`.
 - `idlePoolCap`: devices retained between sessions; more warm devices cost disk,
   memory and simulator/emulator capacity. Start small, from concurrent bursts and
@@ -259,7 +261,7 @@ to the snapshot fallback if configured, else destroys).
   that gate); distinct from device-count caps. A watch boot takes a slot in the
   simulator (iOS) gate, which already counts every booted simulator.
 - `limits.maxConcurrentResetBoots`: queues iOS erase resets and keep-booted's erase
-  fallback; does not limit Android keep-booted cleanup; unlimited when omitted. Keep
+  fallback, Apple Watch erases included; does not limit Android keep-booted cleanup; unlimited when omitted. Keep
   it at or below safe iOS boot concurrency.
 
 Starting relationship: `totalDeviceCap >= sessionCap + idlePoolCap` plus allowance

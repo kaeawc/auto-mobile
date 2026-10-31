@@ -245,8 +245,12 @@ function startExecution(input: {
     input.name,
     input.executionSessionId,
     input.executionSessionUuid,
-    input.sessionId,
-    untargetedDeviceCall ? input.implicitAutolockMcpSessionId : undefined,
+    {
+      transportSessionId: input.sessionId,
+      unresolvedAutolockMcpSessionId: untargetedDeviceCall
+        ? input.implicitAutolockMcpSessionId
+        : undefined,
+    },
   );
 }
 

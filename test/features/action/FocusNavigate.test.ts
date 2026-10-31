@@ -98,6 +98,90 @@ describe("FocusNavigate", () => {
     expect(result.path).toHaveLength(1);
   });
 
+  test("recognises the inline TV Settings child label without pressing keys", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements = [
+      {
+        class: "android.widget.LinearLayout",
+        "resource-id": "generated:id/row_42",
+        clickable: true,
+        focusable: true,
+        focused: true,
+        bounds: { left: 1200, top: 724, right: 1920, bottom: 820 },
+      },
+      {
+        class: "android.widget.TextView",
+        text: "Device Preferences",
+        bounds: { left: 1240, top: 740, right: 1700, bottom: 800 },
+      },
+    ];
+    grid.moves = { 0: {} };
+    const result = await navigator(grid).execute({ until: { text: "Device Preferences" } });
+    expect(result).toMatchObject({ success: true, status: "focused", steps: 0 });
+    expect(grid.presses).toEqual([]);
+    expect(result.path).toEqual([
+      {
+        resourceId: "generated:id/row_42",
+        bounds: grid.elements[0].bounds,
+        descendantLabel: "Device Preferences",
+      },
+    ]);
+    expect(result.focusedElement).toEqual(result.path[0]);
+  });
+
+  test.each([
+    [{ contentDesc: "CLICK TO SPEAK" }, { "content-desc": "Click to speak" }, "Click to speak"],
+    [{ resourceId: "mic_label" }, { "resource-id": "app:id/mic_label" }, "app:id/mic_label"],
+  ])(
+    "recognises a contained label using direct match semantics: %j",
+    async (until, label, expected) => {
+      const grid = new FakeGrid(0);
+      grid.elements = [
+        {
+          "resource-id": "com.google.android.tvlauncher:id/mic_orb",
+          bounds: { left: 100, top: 100, right: 300, bottom: 300 },
+        },
+        { ...label, bounds: { left: 120, top: 120, right: 280, bottom: 280 } },
+      ];
+      grid.moves = { 0: {} };
+      const result = await navigator(grid).execute({ until });
+      expect(result).toMatchObject({ success: true, status: "focused", steps: 0 });
+      expect(result.path[0]).toMatchObject({ descendantLabel: expected });
+      expect(result.focusedElement).toEqual(result.path[0]);
+      expect(grid.presses).toEqual([]);
+    },
+  );
+
+  test("does not count a sibling label outside the focused row", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements = [
+      { bounds: { left: 1200, top: 724, right: 1920, bottom: 820 } },
+      { text: "Device Preferences", bounds: { left: 1240, top: 740, right: 1700, bottom: 800 } },
+      { text: "Network", bounds: { left: 1240, top: 840, right: 1700, bottom: 900 } },
+    ];
+    grid.moves = { 0: {} };
+    const result = await navigator(grid).execute({ until: { text: "Network" }, maxSteps: 0 });
+    expect(result).toMatchObject({ success: false, status: "max_steps", steps: 0 });
+    expect(grid.presses).toEqual([]);
+  });
+
+  test("requires every target field on the same contained node", async () => {
+    const grid = new FakeGrid(0);
+    grid.elements = [
+      { bounds: { left: 100, top: 100, right: 300, bottom: 300 } },
+      { text: "Speak", bounds: { left: 120, top: 120, right: 200, bottom: 160 } },
+      {
+        "resource-id": "app:id/mic_label",
+        bounds: { left: 120, top: 170, right: 200, bottom: 210 },
+      },
+    ];
+    const result = await navigator(grid).execute({
+      until: { text: "Speak", resourceId: "mic_label" },
+      maxSteps: 0,
+    });
+    expect(result.status).toBe("max_steps");
+  });
+
   test("steers toward the nearest match and reports the path", async () => {
     const grid = new FakeGrid(0);
     const result = await navigator(grid).execute({ until: { text: "Search" } });

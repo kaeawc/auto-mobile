@@ -77,6 +77,33 @@ export interface AndroidAudioInputs {
   /** The emulator is launched with `-no-audio` (AUTOMOBILE_EMULATOR_AUDIO=false). */
   launchWithoutAudio: boolean;
   host: HostAudioSnapshot;
+  grpc?:
+    | { state: "reachable" }
+    | { state: "unreachable"; reason: string }
+    | { state: "not_configured"; reason?: string };
+}
+
+function androidGrpcAudioCapabilities(grpc: AndroidAudioInputs["grpc"]): VirtualDeviceCapability[] {
+  if (!grpc) {
+    return [];
+  }
+  return ["android.emulator.audioInputInjection", "android.emulator.audioOutputCapture"].map(
+    (id): VirtualDeviceCapability => {
+      if (grpc.state === "reachable") {
+        return { id, state: "available", source: "platform" };
+      }
+      const fallback =
+        grpc.state === "unreachable"
+          ? "The emulator gRPC endpoint is unreachable."
+          : "No emulator gRPC port is configured.";
+      return {
+        id,
+        state: grpc.state === "unreachable" ? "unavailable" : "unsupported",
+        source: "platform",
+        reason: grpc.reason?.trim() ? grpc.reason : fallback,
+      };
+    },
+  );
 }
 
 /**
@@ -110,5 +137,6 @@ export function androidEmulatorAudioCapabilities(
       found.push({ id, state: "available", source: "avd_config" });
     }
   }
+  found.push(...androidGrpcAudioCapabilities(inputs.grpc));
   return found;
 }

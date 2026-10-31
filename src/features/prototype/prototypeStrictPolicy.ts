@@ -1,5 +1,9 @@
 import { prototypeShareArgumentsError } from "./prototypeShare";
-import { prototypePlatformCall, prototypePlatformUses } from "./prototypePlatform";
+import {
+  prototypePlatformCall,
+  prototypePlatformEvent,
+  prototypePlatformUses,
+} from "./prototypePlatform";
 import {
   isPrototypeDataPointer,
   prototypeDataPathPointer,
@@ -65,7 +69,30 @@ function libraryPolicyError(
   if (host) {
     return { path: `${host.path}.via`, message: "Host requests are unavailable in a library" };
   }
-  return hostChannelsError(spec) ?? secureLibraryError(spec) ?? sensitiveLibraryError(spec);
+  return (
+    hostChannelsError(spec) ??
+    secureLibraryError(spec) ??
+    sensitiveLibraryError(spec) ??
+    sensitiveModuleLibraryError(spec)
+  );
+}
+
+function sensitiveModuleLibraryError(spec: unknown): PrototypeValidationError | undefined {
+  for (const use of prototypePlatformUses(spec)) {
+    if (use.kind === "call" && prototypePlatformCall(use.action.call)?.definition.sensitive) {
+      return {
+        path: use.path,
+        message: `Sensitive platform call ${String(use.action.call)} is unavailable in a library`,
+      };
+    }
+    if (use.kind === "handler" && prototypePlatformEvent(use.event)?.definition.sensitive) {
+      return {
+        path: use.path,
+        message: `Sensitive platform event ${use.event} is unavailable in a library`,
+      };
+    }
+  }
+  return undefined;
 }
 
 /**

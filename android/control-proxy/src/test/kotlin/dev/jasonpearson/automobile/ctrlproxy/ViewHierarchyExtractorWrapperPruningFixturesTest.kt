@@ -71,6 +71,49 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
   }
 
   /**
+   * Replays pruning over the API 30-36 captures taken with pruning forced off. The count is window
+   * root nodes only; the device-on count is the same screen captured with the API default (on). API
+   * 34-36 replay to exactly the device-on count, which pins the replay to device behaviour. On API
+   * 30-33 androidx writes an all-false `BOOLEAN_PROPERTY_KEY` bitmask on every node, which the
+   * device build treated as meaningful, so the replay must now prune past the device-on count.
+   */
+  @Test
+  fun `API 30-36 off captures replay to the pinned pruned counts without losing a selector`() {
+    for ((api, counts) in apiLevelCounts) {
+      val (deviceOn, replayed) = counts
+      val off = apiLevelCaptures.getValue("a$api-off.json")
+      val before = off.flatMap(::flatten)
+      val after = off.flatMap(pruning::optimizeWindowRoot).flatMap(::flatten)
+
+      assertEquals(
+        "API $api device-on",
+        deviceOn,
+        apiLevelCaptures.getValue("a$api-on.json").sumOf { flatten(it).size },
+      )
+      assertEquals("API $api replayed", replayed, after.size)
+      assertEquals(
+        "API $api lost nodes a selector or tap can reach",
+        emptyList<UIElementInfo>(),
+        lost(before, after),
+      )
+      if (api >= 34) assertEquals("API $api replay matches the device", deviceOn, replayed)
+      else assertTrue("API $api replay prunes past the device", replayed < deviceOn)
+    }
+  }
+
+  /** API level to (device-on window-root nodes, replayed window-root nodes). */
+  private val apiLevelCounts =
+    mapOf(
+      30 to (55 to 0),
+      31 to (57 to 0),
+      32 to (40 to 0),
+      33 to (41 to 0),
+      34 to (33 to 0),
+      35 to (34 to 0),
+      36 to (34 to 0),
+    )
+
+  /**
    * Selector-relevant nodes present before pruning and missing after, compared by their own fields.
    */
   private fun lost(before: List<UIElementInfo>, after: List<UIElementInfo>): List<UIElementInfo> {
@@ -127,6 +170,8 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
       isLenient = true
     }
     private lateinit var captures: Map<String, Capture>
+    /** `aNN-on.json`/`aNN-off.json` under android-wrapper-pruning, as window roots. */
+    private lateinit var apiLevelCaptures: Map<String, List<UIElementInfo>>
 
     @BeforeClass
     @JvmStatic
@@ -151,6 +196,15 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
         files[name] = Capture(name, decode(root.jsonObject))
       }
       captures = files
+      apiLevelCaptures =
+        (30..36)
+          .flatMap { api -> listOf("a$api-on.json", "a$api-off.json") }
+          .associateWith { name ->
+            val path = "test/fixtures/android-wrapper-pruning/$name"
+            val message = json.parseToJsonElement(fixture(path).readText()).jsonObject
+            val hierarchy = message["data"]!!.jsonObject["hierarchy"]!!.jsonObject
+            childrenOf(hierarchy["node"]).map(::decode)
+          }
     }
 
     // Same ancestor search as the other repo-fixture tests: works from the repo root, android/,

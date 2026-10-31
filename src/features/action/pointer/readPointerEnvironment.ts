@@ -15,6 +15,14 @@ const API_READ_TIMEOUT_MS = 5000;
 const ROOT_READ_TIMEOUT_MS = 5000;
 
 /**
+ * The uinput route only carries what the runner cannot: with both pointer capabilities advertised
+ * it is never chosen, so the extra `id -u` round trip is skipped.
+ */
+export function needsRootProbe(advertised: ReadonlySet<string>): boolean {
+  return !advertised.has(STYLUS_INPUT_CAPABILITY) || !advertised.has(HOVER_INPUT_CAPABILITY);
+}
+
+/**
  * Whether `adb shell` runs as root, as after `adb root` on an emulator or userdebug build. The uinput
  * route needs it to open `/dev/uinput`. AutoMobile never runs `adb root` itself: it restarts adbd.
  */
@@ -79,6 +87,6 @@ export async function readPointerEnvironment(
     platform: "android",
     apiLevel: apiLevel ?? undefined,
     capabilities: pointerCapabilities((name) => advertised.has(name)),
-    rootShell: await readRootShell(adb, signal),
+    ...(needsRootProbe(advertised) ? { rootShell: await readRootShell(adb, signal) } : {}),
   };
 }

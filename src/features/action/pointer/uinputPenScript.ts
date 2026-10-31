@@ -223,11 +223,13 @@ export function uinputPenScript(request: PointerRequest, geometry: UinputDisplay
   return `${commands.map((command) => JSON.stringify(command)).join("\n")}\n`;
 }
 
+/** Time every uinput run spends before and after its events: the pen attach and close waits. */
+export const UINPUT_FIXED_OVERHEAD_MS = UINPUT_REGISTRATION_SETTLE_MS + CLOSE_SETTLE_MS;
+
 /** The planned event time of a request, for a transport timeout. */
 export function uinputPlannedMs(points: readonly PointerPoint[]): number {
   return (
-    UINPUT_REGISTRATION_SETTLE_MS +
-    CLOSE_SETTLE_MS +
+    UINPUT_FIXED_OVERHEAD_MS +
     points.slice(1).reduce((sum, point) => sum + (point.durationMs ?? DEFAULT_SEGMENT_MS), 0)
   );
 }

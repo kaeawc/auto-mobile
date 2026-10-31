@@ -88,6 +88,28 @@ describe("createUinputDispatch (#13105)", () => {
     }
   });
 
+  test("a script the device could not decode was never played", async () => {
+    const error = await new FakeUinputDevice(undefined, { exitCode: 97, stderr: "" })
+      .dispatch()(stroke)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PointerNotSentError);
+    expect((error as Error).message).toContain("decode");
+  });
+
+  test("a transport failure after the run started keeps the partial-run advice", async () => {
+    const dispatch = createUinputDispatch(new FakeAdbExecutor(), {
+      readGeometry: async () => ({ width: 1080, height: 2400, rotation: 0 }),
+      runScript: async () => {
+        throw new Error("device offline");
+      },
+    });
+    const error = await dispatch(stroke).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).not.toBeInstanceOf(PointerNotSentError);
+    expect((error as Error).message).toContain("device offline");
+    expect((error as Error).message).toContain("Verify state with observe");
+  });
+
   test("any other failure may have played part of the stroke", async () => {
     const error = await new FakeUinputDevice(undefined, {
       exitCode: 1,
@@ -136,7 +158,8 @@ describe("runAdbUinputScript", () => {
     const [command] = adb.getExecutedArgv();
     expect(command[0]).toBe("shell");
     expect(command[1]).toBe(
-      `echo ${Buffer.from('{"id":1}\n').toString("base64")} | base64 -d | uinput - 2>&1; echo automobile-uinput-exit=$?`,
+      `s=$(echo ${Buffer.from('{"id":1}\n').toString("base64")} | base64 -d) || { echo automobile-uinput-exit=97; exit 0; }; ` +
+        `printf '%s\\n' "$s" | uinput - 2>&1; echo automobile-uinput-exit=$?`,
     );
     expect(result).toEqual({
       exitCode: 1,

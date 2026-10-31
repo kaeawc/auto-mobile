@@ -22,6 +22,8 @@ const UINPUT_OVERHEAD_MS = 10_000;
  */
 const MAX_ENCODED_SCRIPT_BYTES = 100_000;
 const EXIT_MARKER = "automobile-uinput-exit=";
+/** The marker status when base64 itself failed, so `uinput` never saw the script. */
+const DECODE_FAILED_STATUS = 97;
 
 export interface UinputScriptResult {
   /** The `uinput` tool's exit status, or null when the shell never reported one. */
@@ -67,8 +69,10 @@ export async function readAdbUinputGeometry(
 }
 
 /**
- * Pipes the script through base64 on the device (no quoting can break it, the same as the perfetto
- * config) into `uinput -`, then prints the tool's exit status so the shell itself always exits 0.
+ * Decodes the script on the device (base64 has no character a shell interprets, the same as the
+ * perfetto config) and feeds it to `uinput -`, then prints the tool's exit status so the shell itself
+ * always exits 0. The decode runs first on its own: in a pipe its failure would leave `uinput` with an
+ * empty script that exits 0 having injected nothing.
  */
 export async function runAdbUinputScript(
   adb: AdbExecutor,
@@ -78,7 +82,11 @@ export async function runAdbUinputScript(
 ): Promise<UinputScriptResult> {
   const encoded = Buffer.from(script, "utf8").toString("base64");
   const result = await adb.execute(
-    ["shell", `echo ${encoded} | base64 -d | uinput - 2>&1; echo ${EXIT_MARKER}$?`],
+    [
+      "shell",
+      `s=$(echo ${encoded} | base64 -d) || { echo ${EXIT_MARKER}${DECODE_FAILED_STATUS}; exit 0; }; ` +
+        `printf '%s\\n' "$s" | uinput - 2>&1; echo ${EXIT_MARKER}$?`,
+    ],
     { timeoutMs, noRetry: true, signal },
   );
   const output = `${result.stdout}\n${result.stderr}`;
@@ -91,6 +99,11 @@ export async function runAdbUinputScript(
 
 function scriptFailure(result: UinputScriptResult): ActionableError {
   const output = result.stderr || `exit ${result.exitCode ?? "unknown"}`;
+  if (result.exitCode === DECODE_FAILED_STATUS) {
+    return new PointerNotSentError(
+      "The device could not decode the uinput script (base64 -d failed). No input was sent.",
+    );
+  }
   if (result.exitCode === 127 || /not found/i.test(result.stderr)) {
     return new PointerNotSentError(
       `This device has no uinput tool, so the uinput route cannot inject a stylus: ${output}. No input was sent.`,
@@ -146,11 +159,16 @@ export function createUinputDispatch(
         );
       }
       throwIfAborted(signal);
-      const result = await deps.runScript(
-        script,
-        uinputPlannedMs(request.points) + UINPUT_OVERHEAD_MS,
-        signal,
-      );
+      const result = await deps
+        .runScript(script, uinputPlannedMs(request.points) + UINPUT_OVERHEAD_MS, signal)
+        .catch((error: unknown) => {
+          throw signal?.aborted
+            ? error
+            : new ActionableError(
+                `The uinput pen run failed and may have played part of the stroke or hover: ${errorMessage(error)}. Verify state with observe before retrying.`,
+                { cause: error },
+              );
+        });
       if (result.exitCode !== 0) {
         throw scriptFailure(result);
       }

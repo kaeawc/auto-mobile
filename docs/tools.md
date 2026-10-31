@@ -212,7 +212,7 @@ virtual loopback device the default input) or the AVD audio settings. The `messa
 | `pressure` other than 1, `tilt` (radians, 0 to PI/2), `orientation` (radians), or `buttons` (`primary`, `secondary`) | CtrlProxy instrumentation | `stylus_input_v1` (Android 12+) |
 | `dragPath` with any `pointer`                                                                                        | CtrlProxy instrumentation | `stylus_input_v1` (Android 12+) |
 
-On an emulator or userdebug build whose `adb shell` already runs as root (after `adb root`), a stylus
+On an emulator or userdebug build whose `adb shell` already runs as root (after `adb root`) and has the `uinput` tool, a stylus
 stroke with `pressure` and a `dragPath` also work without `stylus_input_v1`, through a virtual pen; `tilt`,
 `orientation` and `buttons` still need the runner, and each stroke starts about 4 seconds later while the pen attaches.
 
@@ -237,7 +237,7 @@ Hover enter, move and exit over `points` with no contact (Android only; the reas
 | `mouse`            | `ACTION_HOVER_*` with `TOOL_TYPE_MOUSE` and `SOURCE_MOUSE`; no distance; desktop-style UI |
 
 It needs the `hover_input_v1` runner capability, or, for a `stylus` hover, an `adb shell` that already runs as
-root (after `adb root` on an emulator or userdebug build). A device or runner without either, and iOS, are refused before
+root with a writable `/dev/uinput` (after `adb root` on an emulator or userdebug build). A device or runner without either, and iOS, are refused before
 anything is sent with the missing capability named, and a hover is never turned into a touch. CtrlProxy
 advertises the capability and injects the hover through its `UiAutomation` instrumentation (see the
 [stylus design note](design-docs/mcp/stylus-pressure-hover-injection.md#instrumentation-route-13097)); the semantics above

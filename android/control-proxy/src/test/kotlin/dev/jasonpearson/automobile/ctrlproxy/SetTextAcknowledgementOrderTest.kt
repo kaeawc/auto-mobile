@@ -156,11 +156,18 @@ class SetTextAcknowledgementOrderTest {
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     for (signature in
       listOf(
-        "private fun performGlobalActionRequest(",
         "override suspend fun requestClickFocusedInput(",
       )) {
       assertTrue("$signature clears caret", functionBody(serviceSource, signature).contains(forget))
     }
+    // Global actions moved to GlobalActionController (#11876); its Host seam reaches the caret.
+    val globalActionSource =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("GlobalActionController.kt").readText())
+    assertTrue(
+      "performGlobalActionRequest clears caret",
+      functionBody(globalActionSource, "fun performGlobalActionRequest(")
+        .contains("host.forgetRememberedInsert()"),
+    )
     // The commit path moved to ImeController (#11876); its Host seam is wired to the same caret.
     val imeSource =
       KotlinSourceScan.maskLiteralsAndComments(locateSource("ImeController.kt").readText())

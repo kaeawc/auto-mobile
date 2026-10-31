@@ -1,5 +1,5 @@
 import type { DeviceProfileSelector } from "../../models/ManufacturerProfileIds";
-import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
+import type { RequirementResult, SessionDeviceProfile } from "../../devices/sessionRequirements";
 import type { BrokerResourceRecord } from "./store";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionBrokerFailure } from "../../devices/sessionBrokerResult";
@@ -66,4 +66,15 @@ export interface SessionBrokerDevicePort {
     signal?: AbortSignal,
     runResetBoot?: ResetBootRunner,
   ): Promise<ResetResult>;
+}
+
+export function unwrap<T>(result: RequirementResult<T>): T {
+  if (!result.ok) {
+    throw new SessionBrokerFailureError({
+      code: result.error.code,
+      message: result.error.message,
+      retryable: result.error.transient,
+    });
+  }
+  return result.value;
 }

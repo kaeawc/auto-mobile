@@ -1,7 +1,6 @@
 import { ResetCapacityWaitExceededError } from "../../models/ResetCapacityWaitExceededError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
-import type { RequirementResult } from "../../devices/sessionRequirements";
 import type { SessionConfig } from "../../devices/sessionConfig";
 import type { SessionBrokerFailure, SessionBrokerResult } from "../../devices/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -10,7 +9,10 @@ import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import { SessionBrokerFailureError } from "./devicePort";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { SESSION_BROKER_RETRY_AFTER_MS } from "./timing";
-import type { BrokerRequestRecord } from "./store";
+import type { BrokerRequestRecord, BrokerResourceRecord } from "./store";
+import { nativeProfile } from "./profile";
+import { sessionReadiness } from "./watchAdmission";
+import { SESSION_REQUEST_ABANDONED_CODE } from "./requestIdentity";
 
 export function storedBrokerFailure(
   request: BrokerRequestRecord,
@@ -37,16 +39,7 @@ export function storedBrokerFailure(
   };
 }
 
-export function unwrap<T>(result: RequirementResult<T>): T {
-  if (!result.ok) {
-    throw new SessionBrokerFailureError({
-      code: result.error.code,
-      message: result.error.message,
-      retryable: result.error.transient,
-    });
-  }
-  return result.value;
-}
+export { unwrap } from "./devicePort";
 
 export function failureFor(error: unknown): SessionBrokerFailure {
   return error instanceof SessionBrokerFailureError
@@ -130,4 +123,56 @@ export function drainFailureOutcome(
   // known retryable kind. recover()/service redrive bounds each pass, not total retries:
   // no per-request attempt/time cap exists, so persistent failures can stay pending forever.
   return "pending";
+}
+
+export function brokerResult(
+  request: BrokerRequestRecord,
+  resource: BrokerResourceRecord | undefined,
+  hasPendingPreparation: boolean,
+): SessionBrokerResult {
+  const durableCleanupPending =
+    resource?.requestId === request.requestId &&
+    ["destroying", "resetting", "unknown"].includes(resource.state);
+  const preparationPending =
+    request.errorCode === SESSION_REQUEST_ABANDONED_CODE && hasPendingPreparation;
+  const cleanupPending = Boolean(durableCleanupPending || preparationPending);
+  return {
+    contractVersion: 1,
+    requestId: request.requestId,
+    outcome:
+      request.state === "active"
+        ? "ready"
+        : request.state === "failed"
+          ? "failed"
+          : request.state === "released"
+            ? "released"
+            : "pending",
+    sessionUuid: request.sessionId,
+    profile: resource ? nativeProfile(resource) : null,
+    ...sessionReadiness(request.state === "active", resource),
+    cleanupPending,
+    ...(request.timing ? { timing: request.timing } : {}),
+    ...(request.error ? { failure: storedBrokerFailure(request, cleanupPending) } : {}),
+  };
+}
+
+export function failedPreparationResult(
+  request: BrokerRequestRecord,
+  result: SessionBrokerResult,
+  failure: SessionBrokerFailure,
+): SessionBrokerResult {
+  return request.errorCode === SESSION_REQUEST_ABANDONED_CODE
+    ? result
+    : {
+        ...result,
+        failure: {
+          ...failure,
+          retryable: Boolean(result.failure?.retryable),
+          // The stored receipt owns retry guidance, so the first reply matches every replay.
+          ...(result.failure?.retryAfterMs !== undefined
+            ? { retryAfterMs: result.failure.retryAfterMs }
+            : {}),
+          ...(result.failure?.retryRequires ? { retryRequires: result.failure.retryRequires } : {}),
+        },
+      };
 }

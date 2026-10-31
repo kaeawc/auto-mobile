@@ -491,13 +491,13 @@ async function daemonSupportsRequestedContract(
   return daemonSupportsSessionBroker(advertised);
 }
 
-/** Only a typed stopping refusal proves that prepare admitted nothing and is safe to resend. */
+/** Typed session_broker_stopping and session_broker_maintenance refusals admit nothing and are safe to resend. */
 function stoppingRetryDelay(error: unknown): number | undefined {
   if (
     typeof error !== "object" ||
     error === null ||
     !("code" in error) ||
-    error.code !== "session_broker_stopping"
+    (error.code !== "session_broker_stopping" && error.code !== "session_broker_maintenance")
   ) {
     return undefined;
   }
@@ -637,9 +637,9 @@ async function prepareThenRecover(
       }
       retryAfterMs = stoppingRetryDelay(error);
       if (retryAfterMs !== undefined) {
-        // Expected shutdown refusal admitted nothing; the successor can accept the same request.
+        // Stopping or maintenance admitted nothing; the same request can be accepted on retry.
         logger.debug(
-          `[SessionBroker] Prepare refused while stopping; retrying in ${retryAfterMs}ms.`,
+          `[SessionBroker] Prepare refused while stopping or maintaining snapshots; retrying in ${retryAfterMs}ms.`,
           error,
         );
         continue;
@@ -680,8 +680,8 @@ function acquisitionFailure(
 
 /**
  * Prepares exactly one durable request. Recovery reads status for the same request ID and owner
- * token, except a typed session_broker_stopping refusal admitted nothing: after its retry delay,
- * prepare is resent with identical params within the acquisition deadline.
+ * token, except typed session_broker_stopping and session_broker_maintenance refusals admitted
+ * nothing: after the retry delay, prepare is resent with identical params within the acquisition deadline.
  * A retryable session_broker_stopping receipt with retryRequires: "new_request_id" is returned
  * to the caller without resending: the request ID belongs to the caller.
  */

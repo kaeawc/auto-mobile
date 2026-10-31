@@ -4,6 +4,7 @@ import type { TransitionalSimulator } from "../models/TransitionalSimulator";
 import type { DiscoverySource } from "../utils/discoverySource";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import type { AppleTvSimulatorInventory } from "../utils/ios-cmdline-tools/AppleTvSimulatorInventory";
 import type { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import {
   type BootedDeviceDiscovery,
@@ -79,8 +80,7 @@ export function bootedSweepsFor(
     ios: either || platform === "ios",
     // Only the pool's own readers ask an "either" read for watches (#14908).
     watchos: platform === "watchos" || (either && options.includeWatchOs === true),
-    // Apple TV simulators are not discovered yet.
-    tvos: false,
+    tvos: platform === "tvos",
   };
 }
 
@@ -129,6 +129,57 @@ export function appendWatchBootedDiscovery(
   result.succeededPlatforms.add("watchos");
   result.succeededSources.add("watchos-simulator");
   for (const device of watch.devices) {
+    result.freshDeviceIds.add(device.deviceId);
+  }
+}
+
+/** Booted Apple TV simulators, or the typed reason the tvOS sweep has no answer. */
+export async function discoverBootedAppleTvs(
+  appleTvs: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators"> | undefined,
+  signal: AbortSignal | undefined,
+): Promise<{ devices: BootedDevice[]; error?: DeviceDiscoveryError }> {
+  signal?.throwIfAborted();
+  if (!appleTvs) {
+    return {
+      devices: [],
+      error: { code: "unavailable", message: "tvOS simulator discovery is unavailable." },
+    };
+  }
+  try {
+    const listed = await appleTvs.listAppleTvSimulators(signal);
+    signal?.throwIfAborted();
+    return {
+      devices: listed.flatMap((tv) =>
+        tv.isRunning && tv.deviceId
+          ? [{ name: tv.name, platform: "tvos" as const, deviceId: tv.deviceId }]
+          : [],
+      ),
+    };
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn(`tvOS simulator discovery failed: ${errorMessage(error)}`, error);
+    return {
+      devices: [],
+      error: {
+        code: "failed",
+        message: `tvOS simulator discovery failed: ${errorMessage(error)}`,
+      },
+    };
+  }
+}
+
+export function appendTvOsBootedDiscovery(
+  tv: { devices: BootedDevice[]; error?: DeviceDiscoveryError },
+  result: BootedDiscoveryAccumulator,
+): void {
+  if (tv.error) {
+    result.discoveryErrors.tvos = tv.error;
+    return;
+  }
+  result.devices.push(...tv.devices);
+  result.succeededPlatforms.add("tvos");
+  result.succeededSources.add("tvos-simulator");
+  for (const device of tv.devices) {
     result.freshDeviceIds.add(device.deviceId);
   }
 }

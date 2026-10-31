@@ -84,8 +84,10 @@ describe("DaemonClient never destructively recovers a stale socket (#6140)", () 
       writePidFile(pidFilePath, socketPath);
 
       const client = new DaemonClient(socketPath, 100, undefined, {
-        pidFilePath,
-        isProcessRunning: () => false,
+        recoveryOptions: {
+          pidFilePath,
+          isProcessRunning: () => false,
+        },
       });
 
       await expect(client.connect()).rejects.toThrow("Daemon socket not found");
@@ -102,8 +104,10 @@ describe("DaemonClient never destructively recovers a stale socket (#6140)", () 
       writePidFile(pidFilePath, socketPath);
 
       const client = new DaemonClient(socketPath, 100, undefined, {
-        pidFilePath,
-        isProcessRunning: () => true,
+        recoveryOptions: {
+          pidFilePath,
+          isProcessRunning: () => true,
+        },
       });
 
       await expect(client.connect()).rejects.toThrow("Daemon socket not found");
@@ -118,8 +122,10 @@ describe("DaemonClient never destructively recovers a stale socket (#6140)", () 
       writePidFile(pidFilePath, socketPath, 54321);
 
       const client = new DaemonClient(socketPath, 100, undefined, {
-        pidFilePath,
-        isProcessRunning: () => false,
+        recoveryOptions: {
+          pidFilePath,
+          isProcessRunning: () => false,
+        },
       });
 
       const error: unknown = await client.connect().then(
@@ -139,8 +145,10 @@ describe("DaemonClient never destructively recovers a stale socket (#6140)", () 
       writePidFile(pidFilePath, socketPath, 54321);
 
       const client = new DaemonClient(socketPath, 100, undefined, {
-        pidFilePath,
-        isProcessRunning: () => true,
+        recoveryOptions: {
+          pidFilePath,
+          isProcessRunning: () => true,
+        },
       });
 
       const error: unknown = await client.connect().then(
@@ -159,8 +167,10 @@ describe("DaemonClient never destructively recovers a stale socket (#6140)", () 
       // No socket file, no PID file: the simplest "nothing here" case.
 
       const client = new DaemonClient(socketPath, 100, undefined, {
-        pidFilePath,
-        isProcessRunning: () => false,
+        recoveryOptions: {
+          pidFilePath,
+          isProcessRunning: () => false,
+        },
       });
 
       await expect(client.connect()).rejects.toThrow("Daemon socket not found");
@@ -200,13 +210,11 @@ describe("DaemonClient platform-aware connect (#6140)", () => {
       `daemon-client-win32-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`,
     );
 
-    const client = new DaemonClient(
-      nonExistentSocketPath,
-      100,
-      undefined,
-      {},
-      { clientIdentity: null, platformOverride: "win32" },
-    );
+    const client = new DaemonClient(nonExistentSocketPath, 100, undefined, {
+      recoveryOptions: {},
+      clientIdentity: null,
+      platformOverride: "win32",
+    });
 
     const internals = client.testHooks;
     expect(internals.socketPathObservable()).toBe(true);
@@ -227,7 +235,9 @@ describe("DaemonClient platform-aware connect (#6140)", () => {
       const pidFilePath = createTempPidPath();
 
       const client = new DaemonClient(nonExistentSocketPath, 100, undefined, {
-        pidFilePath,
+        recoveryOptions: {
+          pidFilePath,
+        },
       });
 
       await expect(client.connect()).rejects.toThrow("Daemon socket not found");

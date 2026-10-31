@@ -209,8 +209,7 @@ export class ProxyToolCalls {
       },
       undefined,
       true,
-      true,
-      { signal },
+      { fenceSessionNotFoundOnRetry: true, signal },
     );
     const answer = raceWithDeadline(forwarding, {
       timer: this.runtime.timer,
@@ -347,13 +346,12 @@ export class ProxyToolCalls {
           signal?.throwIfAborted();
           const client = this.port.requireClient();
           return this.port.trackToolCallInFlight(client, () =>
-            client.callTool(name, forwardedArgs, progressToken, undefined, { signal }),
+            client.callTool(name, forwardedArgs, progressToken, { signal }),
           );
         },
         undefined,
         true,
-        false,
-        { signal },
+        { fenceSessionNotFoundOnRetry: false, signal },
       ),
       { timer: this.runtime.timer, signal, label: `Daemon tool ${name}` },
     );

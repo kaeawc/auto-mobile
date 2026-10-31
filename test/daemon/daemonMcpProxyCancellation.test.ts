@@ -31,7 +31,8 @@ function config(clientFactory: () => FakeDaemonClient, timer = new FakeTimer()) 
 async function setup() {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const daemonClient = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+  const daemonClient = new DaemonClient("/fake/socket", 1000, timer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
     clientIdentity: null,
     idGenerator: new FakeIdGenerator(),
   });

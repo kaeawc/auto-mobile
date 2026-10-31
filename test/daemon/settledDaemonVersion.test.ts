@@ -89,7 +89,8 @@ test("default client waits for refinement before opening a handshake connection"
     queueMicrotask(connected);
     return socket;
   });
-  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), ISOLATED_DAEMON_RECOVERY, {
+  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
     platformOverride: "win32",
   });
   try {

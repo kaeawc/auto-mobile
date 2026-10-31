@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { DaemonClientLike } from "../../../src/daemon/client/client";
+import type { DaemonClientLike, DaemonToolCallOptions } from "../../../src/daemon/client/client";
 import {
   ToolCallForwarder,
   type ForwardedResultContext,
@@ -38,10 +38,10 @@ function createHarness(): Harness {
       name: string,
       args: Record<string, unknown>,
       _progressToken?: string | number,
-      onRequestId?: (requestId: string) => void,
+      options?: DaemonToolCallOptions,
     ): Promise<unknown> {
       sent.push({ name, args });
-      onRequestId?.("req-1");
+      options?.onRequestId?.("req-1");
       if (sendError !== undefined) {
         throw sendError;
       }

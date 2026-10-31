@@ -61,13 +61,12 @@ function createConnectedClient(
   env: NodeJS.ProcessEnv = {},
   socket: Duplex = createBlackHoleSocket(),
 ): DaemonClient {
-  const client = new DaemonClient(
-    "/fake/socket",
-    connectionTimeout,
-    fakeTimer,
-    ISOLATED_DAEMON_RECOVERY,
-    { clientIdentity: null, env, idGenerator: new FakeIdGenerator() },
-  );
+  const client = new DaemonClient("/fake/socket", connectionTimeout, fakeTimer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+    clientIdentity: null,
+    env,
+    idGenerator: new FakeIdGenerator(),
+  });
   client.testHooks.attachSocket(socket);
   return client;
 }
@@ -100,12 +99,9 @@ function createDeferredConnectClient(
       callback();
     },
   });
-  const client = new DaemonClient(
-    "/fake/socket",
-    connectionTimeout,
-    fakeTimer,
-    ISOLATED_DAEMON_RECOVERY,
-  );
+  const client = new DaemonClient("/fake/socket", connectionTimeout, fakeTimer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+  });
   client.connect = async (timeoutMs = 1000) => {
     connectTimeouts.push(timeoutMs);
     markConnectStarted();
@@ -595,11 +591,15 @@ describe("DaemonClient per-request timeout is extended by progress, bounded (#62
     const client = createConnectedClient(fakeTimer);
     let firstId = "";
     let secondId = "";
-    const first = client.callTool("tapOn", {}, "reused", (id) => {
-      firstId = id;
+    const first = client.callTool("tapOn", {}, "reused", {
+      onRequestId: (id) => {
+        firstId = id;
+      },
     });
-    const second = client.callTool("tapOn", {}, "reused", (id) => {
-      secondId = id;
+    const second = client.callTool("tapOn", {}, "reused", {
+      onRequestId: (id) => {
+        secondId = id;
+      },
     });
     const firstResult = first.catch((error: unknown) => error);
     const secondResult = second.catch((error: unknown) => error);
@@ -624,7 +624,8 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
   function setup() {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+    const client = new DaemonClient("/fake/socket", 1000, timer, {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
       clientIdentity: null,
     });
     client.testHooks.attachSocket(socket);
@@ -751,8 +752,10 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
     const { client, timer, socket, respond } = setup();
     let requestId = "";
     const outcome = client
-      .callTool("tapOn", {}, "progress", (id) => {
-        requestId = id;
+      .callTool("tapOn", {}, "progress", {
+        onRequestId: (id) => {
+          requestId = id;
+        },
       })
       .catch((error: unknown) => error);
     const progress = () =>
@@ -811,19 +814,16 @@ test.each(["timeout", "reply", "abort"])(
     timer.setTimeout = (callback, ms) =>
       scheduleFakeTimeout(callback, ms > MAX_SETTIMEOUT_DELAY_MS ? 1 : ms);
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+    const client = new DaemonClient("/fake/socket", 1000, timer, {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
       clientIdentity: null,
     });
     client.testHooks.attachSocket(socket);
     const controller = new AbortController();
     const outcome = client
-      .callTool(
-        "tapOn",
-        { action: "longPress", duration: Number.MAX_SAFE_INTEGER },
-        undefined,
-        undefined,
-        { signal: controller.signal },
-      )
+      .callTool("tapOn", { action: "longPress", duration: Number.MAX_SAFE_INTEGER }, undefined, {
+        signal: controller.signal,
+      })
       .catch((error: unknown) => error);
     const request = socket.getWrittenMessages(daemonRequestFrameSchema)[0];
     try {
@@ -876,12 +876,9 @@ async function checkArgumentBudgetClientTimeout(
       callback();
     },
   });
-  const client = new DaemonClient(
-    "/fake/socket",
-    connectionTimeout,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-  );
+  const client = new DaemonClient("/fake/socket", connectionTimeout, timer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+  });
   client.testHooks.attachSocket(socket);
   const outcome = client.callTool(tool, args).catch((error: unknown) => error);
   const expectedMs = Math.max(resolvedMs, connectionTimeout);
@@ -1216,7 +1213,8 @@ describe("DaemonClient.callDaemonMethod reply timeout cancellation (#13800)", ()
   function setup() {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+    const client = new DaemonClient("/fake/socket", 1000, timer, {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
       clientIdentity: null,
       idGenerator: new FakeIdGenerator(),
     });

@@ -11,6 +11,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { FakeDeviceExecutionBinding } from "../../fakes/FakeDeviceExecutionBinding";
 
 const result = (stdout = ""): ExecResult => ({
   stdout,
@@ -71,6 +72,81 @@ function setup(
 }
 
 describe("DefaultEmulatorReadinessPoller", () => {
+  for (const correlation of ["launch-output", "avd-name"]) {
+    for (const quarantined of [false, true]) {
+      test(`binds only the correlated target during boot: ${correlation}, quarantined=${quarantined}`, async () => {
+        const { timer, adb, host } = setup(
+          readyAdb({ "shell getprop sys.boot_completed": "0\n" }),
+          () => null,
+          { autoAdvance: false },
+        );
+        const binding = new FakeDeviceExecutionBinding();
+        const target: BootedDevice = {
+          name: "Pixel_9",
+          deviceId: "emulator-5558",
+          platform: "android",
+        };
+        const unrelated: BootedDevice = {
+          name: "Other",
+          deviceId: "emulator-5556",
+          platform: "android",
+        };
+        const admitted: string[] = [];
+        const expectedBindings = quarantined ? [] : [target.deviceId];
+        const poller = new DefaultEmulatorReadinessPoller(host, undefined, {
+          executionBinding: binding,
+          admissionGate: {
+            assertDeviceActionable: (id) => {
+              admitted.push(id);
+              if (quarantined) {
+                throw new ActionableError("Device identity is quarantined");
+              }
+            },
+          },
+        });
+        host.getLaunchTargetDeviceId = () =>
+          correlation === "launch-output" ? target.deviceId : undefined;
+        // Launch correlation must bind even before the target appears in discovery.
+        host.getBootedDevicesWithDiagnostics = async () => {
+          if (correlation === "launch-output") {
+            expect(binding.deviceIds).toEqual(expectedBindings);
+          }
+          return {
+            devices: correlation === "launch-output" ? [unrelated] : [unrelated, target],
+            diagnostics: [],
+          };
+        };
+        host.findNamedEmulator = (name, _child, devices) => ({
+          emulator: devices.find((device) => device.name === name),
+        });
+        host.adbFactory = () => ({
+          create: (device) => {
+            if (device) {
+              // Name correlation must bind before the first selected-device probe.
+              expect(device.deviceId).toBe(target.deviceId);
+              expect(binding.deviceIds).toEqual(expectedBindings);
+            }
+            return adb;
+          },
+        });
+        const controller = new AbortController();
+        const reason = new Error("test completed before readiness");
+        const pending = poller
+          .waitForEmulatorReady("Pixel_9", 5_000, null, {
+            signal: controller.signal,
+          })
+          .catch((error: unknown) => error);
+        await drainMicrotasks(200);
+        controller.abort(reason);
+        expect(await pending).toBe(reason);
+        expect(binding.deviceIds).toEqual(expectedBindings);
+        expect(admitted).toEqual([target.deviceId]);
+        expect(timer.now()).toBe(0);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      });
+    }
+  }
+
   test("abort during both readiness sleeps rejects promptly without leaving timers", async () => {
     const { poller, timer } = setup(
       readyAdb({ "shell getprop sys.boot_completed": "0\n" }),

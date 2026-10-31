@@ -274,13 +274,19 @@ export const prototypeOutputSchema = z.object({
             "Authored prototype id on Android; bundle id on iOS simulators, accepted by deleteSaved.",
           ),
         label: z.string(),
-        slug: z.string(),
+        slug: z.string().optional(),
         savedAt: z
           .number()
           .finite()
           .optional()
-          .describe("Absent where the platform cannot report save time (iOS simulators)."),
+          .describe(
+            "Absent for host-only entries or where the platform cannot report save time (iOS simulators).",
+          ),
         pinned: z.boolean(),
+        hostOnly: z
+          .boolean()
+          .optional()
+          .describe("Present on the host mirror but missing on the device."),
       }),
     )
     .optional(),

@@ -1,6 +1,5 @@
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, PlanStep, Element } from "../../../models";
-import type { PointerOption } from "../../../models/PointerOption";
 import type {
   GestureEmitter,
   GestureEvent,
@@ -9,7 +8,7 @@ import type {
   ReceivedInteraction,
   TouchTrackFailure,
 } from "./types";
-import { GESTURE_THRESHOLDS } from "./types";
+import { GESTURE_THRESHOLDS, pointerOf } from "./types";
 import { formsDoubleTap, hasUnknownAxes } from "./gesturePairing";
 import { noteExportLoss } from "./penExportWarnings";
 import { AndroidCtrlProxyClient, type AndroidCtrlProxy } from "../../observe/android";
@@ -1002,14 +1001,6 @@ function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): Plan
     params.speed = "fast";
   }
   return { tool: "swipeOn", params };
-}
-
-/**
- * The replayable pointer for a recorded pen gesture. Only "stylus" can be injected, so an eraser
- * has none (the recorder skips those gestures instead of replaying them as another tool).
- */
-function pointerOf(gesture: GestureEvent): PointerOption | undefined {
-  return gesture.toolType === "stylus" ? { toolType: "stylus" } : undefined;
 }
 
 function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {

@@ -1,3 +1,4 @@
+import { runWithTargetDeviceExecutionBinding } from "../deviceExecutionBinding";
 import { refreshEmulatorGrpcAudio } from "../audio/emulatorGrpcAudioState";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { combineAbortSignals } from "../AbortContext";
@@ -272,50 +273,52 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       const diagnostics: ReadinessDiagnostic[] = [];
       perf.startOperation("avdNameResolution");
       const emulatorResults = await Promise.all(
-        emulatorDevices.map(async (device) => {
-          if (foreignSerials?.has(device.deviceId)) {
-            return { device: this.foreignDevice(device, options), diagnostic: undefined };
-          }
-          const deadlineMs = this.deps.timer().now() + remainingScanMs();
-          const nameTimeoutMs = Math.min(infoTimeoutMs, remainingScanMs());
-          const avdName =
-            options.skipNameEnrichment || nameTimeoutMs <= 0
-              ? { name: "", diagnostic: undefined }
-              : await this.inventoryRunningAvdName(device, {
-                  options,
-                  timeoutMs: nameTimeoutMs,
-                  signal,
-                });
-          const modelRemainingMs = Math.min(
-            deadlineMs - this.deps.timer().now(),
-            remainingScanMs(),
-          );
-          const model =
-            modelRemainingMs > 0 &&
-            !options.skipProfileEnrichment &&
-            !(options.readinessOnly && options.coalesceInventoryEnrichment)
-              ? await this.modelForBootedEmulator(device, avdName, modelRemainingMs, {
-                  skipNameEnrichment: options.skipNameEnrichment === true,
-                  signal,
-                })
-              : undefined;
-          const architectureRemainingMs = Math.min(
-            deadlineMs - this.deps.timer().now(),
-            remainingScanMs(),
-          );
-          const architecture =
-            architectureRemainingMs > 0 && this.includesFullMetadata(options)
-              ? await this.resolveEmulatorArchitecture(device, avdName, architectureRemainingMs, {
-                  skipNameEnrichment: options.skipNameEnrichment === true,
-                  signal,
-                })
-              : undefined;
+        emulatorDevices.map((device) =>
+          runWithTargetDeviceExecutionBinding(device.deviceId, options.targetDeviceId, async () => {
+            if (foreignSerials?.has(device.deviceId)) {
+              return { device: this.foreignDevice(device, options), diagnostic: undefined };
+            }
+            const deadlineMs = this.deps.timer().now() + remainingScanMs();
+            const nameTimeoutMs = Math.min(infoTimeoutMs, remainingScanMs());
+            const avdName =
+              options.skipNameEnrichment || nameTimeoutMs <= 0
+                ? { name: "", diagnostic: undefined }
+                : await this.inventoryRunningAvdName(device, {
+                    options,
+                    timeoutMs: nameTimeoutMs,
+                    signal,
+                  });
+            const modelRemainingMs = Math.min(
+              deadlineMs - this.deps.timer().now(),
+              remainingScanMs(),
+            );
+            const model =
+              modelRemainingMs > 0 &&
+              !options.skipProfileEnrichment &&
+              !(options.readinessOnly && options.coalesceInventoryEnrichment)
+                ? await this.modelForBootedEmulator(device, avdName, modelRemainingMs, {
+                    skipNameEnrichment: options.skipNameEnrichment === true,
+                    signal,
+                  })
+                : undefined;
+            const architectureRemainingMs = Math.min(
+              deadlineMs - this.deps.timer().now(),
+              remainingScanMs(),
+            );
+            const architecture =
+              architectureRemainingMs > 0 && this.includesFullMetadata(options)
+                ? await this.resolveEmulatorArchitecture(device, avdName, architectureRemainingMs, {
+                    skipNameEnrichment: options.skipNameEnrichment === true,
+                    signal,
+                  })
+                : undefined;
 
-          return {
-            device: this.discoveredEmulatorDevice(device, avdName, model, architecture),
-            diagnostic: avdName.diagnostic,
-          };
-        }),
+            return {
+              device: this.discoveredEmulatorDevice(device, avdName, model, architecture),
+              diagnostic: avdName.diagnostic,
+            };
+          }),
+        ),
       );
       for (const result of emulatorResults) {
         this.refreshGrpcAudio(result.device, options);
@@ -340,10 +343,15 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
             const snapshotDevice = devices.find(
               (snapshot) => snapshot.deviceId === device.deviceId,
             );
-            const displays = await this.inventoryDisplays(
-              { ...device, observedAt: snapshotDevice?.observedAt },
-              options,
-              signal,
+            const displays = await runWithTargetDeviceExecutionBinding(
+              device.deviceId,
+              options.targetDeviceId,
+              () =>
+                this.inventoryDisplays(
+                  { ...device, observedAt: snapshotDevice?.observedAt },
+                  options,
+                  signal,
+                ),
             );
             if (displays) {
               device.displays = displays;
@@ -387,17 +395,27 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         runningDevices.push(this.discoveredPhysicalDevice(device, undefined, undefined));
         continue;
       }
-      const [model, architecture] = await Promise.all([
-        this.resolveDeviceModel(device, physicalTimeoutMs, options.skipNameEnrichment === true, {
-          signal,
-        }),
-        this.resolvePhysicalDeviceArchitecture(
-          device,
-          physicalTimeoutMs,
-          options.skipNameEnrichment === true,
-          { signal },
-        ),
-      ]);
+      const [model, architecture] = await runWithTargetDeviceExecutionBinding(
+        device.deviceId,
+        options.targetDeviceId,
+        () =>
+          Promise.all([
+            this.resolveDeviceModel(
+              device,
+              physicalTimeoutMs,
+              options.skipNameEnrichment === true,
+              {
+                signal,
+              },
+            ),
+            this.resolvePhysicalDeviceArchitecture(
+              device,
+              physicalTimeoutMs,
+              options.skipNameEnrichment === true,
+              { signal },
+            ),
+          ]),
+      );
       runningDevices.push(this.discoveredPhysicalDevice(device, model, architecture));
     }
     return runningDevices;
@@ -522,13 +540,15 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     return state.nameFlight.run(
       key,
       () =>
-        runWithAbortSignal(undefined, async () => {
-          const result = await this.deps.getRunningAvdName(device, READINESS_NAME_TIMEOUT_MS);
-          if (result.name && generation === state.generation) {
-            state.names.set(key, result);
-          }
-          return result;
-        }),
+        runWithTargetDeviceExecutionBinding(device.deviceId, options.targetDeviceId, () =>
+          runWithAbortSignal(undefined, async () => {
+            const result = await this.deps.getRunningAvdName(device, READINESS_NAME_TIMEOUT_MS);
+            if (result.name && generation === state.generation) {
+              state.names.set(key, result);
+            }
+            return result;
+          }),
+        ),
       signal ?? getAbortSignal(),
     );
   }
@@ -630,19 +650,21 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     const result = await state.displayFlight.run(
       key,
       () =>
-        runWithAbortSignal(undefined, async () => {
-          const result = await readAndroidDeviceDisplaysChecked(
-            this.deps.adbFactory().create(device),
-          );
-          if (
-            generation === state.generation &&
-            !result.degraded &&
-            result.outcome.kind !== "unreadable"
-          ) {
-            state.displays.set(key, result);
-          }
-          return result;
-        }),
+        runWithTargetDeviceExecutionBinding(device.deviceId, options.targetDeviceId, () =>
+          runWithAbortSignal(undefined, async () => {
+            const result = await readAndroidDeviceDisplaysChecked(
+              this.deps.adbFactory().create(device),
+            );
+            if (
+              generation === state.generation &&
+              !result.degraded &&
+              result.outcome.kind !== "unreadable"
+            ) {
+              state.displays.set(key, result);
+            }
+            return result;
+          }),
+        ),
       signal ?? getAbortSignal(),
     );
     return result.displays;

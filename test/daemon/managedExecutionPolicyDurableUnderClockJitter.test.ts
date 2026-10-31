@@ -30,7 +30,7 @@ test("managed policy survives a lower second conversion and daemon rehydration",
   const timer = new JitterTimer();
   timer.setCurrentTime(1_700_000_000_000);
   db = await createTestDatabase();
-  const repository = new DeviceSessionRepository(db, timer);
+  const repository = new DeviceSessionRepository({ db, timer });
   const writer = new SessionManager(timer, repository);
   managers.push(writer);
   const session = await writer.createSession(SESSION, DEVICE, "android", {
@@ -77,7 +77,7 @@ test("managed policy survives a lower second conversion and daemon rehydration",
 test("unchanged instants reuse their wall stamps; newer and stale instants still cross the frame", async () => {
   const timer = new FakeTimer();
   db = await createTestDatabase();
-  const repository = new DeviceSessionRepository(db, timer);
+  const repository = new DeviceSessionRepository({ db, timer });
   let offset = 1_000;
   const converted: number[] = [];
   const persistence = onSessionClock(repository, {
@@ -139,7 +139,7 @@ test("unchanged instants reuse their wall stamps; newer and stale instants still
 test("stale activity preserves the newer stamp for a managed policy write under jitter", async () => {
   const timer = new FakeTimer();
   db = await createTestDatabase();
-  const repository = new DeviceSessionRepository(db, timer);
+  const repository = new DeviceSessionRepository({ db, timer });
   let offset = 1_000;
   const converted: number[] = [];
   const persistence = onSessionClock(repository, {

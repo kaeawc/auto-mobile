@@ -36,8 +36,8 @@ describe("NavigationGraphManager provenance write path", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    const navRepo = new NavigationRepository(db);
-    const coverageRepo = new TestCoverageRepository(db);
+    const navRepo = new NavigationRepository({ db });
+    const coverageRepo = new TestCoverageRepository({ db });
     manager = NavigationGraphManager.createForTesting(navRepo, {
       testCoverageRepository: coverageRepo,
       sessionUuid: SESSION,
@@ -221,8 +221,8 @@ describe("NavigationGraphManager provenance write path", () => {
         return super.getNodeByFingerprint(appId, hash);
       }
     }
-    const switchingRepo = new SwitchingRepo(db);
-    const coverageRepo = new TestCoverageRepository(db);
+    const switchingRepo = new SwitchingRepo({ db });
+    const coverageRepo = new TestCoverageRepository({ db });
     const m = NavigationGraphManager.createForTesting(switchingRepo, {
       testCoverageRepository: coverageRepo,
       sessionUuid: SESSION,
@@ -284,8 +284,8 @@ describe("NavigationGraphManager provenance write path", () => {
         return super.getNodeByFingerprint(appId, hash);
       }
     }
-    const switchingRepo = new SwitchingRepo(db);
-    const coverageRepo = new TestCoverageRepository(db);
+    const switchingRepo = new SwitchingRepo({ db });
+    const coverageRepo = new TestCoverageRepository({ db });
     const m = NavigationGraphManager.createForTesting(switchingRepo, {
       testCoverageRepository: coverageRepo,
       sessionUuid: SESSION,
@@ -376,7 +376,7 @@ describe("NavigationGraphManager provenance write path", () => {
       versionCode: 7,
       contentHash: "hashA",
     });
-    const repo = new NavigationRepository(db);
+    const repo = new NavigationRepository({ db });
     const suggestion = await repo.addOrUpdateSuggestion(APP, "fp-hash", "{}", 100);
     const old = await ageUpdatedAt();
 
@@ -403,7 +403,7 @@ describe("NavigationGraphManager provenance write path", () => {
 
   test("suggestion reaches retain distinct build/device/session provenance and transfer on promotion", async () => {
     await manager.setCurrentApp(APP);
-    const repo = new NavigationRepository(db);
+    const repo = new NavigationRepository({ db });
     await repo.getOrCreateNode(APP, "Existing", 1);
     manager.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "a" });
     const reach = (timestamp: number) =>
@@ -489,7 +489,7 @@ describe("NavigationGraphManager provenance write path", () => {
   test("cross-app suggestion promotion skips transfer and records fallback provenance", async () => {
     const otherApp = "com.example.other";
     await manager.setCurrentApp(APP);
-    const repo = new NavigationRepository(db);
+    const repo = new NavigationRepository({ db });
     await repo.getOrCreateApp(otherApp);
     const suggestion = await repo.addOrUpdateSuggestion(otherApp, "foreign-fp", "{}", 100);
     const otherBuild = await repo.getOrCreateBuildKey(otherApp, 7, "foreign-build");

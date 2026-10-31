@@ -10,7 +10,7 @@ describe("ToolCallRepository status recording", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repository = new ToolCallRepository(db);
+    repository = new ToolCallRepository({ db });
   });
   afterEach(async () => {
     await db.destroy();

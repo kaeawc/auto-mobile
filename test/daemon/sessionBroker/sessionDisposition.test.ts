@@ -105,7 +105,7 @@ describe("broker session disposition", () => {
   test("real device-restart persistence stays recoverable until its window ends", async () => {
     const db = await createTestDatabase();
     const ports = rig();
-    const repository = new DeviceSessionRepository(db, ports.timer);
+    const repository = new DeviceSessionRepository({ db, timer: ports.timer });
     try {
       await repository.upsertActiveSession({
         sessionUuid: "handoff",

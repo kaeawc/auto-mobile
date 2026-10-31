@@ -12,7 +12,7 @@ describe("NavigationRepository", () => {
   beforeEach(async () => {
     // foreignKeys ON so clearApp's cascade deletes fire, matching production.
     db = await createTestDatabase({ foreignKeys: true });
-    repo = new NavigationRepository(db);
+    repo = new NavigationRepository({ db });
   });
 
   afterEach(async () => {
@@ -851,7 +851,7 @@ describe("NavigationRepository", () => {
 
   describe("resolveConnection", () => {
     test("returns the bound executor for a repo constructed with a db", () => {
-      const bound = new NavigationRepository(db);
+      const bound = new NavigationRepository({ db });
       expect(bound.resolveConnection()).toBe(db);
     });
 

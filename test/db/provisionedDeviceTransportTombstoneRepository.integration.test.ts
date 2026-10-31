@@ -16,7 +16,7 @@ describe("ProvisionedDeviceTransportTombstoneRepository", () => {
   });
 
   test("persists and updates retired serial identity across repository instances", async () => {
-    const repository = new ProvisionedDeviceTransportTombstoneRepository(database);
+    const repository = new ProvisionedDeviceTransportTombstoneRepository({ db: database });
     await repository.retire(
       {
         deviceId: "emulator-5554",
@@ -27,7 +27,9 @@ describe("ProvisionedDeviceTransportTombstoneRepository", () => {
     );
 
     expect(
-      await new ProvisionedDeviceTransportTombstoneRepository(database).get("emulator-5554"),
+      await new ProvisionedDeviceTransportTombstoneRepository({ db: database }).get(
+        "emulator-5554",
+      ),
     ).toEqual({
       deviceId: "emulator-5554",
       stableId: "phone-api-36-a",

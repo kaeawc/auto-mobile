@@ -114,7 +114,7 @@ describe("remaining session row writes (#11557)", () => {
     db = await createTestDatabase();
     // Warm lifecycle modules and SQL statements once; cold initialization is not the race under test.
     const warmTimer = new FakeTimer();
-    const warmStore = new DeferredRowRepository(db, warmTimer);
+    const warmStore = new DeferredRowRepository({ db, timer: warmTimer });
     const warmManager = makeSessionManager({
       timer: warmTimer,
       persistence: warmStore,
@@ -136,8 +136,8 @@ describe("remaining session row writes (#11557)", () => {
     await db.deleteFrom("device_sessions").execute();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    store = new DeferredRowRepository(db, timer);
-    peer = new DeviceSessionRepository(db, timer);
+    store = new DeferredRowRepository({ db, timer });
+    peer = new DeviceSessionRepository({ db, timer });
     manager = makeSessionManager({ timer: timer, persistence: store, fakeBarrier: true });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-1");

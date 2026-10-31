@@ -648,7 +648,10 @@ export class LivenessScenario {
   /** Restart-scenario helpers boot successor daemons through this. */
   async createDaemonSide(startupMs = 0): Promise<DaemonSide> {
     // One database across daemon "processes", so a restart rehydrates what the last one persisted.
-    this.repository ??= new DeviceSessionRepository(await createTestDatabase(), this.timer);
+    this.repository ??= new DeviceSessionRepository({
+      db: await createTestDatabase(),
+      timer: this.timer,
+    });
     const repository = this.repository;
     // Both process identity and session identity come from the daemon's injected id generator.
     const daemonName = `scenario-daemon-${++this.daemonCount}`;

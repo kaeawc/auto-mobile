@@ -3,6 +3,7 @@ import { type Kysely, sql } from "kysely";
 import { getDatabase } from "./database";
 import type { Database } from "./types";
 import { logger } from "../utils/logger";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /**
  * What `device_identity` stores: a digest of the device identity TOGETHER with the
@@ -32,7 +33,7 @@ function identityBinding(identity: string, lockType: string, credential: string 
 export class DeviceLockRepository {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
     this.db = db ?? null;
   }
 

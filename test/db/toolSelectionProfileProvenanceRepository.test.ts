@@ -31,7 +31,7 @@ describe("ToolSelectionProfileProvenanceRepository", () => {
 
   beforeEach(async () => {
     await db.deleteFrom("tool_selection_profile_provenance").execute();
-    repo = new ToolSelectionProfileProvenanceRepository(db);
+    repo = new ToolSelectionProfileProvenanceRepository({ db });
   });
 
   test("loadAll returns empty when nothing has been minted", async () => {

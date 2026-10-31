@@ -15,7 +15,7 @@ describe("NavigationRepository provenance observations", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new NavigationRepository(db);
+    repo = new NavigationRepository({ db });
     await repo.getOrCreateApp("com.example.app");
   });
 

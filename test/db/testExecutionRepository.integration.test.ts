@@ -44,7 +44,7 @@ describe("TestExecutionRepository", () => {
   beforeEach(async () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
-    repo = new TestExecutionRepository(db, timer);
+    repo = new TestExecutionRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -236,7 +236,7 @@ describe("TestExecutionRepository", () => {
       let executionId = 0;
 
       await db.transaction().execute(async (trx) => {
-        const boundRepo = new TestExecutionRepository(trx, timer);
+        const boundRepo = new TestExecutionRepository({ db: trx, timer });
         executionId = await boundRepo.recordExecution(
           makeExecution({
             steps: [makeStep()],
@@ -285,7 +285,7 @@ describe("TestExecutionRepository", () => {
 
     test("fetches executions, steps, and screens with exactly three queries", async () => {
       const instrumented = await createInstrumentedTestDatabase();
-      const instrumentedRepo = new TestExecutionRepository(instrumented.db, timer);
+      const instrumentedRepo = new TestExecutionRepository({ db: instrumented.db, timer });
       try {
         for (let i = 0; i < 5; i++) {
           await instrumentedRepo.recordExecution(
@@ -319,7 +319,7 @@ describe("TestExecutionRepository", () => {
 
     test("chunks more than SQLite's conservative bound-parameter limit without mixing steps or screens", async () => {
       const instrumented = await createInstrumentedTestDatabase();
-      const instrumentedRepo = new TestExecutionRepository(instrumented.db, timer);
+      const instrumentedRepo = new TestExecutionRepository({ db: instrumented.db, timer });
       const executionCount = SQLITE_MAX_BOUND_PARAMETERS + 6;
       try {
         await seedTestExecutions(instrumented.db, executionCount);
@@ -808,7 +808,7 @@ describe("TestExecutionRepository retention (#3440)", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(10_000_000_000);
-    repo = new TestExecutionRepository(db, timer);
+    repo = new TestExecutionRepository({ db, timer });
   });
 
   afterEach(async () => {

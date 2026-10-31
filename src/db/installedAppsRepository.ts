@@ -2,13 +2,14 @@ import type { InstalledAppsStore } from "../models/InstalledAppsStore";
 import type { Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, InstalledApp as DbInstalledApp, NewInstalledApp } from "./types";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 export type { InstalledAppsStore } from "../models/InstalledAppsStore";
 
 export class InstalledAppsRepository implements InstalledAppsStore {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
     this.db = db ?? null;
   }
 

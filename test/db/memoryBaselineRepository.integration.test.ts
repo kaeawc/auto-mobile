@@ -23,7 +23,7 @@ describe("MemoryBaselineRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new MemoryBaselineRepository(db);
+    repo = new MemoryBaselineRepository({ db });
   });
 
   afterEach(async () => {

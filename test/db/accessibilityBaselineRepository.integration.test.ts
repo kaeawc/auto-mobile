@@ -10,7 +10,7 @@ describe("AccessibilityBaselineRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new AccessibilityBaselineRepository(db);
+    repo = new AccessibilityBaselineRepository({ db });
   });
 
   afterEach(async () => {

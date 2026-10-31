@@ -40,7 +40,7 @@ export class BaselineManager {
    * (`createTestDatabase`) for tests that exercise the query paths (issue #3067).
    */
   constructor(db?: Kysely<Database>) {
-    this.repository = new AccessibilityBaselineRepository(db);
+    this.repository = new AccessibilityBaselineRepository({ db });
   }
 
   /**

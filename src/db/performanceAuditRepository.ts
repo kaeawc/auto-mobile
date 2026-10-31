@@ -9,6 +9,7 @@ import {
   pruneTableByRowCap,
   runAmortizedRetention,
 } from "./rowCapRetention";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 const RETENTION_MAX_ROWS = 10_000;
 const RETENTION_MAX_AGE_HOURS = 24;
@@ -87,7 +88,7 @@ export class PerformanceAuditRepository {
   private timer: Timer;
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>, timer: Timer = defaultTimer) {
+  constructor({ db, timer = defaultTimer }: Pick<RepositoryDeps, "db" | "timer"> = {}) {
     this.timer = timer;
     this.db = db ?? null;
   }

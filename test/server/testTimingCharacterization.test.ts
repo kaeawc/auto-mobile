@@ -29,7 +29,7 @@ describe("test timing filter characterization", () => {
   test.each([{}, filters, { targetSdk: 0, isCi: true }, { testClass: "", deviceName: "" }])(
     "preserves filter inclusion and query defaults for %p",
     async (args) => {
-      const repository = new TestExecutionRepository(undefined, new FakeTimer());
+      const repository = new TestExecutionRepository({ timer: new FakeTimer() });
       const query = spyOn(repository, "getTimingStats").mockResolvedValue([]);
       try {
         const response = await buildTestTimingResponse(args, repository);
@@ -63,7 +63,7 @@ describe("test timing filter characterization", () => {
   );
 
   test("preserves sample rates, zero timestamps, ordering overrides and result fields", async () => {
-    const repository = new TestExecutionRepository(undefined, new FakeTimer());
+    const repository = new TestExecutionRepository({ timer: new FakeTimer() });
     const query = spyOn(repository, "getTimingStats").mockResolvedValue([
       {
         testClass: "A",

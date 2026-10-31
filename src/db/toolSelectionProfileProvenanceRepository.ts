@@ -2,6 +2,7 @@ import type { Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database } from "./types";
 import { logger } from "../utils/logger";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /**
  * The narrow slice of `ToolSelectionProfileProvenanceRepository` that
@@ -37,7 +38,7 @@ export interface ToolSelectionProfileProvenanceStore {
 export class ToolSelectionProfileProvenanceRepository implements ToolSelectionProfileProvenanceStore {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
     this.db = db ?? null;
   }
 

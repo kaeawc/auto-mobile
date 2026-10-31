@@ -1,3 +1,4 @@
+import { bootCapacityOwnershipNote } from "../../../devices/bootAdmission/BootAdmissionGate";
 import type { BootSlotReservation } from "../../../devices/bootAdmission/BootSlotReservation";
 import { withVerifiedBootCapacity } from "../../../devices/bootAdmission/VerifiedBootCapacity";
 import { bootGatePlatform } from "../../../features/bootAdmission/sharedBootAdmissionGates";
@@ -912,7 +913,7 @@ export class BindingDeviceCreation {
       throw new ReconcileAbort(
         failure(
           "capacity_exhausted",
-          `${check.booted} ${request.platform} device(s) booted; limit is ${check.limit}.`,
+          `${check.booted} ${request.platform} device(s) booted; limit is ${check.limit}.${bootCapacityOwnershipNote(check)}`,
           {
             capacity: {
               limit: check.limit,

@@ -18,6 +18,8 @@ export interface BootCapacityExhaustedDetails {
   externalDevices?: string[];
   /** Counted iOS simulators with an AutoMobile admission, session or binding owner. */
   heldDevices?: string[];
+  /** Ownership could not be read; external labels are unconfirmed. */
+  ownershipUnknown?: boolean;
 }
 
 /**

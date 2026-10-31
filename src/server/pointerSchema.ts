@@ -10,7 +10,7 @@ export const pointerSchema = z
     toolType: z
       .enum(["stylus"])
       .describe(
-        "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1",
+        "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell",
       ),
     pressure: z
       .number()
@@ -18,7 +18,7 @@ export const pointerSchema = z
       .max(1)
       .optional()
       .describe(
-        "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) and is refused before input without it",
+        "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) or a root adb shell and is refused before input without either",
       ),
     tilt: z
       .number()

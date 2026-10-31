@@ -24,6 +24,7 @@ import { resolveTapAtCoordinates } from "./TapAtCoordinate";
 import { DRAG_PATH_DEFAULT_SEGMENT_MS, assertDragPathFitsRequestBudget } from "./dragPathPlan";
 import type { PointerEnvironment, PointerInjector } from "./pointer/PointerInjector";
 import { createInstrumentationDispatch } from "./pointer/instrumentationDispatch";
+import { createUinputDispatch } from "./pointer/uinputDispatch";
 import { defaultPointerRoutes } from "./pointer/pointerRoutes";
 import { readPointerEnvironment } from "./pointer/readPointerEnvironment";
 import { selectPointerRoute } from "./pointer/selectPointerRoute";
@@ -82,6 +83,7 @@ export class HoverAt extends BaseVisualChange {
         a11y: notAHoverRoute,
         adbInputSource: notAHoverRoute,
         instrumentation: createInstrumentationDispatch(this.adb),
+        uinput: createUinputDispatch(this.adb),
       });
     this.readEnvironment =
       dependencies.readPointerEnvironment ??

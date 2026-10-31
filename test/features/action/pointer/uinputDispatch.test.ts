@@ -1,0 +1,143 @@
+import { describe, expect, test } from "bun:test";
+import { PointerNotSentError } from "../../../../src/features/action/pointer/instrumentationDispatch";
+import type { PointerRequest } from "../../../../src/features/action/pointer/PointerInjector";
+import {
+  createUinputDispatch,
+  runAdbUinputScript,
+  type UinputScriptResult,
+} from "../../../../src/features/action/pointer/uinputDispatch";
+import type { UinputDisplayGeometry } from "../../../../src/features/action/pointer/uinputPenScript";
+import { ActionableError } from "../../../../src/models/ActionableError";
+import { createExecResult } from "../../../../src/utils/execResult";
+import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
+
+const stroke: PointerRequest = {
+  features: { toolType: "stylus", variablePressure: true },
+  points: [
+    { x: 100, y: 200, pressure: 0.5 },
+    { x: 100, y: 232, durationMs: 32, pressure: 1 },
+  ],
+};
+
+class FakeUinputDevice {
+  scripts: Array<{ script: string; timeoutMs: number }> = [];
+  geometryReads = 0;
+  constructor(
+    private geometry: UinputDisplayGeometry | Error = { width: 1080, height: 2400, rotation: 0 },
+    private result: UinputScriptResult = { exitCode: 0, stderr: "" },
+  ) {}
+  dispatch() {
+    return createUinputDispatch(new FakeAdbExecutor(), {
+      readGeometry: async () => {
+        this.geometryReads++;
+        if (this.geometry instanceof Error) {
+          throw this.geometry;
+        }
+        return this.geometry;
+      },
+      runScript: async (script, timeoutMs) => {
+        this.scripts.push({ script, timeoutMs });
+        return this.result;
+      },
+    });
+  }
+}
+
+describe("createUinputDispatch (#13105)", () => {
+  test("plays the request's script once, with a timeout covering registration and the stroke", async () => {
+    const device = new FakeUinputDevice();
+    await device.dispatch()(stroke);
+    expect(device.scripts).toHaveLength(1);
+    expect(device.scripts[0].script.split("\n")[0]).toContain('"command":"register"');
+    expect(device.scripts[0].timeoutMs).toBeGreaterThan(4000 + 32);
+  });
+
+  test("sends nothing for a secondary display", async () => {
+    const device = new FakeUinputDevice();
+    const error = await device
+      .dispatch()({ ...stroke, displayId: 2 })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PointerNotSentError);
+    expect(device.geometryReads).toBe(0);
+    expect(device.scripts).toEqual([]);
+  });
+
+  test("sends nothing when the display geometry cannot be read", async () => {
+    const device = new FakeUinputDevice(new Error("wm size failed"));
+    const error = await device
+      .dispatch()(stroke)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PointerNotSentError);
+    expect((error as Error).message).toContain("wm size failed");
+    expect(device.scripts).toEqual([]);
+  });
+
+  test("a missing uinput tool or an unwritable /dev/uinput means nothing was sent", async () => {
+    for (const [result, hint] of [
+      [{ exitCode: 127, stderr: "/system/bin/sh: uinput: inaccessible or not found" }, "no uinput"],
+      [{ exitCode: 1, stderr: "Failed to open /dev/uinput: Permission denied" }, "adb root"],
+    ] as const) {
+      const error = await new FakeUinputDevice(undefined, result)
+        .dispatch()(stroke)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(PointerNotSentError);
+      expect((error as Error).message).toContain(hint);
+    }
+  });
+
+  test("any other failure may have played part of the stroke", async () => {
+    const error = await new FakeUinputDevice(undefined, {
+      exitCode: 1,
+      stderr: "Segmentation fault",
+    })
+      .dispatch()(stroke)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).not.toBeInstanceOf(PointerNotSentError);
+    expect((error as Error).message).toContain("Segmentation fault");
+  });
+
+  test("a stroke too long for one shell argument is refused before anything is sent", async () => {
+    const device = new FakeUinputDevice();
+    const long: PointerRequest = {
+      ...stroke,
+      points: [stroke.points[0], { x: 900, y: 2000, durationMs: 60_000 }],
+    };
+    const error = await device
+      .dispatch()(long)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PointerNotSentError);
+    expect(device.scripts).toEqual([]);
+  });
+
+  test("a shell that never reports uinput's exit status leaves the outcome unknown", async () => {
+    const error = await new FakeUinputDevice(undefined, { exitCode: null, stderr: "" })
+      .dispatch()(stroke)
+      .catch((caught: unknown) => caught);
+    expect(error).not.toBeInstanceOf(PointerNotSentError);
+    expect((error as Error).message).toContain("may have played part");
+  });
+});
+
+describe("runAdbUinputScript", () => {
+  test("pipes the script through base64 into uinput and reads the exit marker", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "uinput -",
+      createExecResult(
+        "Failed to open /dev/uinput: Permission denied\nautomobile-uinput-exit=1\n",
+        "",
+      ),
+    );
+    const result = await runAdbUinputScript(adb, '{"id":1}\n', 5000);
+    const [command] = adb.getExecutedArgv();
+    expect(command[0]).toBe("shell");
+    expect(command[1]).toBe(
+      `echo ${Buffer.from('{"id":1}\n').toString("base64")} | base64 -d | uinput - 2>&1; echo automobile-uinput-exit=$?`,
+    );
+    expect(result).toEqual({
+      exitCode: 1,
+      stderr: "Failed to open /dev/uinput: Permission denied",
+    });
+  });
+});

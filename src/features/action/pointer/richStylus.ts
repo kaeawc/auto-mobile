@@ -9,6 +9,7 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import { StylusOutcomeIndeterminateError } from "../stylusPointer";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { PointerNotSentError, createInstrumentationDispatch } from "./instrumentationDispatch";
+import { createUinputDispatch } from "./uinputDispatch";
 import type {
   PointerEnvironment,
   PointerInjector,
@@ -90,7 +91,8 @@ export function tapStrokePoints(
 }
 
 /**
- * Sends a stylus stroke that `adb input stylus` cannot express through the instrumentation route.
+ * Sends a stylus stroke that `adb input stylus` cannot express through the instrumentation route,
+ * or the root-only uinput route where the runner cannot.
  * The route is chosen from the device first: a device or runner that cannot honour it is refused
  * before anything is sent, and the stroke is never turned into a finger touch.
  */
@@ -109,6 +111,7 @@ export async function dispatchRichStylus(
       a11y: refuseNonStylus,
       adbInputSource: refuseNonStylus,
       instrumentation: createInstrumentationDispatch(adb),
+      uinput: createUinputDispatch(adb),
     });
   const route = requirePointerRoute(request.features, environment, injectors);
   options.assertCurrent?.();

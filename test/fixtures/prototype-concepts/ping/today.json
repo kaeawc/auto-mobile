@@ -119,7 +119,8 @@
     "start": "home",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "home": {
@@ -614,7 +615,7 @@
             "items": [
               {
                 "label": "Chats",
-                "icon": "chat"
+                "icon": "forum"
               },
               {
                 "label": "Status",
@@ -1226,7 +1227,7 @@
                             {
                               "type": "icon",
                               "testTag": "tick_delivered",
-                              "name": "done_all",
+                              "name": "done",
                               "contentDescription": "Delivered",
                               "visibleWhen": {
                                 "key": "sendStatus",
@@ -1239,7 +1240,7 @@
                             {
                               "type": "icon",
                               "testTag": "tick_read",
-                              "name": "done_all",
+                              "name": "done",
                               "contentDescription": "Read",
                               "visibleWhen": {
                                 "key": "sendStatus",

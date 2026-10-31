@@ -139,7 +139,8 @@
     "start": "home",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "home": {
@@ -338,7 +339,7 @@
                     "children": [
                       {
                         "type": "icon",
-                        "name": "no_photography",
+                        "name": "block",
                         "contentDescription": "No access"
                       },
                       {
@@ -1162,7 +1163,7 @@
                             "type": "button",
                             "testTag": "backup_start",
                             "label": "Back up now",
-                            "icon": "cloud_upload",
+                            "icon": "file_upload",
                             "onTap": [
                               {
                                 "type": "setState",
@@ -1252,7 +1253,7 @@
               },
               {
                 "label": "Backup",
-                "icon": "cloud_upload"
+                "icon": "file_upload"
               }
             ]
           },

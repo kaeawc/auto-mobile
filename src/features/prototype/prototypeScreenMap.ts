@@ -14,6 +14,8 @@ export interface PrototypeScreenMapNode {
   label?: string;
   /** True for the start screen of a stack and the first page of a pager. */
   start?: true;
+  /** The testTag of the node that draws the screen, matched as a real screen's identifier. */
+  testTag?: string;
 }
 
 export type PrototypeScreenEdgeAction = "push" | "replace" | "pop" | "popToRoot" | "setPage";
@@ -43,6 +45,11 @@ const MAX_DEPTH = 200;
 
 const text = (value: unknown): string | undefined =>
   typeof value === "string" && value !== "" ? value : undefined;
+
+const testTagOf = (value: unknown): { testTag?: string } => {
+  const testTag = text(record(value)?.testTag);
+  return testTag ? { testTag } : {};
+};
 
 class Builder {
   readonly nodes: PrototypeScreenMapNode[] = [];
@@ -150,6 +157,7 @@ function walk(
       id: `${node.type === "dialog" ? "dialog" : "sheet"}:${id}`,
       kind: node.type === "dialog" ? "dialog" : "sheet",
       path,
+      ...testTagOf(node),
     });
   }
   if (node.type === "stack" && record(node.screens)) {
@@ -160,6 +168,7 @@ function walk(
         kind: "stackScreen",
         path: `${path}.screens[${JSON.stringify(name)}]`,
         ...(name === node.start ? { start: true as const } : {}),
+        ...testTagOf(child),
       });
       walk(builder, child, `${path}.screens[${JSON.stringify(name)}]`, {
         screen: screenId,
@@ -179,6 +188,7 @@ function walk(
         path: `${path}${child.suffix}`,
         ...(label ? { label } : {}),
         ...(index === 0 ? { start: true as const } : {}),
+        ...testTagOf(child.value),
       });
       walk(builder, child.value, `${path}${child.suffix}`, { screen: pageId, depth: depth + 1 });
     } else {

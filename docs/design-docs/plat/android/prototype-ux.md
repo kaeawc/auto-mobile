@@ -1402,9 +1402,22 @@ Nodes are the root, each `stack` screen (`stack:<id>/<screen>`, `start` on the s
 `pager` page (`pager:<id>/<index>`, labelled from a `tabBar` or `bottomNav` that names the pager),
 `bottomSheet` and `dialog`. Edges are `push`, `replace`, `pop`, `popToRoot` and `setPage` actions, from
 the enclosing screen, each tagged with the `testTag`, `id` and text or label of the node that runs it
-and its spec path. A `pop` targets `back` (the previous screen is runtime state), and `setPage` with
-`next` or `prev` keeps the authored word. `visibleWhen` alternatives and sheet or dialog opening by
-state are not resolved. The dynamic cross-check and the diff against `getNavigationGraph` are not built.
+and its spec path. A screen node carries the `testTag` of the node that draws it. A `pop` targets
+`back` (the previous screen is runtime state), and `setPage` with `next` or `prev` keeps the authored
+word. `visibleWhen` alternatives and sheet or dialog opening by state are not resolved.
+
+`getNavigationGraph` (debug-gated with the rest of that tool) diffs the map against the app's recorded
+graph when given `prototypeSpec` or `prototypeSpecPath`, and returns `prototypeDiff`. A prototype screen
+matches a real screen through, in order: an explicit `screenMapping` (or `screenMappingPath`) entry from
+prototype screen id to real screen name; its `testTag` equal to the real screen name; or its stack
+screen key, tab label or sheet/dialog id equal to the real name ignoring case, punctuation and a
+trailing `Screen`, `Activity`, `Fragment`, `Page`, `View` or `Controller`. A mapped screen never falls
+back to the other rules, and a mapping to a name the graph lacks reports `mappedScreenMissing`. The root
+is a destination only when the mapping names it. The result lists `matched` screens,
+`unmatchedPrototypeScreens`, `unmatchedRealScreens`, `observedTransitions`, `unobservedTransitions`
+(`unmatchedScreen`, `dynamicTarget` for `back` and `next`/`prev`, or `notObserved`) and
+`ignoredMappings` (keys naming no prototype screen). The live cross-check against `screen_changed`
+events from an explored prototype is not built.
 
 ### Route contract
 

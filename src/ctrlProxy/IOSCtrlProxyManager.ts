@@ -960,8 +960,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return readEnvPositiveInteger(
       ENV.CTRL_PROXY_HEALTH_MAX_ATTEMPTS.name,
       ENV.CTRL_PROXY_HEALTH_MAX_ATTEMPTS.legacyName,
-      { fallback: IOS_CTRL_PROXY_DEFAULT_HEALTH_POLL_MAX_ATTEMPTS },
-      env,
+      { fallback: IOS_CTRL_PROXY_DEFAULT_HEALTH_POLL_MAX_ATTEMPTS, env },
     );
   }
   ensureServicePortReadyForLaunch(): Promise<void> {

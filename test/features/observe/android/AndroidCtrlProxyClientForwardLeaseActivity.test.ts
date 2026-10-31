@@ -63,7 +63,9 @@ describe("AndroidCtrlProxyClient forwarding-lease activity (#10497 review)", () 
 
     // e.g. an MCP resource read or initial observation frame: no tool call is bound.
     const requests = client.connectionTestHooks.requestManager;
-    const pending = requests.register("read-1", "storage_read", 30_000, () => null);
+    const pending = requests.register("read-1", "storage_read", 30_000, {
+      timeoutErrorFactory: () => null,
+    });
     timer.setCurrentTime(7_000);
     expect(AndroidCtrlProxyClient.getForwardLeaseActivity(DEVICE.deviceId, timer)).toEqual({
       inFlightRequests: 1,

@@ -59,7 +59,7 @@ describe("NetworkState", () => {
 
   describe("simulation", () => {
     it("starts simulation with expiration", () => {
-      state.startSimulation(DEVICE, "http500", 30, null);
+      state.startSimulation(DEVICE, "http500", 30, { limit: null });
       const sim = state.getSimulation(DEVICE);
       expect(sim).not.toBeNull();
       expect(sim!.errorType).toBe("http500");
@@ -68,7 +68,7 @@ describe("NetworkState", () => {
     });
 
     it("rounds fractional duration expirations up to integer milliseconds", () => {
-      state.startSimulation(DEVICE, "http500", 1.2345, null);
+      state.startSimulation(DEVICE, "http500", 1.2345, { limit: null });
 
       expect(state.getSimulation(DEVICE)?.expiresAt).toBe(1_235);
     });
@@ -94,7 +94,7 @@ describe("NetworkState", () => {
     });
 
     it("expires simulation after duration", () => {
-      state.startSimulation(DEVICE, "timeout", 10, null);
+      state.startSimulation(DEVICE, "timeout", 10, { limit: null });
       expect(state.getSimulation(DEVICE)).not.toBeNull();
 
       timer.advanceTime(10_000);
@@ -102,21 +102,21 @@ describe("NetworkState", () => {
     });
 
     it("cancels simulation", () => {
-      state.startSimulation(DEVICE, "http500", 30, null);
+      state.startSimulation(DEVICE, "http500", 30, { limit: null });
       state.cancelSimulation(DEVICE);
       expect(state.getSimulation(DEVICE)).toBeNull();
     });
 
     it("tracks limit", () => {
-      state.startSimulation(DEVICE, "dnsFailure", 60, 5);
+      state.startSimulation(DEVICE, "dnsFailure", 60, { limit: 5 });
       const sim = state.getSimulation(DEVICE);
       expect(sim!.limit).toBe(5);
       expect(sim!.remaining).toBe(5);
     });
 
     it("replaces previous simulation", () => {
-      state.startSimulation(DEVICE, "http500", 30, null);
-      state.startSimulation(DEVICE, "timeout", 60, 3);
+      state.startSimulation(DEVICE, "http500", 30, { limit: null });
+      state.startSimulation(DEVICE, "timeout", 60, { limit: 3 });
       const sim = state.getSimulation(DEVICE);
       expect(sim!.errorType).toBe("timeout");
       expect(sim!.limit).toBe(3);
@@ -253,7 +253,7 @@ describe("NetworkState", () => {
     it("keeps rules and simulation separate per device", () => {
       const a = state.addMock(DEVICE, rule("a.com"));
       const b = state.addMock(OTHER_DEVICE, rule("b.com"));
-      state.startSimulation(DEVICE, "timeout", 30, null);
+      state.startSimulation(DEVICE, "timeout", 30, { limit: null });
 
       expect(Array.from(state.getMocks(DEVICE).keys())).toEqual([a.mockId]);
       expect(Array.from(state.getMocks(OTHER_DEVICE).keys())).toEqual([b.mockId]);
@@ -267,7 +267,7 @@ describe("NetworkState", () => {
     it("clearing one device leaves the other device's rules and simulation", () => {
       state.addMock(DEVICE, rule("a.com"));
       const b = state.addMock(OTHER_DEVICE, rule("b.com"));
-      state.startSimulation(OTHER_DEVICE, "timeout", 30, null);
+      state.startSimulation(OTHER_DEVICE, "timeout", 30, { limit: null });
 
       expect(state.clearAllMocks(DEVICE)).toBe(1);
       state.cancelSimulation(DEVICE);
@@ -284,7 +284,7 @@ describe("NetworkState", () => {
     });
 
     it("reports per-device simulation on a device-less snapshot", () => {
-      state.startSimulation(OTHER_DEVICE, "timeout", 30, 2);
+      state.startSimulation(OTHER_DEVICE, "timeout", 30, { limit: 2 });
 
       expect(state.getSnapshot().simulatingErrors).toBeUndefined();
       expect(state.getSnapshot().simulatingErrorsByDevice).toEqual({
@@ -294,8 +294,8 @@ describe("NetworkState", () => {
     });
 
     it("expires one device's simulation without touching the other", () => {
-      state.startSimulation(DEVICE, "timeout", 10, null);
-      state.startSimulation(OTHER_DEVICE, "timeout", 60, null);
+      state.startSimulation(DEVICE, "timeout", 10, { limit: null });
+      state.startSimulation(OTHER_DEVICE, "timeout", 60, { limit: null });
 
       timer.advanceTime(10_000);
 
@@ -305,7 +305,7 @@ describe("NetworkState", () => {
 
     it("clearDeviceOwnedBySession removes only state its session installed", () => {
       state.addMock(DEVICE, rule("a.com"), "session-1");
-      state.startSimulation(DEVICE, "timeout", 30, null, "session-1");
+      state.startSimulation(DEVICE, "timeout", 30, { limit: null, ownerSessionUuid: "session-1" });
       state.addMock(OTHER_DEVICE, rule("b.com"), "session-2");
 
       expect(state.clearDeviceOwnedBySession(DEVICE, "session-2")).toBe(false);
@@ -319,7 +319,7 @@ describe("NetworkState", () => {
 
     it("leaves sessionless state in place when a session is released", () => {
       state.addMock(DEVICE, rule("a.com"));
-      state.startSimulation(DEVICE, "timeout", 30, null);
+      state.startSimulation(DEVICE, "timeout", 30, { limit: null });
 
       expect(state.clearDeviceOwnedBySession(DEVICE, "session-1")).toBe(false);
       expect(state.getMocks(DEVICE).size).toBe(1);
@@ -330,7 +330,7 @@ describe("NetworkState", () => {
       const own = state.addMock(DEVICE, rule("own.com"), "session-1");
       const sessionless = state.addMock(DEVICE, rule("sessionless.com"));
       const other = state.addMock(DEVICE, rule("other.com"), "session-2");
-      state.startSimulation(DEVICE, "timeout", 30, null);
+      state.startSimulation(DEVICE, "timeout", 30, { limit: null });
 
       expect(state.clearDeviceOwnedBySession(DEVICE, "session-1")).toBe(true);
 
@@ -340,12 +340,12 @@ describe("NetworkState", () => {
     });
 
     it("the last writer owns a replaced simulation", () => {
-      state.startSimulation(DEVICE, "timeout", 30, null, "session-1");
-      state.startSimulation(DEVICE, "http500", 30, null);
+      state.startSimulation(DEVICE, "timeout", 30, { limit: null, ownerSessionUuid: "session-1" });
+      state.startSimulation(DEVICE, "http500", 30, { limit: null });
       expect(state.clearDeviceOwnedBySession(DEVICE, "session-1")).toBe(false);
       expect(state.getSimulation(DEVICE)?.errorType).toBe("http500");
 
-      state.startSimulation(DEVICE, "timeout", 30, null, "session-2");
+      state.startSimulation(DEVICE, "timeout", 30, { limit: null, ownerSessionUuid: "session-2" });
       expect(state.clearDeviceOwnedBySession(DEVICE, "session-2")).toBe(true);
       expect(state.getSimulation(DEVICE)).toBeNull();
     });
@@ -361,7 +361,7 @@ describe("NetworkState", () => {
 
     it("retireDevice drops a device's state regardless of owner and cancels its timer", () => {
       state.addMock(DEVICE, rule("a.com"), "session-1");
-      state.startSimulation(DEVICE, "timeout", 30, null, "session-1");
+      state.startSimulation(DEVICE, "timeout", 30, { limit: null, ownerSessionUuid: "session-1" });
 
       state.retireDevice(DEVICE);
 
@@ -393,7 +393,7 @@ describe("NetworkState", () => {
     });
 
     it("includes simulation when active", () => {
-      state.startSimulation(DEVICE, "http500", 60, 10);
+      state.startSimulation(DEVICE, "http500", 60, { limit: 10 });
       const snap = state.getSnapshot(DEVICE);
       expect(snap.simulatingErrors).toBeDefined();
       expect(snap.simulatingErrors!.errorType).toBe("http500");
@@ -442,7 +442,7 @@ describe("NetworkState", () => {
         responseBody: "",
         contentType: "application/json",
       });
-      state.startSimulation(OTHER_DEVICE, "timeout", 30, null);
+      state.startSimulation(OTHER_DEVICE, "timeout", 30, { limit: null });
 
       // A response served by DEVICE's mock rule is provenance, not a failure.
       state.onNetworkEvent(makeNotification({ statusCode: 200, error: "mocked:mock-1" }));
@@ -549,7 +549,7 @@ describe("NetworkState", () => {
   describe("dispose", () => {
     it("cleans up timers and state", () => {
       state.setCapture(true);
-      state.startSimulation(DEVICE, "http500", 60, null);
+      state.startSimulation(DEVICE, "http500", 60, { limit: null });
       state.onNetworkEvent(makeNotification());
 
       state.dispose();

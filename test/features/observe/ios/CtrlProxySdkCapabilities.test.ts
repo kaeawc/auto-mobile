@@ -802,7 +802,10 @@ describe("SDK capability caller budgets", () => {
       timer: h.timer,
       notifier: { notifyResourceUpdated: () => {} },
     });
-    state.startSimulation(deviceId, "timeout", 30, null, "released-session");
+    state.startSimulation(deviceId, "timeout", 30, {
+      limit: null,
+      ownerSessionUuid: "released-session",
+    });
     const manager = new FakeSessionCleanupManager();
     registerNetworkStateSessionCleanup(manager, { state: () => state, timer: h.timer });
     manager.release("released-session", deviceId);

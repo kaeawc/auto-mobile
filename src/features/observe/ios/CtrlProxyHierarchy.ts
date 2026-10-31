@@ -583,16 +583,13 @@ export class CtrlProxyHierarchy {
       perfTiming?: CtrlProxyPerfTiming;
       frameContext?: string;
       error?: string;
-    }>(
-      requestId,
-      "hierarchy",
-      remainingTimeoutMs,
-      () => ({
+    }>(requestId, "hierarchy", remainingTimeoutMs, {
+      timeoutErrorFactory: () => ({
         hierarchy: undefined,
         perfTiming: undefined,
       }),
-      (error) => ({ error }),
-    );
+      responseErrorFactory: (error) => ({ error }),
+    });
 
     const rejectOnAbort = () => {
       this.rejectAbortedHierarchyRequest(requestId, signal);

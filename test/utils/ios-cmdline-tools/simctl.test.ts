@@ -7,6 +7,7 @@ import {
 import { BootedDevice, ExecResult } from "../../../src/models";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { createExecResult } from "../../../src/utils/execResult";
+import type { SimctlExecOptions } from "../../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 import { resetSimCtlSharedStateForTesting } from "../../../src/utils/ios-cmdline-tools/SimCtlSharedState";
@@ -51,8 +52,7 @@ describe("Simctl", function () {
   let mockExecAsync: (
     file: string,
     args: string[],
-    maxBuffer?: number,
-    signal?: AbortSignal,
+    options?: SimctlExecOptions,
   ) => Promise<ExecResult>;
 
   beforeEach(function () {
@@ -140,8 +140,7 @@ describe("Simctl", function () {
       mockExecAsync = async (
         _file: string,
         _args: string[],
-        _maxBuffer?: number,
-        signal?: AbortSignal,
+        { signal }: SimctlExecOptions = {},
       ): Promise<ExecResult> => {
         probeSignal = signal;
         return new Promise<ExecResult>((_resolve, reject) => {
@@ -165,7 +164,7 @@ describe("Simctl", function () {
     test("bounds and aborts a command without an explicit timeout", async function () {
       const timer = new FakeTimer();
       let commandSignal: AbortSignal | undefined;
-      mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
+      mockExecAsync = async (_file, _args, { signal } = {}) => {
         commandSignal = signal;
         return await new Promise<ExecResult>((_resolve, reject) => {
           signal?.addEventListener("abort", () => reject(new Error("command aborted")));
@@ -184,7 +183,7 @@ describe("Simctl", function () {
     test("preserves explicit cancellation with a default timeout", async function () {
       const timer = new FakeTimer();
       let commandSignal: AbortSignal | undefined;
-      mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
+      mockExecAsync = async (_file, _args, { signal } = {}) => {
         commandSignal = signal;
         return await new Promise<ExecResult>((_resolve, reject) => {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
@@ -204,7 +203,7 @@ describe("Simctl", function () {
     test("preserves ambient cancellation with a default timeout", async function () {
       const timer = new FakeTimer();
       let commandSignal: AbortSignal | undefined;
-      mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
+      mockExecAsync = async (_file, _args, { signal } = {}) => {
         commandSignal = signal;
         return await new Promise<ExecResult>((_resolve, reject) => {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
@@ -458,8 +457,7 @@ describe("Simctl", function () {
       mockExecAsync = async (
         file: string,
         args: string[],
-        _maxBuffer?: number,
-        signal?: AbortSignal,
+        { signal }: SimctlExecOptions = {},
       ): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1.0.0", "");
@@ -844,8 +842,7 @@ describe("Simctl", function () {
       mockExecAsync = async (
         file: string,
         args: string[],
-        _maxBuffer?: number,
-        signal?: AbortSignal,
+        { signal }: SimctlExecOptions = {},
       ): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1051.50", "");
@@ -885,8 +882,7 @@ describe("Simctl", function () {
       mockExecAsync = async (
         file: string,
         args: string[],
-        _maxBuffer?: number,
-        signal?: AbortSignal,
+        { signal }: SimctlExecOptions = {},
       ): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1051.50", "");
@@ -930,8 +926,7 @@ describe("Simctl", function () {
       mockExecAsync = async (
         file: string,
         args: string[],
-        _maxBuffer?: number,
-        signal?: AbortSignal,
+        { signal }: SimctlExecOptions = {},
       ): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 1051.50", "");
@@ -1736,8 +1731,7 @@ describe("Simctl", function () {
       mockExecAsync = async (
         file: string,
         args: string[],
-        _maxBuffer?: number,
-        signal?: AbortSignal,
+        { signal }: SimctlExecOptions = {},
       ): Promise<ExecResult> => {
         if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
           listCalls++;
@@ -1997,7 +1991,7 @@ describe("Simctl", function () {
 
     test("an explicit bypass signal cancels the underlying discovery", async function () {
       let captured: AbortSignal | undefined;
-      mockExecAsync = async (_file, args, _maxBuffer, signal) => {
+      mockExecAsync = async (_file, args, { signal } = {}) => {
         if (args.join(" ") !== "simctl list devices --json") {
           return createExecResult("", "");
         }

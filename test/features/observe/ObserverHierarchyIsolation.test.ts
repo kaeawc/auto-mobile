@@ -385,7 +385,9 @@ test.each(["android", "ios"] as const)(
           });
     const requests = Reflect.get(client, "requestManager") as RequestManager;
     const ownerId = requests.generateId("owner-action");
-    const ownerAction = requests.register(ownerId, "owner-action", 1000, () => ({ ok: false }));
+    const ownerAction = requests.register(ownerId, "owner-action", 1000, {
+      timeoutErrorFactory: () => ({ ok: false }),
+    });
     let reads = 0;
     const priorHierarchy = Reflect.get(client, "_hierarchy");
     Reflect.set(
@@ -751,7 +753,9 @@ test.each(["android", "ios"] as const)(
           });
     const requests = Reflect.get(client, "requestManager") as RequestManager;
     const ownerId = requests.generateId("owner-action");
-    const owner = requests.register(ownerId, "owner-action", 1000, () => ({ ok: false }));
+    const owner = requests.register(ownerId, "owner-action", 1000, {
+      timeoutErrorFactory: () => ({ ok: false }),
+    });
     try {
       // Sample the owner as the observer rejects: auto-advance keeps moving fake time
       // afterwards and would expire the owner's own 1000 ms timeout next.
@@ -794,7 +798,9 @@ test.each(["android", "ios"] as const)(
       expect(await client.ensureConnected()).toBe(true);
       const requests = Reflect.get(client, "requestManager") as RequestManager;
       const ownerId = requests.generateId("owner-action");
-      const owner = requests.register(ownerId, "owner-action", 1000, () => ({ ok: false }));
+      const owner = requests.register(ownerId, "owner-action", 1000, {
+        timeoutErrorFactory: () => ({ ok: false }),
+      });
       const reconnect = spyOn(client, "ensureConnected");
       const observer = client.requestHierarchySyncForObserver(
         new NoOpPerformanceTracker(),
@@ -1099,7 +1105,9 @@ test("iOS observer screenshot waits for the owner's in-flight request", async ()
     expect(await client.ensureConnected()).toBe(true);
     const requests = Reflect.get(client, "requestManager") as RequestManager;
     const ownerId = requests.generateId("owner-action");
-    const owner = requests.register(ownerId, "owner-action", 1000, () => ({ ok: false }));
+    const owner = requests.register(ownerId, "owner-action", 1000, {
+      timeoutErrorFactory: () => ({ ok: false }),
+    });
     const screenshot = client.requestScreenshotForObserver(100);
     await Promise.resolve();
     expect(sockets.socket().sent.some((wire) => wire.includes("request_screenshot"))).toBe(false);

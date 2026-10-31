@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
+import type { SimctlExecOptions } from "../../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models";
 
@@ -20,12 +21,7 @@ function createClient(
 } {
   const calls: string[] = [];
   const signals: Array<AbortSignal | undefined> = [];
-  const execAsync = async (
-    file: string,
-    args: string[],
-    _maxBuffer?: number,
-    signal?: AbortSignal,
-  ) => {
+  const execAsync = async (file: string, args: string[], { signal }: SimctlExecOptions = {}) => {
     const command = `${file} ${args.join(" ")}`;
     calls.push(command);
     signals.push(signal);

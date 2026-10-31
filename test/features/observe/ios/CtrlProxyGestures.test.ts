@@ -2,7 +2,7 @@ import { FakeOpenSocket } from "../../../fakes/FakeOpenSocket";
 import { describe, expect, it } from "bun:test";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
 import type { DelegateContext } from "../../../../src/features/observe/ios/types";
-import { RequestManager } from "../../../../src/utils/RequestManager";
+import { RequestManager, type RequestErrorFactories } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 class CapturingRequestManager extends RequestManager {
@@ -12,11 +12,10 @@ class CapturingRequestManager extends RequestManager {
     id: string,
     type: string,
     timeoutMs: number,
-    timeoutErrorFactory: (requestId: string, type: string, timeoutMs: number) => T,
-    responseErrorFactory?: (error: string, totalTimeMs: number) => T,
+    factories: RequestErrorFactories<T>,
   ): Promise<T> {
     this.lastRegisteredType = type;
-    return super.register(id, type, timeoutMs, timeoutErrorFactory, responseErrorFactory);
+    return super.register(id, type, timeoutMs, factories);
   }
 }
 

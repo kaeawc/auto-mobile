@@ -196,7 +196,10 @@ for (const replaced of [true, false]) {
         timer: h.timer,
         notifier: { notifyResourceUpdated: () => {} },
       });
-      state.startSimulation(original.deviceId, "timeout", 30, null, "holder");
+      state.startSimulation(original.deviceId, "timeout", 30, {
+        limit: null,
+        ownerSessionUuid: "holder",
+      });
       registerNetworkStateSessionCleanup(h.sessions, {
         state: () => state,
         pusher: {
@@ -304,7 +307,10 @@ for (const superseded of [true, false]) {
           timer: h.timer,
           notifier: { notifyResourceUpdated: () => {} },
         });
-        state.startSimulation(original.deviceId, "timeout", 30, null, "holder");
+        state.startSimulation(original.deviceId, "timeout", 30, {
+          limit: null,
+          ownerSessionUuid: "holder",
+        });
         registerNetworkStateSessionCleanup(h.sessions, {
           state: () => state,
           pusher: {
@@ -1250,7 +1256,10 @@ warmedTest(
         timer: h.timer,
         notifier: { notifyResourceUpdated: () => {} },
       });
-      state.startSimulation(original.deviceId, "timeout", 30, null, "holder");
+      state.startSimulation(original.deviceId, "timeout", 30, {
+        limit: null,
+        ownerSessionUuid: "holder",
+      });
       registerNetworkStateSessionCleanup(h.sessions, {
         state: () => state,
         pusher: {

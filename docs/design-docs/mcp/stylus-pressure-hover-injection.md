@@ -221,7 +221,7 @@ rooted-device or userdebug-emulator record-replay symmetry.
 
 ## Instrumentation route (#13097)
 
-**GO:** `PointerInstrumentation` supports stylus pressure, tilt, buttons and hover on API 33+
+**GO:** `PointerInstrumentation` supports stylus pressure, tilt, buttons and hover on API 31+
 stock-privilege devices using shell identity, without root. Device evidence and remaining
 verification gaps are below.
 
@@ -232,13 +232,12 @@ starts it with
 **Why `--no-restart`.** The instrumentation targets CtrlProxy's own package, and
 `am instrument` force-stops its target when it starts and again when it finishes unless given
 `--no-restart`. Without it every injection would kill the accessibility service and its WebSocket
-server. The flag arrived with the Android 13 `am`, so CtrlProxy advertises `stylus_input_v1` and
-`hover_input_v1` only on API 33 and newer (`PointerInjectionSupport`); an older device is refused with
-the flags absent, and an `am` that rejects the flag reports it. On the API 37 AVD, `--no-restart`
-keeps CtrlProxy's pid and accessibility service. Instrumentation shares CtrlProxy's process, so
-killing either kills both. Flag acceptance on API 33–36 remains unverified.
-A separate package for the instrumentation, or an `app_process` injector, are the fallbacks if
-the `--no-restart` assumption fails on an older API.
+server. Measured on emulators (#13082), API 30's `am` rejects the flag (`Unknown option:
+--no-restart`), while API 31, 32, 33 and 37 accept it and keep CtrlProxy's pid and accessibility
+service after a stroke and a hover. CtrlProxy therefore advertises `stylus_input_v1` and
+`hover_input_v1` only on API 31 and newer (`PointerInjectionSupport`); an older device is refused with
+the flags absent, and an `am` that rejects the flag reports it. Instrumentation shares CtrlProxy's
+process, so killing either kills both.
 It validates the request, gets a `UiAutomation` with `FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`
 (without it the system silences CtrlProxy's own accessibility service for the duration), plays the
 planned `MotionEvent`s through `injectInputEvent`, and reports `success`, `error`, `injected` and
@@ -249,7 +248,7 @@ and EXIT; a stroke is DOWN, MOVEs, UP with pressure, distance, tilt and orientat
 between waypoints) and its validation; `PointerRequestCodec`; `PointerInjectionExecutor` (schedules
 events and, if one is refused or the run is cancelled, closes the pointer with CANCEL or HOVER_EXIT);
 `UiAutomationPointerSink` (the only class that touches `MotionEvent`). CtrlProxy advertises
-`stylus_input_v1` and `hover_input_v1` (API 33+); `hoverAt` uses the route.
+`stylus_input_v1` and `hover_input_v1` (API 31+); `hoverAt` uses the route.
 
 **Failure modes.**
 
@@ -274,14 +273,13 @@ open only for device acceptance of the host protection in #16059.
 receives strokes as `TOOL_TYPE_STYLUS`, source `STYLUS(0x4002)`, with pressure and tilt
 interpolated as planned, orientation, and barrel button `buttons: 32` as `STYLUS_PRIMARY`.
 Without root, hover ENTER/MOVE/EXIT arrives as STYLUS; tool `"mouse"` with `hover: true`
-arrives as MOUSE. This supports the API 33+ instrumentation route for rich stylus input and hover.
+arrives as MOUSE. This supports the API 31+ instrumentation route for rich stylus input and hover.
 
 Open verification gaps:
 
 - Physical pen device.
 - `FLAG_SECURE` window and a UiAutomator test holding `UiAutomation`.
 - Multi-display injection (non-default displays are currently refused).
-- Minimum API accepting `--no-restart` across API 33–36.
 - Quiet-host latency; cold one-point hover on a loaded host is not a latency budget.
 
 ## Rich stylus on tapAt, swipeAt and dragPath (#13099)

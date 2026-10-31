@@ -25,6 +25,6 @@ export interface DragPathOptions {
   display?: string;
   snapshotId?: string;
   layer?: HierarchyLayer;
-  /** Draw with a stylus instead of a finger (Android 13+, `stylus_input_v1`); never falls back to a finger. */
+  /** Draw with a stylus instead of a finger (Android 12+, `stylus_input_v1`); never falls back to a finger. */
   pointer?: PointerOption;
 }

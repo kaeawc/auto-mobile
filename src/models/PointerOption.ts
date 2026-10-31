@@ -6,7 +6,7 @@ export type StylusButton = "primary" | "secondary";
  *
  * Plain `stylus` at full pressure goes through `adb shell input stylus`, which hard-codes pressure to
  * 1.0 (#13081). Any other pressure, a tilt or orientation, or a barrel button needs the instrumentation
- * route (`stylus_input_v1`, Android 13+) and is refused before any input when the device lacks it, never
+ * route (`stylus_input_v1`, Android 12+) and is refused before any input when the device lacks it, never
  * rounded or sent as a finger (#13099).
  */
 export interface PointerOption {

@@ -173,9 +173,9 @@ describe("createInstrumentationDispatch", () => {
     );
   });
 
-  test("an am without --no-restart says it needs Android 13", async () => {
+  test("an am without --no-restart says it needs Android 12", async () => {
     await expect(run(result(["Error: Unknown option: --no-restart"]))).rejects.toThrow(
-      /Android 13 or newer. No input was sent/,
+      /Android 12 or newer. No input was sent/,
     );
   });
 

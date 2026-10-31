@@ -249,7 +249,7 @@ export type WatchStartDeviceArgs = z.output<typeof watchStartDeviceParametersSch
 export const startDeviceRegistrationSchema = z.preprocess(
   mergeLegacyStartDevicePayload,
   startDeviceParametersSchema
-    .extend({ platform: z.enum(["android", "ios", "watchos"]) })
+    .extend({ platform: z.enum(["android", "ios", "watchos", "tvos"]) })
     .superRefine(refineStartDeviceParameters),
 );
 

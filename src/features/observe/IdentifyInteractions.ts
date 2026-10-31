@@ -15,12 +15,13 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { NavigationEdge } from "../../utils/interfaces/NavigationGraph";
 
 import { isEditableElementProperties } from "../utility/elementProperties";
+import type { PlatformArg } from "../../utils/schemaHelpers";
 
 type InteractionType = "navigation" | "input" | "action" | "scroll" | "toggle";
 
 export interface IdentifyInteractionsOptions {
   // #6154: optional — resolved from deviceId/session when omitted.
-  platform?: "android" | "ios";
+  platform?: PlatformArg;
   // Injected by `addDeviceTargetingToSchema` (see identifyInteractionsSchema in
   // observeTools.ts); genuinely present on `args` at runtime even though it was
   // missing from this hand-written interface (issue #6252).

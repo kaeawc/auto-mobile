@@ -46,7 +46,7 @@ case " $* " in
     if [ "$scheme" = CtrlProxyWatch ]; then
       case "${PROBE_MODE:-}" in
         failure)
-          echo '    PLATFORM_NAME = appletvsimulator'
+          echo '    PLATFORM_NAME = appletvos'
           echo 'probe failed' >&2
           exit 1 ;;
         unknown) echo '    PLATFORM_NAME = unsupported'; exit 0 ;;
@@ -54,13 +54,13 @@ case " $* " in
       esac
     fi
     case "$scheme" in
-      AutoMobileTest) platform=iphonesimulator ;;
-      CtrlProxyWatch) platform=watchsimulator ;;
-      AutoMobileTVTest) platform=appletvsimulator ;;
+      AutoMobileTest) platform=iphoneos ;;
+      CtrlProxyWatch) platform=watchos ;;
+      AutoMobileTVTest) platform=appletvos ;;
     esac
     printf '    PLATFORM_NAME = %s\n' "$platform"
     # A later target must not override the first platform setting.
-    echo '    PLATFORM_NAME = iphonesimulator'
+    echo '    PLATFORM_NAME = iphoneos'
     ;;
   *' build '*) exit 0 ;;
   *) exit 1 ;;

@@ -83,7 +83,12 @@ export class GetEventReader implements GestureEmitter {
       singleTouch: node.kind === "pen",
       onHover: onGesture,
     });
-    const classifier = new GestureClassifier(scaler, this.opts.density, pressureRangeOf(node));
+    const classifier = new GestureClassifier(
+      scaler,
+      this.opts.density,
+      pressureRangeOf(node),
+      node.tiltAxes,
+    );
 
     const args = ["shell", "getevent", "-lt", node.path];
 

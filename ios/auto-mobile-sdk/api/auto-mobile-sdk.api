@@ -539,7 +539,7 @@ public enum NetworkCaptureDirection: String, Codable, Sendable
 public final class NetworkCaptureRecorder: Sendable
   public typealias Emit = @Sendable (NetworkRequestRecord) -> Void
   public typealias IDGenerator = @Sendable () -> String
-  public init( emit: @escaping Emit, maxBodyBytes: Int = 32 * 1024, idGenerator: @escaping IDGenerator = { UUID().uuidString }, isEnabled: @escaping @Sendable () -> Bool = { true }, isBodyCaptureEnabled: @escaping @Sendable () -> Bool = { true }, samplingRate: Double = 1, sampler: @escaping @Sendable () -> Double = { Double.random(in: 0 ..< 1) }, headerRedactor: @escaping @Sendable ([String: String]) -> [String: String] = { NetworkCaptureRecorder.redactHeaders($0) } )
+  public convenience init( emit: @escaping Emit, maxBodyBytes: Int = 32 * 1024, idGenerator: @escaping IDGenerator = { UUID().uuidString }, isEnabled: @escaping @Sendable () -> Bool = { true }, isBodyCaptureEnabled: @escaping @Sendable () -> Bool = { true }, samplingRate: Double = 1, sampler: @escaping @Sendable () -> Double = { Double.random(in: 0 ..< 1) }, headerRedactor: @escaping @Sendable ([String: String]) -> [String: String] = { NetworkCaptureRecorder.redactHeaders($0) } )
   @discardableResult public func beginRequest( url: String, method: String = "GET", connectionId: String? = nil, protocolName: String = "http", requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, requestBody: String? = nil )
   public func recordRequestHeaders( requestId: String, headers: [String: String] )
   public func recordResponseHeaders( requestId: String, headers: [String: String] )

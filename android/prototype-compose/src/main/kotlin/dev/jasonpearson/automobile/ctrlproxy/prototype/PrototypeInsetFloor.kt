@@ -43,7 +43,9 @@ val LocalPrototypeInsetFloor = staticCompositionLocalOf { PrototypeInsetFloor.No
  * Fullscreen also sits behind the whole top bar. Top-gravity floating windows clear the portion
  * covered by their downward offset. Anchored floating windows use [anchoredOriginYPx] instead,
  * since their gravity and offset are replaced by their screen origin; other placements have no top
- * floor.
+ * floor. The anchored top floor is capped at the bar height: a negative origin can come from the
+ * floor itself increasing a bottom-aligned root's measured height. Padding beyond the bar would
+ * feed back into that origin and keep growing instead of reaching a fixed point.
  */
 @InternalAutoMobilePrototypeApi
 fun prototypeInsetFloor(
@@ -72,7 +74,8 @@ fun prototypeInsetFloor(
           anchoredOriginYPx != null ||
             (placement.gravity and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.TOP
         )
-          (topBar - (anchoredOriginYPx ?: (placement.offsetYDp * density).roundToInt()))
+          (topBar -
+              (anchoredOriginYPx?.coerceAtLeast(0) ?: (placement.offsetYDp * density).roundToInt()))
             .coerceAtLeast(0)
         else 0
       is PrototypePlacement.Sheet -> 0

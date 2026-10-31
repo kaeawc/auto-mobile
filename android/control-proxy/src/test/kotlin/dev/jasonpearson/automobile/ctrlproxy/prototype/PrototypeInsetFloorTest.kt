@@ -4,7 +4,12 @@ import android.view.Gravity
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.union
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import dev.jasonpearson.automobile.protocol.PrototypeBounds
+import dev.jasonpearson.automobile.protocol.PrototypeBoundsAnchor
+import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -120,6 +125,33 @@ class PrototypeInsetFloorTest {
         anchoredOriginYPx = 30,
       )
     assertEquals(46, floor.top)
+  }
+
+  @Test
+  fun `a bottom-aligned anchored window's top floor converges instead of growing`() {
+    val placement = PrototypePlacement.Floating(Gravity.TOP)
+    val anchor = PrototypeBoundsAnchor(PrototypeBounds(0.0, 0.0, 100.0, 100.0), "bottom")
+    val topBarPx = 76
+    val contentHeightPx = 60
+    val floors = mutableListOf(prototypeInsetFloor(placement, 1f, 0, topBarPx).top)
+    repeat(8) {
+      // prototypeAnchor measures the safe-area-padded root; the host receives its screen origin.
+      val measuredHeightPx = contentHeightPx + floors.last()
+      val origin =
+        prototypeAnchorRect(anchor, 1f, 60f, measuredHeightPx.toFloat(), LayoutDirection.Ltr)
+      floors +=
+        prototypeInsetFloor(
+            placement,
+            1f,
+            0,
+            topBarPx,
+            anchoredOriginYPx = origin.top.roundToInt(),
+          )
+          .top
+    }
+    assertEquals(topBarPx, floors.first())
+    assertTrue(floors.all { it in 0..topBarPx })
+    floors.zipWithNext().forEach { (previous, next) -> assertEquals(previous, next) }
   }
 
   @Test

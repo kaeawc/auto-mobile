@@ -385,7 +385,7 @@ describe("prototype MCP tool", () => {
         expect(payload.success).toBe(true);
         expect(payload.warning).toContain("root.children[1].onTap[0].query.q");
         expect(payload.warning).toContain("Sensitive value cannot be bound into a request");
-        expect(payload.warning).toContain("ProtoViewer imports of this spec refuse it.");
+        expect(payload.warning).toContain("this is a warning only and does not block the show.");
       },
     );
 

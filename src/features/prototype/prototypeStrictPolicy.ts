@@ -154,7 +154,8 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
 
 export function prototypeSensitiveWarnings(spec: unknown): string[] {
   return prototypeSensitiveSinkErrors(spec).map(
-    ({ path, message }) => `${path}: ${message}; ProtoViewer imports of this spec refuse it.`,
+    ({ path, message }) =>
+      `${path}: ${message}; this is a warning only and does not block the show.`,
   );
 }
 

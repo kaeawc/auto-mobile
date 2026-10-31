@@ -4,7 +4,7 @@ import nestedFixture from "../../fixtures/prototype-spec/invalid/strict-library-
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { prototypeSensitiveWarnings } from "../../../src/features/prototype/prototypeStrictPolicy";
 
-test("sensitive warnings retain each sink path and message with the import refusal", () => {
+test("sensitive warnings retain each sink path and message with the warning-only suffix", () => {
   const spec = {
     id: "sensitive-warnings",
     window: { placement: { type: "fullscreen" } },
@@ -31,8 +31,8 @@ test("sensitive warnings retain each sink path and message with the import refus
   };
   expect(validatePrototypeSpec(spec).success).toBe(true);
   expect(prototypeSensitiveWarnings(spec)).toEqual([
-    "root.children[1].onTap[0].headers.Authorization: Sensitive value cannot be bound into a request; ProtoViewer imports of this spec refuse it.",
-    "root.children[1].onTap[0].query.q: Sensitive value cannot be bound into a request; ProtoViewer imports of this spec refuse it.",
+    "root.children[1].onTap[0].headers.Authorization: Sensitive value cannot be bound into a request; this is a warning only and does not block the show.",
+    "root.children[1].onTap[0].query.q: Sensitive value cannot be bound into a request; this is a warning only and does not block the show.",
   ]);
 });
 

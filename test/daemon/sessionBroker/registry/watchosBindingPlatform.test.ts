@@ -12,10 +12,6 @@ import {
   parseJournalTarget,
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryRows";
 import {
-  requireManagedBindingPlatform,
-  WATCH_BINDING_UNSUPPORTED_MESSAGE,
-} from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
-import {
   SqliteBindingRegistry,
   type BindingRegistryDatabase,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
@@ -41,14 +37,6 @@ describe("watchos binding platform validators", () => {
     expect(target.newPlatform).toBe("watchos");
     expect(() => parseJournalTarget(JSON.stringify({ newPlatform: "tvos" }))).toThrow(
       "not a platform",
-    );
-  });
-
-  test("creation, boot and reuse narrow away a watch binding by name", () => {
-    expect(requireManagedBindingPlatform("android")).toBe("android");
-    expect(requireManagedBindingPlatform("ios")).toBe("ios");
-    expect(() => requireManagedBindingPlatform("watchos")).toThrow(
-      WATCH_BINDING_UNSUPPORTED_MESSAGE,
     );
   });
 });

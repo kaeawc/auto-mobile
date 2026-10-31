@@ -15,6 +15,7 @@ import { parseAndroidSystemImageRuntime } from "../../../utils/android-cmdline-t
 import type { AvdConfigReader } from "../../../utils/android-cmdline-tools/AvdConfigReader";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
+import { matchesWatchSimulator } from "./watchBindingSpec";
 
 type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceType"> & {
   deviceType?: string;
@@ -29,6 +30,10 @@ type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceT
  */
 export type BindingRequestedSpec =
   | WithOptionalDeviceType<AndroidDeviceSpecification>
+  /**
+   * Also an Apple Watch spec (#15882), which is the subset `{ runtime, deviceType }` with both
+   * required (`watchBindingSpecSchema`); the watch resolver refuses anything more or less.
+   */
   | WithOptionalDeviceType<IosDeviceSpecification>;
 
 /** `unknown` means the device's configuration could not be read; it never justifies deletion. */
@@ -45,8 +50,8 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
   async matches(device: DeviceInfo, spec: BindingRequestedSpec): Promise<ManagedSpecMatch> {
     switch (device.platform) {
       case "watchos":
-        // A watch is never judged against an iOS spec; unknown never justifies deleting it.
-        return "unknown";
+        // Exact runtime and device type only: never an AVD config or iOS form-factor inference.
+        return matchesWatchSimulator(device, spec);
       case "android":
         return await this.matchesAndroid(device, spec);
       case "ios":

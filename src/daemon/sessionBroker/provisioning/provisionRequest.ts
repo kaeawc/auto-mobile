@@ -3,7 +3,10 @@ import type {
   IosDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
 import { MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS } from "../../wire/sessionLivenessWindows";
-import type { BindingDeviceFamily } from "../../../utils/provisionDeviceSpecSchemas";
+import type {
+  BindingDeviceFamily,
+  WatchBindingSpec,
+} from "../../../utils/provisionDeviceSpecSchemas";
 import { ActionableError } from "../../../models/ActionableError";
 export type BrokerDeviceRequest = {
   bindingIndex: number;
@@ -24,6 +27,8 @@ export type BrokerDeviceRequest = {
         deviceFamily?: BindingDeviceFamily;
       };
     }
+  /** One unpaired Apple Watch simulator, by exact runtime and device type (#15882). */
+  | { platform: "watchos"; requestedSpec: WatchBindingSpec }
 );
 /** Internal provisioning request, built directly by the broker without launch contract parsing. */
 export interface BrokerProvisionRequest {

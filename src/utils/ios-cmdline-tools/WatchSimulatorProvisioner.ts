@@ -54,7 +54,7 @@ export class WatchSimulatorProvisioner {
     request: WatchProvisionRequest,
     options: WatchProvisionOptions,
   ): Promise<WatchProvisionResult> {
-    assertSpecInCatalog(request.spec, await this.inventory.readCatalog(options.signal));
+    assertWatchSpecInCatalog(request.spec, await this.inventory.readCatalog(options.signal));
     const existing = await this.findExisting(request, options.signal);
     if (existing) {
       assertMatchesSpec(existing, request);
@@ -168,7 +168,8 @@ export class WatchSimulatorProvisioner {
   }
 }
 
-function assertSpecInCatalog(
+/** Refuse a watch spec the host catalog does not list (naming what it does) or whose runtime is unavailable. */
+export function assertWatchSpecInCatalog(
   spec: WatchProvisionRequest["spec"],
   catalog: WatchSimulatorCatalog,
 ): void {

@@ -38,6 +38,7 @@ import {
 } from "./GateBindingBootCapacity";
 import { PoolBindingDeviceClaims, type BindingClaimPool } from "./PoolBindingDeviceClaims";
 import { ToolBindingProvisioner, type BindingToolInvoker } from "./reconcilerPorts";
+import type { WatchBindingCatalog } from "./watchBindingSpec";
 import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
@@ -89,6 +90,8 @@ export interface DaemonBindingTooling {
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   /** Apple Watch simulators, charged against the shared total-resource limit (#15882). */
   watchInventory?: WatchBindingInventorySource;
+  /** The watch catalog a watch binding's spec is validated against before creation (#15882). */
+  watchCatalog?: WatchBindingCatalog;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: BindingBootCapacityAssertion;
   reserveBootCapacity?: typeof reserveBootCapacity;
@@ -112,6 +115,9 @@ const sdkAndroidProfileCatalog: ManagedAndroidProfileCatalog = {
 
 /** The injected tooling with the host's real tooling filled in. */
 function hostTooling(tooling: DaemonBindingTooling = {}, source?: ForeignAndroidSerialSource) {
+  // Simulators, Apple Watch ones included, exist only where simctl does.
+  const hostWatches =
+    process.platform === "darwin" ? new WatchSimulatorInventory(new SimCtlClient(null)) : undefined;
   return {
     deviceManager:
       tooling.deviceManager ??
@@ -125,11 +131,8 @@ function hostTooling(tooling: DaemonBindingTooling = {}, source?: ForeignAndroid
     iosRuntimeCatalog:
       tooling.iosRuntimeCatalog ??
       (process.platform === "darwin" ? new SimCtlClient(null) : undefined),
-    watchInventory:
-      tooling.watchInventory ??
-      (process.platform === "darwin"
-        ? new WatchSimulatorInventory(new SimCtlClient(null))
-        : undefined),
+    watchInventory: tooling.watchInventory ?? hostWatches,
+    watchCatalog: tooling.watchCatalog ?? hostWatches,
     checkBootCapacity: tooling.checkBootCapacity,
     reserveBootCapacity: tooling.reserveBootCapacity,
   };
@@ -193,6 +196,7 @@ export function createDaemonBrokerDeviceAcquisition(
         resolver: new DefaultManagedSpecResolver(tooling.iosRuntimeCatalog, {
           androidImageCatalog: tooling.androidImageCatalog,
           androidProfileCatalog: tooling.androidProfileCatalog,
+          watchCatalog: tooling.watchCatalog,
         }),
         provisioner:
           options.tooling?.provisioner ??

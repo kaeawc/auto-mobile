@@ -1,3 +1,4 @@
+import type { PointerOption } from "../../../models/PointerOption";
 import type { InteractionEvent } from "../../observe/android/AndroidCtrlProxyClient";
 
 /**
@@ -36,7 +37,7 @@ export interface TouchSlot {
   toolType?: PointerToolType;
   /** Held stylus buttons (BTN_STYLUS / BTN_STYLUS2); absent when none. */
   buttons?: StylusButton[];
-  /** Raw ABS_TILT_X / ABS_TILT_Y (signed), when the digitizer reports them. */
+  /** Raw ABS_TILT_X / ABS_TILT_Y (device units), when the digitizer reports them. */
   tiltX?: number;
   tiltY?: number;
   /** Raw ABS_DISTANCE (hover height), when reported. */
@@ -96,6 +97,9 @@ export interface GestureEvent {
   /** Stylus buttons held at any point during the contact. */
   buttons?: StylusButton[];
 
+  /** Mean contact AXIS_TILT magnitude in radians, 0..PI/2; absent without both tilt axes. */
+  tilt?: number;
+
   // tap / doubleTap / longPress
   screenX?: number;
   screenY?: number;
@@ -117,6 +121,29 @@ export interface GestureEvent {
 
   // pressButton
   button?: "back" | "home" | "menu" | "power" | "volume_up" | "volume_down" | "recent";
+}
+
+/**
+ * The replayable pointer for a recorded pen gesture. Only "stylus" can be injected, so an eraser
+ * has none (the recorder skips those gestures instead of replaying them as another tool).
+ */
+export function pointerOf(gesture: GestureEvent): PointerOption | undefined {
+  if (gesture.toolType !== "stylus") {
+    return undefined;
+  }
+  const pointer: PointerOption = { toolType: "stylus" };
+  if (gesture.pressure?.normalized) {
+    pointer.pressure = Math.round(gesture.pressure.mean * 1e4) / 1e4;
+  }
+  if (gesture.tilt !== undefined) {
+    pointer.tilt = gesture.tilt;
+  }
+  if (gesture.buttons?.length) {
+    pointer.buttons = gesture.buttons.map((button) =>
+      button === "stylusPrimary" ? "primary" : "secondary",
+    );
+  }
+  return pointer;
 }
 
 /** Thresholds used for gesture classification (dp units where applicable) */

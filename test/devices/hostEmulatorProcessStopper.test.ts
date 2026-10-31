@@ -254,3 +254,29 @@ test("win32 stopper reports an unreadable process table, never an empty read", a
   expect(described.kind).toBe("unreadable");
   expect(f.executor.getExecutedCommands()).toEqual([]);
 });
+
+test("shutdown retries an unreadable snapshot and allows a loaded ps six seconds to prove absence", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const timeouts: Array<number | undefined> = [];
+  const executor = new FakeHostCommandExecutor();
+  executor.executeCommand = async (_command, _args, options) => {
+    timeouts.push(options?.timeoutMs);
+    if (timeouts.length === 1 || (options?.timeoutMs ?? 0) < 6_000) {
+      throw Object.assign(new Error("ps timed out"), {
+        killed: true,
+        signal: "SIGTERM",
+        code: null,
+      });
+    }
+    await timer.sleep(6_000);
+    return createExecResult("1 0 100 0.0 /sbin/launchd", "");
+  };
+  const stopper = createHostEmulatorProcessStopper({ executor, timer, platform: "darwin" });
+  expect(await stopper.describeSerial("emulator-5554", { deadlineMs: 30_000 })).toEqual({
+    kind: "read",
+    candidates: [],
+  });
+  expect(timeouts).toEqual([15_000, 15_000]);
+  expect(timer.getSleepHistory()).toEqual([100, 6_000]);
+});

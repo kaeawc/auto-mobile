@@ -1,3 +1,4 @@
+import { TV_CONFIG, TV_SOURCE_PROPERTIES, tvConfigReader } from "../../fixtures/android-tv-avd";
 import { afterEach, describe, it, expect } from "bun:test";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -781,5 +782,68 @@ describe("effective hardware from hardware-qemu.ini (#15475)", () => {
     const neverLaunched = await reader().readConfig("x");
     expect(neverLaunched?.ramSizeMb).toBe(2048);
     expect(neverLaunched?.effectiveRamMb).toBeUndefined();
+  });
+});
+
+describe("installed system image version metadata", () => {
+  it("reads source.properties alongside captured TV geometry before boot", async () => {
+    const { reader, reads } = tvConfigReader();
+    expect(await reader.readConfig("tv")).toMatchObject({
+      deviceName: "tv_1080p",
+      apiLevel: 36,
+      osVersion: "16",
+      screenWidth: 1920,
+      screenHeight: 1080,
+      screenDensity: 320,
+    });
+    expect(reads).toEqual([
+      "/fixture/avd/tv.avd/config.ini",
+      "/fixture/sdk/system-images/android-36/android-tv/arm64-v8a/source.properties",
+    ]);
+  });
+  it("prefers the installed image release string over the major API lookup", async () => {
+    const reader = new FileAvdConfigReader(
+      async (path) =>
+        path.endsWith("source.properties")
+          ? TV_SOURCE_PROPERTIES.replace("Platform.Version=16", "Platform.Version=16.0")
+          : TV_CONFIG,
+      (path) => path.endsWith("config.ini") || path.endsWith("source.properties"),
+      "/fixture/avd",
+      "/fixture/sdk",
+    );
+    expect((await reader.readConfig("tv"))?.osVersion).toBe("16.0");
+  });
+  it("keeps configured facts when optional source.properties is absent", async () => {
+    const reader = new FileAvdConfigReader(
+      async () => TV_CONFIG,
+      (path) => path.endsWith("config.ini"),
+      "/fixture/avd",
+      "/fixture/sdk",
+    );
+    expect(await reader.readConfig("tv")).toMatchObject({
+      deviceName: "tv_1080p",
+      apiLevel: 36,
+      osVersion: "16",
+      screenWidth: 1920,
+    });
+  });
+  it("keeps configured facts when optional source.properties cannot be read", async () => {
+    const reader = new FileAvdConfigReader(
+      async (path) => {
+        if (path.endsWith("source.properties")) {
+          throw new Error("image unavailable");
+        }
+        return TV_CONFIG;
+      },
+      (path) => path.endsWith("config.ini") || path.endsWith("source.properties"),
+      "/fixture/avd",
+      "/fixture/sdk",
+    );
+    expect(await reader.readConfig("tv")).toMatchObject({
+      deviceName: "tv_1080p",
+      apiLevel: 36,
+      osVersion: "16",
+      screenWidth: 1920,
+    });
   });
 });

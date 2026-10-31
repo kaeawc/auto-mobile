@@ -180,13 +180,13 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     }
 
     /// POST to an observation-bridge route (#5159). Any HTTP reply is returned with its body;
-    /// nil means the SDK was unreachable.
+    /// failures distinguish proven non-delivery from an unanswered request.
     public func sendObservationRequest(
         _ route: SdkRoute,
         body: Data,
         timeoutMs: Double? = nil
     )
-        async -> SdkBridgeReply?
+        async -> SdkBridgeRequestResult
     {
         var request = jsonPost(path: route.path, body: body)
         var requestTransport = transport
@@ -195,19 +195,43 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
             request.timeoutInterval = configuration.timeoutIntervalForRequest
             requestTransport = actionTransport(configuration)
         }
+        let trackedTransport = ObservationRequestTransport(transport: requestTransport)
         do {
             let (data, response) = try await SdkEndpointResolver.requestData(
-                for: request, transport: requestTransport, resolver: endpointResolver
+                for: request, transport: trackedTransport, resolver: endpointResolver
             )
-            guard let http = response as? HTTPURLResponse else { return nil }
-            return SdkBridgeReply(statusCode: http.statusCode, body: data)
+            guard let http = response as? HTTPURLResponse else { return .noReply }
+            return .reply(SdkBridgeReply(statusCode: http.statusCode, body: data))
         } catch let error as SdkEndpointError {
             Self.logEndpointError(error)
-            return nil
+            let started = await trackedTransport.started
+            return started ? .noReply : .notSent
         } catch {
             Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
                 .debug("SDK observation bridge unavailable: \(error.localizedDescription, privacy: .public)")
-            return nil
+            if let urlError = error as? URLError {
+                switch urlError.code {
+                case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet:
+                    return .notSent
+                default: break
+                }
+            }
+            return .noReply
+        }
+    }
+
+    /// Endpoint identity errors can occur both during discovery and after the POST replies.
+    private actor ObservationRequestTransport: HTTPRequesting {
+        let transport: any HTTPRequesting
+        private(set) var started = false
+
+        init(transport: any HTTPRequesting) {
+            self.transport = transport
+        }
+
+        func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+            started = true
+            return try await transport.data(for: request)
         }
     }
 

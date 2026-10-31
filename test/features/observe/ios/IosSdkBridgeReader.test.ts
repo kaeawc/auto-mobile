@@ -1,3 +1,4 @@
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import { describe, expect, test } from "bun:test";
 import {
   createIosSdkBridgeReader,
@@ -27,15 +28,26 @@ class FakeBridgeClient implements IosSdkBridgeClient {
     totalTimeMs: 1,
   };
   observeCalls = 0;
+  discoveryTimeout?: number;
+  snapshotTimeout?: number;
+  onDiscovery: () => void = () => {};
 
-  async getObservationBridgeStateForIos(): Promise<IosObservationBridgeState> {
+  async getObservationBridgeStateForIos(
+    _appId: string,
+    timeoutMs?: number,
+  ): Promise<IosObservationBridgeState> {
+    this.discoveryTimeout = timeoutMs;
+    this.onDiscovery();
     if (this.state instanceof Error) {
       throw this.state;
     }
     return this.state;
   }
 
-  async requestSdkObservationForIos(): Promise<CtrlProxySdkObservationResult> {
+  async requestSdkObservationForIos(options?: {
+    timeoutMs?: number;
+  }): Promise<CtrlProxySdkObservationResult> {
+    this.snapshotTimeout = options?.timeoutMs;
     this.observeCalls++;
     return this.reply;
   }
@@ -88,4 +100,24 @@ describe("createIosSdkBridgeReader (#5159)", () => {
       detail: "bridge_unavailable",
     });
   });
+});
+
+test("bridge calls share the remaining search budget and observe keeps default timeouts", async () => {
+  const timer = new FakeTimer();
+  const client = new FakeBridgeClient();
+  const reader = createIosSdkBridgeReader({ client: () => client, enabled: () => true, timer });
+  client.onDiscovery = () => timer.setCurrentTime(timer.now() + 30);
+  await reader.observe("com.example.app", undefined, 50);
+  expect(client.discoveryTimeout).toBe(50);
+  expect(client.snapshotTimeout).toBe(20);
+  await reader.observe("com.example.app");
+  expect(client.discoveryTimeout).toBe(2000);
+  expect(client.snapshotTimeout).toBe(2000);
+  client.onDiscovery = () => timer.setCurrentTime(timer.now() + 50);
+  const calls = client.observeCalls;
+  expect(await reader.observe("com.example.app", undefined, 50)).toEqual({
+    kind: "unavailable",
+    detail: "search budget exhausted",
+  });
+  expect(client.observeCalls).toBe(calls);
 });

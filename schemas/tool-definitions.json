@@ -4160,6 +4160,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -4302,26 +4308,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -4342,12 +4344,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -4366,7 +4368,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -4418,7 +4420,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -4464,10 +4466,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -4481,7 +4483,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -4528,7 +4530,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -4538,7 +4540,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -4548,7 +4550,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -4556,7 +4558,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -4707,10 +4709,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -5521,6 +5523,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -5560,31 +5572,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -5596,7 +5608,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -5611,7 +5623,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -5666,7 +5678,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -5689,12 +5701,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -5702,7 +5714,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -5721,7 +5733,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -5731,7 +5743,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -6819,6 +6831,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -6961,26 +6979,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -7001,12 +7015,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -7025,7 +7039,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -7077,7 +7091,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -7123,10 +7137,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -7140,7 +7154,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -7187,7 +7201,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -7197,7 +7211,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -7207,7 +7221,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -7215,7 +7229,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -7366,10 +7380,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -8834,6 +8848,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -8873,31 +8897,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -8909,7 +8933,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -8924,7 +8948,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -8979,7 +9003,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -9002,12 +9026,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -9015,7 +9039,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -9034,7 +9058,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -9044,7 +9068,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -12533,6 +12557,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -12675,26 +12705,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -12715,12 +12741,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -12739,7 +12765,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -12791,7 +12817,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -12837,10 +12863,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -12854,7 +12880,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -12901,7 +12927,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -12911,7 +12937,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -12921,7 +12947,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -12929,7 +12955,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -13080,10 +13106,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -13867,6 +13893,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -13906,31 +13942,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -13942,7 +13978,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -13957,7 +13993,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -14012,7 +14048,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -14035,12 +14071,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -14048,7 +14084,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -14067,7 +14103,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -14077,7 +14113,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -15957,6 +15993,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -16099,26 +16141,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -16139,12 +16177,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -16163,7 +16201,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -16215,7 +16253,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -16261,10 +16299,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -16278,7 +16316,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -16325,7 +16363,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -16335,7 +16373,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -16345,7 +16383,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -16353,7 +16391,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -16504,10 +16542,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -17360,6 +17398,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -17399,31 +17447,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -17435,7 +17483,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -17450,7 +17498,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -17505,7 +17553,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -17528,12 +17576,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -17541,7 +17589,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -17560,7 +17608,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -17570,7 +17618,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -24794,6 +24842,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -24936,26 +24990,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -24976,12 +25026,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -25000,7 +25050,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -25052,7 +25102,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -25098,10 +25148,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -25115,7 +25165,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -25162,7 +25212,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -25172,7 +25222,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -25182,7 +25232,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -25190,7 +25240,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -25341,10 +25391,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -26174,6 +26224,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -26213,31 +26273,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -26249,7 +26309,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -26264,7 +26324,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -26319,7 +26379,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -26342,12 +26402,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -26355,7 +26415,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -26374,7 +26434,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -26384,7 +26444,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -26953,6 +27013,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -27095,26 +27161,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -27135,12 +27197,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -27159,7 +27221,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -27211,7 +27273,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -27257,10 +27319,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -27274,7 +27336,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -27321,7 +27383,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -27331,7 +27393,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -27341,7 +27403,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -27349,7 +27411,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -27500,10 +27562,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -28295,6 +28357,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -28334,31 +28406,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -28370,7 +28442,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -28385,7 +28457,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -28440,7 +28512,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -28463,12 +28535,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -28476,7 +28548,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -28495,7 +28567,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -28505,7 +28577,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -42064,6 +42136,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -42206,26 +42284,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -42246,12 +42320,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -42270,7 +42344,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -42322,7 +42396,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -42368,10 +42442,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -42385,7 +42459,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -42432,7 +42506,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -42442,7 +42516,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -42452,7 +42526,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -42460,7 +42534,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -42611,10 +42685,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -43398,6 +43472,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -43437,31 +43521,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -43473,7 +43557,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -43488,7 +43572,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -43543,7 +43627,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -43566,12 +43650,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -43579,7 +43663,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -43598,7 +43682,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -43608,7 +43692,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -45205,6 +45289,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -45347,26 +45437,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -45387,12 +45473,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -45411,7 +45497,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -45463,7 +45549,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -45509,10 +45595,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -45526,7 +45612,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -45573,7 +45659,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -45583,7 +45669,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -45593,7 +45679,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -45601,7 +45687,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -45752,10 +45838,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -46535,6 +46621,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -46574,31 +46670,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -46610,7 +46706,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -46625,7 +46721,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -46680,7 +46776,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -46703,12 +46799,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -46716,7 +46812,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -46735,7 +46831,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -46745,7 +46841,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -47153,6 +47249,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -47295,26 +47397,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -47335,12 +47433,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -47359,7 +47457,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -47411,7 +47509,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -47457,10 +47555,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -47474,7 +47572,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -47521,7 +47619,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -47531,7 +47629,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -47541,7 +47639,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -47549,7 +47647,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -47700,10 +47798,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -48483,6 +48581,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -48522,31 +48630,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -48558,7 +48666,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -48573,7 +48681,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -48628,7 +48736,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -48651,12 +48759,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -48664,7 +48772,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -48683,7 +48791,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -48693,7 +48801,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -53883,6 +53991,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -54025,26 +54139,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -54065,12 +54175,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -54089,7 +54199,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -54141,7 +54251,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -54187,10 +54297,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -54204,7 +54314,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -54251,7 +54361,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -54261,7 +54371,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -54271,7 +54381,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -54279,7 +54389,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -54430,10 +54540,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -55225,6 +55335,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -55264,31 +55384,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -55300,7 +55420,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -55315,7 +55435,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -55370,7 +55490,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -55393,12 +55513,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -55406,7 +55526,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -55425,7 +55545,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -55435,7 +55555,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -55846,6 +55966,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -55988,10 +56114,10 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
@@ -56052,14 +56178,10 @@
                   "additionalProperties": {}
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -56080,12 +56202,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema45"
+                              "$ref": "#/$defs/__schema47"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema45"
+                                "$ref": "#/$defs/__schema47"
                               }
                             }
                           ]
@@ -56104,7 +56226,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema45"
+                                "$ref": "#/$defs/__schema47"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -56156,7 +56278,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema45"
+                      "$ref": "#/$defs/__schema47"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -56202,10 +56324,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema46"
+                                  "$ref": "#/$defs/__schema48"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema46"
+                                  "$ref": "#/$defs/__schema48"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -56219,7 +56341,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "null"
@@ -56266,7 +56388,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "null"
@@ -56276,7 +56398,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "null"
@@ -56286,7 +56408,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "null"
@@ -56294,7 +56416,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema46"
+                          "$ref": "#/$defs/__schema48"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -57109,6 +57231,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -57148,31 +57280,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -57184,7 +57316,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -57199,7 +57331,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -57222,12 +57354,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema47"
                   }
                 }
               ]
@@ -57235,7 +57367,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "type": "object",
           "properties": {
             "top": {
@@ -59204,6 +59336,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -59346,26 +59484,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -59386,12 +59520,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -59410,7 +59544,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -59462,7 +59596,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -59508,10 +59642,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -59525,7 +59659,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -59572,7 +59706,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -59582,7 +59716,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -59592,7 +59726,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -59600,7 +59734,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -59751,10 +59885,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -60743,6 +60877,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -60782,31 +60926,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -60818,7 +60962,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -60833,7 +60977,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -60888,7 +61032,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -60911,12 +61055,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -60924,7 +61068,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -60943,7 +61087,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -60953,7 +61097,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}
@@ -62093,6 +62237,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema44"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema45"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema46"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -62183,7 +62333,7 @@
                 "selectedElements": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema47"
                   }
                 },
                 "focusedElement": {
@@ -62196,13 +62346,13 @@
                   "$ref": "#/$defs/__schema35"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 "backend": {
-                  "$ref": "#/$defs/__schema47"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "fallbackReason": {
-                  "$ref": "#/$defs/__schema48"
+                  "$ref": "#/$defs/__schema46"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -62620,13 +62770,13 @@
           "additionalProperties": {}
         },
         "selectedElement": {
-          "$ref": "#/$defs/__schema45"
-        },
-        "backend": {
           "$ref": "#/$defs/__schema47"
         },
+        "backend": {
+          "$ref": "#/$defs/__schema45"
+        },
         "fallbackReason": {
-          "$ref": "#/$defs/__schema48"
+          "$ref": "#/$defs/__schema46"
         },
         "activatedSubtext": {
           "description": "Semantic accessibility link confirmed by the native runner",
@@ -62647,7 +62797,7 @@
         "selectedElements": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/__schema45"
+            "$ref": "#/$defs/__schema47"
           }
         },
         "skipped": {
@@ -63550,6 +63700,16 @@
           "additionalProperties": false
         },
         "__schema45": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema46": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema47": {
           "type": "object",
           "properties": {
             "text": {
@@ -63600,7 +63760,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "type": "object",
           "properties": {
             "platform": {
@@ -63654,16 +63814,6 @@
           },
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
-        },
-        "__schema47": {
-          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-          "type": "string",
-          "enum": ["sdk", "xctest"]
-        },
-        "__schema48": {
-          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-          "type": "string",
-          "enum": ["unavailable", "unsupported"]
         },
         "__schema49": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
@@ -63730,7 +63880,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema46"
+              "$ref": "#/$defs/__schema48"
             }
           },
           "additionalProperties": {}
@@ -64142,6 +64292,12 @@
                 },
                 "importedPrototypeContent": {
                   "$ref": "#/$defs/__schema42"
+                },
+                "backend": {
+                  "$ref": "#/$defs/__schema43"
+                },
+                "fallbackReason": {
+                  "$ref": "#/$defs/__schema44"
                 }
               },
               "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
@@ -64284,26 +64440,22 @@
                   }
                 },
                 "focusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "accessibilityFocusedElement": {
-                  "$ref": "#/$defs/__schema43"
+                  "$ref": "#/$defs/__schema45"
                 },
                 "activeWindow": {
                   "$ref": "#/$defs/__schema31"
                 },
                 "screenIdentity": {
-                  "$ref": "#/$defs/__schema45"
+                  "$ref": "#/$defs/__schema47"
                 },
                 "backend": {
-                  "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
-                  "type": "string",
-                  "enum": ["sdk", "xctest"]
+                  "$ref": "#/$defs/__schema43"
                 },
                 "fallbackReason": {
-                  "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
-                  "type": "string",
-                  "enum": ["unavailable", "unsupported"]
+                  "$ref": "#/$defs/__schema44"
                 },
                 "hierarchyServiceStarted": {
                   "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
@@ -64324,12 +64476,12 @@
                         "node": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema46"
+                              "$ref": "#/$defs/__schema48"
                             },
                             {
                               "type": "array",
                               "items": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               }
                             }
                           ]
@@ -64348,7 +64500,7 @@
                                 "$ref": "#/$defs/__schema36"
                               },
                               "hierarchy": {
-                                "$ref": "#/$defs/__schema46"
+                                "$ref": "#/$defs/__schema48"
                               },
                               "truncationReasons": {
                                 "description": "Per-window capture truncation codes (max_nodes, max_depth, max_children, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
@@ -64400,7 +64552,7 @@
                       ]
                     },
                     "accessibility-focused-element": {
-                      "$ref": "#/$defs/__schema46"
+                      "$ref": "#/$defs/__schema48"
                     },
                     "systemInsets": {
                       "type": "object",
@@ -64446,10 +64598,10 @@
                               "type": "object",
                               "properties": {
                                 "visible": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 },
                                 "stable": {
-                                  "$ref": "#/$defs/__schema47"
+                                  "$ref": "#/$defs/__schema49"
                                 }
                               },
                               "required": ["visible", "stable"],
@@ -64463,7 +64615,7 @@
                         "displayCutout": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -64510,7 +64662,7 @@
                         "systemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -64520,7 +64672,7 @@
                         "mandatorySystemGestures": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -64530,7 +64682,7 @@
                         "tappableElement": {
                           "anyOf": [
                             {
-                              "$ref": "#/$defs/__schema47"
+                              "$ref": "#/$defs/__schema49"
                             },
                             {
                               "type": "null"
@@ -64538,7 +64690,7 @@
                           ]
                         },
                         "safeArea": {
-                          "$ref": "#/$defs/__schema47"
+                          "$ref": "#/$defs/__schema49"
                         },
                         "systemChrome": {
                           "anyOf": [
@@ -64689,10 +64841,10 @@
               "type": "string"
             },
             "fromScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             },
             "toScreen": {
-              "$ref": "#/$defs/__schema48"
+              "$ref": "#/$defs/__schema50"
             }
           },
           "required": ["mode", "reason"],
@@ -65487,6 +65639,16 @@
           "additionalProperties": false
         },
         "__schema43": {
+          "description": "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its nodes were used, xctest when XCTest stood in.",
+          "type": "string",
+          "enum": ["sdk", "xctest"]
+        },
+        "__schema44": {
+          "description": "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+          "type": "string",
+          "enum": ["unavailable", "unsupported"]
+        },
+        "__schema45": {
           "type": "object",
           "properties": {
             "bounds": {
@@ -65526,31 +65688,31 @@
               "type": "string"
             },
             "checkable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "checked": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "clickable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "enabled": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focusable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "accessibility-focused": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "scrollable": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "selected": {
-              "$ref": "#/$defs/__schema44"
+              "$ref": "#/$defs/__schema46"
             },
             "semantic-links": {
               "type": "array",
@@ -65562,7 +65724,7 @@
           "required": ["bounds"],
           "additionalProperties": {}
         },
-        "__schema44": {
+        "__schema46": {
           "anyOf": [
             {
               "type": "boolean"
@@ -65577,7 +65739,7 @@
             }
           ]
         },
-        "__schema45": {
+        "__schema47": {
           "type": "object",
           "properties": {
             "platform": {
@@ -65632,7 +65794,7 @@
           "required": ["platform", "source", "confidence", "key", "components"],
           "additionalProperties": {}
         },
-        "__schema46": {
+        "__schema48": {
           "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
@@ -65655,12 +65817,12 @@
             "node": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/__schema46"
+                  "$ref": "#/$defs/__schema48"
                 },
                 {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/__schema46"
+                    "$ref": "#/$defs/__schema48"
                   }
                 }
               ]
@@ -65668,7 +65830,7 @@
           },
           "additionalProperties": {}
         },
-        "__schema47": {
+        "__schema49": {
           "type": "object",
           "properties": {
             "top": {
@@ -65687,7 +65849,7 @@
           "required": ["top", "right", "bottom", "left"],
           "additionalProperties": false
         },
-        "__schema48": {
+        "__schema50": {
           "type": "object",
           "properties": {
             "activeWindow": {
@@ -65697,7 +65859,7 @@
               "type": "string"
             },
             "screenIdentity": {
-              "$ref": "#/$defs/__schema45"
+              "$ref": "#/$defs/__schema47"
             }
           },
           "additionalProperties": {}

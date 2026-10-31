@@ -1,3 +1,4 @@
+import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import type { BootedDevice } from "../../../models";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
@@ -43,28 +44,36 @@ export type IosSdkBridgeObservation =
   | { kind: "unavailable"; detail: string };
 
 export interface IosSdkBridgeReader {
-  observe(appId: string, signal?: AbortSignal): Promise<IosSdkBridgeObservation>;
+  observe(
+    appId: string,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<IosSdkBridgeObservation>;
 }
 
 export interface IosSdkBridgeReaderOptions {
   client: () => IosSdkBridgeClient | null;
   enabled?: () => boolean;
+  timer?: Timer;
 }
 
 export function createIosSdkBridgeReader(options: IosSdkBridgeReaderOptions): IosSdkBridgeReader {
   const enabled = options.enabled ?? (() => serverConfig.isIosSdkObservationBridgeEnabled());
+  const timer = options.timer ?? defaultTimer;
+  const failureDetail = (reply: CtrlProxySdkObservationResult) =>
+    reply.failure ?? reply.error ?? "no observation";
   return {
-    async observe(appId, signal) {
+    async observe(appId, signal, timeoutMs = Infinity) {
+      const deadline = timer.now() + Math.max(0, timeoutMs);
+      const remaining = () =>
+        Math.max(0, Math.min(IOS_SDK_BRIDGE_OBSERVE_TIMEOUT_MS, deadline - timer.now()));
       const client = enabled() ? options.client() : null;
-      if (!client) {
+      if (!client || remaining() <= 0) {
         return { kind: "none" };
       }
       let state: IosObservationBridgeState;
       try {
-        state = await client.getObservationBridgeStateForIos(
-          appId,
-          IOS_SDK_BRIDGE_OBSERVE_TIMEOUT_MS,
-        );
+        state = await client.getObservationBridgeStateForIos(appId, remaining());
       } catch (error) {
         // A failed capability probe says nothing about a bridge; observe keeps its XCTest result.
         logger.debug(
@@ -75,15 +84,18 @@ export function createIosSdkBridgeReader(options: IosSdkBridgeReaderOptions): Io
       if (state.status !== "available") {
         return { kind: "none" };
       }
+      if (remaining() <= 0) {
+        return { kind: "unavailable", detail: "search budget exhausted" };
+      }
       try {
         const reply = await client.requestSdkObservationForIos({
-          timeoutMs: IOS_SDK_BRIDGE_OBSERVE_TIMEOUT_MS,
+          timeoutMs: remaining(),
           signal,
         });
         if (reply.success && reply.observation) {
           return { kind: "observation", observation: reply.observation };
         }
-        const detail = reply.failure ?? reply.error ?? "no observation";
+        const detail = failureDetail(reply);
         logger.warn(`[iOS] SDK bridge snapshot unavailable for ${appId}: ${detail}`);
         return { kind: "unavailable", detail };
       } catch (error) {
@@ -97,9 +109,11 @@ export function createIosSdkBridgeReader(options: IosSdkBridgeReaderOptions): Io
 /** The production reader: the device's existing runner client, gated by the routing flag. */
 export function deviceIosSdkBridgeReader(
   device: Pick<BootedDevice, "deviceId">,
+  timer?: Timer,
 ): IosSdkBridgeReader {
   return createIosSdkBridgeReader({
     client: () => IOSCtrlProxyClient.getExistingInstance(device.deviceId),
+    timer,
   });
 }
 
@@ -117,14 +131,25 @@ export async function mergeIosSdkBridgeInto(
   hierarchy: ViewHierarchyResult,
   reader: IosSdkBridgeReader,
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<IosSdkBridgeMergeResult> {
   const appId = hierarchy.packageName;
   if (!appId) {
     return {};
   }
-  const outcome = await reader.observe(appId, signal);
+  const outcome = await reader.observe(appId, signal, timeoutMs);
   if (outcome.kind === "none") {
     return {};
+  }
+  if (
+    outcome.kind === "observation" &&
+    outcome.observation.bundleId !== undefined &&
+    outcome.observation.bundleId !== appId
+  ) {
+    logger.debug(
+      `[iOS] SDK snapshot app ${outcome.observation.bundleId} differs from hierarchy app ${appId}; skipping merge`,
+    );
+    return { backend: "xctest", fallbackReason: "unavailable" };
   }
   const merged =
     outcome.kind === "observation" ? mergeIosSdkObservation(hierarchy, outcome.observation) : null;

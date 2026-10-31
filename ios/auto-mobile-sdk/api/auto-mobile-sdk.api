@@ -1100,6 +1100,7 @@ public struct AutoMobileObservationNode: Codable, Sendable, Equatable
   public func contains(id: String) -> Bool
   public func node(id: String) -> AutoMobileObservationNode?
 public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
+  public let bundleId: String?
   public let captureIdentity: UInt64
   public let orientation: AutoMobileDeviceOrientation
   public let coordinateSpace: AutoMobileCoordinateSpace
@@ -1107,7 +1108,7 @@ public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
   public let root: AutoMobileObservationNode?
   public let focusedElementId: String?
   public let capabilities: Set<String>
-  public init( captureIdentity: UInt64, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
+  public init( captureIdentity: UInt64, bundleId: String? = Bundle.main.bundleIdentifier, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
   public func containsElement(id: String) -> Bool
 public enum AutoMobileAction: Codable, Sendable, Equatable
   case tap(observationIdentity: UInt64, elementId: String)

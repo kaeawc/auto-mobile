@@ -120,6 +120,32 @@ describe("iOS Simulator .ips finder (#14103)", () => {
     expect(reports.reads).toHaveLength(1);
     const body = await finder.read("3F55C604-EC99-4CA7-95B5-0E22E44A5EA5");
     expect(body?.text).toBe(captured);
+    expect(await finder.read("00000000-0000-0000-0000-000000000000")).toBeUndefined();
+  });
+
+  test("finds a crash whose only report is the numbered .000.ips copy", async () => {
+    const reports = new MemoryReports();
+    reports.add(
+      "Playground-2026-10-30-151729.000.ips",
+      fixture("ios-simulator-playground-sigabrt-captured.ips"),
+      Date.parse("2026-10-30T15:17:29-05:00"),
+    );
+    const finder = new IosSimulatorCrashReportFinder(
+      "B131B3E7-52E7-4FC9-B698-0A73E66BB494",
+      reports,
+      REPORTS,
+    );
+
+    const lookup = await finder.find({
+      appId: "dev.jasonpearson.automobile.Playground",
+      processId: 73194,
+      notBeforeTimestampMs: Date.parse("2026-10-30T15:17:10-05:00"),
+    });
+
+    expect(lookup).toMatchObject({
+      status: "found",
+      report: { id: "3F55C604-EC99-4CA7-95B5-0E22E44A5EA5" },
+    });
   });
 
   test("reports notFound when the DiagnosticReports folder does not exist", async () => {

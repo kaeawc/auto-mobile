@@ -95,13 +95,10 @@ export async function reserveRecoveredDeviceForReadiness(
   await validatePooledDeviceMapping(boot.device, requestedIdentity);
   if (devicePool) {
     releaseReadinessReservations.push(
-      await devicePool.reserveDeviceForReadiness(
-        boot.device.deviceId,
-        boot.device,
-        boot.sourceImage?.name ?? boot.device.name,
-        undefined,
-        { enforceAndroidRecoveryExclusion: boot.device.platform === "android" },
-      ),
+      await devicePool.reserveDeviceForReadiness(boot.device.deviceId, boot.device, {
+        stableRuntimeName: boot.sourceImage?.name ?? boot.device.name,
+        enforceAndroidRecoveryExclusion: boot.device.platform === "android",
+      }),
     );
   }
   clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
@@ -125,16 +122,11 @@ export async function reserveInitialDeviceForReadiness(
     return;
   }
   releaseReadinessReservations.push(
-    await devicePool.reserveDeviceForReadiness(
-      boot.device.deviceId,
-      boot.device,
-      boot.sourceImage?.name ?? boot.device.name,
-      undefined,
-      {
-        autolockClient: oneShotCli ? { oneShotCli } : mcpSessionId ? { mcpSessionId } : undefined,
-        enforceAndroidRecoveryExclusion: true,
-      },
-    ),
+    await devicePool.reserveDeviceForReadiness(boot.device.deviceId, boot.device, {
+      stableRuntimeName: boot.sourceImage?.name ?? boot.device.name,
+      autolockClient: oneShotCli ? { oneShotCli } : mcpSessionId ? { mcpSessionId } : undefined,
+      enforceAndroidRecoveryExclusion: true,
+    }),
   );
 }
 
@@ -270,7 +262,7 @@ export function createSystemUiAnrRebooter(
           return;
         }
         if (session) {
-          await releaseSessionAndDevice(manager, devicePool, replacement.id, sessionId, {
+          await releaseSessionAndDevice({ manager, pool: devicePool }, replacement.id, sessionId, {
             reason: utilDeviceLossCancellationReason(replacement.id),
             release: async () =>
               await manager.releaseSession(

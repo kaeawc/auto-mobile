@@ -348,12 +348,10 @@ describe("exact Android binding during transitional adb presence", () => {
 
   test("own readiness reservation waits once then binds the same pooled entry", async () => {
     const h = await setup(true);
-    const reservation = await h.pool.reserveDeviceForReadiness(
-      device.deviceId,
-      device,
-      device.name,
-      image.name,
-    );
+    const reservation = await h.pool.reserveDeviceForReadiness(device.deviceId, device, {
+      stableRuntimeName: device.name,
+      verifiedAndroidAvdName: image.name,
+    });
     try {
       const pending = track(
         h.pool.bindOrReuseDeviceSession({
@@ -386,12 +384,10 @@ describe("exact Android binding during transitional adb presence", () => {
 
   test("own readiness reservation retains the entry when offline outlasts the budget", async () => {
     const h = await setup(true);
-    const reservation = await h.pool.reserveDeviceForReadiness(
-      device.deviceId,
-      device,
-      device.name,
-      image.name,
-    );
+    const reservation = await h.pool.reserveDeviceForReadiness(device.deviceId, device, {
+      stableRuntimeName: device.name,
+      verifiedAndroidAvdName: image.name,
+    });
     const entryBefore = { ...h.entry! };
     try {
       const error = await settleByFakeEvents(
@@ -521,8 +517,7 @@ describe("exact Android binding during transitional adb presence", () => {
     const release = await h.pool.reserveDeviceForReadiness(
       reservedDevice.deviceId,
       reservedDevice,
-      device.name,
-      image.name,
+      { stableRuntimeName: device.name, verifiedAndroidAvdName: image.name },
     );
     const probe = spyOn(h.manager, "getAndroidListedDeviceStates");
     try {
@@ -599,8 +594,7 @@ describe("exact Android binding during transitional adb presence", () => {
       const release = await h.pool.reserveDeviceForReadiness(
         reservedDevice.deviceId,
         reservedDevice,
-        device.name,
-        image.name,
+        { stableRuntimeName: device.name, verifiedAndroidAvdName: image.name },
       );
       const owners = new Set([release.owner]);
       const probe = spyOn(h.manager, "getAndroidListedDeviceStates");

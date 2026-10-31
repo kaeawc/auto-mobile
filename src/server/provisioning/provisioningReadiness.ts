@@ -173,13 +173,10 @@ export async function reserveProvisionDeviceReadiness(
   // readiness that follows resets the shared per-device CtrlProxy manager and
   // rewrites resource settings. Prove this client owns the device first, the
   // same way `reserveInitialDeviceForReadiness` does for startDevice.
-  return await devicePool.reserveDeviceForReadiness(
-    boot.device.deviceId,
-    boot.device,
-    boot.sourceImage?.name ?? boot.device.name,
-    undefined,
-    { autolockClient: readinessReservationOwner(args) },
-  );
+  return await devicePool.reserveDeviceForReadiness(boot.device.deviceId, boot.device, {
+    stableRuntimeName: boot.sourceImage?.name ?? boot.device.name,
+    autolockClient: readinessReservationOwner(args),
+  });
 }
 
 export async function ensureProvisionDeviceReadiness(

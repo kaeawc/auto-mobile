@@ -81,8 +81,7 @@ describe("owner-disconnect release re-arm (#10663)", () => {
             return deferral;
           }
           await releaseSessionAndDevice(
-            sessionManager,
-            devicePool,
+            { manager: sessionManager, pool: devicePool },
             session.assignedDevice,
             session.sessionId,
             {

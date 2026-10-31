@@ -170,7 +170,7 @@ class DaemonUnderTest {
       () => false,
       async (sessionId, reason) => {
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+        await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
           reason,
         });
       },

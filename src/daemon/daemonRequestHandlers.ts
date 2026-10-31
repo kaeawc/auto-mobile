@@ -652,7 +652,7 @@ async function releaseBoundSession(
       error,
     );
   });
-  await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+  await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
     release: async () => {
       deviceId = await manager.releaseSession(sessionId);
       return deviceId;

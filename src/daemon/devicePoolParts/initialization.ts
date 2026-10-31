@@ -366,8 +366,7 @@ export class DevicePoolInitialization {
   ): Promise<void> {
     const { sessionId, assignedDevice } = session;
     await releaseSessionAndDevice(
-      this.state.sessionManager,
-      this.callbacks,
+      { manager: this.state.sessionManager, pool: this.callbacks },
       assignedDevice,
       sessionId,
       {

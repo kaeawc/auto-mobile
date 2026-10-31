@@ -23,8 +23,6 @@ export interface ReservationsOperations {
   reserveDeviceForReadiness(
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    stableRuntimeName?: string,
-    verifiedAndroidAvdName?: string,
     options?: ReadinessReservationOptions,
   ): Promise<DeviceReadinessReservation>;
   /** An admitted owner may prepare R even if R's control call recovered it during boot. */
@@ -125,15 +123,11 @@ export class DevicePoolReservations {
   reserveDeviceForReadiness(
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    stableRuntimeName?: string,
-    verifiedAndroidAvdName?: string,
     options?: ReadinessReservationOptions,
   ): Promise<DeviceReadinessReservation> {
     return this.state.deviceReservations.reserveDeviceForReadiness(
       deviceId,
       expectedIdentity,
-      stableRuntimeName,
-      verifiedAndroidAvdName,
       options,
     );
   }

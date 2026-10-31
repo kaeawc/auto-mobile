@@ -442,8 +442,7 @@ export class DaemonSessions {
       let deviceId: string | null = null;
       let superseded = false;
       await releaseSessionAndDevice(
-        this.host.services.sessionManager(),
-        this.host.services.devicePool(),
+        { manager: this.host.services.sessionManager(), pool: this.host.services.devicePool() },
         assignedDeviceId,
         sessionId,
         {

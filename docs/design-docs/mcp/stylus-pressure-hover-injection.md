@@ -216,11 +216,11 @@ starts it with
 **Why `--no-restart` (an Opus review finding).** The instrumentation targets CtrlProxy's own package, and
 `am instrument` force-stops its target when it starts and again when it finishes unless given
 `--no-restart`. Without it every injection would kill the accessibility service and its WebSocket
-server. The flag arrived with the Android 13 `am`, so CtrlProxy advertises `stylus_input_v1` and
-`hover_input_v1` only on API 33 and newer (`PointerInjectionSupport`); an older device is refused with
-the flags absent, and a `am` that rejects the flag reports it. Both the API level and that the
-connection survives are assumptions the probe must confirm. A separate package for the
-instrumentation, or a `app_process` injector, are the fallbacks if they do not hold.
+server. Measured on emulators (#13082), API 30's `am` rejects the flag (`Unknown option:
+--no-restart`), while API 31, 32, 33 and 37 accept it and keep the accessibility service bound after
+a stroke and a hover. CtrlProxy therefore advertises `stylus_input_v1` and `hover_input_v1` only on
+API 31 and newer (`PointerInjectionSupport`); an older device is refused with the flags absent, and
+a `am` that rejects the flag reports it.
 It validates the request, gets a `UiAutomation` with `FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`
 (without it the system silences CtrlProxy's own accessibility service for the duration), plays the
 planned `MotionEvent`s through `injectInputEvent`, and reports `success`, `error`, `injected` and
@@ -231,7 +231,7 @@ and EXIT; a stroke is DOWN, MOVEs, UP with pressure, distance, tilt and orientat
 between waypoints) and its validation; `PointerRequestCodec`; `PointerInjectionExecutor` (schedules
 events and, if one is refused or the run is cancelled, closes the pointer with CANCEL or HOVER_EXIT);
 `UiAutomationPointerSink` (the only class that touches `MotionEvent`). CtrlProxy advertises
-`stylus_input_v1` and `hover_input_v1` (API 33+); `hoverAt` uses the route.
+`stylus_input_v1` and `hover_input_v1` (API 31+); `hoverAt` uses the route.
 
 **Failure modes, designed for and to be confirmed on a device.**
 

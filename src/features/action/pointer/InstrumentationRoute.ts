@@ -27,7 +27,7 @@ export class InstrumentationRoute extends DispatchingRoute {
     }
     const old =
       device.apiLevel !== undefined && device.apiLevel < POINTER_INSTRUMENTATION_MIN_SDK
-        ? `: this device runs Android API ${device.apiLevel} and the route needs Android 13 (API ${POINTER_INSTRUMENTATION_MIN_SDK})`
+        ? `: this device runs Android API ${device.apiLevel} and the route needs Android 12 (API ${POINTER_INSTRUMENTATION_MIN_SDK})`
         : "";
     return unsupported(`the connected runner does not advertise ${needed}${old}`, needed);
   }

@@ -11,8 +11,8 @@ import type { PointerRequest } from "./PointerInjector";
 export const POINTER_INSTRUMENTATION_COMPONENT =
   "dev.jasonpearson.automobile.ctrlproxy/.pointer.PointerInstrumentation";
 
-/** The first Android release whose `am instrument` has `--no-restart` (see the design note). */
-export const POINTER_INSTRUMENTATION_MIN_SDK = 33;
+/** The first Android release whose `am instrument` has `--no-restart` (measured; see the design note). */
+export const POINTER_INSTRUMENTATION_MIN_SDK = 31;
 
 const dispatchLocks = new WeakMap<AdbExecutor, Mutex>();
 
@@ -97,7 +97,7 @@ async function unreportedFailure(output: string, adb: AdbExecutor): Promise<Acti
   }
   if (/Unknown option|--no-restart/i.test(output)) {
     return new PointerNotSentError(
-      "This Android version's `am instrument` has no --no-restart, which keeps the injection from restarting CtrlProxy; hover and stylus injection need Android 13 or newer. No input was sent.",
+      "This Android version's `am instrument` has no --no-restart, which keeps the injection from restarting CtrlProxy; hover and stylus injection need Android 12 or newer. No input was sent.",
     );
   }
   if (/Process crashed|INSTRUMENTATION_RESULT: shortMsg=/i.test(output)) {

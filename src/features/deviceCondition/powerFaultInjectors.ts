@@ -11,6 +11,19 @@ import type {
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { rejectValue, shell, unsupported } from "./injectorSupport";
 
+/**
+ * Power-domain fault injectors for `deviceCondition.faults` (#14063): battery,
+ * low-power mode, Doze, and thermal throttling. All are Android-only and
+ * root-free (`dumpsys`/`settings`/`cmd`), each paired with its documented reset
+ * and a read-back so release can verify a clean device. Version-sensitive verbs
+ * (`deviceidle`, `thermalservice`) probe their capability first and fail with an
+ * "unsupported on this image" error that the controller surfaces as `unsupported`
+ * rather than half-applying.
+ *
+ * Injectors are factory functions (not classes) so the whole family stays in one
+ * file under the repo's one-class-per-file rule.
+ */
+
 /** Android thermal severities the surface exposes, mapped to framework status ints. */
 const THERMAL_SEVERITY: Record<string, number> = { throttling: 3, critical: 4 };
 

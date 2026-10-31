@@ -31,6 +31,21 @@ import {
 import { OwedResetError } from "./OwedResetError";
 import { createSerializer, rejectValue, unsupported } from "./injectorSupport";
 
+/**
+ * `faults.clockSkew` (#14069): put the device clock `offsetSeconds` ahead of (or behind) real
+ * time, so an app can be tested against a wrong clock: expired tokens and certificates, stale
+ * caches, scheduling. Reset restores real (host) time and the original automatic-time setting.
+ *
+ * It drives the same clock control as `setDeviceState.clock` and shares its per-device queue and
+ * restore baseline, so the two never record each other's skewed clock as "the original". The
+ * clock is device-global: a reset from either surface restores real time for both. Rootable
+ * Android emulators only; setting the clock needs `adb root`, which restarts adbd.
+ *
+ * A repeat skew while one is applied moves the clock again and keeps the one reset the first
+ * skew registered. A skew that fails to verify still hands the controller its reset, because the
+ * clock may have moved before the failure.
+ */
+
 export interface ClockFaultInjectorDeps {
   /** A fresh adapter per operation, so it carries the clock registry's current incarnation signal. */
   adapter: () => DeviceClockAdapter;

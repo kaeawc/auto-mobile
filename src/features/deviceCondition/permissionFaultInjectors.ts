@@ -31,6 +31,13 @@ import {
   type ResolveAppUser,
 } from "./injectorSupport";
 
+/**
+ * `faults.revokePermission` (#14069): revoke one runtime permission from an installed app with
+ * `pm revoke`, so the app can be tested against a permission the user withdrew mid-session. Reset
+ * re-grants it. `pm revoke` kills the app's process, so a revoke also restarts the app; that is a
+ * compound fault, not a side effect to hide. Android only and root-free.
+ */
+
 const paramsSchema = z
   .object({
     package: z.string().regex(ANDROID_PACKAGE_NAME_PATTERN),

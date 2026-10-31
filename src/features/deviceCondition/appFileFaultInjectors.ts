@@ -28,6 +28,17 @@ import {
   type ResolveAppUser,
 } from "./injectorSupport";
 
+/**
+ * `faults.corruptAppFile` (#14066): damage one file in a debuggable app's own data directory, such
+ * as a SQLite database or a SharedPreferences XML, so the app can be tested against a store that
+ * will not open. Android only. It reaches the file with `run-as`, which needs no root but only
+ * works for a debuggable app; a release build is refused with that reason.
+ *
+ * The original is copied beside the file first and the apply records its checksum, so reset puts
+ * the bytes back and proves it by checksum, then removes the copy: nothing is left in the app's
+ * directory. Both steps force-stop the app, so it does not hold the file open or write it back.
+ */
+
 export const CORRUPT_MODES = ["overwrite", "truncate"] as const;
 
 /** Bytes zeroed at the start of the file by `overwrite`, enough to destroy a SQLite header. */

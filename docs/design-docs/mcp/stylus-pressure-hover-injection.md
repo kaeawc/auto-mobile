@@ -150,8 +150,7 @@ observe hover on real pen hardware even where injection is impossible. [doc]
 
 ## Experiments that settle the unknowns
 
-The Playground **Pointer Probe** screen (#13096) is the probe view for experiments
-2, 3, 4 and 6. Open it from Home > Demos > Pointer Probe or
+The Playground **Pointer Probe** screen (#13096) exposes pointer events for route verification. Open it from Home > Demos > Pointer Probe or
 `adb shell am start -a android.intent.action.VIEW -d automobile://playground/demos/input/pointer_probe`
 (app onboarded and logged in). A custom View logs every `MotionEvent` from
 `onTouchEvent`, `onHoverEvent` and `onGenericMotionEvent`: callback, action,
@@ -161,41 +160,41 @@ The Playground **Pointer Probe** screen (#13096) is the probe view for experimen
 is the running total and `pointer_probe_clear` empties the log, so `observe` can
 read results. A hover reaching both the View and the Compose hover fallback is
 logged once (copies matched by `deviceId`, action and event time, since their
-coordinate spaces differ). Device results are still to be collected.
+coordinate spaces differ).
 
-1. `adb shell dumpsys input` on an API 34+ AVD and a physical pen device: devices,
-   sources, motion ranges.
-2. `input stylus swipe` / `input stylus motionevent` against the probe: `toolType`,
-   `source`, `getPressure()`, `AXIS_TILT`.
-3. `input mouse motionevent MOVE` for hover events and their `toolType`/`source`.
-4. Minimal `am instrument` APK calling `UiAutomation.injectInputEvent` with a stylus
-   `MotionEvent` (pressure, tilt, button, hover): confirms the route, measures startup.
-5. Rooted device or userdebug AVD: create a `uinput` pen device, verify
-   `SOURCE_STYLUS` with ranges, confirm the recorder round-trips it.
-6. Emulator gRPC `sendPen` and console `event send` EV_ABS against the probe.
-7. iOS: dump `XCPointerEventPath` / `XCSynthesizedEventRecord` method lists on the
+On the API 37 AVD, `dumpsys input` exposes devices, sources and motion ranges;
+`input stylus swipe` / `input stylus motionevent` and
+`input mouse motionevent MOVE` are the shell probes for tool type, source,
+pressure, tilt and hover. The instrumentation route is **GO** on that AVD for
+stylus pressure, tilt, buttons and stylus/mouse hover, as detailed below; quiet-host
+startup latency remains unbudgeted.
+
+Open experiments:
+
+1. Physical pen device: inspect devices, sources and motion ranges, and verify
+   shell and instrumentation input against Pointer Probe.
+2. Rooted physical device: verify a `uinput` pen's `SOURCE_STYLUS`, motion ranges
+   and recorder round-trip. The API 37 userdebug AVD result is documented below.
+3. Emulator gRPC `sendPen` and console `event send` EV_ABS against the probe.
+4. iOS: inspect `XCPointerEventPath` / `XCSynthesizedEventRecord` method lists on the
    pinned Xcode, test whether any selector changes `UITouch.force` or `UITouch.type`
-   in a probe app on an iPad simulator, and try an IOHID digitizer event through the
-   existing `dlsym` pattern.
+   in an iPad simulator probe app, and try an IOHID digitizer event through the
+   existing `dlsym` pattern. Physical-device Pencil and hover feasibility also
+   need entitlement and on-device checks.
 
-## Proposed follow-up issues
+## Routes and remaining work
 
-1. Android pointer-injection experiments (1-3, 5, 6) via Pointer Probe (#13096).
-2. Android instrumentation injection route (`UiAutomation.injectInputEvent`):
-   shell-identity injector (instrumentation APK or `app_process` dex) with tool type,
-   pressure, tilt, buttons, hover; measure startup latency and failure modes.
-3. `PointerInjector` interface, `stylus_input_v1`/`hover_input_v1` capabilities,
-   derived `pointerInput` summary, pre-dispatch errors, routing off the accessibility path.
-4. `toolType` and `pressure` on tapAt/swipeAt/dragPath: wire the unused
-   `GestureOptions.pressure`, per-point `pressure`, schemas and `tool-definitions.json`.
-5. `hoverAt` for Android; document mouse vs stylus hover semantics.
-6. Recorded stylus gestures: `stroke` / `hover` wire shape and replay with strict
-   unsupported-feature failures.
-7. iOS private-API probe for pressure/pencil on the pinned Xcode.
-8. iOS physical-device Pencil and hover feasibility (IOHID digitizer injection;
-   likely outcome "document as unsupported").
-9. Optional `uinput` pen device for rooted devices and userdebug emulators, only if
-   instrumentation proves insufficient for fidelity or record/replay symmetry.
+Android injection uses `PointerInjector`, runner capability flags and a derived
+`pointerInput` summary to select a route or refuse unsupported features before
+dispatch. The instrumentation route carries rich stylus input for
+`tapAt`/`swipeAt`/`dragPath` and stylus or mouse hover for `hoverAt`; the route and
+nested `pointer` fields are detailed below.
+
+Open work covers the experiments above, the instrumentation verification gaps
+below, and sampled `stroke` / `hover` recording and replay described under
+Recording representation. A production `uinput` route remains conditional on a
+need for rooted-device or userdebug-emulator record/replay symmetry; instrumentation
+is the replay route.
 
 ## Implemented: route selection (#13098)
 
@@ -222,21 +221,24 @@ CtrlProxy now advertises the flags and injects through its instrumentation (belo
 
 ## Instrumentation route (#13097)
 
-Status: built and unit-tested without a device; **real injection is unverified**. Go/no-go as the
-primary stylus route waits for the probe plan below.
+**GO:** `PointerInstrumentation` supports stylus pressure, tilt, buttons and hover on API 33+
+stock-privilege devices using shell identity, without root. Device evidence and remaining
+verification gaps are below.
 
 **Shape.** CtrlProxy declares `PointerInstrumentation` (`<instrumentation>` in its manifest). The host
 starts it with
 `adb shell am instrument -w -r --no-restart -e request <base64 json> dev.jasonpearson.automobile.ctrlproxy/.pointer.PointerInstrumentation`.
 
-**Why `--no-restart` (an Opus review finding).** The instrumentation targets CtrlProxy's own package, and
+**Why `--no-restart`.** The instrumentation targets CtrlProxy's own package, and
 `am instrument` force-stops its target when it starts and again when it finishes unless given
 `--no-restart`. Without it every injection would kill the accessibility service and its WebSocket
 server. The flag arrived with the Android 13 `am`, so CtrlProxy advertises `stylus_input_v1` and
 `hover_input_v1` only on API 33 and newer (`PointerInjectionSupport`); an older device is refused with
-the flags absent, and a `am` that rejects the flag reports it. Both the API level and that the
-connection survives are assumptions the probe must confirm. A separate package for the
-instrumentation, or a `app_process` injector, are the fallbacks if they do not hold.
+the flags absent, and an `am` that rejects the flag reports it. On the API 37 AVD, `--no-restart`
+keeps CtrlProxy's pid and accessibility service. Instrumentation shares CtrlProxy's process, so
+killing either kills both. Flag acceptance on API 33–36 remains unverified.
+A separate package for the instrumentation, or an `app_process` injector, are the fallbacks if
+the `--no-restart` assumption fails on an older API.
 It validates the request, gets a `UiAutomation` with `FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`
 (without it the system silences CtrlProxy's own accessibility service for the duration), plays the
 planned `MotionEvent`s through `injectInputEvent`, and reports `success`, `error`, `injected` and
@@ -249,42 +251,38 @@ events and, if one is refused or the run is cancelled, closes the pointer with C
 `UiAutomationPointerSink` (the only class that touches `MotionEvent`). CtrlProxy advertises
 `stylus_input_v1` and `hover_input_v1` (API 33+); `hoverAt` uses the route.
 
-**Failure modes, designed for and to be confirmed on a device.**
+**Failure modes.**
 
-| Failure                                                                                                            | Behaviour                                                                                                               |
-| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| Instrumentation not in the installed APK                                                                           | `am instrument` reports it cannot find it; the host says to update CtrlProxy, nothing was sent                          |
-| Process killed mid-run                                                                                             | No result is reported; the host says the outcome is unknown and to verify with `observe`                                |
-| An event is refused (secure window, locked device)                                                                 | The executor closes the pointer and reports the count injected                                                          |
-| `UiAutomation` unavailable (another UiAutomation client, such as a running UiAutomator test, holds the connection) | Reported as an error before any event                                                                                   |
-| Non-default display                                                                                                | Refused: routing needs the hidden `setDisplayId`; not implemented                                                       |
-| Cold start                                                                                                         | Each call starts a process (host timeout allows 15 s on top of the planned time); latency is measured by the plan below |
+Unsupported requests report errors: `durationMs` outside 0..5000 and tool `"eraser"`
+(only `"stylus"` or `"mouse"` is accepted). Killing the process also clears enabled
+accessibility services; concurrent runs crash and leave the same state. #16028 remains
+open only for device acceptance of the host protection in #16059.
 
-## Probe plan for #13082 and the go/no-go (not run: manual tests are paused)
+| Failure                                                                                                            | Behaviour                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Instrumentation not in the installed APK                                                                           | `am instrument` reports it cannot find it; the host says to update CtrlProxy, nothing was sent                                                                               |
+| Process killed mid-run                                                                                             | No result is reported; the host says the outcome is unknown and to verify with `observe`. It can also leave a stuck pointer (below).                                         |
+| An event is refused (including HOVER_ENTER with the screen off) or the run is cancelled                            | The executor closes the pointer with CANCEL or HOVER_EXIT and reports the count injected. `FLAG_SECURE` behaviour remains unverified.                                        |
+| `UiAutomation` unavailable (another UiAutomation client, such as a running UiAutomator test, holds the connection) | Reported as an error before any event                                                                                                                                        |
+| Non-default display                                                                                                | Refused: routing needs the hidden `setDisplayId`; not implemented                                                                                                            |
+| Cold start                                                                                                         | Each call starts instrumentation (host timeout allows 15 s on top of the planned time); latency is not yet budgeted. Quiet-host latency is an open gap.                      |
+| Stuck down pointer after a killed or concurrent run                                                                | Device `-1` retains a down pointer; later injections are refused until a stylus CANCEL. The host serialises runs per device and sends a stylus CANCEL for recovery (#16059). |
 
-Use the Playground **Pointer Probe** screen (#13096) on an API 34+ AVD and a physical pen device. Each
-step writes a row into the result table (route, capability, root or emulator requirement, API level).
+## Probe plan for #13082 and the go/no-go
 
-1. `adb shell dumpsys input`: record input devices, sources and motion ranges for stylus capability.
-2. `adb shell input stylus swipe`/`motionevent`: probe `toolType`, `source`, `getPressure()`,
-   `AXIS_TILT`; find the minimum API level where the tool type is stylus.
-3. `adb shell input mouse motionevent MOVE x y`: hover events, their tool type and source.
-4. **This route.** For a stylus stroke with pressure rising 0.1 to 1.0, a hover path with `distance`
-   falling 1.0 to 0.0, a barrel button (`buttons: 32`) and a mouse hover: confirm the probe logs
-   `TOOL_TYPE_STYLUS` (or MOUSE), the injected pressures, `AXIS_DISTANCE`, `AXIS_TILT` and
-   ENTER/MOVE/EXIT at the requested points; confirm CtrlProxy's accessibility service keeps working
-   during the run (the suppress flag).
-5. **Connection survival (first):** with CtrlProxy connected and its accessibility service enabled, run one hover and confirm the WebSocket stays up, the service stays enabled and the process is not restarted (`pidof` before and after); find the lowest API level where `--no-restart` is accepted.
-6. Latency: 20 cold runs and 20 back-to-back runs of a one-point hover and a 1-second stroke; record
-   process start to first event, and per-event drift against the plan.
-7. Failure modes: kill the instrumentation mid-hover, lock the device, open a secure (FLAG_SECURE)
-   window, hold a UiAutomator test session, request display 1 on a multi-display AVD.
-8. Rooted or userdebug AVD only: `uinput` pen device and emulator gRPC `sendPen` against the probe.
+**GO for #13097:** the Playground **Pointer Probe** on an API 37 `google_apis` userdebug AVD
+receives strokes as `TOOL_TYPE_STYLUS`, source `STYLUS(0x4002)`, with pressure and tilt
+interpolated as planned, orientation, and barrel button `buttons: 32` as `STYLUS_PRIMARY`.
+Without root, hover ENTER/MOVE/EXIT arrives as STYLUS; tool `"mouse"` with `hover: true`
+arrives as MOUSE. This supports the API 33+ instrumentation route for rich stylus input and hover.
 
-**Go criteria for making this the primary stylus route:** tool type and pressure arrive as injected
-on a stock API 31+ device without root, hover works, p50 cold start under 1.5 s, and every failure
-mode above reports instead of hanging. A fail on any keeps `adb input stylus` as the stylus tap and
-swipe route and leaves this one hover-only.
+Open verification gaps:
+
+- Physical pen device.
+- `FLAG_SECURE` window and a UiAutomator test holding `UiAutomation`.
+- Multi-display injection (non-default displays are currently refused).
+- Minimum API accepting `--no-restart` across API 33–36.
+- Quiet-host latency; cold one-point hover on a loaded host is not a latency budget.
 
 ## Rich stylus on tapAt, swipeAt and dragPath (#13099)
 

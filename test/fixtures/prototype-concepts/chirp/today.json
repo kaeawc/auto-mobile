@@ -197,7 +197,8 @@
     "start": "home",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "home": {
@@ -998,7 +999,7 @@
                     "title": "Notifications",
                     "actions": [
                       {
-                        "icon": "done_all",
+                        "icon": "done",
                         "label": "Mark all read",
                         "onTap": [
                           {

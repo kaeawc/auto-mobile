@@ -5,6 +5,7 @@ import {
   isAutomotive,
   isWatch,
   parseAndroidEmulatorFlag,
+  parseLeanbackFeature,
   parseTraitFormFactor,
   readAndroidEmulatorFlag,
 } from "../../../src/utils/android-cmdline-tools/deviceTraits";
@@ -208,6 +209,84 @@ describe("AndroidDeviceTraitsReader", () => {
     expect(traits.formFactor).toBe(expected);
   });
 
+  test.each([
+    ["true\n", "tv"],
+    ["false\n", null],
+  ] as const)("emulator leanback feature %j reads as form factor %p", async (raw, expected) => {
+    const timer = new FakeTimer();
+    const adb = samsungAdb();
+    adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("1\n", ""));
+    adb.setCommandResponse("getprop ro.build.characteristics", createExecResult("emulator", ""));
+    adb.setCommandResponse("pm has-feature android.software.leanback", createExecResult(raw, ""));
+    const options: Array<AdbExecuteOptions | undefined> = [];
+    const runner: AdbCommandRunner = {
+      executeCommand: (command, option) => {
+        options.push(option);
+        return adb.executeCommand(command, option);
+      },
+    };
+
+    const traits = await new AndroidDeviceTraitsReader(timer).read(runner, "emulator-5554", {
+      timeoutMs: 750,
+    });
+
+    expect(traits.formFactor).toBe(expected);
+    expect(adb.getExecutedCommands()).toContain("shell pm has-feature android.software.leanback");
+    expect(options).toHaveLength(8);
+    expect(options.every((option) => option?.noRetry === true && option.timeoutMs === 750)).toBe(
+      true,
+    );
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("physical handhelds never probe the leanback feature", async () => {
+    const adb = samsungAdb();
+    adb.setCommandResponse(
+      "getprop ro.build.characteristics",
+      createExecResult("tablet,nosdcard", ""),
+    );
+
+    const traits = await new AndroidDeviceTraitsReader(new FakeTimer()).read(adb, "R5CW123");
+
+    expect(traits.formFactor).toBeNull();
+    expect(adb.getExecutedCommands().some((command) => command.includes("pm has-feature"))).toBe(
+      false,
+    );
+  });
+
+  test.each(["automotive", "watch", "tv"] as const)(
+    "emulator characteristics %s win without a leanback probe",
+    async (formFactor) => {
+      const adb = samsungAdb();
+      adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("1", ""));
+      adb.setCommandResponse("getprop ro.build.characteristics", createExecResult(formFactor, ""));
+
+      const traits = await new AndroidDeviceTraitsReader(new FakeTimer()).read(
+        adb,
+        "emulator-5554",
+      );
+
+      expect(traits.formFactor).toBe(formFactor);
+      expect(adb.getExecutedCommands().some((command) => command.includes("pm has-feature"))).toBe(
+        false,
+      );
+    },
+  );
+
+  test("a failed leanback probe leaves the form factor null without failing the read", async () => {
+    const timer = new FakeTimer();
+    const adb = samsungAdb();
+    adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("1", ""));
+    adb.setCommandResponse("getprop ro.build.characteristics", createExecResult("emulator", ""));
+    adb.setCommandError("pm has-feature android.software.leanback", new Error("timed out"));
+
+    const traits = await new AndroidDeviceTraitsReader(timer).read(adb, "emulator-5554");
+
+    expect(traits).toMatchObject({ isEmulator: true, formFactor: null, manufacturer: "samsung" });
+    expect(adb.getExecutedCommands()).toContain("shell pm has-feature android.software.leanback");
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
   test("a failed ro.build.characteristics read leaves the form factor null without failing the read", async () => {
     const adb = samsungAdb();
     const runner: AdbCommandRunner = {
@@ -220,6 +299,17 @@ describe("AndroidDeviceTraitsReader", () => {
     const traits = await new AndroidDeviceTraitsReader(new FakeTimer()).read(runner, "R5CW123");
 
     expect(traits).toMatchObject({ isEmulator: false, formFactor: null });
+  });
+});
+
+describe("parseLeanbackFeature", () => {
+  test.each([
+    ["true\n", "tv"],
+    ["false\n", null],
+    ["", null],
+    [null, null],
+  ] as const)("%j -> %p", (raw, expected) => {
+    expect(parseLeanbackFeature(raw)).toBe(expected);
   });
 });
 

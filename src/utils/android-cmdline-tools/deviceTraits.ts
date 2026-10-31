@@ -87,6 +87,11 @@ export function parseTraitFormFactor(raw: string | null): TraitFormFactor | null
   return characteristics.includes("tv") ? "tv" : null;
 }
 
+/** Interpret the advisory `pm has-feature android.software.leanback` result. */
+export function parseLeanbackFeature(raw: string | null): TraitFormFactor | null {
+  return raw?.trim() === "true" ? "tv" : null;
+}
+
 /** True only when the device positively announced an automotive build. */
 export function isAutomotive(traits: { formFactor?: TraitFormFactor | null } | undefined): boolean {
   return traits?.formFactor === "automotive";
@@ -213,6 +218,19 @@ export class AndroidDeviceTraitsReader implements DeviceTraits {
       optional("ro.product.brand"),
       optional(BUILD_CHARACTERISTICS_PROP),
     ]);
+    let formFactor = parseTraitFormFactor(characteristics);
+    if (formFactor === null && isEmulator === true) {
+      try {
+        const result = await adb.executeCommand("shell pm has-feature android.software.leanback", {
+          noRetry: true,
+          timeoutMs,
+        });
+        formFactor = parseLeanbackFeature(result.stdout);
+      } catch (error) {
+        // The leanback feature is advisory; a failed probe leaves the form factor null.
+        logger.debug(`[DeviceTraits] leanback feature probe failed: ${errorMessage(error)}`);
+      }
+    }
     return {
       isEmulator,
       model,
@@ -221,7 +239,7 @@ export class AndroidDeviceTraitsReader implements DeviceTraits {
       manufacturer,
       brand,
       skin: null,
-      formFactor: parseTraitFormFactor(characteristics),
+      formFactor,
     };
   }
 }

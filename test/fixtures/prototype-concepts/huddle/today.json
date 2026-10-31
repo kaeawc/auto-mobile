@@ -141,7 +141,8 @@
     "start": "home",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "home": {
@@ -809,7 +810,7 @@
                   "type": "listItem",
                   "testTag": "switch_acme",
                   "headline": "Acme Studio",
-                  "leadingIcon": "workspaces",
+                  "leadingIcon": "groups",
                   "onTap": [
                     {
                       "type": "setState",
@@ -832,7 +833,7 @@
                   "type": "listItem",
                   "testTag": "switch_club",
                   "headline": "Book Club",
-                  "leadingIcon": "workspaces",
+                  "leadingIcon": "groups",
                   "onTap": [
                     {
                       "type": "setState",
@@ -858,7 +859,7 @@
                   "type": "listItem",
                   "testTag": "pause_notifications",
                   "headline": "Pause notifications",
-                  "leadingIcon": "notifications_paused",
+                  "leadingIcon": "notifications_off",
                   "trailing": {
                     "type": "switch",
                     "stateKey": "dnd"
@@ -897,7 +898,7 @@
             },
             "actions": [
               {
-                "icon": "headset_mic",
+                "icon": "headset",
                 "label": "Start a huddle",
                 "onTap": [
                   {

@@ -189,6 +189,32 @@ test("host-only listing preserves unsuccessful or absent-mirror replies", async 
   const reply = { success: true };
   expect(await withHostOnlySavedPrototypes(reply)).toBe(reply);
 });
+test.each([false, true])(
+  "host-only listing preserves an absent device list with populated mirror=%s",
+  async (populated) => {
+    const mirror = new FakeSavedPrototypeMirror();
+    if (populated) {
+      await mirror.record("serial", entry);
+    }
+    const reply = { success: true };
+    const result = await withHostOnlySavedPrototypes(reply, { serial: "serial", mirror });
+    expect(result).toBe(reply);
+    expect(result).not.toHaveProperty("savedPrototypes");
+  },
+);
+test("host-only listing merges mirror entries into an explicit empty device list", async () => {
+  const mirror = new FakeSavedPrototypeMirror();
+  await mirror.record("serial", entry);
+  expect(
+    await withHostOnlySavedPrototypes(
+      { success: true, savedPrototypes: [] },
+      { serial: "serial", mirror },
+    ),
+  ).toEqual({
+    success: true,
+    savedPrototypes: [{ id: entry.id, label: entry.label, pinned: false, hostOnly: true }],
+  });
+});
 test("host-only listing warns and preserves device reply when the mirror fails", async () => {
   const mirror = new FakeSavedPrototypeMirror();
   mirror.error = new Error("mirror unavailable");

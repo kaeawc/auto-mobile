@@ -253,11 +253,11 @@ export async function withHostOnlySavedPrototypes(
   reply: PrototypeResult,
   recorder?: { serial: string; mirror: SavedPrototypeMirror },
 ): Promise<PrototypeResult> {
-  if (!reply.success || reply.error || !recorder) {
+  if (!reply.success || reply.error || !recorder || reply.savedPrototypes === undefined) {
     return reply;
   }
   try {
-    const deviceEntries = reply.savedPrototypes ?? [];
+    const deviceEntries = reply.savedPrototypes;
     const missing = missingOnDevice(await recorder.mirror.list(recorder.serial), deviceEntries);
     return {
       ...reply,

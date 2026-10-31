@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  isAdbTransportSettlingError,
   extractAdbMissingDeviceId,
   isAdbMissingDeviceError,
   isAdbPostDispatchTransportError,
@@ -222,4 +223,25 @@ test("matches a missing alias only when it belongs to the expected canonical", (
   const error = new Error("adb: device 'localhost:5555' not found");
   expect(isAdbMissingDeviceError(error, "emulator-5554", "localhost:5555")).toBe(true);
   expect(isAdbMissingDeviceError(error, "emulator-5554", "localhost:5557")).toBe(false);
+});
+
+describe("isAdbTransportSettlingError", () => {
+  test.each([
+    // Captured from `adb shell pm path android` right after a fresh AAOS boot (#15879).
+    "adb: device still authorizing",
+    "Failed to install APK: Command failed: adb -s emulator-5554 shell pm path android\nadb: device still authorizing",
+    "error: device offline",
+    "adb: device is offline",
+  ])("matches a transport that is still settling: %s", (message) => {
+    expect(isAdbTransportSettlingError(new Error(message))).toBe(true);
+    expect(isAdbTransportSettlingError(message)).toBe(true);
+  });
+
+  test.each([
+    "error: device 'emulator-5554' not found",
+    "adb: device unauthorized.\nThis adb server's $ADB_VENDOR_KEYS is not set",
+    "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]",
+  ])("does not match other failures: %s", (message) => {
+    expect(isAdbTransportSettlingError(new Error(message))).toBe(false);
+  });
 });

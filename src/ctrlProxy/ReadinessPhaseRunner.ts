@@ -1,4 +1,6 @@
 import { ActionableError, toActionableError } from "../models";
+import { DeviceLostError } from "../models/DeviceLostError";
+import { isAdbTransportSettlingError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import type { AdjustableDeadline } from "../utils/AdjustableDeadline";
@@ -275,7 +277,9 @@ export class ReadinessPhaseRunner {
         retryableAndroidFrameworkFailure:
           device.platform === "android" &&
           ReadinessPhaseRunner.isSetupPhase(phase) &&
-          (isAndroidFrameworkUnavailable(detail) || isForegroundUserPending(detail)),
+          (isAndroidFrameworkUnavailable(detail) ||
+            isForegroundUserPending(detail) ||
+            isSettlingAdbTransport(detail)),
         deadlineExhausted: options.deadlineExhausted ?? false,
         phase,
         attempts,
@@ -288,4 +292,13 @@ export class ReadinessPhaseRunner {
     }
     throw failure;
   }
+}
+
+/**
+ * A fresh boot can answer the first setup command with "device still authorizing" or "device
+ * offline" (#15879); the transport settles on its own, so setup retries within its budget. A
+ * typed device loss stays terminal whatever its message says.
+ */
+function isSettlingAdbTransport(detail: unknown): boolean {
+  return !(detail instanceof DeviceLostError) && isAdbTransportSettlingError(detail);
 }

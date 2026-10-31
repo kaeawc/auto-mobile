@@ -59,6 +59,16 @@ export function isAdbDeviceOfflineError(error: unknown): boolean {
 }
 
 /**
+ * ADB knows the device but its transport has not settled: a fresh boot still completing the
+ * adb key handshake ("device still authorizing") or briefly offline. Both clear on their own.
+ */
+export function isAdbTransportSettlingError(error: unknown): boolean {
+  return (
+    /\bdevice\s+still\s+authorizing\b/i.test(errorMessage(error)) || isAdbDeviceOfflineError(error)
+  );
+}
+
+/**
  * Match complete transport diagnostics in stderr, never argv or stdout wording.
  * With shell protocol v2, remote stderr shares the stream with adb's stderr,
  * so wording matches are best-effort. Keep explicit wording independent of

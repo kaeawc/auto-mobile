@@ -13,7 +13,11 @@ import { capturedLauncherHierarchy } from "../../helpers/capturedLauncherHierarc
 const LABEL = "VQ Pin One";
 const PIXEL = "com.google.android.apps.nexuslauncher";
 const api34 = await capturedLauncherHierarchy("android-launcher-home/api34-page2-uiautomator.xml");
-const api37 = await capturedLauncherHierarchy("android-launcher-home/api37-page2-uiautomator.xml");
+// The API 37 dump abbreviates the root package as pkg="NL"; supply capture metadata.
+const api37 = {
+  ...(await capturedLauncherHierarchy("android-launcher-home/api37-page2-uiautomator.xml")),
+  packageName: PIXEL,
+};
 
 function driver(
   options: {
@@ -58,6 +62,46 @@ function driver(
 }
 
 describe("refreshLauncherForShortcut", () => {
+  for (const label of [LABEL, "Missing"]) {
+    test(`does not swipe or restart in a non-launcher app for ${label}`, async () => {
+      const d = driver({ pages: [{ ...api34, packageName: "com.example.editor" }] });
+      const outcome = await refreshLauncherForShortcut(d.value, { label });
+      expect(outcome).toMatchObject({ launcherRestarted: false, shortcutVisible: false });
+      expect(outcome.message).toContain("foreground app is not the home screen");
+      expect(outcome.message).toContain("go to the home screen");
+      expect(d.swipes()).toBe(0);
+      expect(d.restarts).toEqual([]);
+      expect(d.capture.requests).toHaveLength(1);
+      expect(d.timer.getSleepHistory()).toEqual([]);
+    });
+  }
+
+  test("stops scanning if another app becomes foreground between pages", async () => {
+    const d = driver({ pages: [api34, { ...api37, packageName: "com.example.editor" }] });
+    const outcome = await refreshLauncherForShortcut(d.value, { label: "Missing" });
+    expect(outcome).toMatchObject({ launcherRestarted: false, shortcutVisible: false });
+    expect(outcome.message).toContain("go to the home screen");
+    expect(d.swipes()).toBe(1);
+    expect(d.restarts).toEqual([]);
+  });
+
+  test("does not swipe or restart without a captured package", async () => {
+    const d = driver({
+      pages: [
+        {
+          hierarchy: {
+            node: { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } },
+          },
+        },
+      ],
+    });
+    const outcome = await refreshLauncherForShortcut(d.value, { label: "Missing" });
+    expect(outcome).toMatchObject({ launcherRestarted: false, shortcutVisible: false });
+    expect(outcome.message).toContain("go to the home screen");
+    expect(d.swipes()).toBe(0);
+    expect(d.restarts).toEqual([]);
+  });
+
   test("does nothing when the shortcut is already visible", async () => {
     const d = driver();
     expect(await refreshLauncherForShortcut(d.value, { label: LABEL })).toEqual({

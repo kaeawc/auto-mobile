@@ -20,6 +20,7 @@ import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCache
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { capturedLauncherHierarchy } from "../helpers/capturedLauncherHierarchy";
 import { pinDialogTree } from "../helpers/pinDialogTree";
 import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import type { ViewHierarchyResult } from "../../src/models";
@@ -39,6 +40,7 @@ const png = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   Buffer.alloc(4),
 ]);
+const home = await capturedLauncherHierarchy("android-launcher-home/api34-page2-uiautomator.xml");
 const saved = { id: "demo", slug: "demo", replaced: false };
 
 describe("prototype saved actions", () => {
@@ -154,6 +156,7 @@ describe("prototype saved actions", () => {
       "",
     );
     beforeEach(() => {
+      dialog = home;
       proxy.setPinResult({ success: true, pin: { id: "demo", status: "already_pinned" } });
     });
     test("restarts the resolved launcher once when the shortcut is not showing", async () => {
@@ -170,9 +173,8 @@ describe("prototype saved actions", () => {
       ]);
     });
     test("does not restart when the shortcut label is already visible", async () => {
-      dialog = pinDialogTree(["demo"]);
       adb.setCommandResponse(resolveHome, pixelHome);
-      const output = await save({ pin: true });
+      const output = await save({ pin: true, label: "VQ Pin One" });
       expect(output).toMatchObject({ launcherRestarted: false, shortcutVisible: true });
       expect(adb.getExecutedCommands().filter((c) => c.includes("force-stop"))).toEqual([]);
     });

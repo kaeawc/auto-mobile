@@ -1,6 +1,6 @@
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { LauncherRefreshGate } from "./LauncherRefreshGate";
-import type { HierarchyCapture } from "../observe/HierarchyCapture";
+import type { HierarchyCapture, HierarchySnapshot } from "../observe/HierarchyCapture";
 import { textOrDescription, type SearchableEntry } from "../utility/SearchableNode";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
@@ -55,33 +55,62 @@ function treeSignature(nodes: readonly SearchableEntry[]): string {
 async function waitForQuietLauncher(
   driver: LauncherRefreshDriver,
   signal: AbortSignal | undefined,
-): Promise<readonly SearchableEntry[]> {
+): Promise<HierarchySnapshot> {
   const deadline = driver.timer.now() + LAUNCHER_SETTLE_TIMEOUT_MS;
   let previous: string | undefined;
   while (true) {
     signal?.throwIfAborted();
-    const { nodes } = await driver.capture.capture({ freshness: "fresh", signal });
-    const signature = treeSignature(nodes);
+    const snapshot = await driver.capture.capture({ freshness: "fresh", signal });
+    const signature = treeSignature(snapshot.nodes);
     if (signature === previous || driver.timer.now() + LAUNCHER_SETTLE_POLL_MS > deadline) {
-      return nodes;
+      return snapshot;
     }
     previous = signature;
     await driver.timer.sleep(LAUNCHER_SETTLE_POLL_MS);
   }
 }
 
+/** Capture-level foreground identity wins over a root from a different window. */
+async function isLauncherWorkspace(
+  driver: LauncherRefreshDriver,
+  snapshot: HierarchySnapshot,
+): Promise<boolean> {
+  const foreground =
+    snapshot.hierarchy.packageName ??
+    snapshot.nodes.find((node) => node.parentIndex === undefined)?.properties.package;
+  if (typeof foreground !== "string" || foreground.length === 0) {
+    return false;
+  }
+  return (
+    KNOWN_ANDROID_LAUNCHER_PACKAGES.includes(foreground) ||
+    foreground === (await driver.resolveLauncher())
+  );
+}
+
+function notOnHomeScreen(label: string): LauncherRefreshOutcome {
+  return {
+    launcherRestarted: false,
+    shortcutVisible: false,
+    message: `The shortcut "${label}" is not confirmed visible because the foreground app is not the home screen; go to the home screen to check it.`,
+  };
+}
+
 /** Searches the current workspace and following pages, stopping at the edge or the bound. */
 async function scanWorkspace(
   driver: LauncherRefreshDriver,
-  first: readonly SearchableEntry[],
+  first: HierarchySnapshot,
   label: string,
   signal?: AbortSignal,
-): Promise<boolean> {
-  let nodes = first;
+): Promise<"visible" | "missing" | "not-home"> {
+  let snapshot = first;
   for (let page = 1; page <= MAX_WORKSPACE_PAGES; page++) {
     signal?.throwIfAborted();
+    if (!(await isLauncherWorkspace(driver, snapshot))) {
+      return "not-home";
+    }
+    const { nodes } = snapshot;
     if (isShortcutShown(nodes, label)) {
-      return true;
+      return "visible";
     }
     const bounds = nodes.find((node) => node.parentIndex === undefined)?.bounds;
     if (
@@ -96,12 +125,15 @@ async function scanWorkspace(
     await driver.swipeWorkspaceToNextPage(bounds);
     // Allow the swipe animation to start before asking for two matching captures.
     await driver.timer.sleep(LAUNCHER_SETTLE_POLL_MS);
-    nodes = await waitForQuietLauncher(driver, signal);
-    if (treeSignature(nodes) === previous) {
+    snapshot = await waitForQuietLauncher(driver, signal);
+    if (!(await isLauncherWorkspace(driver, snapshot))) {
+      return "not-home";
+    }
+    if (treeSignature(snapshot.nodes) === previous) {
       break;
     }
   }
-  return false;
+  return "missing";
 }
 
 /**
@@ -116,7 +148,11 @@ export async function refreshLauncherForShortcut(
   const release = driver.gate.tryAcquire(driver.deviceKey);
   try {
     const first = await driver.capture.capture({ freshness: "fresh", signal: options.signal });
-    if (await scanWorkspace(driver, first.nodes, options.label, options.signal)) {
+    const scan = await scanWorkspace(driver, first, options.label, options.signal);
+    if (scan === "not-home") {
+      return notOnHomeScreen(options.label);
+    }
+    if (scan === "visible") {
       return { launcherRestarted: false, shortcutVisible: true };
     }
     if (!release) {
@@ -157,7 +193,11 @@ async function restartAndScan(
     };
   }
   const settled = await waitForQuietLauncher(driver, signal);
-  const visible = await scanWorkspace(driver, settled, label, signal);
+  const scan = await scanWorkspace(driver, settled, label, signal);
+  if (scan === "not-home") {
+    return notOnHomeScreen(label);
+  }
+  const visible = scan === "visible";
   return {
     launcherRestarted: true,
     shortcutVisible: visible,

@@ -87,6 +87,39 @@ describe("listDevices tool vs booted resource for a held, adb-offline device", (
     expect(fromTool?.runtime.connection).toEqual(fromResource?.runtime.connection);
     expect(fromTool?.runtime.connection?.state).toBe("offline");
   });
+  test("tvOS listings exclude held offline Android devices without probing them", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeDeviceUtils();
+    manager.setBootedDevices("android", [android]);
+    manager.setBootedDevices("ios", []);
+    manager.setBootedDevices("tvos", []);
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = makePool(sessions, "tvos-offline-held", { timer, deviceManager: manager });
+    await pool.initializeWithDevices([android]);
+    await pool.assignDeviceToSession("session-held");
+    manager.setBootedDevices("android", []);
+    let probeCalls = 0;
+    manager.getAndroidListedDeviceStates = async (ids) => {
+      probeCalls += 1;
+      return new Map(Array.from(ids, (id) => [id, "offline"]));
+    };
+    DaemonState.getInstance().initialize(sessions, pool);
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => manager,
+      avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
+    });
+    setDeviceManager(manager);
+
+    const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "tvos" });
+    const payload = listDevicesOutputSchema.parse(toolStructured(response));
+    expect(payload.devices.some((device) => device.runtime.deviceId === android.deviceId)).toBe(
+      false,
+    );
+    expect(payload.count).toBe(0);
+    expect(probeCalls).toBe(0);
+  });
+
   test("the held-device state probe receives the request's explicit signal, not an ambient one", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

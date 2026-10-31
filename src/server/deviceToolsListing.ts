@@ -65,21 +65,23 @@ async function transitionalHeldListing(input: {
   let probeFailure: DeviceDiscoveryError | undefined;
   const devices: BootedDevice[] = [];
   const holds = new Map<string, TransitionalHold>();
-  for (const offlineHeld of await adbOfflineHeldDevices({
-    platform: input.platform === "ios" ? "ios" : "android",
-    discovered,
-    devicePool: pool,
-    deviceManager,
-    signal: input.signal,
-    onProbeFailure: (failure) => {
-      probeFailure = failure;
-    },
-  })) {
-    holds.set(offlineHeld.device.deviceId, {
-      adbState: offlineHeld.adbState,
-      avdName: offlineHeld.avdName,
-    });
-    devices.push(offlineHeld.device);
+  if (input.platform !== "tvos") {
+    for (const offlineHeld of await adbOfflineHeldDevices({
+      platform: input.platform === "ios" ? "ios" : "android",
+      discovered,
+      devicePool: pool,
+      deviceManager,
+      signal: input.signal,
+      onProbeFailure: (failure) => {
+        probeFailure = failure;
+      },
+    })) {
+      holds.set(offlineHeld.device.deviceId, {
+        adbState: offlineHeld.adbState,
+        avdName: offlineHeld.avdName,
+      });
+      devices.push(offlineHeld.device);
+    }
   }
   for (const held of transitionalHeldSimulators({
     transitional: discovery.transitionalSimulators,

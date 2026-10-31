@@ -38639,14 +38639,18 @@
                 "type": "string"
               },
               "savedAt": {
-                "description": "Absent where the platform cannot report save time (iOS simulators).",
+                "description": "Absent for host-only entries or where the platform cannot report save time (iOS simulators).",
                 "type": "number"
               },
               "pinned": {
                 "type": "boolean"
+              },
+              "hostOnly": {
+                "description": "Present on the host mirror but missing on the device.",
+                "type": "boolean"
               }
             },
-            "required": ["id", "label", "slug", "pinned"],
+            "required": ["id", "label", "pinned"],
             "additionalProperties": false
           }
         },

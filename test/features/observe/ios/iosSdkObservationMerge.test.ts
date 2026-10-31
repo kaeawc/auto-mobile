@@ -127,6 +127,17 @@ describe("mergeIosSdkObservation (#5159)", () => {
     expect(JSON.stringify(hierarchy)).toBe(before);
   });
 
+  test.each(["window", "view"])(
+    "rejects a %s-space observation without touching the screen-space hierarchy (#15819)",
+    (coordinateSpace) => {
+      const hierarchy = xctestHierarchy();
+      const before = JSON.stringify(hierarchy);
+      const local = { ...observation(node({ id: "save", label: "Save" })), coordinateSpace };
+      expect(mergeIosSdkObservation(hierarchy, local)).toBeNull();
+      expect(JSON.stringify(hierarchy)).toBe(before);
+    },
+  );
+
   test("a merged element names its bridge target; an XCTest element names none", () => {
     expect(iosSdkBridgeTarget({ "sdk-element-id": "save", "sdk-capture-identity": "41" })).toEqual({
       elementId: "save",

@@ -488,7 +488,7 @@ export class AndroidWindowModeController implements WindowModeController {
     };
     let outcome: Outcome = { info: before, matched: split(before) };
     if (!outcome.matched) {
-      outcome = await this.enterShellSplit(call, before, position, partner, split);
+      outcome = await this.enterShellSplit(call, before, position, { partner, split });
       if (!outcome.matched) {
         return { ...outcome, partnerAppId: partner };
       }
@@ -515,8 +515,7 @@ export class AndroidWindowModeController implements WindowModeController {
     call: Call,
     before: BackStackInfo,
     position: SplitPosition,
-    partner: string,
-    split: (info: BackStackInfo) => boolean,
+    { partner, split }: { partner: string; split: (info: BackStackInfo) => boolean },
   ): Promise<Outcome> {
     let info = before;
     if (!appTask(info, partner)) {

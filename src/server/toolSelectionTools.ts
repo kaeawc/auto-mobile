@@ -267,8 +267,7 @@ export async function listEnabledToolNames(
           tool.name,
           tool.defaultEnabled ?? true,
           candidateRoutes,
-          resolved,
-          connectionProfileUuid,
+          { sessionToolSelectionService: resolved, connectionProfileUuid },
         ))
           ? tool.name
           : undefined;

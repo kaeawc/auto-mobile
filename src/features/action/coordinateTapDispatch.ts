@@ -332,15 +332,12 @@ function talkBackDisplayTapDispatch(
     const result =
       action === "tap"
         ? await talkBack.strategy.executePreciseTap(x, y, talkBack.driver, fence)
-        : await talkBack.strategy.executeCoordinateFallback(
-            { x, y },
-            action,
-            durationMs,
-            talkBack.driver,
-            {
+        : await talkBack.strategy.executeCoordinateFallback({ x, y }, action, durationMs, {
+            driver: talkBack.driver,
+            fenceOptions: {
               displayFence: fence,
             },
-          );
+          });
     reportTalkBackDelivery(result, action, context);
     throwIfAborted(signal);
     if (!result.success) {

@@ -665,7 +665,7 @@ async function startDualTrack() {
     device,
     timer,
     new CountingIdGenerator("touch-health"),
-    () => new DualTrackRecorder(device, gestures, a11y, timer),
+    () => new DualTrackRecorder(device, gestures, a11y, { timer }),
   );
   return { timer, gestures, a11y };
 }
@@ -767,7 +767,7 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       timer,
       new CountingIdGenerator("geometry"),
       () =>
-        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), { timer, geometry: tracker }),
     );
     gestures.onGesture?.({
       type: "tap",
@@ -796,7 +796,7 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       timer,
       new CountingIdGenerator("geometry-label"),
       () =>
-        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), { timer, geometry: tracker }),
     );
     tracker.handleTransition({ change: "changed", displayId: 0, rotation: 1 });
     timer.advanceTime(100);
@@ -824,7 +824,7 @@ describe("deviceGestureRecordingManager display geometry (#10174)", () => {
       timer,
       new CountingIdGenerator("geometry-clean"),
       () =>
-        new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, { geometry: tracker }),
+        new DualTrackRecorder(device, gestures, new RecordingA11y(), { timer, geometry: tracker }),
     );
     timer.advanceTime(5_000);
     gestures.onGesture?.({
@@ -850,7 +850,7 @@ describe("deviceGestureRecordingManager stylus export (#13084)", () => {
       device,
       timer,
       new CountingIdGenerator(planName),
-      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer),
+      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), { timer }),
     );
     for (const event of events) {
       gestures.onGesture?.({ ...event, arrivedAt: timer.now() });

@@ -65,13 +65,15 @@ function parseNodes(output: string): TouchInputNode[] {
     const mtX = device.abs.get(ABS_MT_POSITION_X);
     const mtY = device.abs.get(ABS_MT_POSITION_Y);
     if (mtX && mtY) {
-      nodes.push(toNode(device, mtX, mtY, device.abs.get(ABS_MT_PRESSURE), "touch"));
+      nodes.push(
+        toNode(device, mtX, mtY, { pressure: device.abs.get(ABS_MT_PRESSURE), kind: "touch" }),
+      );
       continue;
     }
     const x = device.abs.get(ABS_X);
     const y = device.abs.get(ABS_Y);
     if (x && y && device.hasPenTool) {
-      nodes.push(toNode(device, x, y, device.abs.get(ABS_PRESSURE), "pen"));
+      nodes.push(toNode(device, x, y, { pressure: device.abs.get(ABS_PRESSURE), kind: "pen" }));
     }
   }
   return nodes;
@@ -81,8 +83,7 @@ function toNode(
   device: DeviceInfo,
   x: AbsRange,
   y: AbsRange,
-  pressure: AbsRange | undefined,
-  kind: "touch" | "pen",
+  { pressure, kind }: { pressure?: AbsRange; kind: "touch" | "pen" },
 ): TouchInputNode {
   return {
     path: device.path,

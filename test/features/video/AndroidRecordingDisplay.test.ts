@@ -33,12 +33,12 @@ test("recording follows the latest observation stamp and accepts an explicit rol
   });
   const timer = new FakeTimer();
 
-  expect(await resolveAndroidRecordingDisplay(device, adb, undefined, undefined, timer)).toEqual({
+  expect(await resolveAndroidRecordingDisplay(device, adb, { timer })).toEqual({
     panel: { key: "22", role: "inner" },
     physicalId: "22",
     activePanel: { key: "22", role: "inner" },
   });
-  expect(await resolveAndroidRecordingDisplay(device, adb, "cover", undefined, timer)).toEqual({
+  expect(await resolveAndroidRecordingDisplay(device, adb, { request: "cover", timer })).toEqual({
     panel: { key: "11", role: "cover" },
     physicalId: "11",
     activePanel: { key: "22", role: "inner" },
@@ -51,7 +51,7 @@ test("one-panel inventory reports its identity without changing screenrecord arg
     displays: { panels: [device.displays!.panels[0]], postures: [] },
   };
   const adb = new FakeAdbClient();
-  expect(await resolveAndroidRecordingDisplay(onePanel, adb, "cover")).toEqual({
+  expect(await resolveAndroidRecordingDisplay(onePanel, adb, { request: "cover" })).toEqual({
     panel: { key: "11", role: "cover" },
     activePanel: { key: "11", role: "cover" },
   });
@@ -66,7 +66,7 @@ test("known old Android records by default without a display flag and warns", as
     warning: "Android API below 34: recording the default display without a pinned panel.",
   });
   await expect(
-    resolveAndroidRecordingDisplay({ ...device, apiLevel: 33 }, adb, "inner"),
+    resolveAndroidRecordingDisplay({ ...device, apiLevel: 33 }, adb, { request: "inner" }),
   ).rejects.toThrow("API 34 or newer");
   expect(adb.getAllCommands()).toEqual([]);
 });

@@ -383,13 +383,9 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         ),
       );
 
-      const events = await collector.captureGCEvents(
-        "com.example.app",
-        999_500,
-        1_000_500,
-        undefined,
-        "1111",
-      );
+      const events = await collector.captureGCEvents("com.example.app", 999_500, 1_000_500, {
+        pid: "1111",
+      });
 
       expect(events.length).toBe(1);
       expect(events[0].freedKb).toBe(10); // the pid-1111 fixture, not pid-2222's

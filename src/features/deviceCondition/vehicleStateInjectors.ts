@@ -341,8 +341,7 @@ async function writeMotionProperties(
   access: ReturnType<typeof createVehiclePropertyAccess>,
   target: PropertyValues,
   driving: boolean,
-  onWritten: () => void,
-  signal?: AbortSignal,
+  { onWritten, signal }: { onWritten: () => void; signal?: AbortSignal },
 ): Promise<void> {
   for (const [property, value] of Object.entries(target)) {
     if (property !== PERF_VEHICLE_SPEED || !driving) {
@@ -401,15 +400,12 @@ function createMotionInjector(adb: AdbExecutor, timer: Timer): DeviceConditionIn
           if (!driving || speed.failure) {
             await speed.stop();
           }
-          await writeMotionProperties(
-            access,
-            target,
-            driving,
-            () => {
+          await writeMotionProperties(access, target, driving, {
+            onWritten: () => {
               wrote = true;
             },
             signal,
-          );
+          });
           if (driving) {
             await speed.start(signal);
           }
@@ -447,8 +443,10 @@ export function createVehicleStateInjector(
   key: VehicleStateKey,
   adb: AdbExecutor,
   device: BootedDevice,
-  traits: DeviceTraits = defaultDeviceTraits,
-  timer: Timer = defaultTimer,
+  {
+    traits = defaultDeviceTraits,
+    timer = defaultTimer,
+  }: { traits?: DeviceTraits; timer?: Timer } = {},
 ): DeviceConditionInjector {
   const injector =
     key === "vehicle.motion" ? createMotionInjector(adb, timer) : createNightModeInjector(adb);
@@ -496,8 +494,7 @@ export function resolveVehicleStateInjector(
       key as VehicleStateKey,
       (deps.adbFactory ?? defaultAdbClientFactory).create(device),
       device,
-      deps.traits,
-      deps.timer,
+      { traits: deps.traits, timer: deps.timer },
     );
     cache.set(cacheKey, injector);
   }

@@ -391,7 +391,7 @@ describe("TalkBack selected target safety", () => {
       const result =
         action === "click"
           ? await strategy.executeDirectActivation(element, driver)
-          : await strategy.executeLongPress({ x: 540, y: 1500 }, 800, element, driver);
+          : await strategy.executeLongPress({ x: 540, y: 1500 }, 800, element, { driver });
       expect(result.success).toBe(true);
       expect(driver.actionHistory).toEqual([
         {

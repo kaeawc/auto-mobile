@@ -119,24 +119,18 @@ describe("FfmpegVideoProcessingBackend host integration", () => {
 
     try {
       await expect(
-        assertFfmpegOutputReady(
-          missingPath,
-          ["-i", "raw.mov", missingPath],
-          tracker,
-          defaultRecordingFileProbe,
-          "ffmpeg",
-        ),
+        assertFfmpegOutputReady(missingPath, ["-i", "raw.mov", missingPath], tracker, {
+          recordingFileProbe: defaultRecordingFileProbe,
+          binaryPath: "ffmpeg",
+        }),
       ).rejects.toThrow(/FFmpeg output file missing/);
 
       await fs.writeFile(emptyPath, "");
       await expect(
-        assertFfmpegOutputReady(
-          emptyPath,
-          ["-i", "raw.mov", emptyPath],
-          tracker,
-          defaultRecordingFileProbe,
-          "ffmpeg",
-        ),
+        assertFfmpegOutputReady(emptyPath, ["-i", "raw.mov", emptyPath], tracker, {
+          recordingFileProbe: defaultRecordingFileProbe,
+          binaryPath: "ffmpeg",
+        }),
       ).rejects.toThrow(/FFmpeg output file is empty/);
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });

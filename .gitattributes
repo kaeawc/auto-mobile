@@ -7,6 +7,7 @@ test/fixtures/android-display-geometry/*.txt text eol=lf
 test/fixtures/macos-profiles/*.txt text eol=lf
 test/fixtures/bats-joblog/*.tsv text eol=lf
 test/fixtures/ci-time-to-green/*.json text eol=lf
+test/fixtures/ios-notification-center/ios26-*.json text eol=lf
 test/fixtures/prototype-capabilities/*.json text eol=lf
 test/fixtures/android-wrapper-pruning/*.json text eol=lf
 # ProtoViewer iOS notices are compared byte-for-byte against the generator output.

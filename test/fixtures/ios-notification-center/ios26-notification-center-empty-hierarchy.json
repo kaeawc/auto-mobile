@@ -1,0 +1,299 @@
+{
+  "hierarchy": {
+    "node": {
+      "$": {
+        "text": " ",
+        "class": "XCUIApplication",
+        "bounds": [
+          0,
+          0,
+          402,
+          874
+        ],
+        "view-id": "s2-e4af73f3111e9d27"
+      },
+      "node": [
+        {
+          "$": {
+            "resource-id": "SBCoverSheetWindow",
+            "class": "UIWindow",
+            "bounds": [
+              0,
+              0,
+              402,
+              874
+            ],
+            "view-id": "SBCoverSheetWindow"
+          },
+          "extras": {
+            "automobile:iosWindowLayer": "1"
+          },
+          "node": [
+            {
+              "$": {
+                "class": "UIScrollView",
+                "bounds": [
+                  0,
+                  0,
+                  402,
+                  874
+                ],
+                "scrollable": "true",
+                "view-id": "s2-ebbfd4e0beaf5fae"
+              },
+              "node": [
+                {
+                  "$": {
+                    "class": "UIScrollView",
+                    "bounds": [
+                      0,
+                      0,
+                      402,
+                      874
+                    ],
+                    "scrollable": "true",
+                    "view-id": "s2-2957f1f0907c7824"
+                  },
+                  "node": {
+                    "$": {
+                      "class": "UIScrollView",
+                      "bounds": [
+                        14,
+                        0,
+                        388,
+                        219
+                      ],
+                      "scrollable": "true",
+                      "view-id": "s2-bd2e83c81c8646a0"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIScrollView",
+                          "bounds": [
+                            14,
+                            0,
+                            388,
+                            219
+                          ],
+                          "scrollable": "true",
+                          "view-id": "s2-190458cd80f36bb1"
+                        },
+                        "node": [
+                          {
+                            "$": {
+                              "resource-id": "ListCell",
+                              "class": "UIButton",
+                              "bounds": [
+                                14,
+                                0,
+                                388,
+                                219
+                              ],
+                              "clickable": "true",
+                              "role": "button",
+                              "view-id": "ListCell"
+                            },
+                            "node": {
+                              "$": {
+                                "resource-id": "ListCell.ContentView",
+                                "class": "UIView",
+                                "bounds": [
+                                  14,
+                                  0,
+                                  388,
+                                  219
+                                ],
+                                "view-id": "ListCell.ContentView"
+                              }
+                            }
+                          },
+                          {
+                            "$": {
+                              "text": "Vertical scroll bar, 1 page",
+                              "class": "UIView",
+                              "bounds": [
+                                355,
+                                48,
+                                385,
+                                219
+                              ],
+                              "view-id": "s2-edd1e9ee444fedac-1"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "$": {
+                          "text": "Vertical scroll bar, 1 page",
+                          "class": "UIView",
+                          "bounds": [
+                            355,
+                            48,
+                            385,
+                            219
+                          ],
+                          "view-id": "s2-edd1e9ee444fedac-2"
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "$": {
+                    "text": "Vertical scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": [
+                      369,
+                      55,
+                      399,
+                      818
+                    ],
+                    "view-id": "s2-edd1e9ee444fedac-3"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "resource-id": "lockscreen-date-view",
+                "class": "UIView",
+                "bounds": [
+                  0,
+                  0,
+                  402,
+                  874
+                ],
+                "view-id": "lockscreen-date-view"
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "Saturday, October 31",
+                    "class": "UILabel",
+                    "bounds": [
+                      51,
+                      72,
+                      350,
+                      108
+                    ],
+                    "role": "text",
+                    "view-id": "s2-b61207bd394e1840"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "4:51 PM",
+                    "class": "UILabel",
+                    "bounds": [
+                      66,
+                      89,
+                      332,
+                      232
+                    ],
+                    "role": "text",
+                    "view-id": "s2-53a25ed265fc6c50"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "text": "Home indicator",
+                "class": "UIView",
+                "bounds": [
+                  129,
+                  861,
+                  273,
+                  866
+                ],
+                "view-id": "s2-a98c831348621af1"
+              }
+            }
+          ]
+        },
+        {
+          "$": {
+            "text": "Cellular",
+            "class": "UIView",
+            "bounds": [
+              288,
+              26,
+              307,
+              38
+            ],
+            "view-id": "s2-55febb7b5d2fd450"
+          },
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          }
+        },
+        {
+          "$": {
+            "resource-id": "3 of 3 Wi-Fi bars",
+            "class": "UIView",
+            "bounds": [
+              315,
+              26,
+              332,
+              38
+            ],
+            "view-id": "3 of 3 Wi-Fi bars"
+          },
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          }
+        },
+        {
+          "$": {
+            "text": "100% battery power",
+            "class": "UIView",
+            "bounds": [
+              339,
+              26,
+              366,
+              39
+            ],
+            "view-id": "s2-bcee4fb354cade76"
+          },
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          }
+        }
+      ]
+    }
+  },
+  "packageName": "com.apple.springboard",
+  "fallbackToSpringboard": true,
+  "updatedAt": 1793483502831,
+  "windows": [
+    {
+      "bounds": [
+        0,
+        0,
+        402,
+        874
+      ],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ],
+  "screenScale": 3,
+  "screenWidth": 402,
+  "screenHeight": 874,
+  "nativeScale": 3,
+  "pixelWidth": 1206,
+  "pixelHeight": 2622,
+  "insets": {
+    "available": false,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "frameContext": "D93370D1-2D9A-4A21-B274-8C0923100270:1:d3e7b8f9116b3095",
+  "fresh": true
+}

@@ -775,8 +775,6 @@ describe("criticalSection tool", () => {
           deviceCount: 1,
           steps: [{ tool: "clipboard", params: { device: "A" } }],
         },
-        undefined,
-        undefined,
         {
           forPlan: true,
           targetDevice: fakeDevice,

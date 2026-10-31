@@ -262,9 +262,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       });
       const internal = async (sessionUuid: string): Promise<unknown> => {
         try {
-          return await ToolRegistry.callInternal("getAndroid", {}, undefined, undefined, {
-            sessionUuid,
-          });
+          return await ToolRegistry.callInternal("getAndroid", {}, { sessionUuid });
         } catch (error) {
           return error;
         }
@@ -318,8 +316,6 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
           await ToolRegistry.callInternal(
             "controlProbe",
             { platform: "ios", deviceId: free.deviceId },
-            undefined,
-            undefined,
             { sessionUuid: execA },
           );
         } catch (error) {
@@ -332,9 +328,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         });
         expect(handled).toEqual([]);
 
-        await ToolRegistry.callInternal("controlProbe", {}, undefined, undefined, {
-          sessionUuid: execA,
-        });
+        await ToolRegistry.callInternal("controlProbe", {}, { sessionUuid: execA });
         expect(handled).toEqual([`control:${slotA.deviceId}`]);
       },
     );

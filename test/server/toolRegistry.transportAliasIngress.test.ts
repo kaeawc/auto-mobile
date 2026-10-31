@@ -171,8 +171,6 @@ describe("a tool call naming a held handset by either transport id (#11618)", ()
       const ran = await ToolRegistry.callInternal(
         "controlProbe",
         { deviceId },
-        undefined,
-        undefined,
         { sessionUuid: HOLDER },
       ).then(describeOutcome, describeOutcome);
 

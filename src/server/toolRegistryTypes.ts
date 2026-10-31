@@ -66,6 +66,12 @@ export interface InternalToolCallOptions {
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
 }
 
+/** `ToolRegistry.callInternal`'s trailing request: handler progress/abort plus routing options. */
+export interface InternalToolCallRequest extends InternalToolCallOptions {
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+}
+
 export interface InternalToolInvocationContext {
   args: Record<string, unknown>;
   routingSessionUuid?: string;

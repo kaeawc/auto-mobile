@@ -378,6 +378,7 @@ describe("navigation tool session graph selection", () => {
           [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 500,
           [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 1500,
         },
+        { progress: undefined, signal: undefined },
       ]);
       expect(args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM]).toBe(1500);
     } finally {

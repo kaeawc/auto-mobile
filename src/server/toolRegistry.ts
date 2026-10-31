@@ -124,6 +124,7 @@ import {
   DeviceAwareToolOptions,
   deviceReadOnlyMetadata,
   InternalToolCallOptions,
+  InternalToolCallRequest,
   InternalToolInvocationContext,
   pickToolTraits,
   PlainToolOptions,
@@ -617,13 +618,16 @@ export class ToolRegistryClass {
     });
   }
 
+  /**
+   * @param request.progress - Progress callback forwarded to the tool handler.
+   * @param request.signal - Aborts the internal call.
+   */
   async callInternal(
     tool: string | RegisteredTool,
     args: Record<string, unknown>,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    options: InternalToolCallOptions = {},
+    request: InternalToolCallRequest = {},
   ): Promise<unknown> {
+    const { progress, signal, ...options } = request;
     const resolved =
       typeof tool === "string"
         ? options.forPlan
@@ -730,7 +734,7 @@ export class ToolRegistryClass {
       options?: InternalToolCallOptions;
     } = {},
   ): Promise<StructuredToolResponse<InternalToolPayloads[K]> | undefined> {
-    const response = await this.callInternal(name, args, progress, signal, options);
+    const response = await this.callInternal(name, args, { progress, signal, ...options });
     return narrowInternalToolEnvelope(name, response);
   }
 

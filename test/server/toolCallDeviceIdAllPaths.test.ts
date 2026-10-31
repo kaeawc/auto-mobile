@@ -248,7 +248,7 @@ async function daemon(options: DaemonOptions): Promise<Daemon> {
       if (ToolRegistry.getRegisteredTool(name)?.planOnly) {
         // A plan-only tool is no `tools/call`: it is reached as a plan step, an internal call
         // that runs on the plan's session (the holder's) or on none.
-        return ToolRegistry.callInternal(name, planArgs, undefined, undefined, {
+        return ToolRegistry.callInternal(name, planArgs, {
           forPlan: true,
           ...(caller === HOLDER_CONNECTION ? { sessionUuid: HOLDER } : {}),
         }).then(

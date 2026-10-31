@@ -43,12 +43,16 @@ export interface PlanStepTool {
 export interface PlanStepTools<TTool extends PlanStepTool> {
   getTool(name: string): TTool | undefined;
   getToolForPlan(name: string): TTool | undefined;
+  /** @param request.signal - Aborts the step; the remaining fields route the internal call. */
   callInternal(
     tool: TTool,
     params: Record<string, unknown>,
-    progress?: undefined,
-    signal?: AbortSignal,
-    options?: { forPlan?: boolean; sessionUuid?: string; targetDevice?: BootedDevice },
+    request?: {
+      signal?: AbortSignal;
+      forPlan?: boolean;
+      sessionUuid?: string;
+      targetDevice?: BootedDevice;
+    },
   ): Promise<unknown>;
 }
 
@@ -307,13 +311,10 @@ export class DefaultPlanStepExecutor<
     const deadline = new AbortController();
     const onPlanAbort = () => deadline.abort(signal?.reason);
     try {
-      const operation = this.tools.callInternal(
-        observeTool,
-        parsedParams,
-        undefined,
+      const operation = this.tools.callInternal(observeTool, parsedParams, {
         signal,
-        targetDevice ? { targetDevice } : undefined,
-      );
+        ...(targetDevice ? { targetDevice } : {}),
+      });
       signal?.addEventListener("abort", onPlanAbort, { once: true });
       timeoutHandle = this.timer.setTimeout(
         () => deadline.abort(new Error("failure observation timed out")),
@@ -590,7 +591,8 @@ export class DefaultPlanStepExecutor<
       logger.info(`${context.logPrefix} Calling ${step.tool} with params: ${paramsPreview}`);
     }
 
-    return this.tools.callInternal(tool, parsedParams, undefined, context.signal, {
+    return this.tools.callInternal(tool, parsedParams, {
+      signal: context.signal,
       forPlan: true,
       sessionUuid: context.sessionUuid,
       ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),

@@ -249,8 +249,8 @@ export function registerNavigationTools({
     "navigateTo",
     "Navigate to screen using navigation graph",
     navigateToSchema,
-    createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
     {
+      handler: createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
       defaultEnabled: false,
       supportsProgress: true,
       embeddedSdkOnly: true,
@@ -262,9 +262,9 @@ export function registerNavigationTools({
     "getNavigationGraph",
     "Get navigation graph for debugging",
     getNavigationGraphSchema,
-    getNavigationGraphHandler,
-    // Reads only; read-only access never requires a session (#10965).
     {
+      handler: getNavigationGraphHandler,
+      // Reads only; read-only access never requires a session (#10965).
       defaultEnabled: false,
       embeddedSdkOnly: true,
       deviceReadOnly: true,
@@ -346,8 +346,8 @@ export function registerNavigationTools({
     "explore",
     "Automatically explore app to build navigation graph",
     exploreSchema,
-    exploreHandler,
     {
+      handler: exploreHandler,
       defaultEnabled: false,
       supportsProgress: true,
       embeddedSdkOnly: true,

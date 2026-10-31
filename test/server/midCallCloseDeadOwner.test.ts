@@ -116,32 +116,32 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
 
     entered = Promise.withResolvers<void>();
     proceed = Promise.withResolvers<void>();
-    ToolRegistry.registerDeviceAware(
-      PROBE,
-      PROBE,
-      z.object({}),
-      async () => {
+    ToolRegistry.registerDeviceAware(PROBE, PROBE, z.object({}), {
+      handler: async () => {
         entered.resolve();
         await proceed.promise;
         return { success: true };
       },
-      { deviceReadiness: "booted" },
-    );
+      deviceReadiness: "booted",
+    });
     ToolRegistry.registerDeviceAware(
       READ_PROBE,
       READ_PROBE,
       z.object({ fail: z.boolean().optional(), wait: z.boolean().optional() }),
-      async (device, params) => {
-        if (params.wait) {
-          entered.resolve();
-          await proceed.promise;
-        }
-        if (params.fail) {
-          throw new Error("read probe failure");
-        }
-        return { content: [{ type: "text", text: device.deviceId }] };
+      {
+        handler: async (device, params) => {
+          if (params.wait) {
+            entered.resolve();
+            await proceed.promise;
+          }
+          if (params.fail) {
+            throw new Error("read probe failure");
+          }
+          return { content: [{ type: "text", text: device.deviceId }] };
+        },
+        deviceReadiness: "booted",
+        deviceReadOnly: true,
       },
-      { deviceReadiness: "booted", deviceReadOnly: true },
     );
     ToolRegistry.register(
       PLAIN_READ_PROBE,

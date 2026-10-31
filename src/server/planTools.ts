@@ -291,8 +291,12 @@ export const registerPlanTools = () => {
     "executePlan",
     "Execute YAML plan steps; stops on first failed step.",
     executePlanSchema,
-    executePlanTool,
-    { defaultEnabled: false, supportsProgress: true, outputSchema: executePlanResultSchema },
+    {
+      handler: executePlanTool,
+      defaultEnabled: false,
+      supportsProgress: true,
+      outputSchema: executePlanResultSchema,
+    },
   );
 
   registerDeviceGestureRecordingTools();

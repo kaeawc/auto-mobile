@@ -25,22 +25,22 @@ export function registerAppFileTools(
     "putAppFile",
     "Write files into a bounded logical storage target.",
     putAppFileSchema,
-    async (device: BootedDevice, args: PutAppFileArgs, _progress, signal) => {
-      const writePromise = (deps.appFileService ?? getAppFileService)().putFile({
-        ...args,
-        device,
-        signal,
-      });
-      if (args.target.domain === "user_files") {
-        (deps.registerPendingDeviceCleanup ?? registerPendingDeviceCleanup)(
-          device.deviceId,
-          writePromise,
-        );
-      }
-      const result = await writePromise;
-      return createStructuredToolResponse(result);
-    },
     {
+      handler: async (device: BootedDevice, args: PutAppFileArgs, _progress, signal) => {
+        const writePromise = (deps.appFileService ?? getAppFileService)().putFile({
+          ...args,
+          device,
+          signal,
+        });
+        if (args.target.domain === "user_files") {
+          (deps.registerPendingDeviceCleanup ?? registerPendingDeviceCleanup)(
+            device.deviceId,
+            writePromise,
+          );
+        }
+        const result = await writePromise;
+        return createStructuredToolResponse(result);
+      },
       ...PLAN_RELEVANT,
       defaultEnabled: true,
       outputSchema: putAppFileResultSchema,

@@ -37,7 +37,8 @@ describe("ToolRegistry.getToolDefinitions", () => {
           ...options,
         });
       }
-      ToolRegistry.registerDeviceAware("planTool", "Plan only", z.object({}), async () => ({}), {
+      ToolRegistry.registerDeviceAware("planTool", "Plan only", z.object({}), {
+        handler: async () => ({}),
         planOnly: true,
       });
       const choices = () => {

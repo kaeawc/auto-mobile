@@ -4120,8 +4120,7 @@ describe("provisionDevice handler", () => {
         "automationReadyAfterProvisionProbe",
         "Automation-ready probe after provisionDevice readiness: none",
         z.object({ sessionUuid: z.string().optional() }),
-        async () => ({ success: true }),
-        { deviceReadiness: "automationReady" },
+        { handler: async () => ({ success: true }), deviceReadiness: "automationReady" },
       );
 
       const automationResponse = await ToolRegistry.getTool(

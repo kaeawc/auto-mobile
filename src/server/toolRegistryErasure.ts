@@ -21,12 +21,12 @@ export function erased<Stored>(value: unknown): Stored {
  * A registration's fourth argument as its handler and options: a bare handler (a tool with no
  * options) or a `{ handler, ...options }` registration.
  */
-export function splitRegistration<
-  Handler extends (...args: never[]) => unknown,
-  Registration extends { handler: Handler },
->(
-  registration: Handler | Registration,
-): { handler: Handler; options: Omit<Registration, "handler"> | Record<string, never> } {
+export function splitRegistration<Registration extends { handler: (...args: never[]) => unknown }>(
+  registration: Registration["handler"] | Registration,
+): {
+  handler: Registration["handler"];
+  options: Omit<Registration, "handler"> | Record<string, never>;
+} {
   if (typeof registration === "function") {
     return { handler: registration, options: {} };
   }

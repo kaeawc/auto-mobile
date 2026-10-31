@@ -45,7 +45,10 @@ beforeAll(() => {
   const schema = z.object({ sessionUuid: z.string().optional() });
   const ok = async () => ({ content: [{ type: "text" as const, text: "{}" }] });
   ToolRegistry.registerDeviceAware(DEVICE_CONTROL, "control", schema, ok);
-  ToolRegistry.registerDeviceAware(DEVICE_READ, "read", schema, ok, { deviceReadOnly: true });
+  ToolRegistry.registerDeviceAware(DEVICE_READ, "read", schema, {
+    handler: ok,
+    deviceReadOnly: true,
+  });
   ToolRegistry.register(PLAIN, "plain", schema, ok);
   ToolRegistry.register(READ_ONLY_SELECTION, "selection", schema, {
     handler: ok,

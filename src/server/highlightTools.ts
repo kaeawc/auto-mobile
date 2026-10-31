@@ -382,7 +382,6 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
     "highlight",
     "Draw a red hand-drawn circle around a UI element.",
     highlightSchema,
-    highlightHandler,
-    { defaultEnabled: false, outputSchema: highlightResultSchema },
+    { handler: highlightHandler, defaultEnabled: false, outputSchema: highlightResultSchema },
   );
 }

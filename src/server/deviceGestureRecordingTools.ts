@@ -250,8 +250,8 @@ export const registerDeviceGestureRecordingTools = () => {
     "recordDeviceGestures",
     "Start recording on-device user input (not tool calls) for exportPlan.",
     recordDeviceGesturesSchema,
-    recordDeviceGesturesTool,
     {
+      handler: recordDeviceGesturesTool,
       defaultEnabled: false,
       outputSchema: recordDeviceGesturesResultSchema,
       assertHeldDeviceStart: assertDeviceGestureRecordingStartHeldDevice,

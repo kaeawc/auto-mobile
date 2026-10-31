@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { deviceAwareHandler } from "../helpers/registeredHandler";
 import type { BootedDevice } from "../../src/models";
 import { createAuditTool } from "../../src/server/auditTool";
 import type { ToolRegistrar } from "../../src/server/defineTool";
@@ -12,7 +13,7 @@ function registeredHandler(tool: ReturnType<typeof createAuditTool>) {
   const registrar = {
     register: () => {},
     registerDeviceAware: (_name, _description, _schema, registered) => {
-      handler = registered;
+      handler = deviceAwareHandler(registered);
     },
   } as ToolRegistrar;
   tool.register(registrar);

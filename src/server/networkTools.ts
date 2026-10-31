@@ -447,13 +447,10 @@ function updateSimulation(
       throw new ActionableError("durationSeconds is required unless cancel is true");
     }
     const errorType: SimulatedErrorType = simulation.errorType ?? "http500";
-    state.startSimulation(
-      device.deviceId,
-      errorType,
-      simulation.durationSeconds,
-      simulation.limit ?? null,
-      sessionUuid,
-    );
+    state.startSimulation(device.deviceId, errorType, simulation.durationSeconds, {
+      limit: simulation.limit ?? null,
+      ownerSessionUuid: sessionUuid,
+    });
   }
 }
 

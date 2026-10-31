@@ -310,7 +310,7 @@ export function resolveEnvTimeoutFloorMs(
   fallbackMs: number,
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  return readEnvPositiveInteger(primaryEnvVar, legacyEnvVar, { fallback: fallbackMs }, env);
+  return readEnvPositiveInteger(primaryEnvVar, legacyEnvVar, { fallback: fallbackMs, env });
 }
 
 function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {

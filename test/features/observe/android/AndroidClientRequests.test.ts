@@ -43,11 +43,13 @@ describe("AndroidClientRequests.awaitCancellableRequest", () => {
 
   test("an abort settles the pending request with a cancellation failure immediately", async () => {
     const { requests, requestManager, timer } = harness();
-    const pending = requestManager.register<Result>("r", "x", 60_000, () => ({
-      success: false,
-      totalTimeMs: 0,
-      error: "timeout",
-    }));
+    const pending = requestManager.register<Result>("r", "x", 60_000, {
+      timeoutErrorFactory: () => ({
+        success: false,
+        totalTimeMs: 0,
+        error: "timeout",
+      }),
+    });
     const controller = new AbortController();
     const awaited = requests.awaitCancellableRequest("r", pending, controller.signal, timer.now());
     timer.advanceTime(5);

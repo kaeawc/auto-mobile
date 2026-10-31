@@ -191,13 +191,10 @@ describe("AndroidInboundMessageRouter without a client", () => {
   test("unknown-command error settles the request, focused click and existing hierarchy", async () => {
     const h = harness();
     const id = h.ctx.requestManager.generateId("focused-click");
-    const pending = h.ctx.requestManager.register(
-      id,
-      "focused-click",
-      1000,
-      () => "timeout",
-      (error) => error,
-    );
+    const pending = h.ctx.requestManager.register(id, "focused-click", 1000, {
+      timeoutErrorFactory: () => "timeout",
+      responseErrorFactory: (error) => error,
+    });
     h.ctx.lateCancelledScreenshotRequestIds.add(id);
     const error = "Unknown command type: request_click_focused_input";
     await h.receive({ type: "error", requestId: id, error });
@@ -237,7 +234,9 @@ describe("AndroidInboundMessageRouter without a client", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     h.ctx.supportedCommands = new Set([ANDROID_REQUEST_ID_ECHO_CAPABILITY]);
     const id = h.ctx.requestManager.generateId("swipe");
-    const pending = h.ctx.requestManager.register(id, "swipe", 1000, () => ({ success: false }));
+    const pending = h.ctx.requestManager.register(id, "swipe", 1000, {
+      timeoutErrorFactory: () => ({ success: false }),
+    });
     // Frames already asserted by CtrlProxyRequestIdEcho.test.ts.
     for (const requestId of [undefined, ""]) {
       await h.receive({ type: "swipe_result", requestId, success: true, totalTimeMs: 999 });
@@ -393,7 +392,9 @@ for (const { frame, expected } of responseCases) {
     // Replacing state after router construction proves the map does not capture it.
     h.ctx.requestManager = new RequestManager(h.ctx.timer, new CountingIdGenerator("replacement"));
     const id = h.ctx.requestManager.generateId(frame.type);
-    const pending = h.ctx.requestManager.register<unknown>(id, frame.type, 1000, () => "timeout");
+    const pending = h.ctx.requestManager.register<unknown>(id, frame.type, 1000, {
+      timeoutErrorFactory: () => "timeout",
+    });
     await h.receive({ ...frame, requestId: id });
     expect(await pending).toMatchObject(expected);
     expect(h.ctx.requestManager.getPendingCount()).toBe(0);

@@ -1038,7 +1038,7 @@ describe("IOSCtrlProxyClient", function () {
     test("syncs SDK-backed state after capability detection", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.startSimulation(testDevice.deviceId, "tlsFailure", 20, 4);
+      state.startSimulation(testDevice.deviceId, "tlsFailure", 20, { limit: 4 });
       state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
@@ -1114,7 +1114,7 @@ describe("IOSCtrlProxyClient", function () {
     test("does not push another device's rules or simulation on connect (#10061)", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.startSimulation("emulator-5554", "tlsFailure", 20, 4);
+      state.startSimulation("emulator-5554", "tlsFailure", 20, { limit: 4 });
       state.addMock("emulator-5554", {
         host: "api\\.example\\.com",
         path: "/v1/items",
@@ -1178,7 +1178,7 @@ describe("IOSCtrlProxyClient", function () {
         responseBody: "{}",
         contentType: "application/json",
       });
-      state.startSimulation(testDevice.deviceId, "timeout", 10, 2);
+      state.startSimulation(testDevice.deviceId, "timeout", 10, { limit: 2 });
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
         wsFactory: factory,
@@ -1488,7 +1488,7 @@ describe("IOSCtrlProxyClient", function () {
 
   describe("SDK capability transitions", function () {
     test("refreshes capabilities and syncs simulation after launching an SDK-enabled app", async function () {
-      NetworkState.getInstance().startSimulation(testDevice.deviceId, "timeout", 20, 2);
+      NetworkState.getInstance().startSimulation(testDevice.deviceId, "timeout", 20, { limit: 2 });
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
         wsFactory: factory,
@@ -6236,7 +6236,7 @@ describe("IOSCtrlProxyClient", function () {
               activity.requestId,
               "request_tap_coordinates",
               2000,
-              () => ({ success: false }),
+              { timeoutErrorFactory: () => ({ success: false }) },
             )
           : undefined;
         receiveMessage(Buffer.from(JSON.stringify(activity)));

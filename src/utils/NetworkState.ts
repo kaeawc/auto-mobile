@@ -298,8 +298,7 @@ export class NetworkState {
     deviceId: string,
     errorType: SimulatedErrorType,
     durationSeconds: number,
-    limit: number | null,
-    ownerSessionUuid?: string,
+    { limit, ownerSessionUuid }: { limit: number | null; ownerSessionUuid?: string },
   ): void {
     this.startSimulationUntil(
       deviceId,

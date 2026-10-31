@@ -165,7 +165,7 @@ describe("iOS gesture phase diagnostics", () => {
         message.requestId ?? "phase-swipe",
         "swipe",
         5000,
-        () => ({ success: false, error: "Swipe timed out after 5000ms" }),
+        { timeoutErrorFactory: () => ({ success: false, error: "Swipe timed out after 5000ms" }) },
       );
       timer.advanceTime(5000);
       await pending;
@@ -196,7 +196,7 @@ describe("iOS gesture phase diagnostics", () => {
         message.requestId ?? "phase-swipe",
         "swipe",
         5000,
-        () => ({ success: false, error: "Swipe timed out" }),
+        { timeoutErrorFactory: () => ({ success: false, error: "Swipe timed out" }) },
       );
       void hooks.deliverMessage(JSON.stringify(message));
       expect(await pending).toMatchObject({ success: false, perfTiming: message.perfTiming });

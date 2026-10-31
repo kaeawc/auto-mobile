@@ -96,10 +96,12 @@ export class AndroidScreenshotRequester {
         sentRequestId,
         "screenshot",
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          error: `Screenshot timeout after ${timeout}ms`,
-        }),
+        {
+          timeoutErrorFactory: (_id, _type, timeout) => ({
+            success: false,
+            error: `Screenshot timeout after ${timeout}ms`,
+          }),
+        },
       );
 
       await perf.track("sendRequest", () =>

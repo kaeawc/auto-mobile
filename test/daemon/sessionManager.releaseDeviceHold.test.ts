@@ -91,7 +91,7 @@ describe("session release device ownership hold", () => {
       options.push(releaseOptions.deviceIdentityReplaced === true);
     });
     const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
-    state.startSimulation(DEVICE, "timeout", 30, null, SESSION);
+    state.startSimulation(DEVICE, "timeout", 30, { limit: null, ownerSessionUuid: SESSION });
     registerNetworkStateSessionCleanup(manager, {
       state: () => state,
       pusher: {

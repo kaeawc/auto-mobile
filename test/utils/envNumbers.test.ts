@@ -5,15 +5,14 @@ const options = { fallback: 7000 };
 
 function read(env: NodeJS.ProcessEnv, overrides: { min?: number } = {}) {
   const warnings: string[] = [];
-  const value = readEnvPositiveInteger(
-    "PRIMARY_MS",
-    "LEGACY_MS",
-    { ...options, ...overrides },
+  const value = readEnvPositiveInteger("PRIMARY_MS", "LEGACY_MS", {
+    ...options,
+    ...overrides,
     env,
-    {
+    log: {
       warn: (message) => warnings.push(message),
     },
-  );
+  });
   return { value, warnings };
 }
 

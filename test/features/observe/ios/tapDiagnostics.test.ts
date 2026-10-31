@@ -243,10 +243,12 @@ describe("iOS opt-in tap diagnostics", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       logger.setLogLevel(LogLevel.INFO);
-      const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000, () => ({
-        success: false,
-        error: "Tap timed out",
-      }));
+      const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000, {
+        timeoutErrorFactory: () => ({
+          success: false,
+          error: "Tap timed out",
+        }),
+      });
       // Model JSON from an untrusted runner, including a malformed optional value.
       const message = {
         type: "tap_coordinates_result",

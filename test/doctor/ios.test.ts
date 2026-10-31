@@ -1141,7 +1141,7 @@ describe("iOS doctor checked simctl listings", () => {
     });
     const simctl = new SimCtlClient(
       null,
-      async (file, args, _maxBuffer, signal) => {
+      async (file, args, { signal } = {}) => {
         const command = `${file} ${args.join(" ")}`;
         if (command === "xcrun --find simctl") {
           return createExecResult("/usr/bin/simctl");

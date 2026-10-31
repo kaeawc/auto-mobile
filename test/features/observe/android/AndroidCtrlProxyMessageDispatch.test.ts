@@ -123,14 +123,11 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     expect(client.testHooks.cachedHierarchy()?.hierarchy.displayId).toBe(5);
     expect(client.testHooks.cachedHierarchy()?.hierarchy.panelUniqueId).toBe("panel-rear");
 
-    const pending = client.testHooks.requestManager.register(
-      "shot-display",
-      "screenshot",
-      1000,
-      () => ({
+    const pending = client.testHooks.requestManager.register("shot-display", "screenshot", 1000, {
+      timeoutErrorFactory: () => ({
         success: false,
       }),
-    );
+    });
     await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "screenshot",
@@ -154,7 +151,14 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
         "traversal-1",
         "get_traversal_order",
         1000,
-        () => ({ elements: [], focusedIndex: null, totalCount: 0, totalTimeMs: 0 }),
+        {
+          timeoutErrorFactory: () => ({
+            elements: [],
+            focusedIndex: null,
+            totalCount: 0,
+            totalTimeMs: 0,
+          }),
+        },
       );
       await client.testHooks.handleWebSocketMessage(
         JSON.stringify({
@@ -176,14 +180,11 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   );
 
   test("a tap_coordinates_result reply, including a refusal, is marked acknowledged", async () => {
-    const pending = client.testHooks.requestManager.register(
-      "tap-ack",
-      "tap_coordinates",
-      1000,
-      () => ({
+    const pending = client.testHooks.requestManager.register("tap-ack", "tap_coordinates", 1000, {
+      timeoutErrorFactory: () => ({
         success: false,
       }),
-    );
+    });
     await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "tap_coordinates_result",
@@ -201,15 +202,12 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   });
 
   test("resolves a pending settings response through the shared helper", async () => {
-    const pending = client.testHooks.requestManager.register(
-      "settings-1",
-      "settings_get",
-      1000,
-      () => ({
+    const pending = client.testHooks.requestManager.register("settings-1", "settings_get", 1000, {
+      timeoutErrorFactory: () => ({
         success: false,
         value: "timeout",
       }),
-    );
+    });
     await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "settings_get_result",
@@ -243,7 +241,14 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
           "traversal-1",
           "get_traversal_order",
           1000,
-          () => ({ elements: [], focusedIndex: null, totalCount: 0, totalTimeMs: 0 }),
+          {
+            timeoutErrorFactory: () => ({
+              elements: [],
+              focusedIndex: null,
+              totalCount: 0,
+              totalTimeMs: 0,
+            }),
+          },
         );
         await client.testHooks.handleWebSocketMessage(
           JSON.stringify({

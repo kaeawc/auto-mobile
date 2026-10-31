@@ -8,6 +8,7 @@ import {
   type SimCtlBootOptions,
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../../src/utils/execResult";
+import type { SimctlExecOptions } from "../../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { resetSimCtlSharedStateForTesting } from "../../../src/utils/ios-cmdline-tools/SimCtlSharedState";
 import { ActionableError, toActionableError } from "../../../src/models";
@@ -84,12 +85,7 @@ function createHarness(bootOptions: SimCtlBootOptions): Harness {
   let listDevicesFailure: Error | null = null;
   const nextState = (): string => (states.length > 1 ? states.shift()! : states[0]);
 
-  const execAsync = async (
-    file: string,
-    args: string[],
-    _maxBuffer?: number,
-    signal?: AbortSignal,
-  ) => {
+  const execAsync = async (file: string, args: string[], { signal }: SimctlExecOptions = {}) => {
     const command = `${file} ${args.join(" ")}`;
     calls.push(command);
     const timeoutUsage = commandTimeouts.get(command) ?? [];
@@ -275,12 +271,7 @@ function createConcurrentStartHarness(
   let shutdownCount = 0;
   let shutdownSucceeded = false;
   let listDevicesCount = 0;
-  const execAsync = async (
-    file: string,
-    args: string[],
-    _maxBuffer?: number,
-    signal?: AbortSignal,
-  ) => {
+  const execAsync = async (file: string, args: string[], { signal }: SimctlExecOptions = {}) => {
     const command = `${file} ${args.join(" ")}`;
     if (command === "xcrun simctl --version") {
       return createExecResult("", "");
@@ -553,7 +544,7 @@ describe("SimCtlClient boot self-verification", () => {
     const calls: string[] = [];
     const simctl = new SimCtlClient(
       null,
-      async (file, args, _maxBuffer, signal) => {
+      async (file, args, { signal } = {}) => {
         const command = `${file} ${args.join(" ")}`;
         calls.push(command);
         if (command === "xcrun simctl --version" || command === `xcrun simctl shutdown ${UDID}`) {
@@ -593,7 +584,7 @@ describe("SimCtlClient boot self-verification", () => {
     let shutdownStartedAborted: boolean | undefined;
     const simctl = new SimCtlClient(
       null,
-      async (file, args, _maxBuffer, signal) => {
+      async (file, args, { signal } = {}) => {
         const command = `${file} ${args.join(" ")}`;
         calls.push(command);
         if (command === "xcrun simctl --version") {
@@ -680,12 +671,7 @@ describe("SimCtlClient boot self-verification", () => {
   test("does not serialize boot attempts for different UDIDs", async () => {
     const calls: string[] = [];
     const firstController = new AbortController();
-    const execAsync = async (
-      file: string,
-      args: string[],
-      _maxBuffer?: number,
-      signal?: AbortSignal,
-    ) => {
+    const execAsync = async (file: string, args: string[], { signal }: SimctlExecOptions = {}) => {
       const command = `${file} ${args.join(" ")}`;
       calls.push(command);
       if (command === `xcrun simctl bootstatus ${UDID} -b`) {

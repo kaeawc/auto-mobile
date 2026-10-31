@@ -181,7 +181,7 @@ test.each(["timeout", "abort"])("target reads honor %s without enrichment", asyn
   const commands: string[][] = [];
   const client = new SimCtlClient(
     null,
-    async (_file, args, _maxBuffer, signal) => {
+    async (_file, args, { signal } = {}) => {
       commands.push(args);
       commandSignal = signal;
       return new Promise((_, reject) => {

@@ -36,12 +36,10 @@ export const IOS_FIRST_FRAME_TIMEOUT_MS = 15_000;
 export const IOS_SIMULATOR_WINDOW_TIMEOUT_ENV = ENV.IOS_SIMULATOR_WINDOW_TIMEOUT_MS.name;
 
 export function resolveSimulatorWindowTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  return readEnvPositiveInteger(
-    IOS_SIMULATOR_WINDOW_TIMEOUT_ENV,
-    undefined,
-    { fallback: 2_000 },
+  return readEnvPositiveInteger(IOS_SIMULATOR_WINDOW_TIMEOUT_ENV, undefined, {
+    fallback: 2_000,
     env,
-  );
+  });
 }
 
 /**

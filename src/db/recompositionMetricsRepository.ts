@@ -1,7 +1,6 @@
 import type { Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, NewRecompositionMetrics } from "./types";
-import type { RepositoryDeps } from "./repositoryDeps";
 
 /**
  * Persistence for `recomposition_metrics` rows. The Kysely handle is resolved

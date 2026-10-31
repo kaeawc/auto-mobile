@@ -179,6 +179,13 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   return errors;
 }
 
+export function prototypeSensitiveWarnings(spec: unknown): string[] {
+  return prototypeSensitiveSinkErrors(spec).map(
+    ({ path, message }) =>
+      `${path}: ${message}; this is a warning only and does not block the show.`,
+  );
+}
+
 function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {
   return prototypeSensitiveSinkErrors(spec)[0];
 }

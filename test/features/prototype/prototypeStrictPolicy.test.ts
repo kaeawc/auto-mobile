@@ -3,6 +3,39 @@ import hostFixture from "../../fixtures/prototype-spec/invalid/strict-library-vi
 import nestedFixture from "../../fixtures/prototype-spec/invalid/strict-library-via-host-nested.json";
 import protectedFixture from "../../fixtures/prototype-spec/valid/platform-requires.json";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
+import { prototypeSensitiveWarnings } from "../../../src/features/prototype/prototypeStrictPolicy";
+
+test("sensitive warnings retain each sink path and message with the warning-only suffix", () => {
+  const spec = {
+    id: "sensitive-warnings",
+    window: { placement: { type: "fullscreen" } },
+    requires: { platform: ["clipboard"] },
+    root: {
+      type: "column",
+      children: [
+        { type: "pasteButton", into: "/data/code" },
+        {
+          type: "button",
+          label: "Send",
+          onTap: [
+            {
+              type: "request",
+              url: "https://example.com/submit",
+              via: "device",
+              headers: { Authorization: { data: "/code" } },
+              query: { q: { data: "/code" } },
+            },
+          ],
+        },
+      ],
+    },
+  };
+  expect(validatePrototypeSpec(spec).success).toBe(true);
+  expect(prototypeSensitiveWarnings(spec)).toEqual([
+    "root.children[1].onTap[0].headers.Authorization: Sensitive value cannot be bound into a request; this is a warning only and does not block the show.",
+    "root.children[1].onTap[0].query.q: Sensitive value cannot be bound into a request; this is a warning only and does not block the show.",
+  ]);
+});
 
 describe("library request policy", () => {
   test.each([

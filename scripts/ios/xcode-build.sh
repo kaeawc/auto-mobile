@@ -284,7 +284,7 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
     fi
 
     # Build each scheme for its simulator platform, defaulting to iOS when the
-    # settings probe fails or does not identify a supported simulator platform.
+    # settings probe fails or does not identify a supported platform family.
     BUILD_SUCCESS=true
     while IFS= read -r scheme; do
         if [ -n "${scheme}" ]; then
@@ -294,9 +294,9 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
             if [ "${CAPTURED_STATUS}" -eq 0 ]; then
                 PLATFORM_NAME=$(printf '%s\n' "${CAPTURED_OUTPUT}" | awk '$1 == "PLATFORM_NAME" && $2 == "=" { print $3; exit }')
                 case "${PLATFORM_NAME}" in
-                    iphonesimulator) DESTINATION="generic/platform=iOS Simulator" ;;
-                    watchsimulator) DESTINATION="generic/platform=watchOS Simulator" ;;
-                    appletvsimulator) DESTINATION="generic/platform=tvOS Simulator" ;;
+                    iphone*) DESTINATION="generic/platform=iOS Simulator" ;;
+                    watch*) DESTINATION="generic/platform=watchOS Simulator" ;;
+                    appletv*) DESTINATION="generic/platform=tvOS Simulator" ;;
                 esac
             fi
             print_info "Using destination for ${scheme}: ${DESTINATION}"

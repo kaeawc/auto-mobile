@@ -354,6 +354,25 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
       failed = true;
     }
   }
+  if (grants.length) {
+    try {
+      const { resources } = await raceWithDeadline(() => deps.daemonClient.drainPool(), {
+        timer: deps.timer,
+        timeoutMs: deps.cleanupTimeoutMs ?? BROKER_CLEANUP_TIMEOUT_MS,
+        label: "Drain broker pool",
+      });
+      for (const resource of resources) {
+        deps.log(
+          `Drained pool resource ${resource.resourceId}: ${resource.outcome} (cleanupPending=${resource.cleanupPending})`,
+        );
+      }
+      writeEvidence("pool-drain.json", resources, deps);
+      failed ||= resources.some((resource) => resource.cleanupPending);
+    } catch (error) {
+      deps.log(`Drain broker pool: ${errorMessage(error)}`);
+      failed = true;
+    }
+  }
   if (ledger.devices().length) {
     try {
       await assertReleasedAndAbsent({
@@ -370,10 +389,12 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
     }
   }
   const unresolved = grants.filter((row) => !ledger.releaseComplete(row));
-  const pooled = ledger.devices().filter((row) => ledger.hasEvent(row, "pooled"));
+  const pooled = ledger
+    .devices()
+    .filter((row) => ledger.hasEvent(row, "pooled") && !ledger.hasEvent(row, "absent"));
   for (const device of pooled) {
     deps.log(
-      `Pooled ${device.client} on ${device.device!.name} (device ID ${device.device!.deviceId}): clean idle device retained by the broker pool. No harness command evicts idle pooled devices yet (product path pending, #15653); do not signal the device; shutdown-devices refuses it as broker-held until the product evicts it.`,
+      `Pooled ${device.client} on ${device.device!.name} (device ID ${device.device!.deviceId}): still retained by the broker pool after drain; do not signal the device; shutdown-devices refuses it as broker-held.`,
     );
   }
   if (pooled.length) {

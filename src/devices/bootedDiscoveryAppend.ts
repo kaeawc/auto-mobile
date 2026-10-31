@@ -79,6 +79,8 @@ export function bootedSweepsFor(
     ios: either || platform === "ios",
     // Only the pool's own readers ask an "either" read for watches (#14908).
     watchos: platform === "watchos" || (either && options.includeWatchOs === true),
+    // Apple TV simulators are not discovered yet.
+    tvos: false,
   };
 }
 

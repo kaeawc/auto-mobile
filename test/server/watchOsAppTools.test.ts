@@ -19,7 +19,7 @@ import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SELECTS_ACTIVE_DEVICE } from "../../src/server/toolRegistryTypes";
 import { setActiveDeviceSchema } from "../../src/server/utilityTools";
-import { watchOsUnsupportedToolMessage } from "../../src/server/watchOsToolSupport";
+import { unsupportedPlatformToolMessage } from "../../src/server/applePlatformToolSupport";
 import type { Platform } from "../../src/models";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -294,7 +294,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     const error = await failure(call("crashApp", { sessionUuid: WATCH_SESSION, appId: BUNDLE }));
 
     expect(error).toBeInstanceOf(ActionableError);
-    expect(error).toMatchObject({ message: watchOsUnsupportedToolMessage("crashApp") });
+    expect(error).toMatchObject({ message: unsupportedPlatformToolMessage("crashApp", "watchos") });
   });
 
   test("launch, relaunch with clearAppData, and terminate an app on the session-bound watch", async () => {

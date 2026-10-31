@@ -180,12 +180,12 @@ export interface BootCapacityAsserter {
 }
 
 /**
- * The gate whose ledger a boot of `platform` takes a slot in. An Apple Watch simulator is a
- * simulator: the iOS gate already counts every Booted simulator whatever its runtime, so a watch
- * boot is admitted against that same limit rather than bypassing it.
+ * The gate whose ledger a boot of `platform` takes a slot in. Apple Watch and Apple TV simulators
+ * are simulators: the iOS gate already counts every Booted simulator whatever its runtime, so their
+ * boots are admitted against that same limit rather than bypassing it.
  */
 export function bootGatePlatform(platform: Platform): "android" | "ios" {
-  return platform === "watchos" ? "ios" : platform;
+  return platform === "android" ? "android" : "ios";
 }
 
 /**

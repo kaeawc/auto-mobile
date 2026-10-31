@@ -177,6 +177,7 @@ export class ReadinessSelection {
         android: scannedSources.android,
         ios: scannedSources["ios-simulator"] || scannedSources["ios-physical"],
         watchos: false,
+        tvos: false,
       },
       scannedSources,
     };
@@ -918,7 +919,7 @@ export class ReadinessSelection {
     result: BootedDevice[] | ConnectedPlatformScan,
   ): ConnectedPlatformScan {
     return Array.isArray(result)
-      ? { devices: result, scanned: { android: true, ios: true, watchos: false } }
+      ? { devices: result, scanned: { android: true, ios: true, watchos: false, tvos: false } }
       : result;
   }
 }

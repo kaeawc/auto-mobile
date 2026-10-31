@@ -110,7 +110,6 @@ import dev.jasonpearson.automobile.protocol.RequestSetText
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
-import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
@@ -644,6 +643,37 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override suspend fun broadcast(result: GlobalActionResult) =
             webSocketServer.broadcast(result)
+        },
+      asyncActionRunner = asyncActionRunner,
+      timeProvider = timeProvider,
+    )
+  }
+  private val screenshotRequests by lazy {
+    ScreenshotRequestHandler(
+      host =
+        object : ScreenshotRequestHandler.Host {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+
+          override suspend fun broadcast(response: WebSocketResponse) =
+            webSocketServer.broadcast(response)
+
+          override suspend fun broadcast(frame: String) = webSocketServer.broadcast(frame)
+
+          override fun currentFrameContext() = this@CtrlProxy.currentFrameContext()
+
+          override fun activeDisplayId() = this@CtrlProxy.activeDisplayId()
+
+          override fun panelUniqueId(displayId: Int) = displayController.panelUniqueId(displayId)
+
+          override suspend fun capture(displayId: Int) =
+            dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
+              screenshotController.takeScreenshotAsync(displayId)
+            }
+
+          override suspend fun captureWithPrototypeHidden(displayId: Int) =
+            this@CtrlProxy.captureWithPrototypeHidden(displayId)
         },
       asyncActionRunner = asyncActionRunner,
       timeProvider = timeProvider,
@@ -1892,7 +1922,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
     val hidePrototypes = request.hidePrototypes
 
-    broadcastScreenshot(requestId, displayId, hidePrototypes)
+    screenshotRequests.broadcastScreenshot(requestId, displayId, hidePrototypes)
   }
 
   override suspend fun requestDoubleTapCoordinates(
@@ -2942,75 +2972,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         perfTiming = perfTiming,
         alreadySatisfied = alreadySatisfied,
       )
-    }
-  }
-
-  /** Broadcast screenshot to WebSocket clients */
-  private fun broadcastScreenshot(
-    requestId: String?,
-    displayId: Int? = null,
-    hidePrototypes: Boolean = false,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping screenshot broadcast")
-      return
-    }
-
-    // Routed through asyncActionRunner: a throw in takeScreenshotAsync() (or the broadcast) would
-    // otherwise be logged-and-swallowed here, emitting neither `screenshot` nor `screenshot_error`
-    // and hanging the awaiting client until timeout (issue #3023).
-    asyncActionRunner.launch(requestId, "screenshot") {
-      val contextBeforeCapture = currentFrameContext()
-      val targetDisplayId = displayId ?: activeDisplayId()
-      val prototypesHidden: Boolean?
-      val outcome =
-        if (hidePrototypes) {
-          val capture = captureWithPrototypeHidden(targetDisplayId)
-          prototypesHidden = capture.prototypeExcluded
-          capture.value
-        } else {
-          prototypesHidden = null
-          dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeIconCapture.atRest {
-            screenshotController.takeScreenshotAsync(targetDisplayId)
-          }
-        }
-      val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
-      when (outcome) {
-        is ScreenshotCaptureOutcome.Success -> {
-          val screenshot = outcome.payload
-          webSocketServer.broadcast(
-            ProtocolScreenshotResult(
-              timestamp = System.currentTimeMillis(),
-              requestId = requestId,
-              data = screenshot.base64Image,
-              format = "jpeg",
-              rotation = screenshot.rotation,
-              displayId = screenshot.displayId,
-              panelUniqueId = screenshot.panelUniqueId,
-              screenshotCaptureDurationMs = screenshot.captureDurationMs,
-              screenshotEncodeDurationMs = screenshot.encodeDurationMs,
-              screenshotByteLength = screenshot.byteLength,
-              screenshotBase64Length = screenshot.base64Length,
-              frameContext = stableContext?.toString(),
-              prototypesHidden = prototypesHidden,
-            ),
-          )
-          Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
-        }
-        is ScreenshotCaptureOutcome.Failure -> {
-          // Surface a rate limit distinctly so the daemon classifies it as ctrlproxy_rate_limited
-          // rather than a generic capture failure (issue #4927).
-          val error = CtrlProxyScreenshotWire.errorMessageForCode(outcome.errorCode)
-          webSocketServer.broadcast(
-            screenshotErrorFrame(
-              requestId,
-              error,
-              targetDisplayId,
-              displayController.panelUniqueId(targetDisplayId),
-            ),
-          )
-        }
-      }
     }
   }
 

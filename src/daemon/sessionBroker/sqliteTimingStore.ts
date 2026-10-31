@@ -1,4 +1,4 @@
-import type { Kysely, Transaction } from "kysely";
+import type { Kysely } from "kysely";
 import type { BindingRegistryDatabase } from "./registry/sqliteBindingRegistry";
 import type { SessionBrokerTiming } from "../../devices/sessionBrokerResult";
 import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
@@ -19,7 +19,7 @@ export class SqliteBrokerTimingStore {
     timing: SessionBrokerTiming,
     profile?: SessionDeviceProfile,
   ): Promise<void> {
-    await this.db.transaction().execute(async (trx) => {
+    const write = async (trx: Kysely<BindingRegistryDatabase>) => {
       const request = await readRequest(trx, requestId);
       if (!request) {
         return;
@@ -44,11 +44,12 @@ export class SqliteBrokerTimingStore {
         })
         .where("request_id", "=", requestId)
         .execute();
-    });
+    };
+    await (this.db.isTransaction ? write(this.db) : this.db.transaction().execute(write));
   }
 
   private async finalResetTiming(
-    trx: Transaction<BindingRegistryDatabase>,
+    trx: Kysely<BindingRegistryDatabase>,
     request: BrokerRequestRecord,
     timing: SessionBrokerTiming["reset"],
   ) {
@@ -84,7 +85,7 @@ export class SqliteBrokerTimingStore {
   }
 
   async confirmDestroyed(
-    trx: Transaction<BindingRegistryDatabase>,
+    trx: Kysely<BindingRegistryDatabase>,
     requestId: string | null,
   ): Promise<void> {
     if (!requestId) {

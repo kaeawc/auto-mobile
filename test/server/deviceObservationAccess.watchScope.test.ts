@@ -38,7 +38,7 @@ function access(listings: Record<ReadListingScope, BootedResourceReadListing>) {
 
 const either = (devices: BootedDevice[]): BootedResourceReadListing => ({
   devices,
-  scanned: { android: true, ios: true, watchos: false },
+  scanned: { android: true, ios: true, watchos: false, tvos: false },
 });
 
 async function failure(promise: Promise<unknown>): Promise<unknown> {
@@ -52,7 +52,10 @@ describe("observation read listing scope", () => {
   test("a watchOS read lists watches and resolves the named watch", async () => {
     const { read, scopes } = access({
       either: either([IPHONE]),
-      watchos: { devices: [WATCH], scanned: { android: false, ios: false, watchos: true } },
+      watchos: {
+        devices: [WATCH],
+        scanned: { android: false, ios: false, watchos: true, tvos: false },
+      },
     });
 
     expect(
@@ -81,7 +84,7 @@ describe("observation read listing scope", () => {
       either: either([IPHONE]),
       watchos: {
         devices: [],
-        scanned: { android: false, ios: false, watchos: false },
+        scanned: { android: false, ios: false, watchos: false, tvos: false },
         discoveryErrors: { watchos: { code: "unavailable", message: "simctl missing" } },
       },
     });

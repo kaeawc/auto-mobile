@@ -1,4 +1,5 @@
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, ExecResult } from "../../models";
+import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   defaultAdbClientFactory,
@@ -99,19 +100,32 @@ async function carServiceShell(
   const reason =
     `this AAOS image is a user build; ${feature} needs a userdebug/eng image ` +
     "such as `android-automotive` API 34 ext9";
-  let output: string;
+  let result: ExecResult;
   try {
-    output = await shell(adb, args, signal);
+    result = await adb.execute(["shell", ...args], { signal });
   } catch (error) {
-    if (errorMessage(error).includes("requires non-user build")) {
+    const { stdout, stderr } = adbFailureOutput(error);
+    if (
+      stdout.includes("requires non-user build") ||
+      stderr.includes("requires non-user build") ||
+      errorMessage(error).includes("requires non-user build")
+    ) {
       unsupported(reason);
     }
     throw error;
   }
-  if (output.includes("requires non-user build")) {
+  // Inspect the full streams before a resolved failure is reduced to its error field.
+  if (
+    [result.stdout, result.stderr, result.error].some((text) =>
+      text?.includes("requires non-user build"),
+    )
+  ) {
     unsupported(reason);
   }
-  return output;
+  if (result.error) {
+    throw new ActionableError(`adb shell ${args.join(" ")} failed: ${result.error}`);
+  }
+  return result.stdout.replace(/\r\n?/g, "\n").trim();
 }
 
 /** Reads and writes global vehicle properties through the car service. */

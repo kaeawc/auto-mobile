@@ -42,7 +42,7 @@ import {
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { executionTracker } from "../../daemon/executionTracker";
 import { deviceActionClock } from "./deviceActionClock";
-import { assertToolSupportsDevicePlatform } from "../watchOsToolSupport";
+import { assertToolSupportsDevicePlatform } from "../applePlatformToolSupport";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,

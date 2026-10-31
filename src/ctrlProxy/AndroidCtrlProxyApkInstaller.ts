@@ -38,6 +38,7 @@ import { CtrlProxyApkInstallError } from "./CtrlProxyApkInstallError";
 import {
   extractInstallFailureCode,
   isTransientInstallFailureCode,
+  isEmptyStreamedInstallFailure,
   RetryableCtrlProxyInstallFailure,
 } from "./androidInstallFailure";
 
@@ -324,7 +325,7 @@ export class AndroidCtrlProxyApkInstaller {
       const result =
         this.host.device.formFactor === "automotive" || this.host.device.formFactor === "watch"
           ? await this.installWhenSettled(apkPath)
-          : await this.host.executeApkStage(`install "${apkPath}"`, "CtrlProxy APK install");
+          : await this.installWithoutSettling(apkPath);
       const resultString = result.toString().toLowerCase();
 
       if (resultString.includes("failure") || resultString.includes("error")) {
@@ -405,6 +406,101 @@ export class AndroidCtrlProxyApkInstaller {
         shouldRetry: (error) => error instanceof RetryableCtrlProxyInstallFailure,
       },
     );
+  }
+
+  private async installAttemptWithoutSettling(
+    apkPath: string,
+    attempt: number,
+    signal: AbortSignal | undefined,
+  ): Promise<ExecResult> {
+    if (attempt > 1) {
+      signal?.throwIfAborted();
+      await this.host.assertNotDrivenByOtherDaemon(signal);
+      signal?.throwIfAborted();
+    }
+    let output: ExecResult | undefined;
+    try {
+      output = await this.host.executeApkStage(`install "${apkPath}"`, "CtrlProxy APK install");
+      if (
+        !isEmptyStreamedInstallFailure(output.stdout, output.stderr, "", this.host.device.deviceId)
+      ) {
+        return output;
+      }
+      throw new ActionableError("adb install reported a failure");
+    } catch (error) {
+      // Preserve every existing phone failure for install() to classify and wrap.
+      if (error instanceof CtrlProxyApkStageError) {
+        throw error;
+      }
+      throw this.retryableInstallFailureFor(error, output, attempt);
+    }
+  }
+
+  private retryableInstallFailureFor(
+    error: unknown,
+    output: ExecResult | undefined,
+    attempt: number,
+  ): unknown {
+    const { stdout, stderr } = output ?? adbFailureOutput(error);
+    const message = errorMessage(error);
+    if (!isEmptyStreamedInstallFailure(stdout, stderr, message, this.host.device.deviceId)) {
+      return error;
+    }
+    const deviceError = this.host.statusInspectionDeviceError(error);
+    if (deviceError) {
+      return deviceError;
+    }
+    this.host.clearAvailabilityCache();
+    const exitCode =
+      error instanceof Error && "code" in error && typeof error.code === "number"
+        ? `\nexit code: ${error.code}`
+        : "";
+    return new RetryableCtrlProxyInstallFailure(
+      `Failed to install APK (attempt ${attempt}/${CTRL_PROXY_INSTALL_ATTEMPTS}): ${message}${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
+      { cause: error },
+    );
+  }
+
+  private async installWithoutSettling(apkPath: string): Promise<ExecResult> {
+    const signal = getAbortSignal();
+
+    // The first attempt retains the direct phone path, including stage cancellation errors.
+    let initialFailure: RetryableCtrlProxyInstallFailure;
+    try {
+      return await this.installAttemptWithoutSettling(apkPath, 1, signal);
+    } catch (error) {
+      if (!(error instanceof RetryableCtrlProxyInstallFailure)) {
+        throw error;
+      }
+      initialFailure = error;
+    }
+
+    // Return terminal errors as values so retry cancellation cannot replace a stage error.
+    const result = await new DefaultRetryExecutor(this.host.timer).executeOrThrow(
+      async (attempt) => {
+        if (attempt === 1) {
+          throw initialFailure;
+        }
+        try {
+          return { output: await this.installAttemptWithoutSettling(apkPath, attempt, signal) };
+        } catch (error) {
+          if (error instanceof RetryableCtrlProxyInstallFailure) {
+            throw error;
+          }
+          return { error };
+        }
+      },
+      {
+        maxAttempts: CTRL_PROXY_INSTALL_ATTEMPTS,
+        delays: this.installReadiness.installBackoff ?? sequenceBackoff([500, 1500]),
+        signal,
+        shouldRetry: (error) => error instanceof RetryableCtrlProxyInstallFailure,
+      },
+    );
+    if ("error" in result) {
+      throw result.error;
+    }
+    return result.output;
   }
 
   async grantPostInstallPermissions(): Promise<void> {

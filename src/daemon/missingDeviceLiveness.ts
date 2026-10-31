@@ -619,7 +619,10 @@ export class MissingDeviceLiveness {
   }
 }
 
-/** Each platform's cache bypass; the watch listing has no cache, so it reads fresh as is (#14908). */
+/**
+ * Each platform's cache bypass. The watch listing has no cache, so it reads fresh as is (#14908);
+ * Apple TV simulators are not discovered yet, so there is no listing to bypass.
+ */
 function freshPresenceOptions(platform: Platform): BootedDeviceDiscoveryOptions {
   switch (platform) {
     case "android":
@@ -627,6 +630,7 @@ function freshPresenceOptions(platform: Platform): BootedDeviceDiscoveryOptions 
     case "ios":
       return { bypassIosDeviceListCache: true };
     case "watchos":
+    case "tvos":
       return {};
   }
 }

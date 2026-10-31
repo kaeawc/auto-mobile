@@ -5,6 +5,7 @@ import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { errorMessage } from "../utils/describeUnknownError";
+import { runWithDeviceExecutionBinding } from "../utils/deviceExecutionBinding";
 import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import { DeviceBootExecution } from "./DeviceBootExecution";
@@ -458,11 +459,13 @@ export class DeviceBootService {
               !excludedDeviceNames?.has(device.name) && !excludedDeviceIds?.has(device.deviceId),
           )
         : booted;
-    const enriched = await hydrateRequiredDisplayInventories(
-      enrichBootedDevicesFromImages(matchingBooted, images),
-      criteria.requires,
-      this.dependencies.displayInventory ?? defaultDisplayInventoryProvider,
-      context.signal,
+    const enriched = await runWithDeviceExecutionBinding(undefined, () =>
+      hydrateRequiredDisplayInventories(
+        enrichBootedDevicesFromImages(matchingBooted, images),
+        criteria.requires,
+        this.dependencies.displayInventory ?? defaultDisplayInventoryProvider,
+        context.signal,
+      ),
     );
     candidates?.push(...enriched);
     const match =

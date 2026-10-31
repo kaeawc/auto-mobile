@@ -23,6 +23,7 @@ test/fixtures/android-notification-enabled/*.txt text eol=lf
 test/fixtures/android-app-links/*.txt text eol=lf
 test/fixtures/ios-simctl/*.txt text eol=lf
 test/fixtures/android-emulator/*.txt text eol=lf
+test/fixtures/android-car-service/*.txt text eol=lf
 test/fixtures/android-startup/*.txt text eol=lf
 test/fixtures/android-profiling/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf

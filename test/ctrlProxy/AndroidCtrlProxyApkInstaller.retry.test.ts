@@ -23,6 +23,20 @@ const emptyReason = () =>
     stderr: "adb: failed to install control-proxy.apk: \n",
   });
 
+// Verbatim output captured from the freshly booted AAOS Play Store image.
+const capturedEmptyReason = () =>
+  Object.assign(
+    new Error(
+      "adb: failed to install /var/folders/cc/5cjn1v792wq3ts082kyl5j200000gn/T/auto-mobile-few54p/control-proxy.apk:",
+    ),
+    {
+      code: 1,
+      stdout: "Performing Streamed Install",
+      stderr:
+        "adb: failed to install /var/folders/cc/5cjn1v792wq3ts082kyl5j200000gn/T/auto-mobile-few54p/control-proxy.apk:",
+    },
+  );
+
 class FakeInstallerHost implements AndroidCtrlProxyApkInstallerHost {
   readonly adb = new FakeAdbExecutor();
   readonly timer = new FakeTimer();
@@ -37,6 +51,8 @@ class FakeInstallerHost implements AndroidCtrlProxyApkInstallerHost {
   readonly events: string[] = [];
   outcomes: Array<Error | ExecResult> = [createExecResult("Success", "")];
   attempts = 0;
+  ownershipReads = 0;
+  onExecute: (() => void) | undefined;
   deviceError: Error | undefined;
   grantError: Error | undefined;
   assertPinnedVersionVerifiable(): void {}
@@ -50,11 +66,14 @@ class FakeInstallerHost implements AndroidCtrlProxyApkInstallerHost {
     return "";
   }
   async cleanupApk(): Promise<void> {}
-  async assertNotDrivenByOtherDaemon(): Promise<void> {}
+  async assertNotDrivenByOtherDaemon(): Promise<void> {
+    this.ownershipReads++;
+  }
   clearAvailabilityCache(): void {}
   async executeApkStage(): Promise<ExecResult> {
     this.events.push("install");
     this.attempts++;
+    this.onExecute?.();
     const next = this.outcomes.length > 1 ? this.outcomes.shift()! : this.outcomes[0]!;
     if (next instanceof Error) {
       throw next;
@@ -234,15 +253,196 @@ describe("CtrlProxy install settling and retries", () => {
     ]);
   });
 
-  test("phone keeps the existing single-attempt path and never probes", async () => {
-    const { host, probe, installer } = fixture("phone");
-    host.outcomes = [emptyReason()];
-    await expect(installer.install("/fake/control-proxy.apk")).rejects.toThrow(
-      "adb: failed to install",
-    );
+  test("phone first attempt uses only the entry ownership read", async () => {
+    const { host, installer } = fixture("phone");
+    await installer.install("/fake/control-proxy.apk");
+    expect(host.ownershipReads).toBe(1);
     expect(host.attempts).toBe(1);
+  });
+
+  test.each(["automotive", "watch"] as const)(
+    "%s retains entry and per-attempt ownership reads",
+    async (formFactor) => {
+      const { host, installer } = fixture(formFactor);
+      host.outcomes = [emptyReason(), createExecResult("Success", "")];
+      await installer.install("/fake/control-proxy.apk");
+      expect(host.ownershipReads).toBe(3);
+    },
+  );
+
+  test.each([1, 2])(
+    "phone preserves stage errors on attempt %s when the signal aborts",
+    async (attempt) => {
+      const { host, installer } = fixture("phone");
+      const controller = new AbortController();
+      const reason = new Error("acquisition deadline reached");
+      const failure = new CtrlProxyApkStageError(
+        "CtrlProxy APK install cancelled: acquisition deadline reached",
+        { cause: reason },
+      );
+      host.outcomes = attempt === 1 ? [failure] : [capturedEmptyReason(), failure];
+      host.onExecute = () => {
+        if (host.attempts === attempt) {
+          controller.abort(reason);
+        }
+      };
+      await expect(
+        runWithAbortSignal(controller.signal, () => installer.install("/fake/control-proxy.apk")),
+      ).rejects.toBe(failure);
+      expect(host.attempts).toBe(attempt);
+      expect(host.ownershipReads).toBe(attempt);
+    },
+  );
+
+  test.each([
+    new CtrlProxyApkStageError("CtrlProxy APK install timed out"),
+    new CtrlProxyApkStageError("CtrlProxy APK install cancelled"),
+    new ActionableError("request aborted"),
+  ])("phone preserves terminal error identity: %s", async (failure) => {
+    const { host, installer } = fixture("phone");
+    host.outcomes = [failure];
+    await expect(installer.install("/fake/control-proxy.apk")).rejects.toBe(failure);
+    expect(host.attempts).toBe(1);
+  });
+
+  test("phone keeps the original wrapping for a non-empty install failure", async () => {
+    const { host, installer } = fixture("phone");
+    const failure = new Error("Failure [INSTALL_FAILED_INTERNAL_ERROR]");
+    host.outcomes = [failure];
+    const pending = installer.install("/fake/control-proxy.apk");
+    await expect(pending).rejects.toMatchObject({
+      message: "Failed to install APK: Failure [INSTALL_FAILED_INTERNAL_ERROR]",
+      cause: failure,
+    });
+    expect(host.attempts).toBe(1);
+  });
+
+  test("phone retries the captured empty streamed-install failure without probing", async () => {
+    const { host, probe, installer } = fixture("phone");
+    host.outcomes = [capturedEmptyReason(), createExecResult("Success", "")];
+    await installer.install("/fake/control-proxy.apk");
+    expect(host.attempts).toBe(2);
     expect(probe.calls).toEqual([]);
     expect(host.adb.getExecutedCommands()).toEqual([]);
+    expect(host.timer.now()).toBe(10);
+    expect(host.ownershipReads).toBe(2);
+  });
+
+  test("a missing booted form factor still retries the captured failure", async () => {
+    const { host, probe, installer } = fixture("phone");
+    host.device.formFactor = undefined;
+    host.outcomes = [capturedEmptyReason(), createExecResult("Success", "")];
+    await installer.install("/fake/control-proxy.apk");
+    expect(host.attempts).toBe(2);
+    expect(probe.calls).toEqual([]);
+  });
+
+  test("phone exhausts the bounded attempts with raw streams and exit code", async () => {
+    const { host, installer } = fixture("phone");
+    const failure = capturedEmptyReason();
+    host.outcomes = [failure];
+    const pending = installer.install("/fake/control-proxy.apk");
+    await expect(pending).rejects.toThrow("Failed to install APK");
+    await expect(pending).rejects.toThrow("attempt 3/3");
+    await expect(pending).rejects.toThrow("exit code: 1");
+    await expect(pending).rejects.toThrow(failure.stdout);
+    await expect(pending).rejects.toThrow(failure.stderr);
+    expect(host.attempts).toBe(3);
+    expect(host.timer.now()).toBe(30);
+  });
+
+  test.each([
+    "Failure [INSTALL_FAILED_INVALID_APK: blocked]",
+    "Failure [unknown reason]",
+    "device still authorizing",
+    "device offline",
+    "adb: error: closed",
+    "adb: protocol fault (couldn't read status)",
+  ])("phone does not retry an install with a reason: %s", async (reason) => {
+    const { host, installer } = fixture("phone");
+    const failure = capturedEmptyReason();
+    failure.message += `\n${reason}`;
+    host.outcomes = [failure];
+    await expect(installer.install("/fake/control-proxy.apk")).rejects.toThrow(reason);
+    expect(host.attempts).toBe(1);
+  });
+
+  test("phone retries wrapped command errors without losing their raw streams", async () => {
+    const { host, installer } = fixture("phone");
+    const failure = capturedEmptyReason();
+    host.outcomes = [wrapCommandError(failure, { command: "adb", args: ["install"] })];
+    const pending = installer.install("/fake/control-proxy.apk");
+    await expect(pending).rejects.toThrow("attempt 3/3");
+    await expect(pending).rejects.toThrow("exit code: 1");
+    await expect(pending).rejects.toThrow(failure.stdout);
+    await expect(pending).rejects.toThrow(failure.stderr);
+    expect(host.attempts).toBe(3);
+  });
+
+  test("phone does not retry transport diagnostics inside a wrapped command error", async () => {
+    const { host, installer } = fixture("phone");
+    const failure = capturedEmptyReason();
+    failure.message = "adb: error: closed";
+    host.outcomes = [wrapCommandError(failure, { command: "adb", args: ["install"] })];
+    await expect(installer.install("/fake/control-proxy.apk")).rejects.toThrow(
+      "adb: error: closed",
+    );
+    expect(host.attempts).toBe(1);
+  });
+
+  test.each([
+    "Failure [INSTALL_FAILED_INVALID_APK: blocked]",
+    "device still authorizing",
+    "device offline",
+    "adb: error: closed",
+    "unrelated error:",
+  ])("phone does not retry additional stderr: %s", async (reason) => {
+    const { host, installer } = fixture("phone");
+    const failure = capturedEmptyReason();
+    failure.stderr += `\n${reason}`;
+    host.outcomes = [failure];
+    await expect(installer.install("/fake/control-proxy.apk")).rejects.toThrow(
+      "Failed to install APK",
+    );
+    expect(host.attempts).toBe(1);
+  });
+
+  test("phone does not retry a header-only failure without the streamed-install marker", async () => {
+    const { host, installer } = fixture("phone");
+    const failure = capturedEmptyReason();
+    failure.stdout = "";
+    host.outcomes = [failure];
+    await expect(installer.install("/fake/control-proxy.apk")).rejects.toThrow(
+      "Failed to install APK",
+    );
+    expect(host.attempts).toBe(1);
+  });
+
+  test("phone preserves the status-inspection device error without retrying", async () => {
+    const { host, installer } = fixture("phone");
+    host.deviceError = new ActionableError("device offline");
+    host.outcomes = [capturedEmptyReason()];
+    await expect(installer.install("/fake/control-proxy.apk")).rejects.toBe(host.deviceError);
+    expect(host.attempts).toBe(1);
+  });
+
+  test("phone cancellation during backoff prevents a second install", async () => {
+    const { host, probe, installer } = fixture("phone", false);
+    host.outcomes = [capturedEmptyReason()];
+    const controller = new AbortController();
+    const pending = runWithAbortSignal(controller.signal, () =>
+      installer.install("/fake/control-proxy.apk"),
+    );
+    for (let i = 0; i < 40; i++) {
+      await Promise.resolve();
+    }
+    expect(host.attempts).toBe(1);
+    controller.abort(new Error("phase deadline reached"));
+    await expect(pending).rejects.toThrow("phase deadline reached");
+    host.timer.advanceTime(60_000);
+    expect(host.attempts).toBe(1);
+    expect(probe.calls).toEqual([]);
+    expect(host.timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("abort during retry delay prevents another gate or install", async () => {

@@ -17,6 +17,130 @@ teardown() {
   rm -rf "$ios_dir"
 }
 
+# Run the real build path entirely against recording stubs. The pinned version
+# and adjacent templates make install-xcodegen.sh a no-op before any download.
+setup_build_stubs() {
+  export HOME="$ios_dir/home"
+  local stubroot="$ios_dir/stubs"
+  mkdir -p "$HOME" "$stubroot/bin" "$stubroot/share/xcodegen"
+  export PATH="$stubroot/bin:$PATH"
+  export XCODE_BUILD_LOG="$ios_dir/xcodebuild.log"
+  # shellcheck source=scripts/ios/xcodegen_version.sh
+  source "$BATS_TEST_DIRNAME/../../scripts/ios/xcodegen_version.sh"
+  export XCODEGEN_VERSION
+  cat > "$stubroot/bin/xcodebuild" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$XCODE_BUILD_LOG"
+scheme=""
+for ((i=1; i<=$#; i++)); do
+  if [ "${!i}" = -scheme ]; then
+    next=$((i + 1))
+    scheme="${!next}"
+  fi
+done
+case " $* " in
+  *' -version '*) echo 'Xcode fixture' ;;
+  *' -showsdks '*) echo 'iphonesimulator' ;;
+  *' -list '*) printf 'Schemes:\n    AutoMobileTest\n    CtrlProxyWatch\n    AutoMobileTVTest\n\n' ;;
+  *' -showBuildSettings '*)
+    if [ "$scheme" = CtrlProxyWatch ]; then
+      case "${PROBE_MODE:-}" in
+        failure)
+          echo '    PLATFORM_NAME = appletvsimulator'
+          echo 'probe failed' >&2
+          exit 1 ;;
+        unknown) echo '    PLATFORM_NAME = unsupported'; exit 0 ;;
+        missing) echo '    OTHER_SETTING = value'; exit 0 ;;
+      esac
+    fi
+    case "$scheme" in
+      AutoMobileTest) platform=iphonesimulator ;;
+      CtrlProxyWatch) platform=watchsimulator ;;
+      AutoMobileTVTest) platform=appletvsimulator ;;
+    esac
+    printf '    PLATFORM_NAME = %s\n' "$platform"
+    # A later target must not override the first platform setting.
+    echo '    PLATFORM_NAME = iphonesimulator'
+    ;;
+  *' build '*) exit 0 ;;
+  *) exit 1 ;;
+esac
+STUB
+  cat > "$stubroot/bin/xcrun" <<'STUB'
+#!/bin/bash
+if [ "$*" = 'simctl list runtimes' ]; then
+  echo 'iOS 26.0'
+else
+  exit 1
+fi
+STUB
+  cat > "$stubroot/bin/xcodegen" <<'STUB'
+#!/bin/bash
+[ "$1" = --version ] || exit 1
+echo "Version: $XCODEGEN_VERSION"
+STUB
+  # Fail locally if the installer ever unexpectedly tries to download.
+  cat > "$stubroot/bin/curl" <<'STUB'
+#!/bin/bash
+echo 'unexpected network access' >> "$XCODE_BUILD_LOG"
+exit 1
+STUB
+  chmod +x "$stubroot/bin/"*
+}
+
+run_stubbed_build() {
+  run env IOS_DIR="$ios_dir" XCODE_BUILD_DRY_RUN=0 CI=1 \
+    AUTOMOBILE_XCODE_DERIVED_DATA= XCODEGEN_PREFIX="$ios_dir/install" \
+    bash "$script" CtrlProxy
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"XcodeGen $XCODEGEN_VERSION already installed."* ]]
+  [[ "$output" != *"probe failed"* ]]
+  ! grep -q 'unexpected network access' "$XCODE_BUILD_LOG"
+}
+
+assert_build_destination() {
+  grep -F -- "-scheme $1 -destination generic/platform=$2 Simulator " "$XCODE_BUILD_LOG" | grep -q ' build$'
+}
+
+@test "iOS scheme keeps the iOS Simulator destination" {
+  setup_build_stubs
+  run_stubbed_build
+  assert_build_destination AutoMobileTest iOS
+}
+
+@test "watch scheme uses the watchOS Simulator destination from build settings" {
+  setup_build_stubs
+  run_stubbed_build
+  assert_build_destination CtrlProxyWatch watchOS
+}
+
+@test "tvOS scheme uses the tvOS Simulator destination from build settings" {
+  setup_build_stubs
+  run_stubbed_build
+  assert_build_destination AutoMobileTVTest tvOS
+}
+
+@test "failed build settings probe falls back to iOS even with platform output" {
+  setup_build_stubs
+  export PROBE_MODE=failure
+  run_stubbed_build
+  assert_build_destination CtrlProxyWatch iOS
+}
+
+@test "unknown build settings platform falls back to iOS without guessing from scheme" {
+  setup_build_stubs
+  export PROBE_MODE=unknown
+  run_stubbed_build
+  assert_build_destination CtrlProxyWatch iOS
+}
+
+@test "missing build settings platform falls back to iOS" {
+  setup_build_stubs
+  export PROBE_MODE=missing
+  run_stubbed_build
+  assert_build_destination CtrlProxyWatch iOS
+}
+
 @test "no args selects every xcodeproj" {
   run env IOS_DIR="$ios_dir" XCODE_BUILD_DRY_RUN=1 bash "$script"
   [ "$status" -eq 0 ]

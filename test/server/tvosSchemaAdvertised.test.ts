@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { ActionableError } from "../../src/models";
+import { unsupportedPlatformToolMessage } from "../../src/server/applePlatformToolSupport";
 import { toAdvertisedJsonSchema } from "../../src/server/pipeline/advertisedSchema";
 import { registerAllTools } from "../../src/server/registerAllTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -44,19 +46,58 @@ describe("tvOS is advertised in tool schemas and refused by every tool (#15886)"
     expect(missing).toEqual([]);
   });
 
-  test("listDevices refuses tvos instead of listing it as empty", async () => {
-    await expect(
-      ToolRegistry.getTool("listDevices")!.handler({ platform: "tvos" }),
-    ).rejects.toThrow(
-      "listDevices is not supported on tvOS yet. Target an Android or iOS device instead.",
+  test("every tool that offers tvos and is not behind the device gate refuses it by name", async () => {
+    const plain = ToolRegistry.getEveryRegisteredTool().filter(
+      (tool) =>
+        tool.deviceAwareHandler === undefined &&
+        JSON.stringify(toAdvertisedJsonSchema(tool.schema, { constrainAppIds: false })).includes(
+          '"tvos"',
+        ),
     );
+    expect(plain.map((tool) => tool.name).sort()).toEqual([
+      "deleteDevice",
+      "killDevice",
+      "listDeviceImages",
+      "listDevices",
+      "setActiveDevice",
+      "startDevice",
+    ]);
+    const outcomes = await Promise.all(
+      plain.map(async (tool) => {
+        // Both shapes a lifecycle request names its platform with.
+        const request = {
+          platform: "tvos",
+          deviceId: "5B7E1C3D-2A4F-4E6B-8C9D-1E2F3A4B5C6D",
+          name: "Apple TV 4K (3rd generation)",
+          target: { platform: "tvos", isVirtual: true, stableId: "5B7E1C3D" },
+        };
+        const error = await Promise.resolve(tool.handler(request)).then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+        return error instanceof ActionableError &&
+          error.message === unsupportedPlatformToolMessage(tool.name, "tvos")
+          ? "refused"
+          : `${tool.name}: ${String(error)}`;
+      }),
+    );
+    expect(outcomes.filter((outcome) => outcome !== "refused")).toEqual([]);
   });
 
-  test("startDevice refuses tvos before any device work", async () => {
-    await expect(
-      ToolRegistry.getTool("startDevice")!.handler({ platform: "tvos" }),
-    ).rejects.toThrow(
-      "startDevice is not supported on tvOS yet. Target an Android or iOS device instead.",
+  test("deleteDevice refuses an Apple TV named only by its target, before any teardown", async () => {
+    const error = await Promise.resolve(
+      ToolRegistry.getTool("deleteDevice")!.handler({
+        target: { platform: "tvos", isVirtual: true, stableId: "5B7E1C3D" },
+        mode: "destroy",
+        verifyAbsence: true,
+      }),
+    ).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as ActionableError).message).toBe(
+      unsupportedPlatformToolMessage("deleteDevice", "tvos"),
     );
   });
 });

@@ -34,8 +34,11 @@ broker binding never reuses one, and a boot is admitted through the simulator ga
   enum lists `watchos` only when the tool supports a watch, so agents are not offered a watch value
   the tool rejects; such a tool gets its own enum. Every input `platform` enum lists `tvos`,
   including the shared `platformSchema` (owner decision 2026-10-31, #15886), so clients can name an
-  Apple TV before any tool supports one; every tool refuses it, and `listDevices` and `startDevice`
-  refuse it by name rather than return an empty result. `provisionDevice`'s request is a
+  Apple TV before any tool supports one; every tool refuses it. The device-aware tools refuse it at
+  the registry gate; the plain tools that offer it and look up their own target (`listDevices`,
+  `listDeviceImages`, `startDevice`, `setActiveDevice`, `killDevice`, `deleteDevice`) refuse it
+  by name before any lookup (`assertRequestNotTvos`), so a `tvos` request never reaches an iOS
+  simulator path or returns an empty listing. `provisionDevice`'s request is a
   per-platform union with platform-specific spec fields, so it gains a `tvos` branch only with
   tvOS provisioning. Output schemas list `tvos` only where they already list `watchos`.
 - **Allowlisted app tools.** `installApp`, `uninstallApp`, `listApps`, `launchApp` and

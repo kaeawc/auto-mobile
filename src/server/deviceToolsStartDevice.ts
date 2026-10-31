@@ -93,6 +93,7 @@ import {
   devicesHeldByOtherSessions,
 } from "./deviceToolsBootPreparation";
 import { requireAndroidOrIosPlatform } from "../models/Platform";
+import { assertRequestNotTvos } from "./applePlatformToolSupport";
 export { type CreatedDeviceRollback } from "./deviceToolsBootPreparation";
 
 type StartDeviceHooks = {
@@ -942,6 +943,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    assertRequestNotTvos("startDevice", rawArgs);
     if (isWatchStartRequest(rawArgs)) {
       return await startWatchDevice(rawArgs, bindBootedDeviceSession, signal);
     }

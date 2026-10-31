@@ -48,3 +48,19 @@ export function assertToolSupportsDevicePlatform(
   }
   throw new ActionableError(unsupportedPlatformToolMessage(toolName, platform));
 }
+
+/**
+ * Plain tools (device management such as killDevice) look up their target themselves and are not
+ * behind the registry's device gate, so each refuses an Apple TV request by name before any lookup.
+ * Without this, a `tvos` request could fall through to the iOS simulator path.
+ */
+export function assertRequestNotTvos(toolName: string, args: object): void {
+  const { platform, target } = args as { platform?: unknown; target?: unknown };
+  const targetPlatform =
+    target !== null && typeof target === "object"
+      ? (target as { platform?: unknown }).platform
+      : undefined;
+  if (platform === "tvos" || targetPlatform === "tvos") {
+    throw new ActionableError(unsupportedPlatformToolMessage(toolName, "tvos"));
+  }
+}

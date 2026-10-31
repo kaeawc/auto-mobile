@@ -1,3 +1,4 @@
+import { refreshEmulatorGrpcAudio } from "../audio/emulatorGrpcAudioState";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { combineAbortSignals } from "../AbortContext";
 import { logger } from "../logger";
@@ -317,6 +318,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         }),
       );
       for (const result of emulatorResults) {
+        this.refreshGrpcAudio(result.device, options);
         runningDevices.push(result.device);
         if (result.diagnostic) {
           diagnostics.push(result.diagnostic);
@@ -422,6 +424,13 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     delete result.consoleBusyDuringProbe;
     delete result.nameProbeTimedOut;
     return { ...result, foreignOwned: true };
+  }
+
+  private refreshGrpcAudio(device: BootedDevice, options: BootedDeviceScanOptions): void {
+    if (!device.foreignOwned && !options.skipNameEnrichment) {
+      // Cached, single-flight enrichment must not delay the inventory response.
+      void refreshEmulatorGrpcAudio(device.deviceId);
+    }
   }
 
   private includesFullMetadata(options: BootedDeviceScanOptions): boolean {

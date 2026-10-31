@@ -1,3 +1,7 @@
+import { VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION } from "../models/virtualDeviceCapabilities";
+import { isAndroidEmulatorSerial } from "./androidSerial";
+import { androidGrpcAudioCapabilities } from "./audio/audioCapabilities";
+import { emulatorGrpcAudioSnapshot } from "./audio/emulatorGrpcAudioState";
 import type { DeviceInfo } from "../models";
 import type {
   DeviceDescription,
@@ -164,6 +168,18 @@ export function imageLifecycle(image: ImageLike): DeviceDescription["runtime"]["
   };
 }
 
+function androidGrpcCapabilities(
+  device: DeviceInfo,
+  isVirtual: boolean,
+): ReturnType<typeof androidGrpcAudioCapabilities> {
+  return device.platform === "android" &&
+    isVirtual &&
+    device.deviceId &&
+    isAndroidEmulatorSerial(device.deviceId)
+    ? androidGrpcAudioCapabilities(emulatorGrpcAudioSnapshot(device.deviceId))
+    : [];
+}
+
 export function capabilityInventory(
   device: DeviceInfo,
   isVirtual: boolean,
@@ -178,12 +194,18 @@ export function capabilityInventory(
           hostAudio: hostAudioSnapshot(),
         })
       : undefined);
-  if (!inventory) {
+  const grpc = androidGrpcCapabilities(device, isVirtual);
+  if (!inventory && grpc.length === 0) {
     return null;
   }
+  const grpcIds = new Set(grpc.map((entry) => entry.id));
+  const capabilities = [
+    ...(inventory?.capabilities ?? []).filter((entry) => !grpcIds.has(entry.id)),
+    ...grpc,
+  ];
   return {
-    schemaVersion: inventory.schemaVersion,
-    capabilities: inventory.capabilities.map((capability) => ({
+    schemaVersion: inventory?.schemaVersion ?? VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
+    capabilities: capabilities.map((capability) => ({
       id: capability.id,
       state:
         capability.state === "available"

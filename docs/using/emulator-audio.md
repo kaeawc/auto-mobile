@@ -77,7 +77,9 @@ the recording. Android injection is refused if its start delay, maximum duration
 
 Pass `file` or `tone`, not both. With neither, a 2-second tone plays.
 
-The result has `injectionId`, `durationMs` (of one pass), `sampleRate` and `route`. In a session,
+The result has `injectionId`, `durationMs` (of one pass), `sampleRate` and `route`. On an
+emulator, a refusal (busy microphone, rejected credentials) fails the call itself rather than a
+later `stopAudioInput`. In a session,
 releasing the session stops the injection. Without a session, the injection stops when a session
 takes the device. A relative `file` path is relative to the directory the server was started in.
 
@@ -126,6 +128,7 @@ Errors start with a code in brackets:
 | `audio_injection_busy`                | Another injection is starting or already feeds this emulator's microphone, or, for a simulator, any simulator's on the same Mac. Stop it first.                                                                                                                                                                     |
 | `audio_injection_unsupported`         | No route. An emulator is not local or its build has no gRPC audio: use a recent emulator on the same host. A simulator's Mac has no loopback default input or no helper configured: follow the setup above.                                                                                                         |
 | `audio_capture_unsupported`           | The same, for capture; a simulator needs a loopback default output.                                                                                                                                                                                                                                                 |
+| `audio_grpc_auth_rejected`            | The emulator refused AutoMobile's gRPC credentials. Relaunch it with `-grpc-use-token`, or with `-grpc <port>` and no JWT, then retry.                                                                                                                                                                              |
 | `audio_grpc_failed`                   | Any other emulator error; the message carries its detail.                                                                                                                                                                                                                                                           |
 | `audio_loopback_failed`               | The Mac's audio system refused the loopback device, for example without Microphone permission; the message carries the detail.                                                                                                                                                                                      |
 | `audio_record_permission_not_granted` | CtrlProxy has no `android.permission.RECORD_AUDIO` grant that could be verified or repaired. Run `adb shell pm grant dev.jasonpearson.automobile.ctrlproxy android.permission.RECORD_AUDIO` and retry.                                                                                                              |

@@ -187,7 +187,7 @@ describe("Http2GrpcTransport against a loopback emulator", () => {
       call.end();
       expect(await call.status()).toEqual({ code: 3, message: "invalid JWT" });
       await expect(client.injectAudio(sineTone({ durationMs: 40 }))).rejects.toMatchObject({
-        code: "audio_grpc_failed",
+        code: "audio_grpc_auth_rejected",
         grpcStatus: { code: 3, message: "invalid JWT" },
       });
     } finally {
@@ -215,7 +215,7 @@ describe("Http2GrpcTransport against a loopback emulator", () => {
   test("a rejected token is a typed gRPC failure, not a hang", async () => {
     const { client } = await connect("wrong");
     await expect(client.injectAudio(sineTone({ durationMs: 40 }))).rejects.toMatchObject({
-      code: "audio_grpc_failed",
+      code: "audio_grpc_auth_rejected",
     });
   });
 

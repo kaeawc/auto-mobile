@@ -57,15 +57,34 @@ function sentFrames(written: Uint8Array[]): number {
 }
 
 describe("EmulatorAudioClient.injectAudio", () => {
-  test.each([GrpcStatus.PERMISSION_DENIED, GrpcStatus.INVALID_ARGUMENT])(
-    "rejects headers status %i at call time without waiting for close",
-    async (code) => {
+  test.each([
+    // As captured on emulator 37.1.11 (#16026).
+    [
+      GrpcStatus.INVALID_ARGUMENT,
+      "invalid JWT; token has type header set, but validator not",
+      "audio_grpc_auth_rejected",
+    ],
+    [
+      GrpcStatus.PERMISSION_DENIED,
+      "The endpoint: /android.emulation.control.EmulatorController/injectAudio is not on the " +
+        "allowlist loaded from: emulator/lib/emulator_access.json",
+      "audio_grpc_auth_rejected",
+    ],
+    [GrpcStatus.UNAUTHENTICATED, "no token", "audio_grpc_auth_rejected"],
+    [GrpcStatus.INVALID_ARGUMENT, "sampling rate too high", "audio_grpc_failed"],
+  ])(
+    "rejects headers status %i (%s) at call time as %s without waiting for close",
+    async (code, message, expectedCode) => {
       const { client, transport, timer } = setup();
-      const status = { code, message: "refused" };
+      const status = { code, message };
       transport.onOpen = (call) => call.respondHeaders(status);
       const error = await client.injectAudio(CLIP).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(EmulatorAudioError);
-      expect(error).toMatchObject({ code: "audio_grpc_failed", grpcStatus: status });
+      expect(error).toMatchObject({ code: expectedCode, grpcStatus: status });
+      expect((error as EmulatorAudioError).message).toContain(message);
+      if (expectedCode === "audio_grpc_auth_rejected") {
+        expect((error as EmulatorAudioError).remedy).toContain("-grpc-use-token");
+      }
       expect(transport.calls[0].written).toHaveLength(0);
       expect(transport.calls[0].ended).toBe(false);
       expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -445,6 +464,19 @@ describe("EmulatorAudioClient.captureAudio", () => {
     expect(result.timedOut).toBe(true);
     expect(result.pcm.samples.length).toBe(0);
     expect(analyzeLevels(result.pcm).silent).toBe(true);
+  });
+
+  test("a capture refused for its issuer is audio_grpc_auth_rejected", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = {
+        code: GrpcStatus.PERMISSION_DENIED,
+        message: "The endpoint: .../streamAudio is not on the allowlist",
+      };
+    };
+    await expect(client.captureAudio({ durationMs: 100 })).rejects.toMatchObject({
+      code: "audio_grpc_auth_rejected",
+    });
   });
 
   test("an UNIMPLEMENTED stream with no audio is audio_capture_unsupported", async () => {

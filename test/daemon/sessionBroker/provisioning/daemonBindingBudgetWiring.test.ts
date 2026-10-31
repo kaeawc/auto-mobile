@@ -13,6 +13,15 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeInventory, FakeProvisioner, FakeDeleter } from "../registry/fixtures/reconcilerFakes";
 import { assignBindingDevice } from "./bindingFixtures";
 import type { WatchBindingInventorySource } from "../../../../src/daemon/sessionBroker/provisioning/DeviceManagerBindingInventory";
+import type { WatchBindingCatalog } from "../../../../src/daemon/sessionBroker/provisioning/watchBindingSpec";
+import type { BrokerDeviceRequest } from "../../../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import { WatchSimulatorInventory } from "../../../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
+import {
+  FakeWatchSimctl,
+  WATCH_DEVICE_TYPE,
+  WATCH_RUNTIME,
+  WATCH_RUNTIME_ID,
+} from "../../../fakes/FakeWatchSimctl";
 
 const SPEC = { runtime: "system-images;android-35;google_apis;arm64-v8a", deviceType: "pixel_8" };
 const OWNER = { daemonId: "wire", pid: 101 };
@@ -26,6 +35,7 @@ class NoSessions implements BrokerDeviceAcquisitionSessions {
 function wiring(
   resourceBudgetPolicy?: BindingResourceBudgetPolicy,
   watchInventory: WatchBindingInventorySource = { listWatchSimulators: async () => [] },
+  watchCatalog?: WatchBindingCatalog,
 ) {
   const timer = new FakeTimer();
   const registry = new FakeBindingRegistry(timer, () => false);
@@ -62,6 +72,7 @@ function wiring(
       deleter,
       checkBootCapacity: async () => {},
       watchInventory,
+      ...(watchCatalog ? { watchCatalog } : {}),
       androidImageCatalog: { listInstalledPackages: async () => [SPEC.runtime] },
       androidProfileCatalog: { listProfileIds: async () => [SPEC.deviceType] },
       androidConfigReader: {
@@ -70,7 +81,15 @@ function wiring(
       },
     },
   });
-  const acquire = (runnerNamespace = "new") =>
+  const acquire = (
+    runnerNamespace = "new",
+    request: BrokerDeviceRequest = {
+      bindingIndex: 0,
+      role: "primary",
+      platform: "android",
+      requestedSpec: SPEC,
+    },
+  ) =>
     handle.acquisition.acquire(
       buildBrokerProvisionRequest({
         contractVersion: 1,
@@ -78,7 +97,7 @@ function wiring(
         runnerNamespace,
         runnerIncarnation: "inc",
         localBindingCapacity: 1,
-        requests: [{ bindingIndex: 0, role: "primary", platform: "android", requestedSpec: SPEC }],
+        requests: [request],
       }),
       { livenessOwnerToken: "token" },
     );
@@ -211,5 +230,39 @@ describe("host total-resource limit wiring", () => {
       ],
     });
     expect(h.provisioner.calls).toEqual([]);
+  });
+
+  test("a watch binding's spec is validated against the host's watch catalog (#15882)", async () => {
+    const simctl = new FakeWatchSimctl();
+    simctl.runtimes = [WATCH_RUNTIME];
+    simctl.deviceTypes = [WATCH_DEVICE_TYPE];
+    const watches = new WatchSimulatorInventory(simctl);
+    const h = wiring(undefined, watches, watches);
+    const watchRequest = (runtime: string): BrokerDeviceRequest => ({
+      bindingIndex: 0,
+      role: "primary",
+      platform: "watchos",
+      requestedSpec: { runtime, deviceType: WATCH_DEVICE_TYPE.identifier },
+    });
+
+    const unknown = await h.acquire(
+      "watch",
+      watchRequest("com.apple.CoreSimulator.SimRuntime.watchOS-99-0"),
+    );
+    await h.acquire("installed", watchRequest(WATCH_RUNTIME_ID));
+
+    expect(unknown).toMatchObject({
+      outcome: "failed",
+      bindings: [{ platform: "watchos", failure: { code: "spec_unsupported" } }],
+    });
+    expect(unknown.bindings[0]?.failure?.message).toContain(WATCH_RUNTIME_ID);
+    expect(h.provisioner.calls).toMatchObject([
+      {
+        platform: "watchos",
+        mode: "create",
+        spec: { runtime: WATCH_RUNTIME_ID, deviceType: WATCH_DEVICE_TYPE.identifier },
+      },
+    ]);
+    expect(h.provisioner.calls[0]?.name.startsWith("ambroker-")).toBe(true);
   });
 });

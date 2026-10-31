@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ActionableError } from "../../../../src/models/ActionableError";
+import type { AdbExecuteOptions } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   POINTER_INSTRUMENTATION_COMPONENT,
   createInstrumentationDispatch,
@@ -19,6 +19,30 @@ const hover: PointerRequest = {
   ],
 };
 const result = (lines: string[]) => createExecResult(lines.join("\n"), "");
+
+const success = result(["INSTRUMENTATION_RESULT: success=true"]);
+const refusal = (injected = 0, error = "the system refused HOVER_ENTER at 0 ms") =>
+  result([
+    "INSTRUMENTATION_RESULT: success=false",
+    `INSTRUMENTATION_RESULT: injected=${injected}`,
+    `INSTRUMENTATION_RESULT: error=${error}`,
+  ]);
+
+class GatedAdbExecutor extends FakeAdbExecutor {
+  readonly started = Promise.withResolvers<void>();
+  readonly release = Promise.withResolvers<void>();
+  private gated = false;
+
+  override async executeCommand(command: string, options?: AdbExecuteOptions) {
+    const response = super.executeCommand(command, options);
+    if (command.includes("am instrument") && !this.gated) {
+      this.gated = true;
+      this.started.resolve();
+      await this.release.promise;
+    }
+    return response;
+  }
+}
 
 describe("encodePointerRequest", () => {
   test("is base64 JSON with the version, tool and points", () => {
@@ -157,9 +181,143 @@ describe("createInstrumentationDispatch", () => {
 
   test("a crash or silence leaves the outcome unknown and says to verify", async () => {
     for (const output of ["Process crashed.", ""]) {
-      const error = await run(result([output])).catch((thrown: unknown) => thrown);
-      expect(error).toBeInstanceOf(ActionableError);
-      expect((error as Error).message).toContain("may have partially run");
+      await expect(run(result([output]))).rejects.toThrow("may have partially run");
     }
   });
+  test("a zero-event refusal cancels at rounded first-point coordinates and retries once", async () => {
+    const adb = new FakeAdbExecutor();
+    const request = { ...hover, points: [{ x: 500.4, y: 999.6 }] };
+    adb.setCommandResponseSequence("am instrument", [refusal(), success]);
+    await createInstrumentationDispatch(adb)(request);
+    expect(adb.getExecutedCommands()).toEqual([
+      pointerInstrumentationCommand(request),
+      "shell input stylus motionevent CANCEL 500 1000",
+      pointerInstrumentationCommand(request),
+    ]);
+    expect(adb.getCommandCalls()[1].timeoutMs).toBe(5000);
+  });
+
+  test("persistent refusal stops after exactly two instrumentation runs", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("am instrument", refusal());
+    await expect(createInstrumentationDispatch(adb)(hover)).rejects.toThrow(
+      "the system refused HOVER_ENTER at 0 ms",
+    );
+    expect(adb.getExecutedCommands()).toEqual([
+      pointerInstrumentationCommand(hover),
+      "shell input stylus motionevent CANCEL 10 20",
+      pointerInstrumentationCommand(hover),
+    ]);
+  });
+
+  test("a refusal after two injected events never cancels or retries", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("am instrument", refusal(2));
+    await expect(createInstrumentationDispatch(adb)(hover)).rejects.toThrow("after 2 events");
+    expect(adb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
+  });
+
+  test("a zero-event failure without a refusal never cancels or retries", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("am instrument", refusal(0, "invalid request"));
+    await expect(createInstrumentationDispatch(adb)(hover)).rejects.toThrow("invalid request");
+    expect(adb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
+  });
+
+  test("a failed CANCEL still allows the one retry to succeed", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("am instrument", [refusal(), success]);
+    adb.setCommandError("motionevent CANCEL", new Error("CANCEL unavailable"));
+    await createInstrumentationDispatch(adb)(hover);
+    expect(adb.getExecutedCommands()).toEqual([
+      pointerInstrumentationCommand(hover),
+      "shell input stylus motionevent CANCEL 10 20",
+      pointerInstrumentationCommand(hover),
+    ]);
+  });
+
+  test.each([
+    ["null", "is not enabled; re-enable it before retrying."],
+    ["other/service:dev.jasonpearson.automobile.ctrlproxy/.CtrlProxyService", "is still enabled."],
+  ])("a crash reports accessibility service state from %s", async (state, note) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "am instrument",
+      result(["INSTRUMENTATION_RESULT: shortMsg=Process crashed."]),
+    );
+    adb.setCommandResponse("settings get", createExecResult(state, ""));
+    const dispatch = createInstrumentationDispatch(adb)(hover);
+    await expect(dispatch).rejects.toThrow("may have partially run");
+    await expect(dispatch).rejects.toThrow(`CtrlProxy's accessibility service ${note}`);
+    expect(adb.getExecutedCommands()).toHaveLength(2);
+    expect(adb.getCommandCalls()[1]).toMatchObject({
+      command: "shell settings get secure enabled_accessibility_services",
+      timeoutMs: 5000,
+    });
+  });
+
+  test("an unreadable accessibility setting preserves the crash error without a state note", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "am instrument",
+      result(["INSTRUMENTATION_RESULT: shortMsg=runner died"]),
+    );
+    adb.setCommandError("settings get", new Error("settings unavailable"));
+    await expect(createInstrumentationDispatch(adb)(hover)).rejects.toThrow(
+      /^The pointer instrumentation crashed before reporting a result; the hover or stroke may have partially run\. Verify state with observe before retrying\.$/,
+    );
+  });
+
+  test("separate dispatch factories serialize instrumentation on the same adb", async () => {
+    const adb = new GatedAdbExecutor();
+    adb.setCommandResponse("am instrument", success);
+    const first = createInstrumentationDispatch(adb)(hover);
+    await adb.started.promise;
+    const second = createInstrumentationDispatch(adb)(hover);
+    await Promise.resolve();
+    expect(adb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
+    adb.release.resolve();
+    await Promise.all([first, second]);
+    expect(adb.getExecutedCommands()).toEqual([
+      pointerInstrumentationCommand(hover),
+      pointerInstrumentationCommand(hover),
+    ]);
+  });
+
+  test("a caller aborted while queued never starts instrumentation", async () => {
+    const adb = new GatedAdbExecutor();
+    adb.setCommandResponse("am instrument", success);
+    const first = createInstrumentationDispatch(adb)(hover);
+    await adb.started.promise;
+    const controller = new AbortController();
+    const queued = createInstrumentationDispatch(adb)(hover, controller.signal);
+    controller.abort();
+    adb.release.resolve();
+    await expect(queued).rejects.toThrow();
+    await first;
+    expect(adb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
+  });
+
+  test("an already-aborted signal never starts instrumentation", async () => {
+    const adb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(createInstrumentationDispatch(adb)(hover, controller.signal)).rejects.toThrow();
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test.each(["am instrument", "motionevent CANCEL"])(
+    "cancellation after %s skips the retry",
+    async (command) => {
+      const adb = new FakeAdbExecutor();
+      const controller = new AbortController();
+      adb.setCommandResponseSequence("am instrument", [refusal(), success]);
+      adb.abortAfterCommand(command, controller);
+      await expect(createInstrumentationDispatch(adb)(hover, controller.signal)).rejects.toThrow();
+      expect(
+        adb.getExecutedCommands().filter((value) => value.includes("am instrument")),
+      ).toHaveLength(1);
+      expect(adb.getExecutedCommands()).toHaveLength(command === "am instrument" ? 1 : 2);
+    },
+  );
 });

@@ -704,6 +704,7 @@ export class SessionBroker {
     await this.joinReleases();
     await this.cleanup.join();
     await this.destructions.joinAll();
+    await this.snapshotCleanup.join();
   }
 
   /**

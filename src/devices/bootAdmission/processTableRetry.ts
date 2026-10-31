@@ -12,7 +12,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readHostProcessTable } from "./readHostProcessTable";
 import { wrapCommandError } from "../../utils/CommandError";
 import { PS_SNAPSHOT_ARGS } from "./psSnapshot";
-import { readProcProcessTable, type AndroidProcessRow, type ProcFs } from "./procProcessTable";
+import { readProcProcessInventory, type AndroidProcessRow, type ProcFs } from "./procProcessTable";
 
 export type ProcessTableFailureReason =
   | "timeout"
@@ -50,6 +50,8 @@ export interface ProcessTableReadOptions {
 
 interface ProcessTableResult {
   value?: AndroidProcessRow[];
+  /** Readable rows are only a count floor when procfs hid or could not parse a PID. */
+  incomplete?: boolean;
   error?: string;
   failure?: ProcessTableFailure;
 }
@@ -287,12 +289,12 @@ export class ProcessTableReader {
     }
   }
 
-  private async attempt(
-    read: (signal: AbortSignal) => Promise<AndroidProcessRow[]>,
+  private async attempt<T>(
+    read: (signal: AbortSignal) => Promise<T>,
     timeoutMs: number,
     callerSignal: AbortSignal | undefined,
     label: "ps" | "/proc",
-  ): Promise<AndroidProcessRow[]> {
+  ): Promise<T> {
     const controller = new AbortController();
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, controller.signal])
@@ -361,8 +363,8 @@ export class ProcessTableReader {
   ): Promise<ProcessTableResult> {
     const timeoutMs = Math.max(0, Math.min(this.attemptTimeoutMs, endMs - this.timer.now()));
     try {
-      const value = await this.attempt(
-        (signal) => readProcProcessTable(this.procFs!, { signal }),
+      const inventory = await this.attempt(
+        (signal) => readProcProcessInventory(this.procFs!, { signal }),
         timeoutMs,
         options.signal,
         "/proc",
@@ -373,7 +375,7 @@ export class ProcessTableReader {
         );
         this.procLatched = true;
       }
-      return { value };
+      return inventory;
     } catch (error) {
       options.signal?.throwIfAborted();
       const classified = classifyFailure(error, timeoutMs);

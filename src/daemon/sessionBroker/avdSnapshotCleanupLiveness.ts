@@ -23,6 +23,11 @@ export class ProcessTableAvdSnapshotCleanupLiveness implements AvdSnapshotCleanu
         `Cannot verify AVD processes; retry cleanup after process discovery recovers: ${result.error ?? result.failure?.detail ?? "Process table unavailable"}`,
       );
     }
+    if (result.incomplete) {
+      throw new ActionableError(
+        "Cannot verify AVD processes from an incomplete process inventory; restore /proc read access and parseable process data before retrying cleanup",
+      );
+    }
     const names = result.value
       .filter(isEmulatorQemuProcess)
       .map(({ command }) => emulatorProcessArguments(command).avdName);

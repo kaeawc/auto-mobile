@@ -61,6 +61,30 @@ describe("broker AVD snapshot cleanup fence", () => {
     await registry.close();
   });
 
+  test("close joins an in-flight snapshot cleanup operation", async () => {
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const cleanup = broker.cleanupAvdSnapshots(async () => {
+      entered.resolve();
+      await finish.promise;
+      return [];
+    });
+    await entered.promise;
+    let closed = false;
+    const closing = broker.close().then(() => {
+      closed = true;
+    });
+    try {
+      await drainMicrotasks(100);
+      expect(closed).toBe(false);
+    } finally {
+      finish.resolve();
+      await cleanup;
+      await closing;
+    }
+    expect(closed).toBe(true);
+  });
+
   test("prepare refuses synchronously during cleanup without writing a receipt, then accepts the same identity", async () => {
     const finish = Promise.withResolvers<void>();
     const cleanup = broker.cleanupAvdSnapshots(async () => {

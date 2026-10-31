@@ -105,7 +105,9 @@ describe("binding registry schema compatibility", () => {
     ["partially migrated", partial],
   ] as const)("refuses a %s future registry without any write", async (_label, harness) => {
     const before = snapshot(harness.sqlite);
-    const error = await migrateBindingRegistry(harness.db, ":memory:").then(
+    const error = await migrateBindingRegistry(harness.db, ":memory:", undefined, {
+      writerVersion: "test-writer",
+    }).then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -166,7 +168,12 @@ describe("binding registry schema compatibility", () => {
       }));
       try {
         await expect(
-          openSqliteBindingRegistry({ dbPath: ":memory:", migrate, timer: new FakeTimer() }),
+          openSqliteBindingRegistry({
+            dbPath: ":memory:",
+            migrate,
+            timer: new FakeTimer(),
+            writerVersion: "test-writer",
+          }),
         ).rejects.toBeInstanceOf(refusals.BindingRegistrySchemaUnsupportedError);
         expect(snapshot(full.sqlite)).toEqual(before);
         expect(statements.every((sql) => /^(select|pragma)/i.test(sql.trim()))).toBe(true);
@@ -184,7 +191,9 @@ describe("binding registry schema compatibility", () => {
     });
     const release = spyOn(NoOpMigrationLock.prototype, "release");
     try {
-      const error = await migrateBindingRegistry(peer.db, ":memory:").then(
+      const error = await migrateBindingRegistry(peer.db, ":memory:", undefined, {
+        writerVersion: "test-writer",
+      }).then(
         () => undefined,
         (error: unknown) => error,
       );
@@ -203,16 +212,17 @@ describe("binding registry schema compatibility", () => {
   });
 
   test("known executed names still migrate and a fresh in-memory registry opens", async () => {
-    await migrateBindingRegistry(known.db, ":memory:");
+    await migrateBindingRegistry(known.db, ":memory:", undefined, { writerVersion: "test-writer" });
     expect(
       known.sqlite.query("SELECT name FROM kysely_migration WHERE name = ?").get(MIGRATION_005),
     ).toEqual({ name: MIGRATION_005 });
     const before = snapshot(known.sqlite);
-    await migrateBindingRegistry(known.db, ":memory:");
+    await migrateBindingRegistry(known.db, ":memory:", undefined, { writerVersion: "test-writer" });
     expect(snapshot(known.sqlite)).toEqual(before);
     const registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       timer: new FakeTimer(),
+      writerVersion: "test-writer",
     });
     try {
       expect(await registry.snapshotManagedDevices()).toEqual([]);
@@ -231,6 +241,7 @@ describe("binding registry schema compatibility", () => {
       retryable: false,
       dbPath: ":memory:",
       unknownMigrations: [FUTURE],
+      writerVersions: {},
       remedy: error.remedy,
     });
     const open = mock(async () => {

@@ -84,6 +84,7 @@ async function registryMaintenanceHarness() {
   const { daemon, timer } = await makeDaemon({ port: 3161 });
   const registry = await bindingRegistryModule.openSqliteBindingRegistry({
     dbPath: ":memory:",
+    writerVersion: "test-writer",
     timer,
   });
   const open = spyOn(bindingRegistryModule, "openSqliteBindingRegistry").mockResolvedValue(
@@ -561,6 +562,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       expect(await h.daemon.testHooks.openBindingRegistry(undefined, { quiet: true })).toBe(
         h.registry,
       );
+      expect(DaemonState.getInstance().getBindingRegistrySchemaProbe()).toBe(h.registry);
       expect(h.reconcile).toHaveBeenCalledTimes(1);
       expect(h.reconcile).toHaveBeenCalledWith(h.registry.deviceClaims());
       expect(h.recover).not.toHaveBeenCalled();
@@ -579,6 +581,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       expect(h.redrive).toHaveBeenCalledWith(h.registry);
     } finally {
       await h.close();
+      expect(DaemonState.getInstance().getBindingRegistrySchemaProbe()).toBeUndefined();
     }
   });
 

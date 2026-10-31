@@ -96,6 +96,7 @@ describe("registry busy bound (real SQLite)", () => {
         BROKER_TIMING_MIGRATION,
         "2026_10_26_014_device_claims",
         "2026_10_27_015_device_claims_metadata",
+        "2026_10_28_016_binding_registry_writers",
         "2026_10_30_016_watchos_binding_platform",
       ]);
       peer.exec("COMMIT");

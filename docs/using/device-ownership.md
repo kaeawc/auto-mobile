@@ -50,26 +50,37 @@ takes calls from anyone.
 
 Other refusals you may meet, and what to do:
 
-| Code                                                 | Meaning and next step                                                                                                   |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `ambiguous_session_selector`                         | Several of your sessions match; pass `sessionUuid` or `deviceId`.                                                       |
-| `ambiguous_device_target`                            | An unnamed call matched several devices; reads pass `deviceId`, control calls acquire a session and pass `sessionUuid`. |
-| `device_outside_bound_session`                       | The call names a `deviceId` other than the session's device.                                                            |
-| `plan_execution_in_progress` (retryable)             | A plan is running; retry when it finishes. Reads stay allowed.                                                          |
-| `session_ownership_lost`, `no_active_device_session` | The session is gone for good (`retryable: false`, `nextAction: "acquire_new_session"`). Acquire a new session.          |
-| `session_released_during_creation`                   | The session was released before it finished creating. Acquire a new one.                                                |
-| `daemon_session_suspect` (retryable)                 | The owner's heartbeat is late; retry now.                                                                               |
-| `session_held_by_recovery` (retryable)               | Device recovery is in flight; retry after `retryAfterMs`.                                                               |
-| `discovery_incomplete` (retryable)                   | `adb` or `simctl` listing failed, so AutoMobile will not boot or adopt a device blind. Retry.                           |
-| `registry_schema_unsupported` (not retryable)        | A strict ownership read found unknown migrations; the refusal includes `dbPath` and `unknownMigrations`.                |
-| `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                              |
-| `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                  |
+| Code                                                 | Meaning and next step                                                                                                                                                           |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ambiguous_session_selector`                         | Several of your sessions match; pass `sessionUuid` or `deviceId`.                                                                                                               |
+| `ambiguous_device_target`                            | An unnamed call matched several devices; reads pass `deviceId`, control calls acquire a session and pass `sessionUuid`.                                                         |
+| `device_outside_bound_session`                       | The call names a `deviceId` other than the session's device.                                                                                                                    |
+| `plan_execution_in_progress` (retryable)             | A plan is running; retry when it finishes. Reads stay allowed.                                                                                                                  |
+| `session_ownership_lost`, `no_active_device_session` | The session is gone for good (`retryable: false`, `nextAction: "acquire_new_session"`). Acquire a new session.                                                                  |
+| `session_released_during_creation`                   | The session was released before it finished creating. Acquire a new one.                                                                                                        |
+| `daemon_session_suspect` (retryable)                 | The owner's heartbeat is late; retry now.                                                                                                                                       |
+| `session_held_by_recovery` (retryable)               | Device recovery is in flight; retry after `retryAfterMs`.                                                                                                                       |
+| `discovery_incomplete` (retryable)                   | `adb` or `simctl` listing failed, so AutoMobile will not boot or adopt a device blind. Retry.                                                                                   |
+| `registry_schema_unsupported` (not retryable)        | A strict ownership read found unknown migrations; `dbPath`, `unknownMigrations` and recorded `writerVersions` identify the registry and builds. Upgrade the daemons sharing it. |
+| `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                                                                                      |
+| `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                                                                          |
 
 A daemon warning about unknown registry migrations means a newer release has updated
 shared ownership data. Allocation claim files alone decide ownership, and this daemon
 skips the shared claims table until restart. This `files_only` mode does not enforce
 managed bindings: this daemon can allocate a device held only by a managed binding.
-Upgrade the daemons sharing managed devices to a release that includes these migrations.
+The warning names writer versions when recorded. Upgrade the daemons sharing managed
+devices to a release that includes these migrations, then restart older daemons.
+
+To check versions, run `auto-mobile --daemon capabilities --json`. In session-broker
+mode, an already-open registry adds `bindingRegistry`: `schemaVersion` is the latest
+recorded migration, `knownSchemaVersion` is the latest migration this daemon knows,
+`supported` says whether all recorded migrations are known, and `writerVersion`
+identifies the build that recorded the latest migration. A null version means it is
+unknown; the block is omitted when no registry is open or a read fails unexpectedly.
+The refusal's `writerVersions` maps migration names to the builds that applied them;
+older migrations without a recorded writer are left out. Use these versions to
+choose an upgrade that understands every recorded migration.
 
 ### Choosing a device when a call is ambiguous
 

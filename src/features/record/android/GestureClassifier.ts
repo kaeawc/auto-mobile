@@ -25,6 +25,8 @@ interface PenObservation {
   pressureSum: number;
   pressureMin: number;
   pressureMax: number;
+  tiltCount: number;
+  tiltSum: number;
 }
 
 /** Axis range of the pressure axis from `getevent -p`; absent means raw units are reported. */
@@ -253,6 +255,9 @@ export class GestureClassifier {
         normalized: range !== undefined,
       };
     }
+    if (contact.pen.tiltCount > 0) {
+      fields.tilt = Math.round((contact.pen.tiltSum / contact.pen.tiltCount) * 1e4) / 1e4;
+    }
     if (buttons.size > 0) {
       fields.buttons = [...buttons];
     }
@@ -398,6 +403,8 @@ function newPenObservation(): PenObservation {
     pressureSum: 0,
     pressureMin: Infinity,
     pressureMax: -Infinity,
+    tiltCount: 0,
+    tiltSum: 0,
   };
 }
 
@@ -407,6 +414,20 @@ function observePen(pen: PenObservation, slot: RawTouchFrame["activeSlots"][numb
   }
   for (const button of slot.buttons ?? []) {
     pen.buttons.add(button);
+  }
+  if (slot.toolType === "stylus" || slot.toolType === "eraser") {
+    if (
+      slot.tiltX !== undefined &&
+      slot.tiltY !== undefined &&
+      Number.isFinite(slot.tiltX) &&
+      Number.isFinite(slot.tiltY)
+    ) {
+      // Android TouchInputMapper combines the signed degree axes into AXIS_TILT radians.
+      const cosine =
+        Math.cos((slot.tiltX * Math.PI) / 180) * Math.cos((slot.tiltY * Math.PI) / 180);
+      pen.tiltCount += 1;
+      pen.tiltSum += Math.acos(clamp01(cosine));
+    }
   }
   // A zero pressure sample means "not reported" for fingers and "no force" for a pen; neither
   // is a measurement worth averaging.

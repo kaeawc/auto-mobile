@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { readTouchNodeCapture } from "../../../helpers/touchNodeCaptures";
+import { parseInputNodes } from "../../../../src/features/record/android/InputNodeDiscovery";
 import { DualTrackRecorder } from "../../../../src/features/record/android/DualTrackRecorder";
 import { buildScaler } from "../../../../src/features/record/android/AxisRanges";
 import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
@@ -96,7 +98,7 @@ describe("DualTrackRecorder reading a touch and a pen node", () => {
   });
 });
 
-describe("pressure does not change recorded plan steps", () => {
+describe("pressure in recorded plan steps", () => {
   const FINGER = (pressure: boolean): string[] => [
     "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
     "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
@@ -146,6 +148,60 @@ describe("pressure does not change recorded plan steps", () => {
     emit!(gesture);
     return (await recorder.stop()).steps;
   }
+
+  test("captured node with BTN_STYLUS remains a multitouch node", () => {
+    const nodes = parseInputNodes(readTouchNodeCapture("getevent-p-touch-node-emulator-5600.txt"));
+    expect(nodes.touch).toMatchObject({
+      path: "/dev/input/event1",
+      pressureMin: 0,
+      pressureMax: 1024,
+    });
+    expect(nodes.pen).toEqual([]);
+  });
+
+  test("captured probe pressure normalizes before stylus plan export", async () => {
+    const classifier = new GestureClassifier({ toScreenPoint: (x, y) => ({ x, y }) }, 1, {
+      min: 0,
+      max: 4095,
+    });
+    classifier.feedFrame({
+      arrivedAt: 0,
+      releasedSlots: [],
+      activeSlots: [
+        {
+          slotId: 0,
+          trackingId: 1,
+          x: 500,
+          y: 2050,
+          pressure: 4000,
+          toolType: "stylus",
+          buttons: ["stylusPrimary"],
+        },
+      ],
+    });
+    classifier.feedFrame({
+      arrivedAt: 20,
+      releasedSlots: [],
+      activeSlots: [
+        {
+          slotId: 0,
+          trackingId: 1,
+          x: 700,
+          y: 2050,
+          pressure: 4000,
+          toolType: "stylus",
+          buttons: [],
+        },
+      ],
+    });
+    const gesture = classifier.feedFrame({ arrivedAt: 50, releasedSlots: [0], activeSlots: [] });
+    expect(gesture?.pressure?.mean).toBe(0.9768);
+    expect((await stepsFor(gesture!))[0].params.pointer).toEqual({
+      toolType: "stylus",
+      pressure: 0.9768,
+      buttons: ["primary"],
+    });
+  });
 
   test("a pressured finger tap records the same step as an unpressured one", async () => {
     const withPressure = classify(FINGER(true));

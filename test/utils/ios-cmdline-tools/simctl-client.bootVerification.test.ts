@@ -359,7 +359,7 @@ describe("SimCtlClient boot self-verification", () => {
 
   test.each([
     new ActionableError("boot failed"),
-    new DeviceBootTimeoutError("startDevice", "boot", 1000, 1000, UDID),
+    new DeviceBootTimeoutError("startDevice", "boot", 1000, { budgetMs: 1000, device: UDID }),
   ])("attaches failed cleanup while preserving the original boot error: %s", async (failure) => {
     const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
     harness.timer.enableAutoAdvance();
@@ -431,7 +431,7 @@ describe("SimCtlClient boot self-verification", () => {
   test.each([
     new Error("cancelled after boot"),
     new DOMException("cancelled after boot", "AbortError"),
-    new DeviceBootTimeoutError("startDevice", "boot", 1000, 1000, UDID),
+    new DeviceBootTimeoutError("startDevice", "boot", 1000, { budgetMs: 1000, device: UDID }),
   ])("an aborted presentation annotates only a copy of its shared reason: %s", async (reason) => {
     const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
     harness.timer.enableAutoAdvance();
@@ -2153,7 +2153,10 @@ describe("boot readiness provisioning classification", () => {
   } as const;
 
   test.each([
-    new DeviceBootTimeoutError("provisionDevice", "boot readiness", 20, 20, UDID),
+    new DeviceBootTimeoutError("provisionDevice", "boot readiness", 20, {
+      budgetMs: 20,
+      device: UDID,
+    }),
     new SimctlCommandTimeoutError("simctl list timed out"),
     new DOMException("caller deadline expired", "TimeoutError"),
   ])("preserves readiness cause and retryable timeout for %s", async (failure) => {
@@ -2302,7 +2305,9 @@ describe("boot readiness provisioning classification", () => {
   test("operation failure preferred during phase settlement still maps to timeout", async () => {
     const timer = new FakeTimer();
     const boot = leaseHarness(timer);
-    const deadline = new DeviceBootTimeoutError("provisionDevice", "readiness", 10, 10);
+    const deadline = new DeviceBootTimeoutError("provisionDevice", "readiness", 10, {
+      budgetMs: 10,
+    });
     const pending = runPhaseWithSettlement(
       {
         timer,

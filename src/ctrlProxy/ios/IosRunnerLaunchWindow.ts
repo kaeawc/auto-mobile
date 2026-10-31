@@ -15,13 +15,15 @@ export class IosRunnerLaunchWindow {
   private readonly startedAt: number;
   deadlineMs: number;
 
+  private readonly identity: { pid: number; deviceId: string };
+
   constructor(
     private readonly timer: Timer,
     private readonly probe: RunnerLaunchProgressProbe,
     private readonly backoff: BackoffPolicy,
-    private readonly identity: { pid: number; deviceId: string },
-    windowMs: number,
+    { identity, windowMs }: { identity: { pid: number; deviceId: string }; windowMs: number },
   ) {
+    this.identity = identity;
     this.startedAt = timer.now();
     this.deadlineMs = this.startedAt + windowMs;
   }

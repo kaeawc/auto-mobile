@@ -1068,13 +1068,10 @@ function installProbeInventory(column: (typeof probeColumns)[number]): void {
     timer: current.timer,
     adbFactory: new FakeAdbClientFactory(current.adb),
   });
-  const inventory = new MultiPlatformDeviceManager(
-    current.adb,
-    current.simctl,
-    client,
-    new FakeVirtualDeviceLifecycleCoordinator(),
-    { timer: current.timer },
-  );
+  const inventory = new MultiPlatformDeviceManager(current.adb, current.simctl, client, {
+    lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
+    timer: current.timer,
+  });
   const restoreFactory = snapshotPlatformDeviceManagerFactory();
   const previousInstance = Reflect.get(PlatformDeviceManagerFactory, "instance");
   const previousInjectedManager = Reflect.get(PlatformDeviceManagerFactory, "injectedManager");

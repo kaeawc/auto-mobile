@@ -40,7 +40,7 @@ function createHarness() {
   setEnabled(true);
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const manager = AndroidCtrlProxyManager.createForTestingWithDeps(device, adb, timer);
+  const manager = AndroidCtrlProxyManager.createForTestingWithDeps(device, adb, { timer });
   // Exercise real setup without unrelated accessibility-rebind diagnostics.
   const readinessManager: Pick<
     AndroidCtrlProxyManager,

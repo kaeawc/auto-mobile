@@ -485,7 +485,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           await adb.getBootedAndroidDevices({ throwOnMissingAdb: true, signal }),
         listAvds: async () => [{ name: "Pixel_9", platform: "android", isRunning: false }],
       });
-      const manager = new MultiPlatformDeviceManager(adb, new UnusedSimCtl(), emulator, undefined, {
+      const manager = new MultiPlatformDeviceManager(adb, new UnusedSimCtl(), emulator, {
         timer: inventoryTimer,
       });
       server.mcpClientFactory = async () =>

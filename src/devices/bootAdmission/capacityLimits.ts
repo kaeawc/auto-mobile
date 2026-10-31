@@ -156,8 +156,10 @@ export function resolveBootCapacityLimits(
   env: NodeJS.ProcessEnv,
   envName: string,
   resources: CapacityHostResources,
-  perDeviceBytes: number,
-  coresPerDevice: number = CORES_PER_DEVICE,
+  {
+    perDeviceBytes,
+    coresPerDevice = CORES_PER_DEVICE,
+  }: { perDeviceBytes: number; coresPerDevice?: number },
 ): CapacityLimits {
   const raw = env[envName];
   const override = parseOverride(raw);

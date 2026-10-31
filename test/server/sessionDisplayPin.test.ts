@@ -283,7 +283,7 @@ for (const inventoryKind of ["single", "empty", "one panel"] as const) {
                 },
               }),
         });
-        const inventory = new CachingDisplayInventoryProvider(source, source, timer);
+        const inventory = new CachingDisplayInventoryProvider(source, source, { timer });
         const single = { ...device, displays: undefined };
         await pool.initializeWithDevices([single]);
         const handler = createSetActiveDeviceHandler({
@@ -1481,7 +1481,7 @@ for (const outcome of ["throws", "no inventory", "degraded", "degraded panels"] 
     const inventory =
       outcome === "no inventory"
         ? unreadableInventoryProvider()
-        : new CachingDisplayInventoryProvider(source, source, timer);
+        : new CachingDisplayInventoryProvider(source, source, { timer });
     const handler = createSetActiveDeviceHandler({
       displayInventory: inventory,
       resumeCtrlProxy: async () => {},

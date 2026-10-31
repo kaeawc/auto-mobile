@@ -472,7 +472,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
         const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
           androidDevice,
           new FakeAdbExecutor(),
-          new FakeTimer(),
+          { timer: new FakeTimer() },
         );
         spyOn(manager, "ensureCompatibleVersion").mockImplementation(ensure);
         managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(manager);

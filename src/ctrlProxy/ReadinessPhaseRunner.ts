@@ -37,8 +37,10 @@ export class ReadinessPhaseRunner {
     context: ReadinessAttemptContext,
     phase: RunnerReadinessPhase,
     attempts: number,
-    operation: (signal: AbortSignal) => Promise<T>,
-    operationDeadlineMs?: number,
+    {
+      operation,
+      operationDeadlineMs,
+    }: { operation: (signal: AbortSignal) => Promise<T>; operationDeadlineMs?: number },
   ): Promise<T> {
     const remainingMs = Math.min(
       this.remainingForPhase(context, phase),
@@ -47,7 +49,8 @@ export class ReadinessPhaseRunner {
         : Math.max(0, operationDeadlineMs - this.timer.now()),
     );
     if (remainingMs <= 0) {
-      this.fail(context, phase, attempts, "readiness budget exhausted before phase started", {
+      this.fail(context, phase, attempts, {
+        detail: "readiness budget exhausted before phase started",
         deadlineExhausted: true,
       });
     }
@@ -133,7 +136,8 @@ export class ReadinessPhaseRunner {
       }
       // An operation fault remains a fault; only the owned deadline or a
       // request abort captured at that deadline is a timeout.
-      return this.fail(context, phase, attempts, error, {
+      return this.fail(context, phase, attempts, {
+        detail: error,
         deadlineExhausted: phaseTimedOut || callerTimedOut,
       });
     } finally {
@@ -238,12 +242,15 @@ export class ReadinessPhaseRunner {
     context: ReadinessAttemptContext,
     phase: RunnerReadinessPhase,
     attempts: number,
-    detail: unknown,
-    options: {
+    {
+      detail,
+      ...options
+    }: {
+      detail: unknown;
       deadlineExhausted?: boolean;
       failureKind?: "ctrlproxy_forward_unavailable";
       previousAttemptDetails?: readonly string[];
-    } = {},
+    },
   ): never {
     const { device } = context;
     const mapping =
@@ -264,12 +271,17 @@ export class ReadinessPhaseRunner {
       options.failureKind
         ? `${detailMessage}; ${readinessContext}`
         : `${readinessContext}: ${detailMessage}`,
-      device.platform === "android" &&
-        ReadinessPhaseRunner.isSetupPhase(phase) &&
-        (isAndroidFrameworkUnavailable(detail) || isForegroundUserPending(detail)),
-      options.deadlineExhausted ?? false,
-      phase,
-      { attempts, diagnosticCause: detail, failureKind: options.failureKind },
+      {
+        retryableAndroidFrameworkFailure:
+          device.platform === "android" &&
+          ReadinessPhaseRunner.isSetupPhase(phase) &&
+          (isAndroidFrameworkUnavailable(detail) || isForegroundUserPending(detail)),
+        deadlineExhausted: options.deadlineExhausted ?? false,
+        phase,
+        attempts,
+        diagnosticCause: detail,
+        failureKind: options.failureKind,
+      },
     );
     if (options.deadlineExhausted) {
       context.deadlineFailure = failure;

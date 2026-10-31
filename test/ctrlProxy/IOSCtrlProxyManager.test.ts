@@ -177,7 +177,7 @@ describe("IOSCtrlProxyManager", function () {
     const builder = fakeIosCtrlProxyBuilder({
       getInstalledBundleVersion: async () => "2026.9.13",
     });
-    const manager = IOSCtrlProxyManager.createForTesting(testDevice, fakeTimer, builder);
+    const manager = IOSCtrlProxyManager.createForTesting(testDevice, fakeTimer, { builder });
 
     expect(await manager.getInstalledVersionIdentity()).toBe("2026.9.13");
   });

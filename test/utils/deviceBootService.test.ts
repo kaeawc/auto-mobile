@@ -547,7 +547,7 @@ describe("DeviceBootService", () => {
     timer.enableAutoAdvance();
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.waitForDeviceReady = async (_device, _timeout, _handle, signal) => {
+    devices.waitForDeviceReady = async (_device, _timeout, _handle, { signal } = {}) => {
       return new Promise((_resolve, reject) => {
         signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
       });
@@ -1619,7 +1619,7 @@ describe("DeviceBootService", () => {
     timer.enableAutoAdvance();
     devices.setDeviceImages("android", [image]);
     matcher.setImageResult(image);
-    devices.waitForDeviceReady = async (_device, _timeoutMs, _handle, signal) => {
+    devices.waitForDeviceReady = async (_device, _timeoutMs, _handle, { signal } = {}) => {
       await new Promise<never>((_resolve, reject) => {
         signal?.addEventListener(
           "abort",
@@ -2500,13 +2500,13 @@ describe("DeviceBootService", () => {
         signalOwnerReadiness = resolve;
       });
       let ownerReadinessActive = false;
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle) {
           ownerReadinessActive = true;
           signalOwnerReadiness();
           await ownerReadinessGate;
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
       const originalGetBootedDevicesDetailed = devices.getBootedDevicesDetailed.bind(devices);
       let signalFreshDiscovery!: () => void;
@@ -2577,12 +2577,12 @@ describe("DeviceBootService", () => {
       const ownerReadinessStarted = new Promise<void>((resolve) => {
         signalOwnerReadiness = resolve;
       });
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle) {
           signalOwnerReadiness();
           await ownerReadinessGate;
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
 
       const originalGetBootedDevicesDetailed = devices.getBootedDevicesDetailed.bind(devices);
@@ -2693,12 +2693,12 @@ describe("DeviceBootService", () => {
       const ownerReadinessStarted = new Promise<void>((resolve) => {
         signalOwnerReadiness = resolve;
       });
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle) {
           signalOwnerReadiness();
           await ownerReadinessGate;
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
 
       const owner = ownerBootService.boot({ platform: "android", deviceId: image.name });
@@ -2756,7 +2756,7 @@ describe("DeviceBootService", () => {
       });
       let ownerReadinessActive = false;
       const originalWaitForDeviceReady = devices.waitForDeviceReady.bind(devices);
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle) {
           ownerReadinessActive = true;
           signalOwnerReadiness();
@@ -2766,7 +2766,7 @@ describe("DeviceBootService", () => {
           devices.setMockChildProcess(image.name, null);
           throw new Error("owner boot failed");
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
       const originalGetBootedDevicesDetailed = devices.getBootedDevicesDetailed.bind(devices);
       let signalFreshDiscovery!: () => void;
@@ -2958,7 +2958,7 @@ describe("DeviceBootService", () => {
       let failOwnerBoot = false;
       let gated = false;
       const originalWaitForDeviceReady = devices.waitForDeviceReady.bind(devices);
-      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, { signal, options } = {}) => {
         if (handle === ownerHandle && !gated) {
           gated = true;
           ownerReadinessStarted.resolve();
@@ -2968,7 +2968,7 @@ describe("DeviceBootService", () => {
             throw new Error("owner boot failed");
           }
         }
-        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, { signal, options });
       };
       const newService = (lifecycleOptions?: Parameters<typeof service>[5]) =>
         service(devices, matcher, undefined, timer, lifecycleCoordinator, lifecycleOptions);

@@ -358,7 +358,6 @@ describe("Android discovery failure refresh outcome", () => {
           return [];
         },
       }),
-      undefined,
       {
         physicalIosDevices: { listConnectedDevices: async () => ({ devices: [], complete: true }) },
       },

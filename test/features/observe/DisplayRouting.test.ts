@@ -389,7 +389,7 @@ describe("display read routing", () => {
       },
       degraded: false,
     });
-    const provider = new CachingDisplayInventoryProvider(source, source, timer);
+    const provider = new CachingDisplayInventoryProvider(source, source, { timer });
     const hydrated = await provider.hydrate(
       { name: device.name, deviceId: device.deviceId, platform: device.platform },
       "pool-incarnation-1",
@@ -784,11 +784,9 @@ describe("display read routing", () => {
       screenHeight: 100,
     });
     const singleSource = new FakeDisplayInventorySource({ degraded: false });
-    const singleDevice = await new CachingDisplayInventoryProvider(
-      singleSource,
-      singleSource,
+    const singleDevice = await new CachingDisplayInventoryProvider(singleSource, singleSource, {
       timer,
-    ).hydrate(
+    }).hydrate(
       { name: device.name, platform: "android", deviceId: "single-panel-test" },
       "pool-incarnation-1",
     );
@@ -887,11 +885,9 @@ describe("display read routing", () => {
       displays: iosInventory.displays,
       degraded: false,
     });
-    const iosDevice = await new CachingDisplayInventoryProvider(
-      iosSource,
-      iosSource,
+    const iosDevice = await new CachingDisplayInventoryProvider(iosSource, iosSource, {
       timer,
-    ).hydrate(
+    }).hydrate(
       { name: iosInventory.name, deviceId: iosInventory.deviceId, platform: "ios" },
       "pool-incarnation-1",
     );

@@ -5,9 +5,8 @@ it uses for a phone, plus D-pad focus navigation. This guide covers creating one
 and what is out of scope.
 
 > [!WARNING]
-> **Not yet verified on a device.** Creation and detection are unit tested only. No run on a real TV
-> emulator has confirmed boot readiness, CtrlProxy setup or teardown yet, so treat everything that
-> depends on the emulator as **unverified**.
+> Verified on the Android 36 `android-tv` `arm64-v8a` image. The Google TV image and devices
+> without a touchscreen are not verified.
 
 ## Install a TV system image
 
@@ -40,7 +39,8 @@ Creation must be allowed; see `AUTOMOBILE_ALLOW_DEVICE_CREATE` in
   tablet, foldable or unspecified request never creates a TV, and a TV request never creates a phone.
 - The newest API level in range wins, then an ABI the host can run, then the tag in the order above.
   `android-tv` is preferred over `google-tv` because Google TV images ship the Play Store, which
-  usually blocks `adb root`.
+  usually blocks `adb root`. The verified `android-tv` user build also refuses `adb root`; this
+  preference does not guarantee root access.
 - The AVD uses the `tv_1080p` hardware profile and is named `AutoMobile-android-tv-<api>-<id>`
   unless you pass `name`.
 - `minOsVersion` and `maxOsVersion` narrow the API range as they do for a phone.
@@ -83,9 +83,10 @@ emulator -avd tv-36
 
 A device is `tv` when its AVD uses a TV system image or a `tv_*` profile, so `formFactor: "tv"`
 appears in `listDevices` and can be asked for in a device `requires` clause or a broker
-`deviceFamily`. The booted device resources also report `traits.formFactor: "tv"` when the build
-announces `tv` in `ro.build.characteristics`, which covers a TV emulator whose AVD config can't be
-read.
+`deviceFamily`. Booted device resources derive `traits.formFactor` from `ro.build.characteristics`
+separately. The verified image reports `emulator`, without `tv`, so its booted device resources
+report no TV form factor (`traits.formFactor` is `null`). TV recognition on this image depends on
+the AVD config.
 
 ## Lifecycle
 
@@ -100,7 +101,18 @@ read.
 ## Navigating a TV app
 
 TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus to an element and
-`sendKeys` with `enter` to activate the focused item. `pressButton` handles back and home.
+`sendKeys` with `enter` to activate the focused item; activation is verified on this image.
+`pressButton` handles back and home.
+
+`focusNavigate` matches a target by its own `contentDesc` or `resourceId`. A label that is only the
+text of a child view may not be found, even when its row has focus; the call can return `max_steps`
+or `stuck`. Use the focused element's `resourceId` or `contentDesc` in `until` instead.
+
+`tapOn` and `swipeOn` were checked only on an image that reports a touchscreen. Their behaviour
+on devices without a touchscreen is unverified.
+
+Prototype overlays can be shown and dismissed, but their buttons are not reachable with D-pad
+focus. Use `prototype` with `dismiss` to close the overlay.
 
 ## Out of scope
 

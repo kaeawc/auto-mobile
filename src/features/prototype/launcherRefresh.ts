@@ -139,7 +139,7 @@ async function scanWorkspace(
 /**
  * Checks following workspace pages before restarting a known launcher at most once, then
  * scans again from the launcher's reset page. In-process prototype saves share ownership;
- * a concurrent save can scan but cannot restart underneath the owner.
+ * a concurrent save can check the current page but cannot swipe or restart underneath the owner.
  */
 export async function refreshLauncherForShortcut(
   driver: LauncherRefreshDriver,
@@ -148,19 +148,25 @@ export async function refreshLauncherForShortcut(
   const release = driver.gate.tryAcquire(driver.deviceKey);
   try {
     const first = await driver.capture.capture({ freshness: "fresh", signal: options.signal });
+    if (!release) {
+      if (
+        (await isLauncherWorkspace(driver, first)) &&
+        isShortcutShown(first.nodes, options.label)
+      ) {
+        return { launcherRestarted: false, shortcutVisible: true };
+      }
+      return {
+        launcherRestarted: false,
+        shortcutVisible: false,
+        message: `The shortcut "${options.label}" is not visible; another prototype save is already refreshing the home screen on this device (${driver.deviceKey}).`,
+      };
+    }
     const scan = await scanWorkspace(driver, first, options.label, options.signal);
     if (scan === "not-home") {
       return notOnHomeScreen(options.label);
     }
     if (scan === "visible") {
       return { launcherRestarted: false, shortcutVisible: true };
-    }
-    if (!release) {
-      return {
-        launcherRestarted: false,
-        shortcutVisible: false,
-        message: `The shortcut "${options.label}" is not visible; another prototype save is already refreshing the home screen on this device (${driver.deviceKey}).`,
-      };
     }
     return await restartAndScan(driver, options);
   } finally {
@@ -195,7 +201,11 @@ async function restartAndScan(
   const settled = await waitForQuietLauncher(driver, signal);
   const scan = await scanWorkspace(driver, settled, label, signal);
   if (scan === "not-home") {
-    return notOnHomeScreen(label);
+    return {
+      launcherRestarted: true,
+      shortcutVisible: false,
+      message: `Restarted ${launcher}, but the shortcut "${label}" is not confirmed visible because the foreground app is not the home screen; go to the home screen to check it.`,
+    };
   }
   const visible = scan === "visible";
   return {

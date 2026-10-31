@@ -92,6 +92,8 @@ import {
   startMatchExclusions,
   devicesHeldByOtherSessions,
 } from "./deviceToolsBootPreparation";
+import { requireAndroidOrIosPlatform } from "../models/Platform";
+import { assertRequestNotTvos } from "./applePlatformToolSupport";
 export { type CreatedDeviceRollback } from "./deviceToolsBootPreparation";
 
 type StartDeviceHooks = {
@@ -941,12 +943,15 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    assertRequestNotTvos("startDevice", rawArgs);
     if (isWatchStartRequest(rawArgs)) {
       return await startWatchDevice(rawArgs, bindBootedDeviceSession, signal);
     }
     const internalSessionId = internalMcpSessionId(rawArgs);
+    const parsed = startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs));
     const args = {
-      ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
+      ...parsed,
+      platform: requireAndroidOrIosPlatform(parsed.platform, "startDevice"),
       __mcpSessionId: internalSessionId,
       __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
       ...(internalOneShotCli(rawArgs) ? { __oneShotCli: true } : {}),

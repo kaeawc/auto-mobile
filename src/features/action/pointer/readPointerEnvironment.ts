@@ -12,6 +12,36 @@ import type { PointerEnvironment } from "./PointerInjector";
 import { pointerCapabilities } from "./selectPointerRoute";
 
 const API_READ_TIMEOUT_MS = 5000;
+const ROOT_READ_TIMEOUT_MS = 5000;
+
+/**
+ * The uinput route only carries what the runner cannot: with both pointer capabilities advertised
+ * it is never chosen, so the extra `id -u` round trip is skipped.
+ */
+export function needsRootProbe(advertised: ReadonlySet<string>): boolean {
+  return !advertised.has(STYLUS_INPUT_CAPABILITY) || !advertised.has(HOVER_INPUT_CAPABILITY);
+}
+
+/**
+ * Whether `adb shell` runs as root, as after `adb root` on an emulator or userdebug build. The uinput
+ * route needs it to open `/dev/uinput`. AutoMobile never runs `adb root` itself: it restarts adbd.
+ */
+export async function readRootShell(adb: AdbExecutor, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const { stdout } = await adb.executeCommand("shell id -u", {
+      timeoutMs: ROOT_READ_TIMEOUT_MS,
+      noRetry: true,
+      signal,
+    });
+    return stdout.trim() === "0";
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    logger.warn(`[pointer] could not read the adb shell uid: ${errorMessage(error)}`, error);
+    return false;
+  }
+}
 
 /**
  * The device facts the pointer routes decide on: the Android API level and the pointer capability
@@ -57,5 +87,6 @@ export async function readPointerEnvironment(
     platform: "android",
     apiLevel: apiLevel ?? undefined,
     capabilities: pointerCapabilities((name) => advertised.has(name)),
+    ...(needsRootProbe(advertised) ? { rootShell: await readRootShell(adb, signal) } : {}),
   };
 }

@@ -3,6 +3,7 @@ import {
   toActionableError,
   type BootedDevice,
   type Platform,
+  requireAndroidOrIosPlatform,
   type SomePlatform,
 } from "../models";
 import type { BootedDeviceDiscovery, DeviceDiscoveryError } from "../devices/deviceUtils";
@@ -45,6 +46,7 @@ import {
   initializedDevicePool,
   listDevicePayloads,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
+import { assertRequestNotTvos } from "./applePlatformToolSupport";
 
 /** Held Android devices adb lists offline and held simulators simctl lists Booting / Shutting Down. */
 async function transitionalHeldListing(input: {
@@ -177,6 +179,7 @@ function listingDiscoveryObservation(
 export function createListingHandlers() {
   // List AVDs handler
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
+    assertRequestNotTvos("listDeviceImages", args);
     try {
       const deps = getDeviceToolsDependencies();
       const deviceUtils = deps.deviceManagerFactory();
@@ -222,7 +225,12 @@ export function createListingHandlers() {
     // here — enumerate booted devices directly instead of forcing a modality
     // switch to resources. The resource pointers (which also cover not-yet-booted
     // images and richer per-device detail) survive as a `note`.
-    const platform: SomePlatform = args.platform ?? "either";
+    // An Apple TV is never discovered yet, so naming it is refused rather than listed as empty.
+    assertRequestNotTvos("listDevices", args);
+    // Internal callers may pass "either", which the tool schema itself does not offer.
+    const requested: SomePlatform = args.platform ?? "either";
+    const platform: SomePlatform =
+      requested === "either" ? requested : requireAndroidOrIosPlatform(requested, "listDevices");
     const presentationOrder = acceptancePresentationOrder(args);
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const deps = getDeviceToolsDependencies();

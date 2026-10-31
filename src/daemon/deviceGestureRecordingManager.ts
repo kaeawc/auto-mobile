@@ -272,8 +272,7 @@ const buildPlanFromSteps = (
   steps: PlanStep[],
   session: RecordingSession,
   planName: string,
-  stoppedAt: number,
-  omittedInput?: string,
+  { stoppedAt, omittedInput }: { stoppedAt: number; omittedInput?: string },
 ): { plan: Plan; stepCount: number } => {
   if (steps.length === 0) {
     throw new NoUserInputCapturedError(omittedInput);
@@ -349,16 +348,29 @@ function assertRecordingJoinable(
   }
 }
 
+/**
+ * @param device - Device to record on
+ * @param timer - Clock for recording timestamps
+ * @param idGenerator - Recording id source
+ * @param options.recorderFactory - Builds the recorder (defaults to a dual-track recorder)
+ * @param options.ownerSessionUuid - Session that owns the recording
+ * @param options.baseSessionUuid - Maps a session to the base session ownership compares
+ */
 export async function startDeviceGestureRecording(
   device: BootedDevice,
   timer: Timer = defaultTimer,
   idGenerator: IdGenerator = defaultIdGenerator,
-  recorderFactory: RecorderFactory = (target) => new DualTrackRecorder(target),
-  ownership: DeviceGestureRecordingOwnership = {},
+  {
+    recorderFactory = (target) => new DualTrackRecorder(target),
+    ...ownership
+  }: DeviceGestureRecordingOwnership & { recorderFactory?: RecorderFactory } = {},
 ): Promise<DeviceGestureRecordingStartResult> {
   if (stoppingRecording) {
     await stoppingRecording.promise.catch(() => undefined);
-    return startDeviceGestureRecording(device, timer, idGenerator, recorderFactory, ownership);
+    return startDeviceGestureRecording(device, timer, idGenerator, {
+      recorderFactory,
+      ...ownership,
+    });
   }
   const { ownerSessionUuid } = ownership;
 
@@ -572,13 +584,10 @@ async function stopAndBuildResult(
 
   const stoppedAt = timer.now();
   const resolvedPlanName = formatPlanName(planName);
-  const { plan, stepCount } = buildPlanFromSteps(
-    steps,
-    session,
-    resolvedPlanName,
+  const { plan, stepCount } = buildPlanFromSteps(steps, session, resolvedPlanName, {
     stoppedAt,
-    exportMessage,
-  );
+    omittedInput: exportMessage,
+  });
   const planContent = yaml.dump(plan, {
     indent: 2,
     lineWidth: -1,

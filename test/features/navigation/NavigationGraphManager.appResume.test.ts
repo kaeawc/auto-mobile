@@ -31,11 +31,10 @@ describe("NavigationGraphManager app resume (#10193)", () => {
     await repository.clearAppGraph(LAUNCHER);
     timer = new FakeTimer();
     timer.setCurrentTime(T0);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository(harness.db),
       timer,
-    );
+    });
   });
   afterAll(async () => {
     await harness.dispose();

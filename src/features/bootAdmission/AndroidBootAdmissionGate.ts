@@ -179,7 +179,7 @@ export class AndroidBootAdmissionGate
         },
         ledger: this.ledger,
         decide: (sample, window) =>
-          this.decide(sample, window, peers, replacingDeviceId, candidate),
+          this.decide(sample, { window, peers, replacingDeviceId, candidate }),
         admit: () => {
           admitted = this.ledger.admit(replacingDeviceId, replacingDeviceId !== undefined);
           try {
@@ -282,7 +282,7 @@ export class AndroidBootAdmissionGate
     }
     const { sample, window, peers } = await this.sampleInWindow(options);
     assertBootCapacityGranted(
-      { decision: this.decide(sample, window, peers) },
+      { decision: this.decide(sample, { window, peers }) },
       "android",
       "emulator",
     );
@@ -403,10 +403,17 @@ export class AndroidBootAdmissionGate
   /** Synchronous so the waiter decides and records its admission without an interleaving. */
   private decide(
     sample: AndroidCapacitySample,
-    window?: LedgerSampleWindow,
-    peers: readonly HostBootAdmissionRecord[] = [],
-    replacingDeviceId?: string,
-    candidate?: CandidateHardware,
+    {
+      window,
+      peers = [],
+      replacingDeviceId,
+      candidate,
+    }: {
+      window?: LedgerSampleWindow;
+      peers?: readonly HostBootAdmissionRecord[];
+      replacingDeviceId?: string;
+      candidate?: CandidateHardware;
+    } = {},
   ): AndroidAdmissionDecision | RefusedCapacityDecision {
     this.forgetExitedSerials(sample);
     const { limits, effective: bootedCount } = this.count(sample, window, peers, candidate);
@@ -704,11 +711,8 @@ export class AndroidBootAdmissionGate
     inFlight: readonly InFlightBootMemory[],
     candidate?: CandidateHardware,
   ): CapacityLimits {
-    const limits = resolveBootCapacityLimits(
-      this.env,
-      ANDROID_MAX_BOOTED_ENV,
-      sample.host,
-      raisePerDeviceBytes(
+    const limits = resolveBootCapacityLimits(this.env, ANDROID_MAX_BOOTED_ENV, sample.host, {
+      perDeviceBytes: raisePerDeviceBytes(
         estimateSettledPerDeviceBytes(
           sample.emulatorProcessRssBytes?.map((rssBytes, index) => ({
             rssBytes,
@@ -720,8 +724,8 @@ export class AndroidBootAdmissionGate
         candidate?.guestBytes,
         ANDROID_EMULATOR_MEMORY_POLICY,
       ),
-      this.coresPerDevice(candidate),
-    );
+      coresPerDevice: this.coresPerDevice(candidate),
+    });
     if (limits.warning && limits.warning !== this.warnedLimit) {
       this.warnedLimit = limits.warning;
       logger.warn(`[BootAdmission] ${limits.warning}`);

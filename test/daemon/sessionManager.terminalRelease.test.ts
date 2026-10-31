@@ -41,7 +41,7 @@ describe("SessionManager", () => {
     await sessionManager.createSession("lost-session", "emulator-5554", "android");
     const released = Promise.withResolvers<void>();
     let releaseSnapshot: unknown;
-    sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot) => {
+    sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, { snapshot }) => {
       releaseSnapshot = snapshot;
       released.resolve();
     });
@@ -108,7 +108,7 @@ describe("SessionManager", () => {
 
     await manager.createSession("killed-session", "emulator-5554", "android");
     let callbackSnapshot: unknown;
-    manager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot) => {
+    manager.onSessionRelease((_sessionId, _deviceId, _reason, { snapshot }) => {
       callbackSnapshot = snapshot;
     });
     const ordinaryRelease = manager.releaseSession("killed-session", "explicit-release");
@@ -162,7 +162,7 @@ describe("SessionManager", () => {
   test("device-killed supersedes a finalized terminal release", async () => {
     const reasons: string[] = [];
     const persistence = new FakeDeviceSessionPersistence();
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
     };
     const manager = makeSessionManager({ timer: fakeTimer, persistence });
@@ -188,7 +188,7 @@ describe("SessionManager", () => {
     const reasons: string[] = [];
     let failRelease = true;
     const persistence = new FakeDeviceSessionPersistence();
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
       if (failRelease) {
         failRelease = false;
@@ -225,8 +225,8 @@ describe("SessionManager", () => {
     const persistence = new DeferredReleaseDeviceSessionPersistence();
     let failTerminalRelease = true;
     const markReleased = persistence.markReleased.bind(persistence);
-    persistence.markReleased = async (sessionUuid, status, releasedAtMs, reason) => {
-      await markReleased(sessionUuid, status, releasedAtMs, reason);
+    persistence.markReleased = async (sessionUuid, status, releasedAtMs, { reason }) => {
+      await markReleased(sessionUuid, status, releasedAtMs, { reason });
       if (reason === "device-killed" && failTerminalRelease) {
         failTerminalRelease = false;
         throw new Error("terminal write failed");
@@ -276,7 +276,7 @@ describe("SessionManager", () => {
     const terminalPersistenceStarted = Promise.withResolvers<void>();
     const finishTerminalPersistence = Promise.withResolvers<void>();
     const persistence = new FakeDeviceSessionPersistence();
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
       if (reason === "device-killed") {
         terminalPersistenceStarted.resolve();
@@ -368,7 +368,7 @@ describe("SessionManager", () => {
     const persistence = new FakeDeviceSessionPersistence();
     const reasons: string[] = [];
     let failTerminalRelease = true;
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
       if (reason === "device-killed" && failTerminalRelease) {
         failTerminalRelease = false;
@@ -401,7 +401,7 @@ describe("SessionManager", () => {
   test("stale owned retry cannot replace a newer incarnation terminal release", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const reasons: string[] = [];
-    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, { reason }) => {
       reasons.push(reason);
     };
     const manager = makeSessionManager({ timer: fakeTimer, persistence });

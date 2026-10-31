@@ -1,8 +1,13 @@
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../src/models";
+import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
+import type { IosBootRequest } from "../../src/models/IosBootInstrumentation";
 import { WatchSimulatorInventory } from "../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
 import { WatchSimulatorLifecycle } from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
+import { installBootAdmissionServices } from "../../src/devices/bootAdmissionServices";
+import { watchLifecycleOver } from "../../src/server/deviceToolsWatchOs";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { FakeWatchLifecycleSimctl, IPHONE_UDID, watchDevice } from "../fakes/FakeWatchSimctl";
@@ -45,6 +50,99 @@ describe("Apple Watch simulator lifecycle", () => {
     });
     expect(simctl.commands).toEqual([`boot ${WATCH_UDID} 30000`]);
     expect(simctl.stateOf(WATCH_UDID)).toBe("Booted");
+  });
+
+  test("a cold watch boot is admitted through the shared simulator gate first (#15882)", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const requests: IosBootRequest[] = [];
+    const lifecycle = new WatchSimulatorLifecycle(
+      simctl,
+      new WatchSimulatorInventory(simctl, "arm64"),
+      {
+        run: async (request, boot) => {
+          requests.push(request);
+          expect(simctl.commands).toEqual([]);
+          return await boot(request.timeoutMs);
+        },
+      },
+    );
+
+    await lifecycle.boot(await lifecycle.findWatch({ deviceId: WATCH_UDID }), {
+      timeoutMs: 30_000,
+    });
+
+    expect(requests).toEqual([
+      expect.objectContaining({ udid: WATCH_UDID, reason: "restart", timeoutMs: 30_000 }),
+    ]);
+    expect(simctl.commands).toEqual([`boot ${WATCH_UDID} 30000`]);
+  });
+
+  test("a watch boot's admission follows the caller's signal, else the ambient request signal", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const signals: Array<AbortSignal | undefined> = [];
+    const lifecycle = new WatchSimulatorLifecycle(
+      simctl,
+      new WatchSimulatorInventory(simctl, "arm64"),
+      {
+        run: async (request, boot) => {
+          signals.push(request.signal);
+          return await boot(request.timeoutMs);
+        },
+      },
+    );
+    const explicit = new AbortController().signal;
+    const ambient = new AbortController().signal;
+    const watch = await lifecycle.findWatch({ deviceId: WATCH_UDID });
+
+    await lifecycle.boot(watch, { timeoutMs: 30_000, signal: explicit });
+    await runWithAbortSignal(ambient, () => lifecycle.boot(watch, { timeoutMs: 30_000 }));
+
+    expect(signals).toEqual([explicit, ambient]);
+  });
+
+  test("a watch boot refused at the simulator limit never runs simctl boot", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const full = new BootCapacityExhaustedError(
+      { platform: "ios", limit: 2, booted: 2, retryAfterMs: 1_000 },
+      "iOS simulator capacity reached",
+    );
+    const lifecycle = new WatchSimulatorLifecycle(
+      simctl,
+      new WatchSimulatorInventory(simctl, "arm64"),
+      {
+        run: async () => {
+          throw full;
+        },
+      },
+    );
+    const watch = await lifecycle.findWatch({ deviceId: WATCH_UDID });
+    await expect(lifecycle.boot(watch, { timeoutMs: 30_000 })).rejects.toBe(full);
+    expect(simctl.commands).toEqual([]);
+  });
+
+  test("the tool lifecycle admits watch boots through the installed simulator gate", async () => {
+    const simctl = new FakeWatchLifecycleSimctl();
+    const full = new BootCapacityExhaustedError(
+      { platform: "ios", limit: 1, booted: 1, retryAfterMs: 1_000 },
+      "iOS simulator capacity reached",
+    );
+    const previous = installBootAdmissionServices({
+      androidColdBootAdmitter: () => undefined,
+      assertBootCapacityAvailable: async () => {},
+      iosBootInstrumentation: () => ({
+        run: async () => {
+          throw full;
+        },
+      }),
+    });
+    try {
+      const lifecycle = watchLifecycleOver(simctl);
+      const watch = await lifecycle.findWatch({ deviceId: WATCH_UDID });
+      await expect(lifecycle.boot(watch, { timeoutMs: 30_000 })).rejects.toBe(full);
+      expect(simctl.commands).toEqual([]);
+    } finally {
+      installBootAdmissionServices(previous);
+    }
   });
 
   test("adopts an already-booted watch without a boot command", async () => {

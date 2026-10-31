@@ -309,6 +309,15 @@ the device really should be stopped out from under its holder.
 - For a wedged Android emulator, `force` also skips the AVD-name comparison.
 - `killDevice` stops an Apple Watch simulator too: pass `platform: "watchos"`
   and its UDID. A UDID that is not a watch simulator is refused.
+- `deleteDevice` deletes an Apple Watch simulator with
+  `target.platform: "watchos"` and the watch's UDID as `target.stableId`. A
+  running watch is stopped first, which also releases any session on it. The
+  call succeeds only once a fresh watch listing no longer shows the watch. A
+  UDID that no watch simulator has reports `already_absent` and deletes
+  nothing, even when it names another simulator. A `target.stableName` that
+  differs from the watch's name fails with `identity_conflict`, a failed
+  `simctl delete` with `watch_delete_failed`, and running out of `timeoutMs`
+  with `teardown_deadline_exceeded`.
 - A refused `deleteDevice` carries the same typed fields as a refused
   `killDevice`.
 

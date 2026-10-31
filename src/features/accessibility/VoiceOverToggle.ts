@@ -17,16 +17,32 @@ const VOICEOVER_CONFIRMATION_TIMEOUT_MS = 10_000;
 const VOICEOVER_CONFIRMATION_POLL_INTERVAL_MS = 500;
 
 export class VoiceOverToggle {
+  private readonly detector: IosVoiceOverDetector;
+  private readonly processExecutor: HostCommandExecutor;
+  private readonly timer: Timer;
+  // Resolve lazily so the iOS singleton is only touched when the toggle runs,
+  // and so tests can inject a fake CtrlProxy for the physical-device path.
+  private readonly clientProvider: () => IosCtrlProxy;
+
   constructor(
     private readonly device: BootedDevice,
-    private readonly detector: IosVoiceOverDetector = iosVoiceOverDetector,
-    private readonly processExecutor: HostCommandExecutor = new DefaultHostCommandExecutor(),
-    private readonly timer: Timer = defaultTimer,
-    // Resolve lazily so the iOS singleton is only touched when the toggle runs,
-    // and so tests can inject a fake CtrlProxy for the physical-device path.
-    private readonly clientProvider: () => IosCtrlProxy = () =>
-      IOSCtrlProxyClient.getInstance(this.device),
-  ) {}
+    {
+      detector = iosVoiceOverDetector,
+      processExecutor = new DefaultHostCommandExecutor(),
+      timer = defaultTimer,
+      clientProvider = () => IOSCtrlProxyClient.getInstance(this.device),
+    }: {
+      detector?: IosVoiceOverDetector;
+      processExecutor?: HostCommandExecutor;
+      timer?: Timer;
+      clientProvider?: () => IosCtrlProxy;
+    } = {},
+  ) {
+    this.detector = detector;
+    this.processExecutor = processExecutor;
+    this.timer = timer;
+    this.clientProvider = clientProvider;
+  }
 
   async toggle(enabled: boolean, options?: ScreenReaderToggleOptions): Promise<VoiceOverResult> {
     await this.reportPreviousState(enabled, options);
@@ -230,12 +246,9 @@ export class VoiceOverToggle {
       }
 
       this.detector.invalidateCache(this.device.deviceId);
-      lastObservedState = await this.detector.resolveState(
-        this.device.deviceId,
-        client,
-        undefined,
-        remainingMs,
-      );
+      lastObservedState = await this.detector.resolveState(this.device.deviceId, client, {
+        timeoutMs: remainingMs,
+      });
       if (lastObservedState === enabled || this.timer.now() >= deadline) {
         return lastObservedState;
       }

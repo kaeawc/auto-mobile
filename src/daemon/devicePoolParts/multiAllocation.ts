@@ -71,8 +71,10 @@ export interface MultiAllocationOperations {
     ticket: MultiDeviceAllocationTicket,
     deadlineMs: number,
     signal: AbortSignal | undefined,
-    setRefreshFailure: (failure: string | undefined) => void,
-    allocate: () => Promise<T>,
+    options: {
+      setRefreshFailure: (failure: string | undefined) => void;
+      allocate: () => Promise<T>;
+    },
   ): Promise<MultiDeviceAllocationOutcome<T>>;
   refreshMultiDeviceInventory(
     ticket: MultiDeviceAllocationTicket,
@@ -187,7 +189,8 @@ export class DevicePoolMultiAllocation {
       if (shortfall.refresh) {
         refreshFailure = shortfall.refresh.failure;
       }
-      assertPoolCapacity(this.state.criteriaMatcher, shortfall.stats, requiredCount, platform, {
+      assertPoolCapacity(this.state.criteriaMatcher, shortfall.stats, requiredCount, {
+        platform,
         recoveringAndroidImages: this.state.recoveryCoordinator.recoveringAndroidImages.size,
         refreshContext: refreshFailureContext(refreshFailure),
       });
@@ -196,14 +199,11 @@ export class DevicePoolMultiAllocation {
       const assigned = new Set<string>();
       let firstWaitLogged = false;
       const allocate = () =>
-        this.executeMultiDeviceAllocation(
-          ticket,
-          startTime + timeoutMs,
-          signal,
-          (failure) => {
+        this.executeMultiDeviceAllocation(ticket, startTime + timeoutMs, signal, {
+          setRefreshFailure: (failure) => {
             refreshFailure = failure;
           },
-          async () => {
+          allocate: async () => {
             throwIfAllocationAborted(signal);
             // Try to assign all remaining sessions
             while (assigned.size < requiredCount) {
@@ -254,7 +254,7 @@ export class DevicePoolMultiAllocation {
             // All devices assigned successfully
             return assignments;
           },
-        );
+        });
       let result: Awaited<ReturnType<typeof allocate>>;
       try {
         result = await allocate();
@@ -453,60 +453,64 @@ export class DevicePoolMultiAllocation {
           ticket,
           startTime + timeoutMs,
           signal,
-          (failure) => {
-            refreshFailure = failure;
-          },
-          async () => {
-            for (const request of sortedRequests) {
-              if (assignments.has(request.sessionId)) {
-                continue;
-              }
-              if (this.recordHeldAssignment(request, assignments)) {
-                continue;
-              }
-              const result = await this.callbacks.tryAssignDeviceWithCriteria(
-                request.sessionId,
-                request.criteria,
-                signal,
-              );
-              if (result.refreshCompleted) {
-                refreshFailure = result.refreshFailure;
-              }
-              if (result.success) {
-                this.callbacks.recordCriteriaAssignment(
-                  request,
-                  result,
-                  assignments,
-                  assignmentsToRollback,
+          {
+            setRefreshFailure: (failure) => {
+              refreshFailure = failure;
+            },
+            allocate: async () => {
+              for (const request of sortedRequests) {
+                if (assignments.has(request.sessionId)) {
+                  continue;
+                }
+                if (this.recordHeldAssignment(request, assignments)) {
+                  continue;
+                }
+                const result = await this.callbacks.tryAssignDeviceWithCriteria(
+                  request.sessionId,
+                  request.criteria,
+                  signal,
                 );
-                logger.info(
-                  `[DevicePool] Allocated device ${result.deviceId} to session ${request.sessionId} ` +
-                    `(${assignments.size}/${requiredCount})`,
-                );
-              } else if (result.livenessUnknown) {
-                throw new ActionableError(
-                  `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
-                );
-              } else if (!result.shouldWait) {
-                const summary = this.state.criteriaMatcher.formatCriteriaSummary(request.criteria);
-                throw new ActionableError(
-                  `Failed to allocate device for session ${request.sessionId}${summary}.\n` +
-                    `No matching devices are currently available.\n` +
-                    `Suggestions:\n` +
-                    `  - Boot a simulator or emulator that matches the requested criteria\n` +
-                    `  - Wait for a device to become idle\n` +
-                    `  - Reduce parallel test count to match available devices`,
-                );
+                if (result.refreshCompleted) {
+                  refreshFailure = result.refreshFailure;
+                }
+                if (result.success) {
+                  this.callbacks.recordCriteriaAssignment(
+                    request,
+                    result,
+                    assignments,
+                    assignmentsToRollback,
+                  );
+                  logger.info(
+                    `[DevicePool] Allocated device ${result.deviceId} to session ${request.sessionId} ` +
+                      `(${assignments.size}/${requiredCount})`,
+                  );
+                } else if (result.livenessUnknown) {
+                  throw new ActionableError(
+                    `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
+                  );
+                } else if (!result.shouldWait) {
+                  const summary = this.state.criteriaMatcher.formatCriteriaSummary(
+                    request.criteria,
+                  );
+                  throw new ActionableError(
+                    `Failed to allocate device for session ${request.sessionId}${summary}.\n` +
+                      `No matching devices are currently available.\n` +
+                      `Suggestions:\n` +
+                      `  - Boot a simulator or emulator that matches the requested criteria\n` +
+                      `  - Wait for a device to become idle\n` +
+                      `  - Reduce parallel test count to match available devices`,
+                  );
+                }
               }
-            }
-            if (assignments.size < requiredCount) {
-              // Never retain new claims while waiting; existing sessions survive.
-              await this.callbacks.rollbackAssignments(assignmentsToRollback);
-              assignmentsToRollback.clear();
-              assignments.clear();
-              throw new DevicePoolError("All devices busy", true, refreshFailure);
-            }
-            return assignments;
+              if (assignments.size < requiredCount) {
+                // Never retain new claims while waiting; existing sessions survive.
+                await this.callbacks.rollbackAssignments(assignmentsToRollback);
+                assignmentsToRollback.clear();
+                assignments.clear();
+                throw new DevicePoolError("All devices busy", true, refreshFailure);
+              }
+              return assignments;
+            },
           },
         );
         attemptCount = result.attempts;
@@ -672,8 +676,10 @@ export class DevicePoolMultiAllocation {
     ticket: MultiDeviceAllocationTicket,
     deadlineMs: number,
     signal: AbortSignal | undefined,
-    setRefreshFailure: (failure: string | undefined) => void,
-    allocate: () => Promise<T>,
+    {
+      setRefreshFailure,
+      allocate,
+    }: { setRefreshFailure: (failure: string | undefined) => void; allocate: () => Promise<T> },
   ): Promise<MultiDeviceAllocationOutcome<T>> {
     let attempts = 0;
     let waited = false;
@@ -803,16 +809,15 @@ export function connectMultiAllocation(
       ticket: MultiDeviceAllocationTicket,
       deadlineMs: number,
       signal: AbortSignal | undefined,
-      setRefreshFailure: (failure: string | undefined) => void,
-      allocate: () => Promise<T>,
-    ): Promise<MultiDeviceAllocationOutcome<T>> {
-      return part().executeMultiDeviceAllocation(
-        ticket,
-        deadlineMs,
-        signal,
+      {
         setRefreshFailure,
         allocate,
-      );
+      }: { setRefreshFailure: (failure: string | undefined) => void; allocate: () => Promise<T> },
+    ): Promise<MultiDeviceAllocationOutcome<T>> {
+      return part().executeMultiDeviceAllocation(ticket, deadlineMs, signal, {
+        setRefreshFailure,
+        allocate,
+      });
     },
     refreshMultiDeviceInventory: (...args) => part().refreshMultiDeviceInventory(...args),
     isPotentialAllocationSupply: (...args) => part().isPotentialAllocationSupply(...args),

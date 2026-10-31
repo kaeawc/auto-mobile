@@ -78,7 +78,8 @@ function callHandleIdeRequest(
   originalTimeoutMs: number = timeoutMs,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  return server.forwardIdeRequest(mcpClient, request, timeoutMs, socketSessionId, {
+  return server.forwardIdeRequest(mcpClient, request, timeoutMs, {
+    socketSessionId,
     deadline,
     originalTimeoutMs,
     signal,

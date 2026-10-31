@@ -538,19 +538,18 @@ describe("already-dead Android shutdown ownership", () => {
     expect(pool.getDevice(device.deviceId)?.sessionId).toBe("holder");
     const reserve = pool.reserveDeviceForShutdown.bind(pool);
     const reserveSpy = spyOn(pool, "reserveDeviceForShutdown").mockImplementation(
-      (id, signal, client, assertHolder, options) =>
-        reserve(
-          id,
-          signal,
-          client,
-          () => {
+      (id, signal, client, options) => {
+        const assertHolder = options?.assertHolder;
+        return reserve(id, signal, client, {
+          ...options,
+          assertHolder: () => {
             order.push("holder-check");
             beforeHolderCheck?.();
             expect(assertHolder).toBeDefined();
             assertHolder!();
           },
-          options,
-        ),
+        });
+      },
     );
     const release = sessions.releaseSession.bind(sessions);
     const releaseSpy = spyOn(sessions, "releaseSession").mockImplementation((...args) => {

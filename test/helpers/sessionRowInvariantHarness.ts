@@ -126,9 +126,9 @@ class ChaoticRepository extends DeviceSessionRepository {
     const delayMs = this.nextReleaseDelayMs ?? this.writeDelayMs();
     this.nextReleaseDelayMs = undefined;
     this.releaseWritesIssued++;
-    const write = `release(${args[3]}, generation ${args[4]?.expectedRowGeneration ?? "any"})`;
+    const write = `release(${args[3].reason}, generation ${args[3].expectedRowGeneration ?? "any"})`;
     this.log.push(`${write} issued, lands in ${delayMs}ms`);
-    const terminal = isTerminalReleaseReason(args[3]);
+    const terminal = isTerminalReleaseReason(args[3].reason);
     this.terminalWritesInFlight += terminal ? 1 : 0;
     try {
       await this.land(delayMs);
@@ -502,7 +502,7 @@ export async function runSessionRowInterleaving(
     const now = timer.now();
     switch (operation) {
       case "peer-terminal-row": {
-        await peer.markReleased(sessionId, "released", now, PEER_TERMINAL_REASON);
+        await peer.markReleased(sessionId, "released", now, { reason: PEER_TERMINAL_REASON });
         if ((await peer.getSession(sessionId))?.release_reason === PEER_TERMINAL_REASON) {
           peerTerminal = "decisive";
           repository.log.push(`the peer's terminal row landed (${peerTerminal})`);

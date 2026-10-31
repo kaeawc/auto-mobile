@@ -275,7 +275,10 @@ describe("barrier tool", () => {
       expect(cleanup).toHaveBeenCalledWith("loss-lock", "loss-session");
       expect(timer.getPendingTimeouts()).toEqual([]);
       await expect(
-        coordinator.enterCriticalSection("loss-lock", "emulator-5554", 50, "loss-session"),
+        coordinator.enterCriticalSection("loss-lock", "emulator-5554", {
+          timeout: 50,
+          namespace: "loss-session",
+        }),
       ).rejects.toThrow('No expected device count registered for lock "loss-lock"');
       expect(error).toBe(loss);
       expect(isDeviceLostError(error)).toBe(true);

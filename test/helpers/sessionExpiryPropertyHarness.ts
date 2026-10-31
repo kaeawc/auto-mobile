@@ -314,11 +314,11 @@ class ScheduleWorld {
       () => false,
       async (sessionId, reason) => {
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+        await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
           reason,
         });
       },
-      this.timer,
+      { timer: this.timer },
     );
     manager.onSessionRelease((_sessionId, _deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), reason });
@@ -392,12 +392,9 @@ class ScheduleWorld {
   async restart(): Promise<void> {
     const old = this.daemon;
     for (const session of old.manager.getAllSessions()) {
-      await this.persistence.markReleased(
-        session.sessionId,
-        "expired",
-        this.timer.now(),
-        "daemon-restart",
-      );
+      await this.persistence.markReleased(session.sessionId, "expired", this.timer.now(), {
+        reason: "daemon-restart",
+      });
     }
     await old.monitor.stop();
     old.manager.stopCleanupTimer();

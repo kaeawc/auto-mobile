@@ -515,8 +515,7 @@ export class CtrlProxyText extends SharedTextDelegate {
     action: ImeAction,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
+    { abortSignal, onDispatch }: { abortSignal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<ActionTimingResult> {
     let dispatched = false;
     const startMs = this.context.timer.now();
@@ -577,14 +576,21 @@ export class CtrlProxyText extends SharedTextDelegate {
 
   async requestInsertText(
     text: string,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    options?: {
-      expectedSuffix?: string;
-      acceptsCaretNotPlaced?: boolean;
-      precedingState?: InsertTextState;
-    },
-    transport: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs"> = {},
+    {
+      timeoutMs = 5000,
+      perf,
+      options,
+      transport = {},
+    }: {
+      timeoutMs?: number;
+      perf?: PerformanceTracker;
+      options?: {
+        expectedSuffix?: string;
+        acceptsCaretNotPlaced?: boolean;
+        precedingState?: InsertTextState;
+      };
+      transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">;
+    } = {},
   ): Promise<A11ySetTextResult> {
     let dispatched = false;
     const startMs = this.context.timer.now();
@@ -628,10 +634,9 @@ export class CtrlProxyText extends SharedTextDelegate {
     text: string,
     priorImeId?: string,
     timeoutMs: number = imeCommitTimeoutMs(text),
-    perf?: PerformanceTracker,
-    options?: ImeCommitOptions,
+    options?: ImeCommitOptions & { perf?: PerformanceTracker },
   ): Promise<ImeCommitActionResult> {
-    const { signal, delivery, trace } = { ...options };
+    const { perf, signal, delivery, trace } = { ...options };
     let dispatchedId: string | undefined;
     let timedOut = false;
     let result: ImeCommitActionResult;

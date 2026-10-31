@@ -61,7 +61,10 @@ function isOwnPostDispatchTransportFailure(
     current = current.cause;
   }
   const { stdout, stderr } = adbFailureOutput(error);
-  return isAdbPostDispatchTransportError(stderr, exitCode, deviceId, transportId, stdout);
+  return isAdbPostDispatchTransportError(stderr, exitCode, deviceId, {
+    expectedTransportId: transportId,
+    stdout,
+  });
 }
 
 interface TransportRecoveryOptions {

@@ -1495,8 +1495,7 @@ describe("session-only broker lifecycle", () => {
           lockReleased = true;
         },
       },
-      timer,
-      { recordingGaps: new InMemoryMutationRecordingGaps() },
+      { timer, mutations: { recordingGaps: new InMemoryMutationRecordingGaps() } },
     );
     const marked: string[] = [];
     const relinquish = options.store.relinquishForRestart.bind(options.store);
@@ -1629,8 +1628,7 @@ describe("session-only broker lifecycle", () => {
       broker,
       "test-scope",
       { acquire: () => {}, release: () => {} },
-      timer,
-      { recordingGaps: new InMemoryMutationRecordingGaps() },
+      { timer, mutations: { recordingGaps: new InMemoryMutationRecordingGaps() } },
     );
     service.start();
     await entered.promise;

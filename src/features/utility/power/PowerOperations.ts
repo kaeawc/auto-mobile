@@ -64,8 +64,10 @@ export function createPowerOperations(
   device: () => BootedDevice,
   adbFactory: () => AdbClientFactory,
   deviceTraits: () => DeviceTraits,
-  timer: () => Pick<Timer, "sleep" | "now">,
-  seams: PowerDeviceStateDependencies = {},
+  {
+    timer,
+    seams = {},
+  }: { timer: () => Pick<Timer, "sleep" | "now">; seams?: PowerDeviceStateDependencies },
 ): PowerOperations {
   return new PowerOperations({
     device,

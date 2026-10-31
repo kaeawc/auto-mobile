@@ -36,8 +36,10 @@ export class AndroidHierarchySyncRunner {
     perf: PerformanceTracker,
     disableAllFiltering: boolean,
     signal: AbortSignal,
-    effectiveTimeoutMs: number,
-    request: {
+    {
+      effectiveTimeoutMs,
+      ...request
+    }: {
       startTime: number;
       displayId?: number;
       observerMode: boolean;
@@ -45,7 +47,7 @@ export class AndroidHierarchySyncRunner {
       preserveDisplayState: boolean;
       /** Caller-owned out-parameter for the failure detail. */
       diagnostics: HierarchySyncDiagnostics;
-    },
+    } & { effectiveTimeoutMs: number },
   ): Promise<HierarchySyncResult> {
     const { startTime, displayId, observerMode, preserveDisplayState, diagnostics } = request;
     try {
@@ -117,19 +119,22 @@ export class AndroidHierarchySyncRunner {
       const freshData = await this.hooks.awaitSyncReply(
         () =>
           perf.track("waitForPush", () =>
-            this.hooks.waitForFreshData(effectiveTimeoutMs, startTime, false, signal, {
-              requestId: correlationRequestId,
-              dispatchSocket,
-              // A stale nudge has a separate id and stream push; it cannot finish a suppressed
-              // caller and release the primary response's token before that response arrives.
-              allowStaleResponse:
-                !request.onRequestId &&
-                !observerMode &&
-                !disableAllFiltering &&
-                displayId === undefined,
-              observerMode,
-              displayId,
-              diagnostics,
+            this.hooks.waitForFreshData(effectiveTimeoutMs, startTime, false, {
+              signal,
+              options: {
+                requestId: correlationRequestId,
+                dispatchSocket,
+                // A stale nudge has a separate id and stream push; it cannot finish a suppressed
+                // caller and release the primary response's token before that response arrives.
+                allowStaleResponse:
+                  !request.onRequestId &&
+                  !observerMode &&
+                  !disableAllFiltering &&
+                  displayId === undefined,
+                observerMode,
+                displayId,
+                diagnostics,
+              },
             }),
           ),
         correlationRequestId,

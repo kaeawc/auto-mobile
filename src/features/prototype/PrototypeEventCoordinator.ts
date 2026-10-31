@@ -47,18 +47,30 @@ export class PrototypeEventCoordinator {
     { client: PrototypeEventSource; unsubscribe: () => void }
   >();
 
+  private readonly telemetry?: PrototypeEventTelemetry;
+  /** Ends in-flight host-proxied requests (#12527) when their prototype ends. */
+  private readonly requests?: PrototypeRequestCancellation;
+  private readonly recorder?: Pick<PrototypeTestSessionRecorder, "recordEvent" | "endForDismiss"> &
+    Partial<Pick<PrototypeTestSessionRecorder, "endSessionRecordings" | "endDeviceRecordings">>;
+
   constructor(
     private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">,
     private readonly store: PrototypeStatusStore,
-    private readonly telemetry?: PrototypeEventTelemetry,
-    /** Ends in-flight host-proxied requests (#12527) when their prototype ends. */
-    private readonly requests?: PrototypeRequestCancellation,
-    private readonly recorder?: Pick<
-      PrototypeTestSessionRecorder,
-      "recordEvent" | "endForDismiss"
-    > &
-      Partial<Pick<PrototypeTestSessionRecorder, "endSessionRecordings" | "endDeviceRecordings">>,
-  ) {}
+    {
+      telemetry,
+      requests,
+      recorder,
+    }: {
+      telemetry?: PrototypeEventTelemetry;
+      requests?: PrototypeRequestCancellation;
+      recorder?: Pick<PrototypeTestSessionRecorder, "recordEvent" | "endForDismiss"> &
+        Partial<Pick<PrototypeTestSessionRecorder, "endSessionRecordings" | "endDeviceRecordings">>;
+    } = {},
+  ) {
+    this.telemetry = telemetry;
+    this.requests = requests;
+    this.recorder = recorder;
+  }
 
   /** Subscribe before show dispatch so a push during the request cannot be lost. */
   show(scope: PrototypeScope, id: string, client: PrototypeEventSource): void {
@@ -94,8 +106,7 @@ export class PrototypeEventCoordinator {
     scope: PrototypeScope,
     id: string,
     client: PrototypeEventSource,
-    replayed: readonly PrototypeEvent[],
-    lastSequence: number,
+    { replayed, lastSequence }: { replayed: readonly PrototypeEvent[]; lastSequence: number },
   ): void {
     const known = this.entries.get(scopeKey(scope, id));
     // A replayed terminal event may already have ended the entry (shown false, terminal true)

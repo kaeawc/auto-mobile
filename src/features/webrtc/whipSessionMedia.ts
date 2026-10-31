@@ -47,7 +47,7 @@ export function assertWhipAnswerAcceptsMedia(
   const accepted =
     (staticPayloadType !== undefined && formats.has(staticPayloadType)) ||
     attributeLines.some((line) =>
-      isAcceptedCodecRtpMap(line, formats, codec, attributeLines, profile),
+      isAcceptedCodecRtpMap(line, formats, codec, { attributeLines, profile }),
     );
   if (!accepted) {
     throw new Error(`WHIP answer did not accept ${codec.toUpperCase()} ${kind}.`);
@@ -93,8 +93,7 @@ function isAcceptedCodecRtpMap(
   line: string,
   formats: Set<string>,
   codec: string,
-  attributeLines: string[],
-  profile: H264Profile,
+  { attributeLines, profile }: { attributeLines: string[]; profile: H264Profile },
 ): boolean {
   const match = line.match(/^a=rtpmap:(\S+)\s+([^/\s]+)\/(\d+)/i);
   if (!match || !formats.has(match[1]) || match[2].toLowerCase() !== codec) {

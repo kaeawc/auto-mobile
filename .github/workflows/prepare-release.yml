@@ -26,6 +26,7 @@ jobs:
     outputs:
       release_commit: ${{ steps.commit.outputs.release_commit }}
       base_main_commit: ${{ steps.commit.outputs.base_main_commit }}
+      protoviewer_version: ${{ steps.protoviewer-version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -34,6 +35,19 @@ jobs:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+
+      - name: Derive ProtoViewer core version
+        id: protoviewer-version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          core="${RELEASE_VERSION%%[-+]*}"
+          if [[ ! "$core" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::ProtoViewer release version core must match MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          echo "version=${core}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -164,6 +178,23 @@ jobs:
       RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
       RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
+  # Standalone ProtoViewer Android app (#15301), signed with the shared release
+  # keystore. Not the iOS simulator template viewer built below.
+  build-candidate-protoviewer-apk:
+    needs: prepare-version
+    uses: ./.github/workflows/build-protoviewer-apk.yml
+    with:
+      release-version: ${{ needs.prepare-version.outputs.protoviewer_version }}
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: true
+      artifact-retention-days: 90
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
   build-candidate-video-server-jar:
     needs: prepare-version
     uses: ./.github/workflows/build-video-server-jar.yml
@@ -272,6 +303,7 @@ jobs:
         prepare-version,
         build-candidate-ctrl-proxy-ios-ipa,
         build-candidate-control-proxy-apk,
+        build-candidate-protoviewer-apk,
         build-candidate-video-server-jar,
         build-candidate-screen-capture-helper,
         build-candidate-prototype-agent,
@@ -300,6 +332,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           APK_SHA256_CHECKSUM: ${{ needs.build-candidate-control-proxy-apk.outputs.sha256 }}
+          PROTOVIEWER_APK_SHA256: ${{ needs.build-candidate-protoviewer-apk.outputs.sha256 }}
           IOS_CTRL_PROXY_SHA256_CHECKSUM: ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.sha256 }}
           IOS_CTRL_PROXY_RUNNER_SHA256: ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
           VIDEO_JAR_SHA256: ${{ needs.build-candidate-video-server-jar.outputs.sha256 }}
@@ -378,6 +411,7 @@ jobs:
         finalize-release,
         build-candidate-ctrl-proxy-ios-ipa,
         build-candidate-control-proxy-apk,
+        build-candidate-protoviewer-apk,
         build-candidate-video-server-jar,
         build-candidate-screen-capture-helper,
         build-candidate-prototype-agent,
@@ -408,6 +442,12 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: control-proxy-apk
+          path: /tmp
+
+      - name: "Download ProtoViewer APK"
+        uses: actions/download-artifact@v7
+        with:
+          name: protoviewer-apk
           path: /tmp
 
       - name: "Download CtrlProxy iOS IPA"
@@ -470,6 +510,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy-debug.apk android
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-protoviewer.apk protoviewerapk
           bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy.ipa ios
           bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-video.jar videojar
           bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
@@ -528,7 +569,7 @@ jobs:
             --arg tag_sha "$TAG_SHA" \
             --arg prepare_run_id "$PREPARE_RUN_ID" \
             '{tag: $tag, tag_sha: $tag_sha, prepare_run_id: $prepare_run_id,
-              artifacts: ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
+              artifacts: ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
             > /tmp/release-artifact-provenance.json
 
       - name: Upload release artifact provenance

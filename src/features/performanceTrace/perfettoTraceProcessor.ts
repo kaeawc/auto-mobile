@@ -174,8 +174,7 @@ export async function summarizePerfettoTrace(
   processor: PerfettoTraceProcessor,
   tracePath: string,
   template: PerformanceTraceTemplate,
-  appId: string | undefined,
-  signal?: AbortSignal,
+  { appId, signal }: { appId?: string; signal?: AbortSignal } = {},
 ): Promise<{ summary: PerformanceTraceSummary; warnings: string[] }> {
   const warnings: string[] = [];
   const summary: PerformanceTraceSummary = {};

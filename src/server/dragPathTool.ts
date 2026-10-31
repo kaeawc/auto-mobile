@@ -158,7 +158,7 @@ export const dragPathSchema = withJsonSchemaOverride(
   ).superRefine(validateDragPathValue),
   (js) => {
     js.description =
-      'Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag. With pointer: { toolType: "stylus" } it draws with a stylus (Android 13+) with per-point pressure and tilt, and is refused instead of using a finger if the device cannot.';
+      'Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag. With pointer: { toolType: "stylus" } it draws with a stylus (Android 12+) with per-point pressure and tilt, and is refused instead of using a finger if the device cannot.';
   },
 );
 

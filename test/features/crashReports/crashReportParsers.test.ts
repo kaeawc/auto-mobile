@@ -55,6 +55,40 @@ describe(".ips crash reports (#14103)", () => {
     ]);
   });
 
+  test("parses the .ips captured from a real Simulator SIGABRT", () => {
+    // Header and body as captured on iOS 27.0 (#14103), with threads trimmed to the faulting
+    // thread's first frames and usedImages omitted. The header carries the incident id.
+    const parsed = parseIpsCrashReport(
+      fixture("ios-simulator-playground-sigabrt-captured.ips"),
+      "/r/Playground-2026-10-30-151729.ips",
+    );
+
+    expect(parsed?.simulatorDeviceId).toBe("B131B3E7-52E7-4FC9-B698-0A73E66BB494");
+    expect(parsed?.report).toMatchObject({
+      id: "3F55C604-EC99-4CA7-95B5-0E22E44A5EA5",
+      appId: "dev.jasonpearson.automobile.Playground",
+      appVersion: "1.0",
+      processId: 73194,
+      timestampMs: Date.parse("2026-10-30T15:17:12.006-05:00"),
+      exceptionType: "EXC_CRASH (SIGABRT)",
+      exceptionCode: "0x0000000000000000, 0x0000000000000000",
+      terminationReason: "SIGNAL 6: Abort trap: 6 (by zsh)",
+      deviceModel: "iOS Simulator",
+      osVersion: "macOS 26.6.2 (25G83)",
+    });
+    expect(parsed?.report.frames.map((frame) => frame.methodName)).toEqual([
+      "mach_msg2_trap",
+      "mach_msg2_internal",
+      "mach_msg_overwrite",
+      "mach_msg",
+      "__CFRunLoopServiceMachPort",
+      "__CFRunLoopRun",
+      "_CFRunLoopRunSpecificWithOptions",
+      "GSEventRunModal",
+    ]);
+    expect(parsed?.report.frames.some((frame) => frame.isAppCode)).toBe(false);
+  });
+
   test("skips non-crash .ips kinds and unparseable text", () => {
     const hang = fixture("ios-simulator-sigabrt.ips").replace(
       '"bug_type":"309"',

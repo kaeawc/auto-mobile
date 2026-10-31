@@ -16,6 +16,7 @@ import {
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const WRITERS = "2026_10_28_016_binding_registry_writers";
+const WATCH = "2026_10_30_016_watchos_binding_platform";
 const PREVIOUS = "2026_10_27_015_device_claims_metadata";
 const FUTURE = "2099_01_01_017_future";
 const VERSION = "9.9.9-test";
@@ -106,8 +107,8 @@ describe("binding registry writer versions", () => {
         ...migrations.BINDING_REGISTRY_MIGRATIONS,
         [FUTURE]: {
           up: async () => {
-            // Only 016 has resolved its writer so far; this migration's resolver runs after up.
-            expect(resolutions).toBe(1);
+            // Both registered migrations have resolved their writers; this one resolves after up.
+            expect(resolutions).toBe(2);
           },
           down: async (trx) => {
             expect(trx.isTransaction).toBe(true);
@@ -130,9 +131,9 @@ describe("binding registry writer versions", () => {
     await runner.getMigrations();
     expect(resolutions).toBe(0);
     expect((await runner.migrateToLatest()).error).toBeUndefined();
-    expect(resolutions).toBe(2);
+    expect(resolutions).toBe(3);
     expect(rows()).toEqual(
-      [WRITERS, FUTURE].map((migration_name) => ({
+      [WRITERS, WATCH, FUTURE].map((migration_name) => ({
         migration_name,
         writer_version: VERSION,
         recorded_at: expect.any(String),
@@ -140,17 +141,21 @@ describe("binding registry writer versions", () => {
     );
     expect((await runner.migrateDown()).error).toBeUndefined();
     expect(reverted).toBe(true);
-    expect(rows()).toEqual([
-      { migration_name: WRITERS, writer_version: VERSION, recorded_at: expect.any(String) },
-    ]);
-    expect(resolutions).toBe(2);
+    expect(rows()).toEqual(
+      [WRITERS, WATCH].map((migration_name) => ({
+        migration_name,
+        writer_version: VERSION,
+        recorded_at: expect.any(String),
+      })),
+    );
+    expect(resolutions).toBe(3);
   });
 
   test("derives the known schema version from the last registered key", () => {
     expect(migrations.KNOWN_BINDING_REGISTRY_SCHEMA_VERSION).toBe(
       Object.keys(migrations.BINDING_REGISTRY_MIGRATIONS).at(-1)!,
     );
-    expect(migrations.KNOWN_BINDING_REGISTRY_SCHEMA_VERSION).toBe(WRITERS);
+    expect(migrations.KNOWN_BINDING_REGISTRY_SCHEMA_VERSION).toBe(WATCH);
   });
 
   test("fresh migration records writers from 016 onward and a no-op writes nothing", async () => {
@@ -175,9 +180,13 @@ describe("binding registry writer versions", () => {
   test("upgrade leaves old migrations unknown and records only this invocation's work", async () => {
     expect((await migrator().migrateTo(PREVIOUS)).error).toBeUndefined();
     await migrate();
-    expect(rows()).toEqual([
-      { migration_name: WRITERS, writer_version: VERSION, recorded_at: expect.any(String) },
-    ]);
+    expect(rows()).toEqual(
+      [WRITERS, WATCH].map((migration_name) => ({
+        migration_name,
+        writer_version: VERSION,
+        recorded_at: expect.any(String),
+      })),
+    );
     const before = raw.query("SELECT total_changes() AS count").get();
     await migrations.assertBindingRegistryCurrent(db, ":memory:");
     expect(raw.query("SELECT total_changes() AS count").get()).toEqual(before);
@@ -200,7 +209,7 @@ describe("binding registry writer versions", () => {
   });
 
   test("migration 016 is reversible and enforces its row contract", async () => {
-    await migrate();
+    expect((await migrator().migrateTo(WRITERS)).error).toBeUndefined();
     expect(raw.query("PRAGMA table_info(binding_registry_migration_writers)").all()).toMatchObject([
       { name: "migration_name", type: "TEXT", pk: 1 },
       { name: "writer_version", type: "TEXT", notnull: 1 },
@@ -223,7 +232,7 @@ describe("binding registry writer versions", () => {
     const registry = new SqliteBindingRegistry(db, { timer: new FakeTimer() });
     expect(await registry.describeSchema()).toEqual({
       schemaVersion: null,
-      knownSchemaVersion: WRITERS,
+      knownSchemaVersion: WATCH,
       supported: true,
       writerVersion: null,
     });
@@ -253,14 +262,14 @@ describe("binding registry writer versions", () => {
     const registry = new SqliteBindingRegistry(db, { timer: new FakeTimer() });
     expect(await registry.describeSchema()).toEqual({
       schemaVersion: PREVIOUS,
-      knownSchemaVersion: WRITERS,
+      knownSchemaVersion: WATCH,
       supported: true,
       writerVersion: null,
     });
     await migrate();
     expect(await registry.describeSchema()).toEqual({
-      schemaVersion: WRITERS,
-      knownSchemaVersion: WRITERS,
+      schemaVersion: WATCH,
+      knownSchemaVersion: WATCH,
       supported: true,
       writerVersion: VERSION,
     });
@@ -271,7 +280,7 @@ describe("binding registry writer versions", () => {
     const before = raw.serialize();
     expect(await registry.describeSchema()).toEqual({
       schemaVersion: FUTURE,
-      knownSchemaVersion: WRITERS,
+      knownSchemaVersion: WATCH,
       supported: false,
       writerVersion: "2.0.0",
     });

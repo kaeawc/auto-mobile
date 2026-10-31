@@ -39,7 +39,7 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     frame: DaemonResponse | DaemonNotification,
     onFlushed?: (error?: Error | null) => void,
   ): void {
-    this.writeFrameData(socket, sessionId, frame, onFlushed);
+    this.writeFrameData(socket, sessionId, frame, { onFlushed });
   }
 
   /** Replace the local (non-forwarded) request handler. */
@@ -53,8 +53,7 @@ export class UnixSocketServerHarness extends UnixSocketServer {
       sessionId: string,
       socket: Socket,
       request: DaemonRequest,
-      receivedAtMs: number,
-      handling?: SocketRequestHandling,
+      options: { receivedAtMs: number; handling?: SocketRequestHandling },
     ) => Promise<DaemonResponse | undefined>,
   ) {
     this.handleRequest = handler;
@@ -72,7 +71,7 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     request: DaemonRequest,
     receivedAtMs: number,
   ): Promise<DaemonResponse | undefined> {
-    return this.handleRequest(sessionId, socket, request, receivedAtMs);
+    return this.handleRequest(sessionId, socket, request, { receivedAtMs });
   }
 
   /** Run the real local (non-forwarded) handler for one request. */

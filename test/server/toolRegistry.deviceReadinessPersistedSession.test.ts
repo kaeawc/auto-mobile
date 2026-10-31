@@ -159,8 +159,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       "restartDeadlineProbe",
       "Restart deadline probe",
       z.object({ sessionUuid: z.string().optional() }),
-      async () => ({ success: true }),
-      { deviceReadiness: "booted" },
+      { handler: async () => ({ success: true }), deviceReadiness: "booted" },
     );
     const call = (deadline?: number) =>
       ToolRegistry.getTool("restartDeadlineProbe")!.handler({
@@ -390,8 +389,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       "bootedOnlyProbe",
       "Booted-only probe",
       z.object({ sessionUuid: z.string().optional() }),
-      async () => ({ success: true }),
-      { deviceReadiness: "booted" },
+      { handler: async () => ({ success: true }), deviceReadiness: "booted" },
     );
 
     const response = await ToolRegistry.getTool("bootedOnlyProbe")!.handler({
@@ -412,8 +410,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       "automationReadyProbe",
       "Automation-ready probe",
       z.object({ sessionUuid: z.string().optional() }),
-      async () => ({ success: true }),
-      { deviceReadiness: "automationReady" },
+      { handler: async () => ({ success: true }), deviceReadiness: "automationReady" },
     );
 
     const response = await ToolRegistry.getTool("automationReadyProbe")!.handler({
@@ -433,15 +430,13 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       "bootedFirstProbe",
       "Booted-first probe",
       z.object({ sessionUuid: z.string().optional() }),
-      async () => ({ success: true }),
-      { deviceReadiness: "booted" },
+      { handler: async () => ({ success: true }), deviceReadiness: "booted" },
     );
     ToolRegistry.registerDeviceAware(
       "automationReadySecondProbe",
       "Automation-ready-second probe",
       z.object({ sessionUuid: z.string().optional() }),
-      async () => ({ success: true }),
-      { deviceReadiness: "automationReady" },
+      { handler: async () => ({ success: true }), deviceReadiness: "automationReady" },
     );
 
     const bootedResponse = await ToolRegistry.getTool("bootedFirstProbe")!.handler({

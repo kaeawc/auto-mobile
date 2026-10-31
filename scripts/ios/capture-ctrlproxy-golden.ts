@@ -73,8 +73,7 @@ async function main(): Promise<void> {
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: values.udid, platform: "ios", name: "golden-capture" },
     Number(values.port),
-    defaultWebSocketFactory,
-    defaultTimer,
+    { wsFactory: defaultWebSocketFactory, timer: defaultTimer },
   );
   const bundle = values.bundle;
   const udid = values.udid;

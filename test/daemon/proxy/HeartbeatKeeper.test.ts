@@ -75,8 +75,14 @@ function harness() {
       calls.push(["drop", uuid]);
       state.otherHeldSessions.delete(uuid);
     },
-    withRecoverableReconnect: async (operation, uuid, allowReleased, fenceNotFound) => {
-      calls.push(["reconnect", uuid, allowReleased, fenceNotFound, daemonLifecycleAllowed()]);
+    withRecoverableReconnect: async (operation, uuid, allowReleased, options) => {
+      calls.push([
+        "reconnect",
+        uuid,
+        allowReleased,
+        options?.fenceSessionNotFoundOnRetry,
+        daemonLifecycleAllowed(),
+      ]);
       await controls.reconnect();
       return operation();
     },

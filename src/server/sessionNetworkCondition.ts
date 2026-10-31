@@ -87,8 +87,13 @@ export async function runSessionNetworkMutation<T>(
   sessionManager: SessionManager | undefined,
   { sessionUuid, deviceId }: SessionNetworkTarget,
   registerRestore: boolean | IosAppNetworkRulePlan,
-  mutation: (iosRule?: IosAppNetworkRuleCommandContext) => Promise<T>,
-  expiresInSeconds?: number,
+  {
+    mutation,
+    expiresInSeconds,
+  }: {
+    mutation: (iosRule?: IosAppNetworkRuleCommandContext) => Promise<T>;
+    expiresInSeconds?: number;
+  },
 ): Promise<T> {
   if (!sessionManager || !sessionUuid) {
     // No lifecycle owner: an iOS rule command gets no ownership context, and

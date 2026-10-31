@@ -70,28 +70,14 @@ describe("coordinate and focus tool layer argument (#9305)", () => {
       },
     });
 
-    await tapAtHandler(device, { x: 1, y: 2, layer: "app" }, undefined, undefined, interactionDeps);
+    await tapAtHandler(device, { x: 1, y: 2, layer: "app" }, { deps: interactionDeps });
     await swipeOnHandler(
       device,
       { direction: "up", layer: "prototype" },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
-    await pinchOnHandler(
-      device,
-      { direction: "in", layer: "app" },
-      undefined,
-      undefined,
-      interactionDeps,
-    );
-    await selectAllTextHandler(
-      device,
-      { layer: "prototype" },
-      undefined,
-      undefined,
-      interactionDeps,
-    );
+    await pinchOnHandler(device, { direction: "in", layer: "app" }, { deps: interactionDeps });
+    await selectAllTextHandler(device, { layer: "prototype" }, { deps: interactionDeps });
 
     expect(seen).toEqual([
       ["tapAt", "app"],

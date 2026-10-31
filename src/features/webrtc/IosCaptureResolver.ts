@@ -197,21 +197,20 @@ export async function defaultResolveSimulatorWindowId(
   helperPath: string,
   device: BootedDevice,
   commandRunner: CommandRunner,
-  audioEnabled: boolean,
-  poll: { signal: AbortSignal; timer: Timer; pollBudgetMs: number },
+  {
+    audioEnabled,
+    poll,
+  }: { audioEnabled: boolean; poll: { signal: AbortSignal; timer: Timer; pollBudgetMs: number } },
 ): Promise<number> {
   const { signal } = poll;
   const startedAt = poll.timer.now();
   let lookups = 0;
   for (;;) {
     lookups += 1;
-    const outcome = await lookupSimulatorWindowId(
-      helperPath,
-      device,
-      commandRunner,
+    const outcome = await lookupSimulatorWindowId(helperPath, device, commandRunner, {
       audioEnabled,
       signal,
-    );
+    });
     if (outcome.kind === "found") {
       return outcome.windowID;
     }
@@ -237,8 +236,7 @@ async function lookupSimulatorWindowId(
   helperPath: string,
   device: BootedDevice,
   commandRunner: CommandRunner,
-  audioEnabled: boolean,
-  signal: AbortSignal,
+  { audioEnabled, signal }: { audioEnabled: boolean; signal: AbortSignal },
 ): Promise<SimulatorWindowLookup> {
   const result = await commandRunner(helperPath, ["--list-simulators"], signal);
   if (result.exitCode !== 0) {

@@ -648,13 +648,10 @@ const writeResumedRecord = (elapsedMs: number, diverted: number): void => {
   // This file-sink recovery summary is a normal WARN record, without another stderr copy.
   trackWrite(
     writeToFile(
-      formatLogRecord(
-        logFormat,
-        ownLogPrefix,
-        "WARN",
-        `Log sink ${logFilePath} resumed after ${elapsedMs}ms; ${diverted} line(s) were diverted while it was stalled`,
-        [],
-      ),
+      formatLogRecord(logFormat, ownLogPrefix, "WARN", {
+        message: `Log sink ${logFilePath} resumed after ${elapsedMs}ms; ${diverted} line(s) were diverted while it was stalled`,
+        args: [],
+      }),
     ).catch((error) => reportLogFailure("Failed to write log sink recovery", error)),
   );
 };
@@ -896,13 +893,10 @@ const writeToLogFile = async (level: string, message: string, args: any[]) => {
   try {
     const context = currentLogContext();
     const contextualMessage = context ? `trace=${context.traceId} ${message}` : message;
-    const safeLogMessage = formatLogRecord(
-      logFormat,
-      ownLogPrefix,
-      level,
-      contextualMessage,
+    const safeLogMessage = formatLogRecord(logFormat, ownLogPrefix, level, {
+      message: contextualMessage,
       args,
-    ).replace(/[\r\n\t]/g, " ");
+    }).replace(/[\r\n\t]/g, " ");
     // Start both configured writes before awaiting either one. A failed file
     // sink must not suppress the process-stream record in `both` mode.
     mirrorToLegacyStdout(safeLogMessage);

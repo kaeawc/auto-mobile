@@ -158,7 +158,7 @@ describe("registerProfilingSessionCleanup (#14113)", () => {
     controller.abort();
 
     const report = await runWithAbortSignal(controller.signal, () =>
-      cleanupSessionProfiling(DEVICE, registry.takeOwnedBy(DEVICE, "s-1"), device, timer),
+      cleanupSessionProfiling(DEVICE, registry.takeOwnedBy(DEVICE, "s-1"), device, { timer }),
     );
 
     expect(report).toMatchObject({ stoppedTraces: ["trace-t1"], errors: [] });
@@ -176,7 +176,7 @@ describe("registerProfilingSessionCleanup (#14113)", () => {
         DEVICE,
         registry.takeOwnedBy(DEVICE, "s-1"),
         device,
-        timer,
+        { timer },
       );
       expect(report.removedFiles).toEqual([]);
       expect(report.errors).toEqual(["remove /data/local/tmp/x: failed"]);

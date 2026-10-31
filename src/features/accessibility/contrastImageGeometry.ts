@@ -36,9 +36,7 @@ export function opaquePixelTable(image: RawImage): Int32Array {
 export function squareHasOpaquePixel(
   image: RawImage,
   table: Int32Array,
-  x: number,
-  y: number,
-  radius: number,
+  { x, y, radius }: { x: number; y: number; radius: number },
 ): boolean {
   const x0 = Math.round(clamp(x - radius, 0, image.width - 1));
   const x1 = Math.round(clamp(x + radius, 0, image.width - 1));

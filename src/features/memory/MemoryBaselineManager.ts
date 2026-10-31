@@ -45,8 +45,7 @@ export class MemoryBaselineManager {
     deviceId: string,
     packageName: string,
     toolName: string,
-    metrics: MemoryMetrics,
-    alpha: number = DEFAULT_EMA_ALPHA,
+    { metrics, alpha = DEFAULT_EMA_ALPHA }: { metrics: MemoryMetrics; alpha?: number },
   ): Promise<void> {
     try {
       const now = new Date().toISOString();

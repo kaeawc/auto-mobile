@@ -27,8 +27,7 @@ describe("DefaultEmulatorOfflineRecovery", () => {
       tracker,
       { freshProvision: true },
       "emulator-5554",
-      1_000,
-      { pollingIntervalMs: 30_000, remainingPollingTimeMs: 60_000 },
+      { now: 1_000, pollingIntervalMs: 30_000, remainingPollingTimeMs: 60_000 },
     );
     expect(delay).toBe(5_000);
   });
@@ -36,7 +35,8 @@ describe("DefaultEmulatorOfflineRecovery", () => {
   test("polling delay is unchanged outside a fresh offline episode", () => {
     const tracker: OfflineTracker = { deviceId: null, since: null };
     expect(
-      recovery().nextPollingDelayMs(tracker, undefined, undefined, 0, {
+      recovery().nextPollingDelayMs(tracker, undefined, undefined, {
+        now: 0,
         pollingIntervalMs: 2_000,
         remainingPollingTimeMs: 60_000,
       }),

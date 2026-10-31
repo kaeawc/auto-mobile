@@ -5,6 +5,10 @@ full player with a scrubber, skip, speed and a sleep timer, and downloads with p
 `today.json` is the slice that runs on today's vocabulary: playback is a clock driven by timers, so
 the slice plays no audio, and the catalog is literal `data`.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+The library, show and player artwork use `library_music` (`music.note.list` on iOS)
+for the audio collection.
+
 ## Capabilities used
 
 - `prototype_stack_v1`: home, show and player screens.

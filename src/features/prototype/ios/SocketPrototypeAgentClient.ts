@@ -72,13 +72,15 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
   private requestHost: PrototypeRequestHost | undefined;
   private channelHost: PrototypeChannelHost | undefined;
 
+  private readonly requestTimeoutMs: number;
+
   constructor(
     private readonly socket: PrototypeAgentSocket,
     private readonly port: number,
     private readonly timer: Timer,
-    private readonly requestTimeoutMs: number,
-    maxFrameBytes: number,
+    { requestTimeoutMs, maxFrameBytes }: { requestTimeoutMs: number; maxFrameBytes: number },
   ) {
+    this.requestTimeoutMs = requestTimeoutMs;
     this.framer = new LineFramer(maxFrameBytes, {
       onLine: (line) => {
         // LineFramer can emit several lines in a push; fail() closes dispatch immediately.

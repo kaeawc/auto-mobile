@@ -133,8 +133,7 @@ export interface InputKeyIosClient {
     key: InputKeyName,
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: DispatchOptions,
+    options?: DispatchOptions & { perf?: PerformanceTracker },
   ): Promise<
     IOSDispatchResult<{
       success: boolean;
@@ -395,7 +394,6 @@ export class InputKey {
         key,
         [...new Set(modifiers)],
         timeoutMs,
-        undefined,
         { signal, onDispatch },
       );
     } catch (error) {

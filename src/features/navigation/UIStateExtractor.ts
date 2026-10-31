@@ -236,7 +236,7 @@ export class UIStateExtractor {
     }
 
     const modalId = this.getModalIdentifier(attrs, className);
-    const windowId = this.getWindowId(attrs, context?.windowId, modalType, modalId, className);
+    const windowId = this.getWindowId(attrs, context?.windowId, modalType, { modalId, className });
     const windowType = this.getWindowType(attrs, context?.windowType);
 
     modalStack.push({
@@ -252,8 +252,7 @@ export class UIStateExtractor {
     attrs: Record<string, any>,
     contextWindowId: number | undefined,
     modalType: ModalState["type"],
-    modalId: string | undefined,
-    className: string,
+    { modalId, className }: { modalId?: string; className: string },
   ): number | undefined {
     const attrWindowId = this.getAttribute(attrs, ["window-id", "windowId", "window_id"]);
     const parsed = attrWindowId ? Number(attrWindowId) : NaN;

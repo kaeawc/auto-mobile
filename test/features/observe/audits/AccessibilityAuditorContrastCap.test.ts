@@ -98,7 +98,7 @@ function playgroundButtonsObservation(density?: number): ObserveResult {
 function auditorWithCaptureFor(capturedObservationId: string): AccessibilityAuditor {
   const store = new InMemoryScreenshotStateStore(new FakeTimer());
   store.update(androidDevice.deviceId, screenshot);
-  store.updateForObservation(androidDevice.deviceId, capturedObservationId, screenshot);
+  store.updateForObservation(androidDevice.deviceId, capturedObservationId, { path: screenshot });
   return new AccessibilityAuditor({
     device: androidDevice,
     getConfig: () => config,
@@ -246,11 +246,9 @@ describe("an observation with no usable screenshot", () => {
 
   test("a recorded screenshot whose file is gone is treated the same way", async () => {
     const store = new InMemoryScreenshotStateStore(new FakeTimer());
-    store.updateForObservation(
-      androidDevice.deviceId,
-      "obs-B",
-      path.join(fixtures, "screenshots/no-such-capture.png"),
-    );
+    store.updateForObservation(androidDevice.deviceId, "obs-B", {
+      path: path.join(fixtures, "screenshots/no-such-capture.png"),
+    });
     const auditor = new AccessibilityAuditor({
       device: androidDevice,
       getConfig: () => config,

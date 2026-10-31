@@ -128,10 +128,10 @@ test("setProfile validates profile and platform before calling the client", asyn
       return { success: true };
     },
   };
-  await expect(setKeyboardProfileForTool(androidDevice, undefined, client)).rejects.toThrow(
+  await expect(setKeyboardProfileForTool(androidDevice, undefined, { client })).rejects.toThrow(
     "requires profile",
   );
-  await expect(setKeyboardProfileForTool(iosDevice, "direct", client)).rejects.toThrow(
+  await expect(setKeyboardProfileForTool(iosDevice, "direct", { client })).rejects.toThrow(
     "Android-only",
   );
   expect(calls).toEqual([]);
@@ -149,7 +149,7 @@ test("setProfile negotiates then returns profile ids", async () => {
       return { success: true, activeProfileId: id, previousProfileId: "direct" };
     },
   };
-  expect(await setKeyboardProfileForTool(androidDevice, "gboard", client)).toEqual({
+  expect(await setKeyboardProfileForTool(androidDevice, "gboard", { client })).toEqual({
     activeProfileId: "gboard",
     previousProfileId: "direct",
   });
@@ -165,7 +165,7 @@ test("setProfile fails closed on an older build", async () => {
       return { success: true };
     },
   };
-  await expect(setKeyboardProfileForTool(androidDevice, "direct", client)).rejects.toThrow(
+  await expect(setKeyboardProfileForTool(androidDevice, "direct", { client })).rejects.toThrow(
     "update/re-cut the APK",
   );
   expect(calls).toEqual([]);
@@ -202,13 +202,19 @@ describe("keyboard profile restore record (#14705)", () => {
   });
 
   test("setProfile records the profile before the first change for its owner", async () => {
-    await setKeyboardProfileForTool(androidDevice, "gboard", proxy, undefined, {
-      owner: "session-1",
-      registry,
+    await setKeyboardProfileForTool(androidDevice, "gboard", {
+      client: proxy,
+      record: {
+        owner: "session-1",
+        registry,
+      },
     });
-    await setKeyboardProfileForTool(androidDevice, "samsung", proxy, undefined, {
-      owner: "session-1",
-      registry,
+    await setKeyboardProfileForTool(androidDevice, "samsung", {
+      client: proxy,
+      record: {
+        owner: "session-1",
+        registry,
+      },
     });
     expect(registry.pending(androidDevice.deviceId)).toBe("direct");
     expect(registry.takeOwnedBy(androidDevice.deviceId, "session-1")?.profileId).toBe("direct");
@@ -217,13 +223,16 @@ describe("keyboard profile restore record (#14705)", () => {
   test("a refused setProfile records nothing", async () => {
     proxy.refuse = true;
     await expect(
-      setKeyboardProfileForTool(androidDevice, "gboard", proxy, undefined, { registry }),
+      setKeyboardProfileForTool(androidDevice, "gboard", { client: proxy, record: { registry } }),
     ).rejects.toThrow("CtrlProxy refused");
     expect(registry.pending(androidDevice.deviceId)).toBeUndefined();
   });
 
   test("reset puts the recorded profile back once and keeps a refused one recorded", async () => {
-    await setKeyboardProfileForTool(androidDevice, "gboard", proxy, undefined, { registry });
+    await setKeyboardProfileForTool(androidDevice, "gboard", {
+      client: proxy,
+      record: { registry },
+    });
     proxy.refuse = true;
     await expect(
       resetKeyboardProfileForTool(androidDevice, proxy, undefined, registry),
@@ -307,9 +316,11 @@ describe("keyboard setProfile in a daemon session (#14705)", () => {
 
   test("an acquisition-time manufacturer-profile write is restored by the same release path", async () => {
     await manager.createSession("session-1", androidDevice.deviceId, "android");
-    await setKeyboardProfileRecorded(androidDevice, "samsung", proxy, undefined, {
-      owner: "session-1",
-      registry,
+    await setKeyboardProfileRecorded(androidDevice, "samsung", proxy, {
+      record: {
+        owner: "session-1",
+        registry,
+      },
     });
     expect(proxy.active).toBe("samsung");
 

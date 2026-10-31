@@ -695,12 +695,12 @@ describe("reserved device stop policy", () => {
         let attempted = false;
         let completed = false;
         const write = spyOn(f.persistence, "markReleased").mockImplementation(async (...args) => {
-          if (args[3] === "device-killed") {
+          if (args[3].reason === "device-killed") {
             attempted = true;
             expect(f.journal.loadUnconfirmed()).toMatchObject([
               { sessionId: BASE, reason: "device-killed" },
             ]);
-            expect(args[4]).toMatchObject({
+            expect(args[3]).toMatchObject({
               expectedRowGeneration: 0,
               onlyIfOwnedByDaemon: "stop-hold-daemon",
               onlyIfRecoverable: true,
@@ -828,7 +828,7 @@ describe("reserved device stop policy", () => {
             const mark = f.persistence.markReleased.bind(f.persistence);
             const write = spyOn(f.persistence, "markReleased").mockImplementation(
               async (...args) => {
-                if (args[3] === "device-killed") {
+                if (args[3].reason === "device-killed") {
                   const row = (await f.persistence.getSession!(BASE))!;
                   row.stable_identity_generation!++;
                   saved = { ...row };

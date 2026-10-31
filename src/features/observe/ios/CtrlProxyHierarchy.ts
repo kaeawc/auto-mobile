@@ -160,8 +160,7 @@ export class CtrlProxyHierarchy {
       !skipWaitForFresh,
       timeoutMs ?? IOS_HIERARCHY_REQUEST_TIMEOUT_MS,
       perf,
-      skipWaitForFresh,
-      { minTimestamp, signal },
+      { skipWaitForFresh, minTimestamp, signal },
     );
 
     if (!response.hierarchy) {
@@ -193,8 +192,10 @@ export class CtrlProxyHierarchy {
     waitForFresh: boolean = false,
     timeout: number = IOS_HIERARCHY_REQUEST_TIMEOUT_MS,
     perf?: PerformanceTracker,
-    skipWaitForFresh: boolean = false,
-    options?: LatestHierarchyOptions,
+    {
+      skipWaitForFresh = false,
+      ...options
+    }: LatestHierarchyOptions & { skipWaitForFresh?: boolean } = {},
   ): Promise<CtrlProxyHierarchyResponse> {
     const { minTimestamp, signal } = resolveLatestHierarchyOptions(options);
     this.checkHierarchyAbort(signal);
@@ -254,10 +255,10 @@ export class CtrlProxyHierarchy {
         cacheMissing,
         cacheInvalidated,
         cachedIsSpringboard,
-        cacheMissesMinTimestamp,
-        minTimestamp,
+        { cacheMissesMinTimestamp, minTimestamp },
       );
-      const result = await this.requestHierarchySync(perf, false, signal, timeout, {
+      const result = await this.requestHierarchySync(perf, false, signal, {
+        timeoutMs: timeout,
         failureSink: requestFailure,
         ...captureOptions,
       });
@@ -547,8 +548,10 @@ export class CtrlProxyHierarchy {
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs: number = 5000,
-    requestOptions?: IosHierarchySyncRequestOptions,
+    {
+      timeoutMs = 5000,
+      ...requestOptions
+    }: IosHierarchySyncRequestOptions & { timeoutMs?: number } = {},
   ): Promise<CtrlProxySyncedHierarchy | null> {
     const recordFailure = (failure: HierarchyRequestFailure) => {
       this.recordHierarchyFailure(requestOptions, failure);
@@ -580,16 +583,13 @@ export class CtrlProxyHierarchy {
       perfTiming?: CtrlProxyPerfTiming;
       frameContext?: string;
       error?: string;
-    }>(
-      requestId,
-      "hierarchy",
-      remainingTimeoutMs,
-      () => ({
+    }>(requestId, "hierarchy", remainingTimeoutMs, {
+      timeoutErrorFactory: () => ({
         hierarchy: undefined,
         perfTiming: undefined,
       }),
-      (error) => ({ error }),
-    );
+      responseErrorFactory: (error) => ({ error }),
+    });
 
     const rejectOnAbort = () => {
       this.rejectAbortedHierarchyRequest(requestId, signal);
@@ -673,8 +673,10 @@ export class CtrlProxyHierarchy {
     cacheMissing: boolean,
     cacheInvalidated: boolean,
     cachedIsSpringboard: boolean,
-    cacheMissesMinTimestamp: boolean,
-    minTimestamp: number,
+    {
+      cacheMissesMinTimestamp,
+      minTimestamp,
+    }: { cacheMissesMinTimestamp: boolean; minTimestamp: number },
   ): { forceCapture: boolean; sinceTimestamp?: number } {
     return {
       forceCapture:

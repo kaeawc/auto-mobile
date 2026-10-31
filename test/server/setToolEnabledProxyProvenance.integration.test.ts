@@ -81,16 +81,15 @@ describe("setToolEnabled through the daemon-proxy loopback hop (#6148 round 4)",
       "clipboard",
       "clipboard",
       z.object({ sessionUuid: z.string().optional() }),
-      async () => ({ content: [{ type: "text" as const, text: "clipboard" }] }),
-      { defaultEnabled: false },
+      {
+        handler: async () => ({ content: [{ type: "text" as const, text: "clipboard" }] }),
+        defaultEnabled: false,
+      },
     );
-    ToolRegistry.register(
-      "provisionDevice",
-      "test acquisition-style tool",
-      z.object({}),
-      async () => ({ content: [{ type: "text" as const, text: "acquired" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.register("provisionDevice", "test acquisition-style tool", z.object({}), {
+      handler: async () => ({ content: [{ type: "text" as const, text: "acquired" }] }),
+      defaultEnabled: false,
+    });
     registerToolSelectionTools();
   });
 

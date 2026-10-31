@@ -50,7 +50,7 @@ for (const platform of ["android", "ios"] as const) {
         releasePreservedSession: async () => {},
         operations: {
           deviceShutdownTimeoutMs: 30_000,
-          runWithinShutdownDeadline: async (_device, _timer, _deadline, _message, input) =>
+          runWithinShutdownDeadline: async (_device, _timer, _deadline, input) =>
             input.operation(new AbortController().signal, 30_000),
           waitForDeviceShutdown: async () => {},
           shouldClearIntentionalShutdownAfterFailure: () => false,

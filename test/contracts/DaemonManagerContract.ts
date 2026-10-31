@@ -93,7 +93,7 @@ export const runDaemonManagerContract = (
         const controller = new AbortController();
         controller.abort();
 
-        expect(await manager.waitForReady(1000, controller.signal)).toBe(false);
+        expect(await manager.waitForReady(1000, { signal: controller.signal })).toBe(false);
       }),
     );
 
@@ -102,7 +102,9 @@ export const runDaemonManagerContract = (
       withScripted(async ({ manager, setSocketReachable }) => {
         setSocketReachable(false);
 
-        expect(await manager.waitForReady(60_000, undefined, () => false)).toBe(false);
+        expect(await manager.waitForReady(60_000, { shouldContinueWaiting: () => false })).toBe(
+          false,
+        );
       }),
     );
 

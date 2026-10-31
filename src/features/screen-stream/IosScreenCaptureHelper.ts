@@ -272,13 +272,12 @@ export class IosScreenCaptureHelper extends EventEmitter {
 
     proc.stdout.on("data", (chunk) => {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const frames = this.decoder.push(
-        buf,
-        (err) => this.emit("malformed", err),
-        (audio) => this.emit("audio", audio),
-        (frame) => this.enqueueFrame(frame),
-        (video) => this.emit("encodedVideo", video),
-      );
+      const frames = this.decoder.push(buf, {
+        onMalformed: (err) => this.emit("malformed", err),
+        onAudio: (audio) => this.emit("audio", audio),
+        onFrame: (frame) => this.enqueueFrame(frame),
+        onEncodedVideo: (video) => this.emit("encodedVideo", video),
+      });
       // `onFrame` keeps the decoder from allocating an array for a coalesced
       // stdout chunk. Preserve the fallback return path for direct decoder use.
       for (const frame of frames) {

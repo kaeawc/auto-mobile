@@ -41,19 +41,17 @@ export function cleanupSessionProfiling(
   deviceId: string,
   state: SessionProfilingState,
   adb: PerfettoAdb,
-  timer: Pick<Timer, "sleep">,
-  poll?: PerfettoPollOptions,
+  { timer, poll }: { timer: Pick<Timer, "sleep">; poll?: PerfettoPollOptions },
 ): Promise<ProfilingCleanupReport> {
   // Called from inside a request when a start finishes late: a cancelled request must not abort it.
-  return runOutsideRequestContext(() => cleanupAll(deviceId, state, adb, timer, poll));
+  return runOutsideRequestContext(() => cleanupAll(deviceId, state, adb, { timer, poll }));
 }
 
 async function cleanupAll(
   deviceId: string,
   state: SessionProfilingState,
   adb: PerfettoAdb,
-  timer: Pick<Timer, "sleep">,
-  poll?: PerfettoPollOptions,
+  { timer, poll }: { timer: Pick<Timer, "sleep">; poll?: PerfettoPollOptions },
 ): Promise<ProfilingCleanupReport> {
   const report: ProfilingCleanupReport = {
     deviceId,
@@ -63,7 +61,7 @@ async function cleanupAll(
   };
   for (const trace of state.traces) {
     try {
-      await stopPerfettoRecorder(adb, timer, trace.pid, [], { poll });
+      await stopPerfettoRecorder(adb, timer, trace.pid, { warnings: [], poll });
       report.stoppedTraces.push(trace.traceId);
     } catch (error) {
       report.errors.push(`stop ${trace.traceId}: ${errorMessage(error)}`);

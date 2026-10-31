@@ -6,6 +6,7 @@ import * as deviceMutations012 from "./migrations/2026_10_21_012_device_mutation
 import * as brokerTiming013 from "./migrations/2026_10_21_013_session_broker_timing";
 import * as deviceClaims014 from "./migrations/2026_10_26_014_device_claims";
 import * as deviceClaimsMetadata015 from "./migrations/2026_10_27_015_device_claims_metadata";
+import * as watchosPlatform016 from "./migrations/2026_10_30_016_watchos_binding_platform";
 import { sql, type Kysely } from "kysely";
 import { Migrator, type Migration, type MigrationProvider } from "kysely/migration";
 import { ActionableError } from "../../../models/ActionableError";
@@ -49,6 +50,7 @@ export const BINDING_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = 
   "2026_10_26_014_device_claims": deviceClaims014,
   "2026_10_27_015_device_claims_metadata": deviceClaimsMetadata015,
   "2026_10_28_016_binding_registry_writers": registryWriters016,
+  "2026_10_30_016_watchos_binding_platform": watchosPlatform016,
 };
 
 export const KNOWN_BINDING_REGISTRY_SCHEMA_VERSION = Object.keys(BINDING_REGISTRY_MIGRATIONS).at(

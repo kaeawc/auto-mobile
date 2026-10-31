@@ -33,7 +33,14 @@ export interface GuestAudioCapture {
   open(deviceId: string, options: GuestAudioCaptureOpenOptions): Promise<GuestAudioCaptureHandle>;
 }
 
+type GuestAudioCaptureTimer = Pick<
+  Timer,
+  "now" | "monotonicNow" | "sleep" | "setTimeout" | "clearTimeout"
+>;
+
 export interface GuestAudioCaptureOptions {
+  /** Defaults to the system timer. */
+  timer?: GuestAudioCaptureTimer;
   /** Includes discovery, broadcast start, status polling and settling. Default 8 seconds. */
   timeoutMs?: number;
   pollMs?: number;
@@ -62,17 +69,17 @@ export class AdbGuestAudioCapture implements GuestAudioCapture {
   private readonly timeoutMs: number;
   private readonly pollMs: number;
   private readonly settleMs: number;
+  private readonly timer: GuestAudioCaptureTimer;
+  private readonly options: GuestAudioCaptureOptions;
 
   constructor(
     private readonly adbFor: (deviceId: string) => Pick<AdbExecutor, "execute">,
     private readonly discovery: EmulatorGrpcDiscovery,
     private readonly ids: IdGenerator,
-    private readonly timer: Pick<
-      Timer,
-      "now" | "monotonicNow" | "sleep" | "setTimeout" | "clearTimeout"
-    > = defaultTimer,
-    private readonly options: GuestAudioCaptureOptions = {},
+    { timer = defaultTimer, ...options }: GuestAudioCaptureOptions = {},
   ) {
+    this.timer = timer;
+    this.options = options;
     this.now = timer.monotonicNow?.bind(timer) ?? timer.now.bind(timer);
     this.timeoutMs = options.timeoutMs ?? 8_000;
     this.pollMs = options.pollMs ?? 100;

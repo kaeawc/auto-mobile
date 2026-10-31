@@ -49,7 +49,9 @@ describe("Android emulator readiness adb state probe", () => {
     process.env.EMULATOR_POLLING_INTERVAL_MS = "500";
 
     try {
-      const readiness = client.waitForEmulatorReady("Pixel_9_Pro", 20_000, null, "emulator-5554");
+      const readiness = client.waitForEmulatorReady("Pixel_9_Pro", 20_000, null, {
+        targetDeviceId: "emulator-5554",
+      });
       const booted = await timer.resolvePromise(readiness, 500);
       expect(booted.deviceId).toBe("emulator-5554");
     } finally {
@@ -81,7 +83,9 @@ describe("Android emulator readiness adb state probe", () => {
       } as AdbClientFactory,
     });
 
-    const booted = await client.waitForEmulatorReady("Pixel_9_Pro", 20_000, null, "emulator-5554");
+    const booted = await client.waitForEmulatorReady("Pixel_9_Pro", 20_000, null, {
+      targetDeviceId: "emulator-5554",
+    });
     expect(booted.deviceId).toBe("emulator-5554");
   });
 
@@ -102,7 +106,9 @@ describe("Android emulator readiness adb state probe", () => {
       } as AdbClientFactory,
     });
 
-    await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 100, null, "emulator-5554"));
+    await expectRejection(
+      client.waitForEmulatorReady("Pixel_9_Pro", 100, null, { targetDeviceId: "emulator-5554" }),
+    );
     expect(observedTimeouts[0]).toBe(100);
   });
 });

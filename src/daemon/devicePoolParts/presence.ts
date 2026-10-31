@@ -138,8 +138,7 @@ export class DevicePoolPresence {
       device,
       deferRecovery,
       assignmentLockHeld,
-      idleEviction,
-      discovery,
+      { idleEviction, snapshot: discovery },
     );
     return present && this.state.runtimeIdentity.isPooledDeviceIdentityAssignable(device);
   }
@@ -219,13 +218,12 @@ export class DevicePoolPresence {
       this.restartReleaseReasonForIdentityReplacement(device, identityObservation) ??
       deviceLossCancellationReason(device.id, incidentId);
     const attempt = () =>
-      this.state.releaseSessionForDisconnectedDevice(
-        sessionId,
-        device.id,
-        releaseReason,
-        () => !isSupersededByNewerIdentity(),
-        isDeviceRestartReleaseReason(releaseReason) ? { deviceIdentityReplaced: true } : undefined,
-      );
+      this.state.releaseSessionForDisconnectedDevice(sessionId, device.id, releaseReason, {
+        shouldCommit: () => !isSupersededByNewerIdentity(),
+        releaseOptions: isDeviceRestartReleaseReason(releaseReason)
+          ? { deviceIdentityReplaced: true }
+          : undefined,
+      });
     let released: boolean | void = undefined;
     if (isDeviceRestartReleaseReason(releaseReason)) {
       // Quarantine normally drains the holder, but shutdown reservations defer it.

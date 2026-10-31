@@ -705,7 +705,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: fakeFactory,
     });
     const controller = new AbortController();
-    const readiness = client.waitForEmulatorReady("Pixel_9_Pro", 60_000, fakeChild, undefined, {
+    const readiness = client.waitForEmulatorReady("Pixel_9_Pro", 60_000, fakeChild, {
       signal: controller.signal,
     });
     let rejection: Error | undefined;
@@ -802,7 +802,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: fakeFactory,
     });
 
-    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, fakeChild, undefined, {
+    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, fakeChild, {
       signal: controller.signal,
     });
 
@@ -858,7 +858,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: scopedFactory,
     });
 
-    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, null, "emulator-5556");
+    const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, null, {
+      targetDeviceId: "emulator-5556",
+    });
 
     expect(result.deviceId).toBe("emulator-5556");
     expect(result.name).toBe("Pixel_9_Pro");
@@ -891,7 +893,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     });
 
     const error = await expectRejection(
-      client.waitForEmulatorReady("am-api33-ga-arm64", 100, null, "emulator-5556"),
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, null, {
+        targetDeviceId: "emulator-5556",
+      }),
     );
     expect(error.message).toContain("failed to become ready within 100ms");
     expect(
@@ -920,7 +924,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     });
 
     const error = await expectRejection(
-      client.waitForEmulatorReady("am-api33-ga-arm64", 5_000, null, "emulator-5556"),
+      client.waitForEmulatorReady("am-api33-ga-arm64", 5_000, null, {
+        targetDeviceId: "emulator-5556",
+      }),
     );
     expect(error).toBeInstanceOf(ActionableError);
     expect(error.message).toContain("am-api33-ga-arm64");
@@ -948,7 +954,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     });
 
     const error = await expectRejection(
-      client.waitForEmulatorReady("am-api33-ga-arm64", 100, null, "emulator-5556"),
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, null, {
+        targetDeviceId: "emulator-5556",
+      }),
     );
     expect(error).toBeInstanceOf(ActionableError);
     expect(error.message).toContain("am-api33-ga-arm64");
@@ -975,12 +983,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: scopedFactory,
     });
 
-    const result = await client.waitForEmulatorReady(
-      "am-api33-ga-arm64",
-      5_000,
-      null,
-      "emulator-5556",
-    );
+    const result = await client.waitForEmulatorReady("am-api33-ga-arm64", 5_000, null, {
+      targetDeviceId: "emulator-5556",
+    });
     expect(result).toMatchObject({ name: "am-api33-ga-arm64", deviceId: "emulator-5556" });
     expect(
       scopedFactory.commandLog.filter((command) => command === "emulator-5556:emu avd name"),
@@ -1007,12 +1012,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: scopedFactory,
     });
 
-    const result = await client.waitForEmulatorReady(
-      "am-api33-ga-arm64",
-      5_000,
-      null,
-      "emulator-5556",
-    );
+    const result = await client.waitForEmulatorReady("am-api33-ga-arm64", 5_000, null, {
+      targetDeviceId: "emulator-5556",
+    });
     expect(result).toMatchObject({ name: "am-api33-ga-arm64", deviceId: "emulator-5556" });
     expect(
       scopedFactory.commandLog.filter((command) => command === "emulator-5556:emu avd name"),
@@ -1039,12 +1041,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: scopedFactory,
     });
 
-    const result = await client.waitForEmulatorReady(
-      "Unknown (emulator-5556)",
-      5_000,
-      null,
-      "emulator-5556",
-    );
+    const result = await client.waitForEmulatorReady("Unknown (emulator-5556)", 5_000, null, {
+      targetDeviceId: "emulator-5556",
+    });
 
     expect(result.deviceId).toBe("emulator-5556");
     expect(
@@ -1064,7 +1063,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
       adbFactory: scopedFactory,
     });
 
-    const result = await client.waitForEmulatorReady("R58M123456A", 5_000, null, "R58M123456A");
+    const result = await client.waitForEmulatorReady("R58M123456A", 5_000, null, {
+      targetDeviceId: "R58M123456A",
+    });
 
     expect(result.deviceId).toBe("R58M123456A");
     expect(

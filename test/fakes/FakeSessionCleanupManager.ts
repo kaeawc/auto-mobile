@@ -91,11 +91,8 @@ export class FakeSessionCleanupManager implements SessionCleanupSurface {
     deviceIdentityReplaced = false,
   ): void {
     for (const callback of this.releaseCallbacks) {
-      callback(
-        sessionId,
-        deviceId,
-        this.releaseReason,
-        {
+      callback(sessionId, deviceId, this.releaseReason, {
+        snapshot: {
           sessionId,
           deviceId,
           releaseReason: this.releaseReason,
@@ -103,8 +100,9 @@ export class FakeSessionCleanupManager implements SessionCleanupSurface {
           terminal: this.terminal,
           heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
         },
-        { upgradeOnly, deviceIdentityReplaced },
-      );
+        upgradeOnly,
+        deviceIdentityReplaced,
+      });
     }
   }
 

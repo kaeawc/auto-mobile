@@ -57,7 +57,7 @@ test("release hints take the minimum existing bound, round up and stay within th
 });
 
 test("held-device helpers preserve old wording with absent query and append the retry explanation", () => {
-  const old = heldDeviceBindRefusal({}, "device", "holder", "rival");
+  const old = heldDeviceBindRefusal({}, "device", "holder", { requesterSessionUuid: "rival" });
   expect(old.message).toBe("Device 'device' is already assigned to session holder");
   expect(old.toPayload()).toEqual({
     code: "device_owned_by_other_session",
@@ -65,7 +65,7 @@ test("held-device helpers preserve old wording with absent query and append the 
     retryable: false,
   });
   const pool = { holderReleaseRemainingMs: () => 600 };
-  const retry = heldDeviceBindRefusal(pool, "device", "holder", "rival");
+  const retry = heldDeviceBindRefusal(pool, "device", "holder", { requesterSessionUuid: "rival" });
   expect(retry.message).toBe(`${old.message}. The holder is being released; retry in about 600ms.`);
   expect(retry.toPayload()).toEqual({
     code: "device_owned_by_other_session",
@@ -73,7 +73,7 @@ test("held-device helpers preserve old wording with absent query and append the 
     retryable: true,
     retryAfterMs: 600,
   });
-  expect(heldDeviceBindRefusal(pool, "device", undefined, undefined, "another").retryable).toBe(
+  expect(heldDeviceBindRefusal(pool, "device", undefined, { wording: "another" }).retryable).toBe(
     false,
   );
 });

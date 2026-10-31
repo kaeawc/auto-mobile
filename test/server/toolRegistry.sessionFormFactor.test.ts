@@ -132,7 +132,7 @@ async function arrange(reader: AvdConfigReader, image?: Partial<DeviceInfo>) {
           window: new FakeWindow(),
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       ),
   });
   restorers.push(

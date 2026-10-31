@@ -520,7 +520,7 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     if (rejection) {
       return Promise.resolve(this.unavailable(networkFilterShapingRejectionDetail(rejection)));
     }
-    return this.runRule("apply", target, ownership, leaseMs, shaping);
+    return this.runRule("apply", target, ownership, { leaseMs, shaping });
   }
 
   reset(
@@ -535,15 +535,14 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     ownership: NetworkFilterRuleOwnership,
     leaseMs: number,
   ): Promise<NetworkFilterRuleCommandResult> {
-    return this.runRule("renew", target, ownership, leaseMs);
+    return this.runRule("renew", target, ownership, { leaseMs });
   }
 
   private async runRule(
     command: NetworkFilterRuleCommand,
     target: NetworkFilterRuleTarget,
     ownership: NetworkFilterRuleOwnership,
-    leaseMs?: number,
-    shaping?: NetworkFilterShapingRequest,
+    { leaseMs, shaping }: { leaseMs?: number; shaping?: NetworkFilterShapingRequest } = {},
   ): Promise<NetworkFilterRuleCommandResult> {
     const result = await this.run(
       command,

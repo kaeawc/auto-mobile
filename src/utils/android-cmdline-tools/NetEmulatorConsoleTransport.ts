@@ -17,8 +17,7 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
     host: string,
     port: number,
     authToken: string | null,
-    commands: string[],
-    { signal, timeoutMs = this.timeoutMs }: EmulatorConsoleExecuteOptions = {},
+    { commands, signal, timeoutMs = this.timeoutMs }: EmulatorConsoleExecuteOptions,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {

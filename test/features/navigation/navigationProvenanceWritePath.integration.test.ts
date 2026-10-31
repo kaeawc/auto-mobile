@@ -38,7 +38,10 @@ describe("NavigationGraphManager provenance write path", () => {
     db = await createTestDatabase();
     const navRepo = new NavigationRepository(db);
     const coverageRepo = new TestCoverageRepository(db);
-    manager = NavigationGraphManager.createForTesting(navRepo, coverageRepo, undefined, SESSION);
+    manager = NavigationGraphManager.createForTesting(navRepo, {
+      testCoverageRepository: coverageRepo,
+      sessionUuid: SESSION,
+    });
     NavigationGraphManager.setInstanceForTesting(manager);
     TelemetryRecorder.resetInstance();
     telemetrySpy = spyOn(
@@ -220,12 +223,10 @@ describe("NavigationGraphManager provenance write path", () => {
     }
     const switchingRepo = new SwitchingRepo(db);
     const coverageRepo = new TestCoverageRepository(db);
-    const m = NavigationGraphManager.createForTesting(
-      switchingRepo,
-      coverageRepo,
-      undefined,
-      SESSION,
-    );
+    const m = NavigationGraphManager.createForTesting(switchingRepo, {
+      testCoverageRepository: coverageRepo,
+      sessionUuid: SESSION,
+    });
 
     await m.setCurrentApp(APP);
     m.setBuildContext({ appId: APP, deviceId: "emu-1", versionCode: 7, contentHash: "hashA" });
@@ -238,7 +239,10 @@ describe("NavigationGraphManager provenance write path", () => {
 
     // Seed a named node + correlated fingerprint for APP.
     const node = await switchingRepo.getOrCreateNode(APP, "Home", 100);
-    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", "{}", 100);
+    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", {
+      data: "{}",
+      timestamp: 100,
+    });
 
     let appSwitch: Promise<void> | undefined;
     switchingRepo.onLookup = () => {
@@ -282,17 +286,18 @@ describe("NavigationGraphManager provenance write path", () => {
     }
     const switchingRepo = new SwitchingRepo(db);
     const coverageRepo = new TestCoverageRepository(db);
-    const m = NavigationGraphManager.createForTesting(
-      switchingRepo,
-      coverageRepo,
-      undefined,
-      SESSION,
-    );
+    const m = NavigationGraphManager.createForTesting(switchingRepo, {
+      testCoverageRepository: coverageRepo,
+      sessionUuid: SESSION,
+    });
 
     await m.setCurrentApp(APP);
     m.setBuildContext({ appId: APP, deviceId: "device-A", versionCode: 7, contentHash: "hashA" });
     const node = await switchingRepo.getOrCreateNode(APP, "Home", 100);
-    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", "{}", 100);
+    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", {
+      data: "{}",
+      timestamp: 100,
+    });
 
     // Device B swaps APP's context in the manager during the awaited lookup.
     switchingRepo.onLookup = () => {
@@ -488,13 +493,12 @@ describe("NavigationGraphManager provenance write path", () => {
     await repo.getOrCreateApp(otherApp);
     const suggestion = await repo.addOrUpdateSuggestion(otherApp, "foreign-fp", "{}", 100);
     const otherBuild = await repo.getOrCreateBuildKey(otherApp, 7, "foreign-build");
-    await repo.recordSuggestionObservation(
-      suggestion.id,
-      otherBuild.id,
-      "other-device",
-      "other",
-      100,
-    );
+    await repo.recordSuggestionObservation(suggestion.id, {
+      buildKeyId: otherBuild.id,
+      deviceId: "other-device",
+      sessionUuid: "other",
+      seenAt: 100,
+    });
 
     await manager.promoteSuggestion(suggestion.id, "Promoted");
 

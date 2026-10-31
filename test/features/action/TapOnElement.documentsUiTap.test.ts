@@ -232,7 +232,11 @@ test.each(["capability", "action"])(
         return true;
       };
     } else {
-      service.requestNodeAction = async (_action, _selector, _timeout, _perf, signal) => {
+      service.requestNodeAction = async (
+        _action,
+        _selector,
+        { timeoutMs: _timeout, perf: _perf, signal } = {},
+      ) => {
         received = signal;
         signal?.addEventListener("abort", finish, { once: true });
         await pending;

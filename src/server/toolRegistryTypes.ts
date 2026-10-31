@@ -66,6 +66,12 @@ export interface InternalToolCallOptions {
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
 }
 
+/** `ToolRegistry.callInternal`'s trailing request: handler progress/abort plus routing options. */
+export interface InternalToolCallRequest extends InternalToolCallOptions {
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+}
+
 export interface InternalToolInvocationContext {
   args: Record<string, unknown>;
   routingSessionUuid?: string;
@@ -126,6 +132,14 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   selectsActiveDevice?: boolean;
   /** See {@link ToolTraits.hostInventory}. */
   hostInventory?: boolean;
+}
+
+/**
+ * A plain tool's handler together with its options: `ToolRegistry.register`'s fourth argument
+ * when the tool has options. A tool without options passes the bare handler instead.
+ */
+export interface PlainToolRegistration<T = Record<string, unknown>> extends PlainToolOptions<T> {
+  handler: ToolHandler<T>;
 }
 
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
@@ -249,6 +263,16 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     changesHostSideState,
     changesOpaquePersistentState,
   };
+}
+
+/**
+ * A device-aware tool's handler together with its options: `ToolRegistry.registerDeviceAware`'s
+ * fourth argument when the tool has options. A tool without options passes the bare handler.
+ */
+export interface DeviceAwareToolRegistration<
+  T = Record<string, unknown>,
+> extends DeviceAwareToolOptions<T> {
+  handler: DeviceAwareToolHandler<T>;
 }
 
 export interface DeviceAwareToolOptions<T = Record<string, unknown>>

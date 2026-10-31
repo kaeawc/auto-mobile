@@ -259,12 +259,14 @@ describe("androidLauncherPackages", () => {
         createExecResult("com.launcher.a/.Main", ""),
       );
       expect(
-        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer, {
+        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", {
+          timer: fakeTimer,
           incarnationToken: "epoch-1",
         }),
       ).toBe(true);
       expect(
-        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, {
+        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", {
+          timer: fakeTimer,
           incarnationToken: "epoch-1",
         }),
       ).toBe(false);
@@ -276,7 +278,8 @@ describe("androidLauncherPackages", () => {
       // Still within the TTL -- the stale cached value ("a") is still served.
       fakeTimer.setCurrentTime(10_000);
       expect(
-        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, {
+        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", {
+          timer: fakeTimer,
           incarnationToken: "epoch-1",
         }),
       ).toBe(false);
@@ -284,12 +287,14 @@ describe("androidLauncherPackages", () => {
       // Past the TTL -- the new default HOME launcher ("b") is now accepted.
       fakeTimer.setCurrentTime(30_001);
       expect(
-        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", fakeTimer, {
+        await isForegroundLauncher("com.launcher.b", fakeAdb, "device-1", {
+          timer: fakeTimer,
           incarnationToken: "epoch-1",
         }),
       ).toBe(true);
       expect(
-        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", fakeTimer, {
+        await isForegroundLauncher("com.launcher.a", fakeAdb, "device-1", {
+          timer: fakeTimer,
           incarnationToken: "epoch-1",
         }),
       ).toBe(false);
@@ -462,7 +467,7 @@ describe("androidLauncherPackages", () => {
         createExecResult("com.example.launcher/.LauncherActivity", ""),
       );
       expect(
-        await isForegroundLauncher("com.example.launcher", fakeAdb, "emulator-5554", undefined, {
+        await isForegroundLauncher("com.example.launcher", fakeAdb, "emulator-5554", {
           incarnationToken: "epoch-1",
         }),
       ).toBe(true);
@@ -475,22 +480,14 @@ describe("androidLauncherPackages", () => {
       // Same appId as before, but the new incarnation's configured launcher
       // is different -- must not still match on the stale "epoch-1" entry.
       expect(
-        await isForegroundLauncher(
-          "com.example.launcher",
-          reincarnatedAdb,
-          "emulator-5554",
-          undefined,
-          { incarnationToken: "epoch-2" },
-        ),
+        await isForegroundLauncher("com.example.launcher", reincarnatedAdb, "emulator-5554", {
+          incarnationToken: "epoch-2",
+        }),
       ).toBe(false);
       expect(
-        await isForegroundLauncher(
-          "com.other.launcher",
-          reincarnatedAdb,
-          "emulator-5554",
-          undefined,
-          { incarnationToken: "epoch-2" },
-        ),
+        await isForegroundLauncher("com.other.launcher", reincarnatedAdb, "emulator-5554", {
+          incarnationToken: "epoch-2",
+        }),
       ).toBe(true);
     });
   });
@@ -590,7 +587,7 @@ describe("androidLauncherPackages", () => {
       );
       const controller = new AbortController();
 
-      await isForegroundLauncher("com.example.launcher", fakeAdb, "device-1", undefined, {
+      await isForegroundLauncher("com.example.launcher", fakeAdb, "device-1", {
         signal: controller.signal,
       });
 

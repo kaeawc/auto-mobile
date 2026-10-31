@@ -65,8 +65,10 @@ describe("runSessionNetworkMutation", () => {
           manager,
           { sessionUuid: "net-refused", deviceId: "emulator-5554" },
           true,
-          async () => {
-            mutationStarted = true;
+          {
+            mutation: async () => {
+              mutationStarted = true;
+            },
           },
         ),
       ).rejects.toThrow("began releasing before the mutation started");
@@ -97,9 +99,11 @@ describe("runSessionNetworkMutation", () => {
           manager,
           { sessionUuid: "net-throws", deviceId: "emulator-5554" },
           true,
-          async () => {
-            expect(manager.getNetworkCondition("net-throws")).toEqual({ initialProfile: "none" });
-            throw new Error("mutation failed after partially shaping the device");
+          {
+            mutation: async () => {
+              expect(manager.getNetworkCondition("net-throws")).toEqual({ initialProfile: "none" });
+              throw new Error("mutation failed after partially shaping the device");
+            },
           },
         ),
       ).rejects.toThrow("mutation failed after partially shaping the device");
@@ -125,10 +129,12 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-1", deviceId: "emulator-5554" },
         true,
-        async () => {
-          started.resolve();
-          await finished.promise;
-          return "shaped";
+        {
+          mutation: async () => {
+            started.resolve();
+            await finished.promise;
+            return "shaped";
+          },
         },
       );
       await started.promise;
@@ -163,7 +169,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-override", deviceId: "emulator-5554" },
         true,
-        async () => {},
+        { mutation: async () => {} },
       );
       expect(manager.getNetworkCondition("net-override")).toEqual({ initialProfile: "none" });
     } finally {
@@ -181,7 +187,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-reset", deviceId: "emulator-5554" },
         false,
-        async () => {},
+        { mutation: async () => {} },
       );
       expect(manager.getNetworkCondition("net-reset")).toBeUndefined();
     } finally {
@@ -203,8 +209,10 @@ describe("runSessionNetworkMutation", () => {
           manager,
           { sessionUuid: "net-rebind", deviceId: "emulator-5554" },
           true,
-          async () => {
-            mutationStarted = true;
+          {
+            mutation: async () => {
+              mutationStarted = true;
+            },
           },
         ),
       ).rejects.toThrow("bound to emulator-5556, not emulator-5554");
@@ -238,7 +246,7 @@ describe("runSessionNetworkMutation", () => {
               manager,
               { sessionUuid: "net-fallback", deviceId: "emulator-5554" },
               true,
-              async () => applied,
+              { mutation: async () => applied },
             )
           : Promise.resolve(applied);
 
@@ -271,8 +279,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-ttl-wire", deviceId: "emulator-5554" },
         true,
-        async () => {},
-        30,
+        { mutation: async () => {}, expiresInSeconds: 30 },
       );
 
       // The TTL fires after 30s and resets the device to `none`.
@@ -296,14 +303,13 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-ttl-cancel", deviceId: "emulator-5554" },
         true,
-        async () => {},
-        30,
+        { mutation: async () => {}, expiresInSeconds: 30 },
       );
       await runSessionNetworkMutation(
         manager,
         { sessionUuid: "net-ttl-cancel", deviceId: "emulator-5554" },
         false,
-        async () => {},
+        { mutation: async () => {} },
       );
 
       // The reset cancelled the timer, so advancing past the TTL fires no restore.
@@ -328,8 +334,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-reapply", deviceId: "emulator-5554" },
         true,
-        async () => {},
-        30,
+        { mutation: async () => {}, expiresInSeconds: 30 },
       );
 
       // A slow re-apply begins; its tracked mutation blocks partway through.
@@ -337,11 +342,13 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-reapply", deviceId: "emulator-5554" },
         true,
-        async () => {
-          started.resolve();
-          await finished.promise;
+        {
+          mutation: async () => {
+            started.resolve();
+            await finished.promise;
+          },
+          expiresInSeconds: 30,
         },
-        30,
       );
       await started.promise;
 
@@ -375,8 +382,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-reset-fail", deviceId: "emulator-5554" },
         true,
-        async () => {},
-        30,
+        { mutation: async () => {}, expiresInSeconds: 30 },
       );
 
       // 10s elapse, then a manual reset (registerRestore=false) whose emulator
@@ -386,7 +392,13 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-reset-fail", deviceId: "emulator-5554" },
         false,
-        async () => ({ success: false, deviceId: "emulator-5554", platform: "android" }),
+        {
+          mutation: async () => ({
+            success: false,
+            deviceId: "emulator-5554",
+            platform: "android",
+          }),
+        },
       );
       expect(resetResult).toEqual({
         success: false,
@@ -418,8 +430,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-reset-throw", deviceId: "emulator-5554" },
         true,
-        async () => {},
-        30,
+        { mutation: async () => {}, expiresInSeconds: 30 },
       );
 
       timer.advanceTime(10_000);
@@ -428,8 +439,10 @@ describe("runSessionNetworkMutation", () => {
           manager,
           { sessionUuid: "net-reset-throw", deviceId: "emulator-5554" },
           false,
-          async () => {
-            throw new Error("emulator console rejected reset");
+          {
+            mutation: async () => {
+              throw new Error("emulator console rejected reset");
+            },
           },
         ),
       ).rejects.toThrow("emulator console rejected reset");
@@ -457,13 +470,15 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-serialize", deviceId: "emulator-5554" },
         true,
-        async () => {
-          order.push("first-start");
-          startedFirst.resolve();
-          await finishFirst.promise;
-          order.push("first-end");
+        {
+          mutation: async () => {
+            order.push("first-start");
+            startedFirst.resolve();
+            await finishFirst.promise;
+            order.push("first-end");
+          },
+          expiresInSeconds: 30,
         },
-        30,
       );
       await startedFirst.promise;
 
@@ -475,11 +490,13 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-serialize", deviceId: "emulator-5554" },
         true,
-        async () => {
-          secondStarted = true;
-          order.push("second-start");
+        {
+          mutation: async () => {
+            secondStarted = true;
+            order.push("second-start");
+          },
+          expiresInSeconds: 60,
         },
-        60,
       );
 
       // Give the microtask queue every chance to run the second mutation's body
@@ -521,8 +538,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-ab-fail", deviceId: "emulator-5554" },
         true,
-        async () => {},
-        30,
+        { mutation: async () => {}, expiresInSeconds: 30 },
       );
       timer.advanceTime(5_000); // 25s remain on A's deadline.
 
@@ -531,12 +547,14 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-ab-fail", deviceId: "emulator-5554" },
         true,
-        async () => {
-          startedB.resolve();
-          await finishedB.promise;
-          return { success: false, deviceId: "emulator-5554", platform: "android" as const };
+        {
+          mutation: async () => {
+            startedB.resolve();
+            await finishedB.promise;
+            return { success: false, deviceId: "emulator-5554", platform: "android" as const };
+          },
+          expiresInSeconds: 40,
         },
-        40,
       );
       await startedB.promise;
 
@@ -547,12 +565,14 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-ab-fail", deviceId: "emulator-5554" },
         true,
-        async () => {
-          startedC.resolve();
-          await finishedC.promise;
-          return { success: false, deviceId: "emulator-5554", platform: "android" as const };
+        {
+          mutation: async () => {
+            startedC.resolve();
+            await finishedC.promise;
+            return { success: false, deviceId: "emulator-5554", platform: "android" as const };
+          },
+          expiresInSeconds: 50,
         },
-        50,
       );
 
       // B fails. With B and C serialized, B's re-arm of A's original deadline
@@ -590,8 +610,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-reapply-fail", deviceId: "emulator-5554" },
         true,
-        async () => {},
-        30,
+        { mutation: async () => {}, expiresInSeconds: 30 },
       );
 
       timer.advanceTime(10_000);
@@ -604,8 +623,14 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-reapply-fail", deviceId: "emulator-5554" },
         true,
-        async () => ({ success: false, deviceId: "emulator-5554", platform: "android" as const }),
-        999,
+        {
+          mutation: async () => ({
+            success: false,
+            deviceId: "emulator-5554",
+            platform: "android" as const,
+          }),
+          expiresInSeconds: 999,
+        },
       );
       expect(result.success).toBe(false);
 
@@ -640,12 +665,14 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-clock", deviceId: device.deviceId },
         true,
-        () =>
-          state.setState({
-            networkCondition: { profile: "3g", expiresInSeconds: 30 },
-            clock: { mode: "set", instant: "2030-01-01T00:00:00Z" },
-          }),
-        30,
+        {
+          mutation: () =>
+            state.setState({
+              networkCondition: { profile: "3g", expiresInSeconds: 30 },
+              clock: { mode: "set", instant: "2030-01-01T00:00:00Z" },
+            }),
+          expiresInSeconds: 30,
+        },
       );
       expect(result.success).toBe(false);
       expect(result.networkCondition).toMatchObject({ supported: true, appliedProfile: "3g" });
@@ -673,8 +700,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-combined", deviceId: "emulator-5554" },
         true,
-        async () => {},
-        30,
+        { mutation: async () => {}, expiresInSeconds: 30 },
       );
 
       timer.advanceTime(10_000);
@@ -696,7 +722,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-combined", deviceId: "emulator-5554" },
         true,
-        async () => combined,
+        { mutation: async () => combined },
       );
       expect(result).toEqual(combined);
 
@@ -727,9 +753,11 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-release-race", deviceId: "emulator-5554" },
         false,
-        async () => {
-          startedA.resolve();
-          await finishedA.promise;
+        {
+          mutation: async () => {
+            startedA.resolve();
+            await finishedA.promise;
+          },
         },
       );
       await startedA.promise;
@@ -741,10 +769,12 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-release-race", deviceId: "emulator-5554" },
         true,
-        async () => {
-          bStarted = true;
+        {
+          mutation: async () => {
+            bStarted = true;
+          },
+          expiresInSeconds: 999,
         },
-        999,
       );
 
       // Release begins. It cancels any pending TTL (none right now) and waits
@@ -762,8 +792,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-release-race", deviceId: "emulator-5556" },
         true,
-        async () => {},
-        20,
+        { mutation: async () => {}, expiresInSeconds: 20 },
       );
 
       // A finally completes, unblocking B. B must abort — it captured the OLD
@@ -797,8 +826,7 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-release-throw", deviceId: "emulator-5554" },
         true,
-        async () => {},
-        30,
+        { mutation: async () => {}, expiresInSeconds: 30 },
       );
 
       // B: a re-apply that will THROW. Blocks mid-mutation, having already
@@ -807,12 +835,14 @@ describe("runSessionNetworkMutation", () => {
         manager,
         { sessionUuid: "net-release-throw", deviceId: "emulator-5554" },
         true,
-        async () => {
-          startedB.resolve();
-          await failB.promise;
-          throw new Error("emulator console rejected re-apply");
+        {
+          mutation: async () => {
+            startedB.resolve();
+            await failB.promise;
+            throw new Error("emulator console rejected re-apply");
+          },
+          expiresInSeconds: 40,
         },
-        40,
       );
       await startedB.promise;
 
@@ -847,9 +877,11 @@ describe("runSessionNetworkMutation", () => {
       undefined,
       { sessionUuid: undefined, deviceId: "emulator-5554" },
       true,
-      async () => {
-        ran = true;
-        return 42;
+      {
+        mutation: async () => {
+          ran = true;
+          return 42;
+        },
       },
     );
     expect(ran).toBe(true);

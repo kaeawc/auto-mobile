@@ -8,8 +8,10 @@ export async function pollProtoViewerResult(
   read: () => Promise<string>,
   timer: Timer,
   timeoutMs: number,
-  signal?: AbortSignal,
-  timeoutGuidance = "It may still have saved the prototype: check ProtoViewer before retrying, and unlock the device if it is locked.",
+  {
+    signal,
+    timeoutGuidance = "It may still have saved the prototype: check ProtoViewer before retrying, and unlock the device if it is locked.",
+  }: { signal?: AbortSignal; timeoutGuidance?: string } = {},
 ): Promise<ProtoViewerWireResult> {
   const deadline = timer.now() + timeoutMs;
   do {

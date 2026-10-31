@@ -33,7 +33,7 @@ export function observationFromRunnerCapture(capture: { data: unknown }): Observ
   const converted = convertToViewHierarchyResult(capture.data);
   const viewHierarchy = projectActionableHierarchy(
     "ios",
-    normalizeIosHierarchy(converted, converted.updatedAt),
+    normalizeIosHierarchy(converted, { updatedAt: converted.updatedAt }),
   );
   return buildObserveResult({
     viewHierarchy,

@@ -249,6 +249,49 @@ export const keyboardTool = defineDeviceTool({
 
 export const keyboardSchema = keyboardTool.schema;
 
+/** Register the element gesture tools (tapAny, dragAndDrop, swipeOn, pinchOn), in that order. */
+function registerGestureTools(deps: InteractionToolDependencies): void {
+  ToolRegistry.registerDeviceAware(
+    "tapAny",
+    "Tap any clickable element; scope with container or scrollableContainer.",
+    tapAnySchema,
+    {
+      handler: (device, args, progress, signal) =>
+        tapAnyHandler(device, args, { progress, signal, deps }),
+      defaultEnabled: true,
+      supportsProgress: true,
+      ...PLAN_SKELETON,
+      ...ANSWERS_SYSTEM_ALERTS,
+    },
+  );
+
+  ToolRegistry.registerDeviceAware("dragAndDrop", "Drag and drop element", dragAndDropSchema, {
+    handler: (device, args, progress, signal) =>
+      dragAndDropHandler(device, args, { progress, signal, deps }),
+    defaultEnabled: false,
+    supportsProgress: true,
+    outputSchema: dragAndDropResultSchema,
+    ...NAV_PLAN_SKELETON,
+  });
+
+  ToolRegistry.registerDeviceAware("swipeOn", "Swipe/scroll on screen or elements", swipeOnSchema, {
+    handler: (device, args, progress, signal) =>
+      swipeOnHandler(device, args, { progress, signal, deps }),
+    defaultEnabled: true,
+    supportsProgress: true,
+    ...NAV_PLAN_SKELETON,
+  });
+
+  ToolRegistry.registerDeviceAware("pinchOn", "Pinch to zoom", pinchOnSchema, {
+    handler: (device, args, progress, signal) =>
+      pinchOnHandler(device, args, { progress, signal, deps }),
+    defaultEnabled: false,
+    supportsProgress: true,
+    outputSchema: pinchOnResultSchema,
+    ...NAV_PLAN_SKELETON,
+  });
+}
+
 export function registerInteractionTools(deps: InteractionToolDependencies = {}) {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -280,19 +323,19 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   // Register with the tool registry
   selectAllTextTool.register(ToolRegistry, (device, args, progress, signal) =>
-    selectAllTextHandler(device, args, progress, signal, deps),
+    selectAllTextHandler(device, args, { progress, signal, deps }),
   );
 
   pressButtonTool.register(ToolRegistry, (device, args, progress, signal) =>
-    pressButtonHandler(device, args, progress, signal, deps),
+    pressButtonHandler(device, args, { progress, signal, deps }),
   );
 
   ToolRegistry.registerDeviceAware(
     "systemTray",
     "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     systemTraySchema,
-    systemTrayHandler,
     {
+      handler: systemTrayHandler,
       defaultEnabled: false,
       supportsProgress: true,
       outputSchema: systemTrayResultSchema,
@@ -304,8 +347,8 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "sendKeys",
     "Execute ordered typing, clear, raw-key, and semantic IME commands. Unicode: iOS any mode; Android a11y/ime/auto/eventAll/eventLast (event modes use a11y for unsupported runs). Android eventOnly/imeKeyEvents are ASCII-only. textLength counts code points.",
     sendKeysSchema,
-    createSendKeysHandler(deps),
     {
+      handler: createSendKeysHandler(deps),
       defaultEnabled: true,
       supportsProgress: true,
       outputSchema: sendKeysResultSchema,
@@ -319,16 +362,21 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "openLink",
     'Open URL in browser. A transient Android ADB failure returns device_transport_unavailable (retryable: true, retryAfterMs, deviceId). dispatched is false before dispatch or "unknown" after transport loss (true is reserved for confirmed dispatch). For "unknown", the link may already have opened: observe before reissuing a single-use link.',
     openLinkSchema,
-    createOpenLinkHandler(deps),
-    { defaultEnabled: false, outputSchema: openLinkResultSchema, ...PLAN_SKELETON },
+    {
+      handler: createOpenLinkHandler(deps),
+      defaultEnabled: false,
+      outputSchema: openLinkResultSchema,
+      ...PLAN_SKELETON,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
     "tapOn",
     "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
     tapOnSchema,
-    (device, args, progress, signal) => tapOnHandler(device, args, progress, signal, deps),
     {
+      handler: (device, args, progress, signal) =>
+        tapOnHandler(device, args, { progress, signal, deps }),
       defaultEnabled: true,
       supportsProgress: true,
       outputSchema: tapOnResultSchema,
@@ -340,77 +388,57 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "tapAt",
     "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     tapAtSchema,
-    (device, args, progress, signal) => tapAtHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
+    {
+      handler: (device, args, progress, signal) =>
+        tapAtHandler(device, args, { progress, signal, deps }),
+      defaultEnabled: true,
+      supportsProgress: true,
+      ...PLAN_SKELETON,
+      ...ANSWERS_SYSTEM_ALERTS,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
     "dragPath",
-    "Drag a finger (or, with pointer, a stylus on Android 13+) along a polyline with segment timing, an initial hold and a release hold.",
+    "Drag a finger (or, with pointer, a stylus on Android 12+) along a polyline with segment timing, an initial hold and a release hold.",
     dragPathSchema,
-    dragPathHandler,
-    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
+    {
+      handler: dragPathHandler,
+      defaultEnabled: false,
+      supportsProgress: true,
+      ...PLAN_SKELETON,
+      ...ANSWERS_SYSTEM_ALERTS,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
     "hoverAt",
     "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1).",
     hoverAtSchema,
-    hoverAtHandler,
-    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
+    {
+      handler: hoverAtHandler,
+      defaultEnabled: false,
+      supportsProgress: true,
+      ...PLAN_SKELETON,
+      ...ANSWERS_SYSTEM_ALERTS,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
     "hitTest",
     "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
     hitTestSchema,
-    (device, args, progress, signal) => hitTestHandler(device, args, progress, signal, deps),
-    // Dispatches no input: a read (#10965). On a held device it reads through the observer
-    // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
-    { defaultEnabled: false, deviceReadOnly: true },
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "tapAny",
-    "Tap any clickable element; scope with container or scrollableContainer.",
-    tapAnySchema,
-    (device, args, progress, signal) => tapAnyHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON, ...ANSWERS_SYSTEM_ALERTS },
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "dragAndDrop",
-    "Drag and drop element",
-    dragAndDropSchema,
-    (device, args, progress, signal) => dragAndDropHandler(device, args, progress, signal, deps),
     {
+      handler: (device, args, progress, signal) =>
+        hitTestHandler(device, args, { progress, signal, deps }),
+      // Dispatches no input: a read (#10965). On a held device it reads through the observer
+      // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
       defaultEnabled: false,
-      supportsProgress: true,
-      outputSchema: dragAndDropResultSchema,
-      ...NAV_PLAN_SKELETON,
+      deviceReadOnly: true,
     },
   );
 
-  ToolRegistry.registerDeviceAware(
-    "swipeOn",
-    "Swipe/scroll on screen or elements",
-    swipeOnSchema,
-    (device, args, progress, signal) => swipeOnHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...NAV_PLAN_SKELETON },
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "pinchOn",
-    "Pinch to zoom",
-    pinchOnSchema,
-    (device, args, progress, signal) => pinchOnHandler(device, args, progress, signal, deps),
-    {
-      defaultEnabled: false,
-      supportsProgress: true,
-      outputSchema: pinchOnResultSchema,
-      ...NAV_PLAN_SKELETON,
-    },
-  );
+  registerGestureTools(deps);
 
   shakeTool.register(ToolRegistry, createShakeHandler(deps));
 
@@ -422,15 +450,20 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   // Register the new rotate tool
   rotateTool.register(ToolRegistry, (device, args, progress, signal) =>
-    rotateHandler(device, args, progress, signal, deps),
+    rotateHandler(device, args, { progress, signal, deps }),
   );
 
   ToolRegistry.registerDeviceAware(
     "setPosture",
     "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console support is detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android strictly parses emu sensor get hinge-angle0 output as hinge-angle0 = <n>; iOS uses the runner angle. Both report observedHingeAngle when available and warn without failing when the resulting angle is unavailable or differs by more than 1 degree.",
     setPostureSchema,
-    (device, args, progress, signal) => setPostureHandler(device, args, progress, signal, deps),
-    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setPostureResultSchema },
+    {
+      handler: (device, args, progress, signal) =>
+        setPostureHandler(device, args, { progress, signal, deps }),
+      ...PLAN_RELEVANT,
+      defaultEnabled: false,
+      outputSchema: setPostureResultSchema,
+    },
   );
 
   // Register the clipboard tool
@@ -438,9 +471,9 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "clipboard",
     "Clipboard operations (copy/paste/clear/get)",
     clipboardSchema,
-    createClipboardHandler(deps),
-    // get changes no UI: a read (#10965). copy, paste and clear are control.
     {
+      handler: createClipboardHandler(deps),
+      // get changes no UI: a read (#10965). copy, paste and clear are control.
       ...PLAN_RELEVANT,
       defaultEnabled: false,
       outputSchema: clipboardResultSchema,

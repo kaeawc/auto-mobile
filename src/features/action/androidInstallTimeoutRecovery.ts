@@ -89,13 +89,10 @@ async function probeTimedOutInstall(
 ): Promise<TimedOutInstallVerdict> {
   const { adb, userId, prior, signal } = check;
   try {
-    const listed = await isPackageInstalledForUser(
-      adb,
-      packageName,
-      userId,
-      INSTALL_RECOVERY_READ_TIMEOUT_MS,
+    const listed = await isPackageInstalledForUser(adb, packageName, userId, {
+      timeoutMs: INSTALL_RECOVERY_READ_TIMEOUT_MS,
       signal,
-    );
+    });
     if (!listed) {
       return {
         outcome: "indeterminate",

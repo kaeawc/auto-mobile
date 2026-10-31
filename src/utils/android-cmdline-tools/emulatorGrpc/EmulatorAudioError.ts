@@ -12,6 +12,7 @@ export type EmulatorAudioErrorCode =
   | "audio_injection_unsupported"
   | "audio_capture_unsupported"
   | "audio_grpc_failed"
+  | "audio_grpc_auth_rejected"
   | "audio_loopback_failed";
 
 /**
@@ -57,7 +58,36 @@ export function repeatInjectionUnsafe(deviceId: string): EmulatorAudioError {
   );
 }
 
+const AUTH_REJECTED_REMEDY =
+  "Relaunch the emulator with -grpc-use-token, or with -grpc <port> and no JWT, then retry.";
+
+/**
+ * The emulator refuses a token it cannot validate with INVALID_ARGUMENT ("invalid JWT ..."), an
+ * issuer or method off its allowlist with PERMISSION_DENIED, and a missing token with
+ * UNAUTHENTICATED.
+ */
+function isAuthRejection(status: GrpcStatusResult): boolean {
+  return (
+    status.code === GrpcStatus.UNAUTHENTICATED ||
+    status.code === GrpcStatus.PERMISSION_DENIED ||
+    (status.code === GrpcStatus.INVALID_ARGUMENT && /\bJWT\b/i.test(status.message))
+  );
+}
+
+function authRejected(operation: string, status: GrpcStatusResult): EmulatorAudioError {
+  return new EmulatorAudioError(
+    "audio_grpc_auth_rejected",
+    `The emulator refused AutoMobile's gRPC credentials for audio ${operation} ` +
+      `(gRPC status ${status.code}: ${status.message || "no detail"}). ${AUTH_REJECTED_REMEDY}`,
+    status,
+    { retryable: false, remedy: AUTH_REJECTED_REMEDY },
+  );
+}
+
 export function injectionError(status: GrpcStatusResult): EmulatorAudioError {
+  if (isAuthRejection(status)) {
+    return authRejected("injection", status);
+  }
   switch (status.code) {
     case GrpcStatus.FAILED_PRECONDITION:
       return new EmulatorAudioError(
@@ -83,6 +113,9 @@ export function injectionError(status: GrpcStatusResult): EmulatorAudioError {
 }
 
 export function captureError(status: GrpcStatusResult): EmulatorAudioError {
+  if (isAuthRejection(status)) {
+    return authRejected("capture", status);
+  }
   const unsupported =
     status.code === GrpcStatus.UNIMPLEMENTED || status.code === GrpcStatus.UNAVAILABLE;
   return new EmulatorAudioError(

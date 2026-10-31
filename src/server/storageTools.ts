@@ -348,15 +348,19 @@ function withSharedPreferencesInspectionFallback(
   device: BootedDevice,
   { appId, fileName }: AndroidKeyValueFileTarget,
   viaSdk: () => Promise<void>,
-  viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
-  deps: StorageToolsDependencies,
+  {
+    viaDirectFile,
+    deps,
+  }: {
+    viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
+    deps: StorageToolsDependencies;
+  },
 ): Promise<SharedPreferencesInspectionFallbackResult> {
   return withAndroidSharedPreferencesInspectionFallback(
     appId,
     fileName,
     () => deps.adbClientFactory.create(device),
-    viaSdk,
-    viaDirectFile,
+    { viaSdk, viaDirectFile },
   );
 }
 
@@ -391,15 +395,17 @@ async function setKeyValueHandler(
                 value,
                 type: args.type,
               }),
-        (adb) =>
-          value === null
-            ? removeAndroidKeyValueDirect(adb, device.deviceId, target, args.key)
-            : setAndroidKeyValueDirect(adb, device.deviceId, target, {
-                key: args.key,
-                value,
-                type: args.type,
-              }),
-        deps,
+        {
+          viaDirectFile: (adb) =>
+            value === null
+              ? removeAndroidKeyValueDirect(adb, device.deviceId, target, args.key)
+              : setAndroidKeyValueDirect(adb, device.deviceId, target, {
+                  key: args.key,
+                  value,
+                  type: args.type,
+                }),
+          deps,
+        },
       ));
     } else if (device.platform === "ios") {
       const client = deps.iosClientFactory(device);
@@ -466,8 +472,11 @@ async function removeKeyValueHandler(
         device,
         target,
         () => client.removePreference(args.appId, storageName, args.key),
-        (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, target, args.key),
-        deps,
+        {
+          viaDirectFile: (adb) =>
+            removeAndroidKeyValueDirect(adb, device.deviceId, target, args.key),
+          deps,
+        },
       ));
     } else if (device.platform === "ios") {
       const client = deps.iosClientFactory(device);
@@ -518,15 +527,14 @@ async function clearKeyValueFileHandler(
         device,
         { appId: args.appId, fileName: storageName },
         () => client.clearPreferenceStore(args.appId, storageName),
-        (adb) =>
-          clearAndroidKeyValueFileDirect(
-            adb,
-            device.deviceId,
-            args.appId,
-            storageName,
-            args.userId,
-          ),
-        deps,
+        {
+          viaDirectFile: (adb) =>
+            clearAndroidKeyValueFileDirect(adb, device.deviceId, args.appId, {
+              fileName: storageName,
+              userId: args.userId,
+            }),
+          deps,
+        },
       ));
     } else if (device.platform === "ios") {
       const client = deps.iosClientFactory(device);
@@ -633,23 +641,31 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     "deleteKeychainItem",
     "Delete one exact, host-allowlisted, app-owned iOS generic-password Keychain item. Requires SDK opt-in, mutation authorization and explicit confirmation; never exports values.",
     deleteKeychainItemSchema,
-    (device, args) => deleteKeychainItemHandler(device, args, deps),
-    { defaultEnabled: false, outputSchema: deleteKeychainItemResultSchema, embeddedSdkOnly: true },
+    {
+      handler: (device, args) => deleteKeychainItemHandler(device, args, deps),
+      defaultEnabled: false,
+      outputSchema: deleteKeychainItemResultSchema,
+      embeddedSdkOnly: true,
+    },
   );
   ToolRegistry.registerDeviceAware(
     "setKeyValue",
     "Set app key-value storage entry.",
     setKeyValueSchema,
-    (device, args) => setKeyValueHandler(device, args, deps),
-    { defaultEnabled: false, outputSchema: setKeyValueResultSchema, embeddedSdkOnly: true },
+    {
+      handler: (device, args) => setKeyValueHandler(device, args, deps),
+      defaultEnabled: false,
+      outputSchema: setKeyValueResultSchema,
+      embeddedSdkOnly: true,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
     "listDataStores",
     "List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter).",
     listDataStoresSchema,
-    (device, args) => listDataStoresHandler(device, args, deps),
     {
+      handler: (device, args) => listDataStoresHandler(device, args, deps),
       defaultEnabled: false,
       outputSchema: listDataStoresResultSchema,
       embeddedSdkOnly: true,
@@ -662,8 +678,8 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     "getDataStore",
     "Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter).",
     getDataStoreSchema,
-    (device, args) => getDataStoreHandler(device, args, deps),
     {
+      handler: (device, args) => getDataStoreHandler(device, args, deps),
       defaultEnabled: false,
       outputSchema: getDataStoreResultSchema,
       embeddedSdkOnly: true,
@@ -676,15 +692,23 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     "removeKeyValue",
     "Remove app key-value storage entry.",
     removeKeyValueSchema,
-    (device, args) => removeKeyValueHandler(device, args, deps),
-    { defaultEnabled: false, outputSchema: removeKeyValueResultSchema, embeddedSdkOnly: true },
+    {
+      handler: (device, args) => removeKeyValueHandler(device, args, deps),
+      defaultEnabled: false,
+      outputSchema: removeKeyValueResultSchema,
+      embeddedSdkOnly: true,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
     "clearKeyValueFile",
     "Clear app key-value storage file.",
     clearKeyValueFileSchema,
-    (device, args) => clearKeyValueFileHandler(device, args, deps),
-    { defaultEnabled: false, outputSchema: clearKeyValueFileResultSchema, embeddedSdkOnly: true },
+    {
+      handler: (device, args) => clearKeyValueFileHandler(device, args, deps),
+      defaultEnabled: false,
+      outputSchema: clearKeyValueFileResultSchema,
+      embeddedSdkOnly: true,
+    },
   );
 }

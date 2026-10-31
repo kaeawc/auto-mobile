@@ -855,8 +855,8 @@ describe("prototype MCP tool", () => {
     const oldStore = new InMemoryPrototypeStatusStore(timer);
     const newStore = new InMemoryPrototypeStatusStore(timer);
     const scope = { deviceId: device.deviceId, sessionUuid: "one" };
-    oldStore.record(scope, "show", { id: "old" }, { success: true });
-    newStore.record(scope, "show", { id: "new" }, { success: true });
+    oldStore.record(scope, "show", { id: "old" }, { result: { success: true } });
+    newStore.record(scope, "show", { id: "new" }, { result: { success: true } });
     const unsubscribeOld = registerPrototypeTools({ clientFactory: () => client, store: oldStore });
     unsubscribe = registerPrototypeTools({ clientFactory: () => client, store: newStore });
     // A stale disposer must not detach the replacement's listeners.

@@ -13,13 +13,24 @@ export const STARTUP_STDOUT_GRACE_MS = 1_000;
 
 /** Optional early signals; the launcher still owns classification and the 5 s fallback. */
 export class EmulatorStartupValidation {
+  private readonly resolveStartup: () => void;
+  private readonly options: Pick<EmulatorProcessOptions, "expectedDeviceId" | "signal">;
+
   constructor(
     private readonly host: EmulatorLauncherHost,
     private readonly state: EmulatorLaunchState,
     private readonly child: HostChildProcess,
-    private readonly resolveStartup: () => void,
-    private readonly options: Pick<EmulatorProcessOptions, "expectedDeviceId" | "signal"> = {},
-  ) {}
+    {
+      resolveStartup,
+      options = {},
+    }: {
+      resolveStartup: () => void;
+      options?: Pick<EmulatorProcessOptions, "expectedDeviceId" | "signal">;
+    },
+  ) {
+    this.resolveStartup = resolveStartup;
+    this.options = options;
+  }
 
   observeOutput(output: string, isStdout: boolean, diagnosticOutput: string): void {
     this.state.startupAccelerationFailureDetected ||=

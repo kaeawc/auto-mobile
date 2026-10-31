@@ -1170,23 +1170,25 @@ export class LivenessScenario {
       this.timer,
       new SessionScopedStreamAuthenticator(() => manager, "appearance"),
       {
-        getPooledDevices: () => this.deviceIds.map((id) => this.device(id) as never),
-        getSessionDevice: () => undefined,
-        getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId) ?? null,
-        getSessionManager: () => manager,
-      },
-      {
-        getConfig: async () => config as never,
-        updateConfig: async (update) => {
-          config = { ...config, ...update } as typeof config;
-          return config as never;
+        deviceSource: {
+          getPooledDevices: () => this.deviceIds.map((id) => this.device(id) as never),
+          getSessionDevice: () => undefined,
+          getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId) ?? null,
+          getSessionManager: () => manager,
         },
-        resolveMode: async () => "light",
-        applyToDevice: async (device, appliedMode) => {
-          applied.push(`${device.deviceId}:${appliedMode}`);
+        dependencies: {
+          getConfig: async () => config as never,
+          updateConfig: async (update) => {
+            config = { ...config, ...update } as typeof config;
+            return config as never;
+          },
+          resolveMode: async () => "light",
+          applyToDevice: async (device, appliedMode) => {
+            applied.push(`${device.deviceId}:${appliedMode}`);
+          },
+          triggerSync: async () => {},
+          isSyncEnabled: () => false,
         },
-        triggerSync: async () => {},
-        isSyncEnabled: () => false,
       },
     );
     const socket = new FakeSocket();

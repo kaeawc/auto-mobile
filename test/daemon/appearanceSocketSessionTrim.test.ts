@@ -61,8 +61,7 @@ describe("appearance socket session lookup", () => {
           isAuthenticationEnforced: () => true,
           resolveSessionIdentity: (uuid) => uuid?.trim() || undefined,
         },
-        deviceSource,
-        dependencies,
+        { deviceSource, dependencies },
       );
 
       const response = await server.dispatch({

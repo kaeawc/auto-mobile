@@ -454,17 +454,17 @@ void call18(...args18, { assertCurrent: 1 });
 declare const call19: TalkBackTapStrategy["executeCoordinateFallback"];
 declare const args19: Parameters<typeof call19>;
 void call19(...args19);
-const options19 = call19.bind(undefined, args19[0], args19[1], args19[2], args19[3]);
-void options19();
-void options19({ displayFence: fence });
+const options19 = call19.bind(undefined, args19[0], args19[1], args19[2]);
+void options19({ driver: args19[3].driver });
+void options19({ ...args19[3], fenceOptions: { displayFence: fence } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options19({ displayFence: [] });
+void options19({ ...args19[3], fenceOptions: { displayFence: [] } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options19({ displayFence: {} });
+void options19({ ...args19[3], fenceOptions: { displayFence: {} } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options19({ displayFence: { assertCurrent: 1 } });
+void options19({ ...args19[3], fenceOptions: { displayFence: { assertCurrent: 1 } } });
 // @ts-expect-error Arrays are not dispatch options.
-void options19([]);
+void options19({ ...args19[3], fenceOptions: [] });
 // @ts-expect-error Extra positional slots never carry a fence.
 void call19(...args19, []);
 // @ts-expect-error Extra positional slots never carry a fence.
@@ -476,17 +476,17 @@ void call19(...args19, { assertCurrent: 1 });
 declare const call20: TalkBackTapStrategy["executeLongPress"];
 declare const args20: Parameters<typeof call20>;
 void call20(...args20);
-const options20 = call20.bind(undefined, args20[0], args20[1], args20[2], args20[3]);
-void options20();
-void options20({ displayFence: fence });
+const options20 = call20.bind(undefined, args20[0], args20[1], args20[2]);
+void options20({ driver: args20[3].driver });
+void options20({ ...args20[3], fenceOptions: { displayFence: fence } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options20({ displayFence: [] });
+void options20({ ...args20[3], fenceOptions: { displayFence: [] } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options20({ displayFence: {} });
+void options20({ ...args20[3], fenceOptions: { displayFence: {} } });
 // @ts-expect-error A fence must implement assertCurrent(): void.
-void options20({ displayFence: { assertCurrent: 1 } });
+void options20({ ...args20[3], fenceOptions: { displayFence: { assertCurrent: 1 } } });
 // @ts-expect-error Arrays are not dispatch options.
-void options20([]);
+void options20({ ...args20[3], fenceOptions: [] });
 // @ts-expect-error Extra positional slots never carry a fence.
 void call20(...args20, []);
 // @ts-expect-error Extra positional slots never carry a fence.

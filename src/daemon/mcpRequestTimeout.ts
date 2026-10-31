@@ -310,7 +310,7 @@ export function resolveEnvTimeoutFloorMs(
   fallbackMs: number,
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  return readEnvPositiveInteger(primaryEnvVar, legacyEnvVar, { fallback: fallbackMs }, env);
+  return readEnvPositiveInteger(primaryEnvVar, legacyEnvVar, { fallback: fallbackMs, env });
 }
 
 function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {
@@ -788,8 +788,7 @@ function addPlanStepBudgets(
   steps: unknown,
   multiDevice: boolean,
   parentTrack: string | undefined,
-  accumulator: PlanBudgetAccumulator,
-  depth: number,
+  { accumulator, depth }: { accumulator: PlanBudgetAccumulator; depth: number },
 ): void {
   if (!Array.isArray(steps)) {
     return;
@@ -820,7 +819,7 @@ function addPlanStepBudgets(
       (accumulator.tracks.get(track) ?? 0) + resolvePlanStepBudgetMs(step.tool, step.params),
     );
     if (step.tool === "criticalSection") {
-      addPlanStepBudgets(step.params.steps, multiDevice, track, accumulator, depth + 1);
+      addPlanStepBudgets(step.params.steps, multiDevice, track, { accumulator, depth: depth + 1 });
     }
   }
 }
@@ -862,7 +861,7 @@ function resolveExecutePlanStepsBudgetMs(planContent: unknown): number {
     saturated: false,
   };
   const multiDevice = Array.isArray(plan.devices) && plan.devices.length > 0;
-  addPlanStepBudgets(plan.steps, multiDevice, undefined, accumulator, 0);
+  addPlanStepBudgets(plan.steps, multiDevice, undefined, { accumulator, depth: 0 });
   if (accumulator.saturated) {
     return MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
   }

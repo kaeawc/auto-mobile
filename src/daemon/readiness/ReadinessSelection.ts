@@ -277,8 +277,7 @@ export class ReadinessSelection {
         readTarget.bootedDevice,
         readTarget.bootedDevice.platform,
         "provided",
-        scan,
-        options,
+        { scan, ...options },
       );
     }
 
@@ -288,8 +287,7 @@ export class ReadinessSelection {
       platform,
       androidDevices,
       iosDevices,
-      providedDeviceId,
-      options,
+      { providedDeviceId, ...options },
     );
 
     let selectedDevice: BootedDevice | undefined;
@@ -340,21 +338,17 @@ export class ReadinessSelection {
       );
     }
 
-    return await this.finishReadinessSelection(
-      selectedDevice,
-      resolvedPlatform,
-      deviceSource,
+    return await this.finishReadinessSelection(selectedDevice, resolvedPlatform, deviceSource, {
       scan,
-      options,
-    );
+      ...options,
+    });
   }
 
   private async finishReadinessSelection(
     selectedDevice: BootedDevice,
     resolvedPlatform: Platform,
     deviceSource: "provided" | "auto",
-    scan: ConnectedPlatformScan,
-    options?: DeviceReadyOptions,
+    { scan, ...options }: DeviceReadyOptions & { scan: ConnectedPlatformScan },
   ): Promise<BootedDevice> {
     // Safety check: ensure the selected device's platform matches the resolved platform.
     // This guards against cross-platform contamination where an iOS device could be
@@ -763,8 +757,7 @@ export class ReadinessSelection {
     platform: SomePlatform,
     androidDevices: BootedDevice[],
     iosDevices: BootedDevice[],
-    providedDeviceId?: string,
-    options?: DeviceReadyOptions,
+    { providedDeviceId, ...options }: DeviceReadyOptions & { providedDeviceId?: string } = {},
   ): { platformDevices: BootedDevice[]; resolvedPlatform: Platform } {
     // Get devices for the requested platform
     let platformDevices: BootedDevice[] = [];

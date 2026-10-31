@@ -186,9 +186,9 @@ export class FakeDaemonClient implements DaemonClientLike {
     toolName: string,
     params: Record<string, any>,
     progressToken?: string | number,
-    onRequestId?: (requestId: string) => void,
     options?: DaemonToolCallOptions,
   ): Promise<any> {
+    const onRequestId = options?.onRequestId;
     const signal = options?.signal;
     signal?.throwIfAborted();
     this.assertReachable();
@@ -211,7 +211,9 @@ export class FakeDaemonClient implements DaemonClientLike {
     if (perToolResult !== undefined || this.scriptedToolResult || !this.daemon) {
       return perToolResult ?? this.toolResult;
     }
-    return await this.daemon.callTool(toolName, params, progressToken, undefined, options);
+    // The request id was already reported for this hop; the daemon hop must not report another.
+    const forwarded = options === undefined ? undefined : { ...options, onRequestId: undefined };
+    return await this.daemon.callTool(toolName, params, progressToken, forwarded);
   }
 
   async relayTaskMethod(

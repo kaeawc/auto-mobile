@@ -68,7 +68,7 @@ describe("DaemonMcpProxy task relay (#4668)", () => {
   });
 
   test("declared calls and relayed tasks/* share one owner key for the proxy's lifetime", async () => {
-    await proxy.callTool("observe", {}, undefined, undefined, { declaresTasks: true });
+    await proxy.callTool("observe", {}, undefined, { declaresTasks: true });
     await proxy.relayTaskMethod("tasks/get", { taskId: "t-1" }, true);
     await proxy.relayTaskMethod("tasks/cancel", { taskId: "t-1" }, true);
 
@@ -184,7 +184,7 @@ describe("DaemonMcpProxy binds a device-binding task from its completed result (
   }
 
   async function startAsTask(): Promise<Record<string, unknown>> {
-    return proxy.callTool("startDevice", { platform: "android" }, undefined, undefined, {
+    return proxy.callTool("startDevice", { platform: "android" }, undefined, {
       declaresTasks: true,
     });
   }

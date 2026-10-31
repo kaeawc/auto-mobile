@@ -236,18 +236,19 @@ describe("iOS opt-in tap diagnostics", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "tap-diagnostics", platform: "ios", name: "Fake Duo" },
       8765,
-      createSuccessWebSocketFactory(timer),
-      timer,
+      { wsFactory: createSuccessWebSocketFactory(timer), timer },
     );
     const boundary = client.testHooks;
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       logger.setLogLevel(LogLevel.INFO);
-      const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000, () => ({
-        success: false,
-        error: "Tap timed out",
-      }));
+      const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000, {
+        timeoutErrorFactory: () => ({
+          success: false,
+          error: "Tap timed out",
+        }),
+      });
       // Model JSON from an untrusted runner, including a malformed optional value.
       const message = {
         type: "tap_coordinates_result",

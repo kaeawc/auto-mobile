@@ -249,7 +249,6 @@ export class HierarchyCollector {
           new NoOpPerformanceTracker(),
           true, // disableAllFiltering
           signal,
-          undefined,
           { displayId },
         );
         // A read of a non-default display answers its caller only (#10106): it never wrote

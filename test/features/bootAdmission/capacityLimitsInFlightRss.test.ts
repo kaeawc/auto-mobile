@@ -29,7 +29,7 @@ test("a 6 GiB in-flight boot beside a settled 1.5 GiB device keeps the limit at 
       {},
       "MAX_BOOTED",
       { totalMemoryBytes: 16 * GIB, cpuCount: 16 },
-      bytes,
+      { perDeviceBytes: bytes },
     ),
   ).toEqual({ maxBooted: 2, source: "derived" });
 });

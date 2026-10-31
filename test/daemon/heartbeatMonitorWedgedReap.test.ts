@@ -82,8 +82,8 @@ describe("terminal source releases", () => {
         state.running = true;
         await gate.promise;
       },
-      timer,
       {
+        timer,
         checkIntervalMs: SCAN_MS,
         forceStuckRelease: async () => {
           forcedAt.push(timer.now());
@@ -191,7 +191,7 @@ describe("a release that never settles (#10704)", () => {
         }
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     monitor.start();
   });
@@ -313,8 +313,8 @@ describe("monitor reap timestamps", () => {
         reapedAt.push(timer.now());
         await gate.promise;
       },
-      timer,
       {
+        timer,
         checkIntervalMs: SCAN_MS,
         forceStuckRelease: async () => {
           forcedAt.push(timer.now());

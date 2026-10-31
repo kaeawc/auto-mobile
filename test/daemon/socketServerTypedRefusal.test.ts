@@ -46,7 +46,10 @@ test.each(["getApple", "getAndroid"] as const)(
 test("boot and shutdown timeouts agree on the socket frame and the MCP result", () => {
   const device = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" } as const;
   const errors = [
-    new DeviceBootTimeoutError("startDevice", "starting the device", 5, 10, "Pixel 8"),
+    new DeviceBootTimeoutError("startDevice", "starting the device", 5, {
+      budgetMs: 10,
+      device: "Pixel 8",
+    }),
     shutdownTimeoutError(device, "still listed"),
   ];
   for (const error of errors) {

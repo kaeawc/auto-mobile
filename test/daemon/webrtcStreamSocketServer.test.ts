@@ -94,7 +94,7 @@ class TestableServer extends WebRtcStreamSocketServer {
     // daemon's pool, which another suite in this process may have initialized.
     admissionGate: DeviceAdmissionGate = permissiveDeviceAdmissionGate,
   ) {
-    super("/fake/webrtc-stream.sock", new FakeTimer(), deps, authenticator, admissionGate);
+    super("/fake/webrtc-stream.sock", new FakeTimer(), deps, { authenticator, admissionGate });
   }
   async simulateRaw(socket: FakeSocket, line: string): Promise<void> {
     await this.processLine(socket, line);
@@ -270,8 +270,7 @@ describe("WebRtcStreamSocketServer", () => {
       "/fake/webrtc-stream.sock",
       timer,
       makeDeps({ stopAllStreams: () => new Promise<void>(() => {}) }),
-      allowAllAuthenticator,
-      permissiveDeviceAdmissionGate,
+      { authenticator: allowAllAuthenticator, admissionGate: permissiveDeviceAdmissionGate },
     );
     await harness.load();
     const closing = harness.close();
@@ -866,8 +865,8 @@ describe("WebRtcStreamSocketServer", () => {
             identities.push(sessionUuid ?? "missing");
             return descriptor("stream-1");
           },
-          awaitReadiness: async (_streamId, _readiness, _timeoutMs, _leaseId, sessionUuid) => {
-            identities.push(sessionUuid ?? "missing");
+          awaitReadiness: async (_streamId, _readiness, _timeoutMs, options) => {
+            identities.push(options?.sessionUuid ?? "missing");
             return descriptor("stream-1");
           },
           stopStream: async (_streamId, _leaseId, sessionUuid) => {

@@ -118,12 +118,15 @@ export function createSharedStorageReadServiceForTesting(
     dependencies.adbFactory ?? defaultAdbClientFactory,
     dependencies.createUserResolver ?? ((adb) => new AndroidUserTargetResolver(adb)),
     dependencies.deviceResolver ?? findBootedDevice,
-    dependencies.hashCache ?? new BoundedSharedStorageHashCache(),
-    dependencies.iosFixtureReader ??
-      new SimctlIosFilesFixtureContainer(
-        (device) => new SimCtlClient(device),
-        nodeAppFileFileSystem,
-      ),
+    {
+      hashCache: dependencies.hashCache ?? new BoundedSharedStorageHashCache(),
+      iosFixtureReader:
+        dependencies.iosFixtureReader ??
+        new SimctlIosFilesFixtureContainer(
+          (device) => new SimCtlClient(device),
+          nodeAppFileFileSystem,
+        ),
+    },
   );
 }
 
@@ -139,16 +142,27 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
     return describeDefaultSharedStorageReadCoverage(platform, domain);
   }
 
+  private readonly hashCache: SharedStorageHashCache;
+  private readonly iosFixtureReader: Pick<
+    SimctlIosFilesFixtureContainer,
+    "listNamespace" | "readNamespaceFile"
+  >;
+
   constructor(
     private readonly adbFactory: AdbClientFactory,
     private readonly createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver,
     private readonly deviceResolver: (deviceId: string) => Promise<BootedDevice | null>,
-    private readonly hashCache: SharedStorageHashCache,
-    private readonly iosFixtureReader: Pick<
-      SimctlIosFilesFixtureContainer,
-      "listNamespace" | "readNamespaceFile"
-    >,
-  ) {}
+    {
+      hashCache,
+      iosFixtureReader,
+    }: {
+      hashCache: SharedStorageHashCache;
+      iosFixtureReader: Pick<SimctlIosFilesFixtureContainer, "listNamespace" | "readNamespaceFile">;
+    },
+  ) {
+    this.hashCache = hashCache;
+    this.iosFixtureReader = iosFixtureReader;
+  }
 
   async list(request: ListSharedStorageRequest): Promise<SharedStorageNamespaceListing> {
     const namespace = normalizeSharedStorageNamespace(request.namespace);
@@ -213,7 +227,8 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
         namespace,
         new Set(statEntries.map((entry) => entry.absolutePath)),
       );
-      const hashes = await listHashes(adb, statEntries, request, namespace, {
+      const hashes = await listHashes(adb, statEntries, request, {
+        namespace,
         directory,
         cache: this.hashCache,
       });
@@ -522,8 +537,11 @@ async function listHashes(
   adb: AdbExecutor,
   entries: readonly ParsedStatEntry[],
   request: ListSharedStorageRequest,
-  namespace: string,
-  { directory, cache }: { directory: string; cache: SharedStorageHashCache },
+  {
+    namespace,
+    directory,
+    cache,
+  }: { namespace: string; directory: string; cache: SharedStorageHashCache },
 ): Promise<Map<string, string>> {
   const hashes = new Map<string, string>();
   const keyFor = (entry: ParsedStatEntry): SharedStorageHashKey => ({

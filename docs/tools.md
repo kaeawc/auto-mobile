@@ -209,8 +209,8 @@ virtual loopback device the default input) or the AVD audio settings. The `messa
 | `pointer` shape                                                                                                      | Route                     | Needs                           |
 | -------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------- |
 | `{ toolType: "stylus" }`, `pressure` omitted or `1` (`tapAt`, `swipeAt`)                                             | `adb shell input stylus`  | Android 12+ (API 31)            |
-| `pressure` other than 1, `tilt` (radians, 0 to PI/2), `orientation` (radians), or `buttons` (`primary`, `secondary`) | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
-| `dragPath` with any `pointer`                                                                                        | CtrlProxy instrumentation | `stylus_input_v1` (Android 13+) |
+| `pressure` other than 1, `tilt` (radians, 0 to PI/2), `orientation` (radians), or `buttons` (`primary`, `secondary`) | CtrlProxy instrumentation | `stylus_input_v1` (Android 12+) |
+| `dragPath` with any `pointer`                                                                                        | CtrlProxy instrumentation | `stylus_input_v1` (Android 12+) |
 
 `dragPath` points also take `pressure` and `tilt` (they need `pointer`), interpolated between points; `holdMs` and
 `releaseHoldMs` become holds at the first and last point. A device or runner that cannot honour the request is refused before
@@ -240,7 +240,7 @@ are the documented intent and still need on-device confirmation (#13082).
 
 ### prototype
 
-Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](design-docs/plat/android/prototype-ux.md).
+Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](design-docs/plat/android/prototype-ux.md). Camera and media support per runtime: [camera and media guide](design-docs/prototype-camera-media.md).
 
 #### Watch-sized mockups
 

@@ -307,8 +307,11 @@ export class PinchOn extends BaseVisualChange {
         this.screenshotCapturer,
         viewHierarchy,
         searchCriteria,
-        this.visionConfig,
-        { baseError: finalErrorMessage, visionAnalyzer: this.visionAnalyzer },
+        {
+          visionConfig: this.visionConfig,
+          baseError: finalErrorMessage,
+          visionAnalyzer: this.visionAnalyzer,
+        },
       );
     }
 
@@ -665,8 +668,7 @@ export class PinchOn extends BaseVisualChange {
           requireAndroidOrIosPlatform(this.device.platform, "pinchOn"),
           scoped,
           snapshot.requestedFreshness,
-          this.timer,
-          { captureId: snapshot.captureId },
+          { timer: this.timer, captureId: snapshot.captureId },
         );
   }
 
@@ -802,7 +804,9 @@ export class PinchOn extends BaseVisualChange {
 
     throwIfAborted(signal);
     const snapshot = displayObservation?.viewHierarchy
-      ? identifyObservedHierarchy("android", displayObservation.viewHierarchy, "fresh", this.timer)
+      ? identifyObservedHierarchy("android", displayObservation.viewHierarchy, "fresh", {
+          timer: this.timer,
+        })
       : await this.capture.capture({
           freshness: "fresh",
           searchRaw: serverConfig.isRawElementSearchEnabled(),

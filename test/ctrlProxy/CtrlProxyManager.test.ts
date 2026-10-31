@@ -111,7 +111,7 @@ describe("CtrlProxyManager", function () {
       const mirror = new FakeSavedPrototypeMirror();
       const adb = new FakeAdbExecutor();
       const timer = new FakeTimer();
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, { timer });
       const order: string[] = [];
       const warn = spyOn(logger, "warn").mockImplementation((message) => {
         order.push(`warn:${message}`);
@@ -150,13 +150,10 @@ describe("CtrlProxyManager", function () {
         },
       });
       const invoke = (installed = true, force = true) =>
-        manager.installDownloadedApkGuarded(
-          "/fake.apk",
-          { status: "not_installed" },
-          installed,
-          force,
-          new NoOpPerformanceTracker(),
-        );
+        manager.installDownloadedApkGuarded("/fake.apk", { status: "not_installed" }, installed, {
+          needsReinstallDueToUnknownSha: force,
+          perf: new NoOpPerformanceTracker(),
+        });
       const record = () =>
         mirror.record(testDevice.deviceId, {
           id: "panel",
@@ -476,7 +473,7 @@ describe("CtrlProxyManager", function () {
     const installedCommand = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
 
     function createManager(timer: FakeTimer, adb: FakeAdbExecutor): AndroidCtrlProxyManager {
-      return AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
+      return AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, { timer });
     }
 
     // Mirror the production TTLs without exposing private cache state.
@@ -634,8 +631,7 @@ describe("CtrlProxyManager", function () {
               "/tmp/ctrlproxy.apk",
               { status: "not_installed" },
               true,
-              false,
-              new NoOpPerformanceTracker(),
+              { needsReinstallDueToUnknownSha: false, perf: new NoOpPerformanceTracker() },
             );
             expect(result.status).toBe(mode === "reinstall" ? "reinstalled" : "upgraded");
             const commands = adb.getExecutedCommands();
@@ -725,11 +721,9 @@ describe("CtrlProxyManager", function () {
   });
 
   test("categorizes a compatibility-stage timeout for bounded setup retry", async () => {
-    const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-      testDevice,
-      fakeAdb,
-      new FakeTimer(),
-    );
+    const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, fakeAdb, {
+      timer: new FakeTimer(),
+    });
     manager.ensureCompatibleVersion = async () => ({ status: "failed", error: "ADB timed out" });
     const result = await manager.setup();
     expect(result).toMatchObject({
@@ -747,11 +741,9 @@ describe("CtrlProxyManager", function () {
   ] as const)(
     "classifies a %s missing-device compatibility failure (#13392)",
     async (_name, error, category) => {
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeAdb,
-        new FakeTimer(),
-      );
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, fakeAdb, {
+        timer: new FakeTimer(),
+      });
       manager.ensureCompatibleVersion = async () => ({ status: "failed", error });
       const result = await manager.setup();
       expect(result).toMatchObject({ success: false, error, category });
@@ -1186,7 +1178,7 @@ describe("CtrlProxyManager", function () {
       accessibilityServiceClient = AndroidCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeAdb,
-        timer,
+        { timer },
       );
     });
 
@@ -1636,7 +1628,7 @@ describe("CtrlProxyManager", function () {
       accessibilityServiceClient = AndroidCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeAdb,
-        timer,
+        { timer },
       );
       fakeAdb.setDeviceStates([{ deviceId: testDevice.deviceId, state: "device" }]);
     });
@@ -2114,17 +2106,15 @@ describe("CtrlProxyManager", function () {
 
       let downloadCalls = 0;
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        localFakeAdb,
-        new FakeTimer(),
-        {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+        timer: new FakeTimer(),
+        fileDownloader: {
           download: async () => {
             downloadCalls++;
             throw new Error("download should not be called for readiness");
           },
         },
-      );
+      });
 
       const result = await manager.ensureCompatibleVersion();
       expect(result.status).toBe("skipped");
@@ -2160,17 +2150,15 @@ describe("CtrlProxyManager", function () {
 
         let downloadCalls = 0;
         AndroidCtrlProxyManager.resetInstances();
-        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          localFakeAdb,
-          new FakeTimer(),
-          {
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+          timer: new FakeTimer(),
+          fileDownloader: {
             download: async () => {
               downloadCalls++;
               throw new Error("download should not be called for a hermetic mismatch");
             },
           },
-        );
+        });
 
         await expect(manager.ensureCompatibleVersion()).rejects.toThrow(
           "Installed CtrlProxy APK SHA differs from expected release checksum",
@@ -2213,16 +2201,14 @@ describe("CtrlProxyManager", function () {
         );
 
         AndroidCtrlProxyManager.resetInstances();
-        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          localFakeAdb,
-          new FakeTimer(),
-          {
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+          timer: new FakeTimer(),
+          fileDownloader: {
             download: async () => {
               throw new Error("download should not be called for a hermetic mismatch");
             },
           },
-        );
+        });
 
         await expect(manager.ensureCompatibleVersion()).rejects.toThrow(
           "Installed CtrlProxy APK SHA differs from expected release checksum",
@@ -2341,17 +2327,15 @@ describe("CtrlProxyManager", function () {
       localFakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
 
       let downloadCalls = 0;
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        localFakeAdb,
-        new FakeTimer(),
-        {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+        timer: new FakeTimer(),
+        fileDownloader: {
           download: async () => {
             downloadCalls++;
             throw new Error("download should not be called for completed prefetch");
           },
         },
-      );
+      });
 
       const result = await manager.ensureCompatibleVersion();
       expect(result.status).toBe("upgraded");
@@ -2395,16 +2379,14 @@ describe("CtrlProxyManager", function () {
       );
       localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
 
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        localFakeAdb,
-        new FakeTimer(),
-        {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+        timer: new FakeTimer(),
+        fileDownloader: {
           download: async () => {
             throw new Error("download should not be called for completed prefetch");
           },
         },
-      );
+      });
 
       const result = await manager.ensureCompatibleVersion();
       const packageCheckCalls = localFakeAdb
@@ -2471,12 +2453,10 @@ describe("CtrlProxyManager", function () {
         );
         localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
 
-        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          localFakeAdb,
-          new FakeTimer(),
-          { download: async () => Promise.reject(new Error("no download")) },
-        );
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+          timer: new FakeTimer(),
+          fileDownloader: { download: async () => Promise.reject(new Error("no download")) },
+        });
 
         await manager.ensureCompatibleVersion().catch(() => undefined);
 
@@ -2525,16 +2505,14 @@ describe("CtrlProxyManager", function () {
         );
         localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
 
-        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          localFakeAdb,
-          new FakeTimer(),
-          {
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+          timer: new FakeTimer(),
+          fileDownloader: {
             download: async () => {
               throw new Error("download should not be called for completed prefetch");
             },
           },
-        );
+        });
 
         await expect(manager.ensureCompatibleVersion()).rejects.toThrow(
           "Installed CtrlProxy APK SHA differs from expected release checksum",
@@ -2677,17 +2655,15 @@ describe("CtrlProxyManager", function () {
 
       let downloadCalls = 0;
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        localFakeAdb,
-        fakeTimer,
-        {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+        timer: fakeTimer,
+        fileDownloader: {
           download: async () => {
             downloadCalls++;
             throw new Error("Could not resolve host");
           },
         },
-      );
+      });
 
       const firstResult = await manager.ensureCompatibleVersion();
       const secondResult = await manager.ensureCompatibleVersion();
@@ -2778,12 +2754,10 @@ describe("CtrlProxyManager", function () {
           "adb: failed to install x.apk: Failure [INSTALL_FAILED_USER_RESTRICTED: blocked]",
         ),
       );
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        localFakeAdb,
-        new FakeTimer(),
-        { download: async () => undefined },
-      );
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+        timer: new FakeTimer(),
+        fileDownloader: { download: async () => undefined },
+      });
       spyOn(manager, "downloadApk").mockResolvedValue("/tmp/fake-accessibility.apk");
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
@@ -2825,12 +2799,10 @@ describe("CtrlProxyManager", function () {
         createExecResult("Success", ""),
       );
       localFakeAdb.setCommandError('install "', new Error("Failure [INSTALL_FAILED_ABORTED]"));
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        localFakeAdb,
-        new FakeTimer(),
-        { download: async () => undefined },
-      );
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+        timer: new FakeTimer(),
+        fileDownloader: { download: async () => undefined },
+      });
       spyOn(manager, "downloadApk").mockResolvedValue("/tmp/fake-accessibility.apk");
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
@@ -2973,22 +2945,16 @@ describe("CtrlProxyManager", function () {
         "shell sha256sum",
         createExecResult(`${firstSha} /data/app/base.apk\n`, ""),
       );
-      const firstManager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeAdb,
-        new FakeTimer(),
-        undefined,
+      const firstManager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, fakeAdb, {
+        timer: new FakeTimer(),
         checksumCalculator,
-      );
+      });
       expect(await firstManager.isVersionCompatible()).toBe(true);
       expect(await firstManager.isVersionCompatible()).toBe(true);
-      const anotherManager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeAdb,
-        new FakeTimer(),
-        undefined,
+      const anotherManager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, fakeAdb, {
+        timer: new FakeTimer(),
         checksumCalculator,
-      );
+      });
       expect(await anotherManager.isVersionCompatible()).toBe(true);
       expect(hashCalls).toBe(1);
 
@@ -2999,13 +2965,10 @@ describe("CtrlProxyManager", function () {
         "shell sha256sum",
         createExecResult(`${secondSha} /data/app/base.apk\n`, ""),
       );
-      const secondManager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeAdb,
-        new FakeTimer(),
-        undefined,
+      const secondManager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, fakeAdb, {
+        timer: new FakeTimer(),
         checksumCalculator,
-      );
+      });
       expect(await secondManager.isVersionCompatible()).toBe(true);
       expect(hashCalls).toBe(2);
     });
@@ -3024,13 +2987,10 @@ describe("CtrlProxyManager", function () {
           return { checksum: await fs.readFile(filePath, "utf8"), source: "node" as const };
         },
       };
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeAdb,
-        new FakeTimer(),
-        undefined,
-        calculator,
-      );
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, fakeAdb, {
+        timer: new FakeTimer(),
+        checksumCalculator: calculator,
+      });
       expect(
         await Promise.all([manager.getExpectedChecksum(), manager.getExpectedChecksum()]),
       ).toEqual(["first", "first"]);
@@ -3150,16 +3110,14 @@ describe("CtrlProxyManager", function () {
       );
 
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        localFakeAdb,
-        new FakeTimer(),
-        {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+        timer: new FakeTimer(),
+        fileDownloader: {
           download: async () => {
             throw new Error("Could not resolve host");
           },
         },
-      );
+      });
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("failed");
@@ -3187,16 +3145,14 @@ describe("CtrlProxyManager", function () {
       );
 
       AndroidCtrlProxyManager.resetInstances();
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        localFakeAdb,
-        new FakeTimer(),
-        {
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+        timer: new FakeTimer(),
+        fileDownloader: {
           download: async () => {
             throw new Error("Could not resolve host");
           },
         },
-      );
+      });
 
       const forcedResult = await manager.ensureCompatibleVersion({
         allowDownloadWhenInstalled: true,

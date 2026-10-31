@@ -94,7 +94,7 @@ test("post-bind reconnect retries until the fake WebSocket server is listening",
     hierarchyReads++;
     return hierarchyReads === 1 ? firstRead : freshHierarchy;
   });
-  const hierarchy = new ViewHierarchy(device, undefined, subject, timer);
+  const hierarchy = new ViewHierarchy(device, undefined, subject, { timer });
   const observed = await settle(
     timer,
     hierarchy.getViewHierarchy(undefined, { skipWaitForFresh: false, minTimestamp: 0 }),

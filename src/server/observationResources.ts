@@ -643,8 +643,11 @@ async function readFreshScreenshot(
   uri: string,
   sessionUuid: string,
   activeSession: ActiveSessionDevice,
-  context: ResourceReadContext,
-  { path, deps = {} }: { path: string; deps?: ObservationResourceDependencies },
+  {
+    context,
+    path,
+    deps = {},
+  }: { context: ResourceReadContext; path: string; deps?: ObservationResourceDependencies },
 ): Promise<ResourceContent> {
   try {
     await screenshotPathProtection.protect(path);
@@ -885,7 +888,8 @@ async function getFreshSessionScreenshot(
       );
     }
 
-    return readFreshScreenshot(uri, sessionUuid, activeSession, context, {
+    return readFreshScreenshot(uri, sessionUuid, activeSession, {
+      context,
       path: result.path,
       deps,
     });
@@ -905,22 +909,20 @@ async function getFreshSessionScreenshot(
 // Register all observation resources
 export function registerObservationResources(deps: ObservationResourceDependencies = {}): void {
   // Register latest observation as text/json resource (all devices)
-  ResourceRegistry.register(
-    RESOURCE_URIS.LATEST_OBSERVATION,
-    "Latest Observation",
-    "The hierarchy and unscoped screenshot are a best-effort point-in-time snapshot per read, with no hard cross-read guarantee: another device's newer observation can land between reads. Failures are application/json with code, retryable, error.",
-    "application/json",
-    getLatestObservation,
-  );
+  ResourceRegistry.register(RESOURCE_URIS.LATEST_OBSERVATION, "Latest Observation", {
+    description:
+      "The hierarchy and unscoped screenshot are a best-effort point-in-time snapshot per read, with no hard cross-read guarantee: another device's newer observation can land between reads. Failures are application/json with code, retryable, error.",
+    mimeType: "application/json",
+    handler: getLatestObservation,
+  });
 
   // Register latest screenshot as image blob resource (all devices)
-  ResourceRegistry.register(
-    RESOURCE_URIS.LATEST_SCREENSHOT,
-    "Latest Screenshot",
-    "The most recent screen capture as a PNG or WebP image. Updated automatically after each observe() call. Failures are application/json with code, retryable, error.",
-    "image/png",
-    () => getLatestScreenshot(deps),
-  );
+  ResourceRegistry.register(RESOURCE_URIS.LATEST_SCREENSHOT, "Latest Screenshot", {
+    description:
+      "The most recent screen capture as a PNG or WebP image. Updated automatically after each observe() call. Failures are application/json with code, retryable, error.",
+    mimeType: "image/png",
+    handler: () => getLatestScreenshot(deps),
+  });
 
   // This template has no read context: a known observation identity is readable
   // by any client, but becomes unavailable after a newer device observation evicts it.

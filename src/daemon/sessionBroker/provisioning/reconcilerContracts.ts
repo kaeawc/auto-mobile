@@ -87,9 +87,9 @@ export interface BindingInventory {
 
 export interface BindingProvisionRequest {
   platform: BindingPlatform;
-  /** Android: the AVD name (stable id). iOS: the simulator name. */
+  /** Android: the AVD name (stable id). iOS and watchOS: the simulator name. */
   name: string;
-  /** iOS UDID of an assigned simulator to reuse. */
+  /** UDID of an assigned simulator (iPhone or Apple Watch) to reuse. */
   deviceId?: string;
   /**
    * `create` always carries a concrete `deviceType` (the resolved model). `adopt` carries the
@@ -131,8 +131,9 @@ export interface BindingExistingSpecReader {
 }
 
 /**
- * The `provisionDevice` path with `readiness: "automation"`: exact matching, creation, boot,
- * session bind and its own rollback of partial creations (#11125, #11182). Throws
+ * The `provisionDevice` path with `readiness: "automation"` (an Apple Watch: booted, as watchOS has
+ * no runner): exact matching, creation, boot, session bind and its own rollback of partial
+ * creations (#11125, #11182). Throws
  * `ProvisionDeviceError` or `BootCapacityExhaustedError` on failure.
  */
 export interface BindingDeviceProvisioner extends BindingExistingSpecReader {

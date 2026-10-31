@@ -67,7 +67,7 @@ function createObserveScreen(
       deviceStateCollector: fakeDeviceStateCollector,
       ...noopObserveAudits(),
     },
-    fakeTimer,
+    { timer: fakeTimer },
   );
 
   return {
@@ -163,7 +163,7 @@ describe("ObserveScreen skip options", () => {
         cacheStore: new FakeObserveCacheStore(timer),
         accessibilityStateDetector: detector as AccessibilityStateDetector,
       },
-      timer,
+      { timer },
     );
     const options = {
       skipScreenshot: true,
@@ -205,7 +205,7 @@ describe("ObserveScreen skip options", () => {
   test("deferred capture marks a skipped terminal observation so its screenshot URI is emitted", async () => {
     const observation = await observeScreen.execute({ skipScreenshot: true });
 
-    await observeScreen.captureScreenshot(undefined, undefined, observation);
+    await observeScreen.captureScreenshot(undefined, { observation });
 
     expect(fakeScreenshotRecorder.captureFreshCalls).toBe(1);
     const finalized = finalizeToolResponse(createStructuredToolResponse(observation), {
@@ -280,7 +280,7 @@ describe("ObserveScreen skip options", () => {
       screenshot: "async",
       screenshotOptions: { hidePrototypes: true },
     });
-    await observeScreen.captureScreenshot(undefined, undefined, result, "async");
+    await observeScreen.captureScreenshot(undefined, { observation: result, screenshot: "async" });
     expect(fakeScreenshotRecorder.captureOptions).toEqual([{ hidePrototypes: true }, undefined]);
     expect(result.screenshotIncludesPrototype).toBeUndefined();
   });
@@ -460,7 +460,7 @@ test("freshness capture failure reaches hierarchy collection and reports viewHie
       ...noopObserveAudits(),
       onAvailabilityLost: (reason) => lost.push(reason),
     },
-    timer,
+    { timer },
   );
   try {
     const result = await screen.execute({

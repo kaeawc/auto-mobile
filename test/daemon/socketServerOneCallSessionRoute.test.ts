@@ -43,7 +43,10 @@ function forward(
     executionKey: `session:${sessionUuid}`,
     sessionUuid,
   };
-  server.recordForwardResult(request, SOCKET, route, false, { content: [] });
+  server.recordForwardResult(request, SOCKET, route, {
+    sessionWasActiveBeforeForward: false,
+    response: { content: [] },
+  });
 }
 
 function routedSession(server: UnixSocketServerHarness): string | undefined {

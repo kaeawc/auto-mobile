@@ -511,13 +511,12 @@ export class SwipeOn extends BaseVisualChange {
       if (searchCriteria) {
         throwIfAborted(signal);
         const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
-        const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
+        const vision = { visionConfig: this.visionConfig, visionAnalyzer: this.visionAnalyzer };
         errorMsg = await getVisionEnrichedError(
           this.screenshotCapturer,
-          viewHierarchy,
+          cachedObserve?.viewHierarchy ?? null,
           searchCriteria,
-          this.visionConfig,
-          { baseError: errorMsg, visionAnalyzer: this.visionAnalyzer },
+          { ...vision, baseError: errorMsg },
         );
       }
 

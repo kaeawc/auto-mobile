@@ -702,8 +702,10 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     waitForFresh: boolean = false,
     timeout: number = 100,
     perf?: PerformanceTracker,
-    skipWaitForFresh: boolean = false,
-    _options?: LatestHierarchyOptions,
+    {
+      skipWaitForFresh = false,
+      ..._options
+    }: LatestHierarchyOptions & { skipWaitForFresh?: boolean } = {},
   ): Promise<CtrlProxyHierarchyResponse> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getLatestHierarchy");
@@ -733,16 +735,13 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number,
-    options?: { forceCapture?: boolean },
+    { timeoutMs, forceCapture }: { timeoutMs?: number; forceCapture?: boolean } = {},
   ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     this.hierarchyRequestCount++;
     this.hierarchySyncRequests.push({
       timeoutMs,
       kind:
-        options?.forceCapture || disableAllFiltering
-          ? "request_hierarchy"
-          : "request_hierarchy_if_stale",
+        forceCapture || disableAllFiltering ? "request_hierarchy" : "request_hierarchy_if_stale",
     });
     await this.applyDelay("requestHierarchySync");
     this.checkFailure("requestHierarchySync");
@@ -763,15 +762,19 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     signal?: AbortSignal,
     timeoutMs?: number,
   ): ReturnType<IosCtrlProxy["requestHierarchySync"]> {
-    return this.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, {
+    return this.requestHierarchySync(perf, disableAllFiltering, signal, {
+      timeoutMs,
       forceCapture: true,
     });
   }
 
   requestHierarchySyncWithoutObservationStreamPush(
-    ...args: Parameters<IosCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]>
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
   ): ReturnType<IosCtrlProxy["requestHierarchySyncWithoutObservationStreamPush"]> {
-    return this.requestHierarchySync(...args);
+    return this.requestHierarchySync(perf, disableAllFiltering, signal, { timeoutMs });
   }
 
   /** Scale metadata the fake reports; null models a runner that has sent none. */
@@ -979,8 +982,8 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   requestAppendText(
     ...args: Parameters<IosCtrlProxy["requestAppendText"]>
   ): ReturnType<IosCtrlProxy["requestAppendText"]> {
-    const [text, timeoutMs, perf, frameContext] = args;
-    return this.requestSetText(text, { timeoutMs, perf, frameContext });
+    const [text, timeoutMs, perf, options] = args;
+    return this.requestSetText(text, { timeoutMs, perf, frameContext: options?.frameContext });
   }
 
   async requestClearText(
@@ -1069,7 +1072,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     key: InputKeyName,
     modifiers: InputKeyModifier[],
     timeoutMs: number = 5000,
-    _perf?: PerformanceTracker,
+    _options?: { perf?: PerformanceTracker },
   ): Promise<CtrlProxyPressKeyResult> {
     await this.applyDelay("pressKey");
     this.checkFailure("pressKey");
@@ -1083,7 +1086,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   async requestPressHome(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    _frameContext?: string,
+    { frameContext: _frameContext }: { frameContext?: string } = {},
   ): Promise<CtrlProxyPressHomeResult> {
     this.pressHomeRequestCount++;
     await this.applyDelay("pressHome");
@@ -1257,8 +1260,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     bundleId: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    _coldBoot?: boolean,
-    signal?: AbortSignal,
+    { coldBoot: _coldBoot, signal }: { coldBoot?: boolean; signal?: AbortSignal } = {},
   ): Promise<CtrlProxyLaunchAppResult> {
     signal?.throwIfAborted();
     await this.applyDelay("launchApp");
@@ -1348,11 +1350,13 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     label: string,
     action: "activate" | "long_press",
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    options?: {
+    {
+      perf,
+      ...options
+    }: {
       bounds?: { left: number; top: number; right: number; bottom: number };
       duration?: number;
-    },
+    } & { perf?: PerformanceTracker } = {},
   ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("voiceOverActivate");
     this.checkFailure("voiceOverActivate");
@@ -1432,7 +1436,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   async requestPathGesture(
     points: ReadonlyArray<{ x: number; y: number; offsetMs: number }>,
     _timeoutMs?: number,
-    frameContext?: string,
+    { frameContext }: { frameContext?: string } = {},
   ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
     await this.applyDelay("pathGesture");
     this.checkFailure("pathGesture");
@@ -1448,8 +1452,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     action: string,
     resourceId?: string,
     label?: string,
-    timeoutMs: number = 5000,
-    options?: CtrlProxyRequestActionOptions,
+    { timeoutMs = 5000, ...options }: CtrlProxyRequestActionOptions & { timeoutMs?: number } = {},
   ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("action");
     this.checkFailure("action");
@@ -1604,7 +1607,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
+    _options?: { perf?: PerformanceTracker },
   ): Promise<CtrlProxyClipboardResult> {
     await this.applyDelay("clipboard");
     this.checkFailure("clipboard");

@@ -68,16 +68,13 @@ describe("deviceId-only calls from the holder's own connection (#10994)", () => 
     unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
     tools = new RealToolCallPath([held]).install();
     reads = [];
-    ToolRegistry.registerDeviceAware(
-      "readProbe",
-      "Read-only probe",
-      z.object({}).passthrough(),
-      async (_device: BootedDevice, args: Record<string, unknown>) => {
+    ToolRegistry.registerDeviceAware("readProbe", "Read-only probe", z.object({}).passthrough(), {
+      handler: async (_device: BootedDevice, args: Record<string, unknown>) => {
         reads.push({ readPath: isSessionlessDeviceRead(), sessionUuid: args.sessionUuid });
         return { success: true };
       },
-      { deviceReadOnly: true },
-    );
+      deviceReadOnly: true,
+    });
     await pool.bindOrReuseDeviceSession({
       sessionId: HOLDER,
       deviceId: held.deviceId,

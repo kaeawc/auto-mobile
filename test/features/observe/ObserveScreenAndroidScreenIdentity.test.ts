@@ -29,7 +29,7 @@ async function observe(viewHierarchy: FakeViewHierarchy): Promise<ObserveResult>
     device,
     new FakeAdbClientFactory(adb),
     { viewHierarchy, cacheStore: new FakeObserveCacheStore(timer) },
-    timer,
+    { timer },
   );
   return screen.execute({ skipScreenshot: true, skipBackStack: true });
 }

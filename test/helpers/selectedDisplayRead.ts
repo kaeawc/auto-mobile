@@ -95,7 +95,7 @@ export function selectedDisplayHarness(options: {
       cacheStore: new FakeObserveCacheStore(timer),
       selectedDisplayRead: options.selectedDisplayRead,
     },
-    timer,
+    { timer },
   );
   return { timer, adb, capture, screen };
 }

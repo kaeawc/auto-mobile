@@ -250,8 +250,7 @@ describe("SDK capability transport uncertainty", () => {
       const client = IOSCtrlProxyClient.createForTesting(
         { deviceId: "release-clear-test", platform: "ios", name: "fake" },
         8765,
-        () => new FakeOpenSocket(),
-        timer,
+        { wsFactory: () => new FakeOpenSocket(), timer },
       );
       const send = spyOn(client, "sendMessage").mockImplementation((data) => {
         frames.push(JSON.parse(data));
@@ -641,8 +640,7 @@ describe("SDK capability caller propagation", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "sdk-probe-test", platform: "ios", name: "fake" },
       8765,
-      () => new FakeOpenSocket(),
-      timer,
+      { wsFactory: () => new FakeOpenSocket(), timer },
     );
     const failure = new SdkCapabilityQueryError("timeout", timeoutFailure.message);
     const ensure = spyOn(
@@ -664,7 +662,8 @@ describe("SDK capability caller budgets", () => {
     [
       {
         name: "SQL",
-        run: (client) => client.executeSQLForIos("com.example.sdk", "app.db", "select 1", 250),
+        run: (client) =>
+          client.executeSQLForIos("com.example.sdk", "app.db", "select 1", { timeoutMs: 250 }),
       },
       { name: "databases", run: (client) => client.listDatabasesForIos("com.example.sdk", 250) },
       {
@@ -678,13 +677,10 @@ describe("SDK capability caller budgets", () => {
       {
         name: "table data",
         run: (client) =>
-          client.getTableDataForIos(
-            "com.example.sdk",
-            "app.db",
-            "items",
-            { limit: 50, offset: 0 },
-            250,
-          ),
+          client.getTableDataForIos("com.example.sdk", "app.db", "items", {
+            page: { limit: 50, offset: 0 },
+            timeoutMs: 250,
+          }),
       },
       {
         name: "table structure",
@@ -710,8 +706,7 @@ describe("SDK capability caller budgets", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "budget-test", platform: "ios", name: "fake" },
       8765,
-      () => new FakeOpenSocket(),
-      h.timer,
+      { wsFactory: () => new FakeOpenSocket(), timer: h.timer },
     );
     const ensure = spyOn(
       client.getSdkCapabilityTestHooks(),
@@ -744,8 +739,7 @@ describe("SDK capability caller budgets", () => {
       const client = IOSCtrlProxyClient.createForTesting(
         { deviceId: "launch-budget-test", platform: "ios", name: "fake" },
         8765,
-        () => new FakeOpenSocket(),
-        h.timer,
+        { wsFactory: () => new FakeOpenSocket(), timer: h.timer },
       );
       const launch = spyOn(CtrlProxyNavigation.prototype, "requestLaunchApp").mockResolvedValue({
         success: true,
@@ -763,8 +757,7 @@ describe("SDK capability caller budgets", () => {
           "com.example.sdk",
           boundary === "deadline" ? 200 : undefined,
           undefined,
-          false,
-          controller.signal,
+          { coldBoot: false, signal: controller.signal },
         ),
       );
       void pending.then(() => {
@@ -796,8 +789,7 @@ describe("SDK capability caller budgets", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId, platform: "ios", name: "fake" },
       8765,
-      () => new FakeOpenSocket(),
-      h.timer,
+      { wsFactory: () => new FakeOpenSocket(), timer: h.timer },
     );
     const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(client);
     const ensure = spyOn(
@@ -810,7 +802,10 @@ describe("SDK capability caller budgets", () => {
       timer: h.timer,
       notifier: { notifyResourceUpdated: () => {} },
     });
-    state.startSimulation(deviceId, "timeout", 30, null, "released-session");
+    state.startSimulation(deviceId, "timeout", 30, {
+      limit: null,
+      ownerSessionUuid: "released-session",
+    });
     const manager = new FakeSessionCleanupManager();
     registerNetworkStateSessionCleanup(manager, { state: () => state, timer: h.timer });
     manager.release("released-session", deviceId);
@@ -840,8 +835,7 @@ describe("SDK capability caller budgets", () => {
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "ambient-budget-test", platform: "ios", name: "fake" },
       8765,
-      () => new FakeOpenSocket(),
-      h.timer,
+      { wsFactory: () => new FakeOpenSocket(), timer: h.timer },
     );
     const ensure = spyOn(
       client.getSdkCapabilityTestHooks(),
@@ -883,8 +877,7 @@ describe("best-effort SDK refresh diagnostics", () => {
       const client = IOSCtrlProxyClient.createForTesting(
         { deviceId: "refresh-log-test", platform: "ios", name: "fake" },
         8765,
-        () => new FakeOpenSocket(),
-        timer,
+        { wsFactory: () => new FakeOpenSocket(), timer },
       );
       const failure = new Error("socket transport failed");
       const superseded = new SdkCapabilityProbeSupersededError("hierarchy", 0, 1);
@@ -978,8 +971,7 @@ test.each([
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "outcome-test", platform: "ios", name: "fake" },
     8765,
-    () => new FakeOpenSocket(),
-    timer,
+    { wsFactory: () => new FakeOpenSocket(), timer },
   );
   const frames: string[] = [];
   const send = spyOn(client, "sendMessage").mockImplementation((data) => {

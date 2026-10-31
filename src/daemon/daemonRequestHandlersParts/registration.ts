@@ -1,7 +1,6 @@
 import { bindBrokerRegistration } from "../sessionBroker/handlers";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { type ReleaseCutExecutions } from "../releaseSessionAndDevice";
 import { z } from "zod";
 import {
   MAX_OBSERVER_CLIENT_NAME_LENGTH,
@@ -24,7 +23,12 @@ import {
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../../models/deviceSessionRecovery";
 import { type BrokerConnectionBinding } from "../sessionBroker/connectionScope";
 import { DeviceOutsideBrokerGrantError } from "../sessionBroker/connectionRefusal";
-import type { DaemonStateAccess, DaemonMethodResult, DaemonRequestContext } from "./contracts";
+import type {
+  DaemonStateAccess,
+  DaemonMethodResult,
+  DaemonRequestContext,
+  DaemonRequestOptions,
+} from "./contracts";
 import { reportedWallClock, lookupReleasedSessionReason } from "./sessionReporting";
 
 const registerSessionParams = z.object({
@@ -188,9 +192,7 @@ function releaseBeforeRegistrationRefusal(
 export async function handleRegisterSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
-  _executions?: ReleaseCutExecutions,
-  _signal?: AbortSignal,
-  context: DaemonRequestContext = {},
+  { context = {} }: DaemonRequestOptions = {},
 ): Promise<DaemonMethodResult> {
   const params: unknown = request.params;
   const parsed = registerSessionParams.safeParse(params);

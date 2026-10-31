@@ -13,6 +13,14 @@ export interface EnvPositiveIntegerOptions {
   min?: number;
 }
 
+/** Where an env reader looks and whom it tells about an unusable value. */
+export interface EnvReadSources {
+  /** The environment to read; defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
+  /** Receives the once-per-value warning; defaults to the shared logger. */
+  log?: EnvNumberLogger;
+}
+
 const warned = new Set<string>();
 
 /**
@@ -21,27 +29,25 @@ const warned = new Set<string>();
  * `"1e5"` is 1); this accepts digits only. A value that is set but unusable (malformed, zero,
  * unsafe, or below `min`) falls back to `fallback` with a `warn` naming the variable and the
  * value, once per distinct pair. An unset or empty variable is the default without a warning.
+ *
+ * @param options.env The environment to read; defaults to `process.env`.
+ * @param options.log Receives the warning; defaults to the shared logger.
  */
 export function readEnvPositiveInteger(
   primaryName: string,
   legacyName: string | undefined,
-  options: EnvPositiveIntegerOptions,
-  env: NodeJS.ProcessEnv = process.env,
-  log: EnvNumberLogger = logger,
+  options: EnvPositiveIntegerOptions & EnvReadSources,
 ): number {
-  return (
-    readOptionalEnvPositiveInteger(primaryName, legacyName, options, env, log) ?? options.fallback
-  );
+  return readOptionalEnvPositiveInteger(primaryName, legacyName, options) ?? options.fallback;
 }
 
 /** Like {@link readEnvPositiveInteger}, but the caller owns the default: undefined when unusable. */
 export function readOptionalEnvPositiveInteger(
   primaryName: string,
   legacyName: string | undefined,
-  options: Partial<EnvPositiveIntegerOptions> = {},
-  env: NodeJS.ProcessEnv = process.env,
-  log: EnvNumberLogger = logger,
+  options: Partial<EnvPositiveIntegerOptions> & EnvReadSources = {},
 ): number | undefined {
+  const { env = process.env, log = logger } = options;
   const { name, raw } = pickEnvEntry(primaryName, legacyName, env);
   if (raw === "") {
     return undefined;
@@ -100,11 +106,10 @@ export function readEnvInt(
   env: NodeJS.ProcessEnv = process.env,
   options: { fallback?: number; log?: EnvNumberLogger } = {},
 ): number {
-  return readEnvPositiveInteger(
-    spec.name,
-    spec.legacyName,
-    { fallback: options.fallback ?? spec.fallback ?? 0, min: spec.min },
+  return readEnvPositiveInteger(spec.name, spec.legacyName, {
+    fallback: options.fallback ?? spec.fallback ?? 0,
+    min: spec.min,
     env,
-    options.log ?? logger,
-  );
+    log: options.log ?? logger,
+  });
 }

@@ -50,7 +50,9 @@ describe("daemon owner stamp on persisted sessions (#11114)", () => {
     await predecessor.createSession("restarted-session", "emulator-5554", "android", {
       stableDeviceId: "Pixel_8_API_35",
     });
-    await persistence.markReleased("restarted-session", "expired", 1_000, "daemon-restart");
+    await persistence.markReleased("restarted-session", "expired", 1_000, {
+      reason: "daemon-restart",
+    });
 
     const restarted = managerFor("daemon-b", persistence);
     const pool: SessionDeviceAssigner = {

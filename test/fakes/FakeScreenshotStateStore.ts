@@ -2,6 +2,7 @@ import {
   MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE,
   OBSERVE_RESULT_CACHE_TTL_MS,
   type ScreenshotStateStore,
+  type ScreenshotStateUpdate,
 } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import type { Timer } from "../../src/utils/SystemTimer";
 
@@ -48,9 +49,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
   updateForObservation(
     deviceId: string,
     observationId: string,
-    path?: string,
-    error?: string,
-    imageSize?: { width: number; height: number },
+    { path, error, imageSize }: ScreenshotStateUpdate = {},
   ): void {
     if (this.isCleared(deviceId, observationId)) {
       return;
@@ -116,7 +115,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     const existing = this.findObservation(deviceId, observationId);
     // A late cancellation must not replace a real path or error recorded by another capture.
     if (!existing || (existing.path === null && existing.error === null)) {
-      this.updateForObservation(deviceId, observationId, undefined, reason);
+      this.updateForObservation(deviceId, observationId, { error: reason });
       return;
     }
     this.completeObservation(deviceId, observationId);

@@ -875,22 +875,16 @@ describe("Android keep-booted strategy", () => {
     timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
-    await seam.capture(
-      SESSION.resourceId,
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      SESSION.sessionId,
-      { stableDeviceId: "stable-avd" },
-    );
+    await seam.capture(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: SESSION.sessionId,
+      stableDeviceId: "stable-avd",
+    });
     host.safe = false;
     await journal.record(SCOPE, SETTING);
     expect(
-      await seam.reset(
-        SESSION.resourceId,
-        ANDROID_RESET_DEVICE,
-        ANDROID_RESET_PROFILE,
-        async () => {},
-      ),
+      await seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        assertOwned: async () => {},
+      }),
     ).toMatchObject({ outcome: "clean", mode: "keep-booted" });
     expect(host.closed).toBe(1);
     expect(await journal.list(SCOPE)).toHaveLength(1);
@@ -903,17 +897,16 @@ describe("Android keep-booted strategy", () => {
     timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
-    await seam.capture(
-      SESSION.resourceId,
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      SESSION.sessionId,
-      { stableDeviceId: "stable-avd" },
-    );
+    await seam.capture(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: SESSION.sessionId,
+      stableDeviceId: "stable-avd",
+    });
     await journal.record(SCOPE, SETTING);
     host.healthy = false;
     await expect(
-      seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+      seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        assertOwned: async () => {},
+      }),
     ).rejects.toThrow("CtrlProxy health check failed");
     expect(await journal.list(SCOPE)).toHaveLength(1);
   });
@@ -925,21 +918,15 @@ describe("Android keep-booted strategy", () => {
     timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
-    await seam.capture(
-      SESSION.resourceId,
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      SESSION.sessionId,
-      { stableDeviceId: "stable-avd" },
-    );
+    await seam.capture(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: SESSION.sessionId,
+      stableDeviceId: "stable-avd",
+    });
     host.commands = [];
     host.commandOptions = [];
-    await seam.reset(
-      SESSION.resourceId,
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      async () => {},
-    );
+    await seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      assertOwned: async () => {},
+    });
     for (const options of host.commandOptions) {
       expect(options!.timeoutMs).toBeGreaterThan(0);
       expect(options).toMatchObject({
@@ -968,13 +955,11 @@ describe("Android keep-booted strategy", () => {
       timer,
     });
     const seam = new AndroidBaselineReset(host);
-    await seam.capture(
-      SESSION.resourceId,
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      SESSION.sessionId,
-      { stableDeviceId: "stable-avd", timer },
-    );
+    await seam.capture(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: SESSION.sessionId,
+      stableDeviceId: "stable-avd",
+      timer,
+    });
     const reached = Promise.withResolvers<void>();
     let probeSignal: AbortSignal | undefined;
     host.ctrlProxyReady = async (_device, options) => {
@@ -987,7 +972,9 @@ describe("Android keep-booted strategy", () => {
       });
     };
     const result = seam
-      .reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {})
+      .reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        assertOwned: async () => {},
+      })
       .then(
         () => null,
         (error: unknown) => error,
@@ -1013,16 +1000,15 @@ describe("Android keep-booted strategy", () => {
     timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
-    await seam.capture(
-      SESSION.resourceId,
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      SESSION.sessionId,
-      { stableDeviceId: "stable-avd" },
-    );
+    await seam.capture(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: SESSION.sessionId,
+      stableDeviceId: "stable-avd",
+    });
     host.bootId = "87654321-1234-1234-1234-123456789abc";
     await expect(
-      seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {}),
+      seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        assertOwned: async () => {},
+      }),
     ).rejects.toThrow("changed emulator boot identity");
     expect(port.cleanCount).toBe(0);
     expect(fallbacks).toBe(0);
@@ -1048,25 +1034,19 @@ describe("Android keep-booted strategy", () => {
       timer.enableAutoAdvance();
       host.strategy = strategy;
       const seam = new AndroidBaselineReset(host);
-      await seam.capture(
-        SESSION.resourceId,
-        ANDROID_RESET_DEVICE,
-        ANDROID_RESET_PROFILE,
-        SESSION.sessionId,
-        { stableDeviceId: "stable-avd" },
-      );
+      await seam.capture(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        sessionId: SESSION.sessionId,
+        stableDeviceId: "stable-avd",
+      });
       port.beforeClean = async () => {
         host.booted = failure !== "boot";
         host.packageManager = failure !== "package-manager";
         host.healthy = failure !== "CtrlProxy";
       };
       expect(
-        await seam.reset(
-          SESSION.resourceId,
-          ANDROID_RESET_DEVICE,
-          ANDROID_RESET_PROFILE,
-          async () => {},
-        ),
+        await seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+          assertOwned: async () => {},
+        }),
       ).toMatchObject({ outcome: "fallback:snapshot", mode: "snapshot" });
       expect(fallbacks).toBe(1);
     },
@@ -1087,21 +1067,20 @@ describe("Android keep-booted strategy", () => {
     timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
-    await seam.capture(
-      SESSION.resourceId,
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      SESSION.sessionId,
-      { stableDeviceId: "stable-avd" },
-    );
+    await seam.capture(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: SESSION.sessionId,
+      stableDeviceId: "stable-avd",
+    });
     host.onHealth = () => {
       owned = false;
     };
     await expect(
-      seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, async () => {
-        if (!owned) {
-          throw new Error("ownership lost during health");
-        }
+      seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        assertOwned: async () => {
+          if (!owned) {
+            throw new Error("ownership lost during health");
+          }
+        },
       }),
     ).rejects.toThrow("ownership lost during health");
     expect(fallbacks).toBe(0);
@@ -1114,13 +1093,10 @@ describe("Android keep-booted strategy", () => {
     timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
-    await seam.capture(
-      SESSION.resourceId,
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      SESSION.sessionId,
-      { stableDeviceId: "stable-avd" },
-    );
+    await seam.capture(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: SESSION.sessionId,
+      stableDeviceId: "stable-avd",
+    });
     host.safe = false;
     host.installed.add("com.example.session");
     port.snapshot.observations.push({
@@ -1132,12 +1108,9 @@ describe("Android keep-booted strategy", () => {
       host.installed.delete("com.example.session");
     };
     expect(
-      await seam.reset(
-        SESSION.resourceId,
-        ANDROID_RESET_DEVICE,
-        ANDROID_RESET_PROFILE,
-        async () => {},
-      ),
+      await seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        assertOwned: async () => {},
+      }),
     ).toMatchObject({ outcome: "clean", mode: "keep-booted" });
     expect(port.reverted).toMatchObject([
       { kind: "installed-app", key: "com.example.session", priorValue: { state: "absent" } },
@@ -1151,21 +1124,15 @@ describe("Android keep-booted strategy", () => {
     timer.enableAutoAdvance();
     host.strategy = strategy;
     const seam = new AndroidBaselineReset(host);
-    await seam.capture(
-      SESSION.resourceId,
-      ANDROID_RESET_DEVICE,
-      ANDROID_RESET_PROFILE,
-      SESSION.sessionId,
-      { stableDeviceId: "stable-avd" },
-    );
+    await seam.capture(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId: SESSION.sessionId,
+      stableDeviceId: "stable-avd",
+    });
     host.installed.add("com.example.contamination");
     expect(
-      await seam.reset(
-        SESSION.resourceId,
-        ANDROID_RESET_DEVICE,
-        ANDROID_RESET_PROFILE,
-        async () => {},
-      ),
+      await seam.reset(SESSION.resourceId, ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+        assertOwned: async () => {},
+      }),
     ).toMatchObject({ outcome: "fallback:snapshot", mode: "snapshot" });
   });
 

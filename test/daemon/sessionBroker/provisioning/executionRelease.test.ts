@@ -586,7 +586,7 @@ describe("managed execution release wiring", () => {
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     try {
       const policies: Array<string | undefined> = [];
-      manager.onSessionRelease((_id, _device, _reason, snapshot) => {
+      manager.onSessionRelease((_id, _device, _reason, { snapshot }) => {
         policies.push(snapshot.livenessPolicy);
       });
       await manager.createSession(S1, DEVICE, "android");

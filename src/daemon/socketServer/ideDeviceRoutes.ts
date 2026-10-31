@@ -264,13 +264,10 @@ export class IdeDeviceRoutes {
     }
     // A lifecycle action on a held device: only the holder, or an explicit `force` (as
     // killDevice allows), may reinstall/restart its CtrlProxy (#10827).
-    await this.assertIdeMutationOwnership(
-      request,
-      targetDevice,
-      "ide/updateService",
-      args.force,
+    await this.assertIdeMutationOwnership(request, targetDevice, "ide/updateService", {
+      force: args.force,
       ideMutation,
-    );
+    });
     if (args.platform === "android") {
       ideMutation?.signal.throwIfAborted();
       ideMutation?.dispatching();
@@ -310,8 +307,7 @@ export class IdeDeviceRoutes {
       args.platform,
       args.deviceId,
       request,
-      "ide/setKeyValue",
-      ideMutation,
+      { action: "ide/setKeyValue", ideMutation },
     );
     const appId = args.appId;
     const fileName = args.fileName;
@@ -323,8 +319,8 @@ export class IdeDeviceRoutes {
         platform,
         device,
         appId,
-        fileName,
         {
+          fileName,
           ideMutation,
           viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
           viaDirectFile: (adb) =>
@@ -341,8 +337,8 @@ export class IdeDeviceRoutes {
         platform,
         device,
         appId,
-        fileName,
         {
+          fileName,
           ideMutation,
           viaSdk: (onDispatch) => client.setPreference(appId, fileName, entry, { onDispatch }),
           viaDirectFile: (adb) =>
@@ -375,8 +371,7 @@ export class IdeDeviceRoutes {
       args.platform,
       args.deviceId,
       request,
-      "ide/removeKeyValue",
-      ideMutation,
+      { action: "ide/removeKeyValue", ideMutation },
     );
     const appId = args.appId;
     const fileName = args.fileName;
@@ -385,8 +380,8 @@ export class IdeDeviceRoutes {
       platform,
       device,
       appId,
-      fileName,
       {
+        fileName,
         ideMutation,
         viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
         viaDirectFile: (adb) =>
@@ -415,8 +410,7 @@ export class IdeDeviceRoutes {
       args.platform,
       args.deviceId,
       request,
-      "ide/clearKeyValueFile",
-      ideMutation,
+      { action: "ide/clearKeyValueFile", ideMutation },
     );
     const appId = args.appId;
     const fileName = args.fileName;
@@ -424,12 +418,12 @@ export class IdeDeviceRoutes {
       platform,
       device,
       appId,
-      fileName,
       {
+        fileName,
         ideMutation,
         viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
         viaDirectFile: (adb) =>
-          clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+          clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, { fileName }),
       },
     );
     const resolvedStore = resolution?.resolvedStore;
@@ -466,8 +460,7 @@ export class IdeDeviceRoutes {
     request: DaemonRequest,
     device: BootedDevice,
     action: string,
-    force = false,
-    ideMutation?: IdeMutationCall,
+    { force = false, ideMutation }: { force?: boolean; ideMutation?: IdeMutationCall } = {},
   ): Promise<void> {
     const deviceId = device.deviceId;
     const requesterSessionUuid = parseInputRequesterSessionUuid(request.method, request.params);
@@ -695,8 +688,8 @@ export class IdeDeviceRoutes {
       this.ports.daemonState().getDevicePool(),
       device,
       action,
-      Boolean(sessionManager.getSessionForDevice?.(device.deviceId)),
       {
+        heldBySession: Boolean(sessionManager.getSessionForDevice?.(device.deviceId)),
         sessions: frameHeldSessionsFrom(sessionManager),
         requester,
         sessionManager,
@@ -724,8 +717,7 @@ export class IdeDeviceRoutes {
     platformValue: string | undefined,
     deviceId: string,
     request: DaemonRequest,
-    action: string,
-    ideMutation?: IdeMutationCall,
+    { action, ideMutation }: { action: string; ideMutation?: IdeMutationCall },
   ): Promise<{
     platform: "android" | "ios";
     client: KeyValueMutationClient;
@@ -744,7 +736,7 @@ export class IdeDeviceRoutes {
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
     }
-    await this.assertIdeMutationOwnership(request, targetDevice, action, false, ideMutation);
+    await this.assertIdeMutationOwnership(request, targetDevice, action, { ideMutation });
     ideMutation?.signal.throwIfAborted();
     const client =
       platform === "ios"
@@ -768,8 +760,8 @@ export class IdeDeviceRoutes {
     platform: "android" | "ios",
     device: BootedDevice,
     appId: string,
-    fileName: string,
     mutation: {
+      fileName: string;
       ideMutation: IdeMutationCall | undefined;
       viaSdk: (onDispatch: () => void) => Promise<PreferenceStoreResolution | void>;
       viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>;
@@ -779,6 +771,7 @@ export class IdeDeviceRoutes {
     resolution: PreferenceStoreResolution | undefined;
   }> {
     let dispatched = false;
+    const { fileName } = mutation;
     const onDispatch = () => {
       if (dispatched) {
         return;
@@ -796,15 +789,17 @@ export class IdeDeviceRoutes {
       appId,
       fileName,
       () => this.ports.adbClientFactory().create(device),
-      async () => {
-        mutation.ideMutation?.signal.throwIfAborted();
-        resolution = (await mutation.viaSdk(onDispatch)) || undefined;
-      },
-      // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
-      (adb) => {
-        mutation.ideMutation?.signal.throwIfAborted();
-        onDispatch();
-        return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
+      {
+        viaSdk: async () => {
+          mutation.ideMutation?.signal.throwIfAborted();
+          resolution = (await mutation.viaSdk(onDispatch)) || undefined;
+        },
+        // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
+        viaDirectFile: (adb) => {
+          mutation.ideMutation?.signal.throwIfAborted();
+          onDispatch();
+          return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
+        },
       },
     );
     return { ...result, resolution };

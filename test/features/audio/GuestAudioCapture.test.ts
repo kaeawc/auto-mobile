@@ -55,8 +55,7 @@ function setup(options: GuestAudioCaptureOptions = {}) {
     () => adb,
     discovery,
     new CountingIdGenerator("capture"),
-    timer,
-    options,
+    { timer, ...options },
   );
   return { adb, timer, capture, emulator, discovery };
 }
@@ -289,8 +288,7 @@ describe("AdbGuestAudioCapture", () => {
       () => adb,
       discovery,
       new CountingIdGenerator("capture"),
-      timer,
-      { resolveSetupUser: () => new Promise<number | undefined>(() => {}) },
+      { timer, resolveSetupUser: () => new Promise<number | undefined>(() => {}) },
     );
     const opening = capture.open("emulator-5554", { leaseMs: 60_000 });
     await expect(
@@ -478,7 +476,7 @@ describe("AdbGuestAudioCapture", () => {
       () => adb,
       discovery,
       new CountingIdGenerator("capture"),
-      timer,
+      { timer },
     );
     await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toThrow("deadline");
     expect(adb.getExecutedCommands().at(-1)).toContain("--es op stop");
@@ -531,7 +529,7 @@ describe("AdbGuestAudioCapture", () => {
       () => adb,
       discovery,
       new CountingIdGenerator("capture"),
-      timer,
+      { timer },
     );
     await expect(capture.open("emulator-5554", { leaseMs: 60_000 })).rejects.toThrow(
       "cannot query capture",

@@ -111,9 +111,9 @@ describe("GestureOwnershipRegistry", () => {
     const { liveSockets, cancels, registry } = createHarness();
     liveSockets.add("s1");
     liveSockets.add("s2");
-    await registry.onStartAcked("s1", device, "g1", "session-a");
-    await registry.onStartAcked("s2", device, "g2", "session-a");
-    await registry.onStartAcked("s2", device, "g3", "session-b");
+    await registry.onStartAcked("s1", device, "g1", { holderSessionId: "session-a" });
+    await registry.onStartAcked("s2", device, "g2", { holderSessionId: "session-a" });
+    await registry.onStartAcked("s2", device, "g3", { holderSessionId: "session-b" });
     await registry.onStartAcked("s2", device, "g4");
 
     await registry.cancelAllHeldBy("session-a");
@@ -129,7 +129,7 @@ describe("GestureOwnershipRegistry", () => {
   test("a refused frame cancels its socket's stroke only once the device has changed hands", async () => {
     const { liveSockets, cancels, registry } = createHarness();
     liveSockets.add("s1");
-    await registry.onStartAcked("s1", device, "g1", "session-a");
+    await registry.onStartAcked("s1", device, "g1", { holderSessionId: "session-a" });
     const refused = (socketSessionId: string, holder: string | undefined) =>
       registry.cancelIfDeviceChangedHands(socketSessionId, device.deviceId, "g1", holder);
 
@@ -159,8 +159,8 @@ describe("GestureOwnershipRegistry", () => {
   test("a failed release-time or handover cancel is logged, not thrown", async () => {
     const { liveSockets, registry } = createHarness({ failCancel: true });
     liveSockets.add("s1");
-    await registry.onStartAcked("s1", device, "g1", "session-a");
-    await registry.onStartAcked("s1", device, "g2", "session-b");
+    await registry.onStartAcked("s1", device, "g1", { holderSessionId: "session-a" });
+    await registry.onStartAcked("s1", device, "g2", { holderSessionId: "session-b" });
 
     await registry.cancelAllHeldBy("session-a");
     expect(
@@ -173,7 +173,12 @@ describe("GestureOwnershipRegistry", () => {
     const { liveSockets, cancels, registry } = createHarness();
     liveSockets.add("s1");
 
-    expect(await registry.onStartAcked("s1", device, "g1", "holder", false)).toBe("cancelled");
+    expect(
+      await registry.onStartAcked("s1", device, "g1", {
+        holderSessionId: "holder",
+        admissionStillHolds: false,
+      }),
+    ).toBe("cancelled");
 
     expect(cancels).toEqual([{ deviceId: "emulator-5554", gestureId: "g1" }]);
     expect(registry.ownerCount).toBe(0);
@@ -190,7 +195,7 @@ describe("GestureOwnershipRegistry", () => {
     liveSockets.add("s2");
     await registry.onStartAcked("s1", device, "sessionless");
     await registry.onStartAcked("s2", device, "sessionless-2");
-    await registry.onStartAcked("s1", device, "held", "holder");
+    await registry.onStartAcked("s1", device, "held", { holderSessionId: "holder" });
     await registry.onStartAcked("s1", otherDevice, "elsewhere");
 
     await registry.cancelAllUnheldOn(device.deviceId);

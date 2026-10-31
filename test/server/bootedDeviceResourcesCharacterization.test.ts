@@ -50,7 +50,7 @@ for (const expectedSha256 of ["", "ABC"]) {
                 return { versionCode: "123", source: "android-package" };
               },
             },
-            new FakeTimer(),
+            { timer: new FakeTimer() },
           );
           expect(status).toEqual({
             installed: true,
@@ -116,8 +116,10 @@ for (const commands of [null, [], ["required"]]) {
               return undefined;
             },
           },
-          new FakeTimer(),
-          { runnerCommandRequirements: { requiredCommands: ["required"], applicability: {} } },
+          {
+            timer: new FakeTimer(),
+            runnerCommandRequirements: { requiredCommands: ["required"], applicability: {} },
+          },
         );
         expect(status?.supportedCommandsComplete).toBe(
           commands === null ? null : commands.includes("required"),
@@ -166,7 +168,7 @@ for (const state of ["backoff", "exhausted", "suspended"] as const) {
           { name: "iPhone", platform: "ios", deviceId: "characterization" },
           undefined,
           { getVersion: async () => ({ build: "build", source: "ios-runner-bundle" }) },
-          new FakeTimer(),
+          { timer: new FakeTimer() },
         );
         expect(status?.supportedCommandsComplete).toBeNull();
         expect(status?.supportedFeaturesComplete).toBeNull();

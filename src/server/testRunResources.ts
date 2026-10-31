@@ -273,13 +273,11 @@ async function getTestRunResource(args: TestRunQueryParams, uri: string): Promis
 }
 
 export function registerTestRunResources(): void {
-  ResourceRegistry.register(
-    TEST_RUN_RESOURCE_URIS.BASE,
-    "Test Run History",
-    "Individual test run history with step-level details and screens visited.",
-    "application/json",
-    () => getTestRunResource({}, TEST_RUN_RESOURCE_URIS.BASE),
-  );
+  ResourceRegistry.register(TEST_RUN_RESOURCE_URIS.BASE, "Test Run History", {
+    description: "Individual test run history with step-level details and screens visited.",
+    mimeType: "application/json",
+    handler: () => getTestRunResource({}, TEST_RUN_RESOURCE_URIS.BASE),
+  });
 
   ResourceRegistry.registerTemplate(TEST_RUN_QUERY_TEMPLATE, "Test Run History", {
     description: "Individual test run history with step-level details and screens visited.",

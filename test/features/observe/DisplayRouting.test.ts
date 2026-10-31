@@ -74,7 +74,7 @@ describe("display read routing", () => {
           hierarchyCapture: capture,
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       try {
         const read =
@@ -125,7 +125,7 @@ describe("display read routing", () => {
           getActivityHash: async () => "",
         },
       },
-      timer,
+      { timer },
     );
     try {
       await expect(screen.executeDeviceRead()).rejects.toBeInstanceOf(AndroidDisplayReadError);
@@ -161,7 +161,7 @@ describe("display read routing", () => {
           getActivityHash: async () => "",
         },
       },
-      timer,
+      { timer },
     );
 
     try {
@@ -185,7 +185,7 @@ describe("display read routing", () => {
     });
     const capture = createDeviceHierarchyCapture(device, {
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, _signal, _timeout, options) => {
+        requestHierarchySync: async (_perf, _raw, _signal, { timeoutMs: _timeout, ...options }) => {
           requestedDisplayId = options?.displayId;
           return { hierarchy };
         },
@@ -217,7 +217,12 @@ describe("display read routing", () => {
         },
       },
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, actualSignal, timeout, options) => {
+        requestHierarchySync: async (
+          _perf,
+          _raw,
+          actualSignal,
+          { timeoutMs: timeout, ...options },
+        ) => {
           syncReads++;
           expect(actualSignal).toBe(signal);
           expect(timeout).toBe(750);
@@ -238,7 +243,7 @@ describe("display read routing", () => {
         device,
         new FakeAdbClientFactory(adb),
         { hierarchyCapture: capture, cacheStore: new FakeObserveCacheStore(timer) },
-        timer,
+        { timer },
       );
       await expect(
         screen.execute({
@@ -330,7 +335,7 @@ describe("display read routing", () => {
             ...(isDefault ? { viewHierarchy: defaultHierarchy } : { hierarchyCapture }),
             cacheStore: new FakeObserveCacheStore(timer),
           },
-          timer,
+          { timer },
         );
         const result = await screen.execute({
           ...readOptions,
@@ -384,7 +389,7 @@ describe("display read routing", () => {
       },
       degraded: false,
     });
-    const provider = new CachingDisplayInventoryProvider(source, source, timer);
+    const provider = new CachingDisplayInventoryProvider(source, source, { timer });
     const hydrated = await provider.hydrate(
       { name: device.name, deviceId: device.deviceId, platform: device.platform },
       "pool-incarnation-1",
@@ -403,7 +408,7 @@ describe("display read routing", () => {
           viewHierarchy: hierarchy,
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       const result = await screen.execute({
         skipScreenshot: true,
@@ -439,7 +444,7 @@ describe("display read routing", () => {
           },
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       const cover = await coverScreen.execute({ ...readOptions, display: "cover" });
       expect(cover.display).toMatchObject({ key: "cover", role: "cover" });
@@ -497,9 +502,7 @@ describe("display read routing", () => {
     const recorder = {
       captureSettled: async (
         _id: string,
-        _perf: unknown,
-        _signal: AbortSignal | undefined,
-        displayId: number | undefined,
+        { displayId }: { perf?: unknown; signal?: AbortSignal; displayId?: number } = {},
       ) => {
         screenshotDisplayId = displayId;
         return "/tmp/selected-display.png";
@@ -517,7 +520,7 @@ describe("display read routing", () => {
           },
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       const result = await screen.execute({
         display: "external",
@@ -559,9 +562,7 @@ describe("display read routing", () => {
     const recorder = {
       captureSettled: async (
         _id: string,
-        _perf: unknown,
-        _signal: AbortSignal | undefined,
-        displayId?: number,
+        { displayId }: { perf?: unknown; signal?: AbortSignal; displayId?: number } = {},
       ) => {
         routedDisplayId = displayId;
         return "/tmp/default-display.png";
@@ -579,7 +580,7 @@ describe("display read routing", () => {
           },
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       const result = await screen.execute({
         ...readOptions,
@@ -627,8 +628,7 @@ describe("display read routing", () => {
           hierarchyCapture: capture,
           cacheStore: cache,
         },
-        timer,
-        ids,
+        { timer, idGenerator: ids },
       );
       ids.setScripted(["same-observation", "same-capture"]);
       const ordinary = await screen.execute(readOptions);
@@ -701,7 +701,7 @@ describe("display read routing", () => {
           hierarchyCapture: capture,
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       await expect(screen.execute({ ...readOptions, display: "external" })).rejects.toThrow(
         "CtrlProxy APK too old for display routing; update it",
@@ -737,7 +737,7 @@ describe("display read routing", () => {
           viewHierarchy: hierarchy,
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       expect((await screen.execute(readOptions)).display.key).toBe("external");
       timer.advanceTime(5_100);
@@ -783,11 +783,9 @@ describe("display read routing", () => {
       screenHeight: 100,
     });
     const singleSource = new FakeDisplayInventorySource({ degraded: false });
-    const singleDevice = await new CachingDisplayInventoryProvider(
-      singleSource,
-      singleSource,
+    const singleDevice = await new CachingDisplayInventoryProvider(singleSource, singleSource, {
       timer,
-    ).hydrate(
+    }).hydrate(
       { name: device.name, platform: "android", deviceId: "single-panel-test" },
       "pool-incarnation-1",
     );
@@ -797,7 +795,7 @@ describe("display read routing", () => {
         singleDevice,
         new FakeAdbClientFactory(adb),
         { viewHierarchy: hierarchy, cacheStore: new FakeObserveCacheStore(timer) },
-        timer,
+        { timer },
       );
       const result = await screen.execute({
         skipScreenshot: true,
@@ -841,15 +839,12 @@ describe("display read routing", () => {
         iosDevice,
         new FakeAdbClientFactory(adb),
         {
-          viewHierarchy: new ViewHierarchy(
-            iosDevice,
-            new FakeAdbClientFactory(adb),
-            undefined,
+          viewHierarchy: new ViewHierarchy(iosDevice, new FakeAdbClientFactory(adb), undefined, {
             timer,
-          ),
+          }),
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       await expect(
         screen.execute({
@@ -886,11 +881,9 @@ describe("display read routing", () => {
       displays: iosInventory.displays,
       degraded: false,
     });
-    const iosDevice = await new CachingDisplayInventoryProvider(
-      iosSource,
-      iosSource,
+    const iosDevice = await new CachingDisplayInventoryProvider(iosSource, iosSource, {
       timer,
-    ).hydrate(
+    }).hydrate(
       { name: iosInventory.name, deviceId: iosInventory.deviceId, platform: "ios" },
       "pool-incarnation-1",
     );
@@ -911,15 +904,12 @@ describe("display read routing", () => {
         iosDevice,
         new FakeAdbClientFactory(adb),
         {
-          viewHierarchy: new ViewHierarchy(
-            iosDevice,
-            new FakeAdbClientFactory(adb),
-            undefined,
+          viewHierarchy: new ViewHierarchy(iosDevice, new FakeAdbClientFactory(adb), undefined, {
             timer,
-          ),
+          }),
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       const result = await screen.execute({
         skipScreenshot: true,
@@ -976,8 +966,7 @@ describe("all-display captures", () => {
           stat: async () => ({ isFile: () => true, size: 1, mtimeMs: timer.now() }),
         },
       },
-      timer,
-      new FakeIdGenerator(),
+      { timer, idGenerator: new FakeIdGenerator() },
     );
     return { screen, capture, hierarchy, timer, cache, screenshotRecorder, adb };
   }
@@ -1137,8 +1126,7 @@ describe("all-display captures", () => {
       { ...device, platform: "ios", deviceId: "00000000-0000-0000-0000-000000000001" },
       new FakeAdbClientFactory(h.adb),
       { iosLockStateProbe: { read: async () => ({ kind: "known", lock }) }, cacheStore: h.cache },
-      h.timer,
-      new FakeIdGenerator(),
+      { timer: h.timer, idGenerator: new FakeIdGenerator() },
     );
     const error = new Error("Device access denied");
     const base = screen.createBaseResult();
@@ -1384,7 +1372,7 @@ describe("all-display captures", () => {
         hierarchyCapture: capture,
         cacheStore: new FakeObserveCacheStore(),
       },
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
     await expect(ios.execute({ display: "all", ...options })).rejects.toThrow(/unsupported on iOS/);
     expect(capture.requests).toHaveLength(0);

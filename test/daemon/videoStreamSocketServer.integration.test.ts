@@ -201,10 +201,10 @@ async function startHarness(
     },
     socketPath,
     options.timer ?? defaultTimer,
-    options.authenticator ?? allowAllAuthenticator,
-    // Explicit rather than defaulted: the real default consults the running
-    // daemon's pool, which another suite in this process may have initialized.
-    options.admissionGate ?? permissiveDeviceAdmissionGate,
+    {
+      authenticator: options.authenticator ?? allowAllAuthenticator,
+      admissionGate: options.admissionGate ?? permissiveDeviceAdmissionGate,
+    },
   );
   await server.start();
 
@@ -1082,7 +1082,7 @@ describe("VideoStreamSocketServer", () => {
         },
         socketPath,
         fakeTimer,
-        allowAllAuthenticator,
+        { authenticator: allowAllAuthenticator },
       );
       void server.start().then(() => {
         harnesses.push({
@@ -1136,7 +1136,7 @@ describe("VideoStreamSocketServer", () => {
       },
       socketPath,
       fakeTimer,
-      allowAllAuthenticator,
+      { authenticator: allowAllAuthenticator },
     );
     await server.start();
     harnesses.push({

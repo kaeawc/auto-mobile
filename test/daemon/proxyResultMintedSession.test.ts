@@ -125,7 +125,7 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
         reaped.push({ sessionId, reason });
         await sessionManager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   });

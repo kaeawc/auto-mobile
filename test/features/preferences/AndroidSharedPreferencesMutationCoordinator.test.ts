@@ -15,20 +15,19 @@ describe("PerFileAndroidSharedPreferencesMutationCoordinator user scoping (#9919
     const order: string[] = [];
     const gate = deferred();
 
-    const first = coordinator.run("dev", "app", "prefs", async () => {
-      order.push("first:start");
-      await gate.promise;
-      order.push("first:end");
+    const first = coordinator.run("dev", "app", "prefs", {
+      mutation: async () => {
+        order.push("first:start");
+        await gate.promise;
+        order.push("first:end");
+      },
     });
-    const second = coordinator.run(
-      "dev",
-      "app",
-      "prefs",
-      async () => {
+    const second = coordinator.run("dev", "app", "prefs", {
+      mutation: async () => {
         order.push("second");
       },
-      0,
-    );
+      userId: 0,
+    });
 
     await Promise.resolve();
     expect(order).toEqual(["first:start"]);
@@ -42,19 +41,18 @@ describe("PerFileAndroidSharedPreferencesMutationCoordinator user scoping (#9919
     const order: string[] = [];
     const gate = deferred();
 
-    const owner = coordinator.run("dev", "app", "prefs", async () => {
-      await gate.promise;
-      order.push("owner");
+    const owner = coordinator.run("dev", "app", "prefs", {
+      mutation: async () => {
+        await gate.promise;
+        order.push("owner");
+      },
     });
-    const work = coordinator.run(
-      "dev",
-      "app",
-      "prefs",
-      async () => {
+    const work = coordinator.run("dev", "app", "prefs", {
+      mutation: async () => {
         order.push("work");
       },
-      10,
-    );
+      userId: 10,
+    });
 
     await work;
     expect(order).toEqual(["work"]);

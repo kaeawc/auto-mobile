@@ -111,13 +111,34 @@ export class PrivateDaemonOrphanWatchdog {
   private shutdownRequested = false;
   private launcherToken: string | undefined;
 
+  private readonly port: PrivateDaemonOrphanPort;
+  private readonly idleMs: number;
+  private readonly timer: Timer;
+  private readonly checkIntervalMs: number;
+  private readonly launcherGeneration: LockOwnerGenerationProbe;
+
+  /**
+   * @param port - Process and client-count probes plus the shutdown action
+   * @param idleMs - Orphaned idle time before shutdown; zero disables the watchdog
+   * @param timer - Clock for the idle window and check interval
+   * @param options.checkIntervalMs - Check cadence (defaults to the smaller of 30 s and `idleMs`)
+   * @param options.launcherGeneration - Launcher generation probe
+   */
   constructor(
-    private readonly port: PrivateDaemonOrphanPort,
-    private readonly idleMs: number,
-    private readonly timer: Timer = defaultTimer,
-    private readonly checkIntervalMs: number = Math.min(CHECK_INTERVAL_MS, idleMs),
-    private readonly launcherGeneration: LockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
-  ) {}
+    port: PrivateDaemonOrphanPort,
+    idleMs: number,
+    timer: Timer = defaultTimer,
+    {
+      checkIntervalMs = Math.min(CHECK_INTERVAL_MS, idleMs),
+      launcherGeneration = defaultLockOwnerGenerationProbe,
+    }: { checkIntervalMs?: number; launcherGeneration?: LockOwnerGenerationProbe } = {},
+  ) {
+    this.port = port;
+    this.idleMs = idleMs;
+    this.timer = timer;
+    this.checkIntervalMs = checkIntervalMs;
+    this.launcherGeneration = launcherGeneration;
+  }
 
   start(): void {
     if (this.handle || this.idleMs <= 0) {

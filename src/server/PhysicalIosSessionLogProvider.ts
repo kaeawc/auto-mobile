@@ -127,7 +127,8 @@ export class PhysicalIosSessionLogProvider implements SessionLogProvider {
       const archive = join(workDir, "window.logarchive");
       const stdout = await this.runBounded(
         device,
-        (childSignal) => this.collectAndShow(device, request, predicate, archive, childSignal),
+        (childSignal) =>
+          this.collectAndShow(device, request, predicate, { archive, signal: childSignal }),
         signal,
       );
       return unifiedLogWindowResult(request, stdout, maxBytes, {
@@ -145,8 +146,7 @@ export class PhysicalIosSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     request: UnifiedLogWindowRequest,
     predicate: string,
-    archive: string,
-    signal: AbortSignal,
+    { archive, signal }: { archive: string; signal: AbortSignal },
   ): Promise<string> {
     const options = { timeoutMs: this.deps.timeoutMs, signal };
     try {

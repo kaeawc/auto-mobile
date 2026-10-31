@@ -185,7 +185,8 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     daemonSide = new DaemonSideSocket();
     clientSide = new ClientSideSocket(daemonSide);
     internals.connect(daemonSide);
-    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, ISOLATED_DAEMON_RECOVERY, {
+    daemonClient = new DaemonClient("/fake/socket", 60_000, timer, {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
       clientIdentity: null,
       idGenerator: new FakeIdGenerator(),
     });
@@ -204,7 +205,7 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
   test("a cancel frame sent while the search is between swipes reaches the loopback signal and no swipe follows", async () => {
     const controller = new AbortController();
     const call = daemonClient
-      .callTool("swipeOn", lookForArgs, undefined, undefined, { signal: controller.signal })
+      .callTool("swipeOn", lookForArgs, undefined, { signal: controller.signal })
       .then(
         () => undefined,
         (error: unknown) => error,
@@ -281,10 +282,10 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     const first = new AbortController();
     const second = new AbortController();
     const firstCall = daemonClient
-      .callTool("swipeOn", lookForArgs, undefined, undefined, { signal: first.signal })
+      .callTool("swipeOn", lookForArgs, undefined, { signal: first.signal })
       .catch(() => undefined);
     const secondCall = daemonClient
-      .callTool("swipeOn", { ...lookForArgs, direction: "down" }, undefined, undefined, {
+      .callTool("swipeOn", { ...lookForArgs, direction: "down" }, undefined, {
         signal: second.signal,
       })
       .catch(() => undefined);

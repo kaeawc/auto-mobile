@@ -188,13 +188,22 @@ jobs:
             '.tag == $tag
               and .tag_sha == $tag_sha
               and .prepare_run_id == $prepare_run_id
-              and .artifacts == ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]' \
+              and .artifacts == ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]' \
             /tmp/release-artifact-provenance.json >/dev/null
 
       - name: "Download CtrlProxy APK"
         uses: actions/download-artifact@v7
         with:
           name: control-proxy-apk
+          path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
+
+      - name: "Download ProtoViewer APK"
+        uses: actions/download-artifact@v7
+        with:
+          name: protoviewer-apk
           path: /tmp
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
@@ -313,6 +322,7 @@ jobs:
             }
             const checksums = {
               apk: entry.apkSha256,
+              protoviewer_apk: entry.protoViewerApkSha256,
               ipa: entry.ipaSha256,
               video_jar: entry.videoJarSha256,
               screen_capture_helper: entry.screenCaptureHelperSha256,
@@ -332,10 +342,19 @@ jobs:
             }
           '
 
+      # Refuse to publish a ProtoViewer APK that is missing, differs from the checksum
+      # prepare-release pinned in the registry, or is not signed with the release key (#15301).
+      - name: Verify ProtoViewer APK against the prepared registry entry
+        run: |
+          set -euo pipefail
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-protoviewer.apk protoviewerapk
+          bash scripts/ci/verify-apk-release-signature.sh /tmp/automobile-protoviewer.apk
+
       - name: Create release notes
         id: release_notes
         env:
           APK_CHECKSUM: ${{ steps.prepared_checksums.outputs.apk }}
+          PROTOVIEWER_APK_CHECKSUM: ${{ steps.prepared_checksums.outputs.protoviewer_apk }}
           IPA_CHECKSUM: ${{ steps.prepared_checksums.outputs.ipa }}
           VIDEO_JAR_CHECKSUM: ${{ steps.prepared_checksums.outputs.video_jar }}
           SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.prepared_checksums.outputs.screen_capture_helper }}
@@ -394,8 +413,15 @@ jobs:
           DESKTOP_PUBLISHER: ${{ vars.DESKTOP_PUBLISHER }}
         run: |
           set -euo pipefail
+          # The ProtoViewer APK is built under a stable name; publish it with the version in
+          # the file name plus a `sha256sum -c` checksum file (#15301).
+          protoviewer_apk="/tmp/automobile-protoviewer-${VERSION}.apk"
+          cp /tmp/automobile-protoviewer.apk "$protoviewer_apk"
+          bash scripts/release/write-asset-checksum.sh "$protoviewer_apk" >/dev/null
           files=(
             /tmp/control-proxy-debug.apk
+            "$protoviewer_apk"
+            "$protoviewer_apk.sha256"
             /tmp/control-proxy.ipa
             /tmp/automobile-video.jar
             /tmp/screen-capture-helper-macos-universal.zip
@@ -639,6 +665,7 @@ jobs:
         env:
           VER: ${{ steps.version.outputs.version }}
           APK_CHECKSUM: ${{ steps.prepared_checksums.outputs.apk }}
+          PROTOVIEWER_APK_CHECKSUM: ${{ steps.prepared_checksums.outputs.protoviewer_apk }}
           IPA_CHECKSUM: ${{ steps.prepared_checksums.outputs.ipa }}
           VIDEO_JAR_CHECKSUM: ${{ steps.prepared_checksums.outputs.video_jar }}
           SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.prepared_checksums.outputs.screen_capture_helper }}
@@ -654,6 +681,8 @@ jobs:
           echo "**Version:** v$VER" >> "$S"
           echo "**APK Built:** control-proxy-debug.apk" >> "$S"
           echo "**APK SHA256:** \`$APK_CHECKSUM\`" >> "$S"
+          echo "**ProtoViewer APK Built:** automobile-protoviewer-$VER.apk" >> "$S"
+          echo "**ProtoViewer APK SHA256:** \`$PROTOVIEWER_APK_CHECKSUM\`" >> "$S"
           echo "**IPA Built:** control-proxy.ipa" >> "$S"
           echo "**IPA SHA256:** \`$IPA_CHECKSUM\`" >> "$S"
           echo "**video-server jar Built:** automobile-video.jar" >> "$S"

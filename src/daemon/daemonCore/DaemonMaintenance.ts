@@ -152,8 +152,8 @@ export class DaemonMaintenance {
             cutCallsLearnRelease: true,
           });
         },
-        this.host.services.timer(),
         {
+          timer: this.host.services.timer(),
           // A reap stuck past its deadline frees the device; the session stays fenced (#10963).
           forceStuckRelease: (sessionId) =>
             forceStuckSessionRelease(

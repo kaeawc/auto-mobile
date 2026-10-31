@@ -486,9 +486,7 @@ test("handlers forward the complete nested scope and unique strategy", async () 
         container,
         selectionStrategy: "unique",
       },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     await tapAnyHandler(
       device,
@@ -498,9 +496,7 @@ test("handlers forward the complete nested scope and unique strategy", async () 
         container,
         selectionStrategy: "unique",
       },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     expect(requests).toHaveLength(2);
     for (const request of requests) {
@@ -528,13 +524,9 @@ test("tapAny accepts and forwards display exactly like tapOn", async () => {
   });
   try {
     const args = { action: "tap" as const, display: "cover" };
-    await tapAnyHandler(
-      { name: "fake", deviceId: "fake", platform: "android" },
-      args,
-      undefined,
-      undefined,
-      interactionDeps,
-    );
+    await tapAnyHandler({ name: "fake", deviceId: "fake", platform: "android" }, args, {
+      deps: interactionDeps,
+    });
     expect(requests[0]).toMatchObject({ display: "cover" });
   } finally {
     delete interactionDeps.tapAnyElementFactory;
@@ -559,9 +551,7 @@ for (const error of [
       const response = await tapAnyHandler(
         { name: "fake", deviceId: "fake", platform: "android" },
         { action: "tap" },
-        undefined,
-        undefined,
-        interactionDeps,
+        { deps: interactionDeps },
       );
       const payload = toolJson(response);
       expect(payload.message).toBe(

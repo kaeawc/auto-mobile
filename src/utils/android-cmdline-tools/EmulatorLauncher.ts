@@ -185,11 +185,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
   ): Promise<EmulatorProcessLaunch> {
     const admission = await options.admitColdBoot?.();
     if (!admission) {
-      return await this.spawnAdmittedEmulator(avdName, perf, args, options);
+      return await this.spawnAdmittedEmulator(avdName, perf, args, { options });
     }
     options.onAdmitted?.(admission);
     return await spawnUnderBootAdmission(admission, options.expectedDeviceId, (onAdmittedSpawn) =>
-      this.spawnAdmittedEmulator(avdName, perf, args, options, onAdmittedSpawn),
+      this.spawnAdmittedEmulator(avdName, perf, args, { options, onAdmittedSpawn }),
     );
   }
 
@@ -197,8 +197,10 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     avdName: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     args: string[],
-    options: EmulatorProcessOptions,
-    onAdmittedSpawn?: OnAdmittedSpawn<ChildProcess>,
+    {
+      options,
+      onAdmittedSpawn,
+    }: { options: EmulatorProcessOptions; onAdmittedSpawn?: OnAdmittedSpawn<ChildProcess> },
   ): Promise<EmulatorProcessLaunch & { reservedDeviceId?: string }> {
     const {
       onSpawn,
@@ -214,13 +216,10 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     this.host.throwIfLaunchCancelled(avdName, isCancelled);
     const reservedEmulator = await this.host
       .reservations()
-      .addReservedEmulatorPort(
-        args,
-        avdName,
-        preLaunchEmulatorDeviceSnapshot,
+      .addReservedEmulatorPort(args, avdName, preLaunchEmulatorDeviceSnapshot, {
         expectedDeviceId,
         signal,
-      );
+      });
     this.host.releaseReservationIfLaunchCancelled(avdName, reservedEmulator, isCancelled);
     logger.info(`Starting emulator with AVD: ${avdName}`);
     logger.debug(`Emulator command: ${this.host.emulatorPath()} ${args.join(" ")}`);
@@ -469,17 +468,14 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     >,
     options: Pick<EmulatorProcessOptions, "expectedDeviceId" | "signal">,
   ): EmulatorStartupValidation {
-    return new EmulatorStartupValidation(
-      this.host,
-      context.state,
-      context.child,
-      () => {
+    return new EmulatorStartupValidation(this.host, context.state, context.child, {
+      resolveStartup: () => {
         context.completeStartupValidation();
         context.perf.endOperation("panicDetection");
         context.resolve(context.child);
       },
-      { expectedDeviceId: options.expectedDeviceId, signal: options.signal },
-    );
+      options: { expectedDeviceId: options.expectedDeviceId, signal: options.signal },
+    });
   }
 
   private createLaunchCaptureHandlers(

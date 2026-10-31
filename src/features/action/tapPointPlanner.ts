@@ -278,7 +278,8 @@ export class TapPointPlanner {
         : ime
           ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
           : this.deps.geometry().getElementCenter({ bounds: visibleBounds });
-      const safe = applicationWindowSafeTapPoint(hierarchy, target, visibleBounds, proposed, {
+      const safe = applicationWindowSafeTapPoint(hierarchy, target, visibleBounds, {
+        point: proposed,
         imeBounds: ime && {
           left: ime.bounds[0],
           top: ime.bounds[1],

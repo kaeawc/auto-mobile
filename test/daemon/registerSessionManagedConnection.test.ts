@@ -63,9 +63,7 @@ describe("daemon/registerSession on managed connections", () => {
     return handleDaemonRequest(
       { id: "r", type: "daemon_request", method: DAEMON_REGISTER_SESSION_METHOD, params },
       state,
-      undefined,
-      undefined,
-      { socketSessionId },
+      { context: { socketSessionId } },
     );
   }
 

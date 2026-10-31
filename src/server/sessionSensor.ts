@@ -31,8 +31,10 @@ export async function runSessionSensorMutation<T>(
   sessionManager: SessionSensorHost | undefined,
   sessionUuid: string | undefined,
   deviceId: string,
-  mutation: (owner?: string) => Promise<T>,
-  wording: SessionMutationWording = SENSOR_WORDING,
+  {
+    mutation,
+    wording = SENSOR_WORDING,
+  }: { mutation: (owner?: string) => Promise<T>; wording?: SessionMutationWording },
 ): Promise<T> {
   if (!sessionManager || !sessionUuid) {
     return mutation();

@@ -70,25 +70,15 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
 
   test("a control during a plan is typed; a read in the same state runs", async () => {
     const readName = `${PROBE_TOOL}_read`;
-    ToolRegistry.registerDeviceAware(
-      PROBE_TOOL,
-      "control",
-      z.object({}),
-      async () => ({ content: [] }),
-      {
-        nonDeviceHandler: async () => ({ content: [] }),
-      },
-    );
-    ToolRegistry.registerDeviceAware(
-      readName,
-      "read",
-      z.object({}),
-      async () => ({ content: [] }),
-      {
-        deviceReadOnly: true,
-        nonDeviceHandler: async () => ({ content: [{ type: "text", text: "read ran" }] }),
-      },
-    );
+    ToolRegistry.registerDeviceAware(PROBE_TOOL, "control", z.object({}), {
+      handler: async () => ({ content: [] }),
+      nonDeviceHandler: async () => ({ content: [] }),
+    });
+    ToolRegistry.registerDeviceAware(readName, "read", z.object({}), {
+      handler: async () => ({ content: [] }),
+      deviceReadOnly: true,
+      nonDeviceHandler: async () => ({ content: [{ type: "text", text: "read ran" }] }),
+    });
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       executionTargetResolver: {
         resolveExecutionTarget: async ({ args }) => ({
@@ -142,13 +132,10 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
       env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" },
     });
     try {
-      ToolRegistry.registerDeviceAware(
-        PROBE_TOOL,
-        "ambiguity",
-        z.object({}),
-        async () => ({ content: [] }),
-        { deviceReadOnly: readOnly },
-      );
+      ToolRegistry.registerDeviceAware(PROBE_TOOL, "ambiguity", z.object({}), {
+        handler: async () => ({ content: [] }),
+        deviceReadOnly: readOnly,
+      });
       fixture = new McpTestFixture({ daemonMode: true });
       await fixture.setup();
       const result = await fixture.client.callTool({ name: PROBE_TOOL, arguments: {} });

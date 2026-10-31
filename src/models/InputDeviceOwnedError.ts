@@ -15,6 +15,8 @@ export const TOOL_CALL_REMEDY =
 
 /** Trailing options for `InputDeviceOwnedError`. */
 export interface InputDeviceOwnedErrorOptions {
+  /** Remedy appended to the composed message; defaults to `INPUT_REMEDY`. */
+  remedy?: string;
   /** Replaces the composed message where a caller's existing wording must stay stable. */
   message?: string;
   /** Set only when the refusal ends without the caller or a holder doing anything. */
@@ -43,10 +45,9 @@ export class InputDeviceOwnedError extends ActionableError {
     action: string,
     readonly deviceId: string,
     requesterSessionUuid: string | undefined,
-    remedy = INPUT_REMEDY,
     options: InputDeviceOwnedErrorOptions = {},
   ) {
-    const { message, retryAfterMs } = options;
+    const { remedy = INPUT_REMEDY, message, retryAfterMs } = options;
     super(
       message ??
         `${action} refused: device '${deviceId}' is held by another session. ` +

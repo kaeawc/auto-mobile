@@ -21,8 +21,7 @@ export async function addOrUpdateSuggestion(
   ctx: NavigationQueryContext,
   appId: string,
   hash: string,
-  data: string,
-  timestamp: number,
+  { data, timestamp }: { data: string; timestamp: number },
 ): Promise<NavigationSuggestion> {
   const db = ctx.getDb();
 
@@ -129,20 +128,19 @@ export async function promoteSuggestion(
 ): Promise<NavigationNodeFingerprint> {
   const db = ctx.getDb();
   if (db.isTransaction) {
-    return promoteSuggestionWithin(ctx, db, suggestionId, nodeId, timestamp);
+    return promoteSuggestionWithin(ctx, db, suggestionId, { nodeId, timestamp });
   }
 
   return db
     .transaction()
-    .execute((trx) => promoteSuggestionWithin(ctx, trx, suggestionId, nodeId, timestamp));
+    .execute((trx) => promoteSuggestionWithin(ctx, trx, suggestionId, { nodeId, timestamp }));
 }
 
 async function promoteSuggestionWithin(
   ctx: NavigationQueryContext,
   db: Kysely<Database>,
   suggestionId: number,
-  nodeId: number,
-  timestamp: number,
+  { nodeId, timestamp }: { nodeId: number; timestamp: number },
 ): Promise<NavigationNodeFingerprint> {
   // Get the suggestion
   const suggestion = await db
@@ -158,13 +156,10 @@ async function promoteSuggestionWithin(
   // Create fingerprint record (using app_id from suggestion)
   const fingerprint = await ctx.repository
     .withExecutor(db)
-    .getOrCreateFingerprint(
-      suggestion.app_id,
-      nodeId,
-      suggestion.fingerprint_hash,
-      suggestion.fingerprint_data,
+    .getOrCreateFingerprint(suggestion.app_id, nodeId, suggestion.fingerprint_hash, {
+      data: suggestion.fingerprint_data,
       timestamp,
-    );
+    });
 
   // Link suggestion to fingerprint
   await db

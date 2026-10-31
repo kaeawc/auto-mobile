@@ -178,7 +178,7 @@ export class DaemonBroker {
     this.brokerExecutionRelease = release;
     this.host.services
       .sessionManager()
-      .onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
+      .onSessionRelease((_sessionId, _deviceId, _reason, { snapshot, ...options }) =>
         release.onSessionReleased(snapshot, options),
       );
   }

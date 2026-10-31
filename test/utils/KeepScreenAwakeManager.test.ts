@@ -342,10 +342,10 @@ describe("KeepScreenAwakeManager", () => {
         mode === "provider throws"
           ? []
           : [
-              ["global", "stay_on_while_plugged_in", "7", "int"],
-              ["system", "screen_off_timeout", "2147483647", "long"],
+              ["global", "stay_on_while_plugged_in", "7", { valueType: "int" }],
+              ["system", "screen_off_timeout", "2147483647", { valueType: "long" }],
               ["global", "stay_on_while_plugged_in", null],
-              ["system", "screen_off_timeout", "60000", "long"],
+              ["system", "screen_off_timeout", "60000", { valueType: "long" }],
             ],
       );
       if (mode === "success") {
@@ -698,8 +698,8 @@ describe("typed restore outcomes", () => {
       ],
     });
     expect(puts).toEqual([
-      ["global", "stay_on_while_plugged_in", "0", "int"],
-      ["system", "screen_off_timeout", "60000", "long"],
+      ["global", "stay_on_while_plugged_in", "0", { valueType: "int" }],
+      ["system", "screen_off_timeout", "60000", { valueType: "long" }],
     ]);
     expect(adb.calls).toEqual([]);
   });

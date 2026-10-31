@@ -322,8 +322,7 @@ export class TapAnyAndroidTapper {
         { x, y },
         durationMs,
         element,
-        driver,
-        { ...fenceOptions, displayFence: fence },
+        { driver, fenceOptions: { ...fenceOptions, displayFence: fence } },
       );
       if (!result.success && result.semanticActionFailure) {
         throw new ActionableError(
@@ -348,15 +347,12 @@ export class TapAnyAndroidTapper {
     const fallback =
       action === "tap"
         ? await this.deps.talkBackStrategy.executePreciseTap(x, y, driver, fence)
-        : await this.deps.talkBackStrategy.executeCoordinateFallback(
-            { x, y },
-            action,
-            durationMs,
+        : await this.deps.talkBackStrategy.executeCoordinateFallback({ x, y }, action, durationMs, {
             driver,
-            {
+            fenceOptions: {
               displayFence: fence,
             },
-          );
+          });
     fenceOptions.onActivationWarnings?.(fallback.warnings);
     return fallback.success;
   }
@@ -408,7 +404,7 @@ export class TapAnyAndroidTapper {
         requireAndroidOrIosPlatform(this.deps.device.platform, "tapAny"),
         probe.hierarchy,
         "cached-ok",
-        this.deps.timer,
+        { timer: this.deps.timer },
       );
       const refound = this.deps.findClickableElement(options, capture.hierarchy, {
         observationScreenSize: screenSize,
@@ -468,7 +464,7 @@ export class TapAnyAndroidTapper {
       requireAndroidOrIosPlatform(this.deps.device.platform, "tapAny"),
       hierarchy,
       "fresh",
-      this.deps.timer,
+      { timer: this.deps.timer },
     );
     const found = this.deps.findClickableElement(options, capture.hierarchy, {
       observationScreenSize: screenSize,

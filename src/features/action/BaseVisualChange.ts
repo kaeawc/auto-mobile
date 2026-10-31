@@ -687,13 +687,10 @@ export class BaseVisualChange {
     perf.serial("uiStability");
     const gfxMetrics =
       initState !== null
-        ? await this.awaitIdle.waitForUiStabilityWithState(
-            packageName,
-            timeoutMs,
-            initState,
+        ? await this.awaitIdle.waitForUiStabilityWithState(packageName, timeoutMs, initState, {
             perf,
-            options.signal,
-          )
+            signal: options.signal,
+          })
         : await this.awaitIdle.waitForUiStability(packageName, timeoutMs, perf, options.signal);
     perf.end();
     return gfxMetrics;
@@ -760,12 +757,15 @@ export class BaseVisualChange {
       if (
         this.observeScreen.captureScreenshot &&
         deferTerminalScreenshot(observation, async (chosen, requestSignal) => {
-          await this.observeScreen.captureScreenshot?.(perf, requestSignal ?? signal, chosen);
+          await this.observeScreen.captureScreenshot?.(perf, {
+            signal: requestSignal ?? signal,
+            observation: chosen,
+          });
         })
       ) {
         return;
       }
-      await this.observeScreen.captureScreenshot?.(perf, signal, observation);
+      await this.observeScreen.captureScreenshot?.(perf, { signal, observation });
       return;
     }
     await this.observeScreen.runAccessibilityAudit?.(observation, perf);

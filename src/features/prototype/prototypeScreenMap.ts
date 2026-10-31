@@ -133,7 +133,12 @@ class Builder {
   }
 }
 
-function walk(builder: Builder, value: unknown, path: string, screen: string, depth: number): void {
+function walk(
+  builder: Builder,
+  value: unknown,
+  path: string,
+  { screen, depth }: { screen: string; depth: number },
+): void {
   const node = record(value);
   if (!node || depth > MAX_DEPTH) {
     return;
@@ -156,7 +161,10 @@ function walk(builder: Builder, value: unknown, path: string, screen: string, de
         path: `${path}.screens[${JSON.stringify(name)}]`,
         ...(name === node.start ? { start: true as const } : {}),
       });
-      walk(builder, child, `${path}.screens[${JSON.stringify(name)}]`, screenId, depth + 1);
+      walk(builder, child, `${path}.screens[${JSON.stringify(name)}]`, {
+        screen: screenId,
+        depth: depth + 1,
+      });
     }
     return;
   }
@@ -172,9 +180,9 @@ function walk(builder: Builder, value: unknown, path: string, screen: string, de
         ...(label ? { label } : {}),
         ...(index === 0 ? { start: true as const } : {}),
       });
-      walk(builder, child.value, `${path}${child.suffix}`, pageId, depth + 1);
+      walk(builder, child.value, `${path}${child.suffix}`, { screen: pageId, depth: depth + 1 });
     } else {
-      walk(builder, child.value, `${path}${child.suffix}`, screen, depth + 1);
+      walk(builder, child.value, `${path}${child.suffix}`, { screen, depth: depth + 1 });
     }
   });
 }
@@ -202,7 +210,7 @@ export function buildPrototypeScreenMap(spec: unknown): PrototypeScreenMap {
   const roots = prototypeSpecNodeRoots(spec);
   roots.forEach((root) => registerStatics(builder, root.node, 0));
   builder.addNode({ id: "root", kind: "root", path: "root" });
-  roots.forEach((root) => walk(builder, root.node, root.path, "root", 0));
+  roots.forEach((root) => walk(builder, root.node, root.path, { screen: "root", depth: 0 }));
   return { nodes: builder.nodes, edges: builder.edges };
 }
 

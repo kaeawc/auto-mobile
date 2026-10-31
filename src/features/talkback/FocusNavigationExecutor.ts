@@ -252,7 +252,7 @@ export class FocusNavigationExecutor {
       );
     }
 
-    await this.requestFocus(driver, target, before.orderedElements, options, progress);
+    await this.requestFocus(driver, target, before.orderedElements, { options, progress });
     const after = await this.readCursorAfterFocusRequest(
       driver,
       targetSelector,
@@ -308,8 +308,7 @@ export class FocusNavigationExecutor {
     driver: FocusNavigationDriver,
     target: Element,
     traversal: readonly Element[],
-    options: NavigationOptions,
-    progress: { focusRequests: number },
+    { options, progress }: { options: NavigationOptions; progress: { focusRequests: number } },
   ): Promise<void> {
     const { signal } = options;
     const selector = stableNodeSelectorForElement(target);

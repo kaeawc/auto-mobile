@@ -67,9 +67,7 @@ export class TapAnyIosTapper {
       (await this.deps.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
         this.deps.device.deviceId,
         xcTestClient,
-        this.deps.featureFlags,
-        undefined,
-        signal,
+        { featureFlags: this.deps.featureFlags, signal },
       ));
 
     if (isVoiceOverEnabled && element) {
@@ -218,7 +216,8 @@ export class TapAnyIosTapper {
     let dispatched = false;
     let result: Awaited<ReturnType<IosCtrlProxy["requestAction"]>>;
     try {
-      result = await xcTestClient.requestAction(voiceOverAction, resourceId, undefined, timeoutMs, {
+      result = await xcTestClient.requestAction(voiceOverAction, resourceId, undefined, {
+        timeoutMs,
         ...(duration === undefined ? {} : { duration }),
         abortSignal: signal,
         onDispatch: () => {
@@ -290,16 +289,10 @@ export class TapAnyIosTapper {
       );
     }
 
-    const result = await xcTestClient.requestVoiceOverActivate(
-      label,
-      voiceOverAction,
-      timeoutMs,
-      undefined,
-      {
-        bounds: element.bounds,
-        duration: action === "longPress" ? longPressDuration : undefined,
-      },
-    );
+    const result = await xcTestClient.requestVoiceOverActivate(label, voiceOverAction, timeoutMs, {
+      bounds: element.bounds,
+      duration: action === "longPress" ? longPressDuration : undefined,
+    });
 
     this.confirmIosVoiceOverDispatch(result);
     if (!result.success) {

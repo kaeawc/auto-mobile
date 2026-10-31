@@ -363,7 +363,7 @@ export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMeth
   ],
   [
     "daemon/prepareSession",
-    (request, state, _executions, signal, context) =>
+    (request, state, { signal, context }) =>
       handlePrepareBrokerSession(request, state, signal, context.socketSessionId),
   ],
   ["daemon/getSessionExport", (request, state) => handleGetSessionExport(request, state)],
@@ -373,7 +373,7 @@ export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMeth
   ],
   [
     "daemon/sessionRequestStatus",
-    (request, state, _executions, _signal, context) =>
+    (request, state, { context }) =>
       handleBrokerSessionStatus(request, state, context.socketSessionId),
   ],
   [
@@ -383,8 +383,7 @@ export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMeth
   ["daemon/releaseBrokerSession", (request, state) => handleReleaseBrokerSession(request, state)],
   [
     "daemon/drainBrokerPool",
-    (request, state, _executions, _signal, context) =>
-      handleDrainBrokerPool(request, state, context.socketSessionId),
+    (request, state, { context }) => handleDrainBrokerPool(request, state, context.socketSessionId),
   ],
 ];
 

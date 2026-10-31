@@ -1147,7 +1147,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const originalMarkReleased = repository.markReleased.bind(repository);
     const markReleasedSpy = spyOn(repository, "markReleased").mockImplementation(
       async (...args) => {
-        if (args[3] === "explicit-release") {
+        if (args[3].reason === "explicit-release") {
           persistenceStarted.resolve();
           await persistence.promise;
         }

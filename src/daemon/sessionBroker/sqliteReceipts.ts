@@ -51,8 +51,7 @@ export async function linkRequestExport(
   db: Kysely<BindingRegistryDatabase>,
   now: number,
   requestId: string,
-  fingerprint: string,
-  identity: BrokerExportIdentity,
+  { fingerprint, identity }: { fingerprint: string; identity: BrokerExportIdentity },
 ): Promise<void> {
   await db.transaction().execute(async (trx) => {
     const request = await trx
@@ -117,8 +116,7 @@ export async function pruneTerminalRequests(
   db: Kysely<BindingRegistryDatabase>,
   clock: Pick<Timer, "now">,
   retentionMs: number,
-  limit: number,
-  exportRetentionMs = EXPORT_RETENTION_MS,
+  { limit, exportRetentionMs = EXPORT_RETENTION_MS }: { limit: number; exportRetentionMs?: number },
 ): Promise<number> {
   if (
     !Number.isFinite(retentionMs) ||

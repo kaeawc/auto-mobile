@@ -78,11 +78,11 @@ export class DefaultUIStateSetup implements UIStateSetup {
     device: BootedDevice,
     adb: AdbExecutor,
     observeScreenProvider?: () => ObserveScreenLike,
-    timer: Timer = defaultTimer,
     {
+      timer = defaultTimer,
       sessionUuid,
       internalToolCaller = registeredInternalToolCaller,
-    }: DefaultUIStateSetupOptions = {},
+    }: DefaultUIStateSetupOptions & { timer?: Timer } = {},
   ) {
     this.internalTools = internalToolCaller;
     this.device = device;
@@ -133,7 +133,10 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
     // Step 2: Handle selected elements (tabs, menu items, etc.)
     if (requiredState.selectedElements?.length) {
-      await this.setupSelectedElements(requiredState, currentState, setupActions, platform, signal);
+      await this.setupSelectedElements(requiredState, currentState, setupActions, {
+        platform,
+        signal,
+      });
     }
 
     if (setupActions.length === 0) {
@@ -151,8 +154,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     requiredState: UIState,
     currentState: UIState,
     setupActions: string[],
-    platform: string,
-    signal?: AbortSignal,
+    { platform, signal }: { platform: string; signal?: AbortSignal },
   ): Promise<void> {
     // Get current state again after modal stack changes if modals were dismissed
     const updatedState =

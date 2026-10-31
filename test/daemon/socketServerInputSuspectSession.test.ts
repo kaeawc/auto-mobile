@@ -118,7 +118,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
         );
         await sessionManager.releaseSession(sessionId, reason, { allowExpired: true });
       },
-      timer,
+      { timer },
     );
     monitor.start();
   }
@@ -211,7 +211,11 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       (wallNowMs = Date.now()) => sessionManager.sessionNow() - wallNowMs,
     );
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-      hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
+      hasActiveSessionExecution(
+        { tracker: executionTracker, sessionManager, devicePool: pool },
+        sessionId,
+        query,
+      ),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
     if (startOwned) {
@@ -220,8 +224,14 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
 
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const stroke =
-      (kind: string) => async (_id: string, _x: number, _y: number, last?: unknown) => {
-        strokes.push(kind === "end" && last === true ? "cancel" : kind);
+      (kind: string) =>
+      async (
+        _id: string,
+        _x: number,
+        _y: number,
+        last?: { cancel?: boolean; timeoutMs?: number },
+      ) => {
+        strokes.push(kind === "end" && last?.cancel === true ? "cancel" : kind);
         return { success: true, totalTimeMs: 0 };
       };
     spyOnAndroidClientInstance(androidDevice, {

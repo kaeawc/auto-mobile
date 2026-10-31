@@ -493,13 +493,9 @@ export class DevicePoolTargetDiscovery {
   ): boolean {
     if (caller?.oneShotCli === true) {
       if (!isAnonymousAcquisitionSession(session)) {
-        throw heldDeviceBindRefusal(
-          this.callbacks,
-          device.id,
-          session.sessionId,
-          undefined,
-          "another",
-        );
+        throw heldDeviceBindRefusal(this.callbacks, device.id, session.sessionId, {
+          wording: "another",
+        });
       }
       // Anonymous acquisitions share one owner, so a one-shot CLI caller reusing one is its
       // confirmed owner. Returning false sent an acquisition that resolved a source image (an AVD
@@ -517,13 +513,9 @@ export class DevicePoolTargetDiscovery {
       !this.callbacks.isSessionAssignmentCurrent(device, session) ||
       !this.state.sessionManager.isAdmittedForAutomation(session)
     ) {
-      throw heldDeviceBindRefusal(
-        this.callbacks,
-        device.id,
-        session.sessionId,
-        undefined,
-        "another",
-      );
+      throw heldDeviceBindRefusal(this.callbacks, device.id, session.sessionId, {
+        wording: "another",
+      });
     }
     return true;
   }

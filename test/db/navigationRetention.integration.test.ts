@@ -184,7 +184,12 @@ describe("NavigationRetention prune", () => {
     session: string,
     seenAt: number,
   ): Promise<void> {
-    await repo.recordNodeObservation(nodeId, buildKeyId, "device-1", session, seenAt);
+    await repo.recordNodeObservation(nodeId, {
+      buildKeyId,
+      deviceId: "device-1",
+      sessionUuid: session,
+      seenAt,
+    });
   }
 
   async function suggestionObs(
@@ -194,7 +199,12 @@ describe("NavigationRetention prune", () => {
     seenAt: number,
   ): Promise<void> {
     const suggestion = await repo.addOrUpdateSuggestion(appId, `fp-${session}`, "{}", seenAt);
-    await repo.recordSuggestionObservation(suggestion.id, buildKeyId, "device-1", session, seenAt);
+    await repo.recordSuggestionObservation(suggestion.id, {
+      buildKeyId,
+      deviceId: "device-1",
+      sessionUuid: session,
+      seenAt,
+    });
   }
 
   async function countNodeObs(): Promise<number> {
@@ -419,19 +429,26 @@ describe("NavigationRetention prune", () => {
 
   test("prunes old node + edge observations, keeps recent ones", async () => {
     const nodeId = await seedNode("Home", 100);
-    const edge = await repo.createEdge(
-      APP,
-      "Home",
-      "Detail",
-      { toolName: "tapOn", toolArgs: null },
-      100,
-    );
+    const edge = await repo.createEdge(APP, "Home", "Detail", {
+      tool: { toolName: "tapOn", toolArgs: null },
+      timestamp: 100,
+    });
     const bkOld = await buildKey(APP, 1);
     const bkNew = await buildKey(APP, 2);
     await nodeObs(nodeId, bkOld, "s-old", 100);
     await nodeObs(nodeId, bkNew, "s-new", 100_000); // newest -> protected
-    await repo.recordEdgeObservation(edge.id, bkOld, "device-1", "s-old", 100);
-    await repo.recordEdgeObservation(edge.id, bkNew, "device-1", "s-new", 100_000);
+    await repo.recordEdgeObservation(edge.id, {
+      buildKeyId: bkOld,
+      deviceId: "device-1",
+      sessionUuid: "s-old",
+      seenAt: 100,
+    });
+    await repo.recordEdgeObservation(edge.id, {
+      buildKeyId: bkNew,
+      deviceId: "device-1",
+      sessionUuid: "s-new",
+      seenAt: 100_000,
+    });
 
     const summary = await retention().prune(50_000); // cutoff 45000
 
@@ -448,31 +465,32 @@ describe("NavigationRetention prune", () => {
 
   test("revalidates each TTL batch only for apps represented in that batch", async () => {
     const nodeId = await seedNode("Home", 100);
-    const edge = await repo.createEdge(
-      APP,
-      "Home",
-      "Detail",
-      { toolName: "tapOn", toolArgs: null },
-      100,
-    );
+    const edge = await repo.createEdge(APP, "Home", "Detail", {
+      tool: { toolName: "tapOn", toolArgs: null },
+      timestamp: 100,
+    });
     const oldBuild = await buildKey(APP, 1);
     const activeBuild = await buildKey(APP, 2);
     for (let index = 0; index < 5; index += 1) {
       await nodeObs(nodeId, oldBuild, `old-node-${index}`, 100 + index);
-      await repo.recordEdgeObservation(
-        edge.id,
-        oldBuild,
-        "device-1",
-        `old-edge-${index}`,
-        100 + index,
-      );
+      await repo.recordEdgeObservation(edge.id, {
+        buildKeyId: oldBuild,
+        deviceId: "device-1",
+        sessionUuid: `old-edge-${index}`,
+        seenAt: 100 + index,
+      });
     }
     await nodeObs(nodeId, activeBuild, "active", 100_000);
 
     await repo.getOrCreateApp(APP2);
     const otherNode = await repo.getOrCreateNode(APP2, "Other", 100);
     const otherBuild = await buildKey(APP2, 1);
-    await repo.recordNodeObservation(otherNode.id, otherBuild, "device-2", "other", 100_000);
+    await repo.recordNodeObservation(otherNode.id, {
+      buildKeyId: otherBuild,
+      deviceId: "device-2",
+      sessionUuid: "other",
+      seenAt: 100_000,
+    });
 
     const protectedScopes: (readonly string[] | undefined)[] = [];
     const summary = await retention(
@@ -539,7 +557,12 @@ describe("NavigationRetention prune", () => {
       const node = await repo.getOrCreateNode(appId, "Home", 1);
       const build = await repo.getOrCreateBuildKey(appId, 1, `hash-${appId}`);
       for (let index = 0; index < 3; index += 1) {
-        await repo.recordNodeObservation(node.id, build.id, "device-1", `${appId}-${index}`, index);
+        await repo.recordNodeObservation(node.id, {
+          buildKeyId: build.id,
+          deviceId: "device-1",
+          sessionUuid: `${appId}-${index}`,
+          seenAt: index,
+        });
       }
     }
 
@@ -561,7 +584,12 @@ describe("NavigationRetention prune", () => {
       await repo.getOrCreateApp(appId);
       const node = await repo.getOrCreateNode(appId, "Home", 1);
       const build = await repo.getOrCreateBuildKey(appId, 1, `hash-${appId}`);
-      await repo.recordNodeObservation(node.id, build.id, "device-1", appId, 10_000);
+      await repo.recordNodeObservation(node.id, {
+        buildKeyId: build.id,
+        deviceId: "device-1",
+        sessionUuid: appId,
+        seenAt: 10_000,
+      });
     }
 
     let yields = 0;
@@ -618,7 +646,12 @@ describe("NavigationRetention prune", () => {
       const node = await repo.getOrCreateNode(appId, "Home", 1);
       const build = await repo.getOrCreateBuildKey(appId, 1, `hash-${appId}`);
       for (let index = 0; index < 3; index += 1) {
-        await repo.recordNodeObservation(node.id, build.id, "device-1", `${appId}-${index}`, index);
+        await repo.recordNodeObservation(node.id, {
+          buildKeyId: build.id,
+          deviceId: "device-1",
+          sessionUuid: `${appId}-${index}`,
+          seenAt: index,
+        });
       }
     }
 
@@ -686,8 +719,18 @@ describe("NavigationRetention prune", () => {
     const appBNode = await repo.getOrCreateNode(APP2, "B", 1);
     const appBOldBuild = await buildKey(APP2, 1);
     const appBActiveBuild = await buildKey(APP2, 2);
-    await repo.recordNodeObservation(appBNode.id, appBOldBuild, "device-2", "b-old", 200);
-    await repo.recordNodeObservation(appBNode.id, appBActiveBuild, "device-2", "b-active", 900);
+    await repo.recordNodeObservation(appBNode.id, {
+      buildKeyId: appBOldBuild,
+      deviceId: "device-2",
+      sessionUuid: "b-old",
+      seenAt: 200,
+    });
+    await repo.recordNodeObservation(appBNode.id, {
+      buildKeyId: appBActiveBuild,
+      deviceId: "device-2",
+      sessionUuid: "b-active",
+      seenAt: 900,
+    });
 
     let fullProtectedReads = 0;
     let shiftedAppA = false;
@@ -892,8 +935,18 @@ describe("NavigationRetention prune", () => {
     const n2 = await repo.getOrCreateNode(APP2, "B", 1);
     const bk2old = await buildKey(APP2, 1);
     const bk2new = await buildKey(APP2, 2);
-    await repo.recordNodeObservation(n2.id, bk2new, "d", "p2", 9_500);
-    await repo.recordNodeObservation(n2.id, bk2old, "d", "b-200", 200);
+    await repo.recordNodeObservation(n2.id, {
+      buildKeyId: bk2new,
+      deviceId: "d",
+      sessionUuid: "p2",
+      seenAt: 9_500,
+    });
+    await repo.recordNodeObservation(n2.id, {
+      buildKeyId: bk2old,
+      deviceId: "d",
+      sessionUuid: "b-200",
+      seenAt: 200,
+    });
 
     // total 5; global cap 2 -> overflow 3 evicts the 3 oldest non-active rows
     // (a-100, b-200, a-300). Each app's active build (p1, p2) is shielded even
@@ -1190,10 +1243,20 @@ describe("eviction active-row exclusion is relational (bounded bind params)", ()
 
     // 300 observations all tied at the max instant (all "active") + 5 older rows.
     for (let i = 0; i < 300; i++) {
-      await repo.recordNodeObservation(node.id, bk.id, "d", `active-${i}`, 10_000);
+      await repo.recordNodeObservation(node.id, {
+        buildKeyId: bk.id,
+        deviceId: "d",
+        sessionUuid: `active-${i}`,
+        seenAt: 10_000,
+      });
     }
     for (let i = 0; i < 5; i++) {
-      await repo.recordNodeObservation(node.id, bk.id, "d", `old-${i}`, 1_000 + i);
+      await repo.recordNodeObservation(node.id, {
+        buildKeyId: bk.id,
+        deviceId: "d",
+        sessionUuid: `old-${i}`,
+        seenAt: 1_000 + i,
+      });
     }
 
     // Aggressive cap; structure TTL huge so only the cap acts. All 300 tied-max
@@ -1254,7 +1317,12 @@ describe("prune releases the connection between chunks (issue #6650)", () => {
     const node = await repo.getOrCreateNode(APP, "Home", 1);
     const bk = await repo.getOrCreateBuildKey(APP, 1, "h");
     for (let i = 0; i < count; i++) {
-      await repo.recordNodeObservation(node.id, bk.id, "device-1", `s${i}`, 100 + i);
+      await repo.recordNodeObservation(node.id, {
+        buildKeyId: bk.id,
+        deviceId: "device-1",
+        sessionUuid: `s${i}`,
+        seenAt: 100 + i,
+      });
     }
   }
 

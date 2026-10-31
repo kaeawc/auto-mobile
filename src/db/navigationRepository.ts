@@ -40,6 +40,7 @@ import {
   getOrCreateBuildKey,
   getSuggestions,
   hasNamedNodes,
+  type ObservationSource,
   promoteSuggestion,
   recordEdgeObservation,
   recordNodeObservation,
@@ -60,6 +61,9 @@ export type {
   NavigationNodeProvenanceRow,
   NavigationEdgeTool,
 } from "./navigationRepositoryTypes";
+
+/** The build/device/session an observation was made under, and when it was seen. */
+type ObservedAt = ObservationSource & { seenAt: number };
 
 /**
  * Repository for navigation graph database operations.
@@ -318,8 +322,7 @@ export class NavigationRepository {
     appId: string,
     fromScreen: string,
     toScreen: string,
-    tool: NavigationEdgeTool,
-    timestamp: number,
+    { tool, timestamp }: { tool: NavigationEdgeTool; timestamp: number },
   ): Promise<NavigationEdge> {
     const { toolName, toolArgs } = tool;
     const db = this.getDb();
@@ -622,7 +625,7 @@ export class NavigationRepository {
     direction: string,
     options: ScrollPositionOptions = {},
   ): Promise<void> {
-    return setScrollPosition(this.ctx, edgeId, targetElementId, direction, options);
+    return setScrollPosition(this.ctx, edgeId, targetElementId, { direction, ...options });
   }
 
   /**
@@ -753,8 +756,7 @@ export class NavigationRepository {
     appId: string,
     nodeId: number,
     hash: string,
-    data: string,
-    timestamp: number,
+    { data, timestamp }: { data: string; timestamp: number },
   ): Promise<NavigationNodeFingerprint> {
     const db = this.getDb();
 
@@ -835,16 +837,13 @@ export class NavigationRepository {
     data: string,
     timestamp: number,
   ): Promise<NavigationSuggestion> {
-    return addOrUpdateSuggestion(this.ctx, appId, hash, data, timestamp);
+    return addOrUpdateSuggestion(this.ctx, appId, hash, { data, timestamp });
   }
 
   /** Record one uncorrelated reach under its actual build/device/session. */
   async recordSuggestionObservation(
     suggestionId: number,
-    buildKeyId: number,
-    deviceId: string,
-    sessionUuid: string,
-    seenAt: number,
+    { buildKeyId, deviceId, sessionUuid, seenAt }: ObservedAt,
   ): Promise<void> {
     return recordSuggestionObservation(
       this.ctx,
@@ -918,10 +917,7 @@ export class NavigationRepository {
    */
   async recordNodeObservation(
     nodeId: number,
-    buildKeyId: number,
-    deviceId: string,
-    sessionUuid: string,
-    seenAt: number,
+    { buildKeyId, deviceId, sessionUuid, seenAt }: ObservedAt,
   ): Promise<void> {
     return recordNodeObservation(this.ctx, nodeId, { buildKeyId, deviceId, sessionUuid }, seenAt);
   }
@@ -932,10 +928,7 @@ export class NavigationRepository {
    */
   async recordEdgeObservation(
     edgeId: number,
-    buildKeyId: number,
-    deviceId: string,
-    sessionUuid: string,
-    seenAt: number,
+    { buildKeyId, deviceId, sessionUuid, seenAt }: ObservedAt,
   ): Promise<void> {
     return recordEdgeObservation(this.ctx, edgeId, { buildKeyId, deviceId, sessionUuid }, seenAt);
   }

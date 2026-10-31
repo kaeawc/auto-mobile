@@ -721,13 +721,11 @@ async function brokerKeeper(
       );
     }
   };
-  const leaseMs = readEnvPositiveInteger(
-    "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
-    undefined,
-    { fallback: DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS },
-    deps.env,
-    { warn: deps.err },
-  );
+  const leaseMs = readEnvPositiveInteger("AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS", undefined, {
+    fallback: DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+    env: deps.env,
+    log: { warn: deps.err },
+  });
   const heartbeatTimeoutMs = Math.max(
     1,
     Math.min(Math.floor(leaseMs / 2), PROXY_HEARTBEAT_INTERVAL_MS * 2),
@@ -948,9 +946,9 @@ function prepareUserFrames(
           {
             fallback: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
             min: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+            env: deps.env,
+            log: { warn: deps.err },
           },
-          deps.env,
-          { warn: deps.err },
         ),
       };
     }

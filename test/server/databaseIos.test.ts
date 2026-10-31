@@ -148,8 +148,7 @@ describe("iOS database inspection server integration", function () {
       "com.example.app",
       "/app/Documents/app.db",
       "SELECT id, payload FROM notes",
-      undefined,
-      true,
+      { readOnly: true },
     );
     const payload = JSON.parse(toolText(response));
     expect(payload).toEqual({
@@ -169,13 +168,9 @@ describe("iOS database inspection server integration", function () {
       databasePath: "sessions.db",
       query: "SELECT 1",
     });
-    expect(executeSQLForIos).toHaveBeenCalledWith(
-      "com.example.app",
-      "sessions.db",
-      "SELECT 1",
-      undefined,
-      true,
-    );
+    expect(executeSQLForIos).toHaveBeenCalledWith("com.example.app", "sessions.db", "SELECT 1", {
+      readOnly: true,
+    });
   });
 
   test.each(["sessions.db", "/data/data/com.example.app/databases/sessions.db"])(

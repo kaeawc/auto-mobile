@@ -42,8 +42,13 @@ export async function resumeCtrlProxyAfterUnconfirmedFailure(
   device: BootedDevice,
   error: unknown,
   requestAbortSignal: AbortSignal | undefined,
-  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">,
-  shutdownWasConfirmed = false,
+  {
+    daemonState,
+    shutdownWasConfirmed = false,
+  }: {
+    daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">;
+    shutdownWasConfirmed?: boolean;
+  },
 ): Promise<void> {
   if (
     !shutdownWasConfirmed &&

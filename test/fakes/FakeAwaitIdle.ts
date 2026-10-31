@@ -127,8 +127,7 @@ export class FakeAwaitIdle implements AwaitIdle {
     packageName: string,
     timeoutMs: number,
     _initState: UiStabilityState,
-    _perf?: any,
-    _signal?: AbortSignal,
+    _options?: Parameters<AwaitIdle["waitForUiStabilityWithState"]>[3],
   ): Promise<GfxMetrics | null> {
     this.executedOperations.push(`waitForUiStabilityWithState(${packageName}, ${timeoutMs})`);
     this.waitForUiStabilityWithStateCallCount++;

@@ -87,8 +87,9 @@ export const AVD_SNAPSHOT_CONSOLE_TIMEOUT_MS = 30_000;
  * its own line, then send `quit` and close. The aggregated server output is
  * returned so callers can detect `KO:` failure prefixes.
  */
-/** Per-exchange cancellation and deadline for an emulator console exchange. */
+/** The commands of one emulator console exchange, with its cancellation and deadline. */
 export interface EmulatorConsoleExecuteOptions {
+  commands: string[];
   signal?: AbortSignal;
   /** Overrides the transport's default deadline for this exchange. */
   timeoutMs?: number;
@@ -99,8 +100,7 @@ export interface EmulatorConsoleTransport {
     host: string,
     port: number,
     authToken: string | null,
-    commands: string[],
-    options?: EmulatorConsoleExecuteOptions,
+    options: EmulatorConsoleExecuteOptions,
   ): Promise<string>;
 }
 
@@ -210,7 +210,8 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     return trackAmbient(`emulator-console ${verb}`.trimEnd(), async () => {
       const token = await this.tokenReader.read();
       signal?.throwIfAborted();
-      const output = await this.transport.execute("127.0.0.1", this.port, token, commands, {
+      const output = await this.transport.execute("127.0.0.1", this.port, token, {
+        commands,
         signal,
         timeoutMs,
       });

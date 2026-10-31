@@ -311,7 +311,8 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     expect(cacheHit?.fresh).toBe(false);
     expect(deviceRequests).toBe(0);
 
-    const timestampCacheHit = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, false, {
+    const timestampCacheHit = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: false,
       minTimestamp: 50,
     });
     expect(timestampCacheHit.fresh).toBe(false);
@@ -426,7 +427,8 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     let releaseProbe!: () => void;
     h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
     const controller = new AbortController();
-    const latestPromise = h.hierarchy.getLatestHierarchy(false, 1000, undefined, false, {
+    const latestPromise = h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: false,
       minTimestamp: 0,
       signal: controller.signal,
     });

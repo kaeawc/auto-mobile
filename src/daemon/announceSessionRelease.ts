@@ -25,13 +25,27 @@ export interface SessionReleaseAnnouncer {
  * recordings it finalizes (#10958). The captured recording ids are consumed even when the release
  * is not announced because shutdown's fallback already was (#11058): left behind, they would be
  * reported for a later release that reuses the UUID.
+ *
+ * @param announcer - Recording-id source and release broadcaster
+ * @param sessionId - The released session
+ * @param releaseReason - Why the session was released
+ * @param options.shutdown - Shutdown announcement bookkeeping
+ * @param options.snapshot - The session's release snapshot
+ * @param options.upgradeOnly - True for an upgrade-only release
  */
 export function announceSessionRelease(
   announcer: SessionReleaseAnnouncer,
-  shutdown: ShutdownReleaseAnnouncements,
   sessionId: string,
   releaseReason: string,
-  { snapshot, upgradeOnly }: { snapshot: SessionReleaseSnapshot; upgradeOnly?: boolean },
+  {
+    shutdown,
+    snapshot,
+    upgradeOnly,
+  }: {
+    shutdown: ShutdownReleaseAnnouncements;
+    snapshot: SessionReleaseSnapshot;
+    upgradeOnly?: boolean;
+  },
 ): void {
   const recordingIds = announcer.takeRecordingIds(sessionId);
   if (shutdown.fallbacks?.has(sessionId)) {

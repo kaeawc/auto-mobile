@@ -372,7 +372,7 @@ describe("NotificationUIDetector", () => {
       const swipes: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> =
         [];
       const detector = new IosNotificationUIDetector(iosDevice, {
-        requestSwipe: async (x1, y1, x2, y2, duration) => {
+        requestSwipe: async ({ x1, y1, x2, y2, duration }) => {
           swipes.push({ x1, y1, x2, y2, duration });
           return { success: true };
         },
@@ -389,7 +389,7 @@ describe("NotificationUIDetector", () => {
       const swipes: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> =
         [];
       const detector = new IosNotificationUIDetector(iosDevice, {
-        requestSwipe: async (x1, y1, x2, y2, duration) => {
+        requestSwipe: async ({ x1, y1, x2, y2, duration }) => {
           swipes.push({ x1, y1, x2, y2, duration });
           return { success: true };
         },

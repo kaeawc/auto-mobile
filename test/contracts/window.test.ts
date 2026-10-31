@@ -38,7 +38,7 @@ runWindowContract(
       new FakeAdbClientFactory(adb),
       new FakeTimer(),
       // NODE_ENV=test without a data dir keeps the disk cache off.
-      { NODE_ENV: "test" },
+      { env: { NODE_ENV: "test" } },
     );
     let shown = dumps.primary;
     return {

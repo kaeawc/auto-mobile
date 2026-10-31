@@ -80,7 +80,7 @@ describe("DeviceSessionRepository injected timestamp clock", () => {
     {
       name: "markReleased",
       mutate: (sessionUuid) =>
-        repo.markReleased(sessionUuid, "released", timer.now(), "explicit-release"),
+        repo.markReleased(sessionUuid, "released", timer.now(), { reason: "explicit-release" }),
     },
     {
       name: "markStaleActiveSessionsExpired",

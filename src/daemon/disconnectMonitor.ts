@@ -146,13 +146,24 @@ export interface DisconnectMonitorEvaluationInput {
  * unknown listing (probe failed or skipped) selects nothing, and the evaluator
  * still requires the Android source to have succeeded, so a failed or partial
  * listing never fast-paths a release.
+ *
+ * @param candidateDeviceIds - Devices that sessions hold
+ * @param candidatePlatforms - Each candidate's platform
+ * @param bootedDeviceIds - Devices listed in the `device` state
+ * @param listing.listedNonDeviceIds - Serials listed in any other state; undefined when unknown
+ * @param listing.transportRestarts - Serials whose adbd AutoMobile is restarting
  */
 export function selectImmediateDisconnectCandidates(
   candidateDeviceIds: ReadonlySet<string>,
   candidatePlatforms: ReadonlyMap<string, Platform>,
   bootedDeviceIds: ReadonlySet<string>,
-  listedNonDeviceIds: ReadonlySet<string> | undefined,
-  transportRestarts?: AdbTransportRestartLookup,
+  {
+    listedNonDeviceIds,
+    transportRestarts,
+  }: {
+    listedNonDeviceIds: ReadonlySet<string> | undefined;
+    transportRestarts?: AdbTransportRestartLookup;
+  },
 ): Set<string> {
   if (listedNonDeviceIds === undefined) {
     return new Set();
@@ -179,13 +190,24 @@ export function selectImmediateDisconnectCandidates(
  *
  * An undefined offline result means the probe failed: retain episode state
  * unless the candidate disappeared or its incarnation changed.
+ *
+ * @param attempted - Devices whose recovery was already attempted
+ * @param candidateDeviceIds - Devices that sessions hold
+ * @param offlineDeviceIds - Devices observed offline; undefined when the probe failed
+ * @param incarnations.attemptedIncarnations - Incarnation each attempt was made for
+ * @param incarnations.candidateIncarnations - Each candidate's current incarnation
  */
 export function pruneStaleOfflineRecoveryAttempts(
   attempted: ReadonlySet<string>,
   candidateDeviceIds: ReadonlySet<string>,
   offlineDeviceIds: ReadonlySet<string> | undefined,
-  attemptedIncarnations: ReadonlyMap<string, DisconnectCandidateIncarnation> = new Map(),
-  candidateIncarnations: ReadonlyMap<string, DisconnectCandidateIncarnation> = new Map(),
+  {
+    attemptedIncarnations = new Map(),
+    candidateIncarnations = new Map(),
+  }: {
+    attemptedIncarnations?: ReadonlyMap<string, DisconnectCandidateIncarnation>;
+    candidateIncarnations?: ReadonlyMap<string, DisconnectCandidateIncarnation>;
+  } = {},
 ): Set<string> {
   return new Set(
     [...attempted].filter(

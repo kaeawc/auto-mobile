@@ -211,17 +211,14 @@ export async function openSessionBrokerService(
     const store = options.registry.sessionBrokerStore(scopeKey);
     const reuse = iosReusePolicy(options.config);
     const journal = options.registry.deviceMutationJournal();
-    const reset = nativeBaselineReset(
-      options.config,
-      options.androidReset,
-      options.timer,
+    const reset = nativeBaselineReset(options.config, options.androidReset, options.timer, {
       journal,
       recordingGaps,
-    );
+    });
     const iosReset = reset?.ios;
     let resetIosBaseline: NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"] =
       iosReset
-        ? (device, profile, assertOwned, signal, context) => {
+        ? (device, profile, assertOwned, { signal, context } = {}) => {
             const operation = () => iosReset.resetWithTiming(device, profile, assertOwned, signal);
             return context?.runResetBoot ? context.runResetBoot(operation) : operation();
           }
@@ -294,11 +291,17 @@ export async function openSessionBrokerService(
     });
     await broker.recoverReceipts();
     const recoverMutationRecorder = (sessionUuid: string) =>
-      recoverSessionMutationRecorder(options, store, scopeKey, bindMutationRecorder, sessionUuid);
+      recoverSessionMutationRecorder(options, store, scopeKey, {
+        bindMutationRecorder,
+        sessionUuid,
+      });
     await recoverActiveMutationRecorders(store, recoverMutationRecorder, recordingGaps);
-    const service = new SessionBrokerService(broker, scopeKey, lock, options.timer, {
-      recordingGaps,
-      recorderFor: recoverMutationRecorder,
+    const service = new SessionBrokerService(broker, scopeKey, lock, {
+      timer: options.timer,
+      mutations: {
+        recordingGaps,
+        recorderFor: recoverMutationRecorder,
+      },
     });
     if (!options.deferStart) {
       service.start();
@@ -352,8 +355,13 @@ async function recoverSessionMutationRecorder(
   options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "registry">,
   store: Pick<SqliteSessionBrokerStore, "getSession" | "getResource">,
   scopeKey: string,
-  bindMutationRecorder: ((scope: DeviceMutationScope) => void) | undefined,
-  sessionUuid: string,
+  {
+    bindMutationRecorder,
+    sessionUuid,
+  }: {
+    bindMutationRecorder: ((scope: DeviceMutationScope) => void) | undefined;
+    sessionUuid: string;
+  },
 ): Promise<MutationRecorder | undefined> {
   if (!bindMutationRecorder || !options.mutationSessions) {
     return undefined;
@@ -408,13 +416,10 @@ function iosReuseWiring(
   }
   if (reuse.mode === "minimal") {
     return {
-      resetIosBaseline: minimalIosResetBaseline(
-        options,
-        reuse.maxUses,
-        journal,
+      resetIosBaseline: minimalIosResetBaseline(options, reuse.maxUses, journal, {
         recordingGaps,
         store,
-      ),
+      }),
       captureIosBaseline: undefined,
     };
   }
@@ -455,7 +460,7 @@ function keepBootedIosWiring(
   });
   return {
     captureIosBaseline: (context) => captureFirstDeviceBaseline(journal, mutations, context),
-    resetIosBaseline: async (device, profile, assertOwned, signal, context) => {
+    resetIosBaseline: async (device, profile, assertOwned, { signal, context } = {}) => {
       const request = context?.resource.requestId
         ? await store.getRequest(context.resource.requestId)
         : undefined;
@@ -464,17 +469,12 @@ function keepBootedIosWiring(
           "iOS keep-booted reset requires its durable released session identity",
         );
       }
-      return fast.resetWithTiming(
-        device,
-        profile,
-        assertOwned,
-        { ...context.scope, sessionUuid: request.sessionId },
-        {
-          reuseCount: context.resource.reuseCount ?? 0,
-          signal,
-          runResetBoot: context.runResetBoot,
-        },
-      );
+      return fast.resetWithTiming(device, profile, assertOwned, {
+        scope: { ...context.scope, sessionUuid: request.sessionId },
+        reuseCount: context.resource.reuseCount ?? 0,
+        signal,
+        runResetBoot: context.runResetBoot,
+      });
     },
   };
 }
@@ -484,8 +484,10 @@ function minimalIosResetBaseline(
   options: OpenSessionBrokerServiceOptions,
   maxUses: number,
   journal: DeviceMutationJournal,
-  recordingGaps: MutationRecordingGaps,
-  store: Pick<SqliteSessionBrokerStore, "getRequest">,
+  {
+    recordingGaps,
+    store,
+  }: { recordingGaps: MutationRecordingGaps; store: Pick<SqliteSessionBrokerStore, "getRequest"> },
 ): NonNullable<ManagedDevicePortDependencies["resetBaseline"]>["ios"] {
   const simctl = new SimCtlClient(null);
   const minimal = new IosMinimalReset({
@@ -497,20 +499,18 @@ function minimalIosResetBaseline(
     maxUses,
     budgetMs: readEnvInt(ENV.IOS_RESET_STEP_BUDGET_MS),
   });
-  return async (device, profile, assertOwned, signal, context) => {
+  return async (device, profile, assertOwned, { signal, context } = {}) => {
     const request = context?.resource.requestId
       ? await store.getRequest(context.resource.requestId)
       : undefined;
     if (!context || !request?.sessionId) {
       throw new ActionableError("iOS minimal reset requires its durable released session identity");
     }
-    return minimal.resetWithTiming(
-      device,
-      profile,
-      assertOwned,
-      { ...context.scope, sessionUuid: request.sessionId },
-      { reuseCount: context.resource.reuseCount ?? 0, signal },
-    );
+    return minimal.resetWithTiming(device, profile, assertOwned, {
+      scope: { ...context.scope, sessionUuid: request.sessionId },
+      reuseCount: context.resource.reuseCount ?? 0,
+      signal,
+    });
   };
 }
 
@@ -558,8 +558,10 @@ function nativeBaselineReset(
   config: SessionBrokerHostConfig,
   androidReset: OpenSessionBrokerServiceOptions["androidReset"],
   timer: Timer,
-  journal: DeviceMutationJournal,
-  recordingGaps: MutationRecordingGaps,
+  {
+    journal,
+    recordingGaps,
+  }: { journal: DeviceMutationJournal; recordingGaps: MutationRecordingGaps },
 ) {
   if (config.reuseAndroidCleanDevices && config.defaults.android && !androidReset) {
     throw new ActionableError("Android baseline reset requires the daemon readiness ports");
@@ -570,7 +572,7 @@ function nativeBaselineReset(
         ios: reuseIos ? nativeIosBaselineReset() : undefined,
         android:
           config.reuseAndroidCleanDevices && config.defaults.android
-            ? nativeAndroidBaselineReset(androidReset!, timer, config, journal, recordingGaps)
+            ? nativeAndroidBaselineReset(androidReset!, timer, config, { journal, recordingGaps })
             : undefined,
       }
     : undefined;
@@ -599,8 +601,10 @@ function nativeAndroidBaselineReset(
   ports: NonNullable<OpenSessionBrokerServiceOptions["androidReset"]>,
   timer: Timer,
   config: SessionBrokerHostConfig,
-  journal: DeviceMutationJournal,
-  recordingGaps: MutationRecordingGaps,
+  {
+    journal,
+    recordingGaps,
+  }: { journal: DeviceMutationJournal; recordingGaps: MutationRecordingGaps },
 ): AndroidBaselineReset {
   const configReader = new FileAvdConfigReader();
   const inventory = boundAndroidResetInventory(ports.inventory, timer);
@@ -842,13 +846,24 @@ export class SessionBrokerService {
   private closing: Promise<void> | undefined;
   private wake: (() => void) | undefined;
 
+  private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">;
+  private readonly mutations: SessionBrokerServiceMutations;
+
   constructor(
     readonly broker: SessionBroker,
     readonly scopeKey: string,
     private readonly lock: SessionBrokerHostLock,
-    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">,
-    private readonly mutations: SessionBrokerServiceMutations,
-  ) {}
+    {
+      timer,
+      mutations,
+    }: {
+      timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">;
+      mutations: SessionBrokerServiceMutations;
+    },
+  ) {
+    this.timer = timer;
+    this.mutations = mutations;
+  }
 
   markMutationUnrecorded(sessionUuid: string, reason: string): void {
     this.mutations.recordingGaps.mark(sessionUuid, reason);

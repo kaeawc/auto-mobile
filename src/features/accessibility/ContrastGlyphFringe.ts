@@ -51,8 +51,7 @@ export class ContrastGlyphFringe {
     image: RawImage,
     bounds: Element["bounds"],
     elementColors: ElementColors,
-    color: RGB,
-    point: { x: number; y: number },
+    { color, point }: { color: RGB; point: { x: number; y: number } },
   ): boolean {
     const { x, y } = point;
     const nearText = colorDistance(color, elementColors.textColor) <= GLYPH_PIXEL_MAX_DISTANCE;
@@ -63,7 +62,7 @@ export class ContrastGlyphFringe {
     if (
       !nearText &&
       isSimilarColor(this.resolve(image, x, y), elementColors.textColor) &&
-      this.isFringeNear(image, bounds, point, color, elementColors)
+      this.isFringeNear(image, bounds, point, { color, ...elementColors })
     ) {
       return true;
     }
@@ -99,8 +98,7 @@ export class ContrastGlyphFringe {
     image: RawImage,
     bounds: Element["bounds"],
     point: { x: number; y: number },
-    color: RGB,
-    { textColor: text, backgroundColor: background }: ElementColors,
+    { color, textColor: text, backgroundColor: background }: ElementColors & { color: RGB },
   ): boolean {
     return this.isFringe(
       image,
@@ -111,8 +109,7 @@ export class ContrastGlyphFringe {
         bottom: Math.min(bounds.bottom, point.y + SAMPLE_WINDOW),
       },
       color,
-      text,
-      background,
+      { text, background },
     );
   }
 
@@ -144,8 +141,7 @@ export class ContrastGlyphFringe {
     image: RawImage,
     bounds: Element["bounds"],
     color: RGB,
-    text: RGB,
-    background: RGB,
+    { text, background }: { text: RGB; background: RGB },
   ): boolean {
     if (!this.isAntiAliasingBlend(color, background, text)) {
       return false;

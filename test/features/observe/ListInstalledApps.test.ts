@@ -1532,13 +1532,10 @@ describe("ListInstalledApps", function () {
       // A zero timestamp is read as "never verified", which would rebuild
       // regardless; use a real-looking one so only the fix can force the rebuild.
       timer.advanceTime(1_000);
-      await repo.upsertInstalledApp(
-        mockDevice.deviceId,
-        0,
-        "com.broadcast.app",
-        false,
-        timer.now(),
-      );
+      await repo.upsertInstalledApp(mockDevice.deviceId, 0, "com.broadcast.app", {
+        isSystem: false,
+        timestampMs: timer.now(),
+      });
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse(
@@ -1586,13 +1583,10 @@ describe("ListInstalledApps", function () {
       timer.advanceTime(5 * 60 * 1000 + 1);
 
       // The broadcast writer patches exactly one row, bypassing the coordinator.
-      await repo.upsertInstalledApp(
-        mockDevice.deviceId,
-        0,
-        "com.broadcast.app",
-        false,
-        timer.now(),
-      );
+      await repo.upsertInstalledApp(mockDevice.deviceId, 0, "com.broadcast.app", {
+        isSystem: false,
+        timestampMs: timer.now(),
+      });
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse(

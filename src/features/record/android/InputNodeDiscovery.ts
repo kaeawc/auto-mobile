@@ -1,23 +1,20 @@
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../../utils/logger";
-import type { TouchInputNode } from "./TouchNodeDiscovery";
+import type { AbsoluteAxisInfo, TouchInputNode } from "./TouchNodeDiscovery";
 
 const ABS_X = 0x00;
 const ABS_Y = 0x01;
 const ABS_PRESSURE = 0x18;
+const ABS_TILT_X = 0x1a;
+const ABS_TILT_Y = 0x1b;
 const ABS_MT_POSITION_X = 0x35;
 const ABS_MT_POSITION_Y = 0x36;
 const ABS_MT_PRESSURE = 0x3a;
 
-interface AbsRange {
-  min: number;
-  max: number;
-}
-
 interface DeviceInfo {
   path: string;
   name: string;
-  abs: Map<number, AbsRange>;
+  abs: Map<number, AbsoluteAxisInfo>;
   hasPenTool: boolean;
 }
 
@@ -65,13 +62,15 @@ function parseNodes(output: string): TouchInputNode[] {
     const mtX = device.abs.get(ABS_MT_POSITION_X);
     const mtY = device.abs.get(ABS_MT_POSITION_Y);
     if (mtX && mtY) {
-      nodes.push(toNode(device, mtX, mtY, device.abs.get(ABS_MT_PRESSURE), "touch"));
+      nodes.push(
+        toNode(device, mtX, mtY, { pressure: device.abs.get(ABS_MT_PRESSURE), kind: "touch" }),
+      );
       continue;
     }
     const x = device.abs.get(ABS_X);
     const y = device.abs.get(ABS_Y);
     if (x && y && device.hasPenTool) {
-      nodes.push(toNode(device, x, y, device.abs.get(ABS_PRESSURE), "pen"));
+      nodes.push(toNode(device, x, y, { pressure: device.abs.get(ABS_PRESSURE), kind: "pen" }));
     }
   }
   return nodes;
@@ -79,11 +78,12 @@ function parseNodes(output: string): TouchInputNode[] {
 
 function toNode(
   device: DeviceInfo,
-  x: AbsRange,
-  y: AbsRange,
-  pressure: AbsRange | undefined,
-  kind: "touch" | "pen",
+  x: AbsoluteAxisInfo,
+  y: AbsoluteAxisInfo,
+  { pressure, kind }: { pressure?: AbsoluteAxisInfo; kind: "touch" | "pen" },
 ): TouchInputNode {
+  const tiltX = device.abs.get(ABS_TILT_X);
+  const tiltY = device.abs.get(ABS_TILT_Y);
   return {
     path: device.path,
     name: device.name,
@@ -92,6 +92,7 @@ function toNode(
     axisYMin: y.min,
     axisYMax: y.max,
     kind,
+    ...(tiltX && tiltY ? { tiltAxes: { x: tiltX, y: tiltY } } : {}),
     ...(pressure && pressure.max > pressure.min
       ? { pressureMin: pressure.min, pressureMax: pressure.max }
       : {}),
@@ -104,6 +105,8 @@ const NAME_TO_CODE: Record<string, number> = {
   ABS_X: ABS_X,
   ABS_Y: ABS_Y,
   ABS_PRESSURE: ABS_PRESSURE,
+  ABS_TILT_X: ABS_TILT_X,
+  ABS_TILT_Y: ABS_TILT_Y,
   ABS_MT_POSITION_X: ABS_MT_POSITION_X,
   ABS_MT_POSITION_Y: ABS_MT_POSITION_Y,
   ABS_MT_PRESSURE: ABS_MT_PRESSURE,
@@ -153,7 +156,7 @@ function applyLine(device: DeviceInfo, line: string, state: { inKeyBlock: boolea
   if (absMatch) {
     const code = absCode(absMatch);
     if (code !== undefined) {
-      device.abs.set(code, { min: parseInt(absMatch[4], 10), max: parseInt(absMatch[5], 10) });
+      device.abs.set(code, axisInfo(absMatch, line));
     }
     state.inKeyBlock = false;
     return;
@@ -173,4 +176,13 @@ function applyLine(device: DeviceInfo, line: string, state: { inKeyBlock: boolea
   } else if (!codesOnly) {
     state.inKeyBlock = false;
   }
+}
+
+function axisInfo(match: RegExpMatchArray, line: string): AbsoluteAxisInfo {
+  const resolution = line.match(/,\s*resolution\s+(\d+)/);
+  return {
+    min: parseInt(match[4], 10),
+    max: parseInt(match[5], 10),
+    ...(resolution ? { resolution: parseInt(resolution[1], 10) } : {}),
+  };
 }

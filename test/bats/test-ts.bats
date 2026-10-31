@@ -56,6 +56,29 @@ write_junit_report_with_lines() {
   } > "$outfile"
 }
 
+# Run shell fakes in a subshell without starting another Bash interpreter.
+# Keep exec semantics for real Bun helpers and process identity for SIGKILL tests.
+test_ts_stub() (
+  local stub="$1"
+  shift
+  set +e +u
+  set +o pipefail
+  # shellcheck source=/dev/null
+  source "$STUB_BIN/$stub" "$@"
+)
+bun() {
+  if [[ "${STUB_BUN_EXITS:-}" == *sigkill* ]]; then
+    command bun "$@"
+  else
+    test_ts_stub bun "$@"
+  fi
+}
+nproc() { test_ts_stub nproc "$@"; }
+sysctl() { test_ts_stub sysctl "$@"; }
+uname() { test_ts_stub uname "$@"; }
+find() { test_ts_stub find "$@"; }
+git() { test_ts_stub git "$@"; }
+
 setup() {
   # scripts/test-ts.sh resolves ROOT with pwd -P; a checkout reached through a
   # symlink (macOS /tmp -> /private/tmp) makes $PWD differ from what it prints.
@@ -88,12 +111,20 @@ setup() {
   # (iOS) skip has its own tests at the end of this file, which set
   # AUTOMOBILE_MACOS_ONLY_TESTS=skip.
   export AUTOMOBILE_MACOS_ONLY_TESTS=include
-  STUB_BIN="$(mktemp -d)"
-  REAL_BUN="$(command -v bun)"
+  # Each BATS case already owns a unique scratch directory.
+  STUB_BIN="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$STUB_BIN"
+  export STUB_BIN
+  # Fake shards finish immediately; avoid paying the production 200ms reap
+  # interval repeatedly. Ordering tests still use their explicit interval.
+  export AUTOMOBILE_UNIT_SHARD_POLL_SECONDS=0.02
+  REAL_BUN="$(type -P bun)"
   export REAL_BUN
-  BUN_ARGS_FILE="$(mktemp)"
+  BUN_ARGS_FILE="$BATS_TEST_TMPDIR/bun.args"
+  : > "$BUN_ARGS_FILE"
   export BUN_ARGS_FILE
-  STUB_RECHECK_INDEX="$(mktemp)"
+  STUB_RECHECK_INDEX="$BATS_TEST_TMPDIR/recheck-index"
+  : > "$STUB_RECHECK_INDEX"
   export STUB_RECHECK_INDEX
   # Every unit file runs isolated unless a test writes this shared-process
   # allow-list (#10583); the committed list must not leak into stubbed lanes.
@@ -124,7 +155,7 @@ EOF
   # Lane discovery walks the real tree (~2000 unit files) in a bash loop on every
   # invocation, ~0.5s each. Tests that do not assert on the real file set get a
   # fixed 12-file list; anything but the discovery query reaches the real find.
-  REAL_FIND="$(command -v find)"
+  REAL_FIND="$(type -P find)"
   export REAL_FIND
   cat > "$STUB_BIN/find" <<'EOF'
 #!/usr/bin/env bash
@@ -369,6 +400,7 @@ if [[ "$target" == ".integration.test.ts" && -n "${STUB_INTEGRATION_MAIN_EXIT:-}
 fi
 EOF
   chmod +x "$STUB_BIN/git" "$STUB_BIN/bun"
+  export -f test_ts_stub bun nproc sysctl uname find git
 }
 
 teardown() {

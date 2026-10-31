@@ -151,16 +151,20 @@ describe("UnixSocketServer MCP forward failures: no reconnect or replay (#11820)
 
   beforeEach(async () => {
     const unusedHandler = async () => ({ content: [] });
-    ToolRegistry.register("launchApp", "test transport capability", z.object({}), unusedHandler, {
+    ToolRegistry.register("launchApp", "test transport capability", z.object({}), {
+      handler: unusedHandler,
       transportRecovery: "connect",
     });
-    ToolRegistry.register("observe", "test transport capability", z.object({}), unusedHandler, {
+    ToolRegistry.register("observe", "test transport capability", z.object({}), {
+      handler: unusedHandler,
       transportRecovery: "replay",
     });
-    ToolRegistry.register("safeProbe", "test transport capability", z.object({}), unusedHandler, {
+    ToolRegistry.register("safeProbe", "test transport capability", z.object({}), {
+      handler: unusedHandler,
       transportRecovery: "replay",
     });
-    ToolRegistry.register("tapOn", "test transport capability", z.object({}), unusedHandler, {
+    ToolRegistry.register("tapOn", "test transport capability", z.object({}), {
+      handler: unusedHandler,
       transportRecovery: "connect",
     });
     socketPath = join(tmpdir(), `mcp-rc-${randomUUID()}.sock`);

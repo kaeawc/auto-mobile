@@ -854,7 +854,7 @@ describe("captured iOS keyboard selected through a registered observe capture", 
           }),
         ]
       : app;
-    identifyObservedHierarchy("ios", hierarchy, "fresh", new FakeTimer());
+    identifyObservedHierarchy("ios", hierarchy, "fresh", { timer: new FakeTimer() });
     return hierarchy;
   }
 });

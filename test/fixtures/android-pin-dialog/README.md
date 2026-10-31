@@ -17,3 +17,9 @@ buttons are Compose text nodes with `clickable=false` and no `click` action (the
 on an unreported ancestor), so a matcher must not require the button node itself to be clickable.
 
 The screenshot (`pin-dialog-api37.png`) is binary and is not kept in the repository.
+
+Additional captures copied verbatim from the saved #12261 comments (comment order in scratch/issue.md; comment IDs were not supplied):
+
+- `pin-dialog-api37-issue12261-uiautomator.xml`: #12261 comment 4, API 37, Pixel Launcher; differs from the earlier API 37 capture above.
+- `pin-dialog-api33-uiautomator.xml`: #12261 comment 5, API 33, Pixel Launcher.
+- `pin-dialog-api30-launcher3-uiautomator.xml`: #12261 comment 5, API 30, AOSP Launcher3.

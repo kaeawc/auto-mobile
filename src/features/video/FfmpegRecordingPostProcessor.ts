@@ -89,8 +89,7 @@ export class FfmpegRecordingPostProcessor {
             "recordVideo",
             capturePath,
           ],
-          backendHandle.captureTracker,
-          capturePath,
+          { tracker: backendHandle.captureTracker, outputPath: capturePath },
         ),
       );
     }
@@ -226,7 +225,7 @@ export class FfmpegRecordingPostProcessor {
             this.ffmpegClient.binaryPath,
             `FFmpeg post-processing timed out after ${budgetMs}ms`,
             ffmpegArgs,
-            ffmpegTracker,
+            { tracker: ffmpegTracker },
           ),
         );
       }
@@ -235,18 +234,15 @@ export class FfmpegRecordingPostProcessor {
           this.ffmpegClient.binaryPath,
           `FFmpeg post-processing failed (exit ${exitCode ?? `signal ${signal}`})`,
           ffmpegArgs,
-          ffmpegTracker,
+          { tracker: ffmpegTracker },
         ),
       );
     }
 
-    await assertFfmpegOutputReady(
-      backendHandle.config.outputPath,
-      ffmpegArgs,
-      ffmpegTracker,
-      this.recordingFileProbe,
-      this.ffmpegClient.binaryPath,
-    );
+    await assertFfmpegOutputReady(backendHandle.config.outputPath, ffmpegArgs, ffmpegTracker, {
+      recordingFileProbe: this.recordingFileProbe,
+      binaryPath: this.ffmpegClient.binaryPath,
+    });
   }
 
   /**

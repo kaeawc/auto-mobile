@@ -13,7 +13,9 @@ const capture = JSON.parse(
   fs.readFileSync(path.join(fixtureDir, "observe-raw-artifact.json"), "utf8"),
 );
 const device = { deviceId: "emulator-5556", name: "emulator-5556", platform: "android" } as const;
-const manager = new IntentChooserHandler(device, { create: () => new FakeAdbExecutor() });
+const manager = new IntentChooserHandler(device, {
+  adbFactory: { create: () => new FakeAdbExecutor() },
+});
 const parser = manager.parser;
 const rootNodes = parser.extractRootNodes(capture.viewHierarchy);
 
@@ -149,7 +151,9 @@ describe("DeepLinkManager.findButtonByText over a captured ResolverActivity", ()
   });
 
   test("still honours a per-instance override of the findButtonByText seam", () => {
-    const patched = new IntentChooserHandler(device, { create: () => new FakeAdbExecutor() });
+    const patched = new IntentChooserHandler(device, {
+      adbFactory: { create: () => new FakeAdbExecutor() },
+    });
     const node = allNodes().find(
       (candidate) => propsOf(candidate)["resource-id"] === "android:id/button_always",
     );

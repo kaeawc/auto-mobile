@@ -51,9 +51,9 @@ function recording(
   return {
     connect: (timeoutMs, signal) => client.connect(timeoutMs, signal),
     close: () => client.close(),
-    callTool: (name, params, progressToken, onRequestId, options) =>
+    callTool: (name, params, progressToken, options) =>
       record(`tools/call ${name}`, params, () =>
-        client.callTool(name, params, progressToken, onRequestId, options),
+        client.callTool(name, params, progressToken, options),
       ),
     readResource: (uri, params, options) =>
       record(`resources/read ${uri}`, params, () => client.readResource(uri, params, options)),

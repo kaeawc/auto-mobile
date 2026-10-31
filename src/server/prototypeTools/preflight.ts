@@ -69,8 +69,13 @@ async function showDisplayId(
   target: PrototypeTarget,
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
-  dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
-  signal: AbortSignal | undefined,
+  {
+    dependencies,
+    signal,
+  }: {
+    dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">;
+    signal?: AbortSignal;
+  },
 ): Promise<number | undefined> {
   // prototypePlatformError refuses display off Android, so only Android reaches the resolver.
   if (args.action !== "show" || args.display === undefined || !target.android) {
@@ -170,8 +175,10 @@ export function appLayerGrant(
   target: PrototypeTarget,
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
-  dependencies: Pick<PrototypeToolDependencies, "adbFactory">,
-  signal: AbortSignal | undefined,
+  {
+    dependencies,
+    signal,
+  }: { dependencies: Pick<PrototypeToolDependencies, "adbFactory">; signal?: AbortSignal },
 ): (() => Promise<void>) | undefined {
   if (args.action !== "show" || args.spec === undefined || !target.android) {
     return undefined;
@@ -210,8 +217,10 @@ export async function specCapabilityRefusal(
   },
   spec: unknown,
   signal: AbortSignal | undefined,
-  iosMinimumOs: Readonly<Record<string, number>> = PROTOTYPE_IOS_MINIMUM_OS,
-  env?: NodeJS.ProcessEnv,
+  {
+    iosMinimumOs = PROTOTYPE_IOS_MINIMUM_OS,
+    env,
+  }: { iosMinimumOs?: Readonly<Record<string, number>>; env?: NodeJS.ProcessEnv } = {},
 ): Promise<PrototypeResult | undefined> {
   const shaderRefusal = shaderRefusalFor(target, spec, env);
   if (shaderRefusal) {
@@ -412,8 +421,13 @@ async function resolveShowAnchors(
   target: PrototypeTarget,
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
-  context: { displayId?: number; signal?: AbortSignal },
-  dependencies: Pick<PrototypeToolDependencies, "anchorHierarchyCaptureFactory">,
+  {
+    context,
+    dependencies,
+  }: {
+    context: { displayId?: number; signal?: AbortSignal };
+    dependencies: Pick<PrototypeToolDependencies, "anchorHierarchyCaptureFactory">;
+  },
 ): Promise<AnchorStage> {
   const { displayId, signal } = context;
   const spec = args.action === "show" ? (args.spec as PrototypeSpec | undefined) : undefined;
@@ -445,11 +459,16 @@ async function resolveShowDisplay(
   target: PrototypeTarget,
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
-  dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
-  signal: AbortSignal | undefined,
+  {
+    dependencies,
+    signal,
+  }: {
+    dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">;
+    signal?: AbortSignal;
+  },
 ): Promise<{ displayId?: number; failure?: PrototypeResult }> {
   try {
-    return { displayId: await showDisplayId(target, device, args, dependencies, signal) };
+    return { displayId: await showDisplayId(target, device, args, { dependencies, signal }) };
   } catch (error) {
     // A cancelled request is not a display refusal: let the abort end the call.
     signal?.throwIfAborted();
@@ -480,11 +499,16 @@ export async function preflightMutation(
   show: MutationPreflightShow,
   target: PrototypeTarget,
   device: BootedDevice,
-  args: z.infer<typeof prototypeSchema>,
-  dependencies: Pick<
-    PrototypeToolDependencies,
-    "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory" | "env"
-  >,
+  {
+    args,
+    dependencies,
+  }: {
+    args: z.infer<typeof prototypeSchema>;
+    dependencies: Pick<
+      PrototypeToolDependencies,
+      "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory" | "env"
+    >;
+  },
 ): Promise<PreflightStage> {
   const { signal } = show;
   const multiSurface = await multiSurfaceRefusal(target, args, signal);
@@ -495,14 +519,14 @@ export async function preflightMutation(
   if (chrome.failure) {
     return { failure: chrome.failure };
   }
-  const resolved = await resolveMutationDisplay(show, target, device, args, dependencies);
+  const resolved = await resolveMutationDisplay(show, target, device, { args, dependencies });
   if (resolved.failure) {
     return resolved;
   }
   const failure =
     iosResetRefusal(target, args) ??
     (args.action === "show" && args.spec !== undefined
-      ? await specCapabilityRefusal(target, args.spec, signal, undefined, dependencies.env)
+      ? await specCapabilityRefusal(target, args.spec, signal, { env: dependencies.env })
       : undefined) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));
@@ -510,13 +534,10 @@ export async function preflightMutation(
     return { displayId: resolved.displayId, failure };
   }
   const anchorDisplayId = show.inPlace ? show.shownDisplayId : resolved.displayId;
-  const anchors = await resolveShowAnchors(
-    target,
-    device,
-    args,
-    { displayId: anchorDisplayId, signal },
+  const anchors = await resolveShowAnchors(target, device, args, {
+    context: { displayId: anchorDisplayId, signal },
     dependencies,
-  );
+  });
   return { ...resolved, ...anchors, ...chrome };
 }
 
@@ -528,8 +549,13 @@ async function resolveMutationDisplay(
   { inPlace, signal }: Pick<MutationPreflightShow, "inPlace" | "signal">,
   target: PrototypeTarget,
   device: BootedDevice,
-  args: z.infer<typeof prototypeSchema>,
-  dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">,
+  {
+    args,
+    dependencies,
+  }: {
+    args: z.infer<typeof prototypeSchema>;
+    dependencies: Pick<PrototypeToolDependencies, "adbFactory" | "lastRenderedObservation">;
+  },
 ): Promise<{ displayId?: number; failure?: PrototypeResult }> {
-  return inPlace ? {} : resolveShowDisplay(target, device, args, dependencies, signal);
+  return inPlace ? {} : resolveShowDisplay(target, device, args, { dependencies, signal });
 }

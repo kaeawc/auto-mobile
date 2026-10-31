@@ -268,12 +268,10 @@ export const DAEMON_LAUNCH_LOG_PATH_ENV = ENV.DAEMON_LAUNCH_LOG_PATH.name;
  * Configurable via AUTOMOBILE_DAEMON_TIMEOUT_MS environment variable.
  */
 export function resolveConnectionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  return readEnvPositiveInteger(
-    ENV.DAEMON_TIMEOUT_MS.name,
-    ENV.DAEMON_TIMEOUT_MS.legacyName,
-    { fallback: 120000 },
+  return readEnvPositiveInteger(ENV.DAEMON_TIMEOUT_MS.name, ENV.DAEMON_TIMEOUT_MS.legacyName, {
+    fallback: 120000,
     env,
-  );
+  });
 }
 export const CONNECTION_TIMEOUT_MS = resolveConnectionTimeoutMs();
 
@@ -290,8 +288,7 @@ export function resolveDaemonStartupTimeoutMs(env: NodeJS.ProcessEnv = process.e
     readEnvPositiveInteger(
       ENV.DAEMON_STARTUP_TIMEOUT_MS.name,
       ENV.DAEMON_STARTUP_TIMEOUT_MS.legacyName,
-      { fallback: 30000 },
-      env,
+      { fallback: 30000, env },
     ),
     MAX_DAEMON_STARTUP_TIMEOUT_MS,
   );
@@ -332,8 +329,7 @@ export function resolveExistingDaemonReachabilityTimeoutMs(
     readEnvPositiveInteger(
       ENV.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS.name,
       ENV.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS.legacyName,
-      { fallback: 10000 },
-      env,
+      { fallback: 10000, env },
     ),
     Math.max(1, Math.floor((startupTimeoutMs * 2) / 3)),
   );

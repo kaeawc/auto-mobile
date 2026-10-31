@@ -21,8 +21,8 @@ export async function readTeardownBootedDiscovery(
     context.deadlineDevice,
     context.dependencies.timer,
     context.deadlineMs,
-    detail,
     {
+      detail,
       requestAbortSignal: context.requestAbortSignal,
       operation: async () => {
         const discovery = await context.deviceManager.getBootedDevicesDetailed(
@@ -99,8 +99,8 @@ export async function readTeardownInventory(
     context.deadlineDevice,
     context.dependencies.timer,
     context.deadlineMs,
-    detail,
     {
+      detail,
       requestAbortSignal: context.requestAbortSignal,
       operation: async (signal) => {
         const platformInventory = await context.deviceManager.getDeviceImagesDetailed(platform, {

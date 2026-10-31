@@ -139,13 +139,11 @@ async function getPerformanceResource(
 }
 
 export function registerPerformanceResources(): void {
-  ResourceRegistry.register(
-    PERFORMANCE_RESOURCE_URIS.BASE,
-    "Performance Results",
-    "List UI performance audit results from the local database.",
-    "application/json",
-    () => getPerformanceResource({}, PERFORMANCE_RESOURCE_URIS.BASE),
-  );
+  ResourceRegistry.register(PERFORMANCE_RESOURCE_URIS.BASE, "Performance Results", {
+    description: "List UI performance audit results from the local database.",
+    mimeType: "application/json",
+    handler: () => getPerformanceResource({}, PERFORMANCE_RESOURCE_URIS.BASE),
+  });
 
   ResourceRegistry.registerTemplate(PERFORMANCE_QUERY_TEMPLATE, "Performance Results", {
     description: "List UI performance audit results from the local database.",

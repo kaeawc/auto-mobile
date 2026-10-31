@@ -1,3 +1,7 @@
+import { Mutex } from "async-mutex";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { logger } from "../../../utils/logger";
+import { throwIfAborted } from "../../../utils/toolUtils";
 import { ActionableError } from "../../../models/ActionableError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { PointerDispatch } from "./DispatchingRoute";
@@ -7,8 +11,10 @@ import type { PointerRequest } from "./PointerInjector";
 export const POINTER_INSTRUMENTATION_COMPONENT =
   "dev.jasonpearson.automobile.ctrlproxy/.pointer.PointerInstrumentation";
 
-/** The first Android release whose `am instrument` has `--no-restart` (see the design note). */
-export const POINTER_INSTRUMENTATION_MIN_SDK = 33;
+/** The first Android release whose `am instrument` has `--no-restart` (measured; see the design note). */
+export const POINTER_INSTRUMENTATION_MIN_SDK = 31;
+
+const dispatchLocks = new WeakMap<AdbExecutor, Mutex>();
 
 const REQUEST_VERSION = 1;
 /** The segment time a point without `durationMs` takes (the same default as `dragPath`). */
@@ -83,7 +89,7 @@ export function parsePointerInstrumentationOutput(
 }
 
 /** Why a run that reported no result failed, from the shell output, as an actionable error. */
-function unreportedFailure(output: string): ActionableError {
+async function unreportedFailure(output: string, adb: AdbExecutor): Promise<ActionableError> {
   if (/Unable to find instrumentation|INSTRUMENTATION_FAILED|does not exist/i.test(output)) {
     return new PointerNotSentError(
       "The connected CtrlProxy does not include the pointer instrumentation; update CtrlProxy. No input was sent.",
@@ -91,12 +97,29 @@ function unreportedFailure(output: string): ActionableError {
   }
   if (/Unknown option|--no-restart/i.test(output)) {
     return new PointerNotSentError(
-      "This Android version's `am instrument` has no --no-restart, which keeps the injection from restarting CtrlProxy; hover and stylus injection need Android 13 or newer. No input was sent.",
+      "This Android version's `am instrument` has no --no-restart, which keeps the injection from restarting CtrlProxy; hover and stylus injection need Android 12 or newer. No input was sent.",
     );
   }
   if (/Process crashed|INSTRUMENTATION_RESULT: shortMsg=/i.test(output)) {
+    let note = "";
+    try {
+      const state = await adb.executeCommand(
+        "shell settings get secure enabled_accessibility_services",
+        { timeoutMs: 5000 },
+      );
+      note = state.stdout.includes("dev.jasonpearson.automobile.ctrlproxy")
+        ? " CtrlProxy's accessibility service is still enabled."
+        : " CtrlProxy's accessibility service is not enabled; re-enable it before retrying.";
+    } catch (error) {
+      // The diagnostic is optional; preserve the crash error when settings cannot be read.
+      logger.warn(
+        `Could not read accessibility services after pointer crash: ${errorMessage(error)}`,
+        error,
+      );
+    }
     return new ActionableError(
-      "The pointer instrumentation crashed before reporting a result; the hover or stroke may have partially run. Verify state with observe before retrying.",
+      "The pointer instrumentation crashed before reporting a result; the hover or stroke may have partially run. Verify state with observe before retrying." +
+        note,
     );
   }
   return new ActionableError(
@@ -110,20 +133,49 @@ function unreportedFailure(output: string): ActionableError {
  * count ran; no report at all means the outcome is unknown.
  */
 export function createInstrumentationDispatch(adb: AdbExecutor): PointerDispatch {
+  let lock = dispatchLocks.get(adb);
+  if (!lock) {
+    lock = new Mutex();
+    dispatchLocks.set(adb, lock);
+  }
   return async (request, signal) => {
-    const result = await adb.executeCommand(pointerInstrumentationCommand(request), {
-      timeoutMs: plannedMs(request) + INSTRUMENTATION_OVERHEAD_MS,
-      signal,
+    throwIfAborted(signal);
+    await lock.runExclusive(async () => {
+      // Cancellation while queued must not start another instrumentation process.
+      throwIfAborted(signal);
+      const run = async () => {
+        const result = await adb.executeCommand(pointerInstrumentationCommand(request), {
+          timeoutMs: plannedMs(request) + INSTRUMENTATION_OVERHEAD_MS,
+          signal,
+        });
+        const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+        const reported = parsePointerInstrumentationOutput(output);
+        if (!reported) {
+          throw await unreportedFailure(output, adb);
+        }
+        return reported;
+      };
+      let reported = await run();
+      if (!reported.success && reported.injected === 0 && /refused/i.test(reported.error ?? "")) {
+        throwIfAborted(signal);
+        const point = request.points[0];
+        try {
+          await adb.executeCommand(
+            `shell input stylus motionevent CANCEL ${Math.round(point.x)} ${Math.round(point.y)}`,
+            { timeoutMs: 5000, signal },
+          );
+        } catch (error) {
+          // Safe to continue: the retry reports the real outcome even if CANCEL failed.
+          logger.warn(`Could not cancel refused pointer input: ${errorMessage(error)}`, error);
+        }
+        throwIfAborted(signal);
+        reported = await run();
+      }
+      if (!reported.success) {
+        throw new ActionableError(
+          `The pointer instrumentation failed after ${reported.injected} event${reported.injected === 1 ? "" : "s"}: ${reported.error ?? "unknown error"}`,
+        );
+      }
     });
-    const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-    const reported = parsePointerInstrumentationOutput(output);
-    if (!reported) {
-      throw unreportedFailure(output);
-    }
-    if (!reported.success) {
-      throw new ActionableError(
-        `The pointer instrumentation failed after ${reported.injected} event${reported.injected === 1 ? "" : "s"}: ${reported.error ?? "unknown error"}`,
-      );
-    }
   };
 }

@@ -113,7 +113,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     const voiceOverState = await this.iosVoiceOverDetector.resolveState(
       this.device.deviceId,
       this.iosClient,
-      this.featureFlags,
+      { featureFlags: this.featureFlags },
     );
     throwIfAborted(signal);
 

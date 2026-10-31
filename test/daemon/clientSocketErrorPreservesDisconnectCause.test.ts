@@ -28,13 +28,11 @@ import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 
 describe("DaemonClient socket error disconnect cause", () => {
   test("surfaces a disconnect cause on each pending request on transport error", async () => {
-    const client = new DaemonClient(
-      "/fake/socket",
-      1_000,
-      new FakeTimer(),
-      ISOLATED_DAEMON_RECOVERY,
-      { clientIdentity: null, platformOverride: "win32" },
-    );
+    const client = new DaemonClient("/fake/socket", 1_000, new FakeTimer(), {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+      clientIdentity: null,
+      platformOverride: "win32",
+    });
     await client.connect();
 
     const request = client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 });
@@ -54,13 +52,11 @@ describe("DaemonClient socket error disconnect cause", () => {
   });
 
   test("decodes a response split inside a multibyte character", async () => {
-    const client = new DaemonClient(
-      "/fake/socket",
-      1_000,
-      new FakeTimer(),
-      ISOLATED_DAEMON_RECOVERY,
-      { clientIdentity: null, platformOverride: "win32" },
-    );
+    const client = new DaemonClient("/fake/socket", 1_000, new FakeTimer(), {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+      clientIdentity: null,
+      platformOverride: "win32",
+    });
     await client.connect();
     const response = client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 });
     await Promise.resolve();
@@ -76,13 +72,11 @@ describe("DaemonClient socket error disconnect cause", () => {
   });
 
   test("rejects the sole pending request promptly on a null-id parse error", async () => {
-    const client = new DaemonClient(
-      "/fake/socket",
-      1_000,
-      new FakeTimer(),
-      ISOLATED_DAEMON_RECOVERY,
-      { clientIdentity: null, platformOverride: "win32" },
-    );
+    const client = new DaemonClient("/fake/socket", 1_000, new FakeTimer(), {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+      clientIdentity: null,
+      platformOverride: "win32",
+    });
     await client.connect();
     const response = client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 });
     await Promise.resolve();
@@ -103,13 +97,11 @@ describe("DaemonClient socket error disconnect cause", () => {
   });
 
   test("drops a null-id response when two requests are pending and warns", async () => {
-    const client = new DaemonClient(
-      "/fake/socket",
-      1_000,
-      new FakeTimer(),
-      ISOLATED_DAEMON_RECOVERY,
-      { clientIdentity: null, platformOverride: "win32" },
-    );
+    const client = new DaemonClient("/fake/socket", 1_000, new FakeTimer(), {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+      clientIdentity: null,
+      platformOverride: "win32",
+    });
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       await client.connect();
@@ -153,13 +145,11 @@ describe("DaemonClient socket error disconnect cause", () => {
   });
 
   test("drops an incomplete frame when a new socket connects", async () => {
-    const client = new DaemonClient(
-      "/fake/socket",
-      1_000,
-      new FakeTimer(),
-      ISOLATED_DAEMON_RECOVERY,
-      { clientIdentity: null, platformOverride: "win32" },
-    );
+    const client = new DaemonClient("/fake/socket", 1_000, new FakeTimer(), {
+      recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+      clientIdentity: null,
+      platformOverride: "win32",
+    });
     await client.connect();
     createdSocket!.emit("data", Buffer.from('{"id":"stale"'));
     createdSocket!.emit("close");

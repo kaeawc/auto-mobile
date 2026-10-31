@@ -129,7 +129,8 @@ describe("daemon request budget notification (#13797)", () => {
 function captureClient(env: NodeJS.ProcessEnv = {}) {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new DaemonClient("/fake/socket", 120_000, timer, ISOLATED_DAEMON_RECOVERY, {
+  const client = new DaemonClient("/fake/socket", 120_000, timer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
     clientIdentity: null,
     env,
     idGenerator: new FakeIdGenerator(),
@@ -152,7 +153,7 @@ describe("daemon-owned budgets across client versions (#13797)", () => {
   test("new client explicit 45000 reaches the daemon context and matches its backstop", async () => {
     const h = captureClient({ AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS: "45000" });
     let contextBudget = 0;
-    server.requestHandler = async (sessionId, _socket, request, receivedAtMs) => {
+    server.requestHandler = async (sessionId, _socket, request, { receivedAtMs }) => {
       contextBudget = createRequestContext(request, sessionId, receivedAtMs).totalTimeoutMs;
       return undefined;
     };
@@ -182,7 +183,7 @@ describe("daemon-owned budgets across client versions (#13797)", () => {
         delete h.request.acceptsRequestBudget;
       }
       let contextBudget = 0;
-      server.requestHandler = async (sessionId, _socket, request, receivedAtMs) => {
+      server.requestHandler = async (sessionId, _socket, request, { receivedAtMs }) => {
         contextBudget = createRequestContext(request, sessionId, receivedAtMs).totalTimeoutMs;
         return undefined;
       };

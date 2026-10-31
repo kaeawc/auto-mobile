@@ -25,8 +25,8 @@ export type ProvisioningHooks = {
     device: BootedDevice,
     args: StartDeviceArgs,
     sourceImage: DeviceInfo | undefined,
-    childProcess: ChildProcess | null | undefined,
     options: {
+      childProcess?: ChildProcess | null;
       autolockEnabled?: boolean;
       readinessReservationOwners?: ReadonlySet<symbol>;
       verifiedAndroidAvdIdentity?: DeviceInfo;
@@ -41,8 +41,7 @@ export type ProvisioningHooks = {
     args: TeardownDeviceArgs,
     deps: DeviceToolsDependencies,
     callerSignal: AbortSignal | undefined,
-    teardownService: DeviceTeardownService,
-    options?: DeleteDeviceOptions,
+    options: DeleteDeviceOptions & { teardownService: DeviceTeardownService },
   ) => Promise<TeardownToolResponse>;
 };
 

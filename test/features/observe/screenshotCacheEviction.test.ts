@@ -11,7 +11,9 @@ describe("selectScreenshotsToEvict", () => {
       { path: "b", size: 10 * MB, mtimeMs: 0 },
     ];
     expect(
-      selectScreenshotsToEvict(files, 100 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, 1_000_000),
+      selectScreenshotsToEvict(files, 100 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, {
+        nowMs: 1_000_000,
+      }),
     ).toEqual({
       toEvict: [],
       overBudgetAfterEviction: false,
@@ -28,13 +30,13 @@ describe("selectScreenshotsToEvict", () => {
       { path: "middle", size: 40 * MB, mtimeMs: old + 1 },
     ];
     // total 120MB, limit 100MB → must drop 40MB → the single oldest file.
-    expect(selectScreenshotsToEvict(files, 100 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, now)).toEqual(
-      {
-        toEvict: ["oldest"],
-        overBudgetAfterEviction: false,
-        skippedReferenced: 0,
-      },
-    );
+    expect(
+      selectScreenshotsToEvict(files, 100 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, { nowMs: now }),
+    ).toEqual({
+      toEvict: ["oldest"],
+      overBudgetAfterEviction: false,
+      skippedReferenced: 0,
+    });
   });
 
   test("never evicts a file younger than minAge (another process's in-flight frame)", () => {
@@ -44,13 +46,13 @@ describe("selectScreenshotsToEvict", () => {
       { path: "recent-2", size: 80 * MB, mtimeMs: now - 2_000 }, // 2s old — protected
     ];
     // Over the limit, but both files are too recent to evict → keep both.
-    expect(selectScreenshotsToEvict(files, 100 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, now)).toEqual(
-      {
-        toEvict: [],
-        overBudgetAfterEviction: true,
-        skippedReferenced: 0,
-      },
-    );
+    expect(
+      selectScreenshotsToEvict(files, 100 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, { nowMs: now }),
+    ).toEqual({
+      toEvict: [],
+      overBudgetAfterEviction: true,
+      skippedReferenced: 0,
+    });
   });
 
   test("evicts only the old files, protecting recent ones, even if still over limit", () => {
@@ -61,7 +63,9 @@ describe("selectScreenshotsToEvict", () => {
     ];
     // total 120MB, limit 50MB. Only "old" can go; "recent" stays even though we
     // remain over limit (correctness over disk bound for in-flight safety).
-    expect(selectScreenshotsToEvict(files, 50 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, now)).toEqual({
+    expect(
+      selectScreenshotsToEvict(files, 50 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, { nowMs: now }),
+    ).toEqual({
       toEvict: ["old"],
       overBudgetAfterEviction: true,
       skippedReferenced: 0,
@@ -86,7 +90,8 @@ describe("selectScreenshotsToEvict", () => {
     const referenced = new Set(["cached"]);
 
     expect(
-      selectScreenshotsToEvict(files, 50 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, now, {
+      selectScreenshotsToEvict(files, 50 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, {
+        nowMs: now,
         isReferenced: (filePath) => referenced.has(filePath),
       }),
     ).toEqual({
@@ -108,7 +113,8 @@ describe("selectScreenshotsToEvict", () => {
     ];
 
     expect(
-      selectScreenshotsToEvict(files, 50 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, now, {
+      selectScreenshotsToEvict(files, 50 * MB, SCREENSHOT_PATH_MIN_LIFETIME_MS, {
+        nowMs: now,
         isReferenced: (filePath) => filePath === "cached",
       }),
     ).toEqual({

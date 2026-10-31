@@ -474,12 +474,9 @@ describe("ExecutionTracker", function () {
 
   test("cancels a forwarded execution when its transport session closes", async function () {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
-    const execution = tracker.startExecution(
-      "tapOn",
-      "forwarded-mcp-session",
-      undefined,
-      "streamable-http-session",
-    );
+    const execution = tracker.startExecution("tapOn", "forwarded-mcp-session", undefined, {
+      transportSessionId: "streamable-http-session",
+    });
 
     expect(tracker.hasActiveSessionExecutions("forwarded-mcp-session")).toBe(true);
     expect(tracker.hasActiveSessionExecutions("streamable-http-session")).toBe(true);
@@ -517,8 +514,7 @@ describe("ExecutionTracker", function () {
           "tapOn",
           undefined,
           membership === "explicit" ? "holder" : undefined,
-          undefined,
-          membership === "provisional" ? "holder" : undefined,
+          { unresolvedAutolockMcpSessionId: membership === "provisional" ? "holder" : undefined },
         );
         if (membership === "resolved") {
           tracker.setResolvedAutolockSessionUuid(call.id, "holder");
@@ -565,8 +561,7 @@ describe("ExecutionTracker", function () {
           "tapOn",
           undefined,
           membership === "explicit" ? "holder" : undefined,
-          undefined,
-          membership === "provisional" ? "holder" : undefined,
+          { unresolvedAutolockMcpSessionId: membership === "provisional" ? "holder" : undefined },
         );
         if (membership === "resolved") {
           tracker.setResolvedAutolockSessionUuid(execution.id, "holder");
@@ -641,13 +636,9 @@ describe("ExecutionTracker", function () {
     tracker.setAutolockSessionResolver({
       autolockSessionForMcpSession: (mcpSessionId) => autolockSessions.get(mcpSessionId),
     });
-    const execution = tracker.startExecution(
-      "tapOn",
-      "mcp-session",
-      undefined,
-      undefined,
-      "mcp-session",
-    );
+    const execution = tracker.startExecution("tapOn", "mcp-session", undefined, {
+      unresolvedAutolockMcpSessionId: "mcp-session",
+    });
 
     expect(tracker.hasActiveAutolockSessionExecutions("device-session")).toBe(true);
     autolockSessions.set("mcp-session", "replacement-session");
@@ -680,8 +671,12 @@ describe("ExecutionTracker", function () {
       new FakeIdGenerator(["different", "none"]),
     );
     tracker.setAutolockSessionResolver({ autolockSessionForMcpSession: () => "session-a" });
-    const different = tracker.startExecution("tapOn", "mcp", undefined, undefined, "mcp");
-    const none = tracker.startExecution("swipeOn", "mcp", undefined, undefined, "mcp");
+    const different = tracker.startExecution("tapOn", "mcp", undefined, {
+      unresolvedAutolockMcpSessionId: "mcp",
+    });
+    const none = tracker.startExecution("swipeOn", "mcp", undefined, {
+      unresolvedAutolockMcpSessionId: "mcp",
+    });
     const drainedA = tracker.waitForDeviceSessionExecutionsToEnd("session-a", 1_000);
 
     tracker.setResolvedAutolockSessionUuid(different.id, "session-b");
@@ -705,13 +700,9 @@ describe("ExecutionTracker", function () {
       autolockSessionForMcpSession: (mcpSessionId) =>
         mcpSessionId === "mcp-session" ? "device-session" : undefined,
     });
-    const execution = tracker.startExecution(
-      "tapOn",
-      "mcp-session",
-      undefined,
-      undefined,
-      "mcp-session",
-    );
+    const execution = tracker.startExecution("tapOn", "mcp-session", undefined, {
+      unresolvedAutolockMcpSessionId: "mcp-session",
+    });
     const drained = tracker.waitForDeviceSessionExecutionsToEnd("device-session", 1_000);
 
     expect(tracker.hasActiveAutolockSessionExecutions("device-session")).toBe(true);

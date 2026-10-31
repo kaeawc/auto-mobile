@@ -245,12 +245,19 @@ to the snapshot fallback if configured, else destroys).
 - `sessionCap`: active or acquiring sessions; size from peak simultaneous workload.
 - `totalDeviceCap`: all broker-owned native devices (active, creating, idle,
   resetting, uncertain, still-destroying). Leave recovery headroom; pending
-  destruction stays charged until absence is confirmed.
+  destruction stays charged until absence is confirmed. One limit covers every
+  kind: Android emulators of any form factor (phone, Wear OS, TV, Automotive),
+  iPhone/iPad simulators (a CarPlay screen is a display of its iPhone, not a
+  device) and Apple Watch simulators (`watchos` bindings and running
+  `ambroker-` watches are charged). A watch binding is created, reused and
+  deleted like an iOS simulator binding and is ready once booted; see
+  `docs/decisions/watchos-platform.md`.
 - `idlePoolCap`: devices retained between sessions; more warm devices cost disk,
   memory and simulator/emulator capacity. Start small, from concurrent bursts and
   measured reuse demand.
 - Platform boot-gate limit: concurrent boots (including creation/replacement under
-  that gate); distinct from device-count caps.
+  that gate); distinct from device-count caps. A watch boot takes a slot in the
+  simulator (iOS) gate, which already counts every booted simulator.
 - `limits.maxConcurrentResetBoots`: queues iOS erase resets and keep-booted's erase
   fallback; does not limit Android keep-booted cleanup; unlimited when omitted. Keep
   it at or below safe iOS boot concurrency.

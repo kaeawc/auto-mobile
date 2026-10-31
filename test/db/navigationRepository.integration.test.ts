@@ -103,13 +103,10 @@ describe("NavigationRepository", () => {
       await repo.getOrCreateNode("com.example.app", "Login", 1000);
       await repo.getOrCreateNode("com.example.app", "Home", 1000);
 
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "Login",
-        "Home",
-        { toolName: "tapOn", toolArgs: { element: "loginButton" } },
-        2000,
-      );
+      const edge = await repo.createEdge("com.example.app", "Login", "Home", {
+        tool: { toolName: "tapOn", toolArgs: { element: "loginButton" } },
+        timestamp: 2000,
+      });
 
       expect(edge.app_id).toBe("com.example.app");
       expect(edge.from_screen).toBe("Login");
@@ -122,13 +119,10 @@ describe("NavigationRepository", () => {
     test("creates edge with null tool_name", async () => {
       await repo.getOrCreateApp("com.example.app");
 
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "Login",
-        "Home",
-        { toolName: null, toolArgs: null },
-        2000,
-      );
+      const edge = await repo.createEdge("com.example.app", "Login", "Home", {
+        tool: { toolName: null, toolArgs: null },
+        timestamp: 2000,
+      });
 
       expect(edge.tool_name).toBeNull();
       expect(edge.tool_args).toBeNull();
@@ -139,20 +133,14 @@ describe("NavigationRepository", () => {
     test("returns all edges for an app ordered by timestamp", async () => {
       await repo.getOrCreateApp("com.example.app");
 
-      await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
-      await repo.createEdge(
-        "com.example.app",
-        "B",
-        "C",
-        { toolName: "swipeOn", toolArgs: null },
-        2000,
-      );
+      await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
+      await repo.createEdge("com.example.app", "B", "C", {
+        tool: { toolName: "swipeOn", toolArgs: null },
+        timestamp: 2000,
+      });
 
       const edges = await repo.getEdges("com.example.app");
       expect(edges).toHaveLength(2);
@@ -277,13 +265,10 @@ describe("NavigationRepository", () => {
   describe("linkUIElementsToEdge / getUIElementsForEdge", () => {
     test("links UI elements to an edge in selection order", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
       const first = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "First", resourceId: "btn_first" },
@@ -303,13 +288,10 @@ describe("NavigationRepository", () => {
 
     test("a duplicate ui_element_id within a single call does not throw and links once (issue #6463)", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
       // Two SelectedElements that resolve to the same ui_elements row (matched on
       // text/resourceId/contentDescription with no bounds — #6463's root cause).
       const element = await repo.getOrCreateUIElement(
@@ -326,13 +308,10 @@ describe("NavigationRepository", () => {
 
     test("re-linking overlapping/identical UI elements to the same edge is idempotent (issue #6463)", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
       const first = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "First", resourceId: "btn_first" },
@@ -369,13 +348,10 @@ describe("NavigationRepository", () => {
 
     test("linking zero elements is a no-op", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
 
       await repo.linkUIElementsToEdge(edge.id, []);
 
@@ -453,13 +429,10 @@ describe("NavigationRepository", () => {
   describe("setEdgeModals / getEdgeModals", () => {
     test("sets and retrieves modal stack for an edge position", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
 
       await repo.setEdgeModals(edge.id, "from", ["dialog_a", "dialog_b"]);
 
@@ -469,13 +442,10 @@ describe("NavigationRepository", () => {
 
     test("replaces modal stack on second set", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
 
       await repo.setEdgeModals(edge.id, "from", ["dialog_a"]);
       await repo.setEdgeModals(edge.id, "from", ["dialog_x", "dialog_y"]);
@@ -486,13 +456,10 @@ describe("NavigationRepository", () => {
 
     test("from and to positions are independent", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
 
       await repo.setEdgeModals(edge.id, "from", ["dialog_from"]);
       await repo.setEdgeModals(edge.id, "to", ["dialog_to"]);
@@ -503,13 +470,10 @@ describe("NavigationRepository", () => {
 
     test("wraps the delete+insert pair in a single transaction (issue #6656)", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
       const transactionSpy = spyOn(db, "transaction");
 
       await repo.setEdgeModals(edge.id, "from", ["dialog_a"]);
@@ -519,13 +483,10 @@ describe("NavigationRepository", () => {
 
     test("does not throw when called from within an existing transaction (issue #6656)", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
 
       await db.transaction().execute(async (trx) => {
         await repo.withExecutor(trx).setEdgeModals(edge.id, "from", ["dialog_a"]);
@@ -538,13 +499,10 @@ describe("NavigationRepository", () => {
     test("N concurrent setEdgeModals for the same edge+position never reject and leave the stack fully intact (issue #6656)", async () => {
       const N = 10;
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 1000,
+      });
 
       // Without the delete+insert pair wrapped in a transaction, concurrent callers
       // can interleave DELETE/DELETE/INSERT/INSERT and hit the UNIQUE(edge_id,
@@ -565,13 +523,10 @@ describe("NavigationRepository", () => {
   describe("setScrollPosition / getScrollPosition", () => {
     test("sets and retrieves scroll position for an edge", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "swipeOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "swipeOn", toolArgs: null },
+        timestamp: 1000,
+      });
       const target = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Target", resourceId: "target_elem" },
@@ -590,13 +545,10 @@ describe("NavigationRepository", () => {
 
     test("preserves a swipeCount of 0 (issue #6130)", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "swipeOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "swipeOn", toolArgs: null },
+        timestamp: 1000,
+      });
       const target = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Target", resourceId: "target_elem" },
@@ -611,13 +563,10 @@ describe("NavigationRepository", () => {
 
     test("wraps the delete+insert pair in a single transaction (issue #6656)", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "swipeOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "swipeOn", toolArgs: null },
+        timestamp: 1000,
+      });
       const target = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Target", resourceId: "target_elem" },
@@ -632,13 +581,10 @@ describe("NavigationRepository", () => {
 
     test("does not throw when called from within an existing transaction (issue #6656)", async () => {
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "swipeOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "swipeOn", toolArgs: null },
+        timestamp: 1000,
+      });
       const target = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Target", resourceId: "target_elem" },
@@ -656,13 +602,10 @@ describe("NavigationRepository", () => {
     test("N concurrent setScrollPosition for the same edge never reject and leave one row intact (issue #6656)", async () => {
       const N = 10;
       await repo.getOrCreateApp("com.example.app");
-      const edge = await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "swipeOn", toolArgs: null },
-        1000,
-      );
+      const edge = await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "swipeOn", toolArgs: null },
+        timestamp: 1000,
+      });
       const target = await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Target", resourceId: "target_elem" },
@@ -695,13 +638,10 @@ describe("NavigationRepository", () => {
       await repo.getOrCreateApp("com.example.app");
       await repo.getOrCreateNode("com.example.app", "Home", 1000);
       await repo.getOrCreateNode("com.example.app", "Settings", 1000);
-      await repo.createEdge(
-        "com.example.app",
-        "Home",
-        "Settings",
-        { toolName: "tapOn", toolArgs: null },
-        2000,
-      );
+      await repo.createEdge("com.example.app", "Home", "Settings", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 2000,
+      });
       await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Login", resourceId: "btn_login" },
@@ -807,7 +747,10 @@ describe("NavigationRepository", () => {
 
       const results = await Promise.all(
         Array.from({ length: N }, () =>
-          repo.getOrCreateFingerprint("com.example.app", node.id, "fp-hash", "{}", 1000),
+          repo.getOrCreateFingerprint("com.example.app", node.id, "fp-hash", {
+            data: "{}",
+            timestamp: 1000,
+          }),
         ),
       );
 
@@ -847,14 +790,14 @@ describe("NavigationRepository", () => {
       await repo.getOrCreateApp("com.example.app");
       await repo.getOrCreateNode("com.example.app", "A", 1000);
       await repo.getOrCreateNode("com.example.app", "B", 1000);
-      await repo.createEdge(
-        "com.example.app",
-        "A",
-        "B",
-        { toolName: "tapOn", toolArgs: null },
-        2000,
-      );
-      await repo.createEdge("com.example.app", "B", "A", { toolName: null, toolArgs: null }, 3000);
+      await repo.createEdge("com.example.app", "A", "B", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 2000,
+      });
+      await repo.createEdge("com.example.app", "B", "A", {
+        tool: { toolName: null, toolArgs: null },
+        timestamp: 3000,
+      });
 
       const stats = await repo.getStats("com.example.app");
       expect(stats.nodeCount).toBe(2);
@@ -870,13 +813,10 @@ describe("NavigationRepository", () => {
       // dropped delete on any of the four tables leaves rows behind.
       await repo.getOrCreateApp("com.example.app");
       await repo.getOrCreateNode("com.example.app", "Home", 1000);
-      await repo.createEdge(
-        "com.example.app",
-        "Home",
-        "Settings",
-        { toolName: "tapOn", toolArgs: null },
-        2000,
-      );
+      await repo.createEdge("com.example.app", "Home", "Settings", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 2000,
+      });
       await repo.getOrCreateUIElement(
         "com.example.app",
         { text: "Login", resourceId: "btn_login" },
@@ -948,13 +888,10 @@ describe("NavigationRepository", () => {
     const seedEdges = async (timestamps: number[]): Promise<void> => {
       await repo.getOrCreateApp("com.example.app");
       for (const ts of timestamps) {
-        await repo.createEdge(
-          "com.example.app",
-          "A",
-          "B",
-          { toolName: "tapOn", toolArgs: null },
-          ts,
-        );
+        await repo.createEdge("com.example.app", "A", "B", {
+          tool: { toolName: "tapOn", toolArgs: null },
+          timestamp: ts,
+        });
       }
     };
 

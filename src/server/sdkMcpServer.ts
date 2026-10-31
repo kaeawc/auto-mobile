@@ -69,14 +69,17 @@ export function serverInstructions(env: NodeJS.ProcessEnv = process.env): string
  * The adjustments hook `Server._wrapHandler`, which `setRequestHandler` applies to every
  * handler registered after construction. All of our handlers are registered after this
  * returns, and they replace the SDK handlers the constructor installed.
+ *
+ * @param options.cacheHints - Modern-era cache hints for list results.
+ * @param options.requestState - Modern-era request state codec.
+ * @param options.instructions - `initialize` instructions; defaults to {@link serverInstructions}.
  */
 export function createSdkMcpServer(
   info: Implementation,
   capabilities: ServerCapabilities,
-  cacheHints?: McpServerOptions["cacheHints"],
-  requestState?: McpServerOptions["requestState"],
-  instructions: string | undefined = serverInstructions(),
+  options: SdkMcpServerOptions = {},
 ): McpServer {
+  const { cacheHints, requestState, instructions = serverInstructions() } = options;
   const server = new McpServer(info, {
     capabilities: { ...capabilities, prompts: undefined },
     ...(cacheHints && { cacheHints }),
@@ -88,6 +91,13 @@ export function createSdkMcpServer(
   }
   installV1HandlerWrapper(server.server);
   return server;
+}
+
+/** Optional construction inputs for {@link createSdkMcpServer}. */
+export interface SdkMcpServerOptions {
+  cacheHints?: McpServerOptions["cacheHints"];
+  requestState?: McpServerOptions["requestState"];
+  instructions?: string;
 }
 
 type HandlerResult = Awaited<ReturnType<RequestHandler>>;

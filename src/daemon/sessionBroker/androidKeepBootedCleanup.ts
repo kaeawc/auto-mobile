@@ -310,16 +310,24 @@ export async function cleanAndroidBaseline(
   baseline: DeviceBaseline,
   context: DeviceMutationResetContext,
   command: AndroidBaselineCommand,
-  revert: (mutation: DeviceMutationInput) => Promise<void>,
-  journalEntries: readonly DeviceMutationEntry[] = [],
+  {
+    revert,
+    journalEntries = [],
+  }: {
+    revert: (mutation: DeviceMutationInput) => Promise<void>;
+    journalEntries?: readonly DeviceMutationEntry[];
+  },
 ): Promise<void> {
   const namespaces = new Set(
     journalEntries.flatMap((entry) => androidUserFilesNamespaceCovered(entry, baseline) ?? []),
   );
-  await new AndroidBaselineCleaner(baseline, context, command, revert, {
-    sessionCreated: sessionCreatedSettingMatcher(journalEntries),
-    userFilesNamespaces: [...namespaces].sort(),
-    launches: journaledAppLaunches(journalEntries),
+  await new AndroidBaselineCleaner(baseline, context, command, {
+    revert,
+    journal: {
+      sessionCreated: sessionCreatedSettingMatcher(journalEntries),
+      userFilesNamespaces: [...namespaces].sort(),
+      launches: journaledAppLaunches(journalEntries),
+    },
   }).clean();
 }
 
@@ -363,13 +371,23 @@ export function journaledAppLaunches(
 class AndroidBaselineCleaner {
   private readonly prior: ReadonlyMap<string, MutationValue>;
 
+  private readonly revert: (mutation: DeviceMutationInput) => Promise<void>;
+  private readonly journal: AndroidCleaningJournalFacts;
+
   constructor(
     private readonly baseline: DeviceBaseline,
     private readonly context: DeviceMutationResetContext,
     private readonly command: AndroidBaselineCommand,
-    private readonly revert: (mutation: DeviceMutationInput) => Promise<void>,
-    private readonly journal: AndroidCleaningJournalFacts,
+    {
+      revert,
+      journal,
+    }: {
+      revert: (mutation: DeviceMutationInput) => Promise<void>;
+      journal: AndroidCleaningJournalFacts;
+    },
   ) {
+    this.revert = revert;
+    this.journal = journal;
     this.prior = new Map(
       baseline.observations.map((observation) => [
         `${observation.kind}:${observation.key}`,

@@ -422,16 +422,28 @@ describe("PressButton", () => {
   test("ios button presses retain their desktop frame context through the runner request", async () => {
     const contexts: string[] = [];
     const getInstanceSpy = spyOnIosClientInstance({
-      requestPressBack: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
-        contexts.push(frameContext ?? "");
+      requestPressBack: async (
+        _timeoutMs?: number,
+        _perf?: unknown,
+        options?: { frameContext?: string },
+      ) => {
+        contexts.push(options?.frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
       },
-      requestPressHome: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
-        contexts.push(frameContext ?? "");
+      requestPressHome: async (
+        _timeoutMs?: number,
+        _perf?: unknown,
+        options?: { frameContext?: string },
+      ) => {
+        contexts.push(options?.frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
       },
-      requestRecentApps: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
-        contexts.push(frameContext ?? "");
+      requestRecentApps: async (
+        _timeoutMs?: number,
+        _perf?: unknown,
+        options?: { frameContext?: string },
+      ) => {
+        contexts.push(options?.frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
       },
       requestPressButton: async (

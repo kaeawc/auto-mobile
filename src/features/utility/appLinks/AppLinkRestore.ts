@@ -62,8 +62,7 @@ export class AppLinksRestoreRegistry {
     device: BootedDevice,
     packageName: string,
     snapshot: AppLinksSnapshot,
-    scope: AppLinksRecordScope,
-    owner: string | undefined,
+    { scope, owner }: { scope: AppLinksRecordScope; owner?: string },
   ): AppLinksRestoreEntry {
     const key = entryKey(device.deviceId, packageName);
     const entry: AppLinksRestoreEntry = this.entries.get(key) ?? {
@@ -206,22 +205,16 @@ export async function applyAppLinksRestorePlan(
   }
   for (const selection of plan.selections) {
     if (selection.enable.length > 0) {
-      await appLinks.setUserSelection(
-        packageName,
-        selection.userId,
-        true,
-        selection.enable,
-        options,
-      );
+      await appLinks.setUserSelection(packageName, selection.userId, true, {
+        domains: selection.enable,
+        ...options,
+      });
     }
     if (selection.disable.length > 0) {
-      await appLinks.setUserSelection(
-        packageName,
-        selection.userId,
-        false,
-        selection.disable,
-        options,
-      );
+      await appLinks.setUserSelection(packageName, selection.userId, false, {
+        domains: selection.disable,
+        ...options,
+      });
     }
   }
 }

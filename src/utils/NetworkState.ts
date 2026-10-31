@@ -298,15 +298,13 @@ export class NetworkState {
     deviceId: string,
     errorType: SimulatedErrorType,
     durationSeconds: number,
-    limit: number | null,
-    ownerSessionUuid?: string,
+    { limit, ownerSessionUuid }: { limit: number | null; ownerSessionUuid?: string },
   ): void {
     this.startSimulationUntil(
       deviceId,
       errorType,
       Math.ceil(this.timer.now() + durationSeconds * 1000),
-      limit,
-      ownerSessionUuid,
+      { limit, ownerSessionUuid },
     );
   }
 
@@ -314,8 +312,7 @@ export class NetworkState {
     deviceId: string,
     errorType: SimulatedErrorType,
     expiresAt: number,
-    limit: number | null,
-    ownerSessionUuid?: string,
+    { limit, ownerSessionUuid }: { limit: number | null; ownerSessionUuid?: string },
   ): void {
     const scope = this.scopeFor(deviceId);
     this.stopSimulationTimer(scope);

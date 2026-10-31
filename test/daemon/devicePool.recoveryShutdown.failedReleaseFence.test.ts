@@ -36,7 +36,7 @@ async function setupFailedReleaseFence() {
       releases.push(reason);
       await context.sessions.releaseSession(id, reason);
     },
-    context.timer,
+    { timer: context.timer },
   );
   return { ...context, internals, record, monitor, releases };
 }

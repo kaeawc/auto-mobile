@@ -87,10 +87,17 @@ export class AndroidHierarchyWaiter {
 
   private matchesHierarchyRequest(
     hierarchy: CachedHierarchy,
-    requestId?: string,
-    staleRequestId?: string | null,
-    allowStaleResponse = true,
-    observerMode = false,
+    {
+      requestId,
+      staleRequestId,
+      allowStaleResponse = true,
+      observerMode = false,
+    }: {
+      requestId?: string;
+      staleRequestId?: string | null;
+      allowStaleResponse?: boolean;
+      observerMode?: boolean;
+    } = {},
   ): boolean {
     if (observerMode && requestId) {
       return hierarchy.requestId === requestId;
@@ -128,13 +135,12 @@ export class AndroidHierarchyWaiter {
     return (
       this.matchesRequestedDisplay(hierarchy, request.displayId) &&
       this.evaluateMinTimestamp(hierarchy, minTimestamp, useDeviceTimestamp).isFresh &&
-      this.matchesHierarchyRequest(
-        hierarchy,
-        request.requestId,
-        request.staleRequestId,
-        request.allowStaleResponse,
-        request.observerMode,
-      )
+      this.matchesHierarchyRequest(hierarchy, {
+        requestId: request.requestId,
+        staleRequestId: request.staleRequestId,
+        allowStaleResponse: request.allowStaleResponse,
+        observerMode: request.observerMode,
+      })
     );
   }
 
@@ -154,10 +160,12 @@ export class AndroidHierarchyWaiter {
     timeout: number,
     minTimestamp: number,
     useDeviceTimestamp: boolean,
-    signal?: AbortSignal,
-    options: FreshDataWaitOptions = {
-      allowStaleResponse: true,
-    },
+    {
+      signal,
+      options = {
+        allowStaleResponse: true,
+      },
+    }: { signal?: AbortSignal; options?: FreshDataWaitOptions } = {},
   ): Promise<CachedHierarchy | null> {
     const { requestId, dispatchSocket, allowStaleResponse, observerMode, displayId } = options;
     const diagnostics = options.diagnostics ?? {};

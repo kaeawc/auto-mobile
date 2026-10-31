@@ -82,7 +82,7 @@ describe("TakeScreenshot iOS cancellation", function () {
         ),
       ).toHaveLength(1);
       expect(pushSpy).toHaveBeenCalledTimes(1);
-      const [deviceId, pushedBase64, , , details] = pushSpy.mock.calls[0]!;
+      const [deviceId, pushedBase64, details] = pushSpy.mock.calls[0]!;
       const options = details?.options;
       expect(deviceId).toBe("ios-single-decode");
       expect(pushedBase64).toBe(screenshotBase64);
@@ -126,7 +126,9 @@ describe("TakeScreenshot iOS cancellation", function () {
         { width: 37, height: 53 },
         undefined,
       ].entries()) {
-        const [, , width, height] = pushSpy.mock.calls[index]!;
+        const [, , details] = pushSpy.mock.calls[index]!;
+        const width = details?.screenWidth;
+        const height = details?.screenHeight;
         expect(width).toBe(expected?.width);
         expect(height).toBe(expected?.height);
         expect(width === 1080 || height === 2340).toBe(false);
@@ -270,10 +272,12 @@ function screenshotClient(
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "screenshot-stub", name: "iPhone", platform: "ios" },
     8765,
-    () => {
-      throw new Error("Unexpected socket connection");
+    {
+      wsFactory: () => {
+        throw new Error("Unexpected socket connection");
+      },
+      timer: new FakeTimer(),
     },
-    new FakeTimer(),
   );
   client.ensureConnected = stub.ensureConnected;
   client.requestScreenshot = stub.requestScreenshot;

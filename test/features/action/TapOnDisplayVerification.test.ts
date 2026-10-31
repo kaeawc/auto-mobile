@@ -655,7 +655,7 @@ describe("tapOn display verification", () => {
       const h = harness(ctrlProxy, { productionCapture: true });
       const requests: Array<number | undefined> = [];
       const sync = spyOn(h.client, "requestHierarchySync").mockImplementation(async (...args) => {
-        requests.push(args[4]?.displayId);
+        requests.push(args[3]?.displayId);
         return {
           hierarchy: { updatedAt: h.timer.now(), packageName: "app", hierarchy: { node: {} } },
         };

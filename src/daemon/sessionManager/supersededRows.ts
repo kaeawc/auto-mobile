@@ -186,8 +186,11 @@ export class SupersededSessionRows {
     error: DeviceSessionRowNotRewritableError | DeviceSessionRowNotReleasableError,
     sessionId: string,
     guard: RefusedRowWriteGuard,
-    write: (guard: RefusedRowWriteGuard) => Promise<T>,
-    { writingReleaseReason: releaseReason, ...releaseOptions }: RefusedRowWriteRelease = {},
+    {
+      write,
+      writingReleaseReason: releaseReason,
+      ...releaseOptions
+    }: RefusedRowWriteRelease & { write: (guard: RefusedRowWriteGuard) => Promise<T> },
   ): Promise<T> {
     const resolveRow = (row: DeviceSession | undefined) => {
       const withGuard = (current: DeviceSession | undefined) => ({

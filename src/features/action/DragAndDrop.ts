@@ -490,8 +490,12 @@ export class DragAndDrop extends BaseVisualChange {
             this.screenshotCapturer,
             viewHierarchy,
             searchCriteria,
-            this.visionConfig,
-            { baseError: finalErrorMessage, signal, visionAnalyzer: this.visionAnalyzer },
+            {
+              visionConfig: this.visionConfig,
+              baseError: finalErrorMessage,
+              signal,
+              visionAnalyzer: this.visionAnalyzer,
+            },
           );
         }
       }

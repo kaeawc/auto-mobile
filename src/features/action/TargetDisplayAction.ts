@@ -83,13 +83,10 @@ async function assertActionPanelConnected(
   // DisplaySelectionError lets a session pin's displayPinFailure attach `pinnedDisplay`; an explicit
   // display has no pin in scope, so it keeps the plain message with no pin details.
   throw new DisplaySelectionError(
-    buildDisconnectedPanelMessage(
-      panel.key,
-      panel.role,
-      connectedPanels,
+    buildDisconnectedPanelMessage(panel.key, panel.role, connectedPanels, {
       hasPostures,
-      selectedDisplayPin() !== undefined,
-    ),
+      pinned: selectedDisplayPin() !== undefined,
+    }),
     {
       disconnectedPanel: {
         panel,

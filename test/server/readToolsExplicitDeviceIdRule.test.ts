@@ -1,4 +1,5 @@
 import type { ResolvedDeviceIdentity } from "../../src/daemon/readiness/DeviceReadiness";
+import { splitRegistration } from "../../src/server/toolRegistryErasure";
 import { z } from "zod/v4";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -347,12 +348,10 @@ beforeAll(async () => {
   // Preserve production options and their classification closures; replace only device I/O.
   const register = ToolRegistry.registerDeviceAware.bind(ToolRegistry);
   const stub = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation(
-    (name, description, schema, _handler, options) => {
-      register(
-        name,
-        description,
-        schema,
-        async (device, args) => {
+    (name, description, schema, registration) => {
+      const { options } = splitRegistration(registration);
+      register(name, description, schema, {
+        handler: async (device, args) => {
           h!.handledDevices.push(device);
           h!.handlerSignals.push(getAbortSignal());
           h!.runs.push({
@@ -362,13 +361,11 @@ beforeAll(async () => {
           });
           return { success: true };
         },
-        {
-          ...options,
-          ...(options?.sessionlessDeviceRead
-            ? { sessionlessDeviceRead: sessionlessDeviceReadFor(access, { timer: retryTimer }) }
-            : {}),
-        },
-      );
+        ...options,
+        ...("sessionlessDeviceRead" in options && options.sessionlessDeviceRead
+          ? { sessionlessDeviceRead: sessionlessDeviceReadFor(access, { timer: retryTimer }) }
+          : {}),
+      });
     },
   );
   try {
@@ -1068,13 +1065,10 @@ function installProbeInventory(column: (typeof probeColumns)[number]): void {
     timer: current.timer,
     adbFactory: new FakeAdbClientFactory(current.adb),
   });
-  const inventory = new MultiPlatformDeviceManager(
-    current.adb,
-    current.simctl,
-    client,
-    new FakeVirtualDeviceLifecycleCoordinator(),
-    { timer: current.timer },
-  );
+  const inventory = new MultiPlatformDeviceManager(current.adb, current.simctl, client, {
+    lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
+    timer: current.timer,
+  });
   const restoreFactory = snapshotPlatformDeviceManagerFactory();
   const previousInstance = Reflect.get(PlatformDeviceManagerFactory, "instance");
   const previousInjectedManager = Reflect.get(PlatformDeviceManagerFactory, "injectedManager");
@@ -1846,11 +1840,19 @@ for (const platform of ["android", "ios"] as const) {
         list.mockClear();
         if (running) {
           expect(
-            await resolveDeviceForObservationRead(id, undefined, access, requested, { timer }),
+            await resolveDeviceForObservationRead(id, undefined, {
+              access,
+              platform: requested,
+              retry: { timer },
+            }),
           ).toEqual(device);
         } else {
           await expect(
-            resolveDeviceForObservationRead(id, undefined, access, requested, { timer }),
+            resolveDeviceForObservationRead(id, undefined, {
+              access,
+              platform: requested,
+              retry: { timer },
+            }),
           ).rejects.toThrow(`Device ${id} not found`);
         }
         expect(list).toHaveBeenCalledTimes(1);
@@ -1871,7 +1873,7 @@ for (const platform of ["android", "ios"] as const) {
       isAuthorized: () => true,
     };
     await expect(
-      resolveDeviceForObservationRead(id, undefined, access, other, { timer }),
+      resolveDeviceForObservationRead(id, undefined, { access, platform: other, retry: { timer } }),
     ).rejects.toThrow(`not found on ${other} platform`);
     expect(list).toHaveBeenCalledTimes(1);
     expect(timer.getSleepCallCount()).toBe(0);

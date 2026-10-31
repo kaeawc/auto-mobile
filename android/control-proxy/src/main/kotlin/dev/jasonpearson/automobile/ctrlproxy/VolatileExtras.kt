@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 /** Accessibility bookkeeping that should not affect wire output or structural change detection. */
 internal object VolatileExtras {
   private const val SPANS_PREFIX = "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_"
+  private const val COMPAT_BOOLEANS_KEY =
+    "androidx.view.accessibility.AccessibilityNodeInfoCompat.BOOLEAN_PROPERTY_KEY"
 
   /**
    * The framework's traversal-order test extras, matched exactly so a provider's own key that
@@ -15,6 +17,15 @@ internal object VolatileExtras {
     )
 
   fun isNeverShipped(key: String): Boolean = key.startsWith(SPANS_PREFIX)
+
+  /**
+   * Whether an extra says nothing that should keep a wrapper node when pruning: the never-shipped
+   * SPANS keys, and the androidx compat boolean-property bitmask with no bit set. Where the
+   * framework lacks a compat property (API 30-33 captures), androidx writes that bitmask on every
+   * node it touches, so "0" is the all-false default, not a property (#13956).
+   */
+  fun isPruningNoise(key: String, value: String): Boolean =
+    isNeverShipped(key) || (key == COMPAT_BOOLEANS_KEY && value == "0")
 
   fun isHashVolatile(key: String): Boolean =
     isNeverShipped(key) || key in TRAVERSAL_KEYS || key == "AccessibilityNodeInfo.roleDescription"

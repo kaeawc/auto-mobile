@@ -92,6 +92,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUn
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.ErrorResponse
+import dev.jasonpearson.automobile.protocol.GlobalActionResult
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
@@ -632,6 +633,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
   private lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
+  private val globalActionController by lazy {
+    GlobalActionController(
+      host =
+        object : GlobalActionController.Host {
+          override fun performGlobalAction(actionId: Int) =
+            this@CtrlProxy.performGlobalAction(actionId)
+
+          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+
+          override suspend fun broadcast(result: GlobalActionResult) =
+            webSocketServer.broadcast(result)
+        },
+      asyncActionRunner = asyncActionRunner,
+      timeProvider = timeProvider,
+    )
+  }
   private val permissionController by lazy {
     PermissionController(
       permissions = { permission, request ->
@@ -2265,7 +2282,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.GLOBAL_ACTION))
       return
-    performGlobalActionRequest(requestId, action)
+    globalActionController.performGlobalActionRequest(requestId, action)
   }
 
   override suspend fun validateFrameContext(requestId: String?, frameContext: String) {
@@ -2769,41 +2786,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId
-
-  /**
-   * Execute a global action (back, home, recents, etc.) via the accessibility service. Returns true
-   * if the action was dispatched successfully.
-   */
-  private fun executeGlobalAction(action: String): Boolean {
-    val actionId = SystemGlobalActions.resolve(action, Build.VERSION.SDK_INT) ?: return false
-    return performGlobalAction(actionId)
-  }
-
-  /** Handle a request_global_action WebSocket message. */
-  private fun performGlobalActionRequest(requestId: String?, action: String) {
-    textInputController.forgetRememberedInsert()
-    val startTime = System.currentTimeMillis()
-    val success = executeGlobalAction(action)
-    val totalTimeMs = System.currentTimeMillis() - startTime
-    asyncActionRunner.launch(requestId, "request_global_action") {
-      webSocketServer.broadcast(
-        dev.jasonpearson.automobile.protocol.GlobalActionResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          action = action,
-          totalTimeMs = totalTimeMs,
-          error =
-            if (!success) {
-              SystemGlobalActions.refusal(action, Build.VERSION.SDK_INT)
-                ?: "Global action failed: $action"
-            } else {
-              null
-            },
-        ),
-      )
-    }
-  }
 
   private suspend fun handleCommand(intent: Intent) {
     // Clean up any lingering UUID-based hierarchy files before processing new requests

@@ -202,6 +202,7 @@ class AsyncActionRunnerWiringTest {
         "StorageController.kt",
         "DeviceInfoController.kt",
         "PermissionController.kt",
+        "GlobalActionController.kt",
       )
       .joinToString("\n") {
         locateCtrlProxySource(it).readText()

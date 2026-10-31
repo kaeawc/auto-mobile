@@ -1,20 +1,29 @@
 # watchOS as its own platform, fail-closed per tool
 
-Status: accepted for #14899 (part of the Apple Watch simulator epic #14895).
+Status: accepted for #14899 (part of the Apple Watch simulator epic #14895); extended to every
+non-iOS Apple platform for #15886 (Apple TV epic #15884).
 
 ## Decision
 
 An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
-(`src/models/Platform.ts`), not an iOS device with a family flag.
+(`src/models/Platform.ts`), not an iOS device with a family flag. The same rule covers every
+non-iOS Apple platform (`NonIosApplePlatform`): an Apple TV simulator is `platform: "tvos"`, and
+everything below that says "watch" applies to it unless a section names watchOS specifically.
+`tvos` supports no tool yet: discovery lists no Apple TVs (no discovery source sweeps them), a
+broker binding never reuses one, a boot is admitted through the simulator gate, and no tool schema
+offers it.
 
-- **Fail closed at the tool boundary.** Every device-aware tool rejects a watch with an
-  `ActionableError` (`<tool> does not support watchOS yet`) after device resolution and before
+- **Fail closed at the tool boundary.** Every device-aware tool rejects a watch or an Apple TV with
+  an `ActionableError` naming the platform (`<tool> does not support watchOS yet`, `<tool> does
+  not support tvOS yet`) after device resolution and before
   navigation recording, mutation journaling, audits or the handler run. The gate is in the
   registry's shared device dispatch, so a newly registered tool is covered without any change.
-- **One allowlist.** `WATCHOS_SUPPORTED_TOOLS` (`src/server/watchOsToolSupport.ts`) names the tools
-  that opted in. A tool joins it only together with its watchOS behaviour and tests.
-  `test/server/watchOsToolSupport.test.ts` registers every tool and drives each device-aware tool
-  not on the list through the registry with a watch device, asserting the rejection.
+- **One allowlist map.** `APPLE_PLATFORM_SUPPORTED_TOOLS` (`src/server/applePlatformToolSupport.ts`)
+  maps each non-iOS Apple platform to the tools that opted in for it. A tool joins a platform only
+  together with that platform's behaviour and tests.
+  `test/server/applePlatformToolSupport.test.ts` registers every tool and, for each platform, drives each device-aware tool
+  not on that platform's list through the registry with a device of that platform, asserting the
+  rejection.
 - **Platform branches decide explicitly.** Code that dispatches on platform narrows with
   `requireAndroidOrIosPlatform(platform, operation)` (throws for a watch) or
   `isAndroidOrIosPlatform` (skips a watch in background loops). A watch never falls through to an

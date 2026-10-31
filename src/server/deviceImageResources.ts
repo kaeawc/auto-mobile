@@ -18,7 +18,7 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { logger } from "../utils/logger";
-import { Platform } from "../models";
+import { ActionableError, Platform } from "../models";
 import {
   AvdInfo,
   type DeviceProfile,
@@ -299,6 +299,10 @@ export function createDeviceImageResourcesHandler(
   ): Promise<DeviceImagesResourceContent> => {
     const platformResults: PlatformResourceResult[] = [];
     for (const platform of platforms) {
+      if (platform === "tvos") {
+        // The resource URI admits only android, ios and watchos; Apple TV images are not listed yet.
+        throw new ActionableError("Device images are not available for tvOS yet.");
+      }
       platformResults.push(
         platform === "android"
           ? await generateAndroidResource(androidCacheState, deviceManager, avdManager, {

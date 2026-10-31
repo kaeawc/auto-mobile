@@ -44,6 +44,7 @@ export class FakeDeviceReadiness implements Pick<
     android: false,
     ios: false,
     watchos: false,
+    tvos: false,
   };
 
   // Call tracking for assertions
@@ -366,6 +367,7 @@ export class FakeDeviceReadiness implements Pick<
       android: !this.failedPlatformScans.android,
       ios: !this.failedPlatformScans.ios,
       watchos: false,
+      tvos: false,
     };
     if (this.simulateDisconnection) {
       return { devices: [], scanned };

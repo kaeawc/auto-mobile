@@ -145,7 +145,7 @@ const EXEMPT_TOOL_LISTS: Readonly<Record<string, string>> = {
     "what recovery guidance tells a client to call, pinned to the registry by a test",
   "src/server/deviceMutationLifecycleAdapters.ts\tAPP_FALLBACK_TOOLS":
     "the vocabulary of an opaque fallback key prefix, not a behaviour list",
-  "src/server/watchOsToolSupport.ts\tWATCHOS_SUPPORTED_TOOLS":
+  "src/server/applePlatformToolSupport.ts\tAPPLE_PLATFORM_SUPPORTED_TOOLS":
     "a policy allow-list documented in docs/decisions/watchos-platform.md",
   "src/utils/android-cmdline-tools/detection.ts\tANDROID_TOOLS":
     "Android SDK command-line tools, not MCP tools",

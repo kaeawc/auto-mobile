@@ -114,6 +114,7 @@ async function findObservationReadTarget(
                 android: scope === "either",
                 ios: scope === "either",
                 watchos: scope === "watchos",
+                tvos: false,
               },
             };
         signal?.throwIfAborted();

@@ -56,6 +56,9 @@ export function sourcesForPlatform(platform: Platform): DiscoverySource[] {
       return ["ios-simulator", "ios-physical"];
     case "watchos":
       return ["watchos-simulator"];
+    case "tvos":
+      // Apple TV simulators are not discovered yet: no source sweeps them.
+      return [];
   }
 }
 

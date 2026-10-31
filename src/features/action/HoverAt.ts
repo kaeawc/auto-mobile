@@ -179,6 +179,23 @@ export class HoverAt extends BaseVisualChange {
     return { points };
   }
 
+  /** The hover's planned event time, after refusing one that cannot finish within the deadline. */
+  private assertFitsBudget(
+    injector: PointerInjector,
+    points: HoverPoint[],
+    call: HoverDriveCall,
+  ): number {
+    const plannedDurationMs = points
+      .slice(1)
+      .reduce((sum, point) => sum + (point.durationMs ?? DRAG_PATH_DEFAULT_SEGMENT_MS), 0);
+    // The uinput pen's attach and close waits run before and after the hover's own events.
+    assertDragPathFitsRequestBudget(
+      plannedDurationMs + (injector.route === "uinput" ? UINPUT_FIXED_OVERHEAD_MS : 0),
+      call.deadlineMs === undefined ? undefined : call.deadlineMs - this.timer.now(),
+    );
+    return plannedDurationMs;
+  }
+
   private async drive(
     injector: PointerInjector,
     options: HoverAtOptions,
@@ -206,14 +223,7 @@ export class HoverAt extends BaseVisualChange {
     if (layerRefusal) {
       return failure(layerRefusal);
     }
-    const plannedDurationMs = points
-      .slice(1)
-      .reduce((sum, point) => sum + (point.durationMs ?? DRAG_PATH_DEFAULT_SEGMENT_MS), 0);
-    // The uinput pen's attach and close waits run before and after the hover's own events.
-    assertDragPathFitsRequestBudget(
-      plannedDurationMs + (injector.route === "uinput" ? UINPUT_FIXED_OVERHEAD_MS : 0),
-      call.deadlineMs === undefined ? undefined : call.deadlineMs - this.timer.now(),
-    );
+    const plannedDurationMs = this.assertFitsBudget(injector, points, call);
     throwIfAborted(call.signal);
     assertCurrent?.();
     try {

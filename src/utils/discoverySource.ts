@@ -16,7 +16,12 @@ import { isIosPhysicalUdid } from "./ios-cmdline-tools/iosDeviceType";
  * every platform uniformly rather than special-casing iOS. Apple Watch simulators have their own
  * source: an iOS sweep never lists them, so it can never prove a watch is gone (#14908).
  */
-export type DiscoverySource = "android" | "ios-simulator" | "ios-physical" | "watchos-simulator";
+export type DiscoverySource =
+  | "android"
+  | "ios-simulator"
+  | "ios-physical"
+  | "watchos-simulator"
+  | "tvos-simulator";
 
 /**
  * The source that would have observed this device.
@@ -33,6 +38,9 @@ export function discoverySourceFor(
 ): DiscoverySource {
   if (platform === "android") {
     return "android";
+  }
+  if (platform === "tvos") {
+    return "tvos-simulator";
   }
   if (platform === "watchos") {
     return "watchos-simulator";
@@ -57,8 +65,7 @@ export function sourcesForPlatform(platform: Platform): DiscoverySource[] {
     case "watchos":
       return ["watchos-simulator"];
     case "tvos":
-      // Apple TV simulators are not discovered yet: no source sweeps them.
-      return [];
+      return ["tvos-simulator"];
   }
 }
 
@@ -66,6 +73,8 @@ function platformForSource(source: DiscoverySource): Platform {
   switch (source) {
     case "android":
       return "android";
+    case "tvos-simulator":
+      return "tvos";
     case "watchos-simulator":
       return "watchos";
     case "ios-simulator":

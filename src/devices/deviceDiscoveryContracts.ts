@@ -81,6 +81,34 @@ export interface BootedDeviceDiscovery {
   transitionalSimulators?: TransitionalSimulator[];
 }
 
+/** Combine configured-image sweeps without treating a failed source as an empty inventory. */
+export function mergeDeviceImageDiscoveries(
+  sources: Partial<
+    Record<
+      Platform,
+      { devices: DeviceInfo[]; succeeded: boolean; error?: DeviceDiscoveryError } | undefined
+    >
+  >,
+): DeviceImageDiscovery {
+  const devices: DeviceInfo[] = [];
+  const succeededPlatforms = new Set<Platform>();
+  const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
+  for (const platform of Object.keys(sources) as Platform[]) {
+    const result = sources[platform];
+    if (!result) {
+      continue;
+    }
+    devices.push(...result.devices);
+    if (result.error) {
+      discoveryErrors[platform] = result.error;
+    }
+    if (result.succeeded) {
+      succeededPlatforms.add(platform);
+    }
+  }
+  return { devices, succeededPlatforms, discoveryErrors };
+}
+
 /**
  * A missing adb binary (ENOENT, surfaced by the adb client as `AdbUnavailableError`) is not a
  * failed sweep: Android does not apply to this host, so it is `unavailable` (#11605).
@@ -227,6 +255,9 @@ export interface DeviceStartResult {
 /** Platform-agnostic device management for Android emulators and iOS simulators. */
 export interface PlatformDeviceManager {
   withForeignAndroidSerialSource?(source: ForeignAndroidSerialSource): this;
+  /** Canonical simulator family for shutdown; adapters without simulator inventories may omit it. */
+  resolveKillDeviceTarget?(device: BootedDevice, signal?: AbortSignal): Promise<BootedDevice>;
+
   /**
    * List all available device images for a specific platform
    * @param platform - Target platform ("android", "ios", or "either" for both)

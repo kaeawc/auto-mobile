@@ -103,12 +103,8 @@ describe.each(["watchos", "tvos"] as const)(
       restoreCollaborators();
     });
 
-    test("the allowlist names only registered device-aware tools", () => {
-      const deviceAware = new Set(
-        ToolRegistry.getEveryRegisteredTool()
-          .filter((tool) => tool.deviceAwareHandler !== undefined)
-          .map((tool) => tool.name),
-      );
+    test("the allowlist names only registered tools", () => {
+      const deviceAware = new Set(ToolRegistry.getEveryRegisteredTool().map((tool) => tool.name));
       expect(
         [...APPLE_PLATFORM_SUPPORTED_TOOLS[platform]].filter((name) => !deviceAware.has(name)),
       ).toEqual([]);

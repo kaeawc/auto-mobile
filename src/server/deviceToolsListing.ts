@@ -3,8 +3,8 @@ import {
   toActionableError,
   type BootedDevice,
   type Platform,
-  requireAndroidOrIosPlatform,
   type SomePlatform,
+  requireAndroidOrIosPlatform,
 } from "../models";
 import type { BootedDeviceDiscovery, DeviceDiscoveryError } from "../devices/deviceUtils";
 import {
@@ -46,7 +46,6 @@ import {
   initializedDevicePool,
   listDevicePayloads,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
-import { assertRequestNotTvos } from "./applePlatformToolSupport";
 
 /** Held Android devices adb lists offline and held simulators simctl lists Booting / Shutting Down. */
 async function transitionalHeldListing(input: {
@@ -176,10 +175,16 @@ function listingDiscoveryObservation(
   };
 }
 
+function listingPlatform(platform: SomePlatform): SomePlatform {
+  if (platform === "either" || platform === "tvos") {
+    return platform;
+  }
+  return requireAndroidOrIosPlatform(platform, "listDevices");
+}
+
 export function createListingHandlers() {
   // List AVDs handler
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
-    assertRequestNotTvos("listDeviceImages", args);
     try {
       const deps = getDeviceToolsDependencies();
       const deviceUtils = deps.deviceManagerFactory();
@@ -225,12 +230,8 @@ export function createListingHandlers() {
     // here — enumerate booted devices directly instead of forcing a modality
     // switch to resources. The resource pointers (which also cover not-yet-booted
     // images and richer per-device detail) survive as a `note`.
-    // An Apple TV is never discovered yet, so naming it is refused rather than listed as empty.
-    assertRequestNotTvos("listDevices", args);
     // Internal callers may pass "either", which the tool schema itself does not offer.
-    const requested: SomePlatform = args.platform ?? "either";
-    const platform: SomePlatform =
-      requested === "either" ? requested : requireAndroidOrIosPlatform(requested, "listDevices");
+    const platform = listingPlatform(args.platform ?? "either");
     const presentationOrder = acceptancePresentationOrder(args);
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const deps = getDeviceToolsDependencies();
@@ -263,7 +264,7 @@ export function createListingHandlers() {
       // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
       // through the same join the booted-devices resource uses (#6863 review).
       booted =
-        platform === "ios"
+        platform !== "android" && platform !== "either"
           ? discovery.devices
           : pool
             ? pool.mapAndroidDiscovery(discovery.devices)

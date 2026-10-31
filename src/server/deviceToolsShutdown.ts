@@ -74,8 +74,12 @@ export function createKillDeviceResponse(
   alreadyStoppedMessage?: string,
 ) {
   if (alreadyStoppedMessage !== undefined) {
-    // A simulator, iPhone or Apple Watch, that is already shut down is the requested end state.
-    if (args.device.platform === "ios" || args.device.platform === "watchos") {
+    // A simulator that is already shut down is the requested end state.
+    if (
+      args.device.platform === "ios" ||
+      args.device.platform === "watchos" ||
+      args.device.platform === "tvos"
+    ) {
       return createStructuredToolResponse({
         message: `${args.device.platform} '${deviceDisplayName(args.device)}' already shut down`,
         udid: args.device.deviceId,

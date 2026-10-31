@@ -55,6 +55,7 @@ export interface RefusedCapacityDecision {
   externalDevices?: string[];
   /** Counted iOS simulators owned by AutoMobile admissions, sessions or bindings. */
   heldDevices?: string[];
+  ownershipUnknown?: boolean;
 }
 
 export interface BootAdmissionResult<D> {
@@ -113,6 +114,7 @@ export function atCapacityDecision(
     retryAfterMs,
     ...(external.length > 0 ? { externalDevices: [...external] } : {}),
     ...(held.length > 0 ? { heldDevices: [...held] } : {}),
+    ...(describe.ownershipUnknown ? { ownershipUnknown: true } : {}),
     message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${bootCapacityOwnershipNote(describe)} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
   };
 }
@@ -232,6 +234,7 @@ export function assertBootCapacityGranted<D extends { outcome: string }>(
       retryAfterMs: decision.retryAfterMs,
       ...(decision.externalDevices ? { externalDevices: decision.externalDevices } : {}),
       ...(decision.heldDevices ? { heldDevices: decision.heldDevices } : {}),
+      ...(decision.ownershipUnknown ? { ownershipUnknown: true } : {}),
     },
     `Refused to boot: no ${noun} capacity (code capacity_exhausted, retryable; retry after ${decision.retryAfterMs}ms): ${decision.message}`,
   );

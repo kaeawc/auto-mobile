@@ -120,12 +120,12 @@ also reads pen data (**Source**):
   range the raw values are kept and `pressure.normalized` is false.
 - **Gesture fields.** `GestureEvent` carries optional `toolType` (`stylus`/`eraser`),
   `pressure` (min, max and mean, normalized when the axis range is known) and `buttons`.
-  A pen gesture exports as a coordinate step carrying `pointer: { toolType: "stylus" }`: a
-  tap or long press as `tapAt`, a swipe as `swipeAt`, never `tapOn` or `swipeOn`, which cannot
-  say "stylus". Recorded pressure is not exported, because replay injects the fixed 1.0 and
-  refuses anything else. A pen gesture with no replayable form (an eraser, which replay cannot
-  inject, or one with no known position or path) is left out with a warning on the stop
-  result, which a salvaged stop keeps. A stylus double tap is exported with a warning because
+  A pen gesture exports as a coordinate step carrying `pointer: { toolType: "stylus" }` (or
+  `"eraser"`): a tap or long press as `tapAt`, a swipe as `swipeAt`, never `tapOn` or `swipeOn`,
+  which cannot say "stylus". Recorded pressure is not exported, because replay injects the fixed 1.0 and
+  refuses anything else. A pen gesture with no known position or path is left out with a warning
+  on the stop result, which a salvaged stop keeps. An eraser gesture is exported with a warning
+  because only a root `adb shell` with the `uinput` tool can replay it. A stylus double tap is exported with a warning because
   replay refuses it. A stylus tap and a finger tap never merge into one double tap. Finger
   gestures export unchanged. Hover is not exported (it only warns), nor are stroke paths or
   pressure series.

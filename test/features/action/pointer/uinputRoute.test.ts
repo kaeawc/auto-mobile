@@ -25,6 +25,31 @@ describe("UinputRoute (#13105)", () => {
     }
   });
 
+  test("takes an eraser stroke on a root shell (#13105)", () => {
+    expect(
+      route.supports({ toolType: "eraser", variablePressure: true, path: true }, env()),
+    ).toEqual({ supported: true });
+  });
+
+  test("an eraser stroke falls to the uinput route: no other route injects one", () => {
+    const withRunner = env({
+      capabilities: new Set(["stylus_input_v1"]),
+      apiLevel: 34,
+      rootShell: false,
+    });
+    const refused = selectPointerRoute({ toolType: "eraser" }, withRunner, routes());
+    expect(refused.selected).toBeNull();
+    expect(refused.selected === null ? refused.refusal : "").toContain(
+      "the instrumentation runner does not inject an eraser",
+    );
+    const rooted = selectPointerRoute(
+      { toolType: "eraser" },
+      { ...withRunner, rootShell: true },
+      routes(),
+    );
+    expect(rooted.selected?.route).toBe("uinput");
+  });
+
   test("needs a root adb shell and says how to get one", () => {
     for (const rootShell of [false, undefined]) {
       const support = route.supports({ toolType: "stylus" }, env({ rootShell }));

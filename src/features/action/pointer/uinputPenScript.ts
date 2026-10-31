@@ -144,8 +144,18 @@ function positionEvents(frame: Frame, geometry: UinputDisplayGeometry, hover: bo
 
 const SYN = [EV_SYN, SYN_REPORT, 0];
 
-function openEvents(frame: Frame, geometry: UinputDisplayGeometry, hover: boolean): number[] {
-  const tool = [EV_KEY, BTN_TOOL_PEN, 1];
+/** The pen end in range: the rubber for an eraser, otherwise the tip. */
+function toolKey(request: PointerRequest): number {
+  return request.features.toolType === "eraser" ? BTN_TOOL_RUBBER : BTN_TOOL_PEN;
+}
+
+function openEvents(
+  frame: Frame,
+  geometry: UinputDisplayGeometry,
+  hover: boolean,
+  key: number,
+): number[] {
+  const tool = [EV_KEY, key, 1];
   return hover
     ? [...tool, ...positionEvents(frame, geometry, true), ...abs(ABS_PRESSURE, 0), ...SYN]
     : [
@@ -159,8 +169,8 @@ function openEvents(frame: Frame, geometry: UinputDisplayGeometry, hover: boolea
       ];
 }
 
-function closeEvents(hover: boolean): number[] {
-  const toolUp = [EV_KEY, BTN_TOOL_PEN, 0, ...SYN];
+function closeEvents(hover: boolean, key: number): number[] {
+  const toolUp = [EV_KEY, key, 0, ...SYN];
   return hover ? toolUp : [EV_KEY, BTN_TOUCH, 0, ...abs(ABS_PRESSURE, 0), ...SYN, ...toolUp];
 }
 
@@ -202,14 +212,14 @@ function registration(geometry: UinputDisplayGeometry) {
 const inject = (events: number[]) => ({ id: DEVICE_ID, command: "inject", events });
 const delay = (duration: number) => ({ id: DEVICE_ID, command: "delay", duration });
 
-/** The stdin script for a stylus stroke or hover; tilt, orientation and buttons are not encoded. */
+/** The stdin script for a stylus or eraser stroke or a hover; tilt, orientation and buttons are not encoded. */
 export function uinputPenScript(request: PointerRequest, geometry: UinputDisplayGeometry): string {
   const hover = request.features.hover === true;
   const [first, ...rest] = planFrames(request);
   const commands: object[] = [
     registration(geometry),
     delay(UINPUT_REGISTRATION_SETTLE_MS),
-    inject(openEvents(first, geometry, hover)),
+    inject(openEvents(first, geometry, hover, toolKey(request))),
   ];
   let previousMs = 0;
   for (const frame of rest) {
@@ -219,7 +229,7 @@ export function uinputPenScript(request: PointerRequest, geometry: UinputDisplay
     }
     commands.push(inject([...positionEvents(frame, geometry, hover), ...SYN]));
   }
-  commands.push(inject(closeEvents(hover)), delay(CLOSE_SETTLE_MS));
+  commands.push(inject(closeEvents(hover, toolKey(request))), delay(CLOSE_SETTLE_MS));
   return `${commands.map((command) => JSON.stringify(command)).join("\n")}\n`;
 }
 

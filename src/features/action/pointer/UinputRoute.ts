@@ -2,8 +2,9 @@ import type { PointerEnvironment, PointerFeatures, PointerSupport } from "./Poin
 import { DispatchingRoute, SUPPORTED, unsupported } from "./DispatchingRoute";
 
 /**
- * A virtual pen registered through Android's `uinput` tool (#13105): stylus strokes with pressure
- * and stylus hover on emulators and rooted devices, where `/dev/uinput` is writable only by root.
+ * A virtual pen registered through Android's `uinput` tool (#13105): stylus and eraser strokes with
+ * pressure and stylus hover on emulators and rooted devices, where `/dev/uinput` is writable only by
+ * root.
  * It is the last route, so a runner that injects without root is always preferred. Tilt,
  * orientation and barrel buttons are refused until their evdev mapping is verified on a device.
  */
@@ -13,8 +14,8 @@ export class UinputRoute extends DispatchingRoute {
     if (device.platform !== "android") {
       return unsupported("uinput injection is an Android route");
     }
-    if (features.toolType !== "stylus") {
-      return unsupported("the uinput route injects a stylus only");
+    if (features.toolType !== "stylus" && features.toolType !== "eraser") {
+      return unsupported("the uinput route injects a stylus or eraser only");
     }
     if (features.extendedAxes) {
       return unsupported(

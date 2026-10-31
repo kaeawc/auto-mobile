@@ -240,7 +240,7 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     expect(result.exportWarnings).toEqual([expect.stringContaining("not exported")]);
   });
 
-  test("an eraser gesture cannot be replayed, so it is skipped with a warning", async () => {
+  test("an eraser gesture exports as an eraser step with a replay warning (#13105)", async () => {
     await recorder.start();
     gestures.emit({
       type: "tap",
@@ -255,8 +255,12 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
 
     const result = await recorder.stop();
 
-    expect(result.steps).toEqual([]);
-    expect(result.exportWarnings).toEqual([expect.stringContaining("eraser")]);
+    expect(result.steps).toHaveLength(1);
+    expect(result.steps[0]).toMatchObject({
+      tool: "tapAt",
+      params: { x: 50, y: 60, pointer: { toolType: "eraser", pressure: 0.98, tilt: 0.55 } },
+    });
+    expect(result.exportWarnings).toEqual([expect.stringContaining("root adb shell")]);
   });
 
   test("a stylus double tap upgrades only a stylus tap, and keeps the pointer", async () => {

@@ -91,12 +91,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ActionResult
-import dev.jasonpearson.automobile.protocol.CrashData
-import dev.jasonpearson.automobile.protocol.CrashEvent
-import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
-import dev.jasonpearson.automobile.protocol.HandledExceptionData
-import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PermissionResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
@@ -184,79 +179,6 @@ internal fun findNodeByResourceIdOnRootDisplay(
     }
   return findNodeByResourceId(root, resourceId, dimensions)
 }
-
-internal fun crashEventTimestamp(reportedMs: Long, nowMs: Long): Long =
-  if (reportedMs > 0) reportedMs else nowMs
-
-internal fun crashEventResponse(
-  timestamp: Long,
-  exceptionClass: String,
-  exceptionMessage: String?,
-  stackTrace: String,
-  threadName: String,
-  currentScreen: String?,
-  packageName: String,
-  appVersion: String?,
-  deviceModel: String,
-  deviceManufacturer: String,
-  osVersion: String,
-  sdkInt: Int,
-): CrashEvent =
-  CrashEvent(
-    timestamp = timestamp,
-    event =
-      CrashData(
-        exceptionClass = exceptionClass,
-        message = exceptionMessage,
-        stackTrace = stackTrace,
-        threadName = threadName,
-        currentScreen = currentScreen,
-        packageName = packageName,
-        appVersion = appVersion,
-        deviceInfo =
-          DeviceInfo(
-            model = deviceModel,
-            manufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          ),
-      ),
-  )
-
-internal fun handledExceptionEventResponse(
-  timestamp: Long,
-  exceptionClass: String,
-  exceptionMessage: String?,
-  stackTrace: String,
-  customMessage: String?,
-  currentScreen: String?,
-  packageName: String,
-  appVersion: String?,
-  deviceModel: String,
-  deviceManufacturer: String,
-  osVersion: String,
-  sdkInt: Int,
-): HandledExceptionEvent =
-  HandledExceptionEvent(
-    timestamp = timestamp,
-    event =
-      HandledExceptionData(
-        exceptionClass = exceptionClass,
-        message = exceptionMessage,
-        stackTrace = stackTrace,
-        customMessage = customMessage,
-        currentScreen = currentScreen,
-        packageName = packageName,
-        appVersion = appVersion,
-        deviceInfo =
-          DeviceInfo(
-            model = deviceModel,
-            manufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          ),
-      ),
-  )
 
 /**
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
@@ -3199,22 +3121,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       try {
-        // Fall back to now because the legacy intent timestamp extra defaults to 0.
         val response =
-          handledExceptionEventResponse(
-            timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
-            exceptionClass = exceptionClass,
-            exceptionMessage = exceptionMessage,
-            stackTrace = stackTrace,
-            customMessage = customMessage,
-            currentScreen = currentScreen,
-            packageName = packageName,
-            appVersion = appVersion,
-            deviceModel = deviceModel,
-            deviceManufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          )
+          handledExceptionEventResponse(report, nowMs = timeProvider.currentTimeMillis())
 
         webSocketServer.broadcast(response)
         Log.d(
@@ -3239,22 +3147,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       try {
-        // Fall back to now because the legacy intent timestamp extra defaults to 0.
-        val response =
-          crashEventResponse(
-            timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
-            exceptionClass = exceptionClass,
-            exceptionMessage = exceptionMessage,
-            stackTrace = stackTrace,
-            threadName = threadName,
-            currentScreen = currentScreen,
-            packageName = packageName,
-            appVersion = appVersion,
-            deviceModel = deviceModel,
-            deviceManufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          )
+        val response = crashEventResponse(report, nowMs = timeProvider.currentTimeMillis())
 
         webSocketServer.broadcast(response)
         Log.i(

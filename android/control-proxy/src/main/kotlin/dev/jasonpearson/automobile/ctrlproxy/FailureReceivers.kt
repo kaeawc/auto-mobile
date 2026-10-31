@@ -4,6 +4,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import dev.jasonpearson.automobile.protocol.CrashData
+import dev.jasonpearson.automobile.protocol.CrashEvent
+import dev.jasonpearson.automobile.protocol.DeviceInfo
+import dev.jasonpearson.automobile.protocol.HandledExceptionData
+import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
@@ -43,6 +48,62 @@ internal data class CrashReport(
   val osVersion: String,
   val sdkInt: Int,
 )
+
+/**
+ * The time a failure event carries: the reported time, or [nowMs] when the report has none. The
+ * legacy intent timestamp extra defaults to 0, so a non-positive time means "not reported".
+ */
+internal fun crashEventTimestamp(reportedMs: Long, nowMs: Long): Long =
+  if (reportedMs > 0) reportedMs else nowMs
+
+/** The wire event for [report], timestamped by [crashEventTimestamp]. */
+internal fun crashEventResponse(report: CrashReport, nowMs: Long): CrashEvent =
+  CrashEvent(
+    timestamp = crashEventTimestamp(report.timestamp, nowMs),
+    event =
+      CrashData(
+        exceptionClass = report.exceptionClass,
+        message = report.exceptionMessage,
+        stackTrace = report.stackTrace,
+        threadName = report.threadName,
+        currentScreen = report.currentScreen,
+        packageName = report.packageName,
+        appVersion = report.appVersion,
+        deviceInfo =
+          DeviceInfo(
+            model = report.deviceModel,
+            manufacturer = report.deviceManufacturer,
+            osVersion = report.osVersion,
+            sdkInt = report.sdkInt,
+          ),
+      ),
+  )
+
+/** The wire event for [report], timestamped by [crashEventTimestamp]. */
+internal fun handledExceptionEventResponse(
+  report: HandledExceptionReport,
+  nowMs: Long,
+): HandledExceptionEvent =
+  HandledExceptionEvent(
+    timestamp = crashEventTimestamp(report.timestamp, nowMs),
+    event =
+      HandledExceptionData(
+        exceptionClass = report.exceptionClass,
+        message = report.exceptionMessage,
+        stackTrace = report.stackTrace,
+        customMessage = report.customMessage,
+        currentScreen = report.currentScreen,
+        packageName = report.packageName,
+        appVersion = report.appVersion,
+        deviceInfo =
+          DeviceInfo(
+            model = report.deviceModel,
+            manufacturer = report.deviceManufacturer,
+            osVersion = report.osVersion,
+            sdkInt = report.sdkInt,
+          ),
+      ),
+  )
 
 /** The service members the failure receivers need: the sinks that forward reports to clients. */
 internal interface FailureReportHost {

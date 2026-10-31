@@ -20,9 +20,12 @@ works on that device and, when it does not, why:
 | `android.emulator.audioInputInjection` | The emulator's gRPC endpoint is reachable.                                          |
 | `android.emulator.audioOutputCapture`  | The emulator's gRPC endpoint is reachable.                                          |
 
-The two Android gRPC entries appear only when a probe result is supplied. They are `available`
-when reachable, `unavailable` when unreachable, and `unsupported` when no emulator gRPC port is
-configured. Non-available entries include a reason. `-no-audio` does not affect these two entries.
+The two Android gRPC entries appear after a running local emulator is probed during device
+listing. Results are cached for 30 seconds and refreshed by later listings; the first listing may
+omit them while the probe runs. They are `available` when the endpoint accepts a TCP connection,
+`unavailable` when unreachable, and `unsupported` when no emulator gRPC endpoint is advertised.
+Non-available entries include a reason. This checks reachability, not gRPC authentication.
+`-no-audio` does not affect these two entries.
 
 When a device cannot record, observations and `setAppPermissions` report `audio_input_unavailable`:
 recordings on that device will contain no audio, and retrying will not change that.

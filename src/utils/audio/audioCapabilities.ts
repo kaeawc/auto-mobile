@@ -83,7 +83,9 @@ export interface AndroidAudioInputs {
     | { state: "not_configured"; reason?: string };
 }
 
-function androidGrpcAudioCapabilities(grpc: AndroidAudioInputs["grpc"]): VirtualDeviceCapability[] {
+export function androidGrpcAudioCapabilities(
+  grpc: AndroidAudioInputs["grpc"],
+): VirtualDeviceCapability[] {
   if (!grpc) {
     return [];
   }

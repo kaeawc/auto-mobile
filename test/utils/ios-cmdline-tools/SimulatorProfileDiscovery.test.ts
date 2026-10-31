@@ -238,7 +238,10 @@ test("two-device discovery overlaps lists then profiles and both enumerations (s
         started.add("devices");
         await listGate.promise;
         timer.advanceTime(20);
-        return createExecResult(JSON.stringify({ devices: { "iOS-26-0": devices } }), "");
+        return createExecResult(
+          JSON.stringify({ devices: { "com.apple.CoreSimulator.SimRuntime.iOS-26-0": devices } }),
+          "",
+        );
       }
       if (args.includes("enumerate")) {
         started.add(args[2]);

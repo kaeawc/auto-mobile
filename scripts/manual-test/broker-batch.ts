@@ -7,7 +7,7 @@ import { parseSessionBrokerHostConfig } from "../../src/daemon/sessionBroker/hos
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
-import { parseBrokerBatch, planExpectations } from "./brokerBatch";
+import { batchClientDevice, parseBrokerBatch, planExpectations } from "./brokerBatch";
 import { brokerBatchHelp } from "./brokerBatchHelp";
 import { readBrokerClients, resolveBrokerClient } from "./brokerClientFiles";
 import {
@@ -154,13 +154,8 @@ function expectationPlan(command: BrokerBatchCommand, deps: BrokerBatchOrchestra
   );
   const names = command.clients ?? readBrokerClients(deps.batchDir, deps.fs);
   const clients = names.map((name) => {
-    const { initial } = resolveBrokerClient(deps.batchDir, name, deps.fs);
-    return {
-      name,
-      platform: initial.device.platform,
-      hardware: initial.device.hardware,
-      os: initial.device.os,
-    };
+    const device = batchClientDevice(resolveBrokerClient(deps.batchDir, name, deps.fs).initial);
+    return { name, platform: device.platform, hardware: device.hardware, os: device.os };
   });
   const manifest = deps.fs.exists(join(deps.batchDir, "batch.json"))
     ? z

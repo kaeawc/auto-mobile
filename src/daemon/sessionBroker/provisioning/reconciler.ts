@@ -24,6 +24,7 @@ import { BindingDeviceCreation } from "./BindingDeviceCreation";
 import { bindingReadinessLabel, isBindingReady } from "./bindingReadiness";
 import { provisionableSpec } from "./DefaultManagedSpecResolver";
 import { ReconcileAbort, type BindingReconcileFailure } from "./ReconcileAbort";
+import { BindingRegistrySchemaUnsupportedError } from "./refusal";
 import {
   bindingId,
   processJournalOwner,
@@ -904,7 +905,7 @@ export class BindingReconciler {
     return this.ready(context, disposition, claimed.assignment, provisioned);
   }
 
-  /** A busy publish cannot hand out its freshly provisioned session; release it before refusing. */
+  /** A busy or schema-refused publish cannot hand out its session; release it before refusing. */
   private async readyOrReleaseOnBusy(
     provisioned: BindingProvisionedDevice,
     publish: (release: () => Promise<void>) => Promise<ReadyResult>,
@@ -919,7 +920,10 @@ export class BindingReconciler {
     try {
       return await publish(release);
     } catch (error) {
-      if (classifySqliteError(error) === "retryable") {
+      if (
+        classifySqliteError(error) === "retryable" ||
+        error instanceof BindingRegistrySchemaUnsupportedError
+      ) {
         await release();
       }
       throw error;

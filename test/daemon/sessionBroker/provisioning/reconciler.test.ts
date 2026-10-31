@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { BindingRegistrySchemaUnsupportedError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
@@ -1742,6 +1743,59 @@ describe("BindingReconciler", () => {
   });
 
   describe("compare-and-set races", () => {
+    test.each(["updateBindingState", "claimExecution"] as const)(
+      "a schema refusal during reuse %s releases the unpublished session",
+      async (stage) => {
+        await seedAssigned();
+        const error = new BindingRegistrySchemaUnsupportedError("slots.sqlite", ["future"]);
+        provisioner.beforeReturn = async () => {
+          registry[stage] = async () => {
+            throw error;
+          };
+        };
+
+        await expect(
+          reconciler.reconcile(
+            request(SPEC_18, {
+              owner: { daemonId: "daemon-a", pid: 4242 },
+            }),
+          ),
+        ).rejects.toBe(error);
+
+        expect(provisioner.released).toEqual(["session-2"]);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
+
+    test.each(["commit", "claim"] as const)(
+      "a schema refusal during creation %s releases the unpublished session",
+      async (stage) => {
+        const error = new BindingRegistrySchemaUnsupportedError("slots.sqlite", ["future"]);
+        const advance = registry.advanceBindingJournal.bind(registry);
+        provisioner.beforeReturn = async () => {
+          if (stage === "commit") {
+            registry.advanceBindingJournal = async (id, input) => {
+              if (input.phase === "committed") {
+                throw error;
+              }
+              return advance(id, input);
+            };
+          } else {
+            registry.claimExecution = async () => {
+              throw error;
+            };
+          }
+        };
+
+        await expect(
+          reconciler.reconcile(request(SPEC_18, { owner: { daemonId: "daemon-a", pid: 4242 } })),
+        ).rejects.toBe(error);
+
+        expect(provisioner.released).toEqual(["session-1"]);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
+
     test("a concurrent commit during create loses cleanly: session released, created device removed", async () => {
       provisioner.beforeReturn = async () => {
         // Another process binds the binding while this one is still provisioning.

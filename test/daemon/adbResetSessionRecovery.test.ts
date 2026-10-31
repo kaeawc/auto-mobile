@@ -246,13 +246,10 @@ describe("AdbResetSessionRecovery", () => {
     );
     h.port.finalizeReleasedRecoveryAfterAwait = mock(async () => false);
     expect(
-      await h.coordinator.finishAdbResetRecoveryAfterReboot(
-        record,
-        false,
-        h.device,
-        h.session,
-        "incident",
-      ),
+      await h.coordinator.finishAdbResetRecoveryAfterReboot(record, false, h.device, {
+        session: h.session,
+        incidentId: "incident",
+      }),
     ).toBe("released");
     expect(h.port.finalizeReleasedRecoveryAfterAwait).toHaveBeenCalledTimes(2);
     expect(h.port.finalizeReleasedRecoveryAfterAwait).toHaveBeenNthCalledWith(

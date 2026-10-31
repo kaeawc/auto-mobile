@@ -66,7 +66,7 @@ class TestDeviceServiceClient extends DeviceServiceClient {
       `test_${this.nextRequestId}`,
       "test",
       timeoutMs,
-      () => ({ success: false }),
+      { timeoutErrorFactory: () => ({ success: false }) },
     );
   }
 }

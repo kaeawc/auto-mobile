@@ -19,20 +19,13 @@ const snapshot = (verification: Record<string, string>, enabled: string[] = []) 
 describe("AppLinksRestoreRegistry (#14110)", () => {
   test("records each part once and hands the entry to a writing session", () => {
     const registry = new AppLinksRestoreRegistry();
-    registry.record(
-      device,
-      "com.a",
-      snapshot({ "a.example.com": "none" }),
-      { verification: true },
-      undefined,
-    );
-    registry.record(
-      device,
-      "com.a",
-      snapshot({ "a.example.com": "approved" }, ["b.example.com"]),
-      { verification: true, userId: 0 },
-      "s1",
-    );
+    registry.record(device, "com.a", snapshot({ "a.example.com": "none" }), {
+      scope: { verification: true },
+    });
+    registry.record(device, "com.a", snapshot({ "a.example.com": "approved" }, ["b.example.com"]), {
+      scope: { verification: true, userId: 0 },
+      owner: "s1",
+    });
     const entry = registry.get(device.deviceId, "com.a");
     expect(entry?.owner).toBe("s1");
     expect(entry?.verification?.get("a.example.com")).toBe("none");
@@ -41,19 +34,14 @@ describe("AppLinksRestoreRegistry (#14110)", () => {
 
   test("later writes add domains without overwriting an earlier original", () => {
     const registry = new AppLinksRestoreRegistry();
-    registry.record(
-      device,
-      "com.a",
-      snapshot({ "b.example.com": "none" }),
-      { verification: true },
-      undefined,
-    );
+    registry.record(device, "com.a", snapshot({ "b.example.com": "none" }), {
+      scope: { verification: true },
+    });
     const entry = registry.record(
       device,
       "com.a",
       snapshot({ "a.example.com": "system_configured", "b.example.com": "approved" }),
-      { verification: true },
-      undefined,
+      { scope: { verification: true } },
     );
     expect(Object.fromEntries(entry.verification ?? [])).toEqual({
       "a.example.com": "system_configured",
@@ -63,8 +51,11 @@ describe("AppLinksRestoreRegistry (#14110)", () => {
 
   test("record never replaces the first session owner", () => {
     const registry = new AppLinksRestoreRegistry();
-    registry.record(device, "com.a", snapshot({}), { verification: false }, "s1");
-    const entry = registry.record(device, "com.a", snapshot({}), { verification: false }, "s2");
+    registry.record(device, "com.a", snapshot({}), { scope: { verification: false }, owner: "s1" });
+    const entry = registry.record(device, "com.a", snapshot({}), {
+      scope: { verification: false },
+      owner: "s2",
+    });
     expect(entry.owner).toBe("s1");
     expect(registry.takeOwnedBy(device.deviceId, "s2")).toEqual([]);
     expect(registry.takeOwnedBy(device.deviceId, "s1")).toEqual([entry]);
@@ -73,11 +64,11 @@ describe("AppLinksRestoreRegistry (#14110)", () => {
   test("takeOwnedBy returns only the session's entries on that device", () => {
     const registry = new AppLinksRestoreRegistry();
     const scope = { verification: true };
-    registry.record(device, "com.a", snapshot({}), scope, "s1");
-    registry.record(device, "com.b", snapshot({}), scope, "s1");
-    registry.record(device, "com.c", snapshot({}), scope, "s2");
-    registry.record(other, "com.a", snapshot({}), scope, "s1");
-    registry.record(device, "com.d", snapshot({}), scope, undefined);
+    registry.record(device, "com.a", snapshot({}), { scope, owner: "s1" });
+    registry.record(device, "com.b", snapshot({}), { scope, owner: "s1" });
+    registry.record(device, "com.c", snapshot({}), { scope, owner: "s2" });
+    registry.record(other, "com.a", snapshot({}), { scope, owner: "s1" });
+    registry.record(device, "com.d", snapshot({}), { scope });
 
     expect(registry.takeOwnedBy(device.deviceId, "s1").map((e) => e.packageName)).toEqual([
       "com.a",
@@ -163,21 +154,20 @@ describe("restoreAppLinksEntries", () => {
       users: { 0: { enabled: ["a.example.com"] } },
     });
     const original = await appLinks.read("com.a", 0);
-    registry.record(
-      device,
-      "com.a",
-      snapshot({ "a.example.com": "verified" }),
-      { verification: true },
-      undefined,
-    );
+    registry.record(device, "com.a", snapshot({ "a.example.com": "verified" }), {
+      scope: { verification: true },
+    });
     await appLinks.setVerificationState("com.a", "approved", ["a.example.com"]);
     const beforeReset = await appLinks.read("com.a", 0);
     if (!beforeReset.found) {
       throw new Error(beforeReset.reason);
     }
-    registry.record(device, "com.a", beforeReset.snapshot, { verification: true, userId: 0 }, "s1");
+    registry.record(device, "com.a", beforeReset.snapshot, {
+      scope: { verification: true, userId: 0 },
+      owner: "s1",
+    });
     await appLinks.setVerificationState("com.a", "none", "all");
-    await appLinks.setUserSelection("com.a", 0, false, "all");
+    await appLinks.setUserSelection("com.a", 0, false, { domains: "all" });
     const entries = registry.takeOwnedBy(device.deviceId, "s1");
     expect(entries).toHaveLength(1);
     expect(registry.get(device.deviceId, "com.a")).toBeUndefined();

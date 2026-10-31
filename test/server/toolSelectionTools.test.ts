@@ -31,7 +31,8 @@ describe("applyToolSelection", () => {
     registerToolSelectionTools();
     setDebugModeEnabled(false);
     serverConfig.setEmbeddedSdkEnabled(false);
-    ToolRegistry.register("sendKeys", "sendKeys", z.object({}), async () => ({ content: [] }), {
+    ToolRegistry.register("sendKeys", "sendKeys", z.object({}), {
+      handler: async () => ({ content: [] }),
       defaultEnabled: false,
     });
   });
@@ -40,7 +41,10 @@ describe("applyToolSelection", () => {
     ["setUIState", { debugOnly: true }, "--debug"],
     ["sdkTool", { embeddedSdkOnly: true }, "embedded SDK"],
   ] as const)("rejects unavailable %s before any batch write", async (name, options, reason) => {
-    ToolRegistry.registerDeviceAware(name, name, z.object({}), async () => ({}), options);
+    ToolRegistry.registerDeviceAware(name, name, z.object({}), {
+      handler: async () => ({}),
+      ...options,
+    });
     const writes: string[] = [];
     const service = {
       isEnabled: async () => false,
@@ -61,7 +65,8 @@ describe("applyToolSelection", () => {
   test.each([true, false])(
     "setToolEnabled rejects an unavailable tool with enabled=%s",
     async (enabled) => {
-      ToolRegistry.register("setUIState", "debug tool", z.object({}), async () => ({}), {
+      ToolRegistry.register("setUIState", "debug tool", z.object({}), {
+        handler: async () => ({}),
         debugOnly: true,
       });
       const writes: string[] = [];
@@ -86,7 +91,8 @@ describe("applyToolSelection", () => {
   );
 
   test("still enables callable default-disabled and debug tools when debug is on", async () => {
-    ToolRegistry.register("setUIState", "debug tool", z.object({}), async () => ({}), {
+    ToolRegistry.register("setUIState", "debug tool", z.object({}), {
+      handler: async () => ({}),
       debugOnly: true,
     });
     setDebugModeEnabled(true);

@@ -423,7 +423,7 @@ export class IdeDeviceRoutes {
         ideMutation,
         viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
         viaDirectFile: (adb) =>
-          clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+          clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, { fileName }),
       },
     );
     const resolvedStore = resolution?.resolvedStore;
@@ -688,8 +688,8 @@ export class IdeDeviceRoutes {
       this.ports.daemonState().getDevicePool(),
       device,
       action,
-      Boolean(sessionManager.getSessionForDevice?.(device.deviceId)),
       {
+        heldBySession: Boolean(sessionManager.getSessionForDevice?.(device.deviceId)),
         sessions: frameHeldSessionsFrom(sessionManager),
         requester,
         sessionManager,
@@ -789,15 +789,17 @@ export class IdeDeviceRoutes {
       appId,
       fileName,
       () => this.ports.adbClientFactory().create(device),
-      async () => {
-        mutation.ideMutation?.signal.throwIfAborted();
-        resolution = (await mutation.viaSdk(onDispatch)) || undefined;
-      },
-      // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
-      (adb) => {
-        mutation.ideMutation?.signal.throwIfAborted();
-        onDispatch();
-        return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
+      {
+        viaSdk: async () => {
+          mutation.ideMutation?.signal.throwIfAborted();
+          resolution = (await mutation.viaSdk(onDispatch)) || undefined;
+        },
+        // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
+        viaDirectFile: (adb) => {
+          mutation.ideMutation?.signal.throwIfAborted();
+          onDispatch();
+          return mutation.viaDirectFile(adb).catch(rethrowForRouteWithoutUserId);
+        },
       },
     );
     return { ...result, resolution };

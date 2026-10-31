@@ -28,18 +28,14 @@ describe("isAdbPostDispatchTransportError", () => {
     expect(isAdbPostDispatchTransportError(" \n", 255, "emulator-5554")).toBe(true);
     expect(isAdbPostDispatchTransportError("", 1, "emulator-5554")).toBe(false);
     expect(isAdbPostDispatchTransportError("", undefined, "emulator-5554")).toBe(false);
-    expect(isAdbPostDispatchTransportError("", 255, "emulator-5554", undefined, " \n")).toBe(true);
+    expect(isAdbPostDispatchTransportError("", 255, "emulator-5554", { stdout: " \n" })).toBe(true);
   });
 
   test("exit 255 with a remote error on stdout is not transport loss", () => {
     expect(
-      isAdbPostDispatchTransportError(
-        "",
-        255,
-        "emulator-5554",
-        undefined,
-        "Unknown command: bar\n",
-      ),
+      isAdbPostDispatchTransportError("", 255, "emulator-5554", {
+        stdout: "Unknown command: bar\n",
+      }),
     ).toBe(false);
   });
 
@@ -47,13 +43,9 @@ describe("isAdbPostDispatchTransportError", () => {
     "explicit transport stderr still matches after remote stdout: %s",
     (stderr) => {
       expect(
-        isAdbPostDispatchTransportError(
-          stderr,
-          255,
-          "emulator-5554",
-          undefined,
-          "partial output\n",
-        ),
+        isAdbPostDispatchTransportError(stderr, 255, "emulator-5554", {
+          stdout: "partial output\n",
+        }),
       ).toBe(true);
     },
   );
@@ -74,9 +66,11 @@ describe("isAdbPostDispatchTransportError", () => {
   test("accepts a serial-qualified diagnostic only for the selected serial or alias", () => {
     const stderr = "adb: device 'localhost:5555': error: closed";
     expect(isAdbPostDispatchTransportError(stderr, 255, "emulator-5554")).toBe(false);
-    expect(isAdbPostDispatchTransportError(stderr, 255, "emulator-5554", "localhost:5555")).toBe(
-      true,
-    );
+    expect(
+      isAdbPostDispatchTransportError(stderr, 255, "emulator-5554", {
+        expectedTransportId: "localhost:5555",
+      }),
+    ).toBe(true);
   });
 });
 

@@ -388,17 +388,14 @@ describe("control-socket forward byte parity: HTTP loopback vs in process (#1182
     ToolRegistry.register(PLAIN_ERROR_TOOL, "parity plain", z.object({}), async () => {
       throw new Error("parity plain failure");
     });
-    ToolRegistry.register(
-      PROGRESS_TOOL,
-      "parity progress",
-      z.object({}),
-      async (_args, progress) => {
+    ToolRegistry.register(PROGRESS_TOOL, "parity progress", z.object({}), {
+      handler: async (_args, progress) => {
         await progress?.(1, 2, "half way");
         await progress?.(2, 2);
         return { content: [{ type: "text", text: "progressed" }] };
       },
-      { supportsProgress: true },
-    );
+      supportsProgress: true,
+    });
     ToolRegistry.register(
       HOLD_TOOL,
       "parity hold",

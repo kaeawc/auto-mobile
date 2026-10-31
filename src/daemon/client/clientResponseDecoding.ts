@@ -308,6 +308,8 @@ export interface DaemonToolCallOptions {
   readonly tasks?: TaskRelayFrame;
   /** Abandons this call (and only this call) when aborted. */
   readonly signal?: AbortSignal;
+  /** Receives the daemon request id once the call is sent. */
+  readonly onRequestId?: (requestId: string) => void;
 }
 
 export interface DaemonClientLike {
@@ -317,7 +319,6 @@ export interface DaemonClientLike {
     toolName: string,
     params: Record<string, any>,
     progressToken?: string | number,
-    onRequestId?: (requestId: string) => void,
     options?: DaemonToolCallOptions,
   ): Promise<any>;
   /**

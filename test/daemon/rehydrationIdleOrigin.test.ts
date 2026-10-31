@@ -31,7 +31,7 @@ describe("rehydrated session idle origin", () => {
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: true,
     });
-    await persistence.markReleased("row-idle", "released", 0, "daemon-restart");
+    await persistence.markReleased("row-idle", "released", 0, { reason: "daemon-restart" });
     sessions = new SessionManager(timer, persistence);
   });
 

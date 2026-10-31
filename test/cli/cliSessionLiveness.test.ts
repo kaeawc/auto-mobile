@@ -330,7 +330,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       async (sessionId, reason) => {
         reaped.push({ sessionId, reason });
       },
-      timer,
+      { timer },
     );
     const proxy = proxyOver(client);
     try {
@@ -414,7 +414,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       async (sessionId, reason) => {
         reaped.push({ sessionId, reason });
       },
-      timer,
+      { timer },
     );
     timer.advanceTime(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS + 1);
     await monitor.tick();

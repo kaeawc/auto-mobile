@@ -167,7 +167,7 @@ describe("GetLogs", () => {
     const ios: IosUnifiedLogSource = {
       resolveProcessName: async () => "Preferences",
       collect: async (...args) => {
-        calls.push([args[0], args[4]]);
+        calls.push([args[0], args[3]?.processName]);
         return { text: "", truncated: false };
       },
     };

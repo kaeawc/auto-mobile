@@ -88,7 +88,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         reaped.push({ sessionId, reason });
         await sessionManager.releaseSession(sessionId);
       },
-      timer,
+      { timer },
     );
   });
 

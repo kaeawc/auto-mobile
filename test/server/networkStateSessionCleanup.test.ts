@@ -120,7 +120,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
 
   test("releasing the owning session empties the device store and pushes the empty set", async () => {
     state.addMock(DEVICE_A, rule("a.com"), "session-1");
-    state.startSimulation(DEVICE_A, "timeout", 30, null, "session-1");
+    state.startSimulation(DEVICE_A, "timeout", 30, { limit: null, ownerSessionUuid: "session-1" });
 
     manager.release("session-1", DEVICE_A);
 
@@ -134,7 +134,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
 
   test("identity replacement clears host state without a device push or quarantine", () => {
     state.addMock(DEVICE_A, rule("a.com"), "session-1");
-    state.startSimulation(DEVICE_A, "timeout", 30, null, "session-1");
+    state.startSimulation(DEVICE_A, "timeout", 30, { limit: null, ownerSessionUuid: "session-1" });
     manager.release("session-1", DEVICE_A, false, true);
     expect(state.getMocks(DEVICE_A).size).toBe(0);
     expect(state.getSimulation(DEVICE_A)).toBeNull();
@@ -146,7 +146,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
   test("a second session's device keeps its rules when the first session is released", async () => {
     state.addMock(DEVICE_A, rule("a.com"), "session-1");
     const keep = state.addMock(DEVICE_B, rule("b.com"), "session-2");
-    state.startSimulation(DEVICE_B, "timeout", 30, null, "session-2");
+    state.startSimulation(DEVICE_B, "timeout", 30, { limit: null, ownerSessionUuid: "session-2" });
 
     manager.release("session-1", DEVICE_A);
     await Promise.all(manager.pendingCleanups.map((entry) => entry.cleanup));
@@ -180,7 +180,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
     const own = state.addMock(DEVICE_A, rule("own.com"), "session-1");
     const sessionless = state.addMock(DEVICE_A, rule("sessionless.com"));
     const other = state.addMock(DEVICE_A, rule("other.com"), "session-2");
-    state.startSimulation(DEVICE_A, "timeout", 30, null, "session-1");
+    state.startSimulation(DEVICE_A, "timeout", 30, { limit: null, ownerSessionUuid: "session-1" });
 
     manager.release("session-1", DEVICE_A);
     await Promise.all(manager.pendingCleanups.map((entry) => entry.cleanup));
@@ -197,7 +197,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
   test("a sessionless rule added after a session's rule survives that session's release", async () => {
     state.addMock(DEVICE_A, rule("own.com"), "session-1");
     const sessionless = state.addMock(DEVICE_A, rule("sessionless.com"));
-    state.startSimulation(DEVICE_A, "timeout", 30, null);
+    state.startSimulation(DEVICE_A, "timeout", 30, { limit: null });
 
     manager.release("session-1", DEVICE_A);
     await Promise.all(manager.pendingCleanups.map((entry) => entry.cleanup));
@@ -294,7 +294,7 @@ describe("createOwnerlessNetworkStateAcquisitionCleanup (#11130)", () => {
   test("acquiring a device clears sessionless mocks and simulation and pushes the rest", async () => {
     state.addMock(DEVICE_A, rule("sessionless.com"));
     const owned = state.addMock(DEVICE_A, rule("owned.com"), "session-1");
-    state.startSimulation(DEVICE_A, "timeout", 30, null);
+    state.startSimulation(DEVICE_A, "timeout", 30, { limit: null });
     const otherDevice = state.addMock(DEVICE_B, rule("b.com"));
 
     acquire(DEVICE_A);
@@ -310,7 +310,7 @@ describe("createOwnerlessNetworkStateAcquisitionCleanup (#11130)", () => {
   });
 
   test("a session-owned simulation survives acquisition", () => {
-    state.startSimulation(DEVICE_A, "timeout", 30, null, "session-1");
+    state.startSimulation(DEVICE_A, "timeout", 30, { limit: null, ownerSessionUuid: "session-1" });
 
     acquire(DEVICE_A);
 
@@ -399,8 +399,7 @@ test("default pusher lets the iOS push decide when a stray Android client shares
   const ios = IOSCtrlProxyClient.createForTesting(
     { deviceId: IOS_UDID, platform: "ios", name: "fake" },
     8765,
-    () => new FakeOpenSocket(),
-    new FakeTimer(),
+    { wsFactory: () => new FakeOpenSocket(), timer: new FakeTimer() },
   );
   const android = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(stray);
   const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(ios);
@@ -428,8 +427,7 @@ test("default pusher still runs the Android push when a stray iOS client shares 
   const stray = IOSCtrlProxyClient.createForTesting(
     { deviceId: "emulator-5554", platform: "ios", name: "fake" },
     8765,
-    () => new FakeOpenSocket(),
-    new FakeTimer(),
+    { wsFactory: () => new FakeOpenSocket(), timer: new FakeTimer() },
   );
   const androidExisting = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(
     android,

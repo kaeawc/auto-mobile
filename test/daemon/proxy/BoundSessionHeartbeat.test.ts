@@ -168,7 +168,7 @@ describe("BoundSessionHeartbeat.recordBoundSessionHeartbeatSuccess", () => {
 describe("BoundSessionHeartbeat.noteNotFoundAnswer", () => {
   test("a non-recoverable release reason ends the session", () => {
     const h = harness();
-    expect(h.bound.noteNotFoundAnswer("a", null, "idle", undefined)).toEqual({
+    expect(h.bound.noteNotFoundAnswer("a", null, "idle")).toEqual({
       kind: "ended",
       reason: "idle",
     });
@@ -179,7 +179,7 @@ describe("BoundSessionHeartbeat.noteNotFoundAnswer", () => {
     h.hold("a");
     h.ownedDeviceSessions.add("a");
     h.timer.advanceTime(50);
-    const outcome = h.bound.noteNotFoundAnswer("a", null, "daemon-restart", undefined);
+    const outcome = h.bound.noteNotFoundAnswer("a", null, "daemon-restart");
     expect(outcome).toEqual({
       kind: "awaited",
       windowSince: h.timer.now(),
@@ -195,9 +195,9 @@ describe("BoundSessionHeartbeat.noteNotFoundAnswer", () => {
     const h = harness();
     h.hold("a");
     h.ownedDeviceSessions.add("a");
-    h.bound.noteNotFoundAnswer("a", null, "daemon-restart", undefined);
+    h.bound.noteNotFoundAnswer("a", null, "daemon-restart");
     h.timer.advanceTime(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS + 1);
-    expect(h.bound.noteNotFoundAnswer("a", null, "daemon-restart", undefined)).toEqual({
+    expect(h.bound.noteNotFoundAnswer("a", null, "daemon-restart")).toEqual({
       kind: "stopped",
     });
   });
@@ -207,21 +207,22 @@ describe("BoundSessionHeartbeat.noteNotFoundAnswer", () => {
     h.hold("a");
     h.ownedDeviceSessions.add("a");
     h.flags.firstOnConnection = true;
-    const outcome = h.bound.noteNotFoundAnswer("a", null, undefined, undefined);
+    const outcome = h.bound.noteNotFoundAnswer("a", null, undefined);
     expect(outcome).toMatchObject({ kind: "awaited", handoff: UNREHYDRATED_HANDOFF });
   });
 
   test("the latest binding is asked again once when it has had no window", () => {
     const h = harness();
-    expect(
-      h.bound.noteNotFoundAnswer("a", null, undefined, undefined, { mayAskAgain: true }),
-    ).toEqual({ kind: "ask-again", handoff: false });
+    expect(h.bound.noteNotFoundAnswer("a", null, undefined, { mayAskAgain: true })).toEqual({
+      kind: "ask-again",
+      handoff: false,
+    });
   });
 
   test("an answer for a session that is not held records no window", () => {
     const h = harness();
     h.ownedDeviceSessions.add("a");
-    h.bound.noteNotFoundAnswer("a", null, "daemon-restart", undefined);
+    h.bound.noteNotFoundAnswer("a", null, "daemon-restart");
     expect(h.state.notFoundWindows.size).toBe(0);
   });
 });

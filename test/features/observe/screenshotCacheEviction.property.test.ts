@@ -40,7 +40,7 @@ describe("selectScreenshotsToEvict (property-based)", () => {
       fc.property(rawFiles, maxSize, minAge, (files, max, min) => {
         return (
           totalSize(files) > max ||
-          selectScreenshotsToEvict(files, max, min, NOW_MS).toEvict.length === 0
+          selectScreenshotsToEvict(files, max, min, { nowMs: NOW_MS }).toEvict.length === 0
         );
       }),
       RUN_OPTIONS,
@@ -51,7 +51,9 @@ describe("selectScreenshotsToEvict (property-based)", () => {
     fc.assert(
       fc.property(rawFiles, maxSize, minAge, (files, max, min) => {
         const paths = new Set(files.map((f) => f.path));
-        return selectScreenshotsToEvict(files, max, min, NOW_MS).toEvict.every((p) => paths.has(p));
+        return selectScreenshotsToEvict(files, max, min, { nowMs: NOW_MS }).toEvict.every((p) =>
+          paths.has(p),
+        );
       }),
       RUN_OPTIONS,
     );
@@ -61,7 +63,7 @@ describe("selectScreenshotsToEvict (property-based)", () => {
     fc.assert(
       fc.property(rawFiles, maxSize, minAge, (files, max, min) => {
         const lookup = byPath(files);
-        return selectScreenshotsToEvict(files, max, min, NOW_MS).toEvict.every(
+        return selectScreenshotsToEvict(files, max, min, { nowMs: NOW_MS }).toEvict.every(
           (p) => NOW_MS - lookup.get(p)!.mtimeMs >= min,
         );
       }),
@@ -73,7 +75,7 @@ describe("selectScreenshotsToEvict (property-based)", () => {
     fc.assert(
       fc.property(rawFiles, maxSize, minAge, (files, max, min) => {
         const lookup = byPath(files);
-        const mtimes = selectScreenshotsToEvict(files, max, min, NOW_MS).toEvict.map(
+        const mtimes = selectScreenshotsToEvict(files, max, min, { nowMs: NOW_MS }).toEvict.map(
           (p) => lookup.get(p)!.mtimeMs,
         );
         return mtimes.every((m, i) => i === 0 || mtimes[i - 1] <= m);
@@ -86,7 +88,7 @@ describe("selectScreenshotsToEvict (property-based)", () => {
     fc.assert(
       fc.property(rawFiles, maxSize, minAge, (files, max, min) => {
         const lookup = byPath(files);
-        const plan = selectScreenshotsToEvict(files, max, min, NOW_MS);
+        const plan = selectScreenshotsToEvict(files, max, min, { nowMs: NOW_MS });
         const evictedSize = plan.toEvict.reduce((s, p) => s + lookup.get(p)!.size, 0);
         const remaining = totalSize(files) - evictedSize;
         if (plan.overBudgetAfterEviction !== remaining > max) {
@@ -108,8 +110,12 @@ describe("selectScreenshotsToEvict (property-based)", () => {
       fc.property(rawFiles, maxSize, maxSize, minAge, (files, a, b, min) => {
         const smaller = Math.min(a, b);
         const larger = Math.max(a, b);
-        const evictedSmall = selectScreenshotsToEvict(files, smaller, min, NOW_MS).toEvict;
-        const evictedLarge = selectScreenshotsToEvict(files, larger, min, NOW_MS).toEvict;
+        const evictedSmall = selectScreenshotsToEvict(files, smaller, min, {
+          nowMs: NOW_MS,
+        }).toEvict;
+        const evictedLarge = selectScreenshotsToEvict(files, larger, min, {
+          nowMs: NOW_MS,
+        }).toEvict;
         // The larger-budget selection is a prefix of the smaller-budget one.
         return (
           evictedLarge.length <= evictedSmall.length &&

@@ -43,8 +43,7 @@ export class IosCtrlProxyOrphanReaper {
             processClient,
             pid,
             deadline,
-            timer,
-            reapedRootPids,
+            { timer, reapedRootPids },
           ))
         ) {
           return;
@@ -65,8 +64,7 @@ export class IosCtrlProxyOrphanReaper {
     processClient: IosCtrlProxyProcessClient,
     pid: number,
     deadline: number,
-    timer: Timer,
-    reapedRootPids: Set<number>,
+    { timer, reapedRootPids }: { timer: Timer; reapedRootPids: Set<number> },
   ): Promise<boolean> {
     const root = await IosCtrlProxyOrphanReaper.findStartupOrphanRunnerRoot(
       processClient,

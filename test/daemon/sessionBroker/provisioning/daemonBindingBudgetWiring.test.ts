@@ -34,7 +34,7 @@ class NoSessions implements BrokerDeviceAcquisitionSessions {
 }
 function wiring(
   resourceBudgetPolicy?: BindingResourceBudgetPolicy,
-  watchInventory?: WatchBindingInventorySource,
+  watchInventory: WatchBindingInventorySource = { listWatchSimulators: async () => [] },
   watchCatalog?: WatchBindingCatalog,
 ) {
   const timer = new FakeTimer();
@@ -71,7 +71,7 @@ function wiring(
       provisioner,
       deleter,
       checkBootCapacity: async () => {},
-      ...(watchInventory ? { watchInventory } : {}),
+      watchInventory,
       ...(watchCatalog ? { watchCatalog } : {}),
       androidImageCatalog: { listInstalledPackages: async () => [SPEC.runtime] },
       androidProfileCatalog: { listProfileIds: async () => [SPEC.deviceType] },

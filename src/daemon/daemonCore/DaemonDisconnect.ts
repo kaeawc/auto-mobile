@@ -280,13 +280,10 @@ export class DaemonDisconnect {
               schedule.selectPlatform(platforms, this.host.services.timer().now(), planOnTracked),
           };
           try {
-            await this.checkDisconnects(
-              deviceManager,
-              listRecordings,
-              transportRestarts,
+            await this.checkDisconnects(deviceManager, listRecordings, transportRestarts, {
               checkPlanDeviceLoss,
               sweep,
-            );
+            });
             schedule.recordSuccess(sweep.idleSignature);
           } catch (error) {
             schedule.recordFailure();
@@ -439,8 +436,10 @@ export class DaemonDisconnect {
         this.host.offlineRecoveryAttemptedDeviceIds(),
         candidateDeviceIds,
         offlineDeviceIds,
-        this.host.offlineRecoveryAttemptedIncarnations(),
-        candidateIncarnations,
+        {
+          attemptedIncarnations: this.host.offlineRecoveryAttemptedIncarnations(),
+          candidateIncarnations,
+        },
       ),
     );
     // A serial that is mid-provisionDevice/startDevice already has its
@@ -842,8 +841,13 @@ export class DaemonDisconnect {
     >,
     listRecordings: DaemonDisconnectHost["listActiveVideoRecordings"],
     transportRestarts: AdbTransportRestartLookup,
-    checkPlanDeviceLoss: ReturnType<DaemonDisconnect["createPlanDeviceLossCheck"]>,
-    sweep: DisconnectSweep,
+    {
+      checkPlanDeviceLoss,
+      sweep,
+    }: {
+      checkPlanDeviceLoss: ReturnType<DaemonDisconnect["createPlanDeviceLossCheck"]>;
+      sweep: DisconnectSweep;
+    },
   ): Promise<void> {
     this.startDeferredSessionRecoverySweep();
     const activeRecordings = await listRecordings();
@@ -936,8 +940,7 @@ export class DaemonDisconnect {
         candidateDeviceIds,
         candidatePlatforms,
         bootedDeviceIds,
-        listed.listedNonDeviceIds,
-        transportRestarts,
+        { listedNonDeviceIds: listed.listedNonDeviceIds, transportRestarts },
       ),
     });
     if (disconnectResult.skippedAllDiscoveryFailed) {
@@ -962,27 +965,31 @@ export class DaemonDisconnect {
       discovery.succeededPlatforms,
       this.host.lifecycle.deviceDisconnectMisses().size,
       candidateDeviceIds,
-      bootedDeviceIds,
-      this.host.services
-        .devicePool()
-        .getAllDevices()
-        .map((device) => device.id),
+      {
+        bootedDeviceIds,
+        pooledDeviceIds: this.host.services
+          .devicePool()
+          .getAllDevices()
+          .map((device) => device.id),
+      },
     );
-    await this.cleanupDisconnects(
-      bootedDeviceIds,
-      succeededPlatforms,
-      missingByDevice,
+    await this.cleanupDisconnects(bootedDeviceIds, succeededPlatforms, missingByDevice, {
       activeRecordings,
       sweep,
-    );
+    });
   }
 
   private async cleanupDisconnects(
     bootedDeviceIds: Set<string>,
     succeededPlatforms: Set<Platform>,
     missingByDevice: Map<string, string[]>,
-    activeRecordings: Awaited<ReturnType<DaemonDisconnectHost["listActiveVideoRecordings"]>>,
-    sweep: { adbServerResetCohort: readonly PooledDevice[] },
+    {
+      activeRecordings,
+      sweep,
+    }: {
+      activeRecordings: Awaited<ReturnType<DaemonDisconnectHost["listActiveVideoRecordings"]>>;
+      sweep: { adbServerResetCohort: readonly PooledDevice[] };
+    },
   ): Promise<void> {
     const resetCohort = getProcessWideAdbServerResetCohort(
       bootedDeviceIds,

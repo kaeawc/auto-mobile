@@ -101,13 +101,7 @@ describe("stale-display result channel", () => {
     interactionDeps.tapAtElementFactory = () => ({
       execute: async () => withStaleDisplay(results.tapAt, stale),
     });
-    const response = await tapAtHandler(
-      device,
-      { x: 1, y: 2 },
-      undefined,
-      undefined,
-      interactionDeps,
-    );
+    const response = await tapAtHandler(device, { x: 1, y: 2 }, { deps: interactionDeps });
     expect(response.isError).toBe(true);
     expect(getStructuredField(response, "staleDisplay")).toEqual(stale.details);
     expect(getStructuredField(response, "error")).toBe(stale.message);
@@ -119,9 +113,7 @@ describe("stale-display result channel", () => {
     const response = await tapOnHandler(
       device,
       { action: "tap", selector: { text: "Target" } },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     expect(response.isError).toBe(true);
     expect(getStructuredField(response, "staleDisplay")).toEqual(stale.details);

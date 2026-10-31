@@ -139,7 +139,7 @@ class IdleWorld {
     async (sessionId, reason) => {
       await this.manager.releaseSession(sessionId, reason);
     },
-    this.timer,
+    { timer: this.timer },
   );
   /** The live session object: read after a release too, to compare with what released it. */
   session!: Session;
@@ -379,7 +379,7 @@ describe("the scan, a late call's admission and idleReleaseAt give one idle dead
           async (id, reason) => {
             await manager.releaseSession(id, reason);
           },
-          timer,
+          { timer },
         );
         try {
           const session = await manager.createSession(SESSION, DEVICE, "android");

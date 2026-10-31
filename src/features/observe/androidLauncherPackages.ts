@@ -372,12 +372,9 @@ export class QuietTreeStability {
     const controller = new AbortController();
     const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     // Lazy construction avoids starting a hierarchy service for ordinary gfxinfo callers.
-    const reader = (this.reader ??= new ViewHierarchy(
-      this.device,
-      this.adbFactory,
-      null,
-      this.timer,
-    ));
+    const reader = (this.reader ??= new ViewHierarchy(this.device, this.adbFactory, null, {
+      timer: this.timer,
+    }));
     const tree = await raceWithDeadline(
       () =>
         reader.getViewHierarchy(undefined, {

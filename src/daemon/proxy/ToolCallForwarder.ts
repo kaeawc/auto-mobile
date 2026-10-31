@@ -70,8 +70,7 @@ function callDaemonTool(
     name,
     args,
     progressToken,
-    onRequestId,
-    tasks ? { signal, tasks } : { signal },
+    tasks ? { onRequestId, signal, tasks } : { onRequestId, signal },
   );
 }
 
@@ -132,7 +131,6 @@ export interface ToolCallForwarderPort {
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
-    fenceSessionNotFoundOnRetry?: boolean,
     options?: RecoverableReconnectOptions,
   ): Promise<T>;
   deferredToTask(
@@ -204,8 +202,12 @@ export class ToolCallForwarder {
     name: string,
     callerArgs: Record<string, unknown>,
     progressToken: string | number | undefined,
-    onProgress: DaemonProxyProgressCallback | undefined,
-    { allowSuspectRetry, tasks, signal }: ToolCallForwardMode,
+    {
+      onProgress,
+      allowSuspectRetry,
+      tasks,
+      signal,
+    }: ToolCallForwardMode & { onProgress?: DaemonProxyProgressCallback },
   ): Promise<ForwardedToolCall> {
     if (this.port.hasLivenessLifecycleFence()) {
       await this.port.waitForLivenessRecovery(signal);
@@ -291,8 +293,11 @@ export class ToolCallForwarder {
         // Acquisition is admitted while fenced; the terminal fence is cleared once
         // the result-minted session establishes a fresh binding.
         allowReleasedSession,
-        true,
-        { nonIdempotentToolName: nonIdempotentToolName(name), signal },
+        {
+          fenceSessionNotFoundOnRetry: true,
+          nonIdempotentToolName: nonIdempotentToolName(name),
+          signal,
+        },
       );
       // Connection recovery is shared with siblings; cancel this wait and fence
       // replay without aborting the shared connection attempt.

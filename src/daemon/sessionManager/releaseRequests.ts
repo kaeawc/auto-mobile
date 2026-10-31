@@ -526,10 +526,12 @@ export class SessionReleaseRequests {
       sessionId,
       releasedRowStatus("explicit-release"),
       this.host.sessionNow(),
-      "explicit-release",
-      persisted.stable_identity_generation === undefined
-        ? {}
-        : { expectedRowGeneration: persisted.stable_identity_generation },
+      {
+        reason: "explicit-release",
+        ...(persisted.stable_identity_generation === undefined
+          ? {}
+          : { expectedRowGeneration: persisted.stable_identity_generation }),
+      },
     );
     return (await this.fenceExplicitlyReleasedRow(sessionId)) ?? "row-changed";
   }

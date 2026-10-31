@@ -38,7 +38,7 @@ export async function resolveStreamDevice(
     if (platform === "android") {
       throw new ActionableError("No connected android devices found.");
     }
-    candidates = await rediscoverStreamDevices(deviceManager, platform, timer, signal, source);
+    candidates = await rediscoverStreamDevices(deviceManager, platform, timer, { signal, source });
   }
   return selectStreamDevice(candidates, deviceId, platform);
 }
@@ -74,8 +74,7 @@ async function rediscoverStreamDevices(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   platform: "android" | "ios",
   timer: Timer,
-  signal: AbortSignal | undefined,
-  source: string,
+  { signal, source }: { signal?: AbortSignal; source: string },
 ): Promise<BootedDevice[]> {
   try {
     return await new DefaultRetryExecutor(timer).executeOrThrow(

@@ -70,7 +70,7 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     gestures = new FakeGestureEmitter();
     a11y = new FakeA11ySource();
     timer = new FakeTimer();
-    recorder = new DualTrackRecorder(device, gestures, a11y, timer);
+    recorder = new DualTrackRecorder(device, gestures, a11y, { timer });
   });
 
   test("a stylus tap over an element is a tapAt with a pointer, never a tapOn", async () => {

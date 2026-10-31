@@ -105,7 +105,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         reaped.push({ sessionId, reason });
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
   }
 
@@ -387,7 +387,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
             reaped.push({ sessionId, reason });
             await sessionManager.releaseSession(sessionId, reason);
           },
-          timer,
+          { timer },
         );
 
         await admitControlCall("exec-lapsed").then(
@@ -487,7 +487,11 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       beforeEach(() => {
         tracker = new ExecutionTracker(timer, new FakeIdGenerator());
         sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-          hasActiveSessionExecution(tracker, sessionManager, pool, sessionId, query),
+          hasActiveSessionExecution(
+            { tracker, sessionManager, devicePool: pool },
+            sessionId,
+            query,
+          ),
         );
         readMonitor = new SessionHeartbeatMonitor(
           sessionManager,
@@ -502,7 +506,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
               tracker,
             );
           },
-          timer,
+          { timer },
         );
       });
 
@@ -898,8 +902,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
           reaped.push({ sessionId, reason });
           await sessionManager.releaseSession(sessionId, reason);
         },
-        timer,
-        { stallThresholdMs: LEASE_MS },
+        { timer, stallThresholdMs: LEASE_MS },
       );
       try {
         strictMonitor.start();
@@ -976,7 +979,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         hasReceivedHeartbeat: true,
       });
       await persistence.recordLivenessOwnership(SESSION, OWNER);
-      await persistence.markReleased(SESSION, "expired", 30, "daemon-restart");
+      await persistence.markReleased(SESSION, "expired", 30, { reason: "daemon-restart" });
       // The restarted daemon comes up long after the persisted heartbeat.
       timer.setCurrentTime(40);
       const restarted = new SessionManager(timer, persistence);

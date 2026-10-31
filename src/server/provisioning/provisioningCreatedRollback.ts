@@ -55,7 +55,8 @@ export async function rollbackCreatedDevice(
     }
     target = resolved.device;
   }
-  const rollback = await cleanupFailedProvisionDevice(ctx, deps, target, provisionFailure, {
+  const rollback = await cleanupFailedProvisionDevice(ctx, deps, target, {
+    provisionFailure,
     lifecycleLease,
     pendingMutationSettlement,
     rollbackDeadlineMs,

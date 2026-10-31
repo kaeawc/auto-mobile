@@ -67,9 +67,7 @@ export class TapAnyIosTapper {
       (await this.deps.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
         this.deps.device.deviceId,
         xcTestClient,
-        this.deps.featureFlags,
-        undefined,
-        signal,
+        { featureFlags: this.deps.featureFlags, signal },
       ));
 
     if (isVoiceOverEnabled && element) {

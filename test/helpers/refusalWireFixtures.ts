@@ -1019,7 +1019,11 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
         "SDK capability query failed: invalid capability reply",
       ),
   ],
-  ["timeout.boot", () => new DeviceBootTimeoutError("boot", "readiness", 1_000, 1_000, DEVICE)],
+  [
+    "timeout.boot",
+    () =>
+      new DeviceBootTimeoutError("boot", "readiness", 1_000, { budgetMs: 1_000, device: DEVICE }),
+  ],
   [
     "daemon_handoff_interrupted",
     () => new DaemonHandoffInterruptionError("Daemon handoff interrupted the in-flight request"),

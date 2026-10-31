@@ -118,7 +118,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
         );
         await sessionManager.releaseSession(sessionId, reason, { allowExpired: true });
       },
-      timer,
+      { timer },
     );
     monitor.start();
   }
@@ -211,7 +211,11 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       (wallNowMs = Date.now()) => sessionManager.sessionNow() - wallNowMs,
     );
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-      hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
+      hasActiveSessionExecution(
+        { tracker: executionTracker, sessionManager, devicePool: pool },
+        sessionId,
+        query,
+      ),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
     if (startOwned) {

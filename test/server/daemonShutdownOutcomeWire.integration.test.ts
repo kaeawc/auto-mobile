@@ -64,8 +64,8 @@ describe("daemon shutdown MCP outcome", () => {
       SCHEMA_TOOL_NAME,
       "daemon shutdown wire probe with output schema",
       z.object({}),
-      handler,
       {
+        handler,
         outputSchema: z.object({
           id: z.string(),
           deviceId: z.string(),

@@ -138,8 +138,7 @@ export class AndroidCoordinateTalkBack {
             { x: point.x, y: point.y },
             "longPress",
             tapDurationMs(options, "android"),
-            guardedDriver,
-            { displayFence: fence },
+            { driver: guardedDriver, fenceOptions: { displayFence: fence } },
           )
         : // A precise TalkBack activation already contains the double-tap gesture.
           this.dependencies.talkBackStrategy.executePreciseTap(

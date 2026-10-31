@@ -516,30 +516,24 @@ export class SocketInput {
     kind: "start" | "move" | "end",
     socketSessionId: string,
     targetDevice: BootedDevice,
-    gestureId: string,
-    startAdmission: StrokeAdmission | undefined,
+    { gestureId, startAdmission }: { gestureId: string; startAdmission?: StrokeAdmission },
   ): Promise<void> {
-    return await this.inputStrokes.trackAckedGestureFrame(
-      kind,
-      socketSessionId,
-      targetDevice,
+    return await this.inputStrokes.trackAckedGestureFrame(kind, socketSessionId, targetDevice, {
       gestureId,
       startAdmission,
-    );
+    });
   }
   async liftingStrokeOnSessionRefusal<T>(
     kind: "start" | "move" | "end",
     socketSessionId: string | undefined,
     targetDevice: BootedDevice,
-    gestureId: string,
-    run: () => Promise<T>,
+    { gestureId, run }: { gestureId: string; run: () => Promise<T> },
   ): Promise<T> {
     return await this.inputStrokes.liftingStrokeOnSessionRefusal(
       kind,
       socketSessionId,
       targetDevice,
-      gestureId,
-      run,
+      { gestureId, run },
     );
   }
   captureStrokeAdmission(deviceId: string, signal?: AbortSignal): StrokeAdmission {

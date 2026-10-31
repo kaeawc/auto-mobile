@@ -53,7 +53,9 @@ export function registerProfilingSessionCleanup(
     const device: BootedDevice = { name: deviceId, platform: "android", deviceId };
     // Not part of whichever request triggered the release: its abort must not cut the cleanup short.
     const done = runOutsideRequestContext(async () =>
-      cleanupSessionProfiling(deviceId, state, adbFor(device), options.timer ?? defaultTimer),
+      cleanupSessionProfiling(deviceId, state, adbFor(device), {
+        timer: options.timer ?? defaultTimer,
+      }),
     ).catch((error: unknown): ProfilingCleanupReport => {
       logger.warn(
         `[profiling] Cleaning up session ${sessionId}'s profiling state threw: ${errorMessage(error)}`,

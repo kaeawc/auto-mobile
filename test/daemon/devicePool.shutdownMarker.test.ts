@@ -378,8 +378,7 @@ describe("DevicePool", () => {
       const releaseReservation = await devicePool.reserveDeviceForReadiness(
         firstPhone.deviceId,
         firstPhone,
-        "Pixel 8",
-        "Pixel 8",
+        { stableRuntimeName: "Pixel 8", verifiedAndroidAvdName: "Pixel 8" },
       );
 
       try {
@@ -589,12 +588,10 @@ describe("DevicePool", () => {
       const replacement = createBootedDevice("emulator-5556", "android", "Pixel 8");
       const sourceImage = pixel8Source();
       await initializeLiveDevices([original, replacement]);
-      const reservation = await devicePool.reserveDeviceForReadiness(
-        original.deviceId,
-        original,
-        sourceImage.name,
-        sourceImage.name,
-      );
+      const reservation = await devicePool.reserveDeviceForReadiness(original.deviceId, original, {
+        stableRuntimeName: sourceImage.name,
+        verifiedAndroidAvdName: sourceImage.name,
+      });
       return { replacement, sourceImage, reservation };
     };
 
@@ -655,11 +652,9 @@ describe("DevicePool", () => {
       const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [original];
       await devicePool.addDevice(original, sourceImage);
-      const reservation = await devicePool.reserveDeviceForReadiness(
-        original.deviceId,
-        original,
-        sourceImage.name,
-      );
+      const reservation = await devicePool.reserveDeviceForReadiness(original.deviceId, original, {
+        stableRuntimeName: sourceImage.name,
+      });
       const originalIncarnation = devicePool.getDevice(original.deviceId)?.incarnation;
 
       await devicePool.removeDevice(original.deviceId);
@@ -703,15 +698,13 @@ describe("DevicePool", () => {
       const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.addDevice(device, sourceImage);
-      const firstReservation = await devicePool.reserveDeviceForReadiness(
-        device.deviceId,
-        device,
-        sourceImage.name,
-      );
+      const firstReservation = await devicePool.reserveDeviceForReadiness(device.deviceId, device, {
+        stableRuntimeName: sourceImage.name,
+      });
       const secondReservation = await devicePool.reserveDeviceForReadiness(
         device.deviceId,
         device,
-        sourceImage.name,
+        { stableRuntimeName: sourceImage.name },
       );
 
       try {

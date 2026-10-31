@@ -1,6 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../../src/utils/logger";
+import type { SimctlExecOptions } from "../../../src/utils/ios-cmdline-tools/SimCtlSupport";
 
 test("simctl launch passes app arguments as argv after the bundle id", async () => {
   const calls: string[][] = [];
@@ -60,13 +61,7 @@ test("simctl launch redacts the token from responses and logs", async () => {
 
 function recordingExec() {
   const calls: Array<{ args: string[]; env?: NodeJS.ProcessEnv; argc: number }> = [];
-  const exec = async (
-    _file: string,
-    args: string[],
-    _maxBuffer?: number,
-    _signal?: AbortSignal,
-    env?: NodeJS.ProcessEnv,
-  ) => {
+  const exec = async (_file: string, args: string[], { env }: SimctlExecOptions = {}) => {
     // Rest-free arity check: an env-less launch must keep the four-argument call shape.
     calls.push({ args, env, argc: env === undefined ? 4 : 5 });
     const stdout = "com.example.app: 456";

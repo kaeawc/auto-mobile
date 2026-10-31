@@ -95,9 +95,10 @@ describe("idleReleaseAt", () => {
       const expected = phase === "lapsed" ? 121_000 : null;
       expect(idleReleaseAt(session, phase)).toBe(expected);
       expect(vetoedIdleReleaseAt(session, undefined, phase)).toBe(expected);
-      expect(sessionHoldDiagnostics(session, 0, undefined, (ms) => ms, phase).idleReleaseAt).toBe(
-        expected,
-      );
+      expect(
+        sessionHoldDiagnostics(session, 0, undefined, { toWall: (ms) => ms, leasePhase: phase })
+          .idleReleaseAt,
+      ).toBe(expected);
     },
   );
   test("a heartbeating owner is released exactly at expiresAt: no suspect grace on idleness (#11107)", () => {
@@ -331,7 +332,9 @@ describe("ExecutionTracker.getActiveDeviceSessionExecutionCount", () => {
     const owned = tracker.startExecution("observe", undefined, SESSION);
     const autolock = tracker.startExecution("tapOn");
     tracker.setResolvedAutolockSessionUuid(autolock.id, SESSION);
-    tracker.startExecution("swipeOn", undefined, undefined, undefined, "mcp-1");
+    tracker.startExecution("swipeOn", undefined, undefined, {
+      unresolvedAutolockMcpSessionId: "mcp-1",
+    });
     tracker.startExecution("observe", undefined, "other-session");
 
     expect(tracker.getActiveDeviceSessionExecutionCount(SESSION)).toBe(3);

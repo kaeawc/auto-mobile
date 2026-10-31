@@ -261,7 +261,7 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
       );
       return this.stillRunning(identity);
     }
-    return this.escalate(target, identity, stopOptions, token, group);
+    return this.escalate(target, identity, stopOptions, { token, group });
   }
 
   private async resolveOwnGroup(
@@ -326,8 +326,7 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     target: StopTarget,
     identity: Extract<EmulatorProcessIdentity, { kind: "match" }>,
     options: StopOptions,
-    token: string | undefined,
-    group?: number,
+    { token, group }: { token?: string; group?: number } = {},
   ): Promise<EmulatorProcessStopOutcome> {
     if (!this.hasKillWaitBudget(identity.pid, options.deadlineMs)) {
       return this.stillRunning(identity);

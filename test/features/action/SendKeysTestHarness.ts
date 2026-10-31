@@ -305,11 +305,14 @@ export function createSendKeysCaptureHarness(
       const observation = frame(`read-${reads.length}`, reads.length);
       events.push(`read:${observation.observationId}`);
       if (!options.skipScreenshot) {
-        await observer.captureScreenshot(undefined, options.signal, observation);
+        await observer.captureScreenshot(undefined, { signal: options.signal, observation });
       }
       return observation;
     },
-    async captureScreenshot(_perf?: unknown, _signal?: AbortSignal, observation?: ObserveResult) {
+    async captureScreenshot(
+      _perf?: unknown,
+      { observation }: { signal?: AbortSignal; observation?: ObserveResult } = {},
+    ) {
       if (!observation) {
         throw new Error("Missing capture observation");
       }
@@ -370,7 +373,7 @@ export function createSendKeysCaptureHarness(
       return result;
     },
     async captureScreenshot(observation: ObserveResult, signal?: AbortSignal) {
-      await observer.captureScreenshot(undefined, signal, observation);
+      await observer.captureScreenshot(undefined, { signal, observation });
     },
   };
   return { ...h, action, commands, observer, timer, events, reads, captures, settleObserve };

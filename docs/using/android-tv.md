@@ -4,10 +4,8 @@ AutoMobile can create, boot and drive an Android TV or Google TV emulator with t
 it uses for a phone, plus D-pad focus navigation. This guide covers creating one, the lifecycle calls,
 and what is out of scope.
 
-> [!WARNING]
-> **Not yet verified on a device.** Creation and detection are unit tested only. No run on a real TV
-> emulator has confirmed boot readiness, CtrlProxy setup or teardown yet, so treat everything that
-> depends on the emulator as **unverified**.
+> Use the `android-tv` image for TV apps. Touch gestures need a device with a touchscreen;
+> otherwise, use D-pad navigation.
 
 ## Install a TV system image
 
@@ -40,7 +38,8 @@ Creation must be allowed; see `AUTOMOBILE_ALLOW_DEVICE_CREATE` in
   tablet, foldable or unspecified request never creates a TV, and a TV request never creates a phone.
 - The newest API level in range wins, then an ABI the host can run, then the tag in the order above.
   `android-tv` is preferred over `google-tv` because Google TV images ship the Play Store, which
-  usually blocks `adb root`.
+  usually blocks `adb root`. The `android-tv` user build also refuses `adb root`; this
+  preference does not guarantee root access.
 - The AVD uses the `tv_1080p` hardware profile and is named `AutoMobile-android-tv-<api>-<id>`
   unless you pass `name`.
 - `minOsVersion` and `maxOsVersion` narrow the API range as they do for a phone.
@@ -83,9 +82,7 @@ emulator -avd tv-36
 
 A device is `tv` when its AVD uses a TV system image or a `tv_*` profile, so `formFactor: "tv"`
 appears in `listDevices` and can be asked for in a device `requires` clause or a broker
-`deviceFamily`. The booted device resources also report `traits.formFactor: "tv"` when the build
-announces `tv` in `ro.build.characteristics`, which covers a TV emulator whose AVD config can't be
-read.
+`deviceFamily`. A booted device reports `tv` in `traits.formFactor`.
 
 ## Lifecycle
 
@@ -100,7 +97,18 @@ read.
 ## Navigating a TV app
 
 TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus to an element and
-`sendKeys` with `enter` to activate the focused item. `pressButton` handles back and home.
+`sendKeys` with `enter` to activate the focused item.
+`pressButton` handles back and home.
+
+`focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
+on a child view of the focused row counts. A large focused container that holds the target also
+counts as focused.
+
+`tapOn` and `swipeOn` need a device that reports a touchscreen; on a TV without one, navigate with
+`focusNavigate` and `sendKeys` instead.
+
+Prototype overlays can be shown and dismissed, but their buttons are not reachable with D-pad
+focus. Use `prototype` with `dismiss` to close the overlay.
 
 ## Out of scope
 

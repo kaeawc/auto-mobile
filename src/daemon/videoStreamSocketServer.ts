@@ -100,16 +100,24 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private readonly admissionGate: DeviceAdmissionGate;
   private readonly pipeline: VideoStreamCapturePipeline;
 
+  /**
+   * @param deps - Device resolution and capture collaborators
+   * @param socketPath - Unix socket path to listen on
+   * @param timer - Clock for socket timers
+   * @param options.authenticator - Subscribe authenticator
+   * @param options.admissionGate - Device admission gate
+   */
   constructor(
     private readonly deps: VideoStreamSocketServerDependencies,
     socketPath: string = getSocketPath(VIDEO_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    // Observers may watch read-only (#10698); admission is still viewer-only for non-holders.
-    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
-      "video-stream subscribe",
-      { allowObserverSessions: true },
-    ),
-    admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
+    {
+      // Observers may watch read-only (#10698); admission is still viewer-only for non-holders.
+      authenticator = createDefaultStreamSocketAuthenticator("video-stream subscribe", {
+        allowObserverSessions: true,
+      }),
+      admissionGate = daemonDeviceAdmissionGate,
+    }: { authenticator?: StreamSocketAuthenticator; admissionGate?: DeviceAdmissionGate } = {},
   ) {
     // Idle timeout disabled: this stream is outbound-only after the handshake, and a viewer that
     // never sends another byte is the normal case, not a dead peer.
@@ -124,8 +132,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       },
       deps,
       deps.captureRegistry ?? createDeviceCaptureRegistry(),
-      timer,
-      this.outboundStalls,
+      { timer, outboundStalls: this.outboundStalls },
     );
   }
 

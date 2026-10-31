@@ -2579,19 +2579,16 @@ describe("startDevice handler", () => {
       const failure =
         kind === "bind-offline"
           ? new DeviceTransportOfflineError(androidDevice.deviceId, "offline")
-          : new RunnerReadinessError(
-              "runner failure",
-              false,
-              kind !== "terminal-runner",
-              "runner-connect",
-              {
-                attempts: 42,
-                diagnosticCause:
-                  kind === "device-lost"
-                    ? new DeviceLostError(androidDevice.deviceId, "device lost", "incident")
-                    : undefined,
-              },
-            );
+          : new RunnerReadinessError("runner failure", {
+              retryableAndroidFrameworkFailure: false,
+              deadlineExhausted: kind !== "terminal-runner",
+              phase: "runner-connect",
+              attempts: 42,
+              diagnosticCause:
+                kind === "device-lost"
+                  ? new DeviceLostError(androidDevice.deviceId, "device lost", "incident")
+                  : undefined,
+            });
       let readyDevice: BootedDevice | undefined;
       let bindFailure = kind === "bind-offline";
       const bind = pool.bindOrReuseDeviceSession.bind(pool);
@@ -2725,12 +2722,11 @@ describe("startDevice handler", () => {
         }
         const settlement = cancelUnownedColdBootUnlessRetryable(
           { device: iosDevice, source: "cold-boot", processHandle: child, provisioned: false },
-          new RunnerReadinessError(
-            "readiness timeout",
-            false,
-            kind !== "non-retryable",
-            "runner-connect",
-          ),
+          new RunnerReadinessError("readiness timeout", {
+            retryableAndroidFrameworkFailure: false,
+            deadlineExhausted: kind !== "non-retryable",
+            phase: "runner-connect",
+          }),
           controller.signal,
         );
         expect(settlement).toBeInstanceOf(Promise);
@@ -2757,7 +2753,11 @@ describe("startDevice handler", () => {
           provisioned: true,
           processHandle: child,
         },
-        new RunnerReadinessError("readiness timeout", false, true, "runner-connect"),
+        new RunnerReadinessError("readiness timeout", {
+          retryableAndroidFrameworkFailure: false,
+          deadlineExhausted: true,
+          phase: "runner-connect",
+        }),
         undefined,
       );
       expect(settlement).toBeInstanceOf(Promise);

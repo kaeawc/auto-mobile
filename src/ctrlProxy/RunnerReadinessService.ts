@@ -116,7 +116,8 @@ export class RunnerReadinessService {
     key: string,
   ): Promise<DeviceReadinessLockRelease> {
     if (this.phases.remainingForPhase(context, "runner-setup") <= 0) {
-      this.phases.fail(context, "runner-setup", 1, "readiness budget exhausted before setup lock", {
+      this.phases.fail(context, "runner-setup", 1, {
+        detail: "readiness budget exhausted before setup lock",
         deadlineExhausted: true,
       });
     }
@@ -137,7 +138,8 @@ export class RunnerReadinessService {
       this.phases.throwIfCallerCancelled(context, error);
       // Otherwise the lock wait is bounded by the remaining setup budget, so
       // the only failure it can report here is that bound being reached.
-      this.phases.fail(context, "runner-setup", 1, normalizeDiagnostic(error), {
+      this.phases.fail(context, "runner-setup", 1, {
+        detail: normalizeDiagnostic(error),
         deadlineExhausted: true,
       });
     }
@@ -152,7 +154,8 @@ export class RunnerReadinessService {
         async (attempt) => {
           this.phases.throwIfCallerCancelled(context);
           if (this.phases.remainingForPhase(context, "runner-setup") <= 0) {
-            this.phases.fail(context, "runner-setup", attempt, lastDiagnostic, {
+            this.phases.fail(context, "runner-setup", attempt, {
+              detail: lastDiagnostic,
               deadlineExhausted: true,
             });
           }
@@ -201,11 +204,8 @@ export class RunnerReadinessService {
       await this.ensureAndroidReadyWithoutDownloads(context, manager, client);
       return;
     }
-    const compatibility = await this.phases.runPhase(
-      context,
-      "package-compatibility",
-      1,
-      (signal) =>
+    const compatibility = await this.phases.runPhase(context, "package-compatibility", 1, {
+      operation: (signal) =>
         manager.ensureCompatibleVersion(
           {
             allowDownloadWhenInstalled: true,
@@ -213,17 +213,17 @@ export class RunnerReadinessService {
           },
           signal,
         ),
-    );
+    });
     this.assertAndroidCompatibility(context, compatibility);
 
     // Read sequentially so a transient failure cannot leave a sibling ADB
     // command running when the next setup attempt starts.
-    const [installed, enabled] = await this.phases.runPhase(
-      context,
-      "runner-setup",
-      1,
-      async (signal) => [await manager.isInstalled(signal), await manager.isEnabled(signal)],
-    );
+    const [installed, enabled] = await this.phases.runPhase(context, "runner-setup", 1, {
+      operation: async (signal) => [
+        await manager.isInstalled(signal),
+        await manager.isEnabled(signal),
+      ],
+    });
     if (await this.isResponsiveFastPath(context, client, installed && enabled)) {
       await this.anrRecovery.recoverIfPresent(context, client);
       return;
@@ -298,37 +298,32 @@ export class RunnerReadinessService {
     manager: ReadinessAndroidManager,
     client: ReadinessClient,
   ): Promise<void> {
-    const [installed, enabled] = await this.phases.runPhase(
-      context,
-      "runner-setup",
-      1,
-      async (signal) => [await manager.isInstalled(signal), await manager.isEnabled(signal)],
-    );
+    const [installed, enabled] = await this.phases.runPhase(context, "runner-setup", 1, {
+      operation: async (signal) => [
+        await manager.isInstalled(signal),
+        await manager.isEnabled(signal),
+      ],
+    });
     if (!installed) {
-      this.phases.fail(
-        context,
-        "runner-setup",
-        1,
-        "CtrlProxy is not installed and runner downloads are disabled",
-      );
+      this.phases.fail(context, "runner-setup", 1, {
+        detail: "CtrlProxy is not installed and runner downloads are disabled",
+      });
     }
-    const compatible = await this.phases.runPhase(context, "package-compatibility", 1, () =>
-      manager.isVersionCompatible(),
-    );
+    const compatible = await this.phases.runPhase(context, "package-compatibility", 1, {
+      operation: () => manager.isVersionCompatible(),
+    });
     if (!compatible) {
-      this.phases.fail(
-        context,
-        "package-compatibility",
-        1,
-        "CtrlProxy version mismatch; run without skipCtrlProxyDownload to install a compatible version",
-      );
+      this.phases.fail(context, "package-compatibility", 1, {
+        detail:
+          "CtrlProxy version mismatch; run without skipCtrlProxyDownload to install a compatible version",
+      });
     }
     if (await this.isResponsiveFastPath(context, client, enabled)) {
       await this.anrRecovery.recoverIfPresent(context, client);
       return;
     }
     if (!enabled) {
-      await this.phases.runPhase(context, "runner-setup", 1, () => manager.enable());
+      await this.phases.runPhase(context, "runner-setup", 1, { operation: () => manager.enable() });
     }
     await this.waitForResponsiveClient(context, client, manager);
     await this.anrRecovery.recoverIfPresent(context, client);
@@ -354,12 +349,9 @@ export class RunnerReadinessService {
         : undefined,
       compatibility.status === "skipped" ? "package compatibility check was skipped" : undefined,
     ].filter((value): value is string => Boolean(value));
-    this.phases.fail(
-      context,
-      "package-compatibility",
-      1,
-      compatibility.cause ?? details.join("; "),
-    );
+    this.phases.fail(context, "package-compatibility", 1, {
+      detail: compatibility.cause ?? details.join("; "),
+    });
   }
 
   private async isResponsiveFastPath(
@@ -370,20 +362,22 @@ export class RunnerReadinessService {
     if (!runnerConfigured || !client.isConnected()) {
       return false;
     }
-    return this.phases.runPhase(context, "runner-health", 1, () =>
-      client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
-    );
+    return this.phases.runPhase(context, "runner-health", 1, {
+      operation: () => client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
+    });
   }
 
   private async setupAndroidRunner(
     context: ReadinessAttemptContext,
     manager: ReadinessAndroidManager,
   ): Promise<void> {
-    const setup = await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
-      manager.setup(false, context.perf, signal),
-    );
+    const setup = await this.phases.runPhase(context, "runner-setup", 1, {
+      operation: (signal) => manager.setup(false, context.perf, signal),
+    });
     if (!setup.success) {
-      this.phases.fail(context, "runner-setup", 1, setup.cause ?? setup.error ?? setup.message);
+      this.phases.fail(context, "runner-setup", 1, {
+        detail: setup.cause ?? setup.error ?? setup.message,
+      });
     }
     const verificationDeadlineMs = Math.min(
       context.totalDeadlineMs,
@@ -394,16 +388,13 @@ export class RunnerReadinessService {
     let enabled = false;
     for (;;) {
       attempts++;
-      [installed, enabled] = await this.phases.runPhase(
-        context,
-        "runner-setup",
-        attempts,
-        async (signal) => [
+      [installed, enabled] = await this.phases.runPhase(context, "runner-setup", attempts, {
+        operation: async (signal) => [
           await manager.isInstalled(signal),
           await manager.isEnabled(signal, { bypassCache: attempts > 1 }),
         ],
-        verificationDeadlineMs,
-      );
+        operationDeadlineMs: verificationDeadlineMs,
+      });
       if (installed && enabled) {
         return;
       }
@@ -421,48 +412,39 @@ export class RunnerReadinessService {
       // Android can clear accessibility enablement after a successful setup
       // write. Reconcile the observed disabled state within the same deadline,
       // then require a fresh read before accepting readiness.
-      await this.phases.runPhase(
-        context,
-        "runner-setup",
-        attempts,
-        () => manager.enable(),
-        verificationDeadlineMs,
-      );
+      await this.phases.runPhase(context, "runner-setup", attempts, {
+        operation: () => manager.enable(),
+        operationDeadlineMs: verificationDeadlineMs,
+      });
     }
     if (!installed || !enabled) {
-      this.phases.fail(
-        context,
-        "runner-setup",
-        attempts,
-        `CtrlProxy state after setup: installed=${installed}, enabled=${enabled}`,
-      );
+      this.phases.fail(context, "runner-setup", attempts, {
+        detail: `CtrlProxy state after setup: installed=${installed}, enabled=${enabled}`,
+      });
     }
   }
 
   private async ensureIosReady(context: ReadinessAttemptContext): Promise<void> {
     this.assertIosRuntimeCompatible(context);
-    const override = await this.phases.runPhase(context, "runner-setup", 1, () =>
-      this.dependencies.checkIosOverride(),
-    );
+    const override = await this.phases.runPhase(context, "runner-setup", 1, {
+      operation: () => this.dependencies.checkIosOverride(),
+    });
     if (override.present && !override.usable) {
-      this.phases.fail(
-        context,
-        "runner-setup",
-        1,
-        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${override.reason ?? "unknown reason"}`,
-      );
+      this.phases.fail(context, "runner-setup", 1, {
+        detail: `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${override.reason ?? "unknown reason"}`,
+      });
     }
 
-    await this.phases.runPhase(context, "runner-setup", 1, () =>
-      this.dependencies.awaitIosStartupMaintenance(),
-    );
+    await this.phases.runPhase(context, "runner-setup", 1, {
+      operation: () => this.dependencies.awaitIosStartupMaintenance(),
+    });
     const manager = this.dependencies.getIosManager(context.device);
     let client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     if (client.isConnected()) {
       this.phases.startHealthWindow(context);
-      const ready = await this.phases.runPhase(context, "runner-health", 1, () =>
-        client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
-      );
+      const ready = await this.phases.runPhase(context, "runner-health", 1, {
+        operation: () => client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
+      });
       if (ready) {
         return;
       }
@@ -471,12 +453,13 @@ export class RunnerReadinessService {
       // hierarchy. In that state setup() would short-circuit on port health,
       // leaving the runner wedged indefinitely. Restart the process so the
       // next health probe uses a fresh observation stream (#5532).
-      await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
-        manager.forceRestart({
-          signal,
-          minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-health"),
-        }),
-      );
+      await this.phases.runPhase(context, "runner-setup", 1, {
+        operation: (signal) =>
+          manager.forceRestart({
+            signal,
+            minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-health"),
+          }),
+      });
       // A cold restart can outlast the original health window. Probe the new
       // process in a fresh window, still capped by the total deadline.
       context.healthDeadlineMs = null;
@@ -509,12 +492,9 @@ export class RunnerReadinessService {
     const runtime = context.device.iosVersion ?? context.device.osVersion;
     const comparison = compareIosVersions(runtime, IOS_CTRL_PROXY_MINIMUM_IOS_VERSION);
     if (comparison !== null && comparison < 0) {
-      this.phases.fail(
-        context,
-        "runner-setup",
-        1,
-        `iOS runtime ${runtime} is below the CtrlProxy minimum ${IOS_CTRL_PROXY_MINIMUM_IOS_VERSION}; select a compatible simulator or device.`,
-      );
+      this.phases.fail(context, "runner-setup", 1, {
+        detail: `iOS runtime ${runtime} is below the CtrlProxy minimum ${IOS_CTRL_PROXY_MINIMUM_IOS_VERSION}; select a compatible simulator or device.`,
+      });
     }
   }
 
@@ -522,23 +502,21 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     manager: ReadinessIosManager,
   ): Promise<void> {
-    const installed = await this.phases.runPhase(context, "runner-setup", 1, () =>
-      manager.isInstalled(),
-    );
+    const installed = await this.phases.runPhase(context, "runner-setup", 1, {
+      operation: () => manager.isInstalled(),
+    });
     if (!installed) {
-      this.phases.fail(
-        context,
-        "runner-setup",
-        1,
-        "CtrlProxy iOS runner is not installed and runner downloads are disabled",
-      );
+      this.phases.fail(context, "runner-setup", 1, {
+        detail: "CtrlProxy iOS runner is not installed and runner downloads are disabled",
+      });
     }
-    await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
-      manager.start({
-        signal,
-        minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-setup"),
-      }),
-    );
+    await this.phases.runPhase(context, "runner-setup", 1, {
+      operation: (signal) =>
+        manager.start({
+          signal,
+          minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-setup"),
+        }),
+    });
     const client = this.dependencies.getIosClient(context.device, manager.getServicePort());
     await this.ensureIosClientReadyAfterStart(context, manager, client);
   }
@@ -556,12 +534,13 @@ export class RunnerReadinessService {
     }
 
     manager.resetSetupState();
-    await this.phases.runPhase(context, "runner-setup", 1, (signal) =>
-      manager.forceRestart({
-        signal,
-        minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-setup"),
-      }),
-    );
+    await this.phases.runPhase(context, "runner-setup", 1, {
+      operation: (signal) =>
+        manager.forceRestart({
+          signal,
+          minimumHealthPollDurationMs: this.phases.remainingForPhase(context, "runner-setup"),
+        }),
+    });
     // A cold restart can outlast the original health window. Probe the new
     // process in a fresh window, still capped by the total deadline.
     context.healthDeadlineMs = null;
@@ -615,18 +594,18 @@ export class RunnerReadinessService {
           attempts,
           client,
         );
-        connected = await this.phases.runPhase(context, phase, attempts, () =>
-          client.waitForConnection(1, 0),
-        );
+        connected = await this.phases.runPhase(context, phase, attempts, {
+          operation: () => client.waitForConnection(1, 0),
+        });
         if (!connected && isTerminalLeaseConflict(client)) {
-          await this.failUnresponsiveClient(context, client, phase, attempts);
+          await this.failUnresponsiveClient(context, client, phase, { attempts });
         }
       }
       if (connected) {
         phase = "runner-health";
-        const ready = await this.phases.runPhase(context, phase, attempts, () =>
-          client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
-        );
+        const ready = await this.phases.runPhase(context, phase, attempts, {
+          operation: () => client.verifyServiceReady(1, 0, this.phases.probeTimeout(context)),
+        });
         if (ready) {
           return;
         }
@@ -650,7 +629,7 @@ export class RunnerReadinessService {
         await this.dependencies.timer.sleep(Math.min(READINESS_RETRY_DELAY_MS, remaining));
       }
     }
-    await this.failUnresponsiveClient(context, client, phase, attempts);
+    await this.failUnresponsiveClient(context, client, phase, { attempts });
   }
 
   private async replaceClosedAndroidClient(
@@ -670,7 +649,10 @@ export class RunnerReadinessService {
     );
     hold.release = replacement.beginReadinessHold?.();
     if (replacement.isClosed?.()) {
-      await this.failUnresponsiveClient(context, replacement, "runner-connect", attempts, false);
+      await this.failUnresponsiveClient(context, replacement, "runner-connect", {
+        attempts,
+        deadlineExhausted: false,
+      });
     }
     return replacement;
   }
@@ -694,11 +676,8 @@ export class RunnerReadinessService {
     ) {
       return;
     }
-    const rebindAttempted = await this.phases.runPhase(
-      context,
-      "runner-connect",
-      attempts,
-      async () => {
+    const rebindAttempted = await this.phases.runPhase(context, "runner-connect", attempts, {
+      operation: async () => {
         try {
           return await manager.rebindIfUnhealthy!();
         } catch (error) {
@@ -710,7 +689,7 @@ export class RunnerReadinessService {
           return false;
         }
       },
-    );
+    });
     context.lastCtrlProxyRebindMs = this.dependencies.timer.now();
     context.ctrlProxyAccessibilityRebindAttempted ||= rebindAttempted;
     if (rebindAttempted) {
@@ -765,9 +744,9 @@ export class RunnerReadinessService {
     context.lastConnectedRecoveryMs = this.dependencies.timer.now();
 
     if (manager.rebindIfUnhealthy && !context.ctrlProxyAccessibilityRebindAttempted) {
-      const rebindAttempted = await this.phases.runPhase(context, "runner-health", attempts, () =>
-        manager.rebindIfUnhealthy!(),
-      );
+      const rebindAttempted = await this.phases.runPhase(context, "runner-health", attempts, {
+        operation: () => manager.rebindIfUnhealthy!(),
+      });
       context.ctrlProxyAccessibilityRebindAttempted ||= rebindAttempted;
       if (rebindAttempted) {
         context.failedHealthProbesSinceRecovery = 0;
@@ -784,9 +763,9 @@ export class RunnerReadinessService {
       return;
     }
     context.ctrlProxyProcessRestartAttempted = true;
-    const restarted = await this.phases.runPhase(context, "runner-health", attempts, () =>
-      manager.forceRestartProcess!(),
-    );
+    const restarted = await this.phases.runPhase(context, "runner-health", attempts, {
+      operation: () => manager.forceRestartProcess!(),
+    });
     if (restarted) {
       client.resetConnectionBudget?.();
     }
@@ -833,8 +812,7 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     client: ReadinessClient,
     phase: RunnerReadinessPhase,
-    attempts: number,
-    deadlineExhausted = true,
+    { attempts, deadlineExhausted = true }: { attempts: number; deadlineExhausted?: boolean },
   ): Promise<never> {
     const isForwardingLeaseConflict =
       phase === "runner-connect" &&
@@ -842,7 +820,7 @@ export class RunnerReadinessService {
     if (isForwardingLeaseConflict) {
       const lastConnectionFailure = client.getLastConnectionFailureMessage?.();
       if (lastConnectionFailure) {
-        this.phases.fail(context, phase, attempts, lastConnectionFailure);
+        this.phases.fail(context, phase, attempts, { detail: lastConnectionFailure });
       }
     }
     if (phase === "runner-connect") {
@@ -852,13 +830,10 @@ export class RunnerReadinessService {
       phase === "runner-connect"
         ? await this.runnerConnectFailureDiagnostic(context)
         : await this.runnerHealthFailureDiagnostic(context, phase);
-    this.phases.fail(
-      context,
-      phase,
-      attempts,
-      `${this.unresponsiveClientRecoveryNote(context, phase)}${diagnostic}`,
-      { deadlineExhausted: true },
-    );
+    this.phases.fail(context, phase, attempts, {
+      detail: `${this.unresponsiveClientRecoveryNote(context, phase)}${diagnostic}`,
+      deadlineExhausted: true,
+    });
   }
 
   private failForwardUnavailableClient(
@@ -873,7 +848,8 @@ export class RunnerReadinessService {
         ? `CtrlProxy client for ${context.device.deviceId} is closed; adb forward unavailable`
         : undefined);
     if (cause) {
-      this.phases.fail(context, "runner-connect", attempts, cause, {
+      this.phases.fail(context, "runner-connect", attempts, {
+        detail: cause,
         deadlineExhausted,
         failureKind: "ctrlproxy_forward_unavailable",
       });

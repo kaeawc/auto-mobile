@@ -365,15 +365,10 @@ export class SocketIdeRoutes {
     // before any loopback MCP client has populated the process registry.
     const declaredDefault = registeredTool?.defaultEnabled ?? false;
     if (!this.state.daemonState.isInitialized()) {
-      await assertToolEnabledForAnySession(
-        toolName,
-        declaredDefault,
-        [undefined],
-        this.state.sessionToolSelectionService,
-        // No connectionProfileUuid on this channel — a caller here is on the direct IDE
-        // socket, which has no MCP connection profile and cannot invoke an MCP tool.
-        { remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD },
-      );
+      await assertToolEnabledForAnySession(toolName, declaredDefault, [undefined], {
+        sessionToolSelectionService: this.state.sessionToolSelectionService,
+        remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      });
       return;
     }
     const sessionManager = this.state.daemonState.getSessionManager();
@@ -390,12 +385,10 @@ export class SocketIdeRoutes {
       toolName,
       declaredDefault,
       [baseSessionUuid, derivedSessionUuid],
-      this.state.sessionToolSelectionService,
-      // This IDE socket-gate path never has a connection profile of its own (see
-      // formatToolEnabledRemediationSentence in toolSelectionPolicy.ts) — the remediation must
-      // name the daemon's own `ide/setSessionToolEnabled` method, not the MCP `setToolEnabled`
-      // tool, since a caller on this channel cannot invoke an MCP tool (issue #6259).
-      { remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD },
+      {
+        sessionToolSelectionService: this.state.sessionToolSelectionService,
+        remediationMethodName: IDE_SET_SESSION_TOOL_ENABLED_METHOD,
+      },
     );
   }
   private inputDeviceGatingInstance?: InputDeviceGating;

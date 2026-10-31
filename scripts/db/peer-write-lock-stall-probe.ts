@@ -99,7 +99,8 @@ try {
             operation = () => repository.upsertActiveSession(session);
           } else if (path === "app-db-session-release") {
             await repository.upsertActiveSession(session);
-            operation = () => repository.markReleased(id, "released", Date.now(), "probe");
+            operation = () =>
+              repository.markReleased(id, "released", Date.now(), { reason: "probe" });
           } else if (path === "app-db-transaction") {
             operation = () =>
               db

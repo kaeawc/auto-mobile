@@ -650,7 +650,7 @@ export class FakeDeviceManagerWithPendingReadiness extends FakeDeviceManager {
     _device: DeviceInfo,
     _timeoutMs?: number,
     _childProcess?: ChildProcess | null,
-    _signal?: AbortSignal,
+    { signal: _signal }: { signal?: AbortSignal } = {},
   ): Promise<BootedDevice> {
     return await new Promise<BootedDevice>(() => {});
   }

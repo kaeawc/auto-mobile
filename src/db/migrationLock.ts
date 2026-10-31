@@ -250,8 +250,7 @@ export function resolveMigrationLockTimeoutMs(
   return readOptionalEnvPositiveInteger(
     ENV.MIGRATION_LOCK_TIMEOUT_MS.name,
     ENV.MIGRATION_LOCK_TIMEOUT_MS.legacyName,
-    {},
-    env,
+    { env },
   );
 }
 

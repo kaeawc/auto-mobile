@@ -62,8 +62,7 @@ export async function applyProvisionDeviceProfile(
   args: ProvisionDeviceArgs,
   deps: Pick<DeviceToolsDependencies, "manufacturerProfileApplier">,
   device: BootedDevice,
-  sessionId: string,
-  signal?: AbortSignal,
+  { boundSessionId, signal }: { boundSessionId: string; signal?: AbortSignal },
 ): Promise<Record<string, unknown> | undefined> {
   const profile = requestedDeviceProfile(args);
   if (!profile) {
@@ -73,7 +72,7 @@ export async function applyProvisionDeviceProfile(
   const result: ApplyPersonaResult | RoutePersonaResult = await applier.apply(
     device,
     profile,
-    sessionId,
+    boundSessionId,
     signal,
   );
   return toManufacturerProfileResult(result);

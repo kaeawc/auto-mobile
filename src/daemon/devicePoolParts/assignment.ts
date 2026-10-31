@@ -213,13 +213,12 @@ export class DevicePoolAssignment {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    return this.state.deviceAllocation.tryAssignDevice(
-      sessionId,
+    return this.state.deviceAllocation.tryAssignDevice(sessionId, {
       platform,
       recoveryTarget,
       settledRecoveryLoss,
-      getAbortSignal(),
-    );
+      signal: getAbortSignal(),
+    });
   }
 
   tryAssignUnownedDevice(

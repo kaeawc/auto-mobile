@@ -379,15 +379,15 @@ test.each(["android", "ios"] as const)(
             webSocketFactory: createSuccessWebSocketFactory(timer),
             timer,
           })
-        : IOSCtrlProxyClient.createForTesting(
-            device,
-            8765,
-            createSuccessWebSocketFactory(timer),
+        : IOSCtrlProxyClient.createForTesting(device, 8765, {
+            wsFactory: createSuccessWebSocketFactory(timer),
             timer,
-          );
+          });
     const requests = Reflect.get(client, "requestManager") as RequestManager;
     const ownerId = requests.generateId("owner-action");
-    const ownerAction = requests.register(ownerId, "owner-action", 1000, () => ({ ok: false }));
+    const ownerAction = requests.register(ownerId, "owner-action", 1000, {
+      timeoutErrorFactory: () => ({ ok: false }),
+    });
     let reads = 0;
     const priorHierarchy = Reflect.get(client, "_hierarchy");
     Reflect.set(
@@ -470,8 +470,7 @@ test("iOS observer hierarchy response leaves client cache and navigation untouch
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890", name: "iOS", platform: "ios" },
     8765,
-    createSuccessWebSocketFactory(timer),
-    timer,
+    { wsFactory: createSuccessWebSocketFactory(timer), timer },
   );
   const navigation = spyOn(client, "getHierarchyNavigationDetector");
   let frames = 0;
@@ -623,8 +622,7 @@ test("iOS real client resolves a correlated observer frame without cache or stre
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890", name: "iOS", platform: "ios" },
     8765,
-    sockets.factory,
-    timer,
+    { wsFactory: sockets.factory, timer },
   );
   const push = spyOn(CtrlProxyObservationStream.prototype, "pushHierarchyToObservationStream");
   try {
@@ -712,7 +710,7 @@ test.each(["android", "ios"] as const)(
             webSocketFactory: sockets.factory,
             timer,
           })
-        : IOSCtrlProxyClient.createForTesting(device, 8765, sockets.factory, timer);
+        : IOSCtrlProxyClient.createForTesting(device, 8765, { wsFactory: sockets.factory, timer });
     try {
       expect(await client.ensureConnected()).toBe(true);
       const pending = client.requestHierarchySyncForObserver(
@@ -749,15 +747,15 @@ test.each(["android", "ios"] as const)(
             webSocketFactory: createSuccessWebSocketFactory(timer),
             timer,
           })
-        : IOSCtrlProxyClient.createForTesting(
-            device,
-            8765,
-            createSuccessWebSocketFactory(timer),
+        : IOSCtrlProxyClient.createForTesting(device, 8765, {
+            wsFactory: createSuccessWebSocketFactory(timer),
             timer,
-          );
+          });
     const requests = Reflect.get(client, "requestManager") as RequestManager;
     const ownerId = requests.generateId("owner-action");
-    const owner = requests.register(ownerId, "owner-action", 1000, () => ({ ok: false }));
+    const owner = requests.register(ownerId, "owner-action", 1000, {
+      timeoutErrorFactory: () => ({ ok: false }),
+    });
     try {
       // Sample the owner as the observer rejects: auto-advance keeps moving fake time
       // afterwards and would expire the owner's own 1000 ms timeout next.
@@ -795,12 +793,14 @@ test.each(["android", "ios"] as const)(
             webSocketFactory: sockets.factory,
             timer,
           })
-        : IOSCtrlProxyClient.createForTesting(device, 8765, sockets.factory, timer);
+        : IOSCtrlProxyClient.createForTesting(device, 8765, { wsFactory: sockets.factory, timer });
     try {
       expect(await client.ensureConnected()).toBe(true);
       const requests = Reflect.get(client, "requestManager") as RequestManager;
       const ownerId = requests.generateId("owner-action");
-      const owner = requests.register(ownerId, "owner-action", 1000, () => ({ ok: false }));
+      const owner = requests.register(ownerId, "owner-action", 1000, {
+        timeoutErrorFactory: () => ({ ok: false }),
+      });
       const reconnect = spyOn(client, "ensureConnected");
       const observer = client.requestHierarchySyncForObserver(
         new NoOpPerformanceTracker(),
@@ -851,20 +851,16 @@ test.each(["android", "ios"] as const)(
             }),
             transientObserver: true,
           })
-        : IOSCtrlProxyClient.createForTesting(
-            device,
-            8765,
-            createInstantFailureWebSocketFactory(timer),
+        : IOSCtrlProxyClient.createForTesting(device, 8765, {
+            wsFactory: createInstantFailureWebSocketFactory(timer),
             timer,
-            {
-              serviceManagerFactory: undefined,
-              bootedDeviceLister: undefined,
-              deviceConnectionLostNotifier: undefined,
-              sdkEventIngestor: undefined,
-              retryExecutor: undefined,
-              options: true,
-            },
-          );
+            serviceManagerFactory: undefined,
+            bootedDeviceLister: undefined,
+            deviceConnectionLostNotifier: undefined,
+            sdkEventIngestor: undefined,
+            retryExecutor: undefined,
+            options: true,
+          });
     const clientClass = platform === "android" ? AndroidCtrlProxyClient : IOSCtrlProxyClient;
     const originalFactory = Reflect.get(clientClass, "createForObservationRead");
     Reflect.set(clientClass, "createForObservationRead", () => client);
@@ -894,12 +890,10 @@ test("unowned observer bounds its transient connection by the hierarchy deadline
   Reflect.set(daemon, "deviceSessionRegistry", {});
   let closes = 0;
   const originalFactory = IOSCtrlProxyClient.createForObservationRead;
-  const transient = IOSCtrlProxyClient.createForTesting(
-    device,
-    8765,
-    createInstantFailureWebSocketFactory(timer),
+  const transient = IOSCtrlProxyClient.createForTesting(device, 8765, {
+    wsFactory: createInstantFailureWebSocketFactory(timer),
     timer,
-  );
+  });
   transient.connectForObservationRead = () => new Promise<boolean>(() => {});
   transient.close = async () => {
     closes++;
@@ -1058,7 +1052,10 @@ test("iOS observer screenshot uses the real open client without reconnect or str
     name: "iOS",
     platform: "ios" as const,
   };
-  const client = IOSCtrlProxyClient.createForTesting(device, 8765, sockets.factory, timer);
+  const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+    wsFactory: sockets.factory,
+    timer,
+  });
   const writer = new FakeScreenshotFileWriter();
   try {
     expect(await client.ensureConnected()).toBe(true);
@@ -1100,12 +1097,17 @@ test("iOS observer screenshot waits for the owner's in-flight request", async ()
   const timer = new FakeTimer();
   const sockets = capturingSockets(timer);
   const device = { deviceId: "ios-screenshot-owner", name: "iOS", platform: "ios" as const };
-  const client = IOSCtrlProxyClient.createForTesting(device, 8765, sockets.factory, timer);
+  const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+    wsFactory: sockets.factory,
+    timer,
+  });
   try {
     expect(await client.ensureConnected()).toBe(true);
     const requests = Reflect.get(client, "requestManager") as RequestManager;
     const ownerId = requests.generateId("owner-action");
-    const owner = requests.register(ownerId, "owner-action", 1000, () => ({ ok: false }));
+    const owner = requests.register(ownerId, "owner-action", 1000, {
+      timeoutErrorFactory: () => ({ ok: false }),
+    });
     const screenshot = client.requestScreenshotForObserver(100);
     await Promise.resolve();
     expect(sockets.socket().sent.some((wire) => wire.includes("request_screenshot"))).toBe(false);
@@ -1140,7 +1142,9 @@ test("unowned physical iOS screenshot uses and closes a real transient client", 
   Reflect.set(daemon, "sessionManager", {});
   Reflect.set(daemon, "devicePool", { getDevice: () => ({ sessionId: undefined }) });
   Reflect.set(daemon, "deviceSessionRegistry", {});
-  const client = IOSCtrlProxyClient.createForTesting(device, 8765, sockets.factory, timer, {
+  const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+    wsFactory: sockets.factory,
+    timer,
     serviceManagerFactory: undefined,
     bootedDeviceLister: undefined,
     deviceConnectionLostNotifier: undefined,

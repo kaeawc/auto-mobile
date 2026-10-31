@@ -33,8 +33,9 @@ export interface FreshOfflineRecoveryContext {
   timeoutMs: number;
 }
 
-/** The configured polling cadence and what is left of the readiness budget. */
+/** The current time, the configured polling cadence and what is left of the readiness budget. */
 export interface PollingDelayBudget {
+  now: number;
   pollingIntervalMs: number;
   remainingPollingTimeMs: number;
 }
@@ -67,7 +68,6 @@ export interface EmulatorOfflineRecovery {
     tracker: OfflineTracker,
     options: AndroidEmulatorReadinessOptions | undefined,
     deviceId: string | undefined,
-    now: number,
     budget: PollingDelayBudget,
   ): number;
   getOfflineDeviceIdsAmong(
@@ -142,8 +142,7 @@ export class DefaultEmulatorOfflineRecovery implements EmulatorOfflineRecovery {
     tracker: OfflineTracker,
     options: AndroidEmulatorReadinessOptions | undefined,
     deviceId: string | undefined,
-    now: number,
-    { pollingIntervalMs, remainingPollingTimeMs }: PollingDelayBudget,
+    { now, pollingIntervalMs, remainingPollingTimeMs }: PollingDelayBudget,
   ): number {
     const currentDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
     // After the one-shot recovery, keep polling at this cadence for the rest

@@ -9,13 +9,23 @@ import { RealObserveScreen } from "../../features/observe/ObserveScreen";
 import { stripNavigationToolParams } from "../../models/navigationToolParams";
 import type { ToolTraits } from "../toolRegistry";
 
+/** Where a navigation tool call is recorded and which traits decide what it records. */
+export interface NavigationRecordContext {
+  /** The routing session whose navigation graph records the call. */
+  sessionUuid: string | undefined;
+  traits?: ToolTraits;
+}
+
 export interface NavigationToolCallRecorder {
+  /**
+   * @param context.sessionUuid - The routing session whose navigation graph records the call.
+   * @param context.traits - Tool traits (stopsApp, replacesProcess, recordsNavigation).
+   */
   record(
     name: string,
     args: any,
     device: BootedDevice | undefined,
-    sessionUuid: string | undefined,
-    traits?: ToolTraits,
+    context: NavigationRecordContext,
   ): NavigationToolCallHandle | undefined;
 }
 
@@ -44,8 +54,7 @@ export class DefaultNavigationToolCallRecorder implements NavigationToolCallReco
     name: string,
     args: any,
     device: BootedDevice | undefined,
-    sessionUuid: string | undefined,
-    traits: ToolTraits = {},
+    { sessionUuid, traits = {} }: NavigationRecordContext,
   ): NavigationToolCallHandle | undefined {
     const stoppedApp = appStoppedByToolCall(name, args, traits);
     if (stoppedApp) {

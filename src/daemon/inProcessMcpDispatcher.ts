@@ -146,7 +146,7 @@ export class InProcessMcpDispatcher {
     const tracked: InFlightForward = {
       requestScopeId: scope.requestScopeId,
       close: (reason) => {
-        closing ??= this.closeForward(tracked, scope, server, closeClient, reason);
+        closing ??= this.closeForward(tracked, scope, server, { closeClient, reason });
         return closing;
       },
     };
@@ -166,8 +166,10 @@ export class InProcessMcpDispatcher {
     forward: InFlightForward,
     scope: StatelessMcpRequestScope,
     server: McpServer,
-    closeClient: () => Promise<void>,
-    reason: ExecutionCancellationReason | undefined,
+    {
+      closeClient,
+      reason,
+    }: { closeClient: () => Promise<void>; reason?: ExecutionCancellationReason },
   ): Promise<void> {
     try {
       // Cancel first, so a still-running execution sees the real reason (the handoff error

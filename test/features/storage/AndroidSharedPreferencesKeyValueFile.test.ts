@@ -367,7 +367,9 @@ describe("clearAndroidKeyValueFileDirect", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
 
-    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", "settings");
+    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", {
+      fileName: "settings",
+    });
 
     const commands = adb.getExecutedCommands();
     expect(commands.some((entry) => entry.includes("cat shared_prefs/settings.xml"))).toBe(true);
@@ -384,7 +386,9 @@ describe("clearAndroidKeyValueFileDirect", () => {
       new Error("cat: shared_prefs/settings.xml: No such file or directory"),
     );
 
-    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", "settings");
+    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", {
+      fileName: "settings",
+    });
 
     expect(adb.getExecutedCommands()).not.toContainEqual(
       expect.stringContaining("base64 -d > shared_prefs/settings.xml"),
@@ -617,7 +621,8 @@ describe("Android user targeting for the direct key-value fallback (#9964)", () 
     ],
     [
       "clearAndroidKeyValueFileDirect",
-      (adb, userId) => clearAndroidKeyValueFileDirect(adb, "device-1", APP, "settings", userId),
+      (adb, userId) =>
+        clearAndroidKeyValueFileDirect(adb, "device-1", APP, { fileName: "settings", userId }),
     ],
   ];
 

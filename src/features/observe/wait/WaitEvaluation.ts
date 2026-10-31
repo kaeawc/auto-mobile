@@ -703,13 +703,12 @@ function createWaitCompletion({
       (mode === "async" &&
         (!shouldSkipObserveWaitForScreenshot() || serverConfig.isAccessibilityAuditEnabled()))
     ) {
-      await observeScreen.captureScreenshot?.(
-        createGlobalPerformanceTracker(),
+      await observeScreen.captureScreenshot?.(createGlobalPerformanceTracker(), {
         signal,
-        outcome.observation,
+        observation: outcome.observation,
         screenshot,
         screenshotOptions,
-      );
+      });
     } else {
       await observeScreen.runAccessibilityAudit?.(
         outcome.observation,

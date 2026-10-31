@@ -4644,11 +4644,13 @@ describe("SendKeys post-action capture boundary", () => {
     const focus = new CapturingFocus(device, { adb: h.adb, timer });
     focus.observeScreen = observe;
     focus.window = new FakeWindow();
-    const capture = mock<typeof observe.captureScreenshot>(async (_perf, _signal, chosen) => {
-      events.push(`capture:start:${chosen?.observationId}`);
-      await Promise.resolve();
-      events.push(`capture:end:${chosen?.observationId}`);
-    });
+    const capture = mock<typeof observe.captureScreenshot>(
+      async (_perf, { observation: chosen } = {}) => {
+        events.push(`capture:start:${chosen?.observationId}`);
+        await Promise.resolve();
+        events.push(`capture:end:${chosen?.observationId}`);
+      },
+    );
     observe.captureScreenshot = capture;
     const insert = h.client.insert;
     h.client.insert = async (...args) => {
@@ -4685,7 +4687,7 @@ describe("SendKeys post-action capture boundary", () => {
         observer: {
           execute: async () => {
             // Model the final ObserveScreen read's own automatic screenshot.
-            await observe.captureScreenshot(undefined, undefined, after);
+            await observe.captureScreenshot(undefined, { observation: after });
             return after;
           },
         },
@@ -4712,7 +4714,7 @@ describe("SendKeys post-action capture boundary", () => {
           "capture:end:after-command",
         ]);
         expect(h.capture).toHaveBeenCalledTimes(2);
-        expect(h.capture.mock.calls[0][2]).toBe(h.before);
+        expect(h.capture.mock.calls[0][1]?.observation).toBe(h.before);
       } finally {
         h.capture.mockReset();
       }

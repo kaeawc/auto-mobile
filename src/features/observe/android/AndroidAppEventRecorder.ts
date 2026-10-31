@@ -106,13 +106,10 @@ export class AndroidAppEventRecorder {
         }
       } else {
         const isSystem = event.isSystem === true;
-        await repo.upsertInstalledApp(
-          deviceId,
-          androidUserId,
-          event.packageName,
+        await repo.upsertInstalledApp(deviceId, androidUserId, event.packageName, {
           isSystem,
-          eventTimestamp,
-        );
+          timestampMs: eventTimestamp,
+        });
       }
 
       // Notify work profile monitor that this user has accessibility service

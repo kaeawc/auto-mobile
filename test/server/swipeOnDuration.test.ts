@@ -53,14 +53,8 @@ test("handler forwards durationMs", async () => {
         return { success: true, x1: 0, y1: 0, x2: 0, y2: 0, duration: 120 };
       },
     }) as never;
-  await swipeOnHandler(
-    device,
-    { direction: "up", durationMs: 120 },
-    undefined,
-    undefined,
-    interactionDeps,
-  );
+  await swipeOnHandler(device, { direction: "up", durationMs: 120 }, { deps: interactionDeps });
   expect(seen?.durationMs).toBe(120);
-  await swipeOnHandler(device, { direction: "up" }, undefined, undefined, interactionDeps);
+  await swipeOnHandler(device, { direction: "up" }, { deps: interactionDeps });
   expect(seen?.durationMs).toBeUndefined();
 });

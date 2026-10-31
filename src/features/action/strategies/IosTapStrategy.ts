@@ -91,11 +91,9 @@ export class IosTapStrategy implements TapStrategy {
     // route through the VoiceOver activation gesture rather than a plain
     // coordinate touch, unlike the honest `isVoiceOverEnabled` used by
     // toggle-confirmation/state-query consumers.
-    return this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
-      this.device.deviceId,
-      ctrlProxy,
-      this.featureFlags,
-    );
+    return this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(this.device.deviceId, ctrlProxy, {
+      featureFlags: this.featureFlags,
+    });
   }
 
   shouldRunPreTapStability(_options: TapOnElementOptions): boolean {

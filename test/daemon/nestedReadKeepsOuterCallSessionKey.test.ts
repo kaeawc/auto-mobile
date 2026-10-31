@@ -169,36 +169,33 @@ describe("nested sessionless calls keep the outer control execution's session ke
       READ,
       "nested sessionless read probe",
       z.object({ deviceId: z.string() }),
-      async (_device: BootedDevice, args: Record<string, unknown>) => {
-        nestedResolution = {
-          sessionUuid: args.sessionUuid,
-          readOnlyPath: isSessionlessDeviceRead(),
-        };
-        nestedExecutionId = getToolSelectionContext()?.execution?.executionId;
-        if (nesting === "throwing-read") {
-          entered.resolve();
-          await outcome.promise;
-          throw new Error("nested read failed");
-        }
-        return { success: true };
+      {
+        handler: async (_device: BootedDevice, args: Record<string, unknown>) => {
+          nestedResolution = {
+            sessionUuid: args.sessionUuid,
+            readOnlyPath: isSessionlessDeviceRead(),
+          };
+          nestedExecutionId = getToolSelectionContext()?.execution?.executionId;
+          if (nesting === "throwing-read") {
+            entered.resolve();
+            await outcome.promise;
+            throw new Error("nested read failed");
+          }
+          return { success: true };
+        },
+        deviceReadOnly: true,
       },
-      { deviceReadOnly: true },
     );
     const recordControl = async (args: Record<string, unknown>) => {
       nestedResolution = { sessionUuid: args.sessionUuid, readOnlyPath: isSessionlessDeviceRead() };
       nestedExecutionId = getToolSelectionContext()?.execution?.executionId;
       return { success: true };
     };
-    ToolRegistry.registerDeviceAware(
-      CONTROL,
-      "nested control probe",
-      z.object({}),
-      async (_device: BootedDevice, args: Record<string, unknown>) => recordControl(args),
-      {
-        shouldEnsureDevice: () => nesting !== "sessionless-control",
-        nonDeviceHandler: recordControl,
-      },
-    );
+    ToolRegistry.registerDeviceAware(CONTROL, "nested control probe", z.object({}), {
+      handler: async (_device: BootedDevice, args: Record<string, unknown>) => recordControl(args),
+      shouldEnsureDevice: () => nesting !== "sessionless-control",
+      nonDeviceHandler: recordControl,
+    });
     ToolRegistry.registerDeviceAware(
       OUTER,
       "outer control probe",

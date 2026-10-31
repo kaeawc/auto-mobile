@@ -36,7 +36,7 @@ describe("FileSystemObserveCacheStore", function () {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
     idGenerator = new CountingIdGenerator("process");
-    store = new FileSystemObserveCacheStore(timer, cacheDir, undefined, idGenerator);
+    store = new FileSystemObserveCacheStore(timer, cacheDir, undefined, { idGenerator });
   });
 
   afterEach(function () {
@@ -54,8 +54,7 @@ describe("FileSystemObserveCacheStore", function () {
       timer,
       cacheDir,
       (file, data) => fs.writeFile(file, data),
-      idGenerator,
-      { unlinkFile: (file) => fs.unlink(String(file)), diskMetadata: fs },
+      { idGenerator, unlinkFile: (file) => fs.unlink(String(file)), diskMetadata: fs },
     );
     return { fs, cache, readdir, stat };
   }
@@ -154,8 +153,7 @@ describe("FileSystemObserveCacheStore", function () {
         await release.promise;
         await fs.writeFile(file, data);
       },
-      idGenerator,
-      { unlinkFile: (file) => fs.unlink(String(file)), diskMetadata: fs },
+      { idGenerator, unlinkFile: (file) => fs.unlink(String(file)), diskMetadata: fs },
     );
     const pending = cache.put("device-1", makeResult("stale"), cache.currentGeneration("device-1"));
     await started.promise;
@@ -283,7 +281,7 @@ describe("FileSystemObserveCacheStore", function () {
     expect(store.getRecentCachedAtForDevice(deviceId)).toBe(1_000_000);
     expect(readdirSync(cacheDir).filter((file) => file.endsWith(".json"))).toHaveLength(1);
 
-    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir, undefined, idGenerator);
+    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir, undefined, { idGenerator });
     expect((await reloaded.getMostRecent(deviceId))?.recompositionSummary).toEqual(
       completed.recompositionSummary,
     );
@@ -324,12 +322,9 @@ describe("FileSystemObserveCacheStore", function () {
     // Drop the in-memory cache by constructing a fresh store backed by the same disk dir.
     const reloadedTimer = new FakeTimer();
     reloadedTimer.setCurrentTime(timer.now() + 1); // 1ms later so file is still within TTL
-    const reloaded = new FileSystemObserveCacheStore(
-      reloadedTimer,
-      cacheDir,
-      undefined,
+    const reloaded = new FileSystemObserveCacheStore(reloadedTimer, cacheDir, undefined, {
       idGenerator,
-    );
+    });
     expect(reloaded.getRecentInMemoryForDevice("device-1")).toBeUndefined();
     const restored = await reloaded.getMostRecent("device-1");
     expect(restored).toBeDefined();
@@ -540,7 +535,7 @@ describe("FileSystemObserveCacheStore", function () {
 
   test("getMostRecent serves an own-process disk entry", async function () {
     await store.put("device-1", makeResult("own"));
-    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir, undefined, idGenerator);
+    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir, undefined, { idGenerator });
 
     expect((await reloaded.getMostRecent("device-1"))?.updatedAt).toBe("own");
   });
@@ -553,7 +548,8 @@ describe("FileSystemObserveCacheStore", function () {
       throw new Error("denied");
     };
     try {
-      const reader = new FileSystemObserveCacheStore(timer, cacheDir, undefined, idGenerator, {
+      const reader = new FileSystemObserveCacheStore(timer, cacheDir, undefined, {
+        idGenerator,
         unlinkFile,
       });
       expect(await reader.getMostRecent("device-1")).toBeUndefined();
@@ -578,7 +574,8 @@ describe("FileSystemObserveCacheStore", function () {
       throw new Error("denied");
     };
     try {
-      store = new FileSystemObserveCacheStore(timer, cacheDir, writeAfterClear, idGenerator, {
+      store = new FileSystemObserveCacheStore(timer, cacheDir, writeAfterClear, {
+        idGenerator,
         unlinkFile,
       });
       const generation = store.currentGeneration("device-1");
@@ -605,7 +602,9 @@ describe("FileSystemObserveCacheStore", function () {
       await gate;
       await writeFileAsync(filePath, data);
     };
-    const gatedStore = new FileSystemObserveCacheStore(timer, cacheDir, gatedWriter, idGenerator);
+    const gatedStore = new FileSystemObserveCacheStore(timer, cacheDir, gatedWriter, {
+      idGenerator,
+    });
 
     const gen = gatedStore.currentGeneration("device-1");
     const putPromise = gatedStore.put("device-1", makeResult("mid-write"), gen);

@@ -94,7 +94,10 @@ describe("CtrlProxyDatabase (iOS)", function () {
 
   test("executeSQLForIos sends execute_sql and returns query rows including blob strings", async function () {
     const { factory, getSocket } = createCapturingFactory();
-    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+      wsFactory: factory,
+      timer: fakeTimer,
+    });
 
     try {
       const resultPromise = client.executeSQLForIos(
@@ -137,7 +140,10 @@ describe("CtrlProxyDatabase (iOS)", function () {
 
   test("executeSQLForIos returns mutation rowsAffected", async function () {
     const { factory, getSocket } = createCapturingFactory();
-    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+      wsFactory: factory,
+      timer: fakeTimer,
+    });
 
     try {
       iosMutationTokens.set(testDevice.deviceId, "com.example.app", "launch-secret");
@@ -175,7 +181,10 @@ describe("CtrlProxyDatabase (iOS)", function () {
 
   test("executeSQLForIos surfaces disabled SDK errors without timing out", async function () {
     const { factory, getSocket } = createCapturingFactory();
-    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+      wsFactory: factory,
+      timer: fakeTimer,
+    });
 
     try {
       const resultPromise = client.executeSQLForIos(

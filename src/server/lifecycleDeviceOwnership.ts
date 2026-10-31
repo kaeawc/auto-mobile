@@ -165,7 +165,7 @@ export function assertLifecycleCallerMayStopRestartReservation({
     reservation?.foreignConnection ||
     pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester, identity)
   ) {
-    throw new InputDeviceOwnedError(toolName, device.deviceId, requester.sessionUuid, undefined, {
+    throw new InputDeviceOwnedError(toolName, device.deviceId, requester.sessionUuid, {
       message:
         `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
         `${requester.sessionUuid}'s device-restart recovery, and this connection did not own ` +
@@ -218,7 +218,7 @@ function assertNotStoppingAnotherRestartHold(
   if (!differentSession) {
     return;
   }
-  throw new InputDeviceOwnedError(toolName, device.deviceId, requester.sessionUuid, undefined, {
+  throw new InputDeviceOwnedError(toolName, device.deviceId, requester.sessionUuid, {
     message:
       `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
       `${reservation.sessionUuid}'s device-restart recovery. ` +

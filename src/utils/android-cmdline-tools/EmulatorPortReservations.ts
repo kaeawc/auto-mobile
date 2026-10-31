@@ -295,8 +295,7 @@ export interface EmulatorPortReservations {
     args: string[],
     avdName: string,
     preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
-    expectedDeviceId?: string,
-    signal?: AbortSignal,
+    options?: { expectedDeviceId?: string; signal?: AbortSignal },
   ): Promise<EmulatorDeviceIdReservation | undefined>;
   findReservedLaunchSerial(
     avdName: string,
@@ -590,8 +589,7 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
     avdName: string,
     preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
     args: readonly string[],
-    expectedDeviceId?: string,
-    signal?: AbortSignal,
+    { expectedDeviceId, signal }: { expectedDeviceId?: string; signal?: AbortSignal } = {},
   ): Promise<EmulatorDeviceIdReservation | undefined> {
     const expectedEmulatorPorts = emulatorPortsForDeviceId(expectedDeviceId);
     if (expectedDeviceId && !expectedEmulatorPorts) {
@@ -644,16 +642,12 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
     args: string[],
     avdName: string,
     preLaunchSnapshot: EmulatorDeviceIdSnapshot | undefined,
-    expectedDeviceId?: string,
-    signal?: AbortSignal,
+    { expectedDeviceId, signal }: { expectedDeviceId?: string; signal?: AbortSignal } = {},
   ): Promise<EmulatorDeviceIdReservation | undefined> {
-    const reservation = await this.reserveEmulatorDeviceId(
-      avdName,
-      preLaunchSnapshot,
-      args,
+    const reservation = await this.reserveEmulatorDeviceId(avdName, preLaunchSnapshot, args, {
       expectedDeviceId,
       signal,
-    );
+    });
     if (reservation?.appendPort) {
       args.push("-port", String(reservation.ports.consolePort));
     }

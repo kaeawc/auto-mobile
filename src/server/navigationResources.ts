@@ -553,21 +553,19 @@ async function getNavigationNodeScreenshotResource(
 }
 
 function registerNavigationGraphResources(): void {
-  ResourceRegistry.register(
-    NAVIGATION_RESOURCE_URIS.APPS,
-    "Navigation Apps",
-    "Apps that have a persisted navigation graph (appId, displayName, lastUpdated). No connected device required.",
-    "application/json",
-    () => getNavigationAppsResource(),
-  );
+  ResourceRegistry.register(NAVIGATION_RESOURCE_URIS.APPS, "Navigation Apps", {
+    description:
+      "Apps that have a persisted navigation graph (appId, displayName, lastUpdated). No connected device required.",
+    mimeType: "application/json",
+    handler: () => getNavigationAppsResource(),
+  });
 
-  ResourceRegistry.register(
-    NAVIGATION_RESOURCE_URIS.GRAPH,
-    "Navigation Graph",
-    "High-level navigation graph for the current app (nodes and edges). Use ?appId= to filter by specific app.",
-    "application/json",
-    (context) => getNavigationGraphResource(undefined, context),
-  );
+  ResourceRegistry.register(NAVIGATION_RESOURCE_URIS.GRAPH, "Navigation Graph", {
+    description:
+      "High-level navigation graph for the current app (nodes and edges). Use ?appId= to filter by specific app.",
+    mimeType: "application/json",
+    handler: (context) => getNavigationGraphResource(undefined, context),
+  });
 
   ResourceRegistry.registerTemplate(
     NAVIGATION_RESOURCE_URIS.GRAPH_WITH_APP_ID,
@@ -605,13 +603,12 @@ function registerNavigationGraphResources(): void {
 }
 
 function registerNavigationHistoryResources(): void {
-  ResourceRegistry.register(
-    NAVIGATION_RESOURCE_URIS.HISTORY,
-    "Navigation History",
-    "Ordered navigation history for the current app (nodes and edges).",
-    "application/json",
-    (context) => getNavigationGraphHistoryResource(NAVIGATION_RESOURCE_URIS.HISTORY, {}, context),
-  );
+  ResourceRegistry.register(NAVIGATION_RESOURCE_URIS.HISTORY, "Navigation History", {
+    description: "Ordered navigation history for the current app (nodes and edges).",
+    mimeType: "application/json",
+    handler: (context) =>
+      getNavigationGraphHistoryResource(NAVIGATION_RESOURCE_URIS.HISTORY, {}, context),
+  });
 
   const historyHandler = async (params: Record<string, string>, context: ResourceReadContext) => {
     try {
@@ -809,47 +806,50 @@ export function registerNavigationResources(
   ResourceRegistry.register(
     NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
     "Navigation Test Coverage Report",
-    "Comprehensive test coverage analysis for the navigation graph, including coverage metrics, critical gaps, and recommendations.",
-    "application/json",
-    async (context) => {
-      try {
-        const appId = (await getNavigationGraphProvider(context).exportGraphSummary()).appId;
+    {
+      description:
+        "Comprehensive test coverage analysis for the navigation graph, including coverage metrics, critical gaps, and recommendations.",
+      mimeType: "application/json",
+      handler: async (context) => {
+        try {
+          const appId = (await getNavigationGraphProvider(context).exportGraphSummary()).appId;
 
-        if (!appId) {
+          if (!appId) {
+            return {
+              uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
+              mimeType: "application/json",
+              text: JSON.stringify(
+                {
+                  error:
+                    "No current app set. Launch or observe an app first to enable test coverage tracking.",
+                },
+                null,
+                2,
+              ),
+            };
+          }
+
+          const report = await testCoverageAnalyzer.generateReport(appId);
+          return {
+            uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
+            mimeType: "application/json",
+            text: JSON.stringify(report, null, 2),
+          };
+        } catch (error) {
+          logger.error(`[NavigationResources] Failed to generate test coverage report: ${error}`);
           return {
             uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
             mimeType: "application/json",
             text: JSON.stringify(
               {
-                error:
-                  "No current app set. Launch or observe an app first to enable test coverage tracking.",
+                error: `Failed to generate test coverage report: ${error}`,
               },
               null,
               2,
             ),
           };
         }
-
-        const report = await testCoverageAnalyzer.generateReport(appId);
-        return {
-          uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
-          mimeType: "application/json",
-          text: JSON.stringify(report, null, 2),
-        };
-      } catch (error) {
-        logger.error(`[NavigationResources] Failed to generate test coverage report: ${error}`);
-        return {
-          uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
-          mimeType: "application/json",
-          text: JSON.stringify(
-            {
-              error: `Failed to generate test coverage report: ${error}`,
-            },
-            null,
-            2,
-          ),
-        };
-      }
+      },
     },
   );
 

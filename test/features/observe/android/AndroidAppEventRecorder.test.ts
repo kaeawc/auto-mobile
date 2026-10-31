@@ -209,7 +209,9 @@ describe("AndroidAppEventRecorder", () => {
     async (action) => {
       const h = createRecorder();
       await h.recorder.handlePackageEvent({ ...added, action, isSystem: true });
-      expect(h.store.upserts).toEqual([["event-device", 0, added.packageName, true, 1234]]);
+      expect(h.store.upserts).toEqual([
+        ["event-device", 0, added.packageName, { isSystem: true, timestampMs: 1234 }],
+      ]);
       expect(h.invalidated).toEqual([added.packageName]);
       expect(h.profiles).toEqual([]);
     },
@@ -218,7 +220,9 @@ describe("AndroidAppEventRecorder", () => {
   test("honors timestamp zero and defaults a non-system package", async () => {
     const h = createRecorder();
     await h.recorder.handlePackageEvent(added, 0);
-    expect(h.store.upserts).toEqual([["event-device", 0, added.packageName, false, 0]]);
+    expect(h.store.upserts).toEqual([
+      ["event-device", 0, added.packageName, { isSystem: false, timestampMs: 0 }],
+    ]);
   });
 
   test.each([false, true])(

@@ -98,7 +98,7 @@ for (const fenced of [true, false]) {
         "holder",
         original.deviceId,
         "device-disconnected:emulator-5554",
-        fenced ? () => true : undefined,
+        { shouldCommit: fenced ? () => true : undefined },
       );
       expect(h.release.mock.calls[0]?.[2]?.deviceIdentityReplaced).toBeUndefined();
       expect(h.restores).toEqual([original.deviceId]);

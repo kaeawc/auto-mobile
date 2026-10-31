@@ -14,8 +14,7 @@ export async function cropSnapshot(
   source: Buffer,
   requestedBounds: ElementBounds,
   geometry: SnapshotGeometry,
-  backend: ImageBackend,
-  label: string = "snapshotOf",
+  { backend, label = "snapshotOf" }: { backend: ImageBackend; label?: string },
 ): Promise<SnapshotCropResult> {
   const clippedBounds = clipSnapshotBounds(requestedBounds, geometry, label);
   const clipped = boundsWereClipped(requestedBounds, clippedBounds);

@@ -49,7 +49,7 @@ function setup(after = demos.structuredContent) {
     () => ({
       execute: async () => (++observations >= 3 ? after : demos.structuredContent),
     }),
-    timer,
+    { timer },
   );
 }
 

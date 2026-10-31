@@ -126,18 +126,20 @@ export function registerBiometricTools() {
         capture.sessionManager,
         args.sessionUuid,
         device.deviceId,
-        capture.initialEnrollment,
-        () =>
-          biometricAuth.execute(
-            {
-              action: args.action,
-              modality: args.modality,
-              fingerprintId: args.fingerprintId,
-              errorCode: args.errorCode,
-              ttlMs: args.ttlMs,
-            },
-            progress,
-          ),
+        {
+          initialEnrollment: capture.initialEnrollment,
+          mutation: () =>
+            biometricAuth.execute(
+              {
+                action: args.action,
+                modality: args.modality,
+                fingerprintId: args.fingerprintId,
+                errorCode: args.errorCode,
+                ttlMs: args.ttlMs,
+              },
+              progress,
+            ),
+        },
       );
 
       if (!result.success) {
@@ -158,8 +160,8 @@ export function registerBiometricTools() {
     "getIosSimulatorCapabilities",
     "Discover biometric capabilities for a selected iOS Simulator device type and runtime.",
     getIosSimulatorCapabilitiesSchema,
-    getIosSimulatorCapabilitiesHandler,
     {
+      handler: getIosSimulatorCapabilitiesHandler,
       defaultEnabled: false,
       readOnly: true,
       outputSchema: getIosSimulatorCapabilitiesResultSchema,
@@ -171,8 +173,8 @@ export function registerBiometricTools() {
     "biometricAuth",
     "Simulate biometric auth: Android emulator/SDK hook, or iOS via the app's AutoMobile SDK or Simulator.",
     biometricAuthSchema,
-    biometricAuthHandler,
     {
+      handler: biometricAuthHandler,
       defaultEnabled: false,
       supportsProgress: true,
       outputSchema: biometricAuthResultSchema,

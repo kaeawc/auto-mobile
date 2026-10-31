@@ -600,7 +600,7 @@ export class UninstallApp {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    return isPackageInstalledForUser(this.adb, packageName, userId, timeoutMs, signal);
+    return isPackageInstalledForUser(this.adb, packageName, userId, { timeoutMs, signal });
   }
 
   private async markInstalledAppsCacheStale(): Promise<void> {

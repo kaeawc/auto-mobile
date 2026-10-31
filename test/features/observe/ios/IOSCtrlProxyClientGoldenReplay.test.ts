@@ -54,7 +54,10 @@ describe("IOSCtrlProxyClient golden replay (Settings, tap General)", () => {
     exchanges = loadRecordedExchanges(SETTINGS_TAP_GENERAL);
     const replay = createReplayWebSocketFactory(exchanges, timer);
     sockets = replay.sockets;
-    client = IOSCtrlProxyClient.createForTesting(device, 8791, replay.factory, timer);
+    client = IOSCtrlProxyClient.createForTesting(device, 8791, {
+      wsFactory: replay.factory,
+      timer,
+    });
   });
 
   afterEach(async () => {

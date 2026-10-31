@@ -663,9 +663,7 @@ export class TapAnyElement extends BaseVisualChange {
       accessibilityEnabled = await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
         this.device.deviceId,
         IOSCtrlProxyClient.getInstance(this.device),
-        this.featureFlags,
-        undefined,
-        context.signal,
+        { featureFlags: this.featureFlags, signal: context.signal },
       );
       if (accessibilityEnabled) {
         return { accessibilityEnabled };

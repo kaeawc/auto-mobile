@@ -156,7 +156,7 @@ async function harness(platform: "android" | "ios" = "android", iosFlightCeiling
         stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 0 }),
       },
     },
-    base.timer,
+    { timer: base.timer },
   );
   return {
     ...base,
@@ -691,8 +691,7 @@ test("queued readiness budget exhaustion is typed before the outer read timer fi
   h.launchQueue.queued.set(h.device.deviceId, queuedStatus);
   const timeout = new RunnerReadinessError(
     "automation runner readiness failed: remainingBudgetMs=0",
-    false,
-    true,
+    { retryableAndroidFrameworkFailure: false, deadlineExhausted: true },
   );
   h.setSetup(async () => {
     throw timeout;
@@ -767,10 +766,12 @@ test("iOS readiness budget exhaustion after admission is typed even when the rea
   const h = await harness("ios");
   const timeout = new RunnerReadinessError(
     "observe deviceId automation runner readiness failed: phase=runner-setup remainingBudgetMs=0",
-    false,
-    true,
-    "runner-setup",
-    { attempts: 1 },
+    {
+      retryableAndroidFrameworkFailure: false,
+      deadlineExhausted: true,
+      phase: "runner-setup",
+      attempts: 1,
+    },
   );
   h.setSetup(async () => {
     throw timeout;
@@ -799,10 +800,12 @@ test.each([
     const h = await harness(platform);
     const failure = new RunnerReadinessError(
       "automation runner readiness failed: phase=runner-setup",
-      false,
-      deadlineExhausted,
-      "runner-setup",
-      { attempts: 1 },
+      {
+        retryableAndroidFrameworkFailure: false,
+        deadlineExhausted,
+        phase: "runner-setup",
+        attempts: 1,
+      },
     );
     h.setSetup(async () => {
       throw failure;

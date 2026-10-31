@@ -140,7 +140,11 @@ describe("an open input stroke vs. a release of its holder session", () => {
       (wallNowMs = Date.now()) => sessionManager.sessionNow() - wallNowMs,
     );
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-      hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
+      hasActiveSessionExecution(
+        { tracker: executionTracker, sessionManager, devicePool: pool },
+        sessionId,
+        query,
+      ),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
     await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
@@ -175,7 +179,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
         sessionManager.cancelExecutionsCutByRelease(sessionId, reason);
         await sessionManager.releaseSession(sessionId, reason, { allowExpired: true });
       },
-      timer,
+      { timer },
     );
     monitor.start();
   }

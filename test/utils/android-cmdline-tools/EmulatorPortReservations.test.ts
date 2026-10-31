@@ -74,12 +74,9 @@ describe("DefaultEmulatorPortReservations", () => {
     "rejects excluded explicit ports before host probes: %j",
     async ({ args, expectedDeviceId }) => {
       excludedPorts.add(5554);
-      const launch = reservations.addReservedEmulatorPort(
-        [...args],
-        "A",
-        undefined,
+      const launch = reservations.addReservedEmulatorPort([...args], "A", undefined, {
         expectedDeviceId,
-      );
+      });
       await expect(launch).rejects.toBeInstanceOf(EmulatorConsolePortExcludedError);
       await expect(launch).rejects.toMatchObject({
         code: "emulator_console_port_excluded",

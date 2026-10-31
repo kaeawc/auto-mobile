@@ -128,12 +128,18 @@ export function mergeDaemonStartupOptions(
   return merged;
 }
 
+/**
+ * @param requested - Startup options the client asked for
+ * @param record - The consumed exit record, if any
+ * @param now - Current wall-clock time in ms
+ * @param options.ttl - How long an exit record stays inheritable, in ms
+ * @param options.buildId - The running build's id; a mismatched record is not inherited
+ */
 export function resolveDaemonExitOptions(
   requested: DaemonOptions,
   record: DaemonExitRecord | undefined,
   now: number,
-  ttl: number,
-  buildId: string,
+  { ttl, buildId }: { ttl: number; buildId: string },
 ): DaemonExitOptionsResolution {
   const options: DaemonOptions = Object.fromEntries(
     Object.entries(requested).filter(([, value]) => value !== undefined),

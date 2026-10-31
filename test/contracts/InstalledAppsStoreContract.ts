@@ -90,12 +90,12 @@ export function runInstalledAppsStoreContract(
 
     test("upsertInstalledApp patches an existing snapshot and never creates the first row", () =>
       withStore(async (store) => {
-        await store.upsertInstalledApp("d1", 0, "a", false, 5);
+        await store.upsertInstalledApp("d1", 0, "a", { isSystem: false, timestampMs: 5 });
         expect(await store.listInstalledApps("d1")).toEqual([]);
 
         await store.replaceInstalledApps("d1", [app("d1", 0, "a", 10)]);
-        await store.upsertInstalledApp("d1", 0, "a", true, 40);
-        await store.upsertInstalledApp("d1", 0, "new", false, 40);
+        await store.upsertInstalledApp("d1", 0, "a", { isSystem: true, timestampMs: 40 });
+        await store.upsertInstalledApp("d1", 0, "new", { isSystem: false, timestampMs: 40 });
         expect(await snapshot(store, "d1")).toEqual([
           { user: 0, pkg: "a", system: 1, verified: 40, session: null, start: null },
           { user: 0, pkg: "new", system: 0, verified: 40, session: null, start: null },

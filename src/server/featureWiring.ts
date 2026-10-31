@@ -11,9 +11,12 @@ registerInternalToolCaller({
   getTool: (name) => ToolRegistry.getTool(name),
   // A handle came from getTool(), so re-resolving it by name yields the same registered tool.
   callInternal: (tool, args, progress, signal) =>
-    ToolRegistry.callInternal(typeof tool === "string" ? tool : tool.name, args, progress, signal),
+    ToolRegistry.callInternal(typeof tool === "string" ? tool : tool.name, args, {
+      progress,
+      signal,
+    }),
   callInternalTyped: (name, args, progress, signal) =>
-    ToolRegistry.callInternalTyped(name, args, progress, signal),
+    ToolRegistry.callInternalTyped(name, args, { progress, signal }),
 });
 registerConfigurableToolNameSource({
   getConfigurableToolNames: () => ToolRegistry.getConfigurableToolNames(),

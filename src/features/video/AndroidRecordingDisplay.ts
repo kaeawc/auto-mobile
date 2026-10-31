@@ -101,9 +101,11 @@ function resolveWithoutMultiplePanels(
 export async function resolveAndroidRecordingDisplay(
   device: BootedDevice,
   adb: AdbCommandRunner,
-  request?: string,
-  signal?: AbortSignal,
-  timer: Pick<Timer, "now"> = defaultTimer,
+  {
+    request,
+    signal,
+    timer = defaultTimer,
+  }: { request?: string; signal?: AbortSignal; timer?: Pick<Timer, "now"> } = {},
 ): Promise<AndroidRecordingDisplay | undefined> {
   if ((device.displays?.panels.length ?? 0) < 2) {
     return resolveWithoutMultiplePanels(device, request);

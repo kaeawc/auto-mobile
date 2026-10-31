@@ -41,13 +41,23 @@ function hasReadInventory(entry: InventoryEntry): boolean {
 export class CachingDisplayInventoryProvider implements DisplayInventoryProvider {
   private readonly entries = new Map<string, InventoryEntry>();
 
+  private readonly timer: Pick<Timer, "now">;
+  private readonly degradedRetryMs: number;
+  private readonly failureRetryMs: number;
+
   constructor(
     private readonly androidSource: DisplayInventorySource,
     private readonly iosSource: DisplayInventorySource,
-    private readonly timer: Pick<Timer, "now"> = defaultTimer,
-    private readonly degradedRetryMs = 5_000,
-    private readonly failureRetryMs = 30_000,
-  ) {}
+    {
+      timer = defaultTimer,
+      degradedRetryMs = 5_000,
+      failureRetryMs = 30_000,
+    }: { timer?: Pick<Timer, "now">; degradedRetryMs?: number; failureRetryMs?: number } = {},
+  ) {
+    this.timer = timer;
+    this.degradedRetryMs = degradedRetryMs;
+    this.failureRetryMs = failureRetryMs;
+  }
 
   async hydrate(
     device: BootedDevice,
@@ -173,7 +183,7 @@ export function createDisplayInventoryProvider(
         degraded: false,
       }),
     },
-    timer,
+    { timer },
   );
 }
 

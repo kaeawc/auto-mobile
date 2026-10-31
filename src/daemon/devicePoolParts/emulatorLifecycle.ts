@@ -27,8 +27,7 @@ export interface EmulatorLifecycleOperations {
     avdName: string,
     deviceId: string,
     discover: () => Promise<BootedDevice[]>,
-    signal: AbortSignal,
-    deadlineMs: number,
+    options: { signal: AbortSignal; deadlineMs: number },
   ): Promise<"stopped">;
   isAndroidSerialHeldOffline(
     avdName: string,
@@ -180,13 +179,10 @@ export class DevicePoolEmulatorLifecycle {
           signal,
         });
         signal.throwIfAborted();
-        return await this.confirmRecoveryStop(
-          avdName,
-          matchingAvd.deviceId,
-          discover,
+        return await this.confirmRecoveryStop(avdName, matchingAvd.deviceId, discover, {
           signal,
           deadlineMs,
-        );
+        });
       }));
     try {
       return await raceWithDeadline(startShutdown, {
@@ -248,15 +244,14 @@ export class DevicePoolEmulatorLifecycle {
       },
     );
     signal.throwIfAborted();
-    return await this.confirmRecoveryStop(avdName, deviceId, discover, signal, deadlineMs);
+    return await this.confirmRecoveryStop(avdName, deviceId, discover, { signal, deadlineMs });
   }
 
   async confirmRecoveryStop(
     avdName: string,
     deviceId: string,
     discover: () => Promise<BootedDevice[]>,
-    signal: AbortSignal,
-    deadlineMs: number,
+    { signal, deadlineMs }: { signal: AbortSignal; deadlineMs: number },
   ): Promise<"stopped"> {
     for (;;) {
       const devices = await discover();

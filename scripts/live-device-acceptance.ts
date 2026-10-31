@@ -2447,7 +2447,7 @@ async function defaultCreateDaemonClient(
   build: BuildIdentity,
   signal: AbortSignal,
 ): Promise<DaemonSessionClient> {
-  const client = new DaemonClient(SOCKET_PATH, undefined, undefined, undefined, {
+  const client = new DaemonClient(SOCKET_PATH, undefined, undefined, {
     clientIdentity: {
       version: DAEMON_VERSION,
       build,

@@ -8,7 +8,8 @@ import {
   type InteractionToolDependencies,
   registerInteractionTools,
 } from "../../src/server/interactionTools";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { type DeviceAwareToolHandler, ToolRegistry } from "../../src/server/toolRegistry";
+import { deviceAwareHandler } from "../helpers/registeredHandler";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -21,11 +22,11 @@ const test = warmedTests(() => ToolRegistry.clearTools());
 test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME switch or tap", async () => {
   const mutations: string[] = [];
   const originalRegister = ToolRegistry.registerDeviceAware.bind(ToolRegistry);
-  let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
+  let keyboardHandler: DeviceAwareToolHandler | undefined;
   const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
     if (args[0] === "keyboard") {
       keyboardHandler = (device, input, progress, signal) =>
-        args[3](device, args[2].parse(input), progress, signal);
+        deviceAwareHandler(args[3])(device, args[2].parse(input), progress, signal);
     }
     return originalRegister(...args);
   });
@@ -61,11 +62,11 @@ test("registered keyboard tapImeKey forwards a pre-dispatch abort without IME sw
 
 test("registered keyboard setIme completes verification after cancellation follows dispatch", async () => {
   const originalRegister = ToolRegistry.registerDeviceAware.bind(ToolRegistry);
-  let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
+  let keyboardHandler: DeviceAwareToolHandler | undefined;
   const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
     if (args[0] === "keyboard") {
       keyboardHandler = (device, input, progress, signal) =>
-        args[3](device, args[2].parse(input), progress, signal);
+        deviceAwareHandler(args[3])(device, args[2].parse(input), progress, signal);
     }
     return originalRegister(...args);
   });
@@ -122,11 +123,11 @@ test("registered keyboard setIme completes verification after cancellation follo
 
 async function openKeyboardWithAbortedFailure(failure: Error) {
   const originalRegister = ToolRegistry.registerDeviceAware.bind(ToolRegistry);
-  let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
+  let keyboardHandler: DeviceAwareToolHandler | undefined;
   const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
     if (args[0] === "keyboard") {
       keyboardHandler = (device, input, progress, signal) =>
-        args[3](device, args[2].parse(input), progress, signal);
+        deviceAwareHandler(args[3])(device, args[2].parse(input), progress, signal);
     }
     return originalRegister(...args);
   });

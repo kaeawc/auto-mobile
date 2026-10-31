@@ -101,11 +101,15 @@ describe("recording a prototype show by path", () => {
     const journal = new FakeDeviceMutationJournal(new FakeTimer());
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, scope),
-      new FamilyMutationPriorReader([]),
-      { appId: async () => undefined },
-      async (path) => specs[path],
+      {
+        reader: new FamilyMutationPriorReader([]),
+        artifactReader: { appId: async () => undefined },
+        specReader: async (path) => specs[path],
+      },
     );
-    await recording.beforeToolCall("prototype", { action: "show", specPath }, device, "session");
+    await recording.beforeToolCall("prototype", { action: "show", specPath }, device, {
+      sessionUuid: "session",
+    });
     return (await journal.list(scope)).map((entry) => entry.key);
   }
 

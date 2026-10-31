@@ -87,12 +87,17 @@ test("runDoctor and the CLI doctor tool pass injected iOS dependencies to the ch
       "doctor",
       "Run AutoMobile setup diagnostics",
       doctorTools.doctorSchema,
-      expect.any(Function),
-      expect.objectContaining({ defaultEnabled: true, readOnly: true }),
+      expect.objectContaining({
+        handler: expect.any(Function),
+        defaultEnabled: true,
+        readOnly: true,
+      }),
     );
-    const handler = registration.mock.calls[0]?.[3];
-    expect(handler).toBeDefined();
-    await handler!({ ios: true });
+    const registered = registration.mock.calls[0]?.[3];
+    if (registered === undefined || typeof registered === "function") {
+      throw new Error("doctor must register its handler with options");
+    }
+    await registered.handler({ ios: true });
     expect(checks.mock.calls[1]?.[1]).toBe(ios);
     expect(checks).toHaveBeenCalledTimes(2);
     expect(ios.getCoreDeviceProbe()).toBe(probe);

@@ -5,6 +5,9 @@ with USD fares and ETAs, choose how to pay, request a ride, follow matching, the
 and the trip, then rate the driver and tip. `today.json` is the slice that runs on today's
 vocabulary: the map is a placeholder and the driver is a chain of timers.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+Ride options use `directions_car` (`car` on iOS).
+
 ## Capabilities used
 
 - `prototype_stack_v1`: home, options and trip screens; the trip replaces the options screen.

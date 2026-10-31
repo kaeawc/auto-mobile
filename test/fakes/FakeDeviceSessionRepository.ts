@@ -93,8 +93,7 @@ export class FakeDeviceSessionRepository
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
-    options: MarkReleasedOptions = {},
+    { reason, ...options }: MarkReleasedOptions & { reason: string },
   ): Promise<void> {
     const row = this.rows.get(sessionUuid);
     if (!row) {

@@ -119,9 +119,11 @@ describe("session broker tool admission", () => {
     await expect(registry.callInternal("getApple", {})).rejects.toThrow("owns device lifecycle");
     await expect(registry.getTool("tapOn")!.handler({})).rejects.toThrow("requires a live session");
     await expect(
-      registry.callInternal("tapOn", {}, undefined, undefined, {
-        targetDevice: { platform: "ios", deviceId: "bypass", name: "bypass" },
-      }),
+      registry.callInternal(
+        "tapOn",
+        {},
+        { targetDevice: { platform: "ios", deviceId: "bypass", name: "bypass" } },
+      ),
     ).rejects.toThrow("requires a live session");
     expect(calls).toBe(0);
   });

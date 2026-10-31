@@ -51,7 +51,7 @@ export function strokeAdmissionEndedError(method: string, admission: StrokeAdmis
         deviceId,
         lifted(`session ${holderSessionId} no longer holds the device`),
       )
-    : new InputDeviceOwnedError(method, deviceId, undefined, undefined, {
+    : new InputDeviceOwnedError(method, deviceId, undefined, {
         message: lifted("a session acquired the device"),
       });
 }
@@ -129,13 +129,10 @@ export class InputStrokes {
         // Frame-identity-free: no frameContext is required or checked.
         checksFrame: false,
         around: (device, run) =>
-          this.ports.liftingStrokeOnSessionRefusal(
-            kind,
-            socketSessionId,
-            device,
-            args.gestureId,
+          this.ports.liftingStrokeOnSessionRefusal(kind, socketSessionId, device, {
+            gestureId: args.gestureId,
             run,
-          ),
+          }),
         dispatch: async ({ targetDevice, signal, dispatching, remainingTimeoutMs }) => {
           // Before the start's admission is captured: it reads the session this frame uses.
           dispatching?.();
@@ -154,13 +151,10 @@ export class InputStrokes {
     }
 
     if (socketSessionId) {
-      await this.ports.trackAckedGestureFrame(
-        kind,
-        socketSessionId,
-        targetDevice,
-        args.gestureId,
+      await this.ports.trackAckedGestureFrame(kind, socketSessionId, targetDevice, {
+        gestureId: args.gestureId,
         startAdmission,
-      );
+      });
     }
 
     return {
@@ -183,8 +177,7 @@ export class InputStrokes {
     kind: "start" | "move" | "end",
     socketSessionId: string,
     targetDevice: BootedDevice,
-    gestureId: string,
-    startAdmission: StrokeAdmission | undefined,
+    { gestureId, startAdmission }: { gestureId: string; startAdmission?: StrokeAdmission },
   ): Promise<void> {
     if (kind === "end") {
       this.ports.ownedGestures().onEndAcked(socketSessionId, targetDevice.deviceId, gestureId);
@@ -198,15 +191,10 @@ export class InputStrokes {
     // (#11541). Evaluated in the same turn the stroke is recorded, so no release or acquisition
     // can land between the check and the record.
     const admissionHolds = !startAdmission || this.ports.strokeAdmissionStillHolds(startAdmission);
-    await this.ports
-      .ownedGestures()
-      .onStartAcked(
-        socketSessionId,
-        targetDevice,
-        gestureId,
-        startAdmission?.holderSessionId,
-        admissionHolds,
-      );
+    await this.ports.ownedGestures().onStartAcked(socketSessionId, targetDevice, gestureId, {
+      holderSessionId: startAdmission?.holderSessionId,
+      admissionStillHolds: admissionHolds,
+    });
     if (startAdmission && !admissionHolds) {
       throw strokeAdmissionEndedError(GESTURE_FRAME_METHODS.start, startAdmission);
     }
@@ -228,8 +216,7 @@ export class InputStrokes {
     kind: "start" | "move" | "end",
     socketSessionId: string | undefined,
     targetDevice: BootedDevice,
-    gestureId: string,
-    run: () => Promise<T>,
+    { gestureId, run }: { gestureId: string; run: () => Promise<T> },
   ): Promise<T> {
     try {
       return await run();

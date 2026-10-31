@@ -35,13 +35,21 @@ export class JwtGrpcAuthorizer implements GrpcAuthorizer {
   private registration: Promise<{ kid: string; privateKey: KeyObject }> | undefined;
   private keyFile: string | undefined;
 
+  private readonly ids: IdGenerator;
+  private readonly timer: Pick<Timer, "now" | "sleep">;
+
   constructor(
     private readonly jwksDir: string,
     private readonly activeJwksFile: string,
     private readonly fs: JwtKeyFs,
-    private readonly ids: IdGenerator = defaultIdGenerator,
-    private readonly timer: Pick<Timer, "now" | "sleep"> = defaultTimer,
-  ) {}
+    {
+      ids = defaultIdGenerator,
+      timer = defaultTimer,
+    }: { ids?: IdGenerator; timer?: Pick<Timer, "now" | "sleep"> } = {},
+  ) {
+    this.ids = ids;
+    this.timer = timer;
+  }
 
   async authorization(method: string): Promise<string> {
     this.registration ??= this.register();

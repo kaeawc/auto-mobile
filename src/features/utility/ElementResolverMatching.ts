@@ -109,8 +109,7 @@ export function matchId(
   nodes: SearchableEntry[],
   query: string,
   matchMode: MatchMode,
-  intent: ResolutionIntent,
-  { caseSensitive, captureNodes = nodes }: IdMatchOptions = {},
+  { intent, caseSensitive, captureNodes = nodes }: IdMatchOptions & { intent: ResolutionIntent },
 ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
   if (matchMode === "regex") {
     return {
@@ -142,15 +141,14 @@ export function matchId(
   if (guard) {
     return { matches: [], matchMode, failureReason: "ambiguous", error: guard };
   }
-  return matchNodeKeyOrNamespace(nodes, query, matchMode, intent, native);
+  return matchNodeKeyOrNamespace(nodes, query, matchMode, { intent, native });
 }
 
 function matchNodeKeyOrNamespace(
   nodes: SearchableEntry[],
   query: string,
   matchMode: MatchMode,
-  intent: ResolutionIntent,
-  native: SearchableEntry[],
+  { intent, native }: { intent: ResolutionIntent; native: SearchableEntry[] },
 ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
   const qualified = qualifiedId(query);
   const direct = nodes.filter(

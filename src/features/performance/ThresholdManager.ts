@@ -162,7 +162,9 @@ export class ThresholdManager {
       const defaultThresholds = DeviceCapabilitiesDetector.calculateDefaultThresholds(capabilities);
 
       // Store the new thresholds
-      await this.storeThresholdsWith(executor, deviceId, capabilities, defaultThresholds);
+      await this.storeThresholdsWith(executor, deviceId, capabilities, {
+        thresholds: defaultThresholds,
+      });
 
       return defaultThresholds;
     };
@@ -190,10 +192,10 @@ export class ThresholdManager {
       cpuUsageThresholdPercent: number;
       touchLatencyThresholdMs: number;
     },
-    weight: number = 1.0,
-    ttlHours: number = 24,
+    { weight = 1.0, ttlHours = 24 }: { weight?: number; ttlHours?: number } = {},
   ): Promise<void> {
-    await this.storeThresholdsWith(this.db, deviceId, capabilities, thresholds, {
+    await this.storeThresholdsWith(this.db, deviceId, capabilities, {
+      thresholds,
       weight,
       ttlHours,
     });
@@ -203,19 +205,25 @@ export class ThresholdManager {
     db: Kysely<Database>,
     deviceId: string,
     capabilities: DeviceCapabilities,
-    thresholds: {
-      frameTimeThresholdMs: number;
-      p50ThresholdMs: number;
-      p90ThresholdMs: number;
-      p95ThresholdMs: number;
-      p99ThresholdMs: number;
-      jankCountThreshold: number;
-      cpuUsageThresholdPercent: number;
-      touchLatencyThresholdMs: number;
+    {
+      thresholds,
+      weight = 1.0,
+      ttlHours = 24,
+    }: {
+      thresholds: {
+        frameTimeThresholdMs: number;
+        p50ThresholdMs: number;
+        p90ThresholdMs: number;
+        p95ThresholdMs: number;
+        p99ThresholdMs: number;
+        jankCountThreshold: number;
+        cpuUsageThresholdPercent: number;
+        touchLatencyThresholdMs: number;
+      };
+      weight?: number;
+      ttlHours?: number;
     },
-    options: { weight?: number; ttlHours?: number } = {},
   ): Promise<void> {
-    const { weight = 1.0, ttlHours = 24 } = options;
     const sessionId = this.getCurrentSessionId();
 
     const newThresholds: NewPerformanceThresholds = {

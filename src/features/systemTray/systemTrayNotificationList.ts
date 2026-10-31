@@ -392,8 +392,13 @@ const attributeTrayRow = (
   row: TrayObservedRow,
   appId: string,
   appLabel: string | null,
-  beforeRecords: readonly DumpsysNotificationRecord[] | undefined,
-  afterRecords: readonly DumpsysNotificationRecord[],
+  {
+    beforeRecords,
+    afterRecords,
+  }: {
+    beforeRecords?: readonly DumpsysNotificationRecord[];
+    afterRecords: readonly DumpsysNotificationRecord[];
+  },
 ): TrayRowAttribution => {
   if (row.notification.appLabel !== null) {
     return appLabel && row.notification.appLabel === appLabel ? "header" : "other";
@@ -431,14 +436,19 @@ const attributeTrayRows = (
   rows: TrayObservedRow[],
   appId: string,
   appLabel: string | null,
-  beforeRecords: readonly DumpsysNotificationRecord[] | undefined,
-  afterRecords: readonly DumpsysNotificationRecord[],
+  {
+    beforeRecords,
+    afterRecords,
+  }: {
+    beforeRecords?: readonly DumpsysNotificationRecord[];
+    afterRecords: readonly DumpsysNotificationRecord[];
+  },
 ): { notifications: ListedTrayNotification[]; unattributedRows: number } => {
   const notifications: ListedTrayNotification[] = [];
   const nativeIds = new Map<string, number>();
   let unattributedRows = 0;
   for (const row of rows) {
-    const attribution = attributeTrayRow(row, appId, appLabel, beforeRecords, afterRecords);
+    const attribution = attributeTrayRow(row, appId, appLabel, { beforeRecords, afterRecords });
     if (attribution === "unknown") {
       unattributedRows++;
       continue;
@@ -503,8 +513,7 @@ export const listSystemTrayNotifications = async (
     detector,
     observeScreenFactory(device),
     await detector.getObservationTimestamp(),
-    awaitTimeoutMs,
-    signal,
+    { awaitTimeoutMs, signal },
   );
   const pageScan = await scanTrayNotificationPages(
     { device, detector, observation, signal },
@@ -652,13 +661,10 @@ async function resolveTrayListingAttribution(
   const afterRecords = hasHeaderlessRows
     ? ((await readDumpsysNotificationRecords(adbFactory(device), signal)) ?? [])
     : [];
-  const { notifications, unattributedRows } = attributeTrayRows(
-    rows,
-    appId,
-    appLabel,
+  const { notifications, unattributedRows } = attributeTrayRows(rows, appId, appLabel, {
     beforeRecords,
     afterRecords,
-  );
+  });
   // Partial attribution stays useful; only zero attributed rows plus positive
   // posting evidence is unsafe to present as a confident empty list (#6875).
   const requestedRecords = afterRecords.filter((record) => record.pkg === appId);

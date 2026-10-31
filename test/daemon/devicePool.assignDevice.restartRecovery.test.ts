@@ -109,7 +109,7 @@ describe("DevicePool", () => {
           async (sessionId, reason) => {
             reaped.push({ sessionId, reason });
           },
-          fakeTimer,
+          { timer: fakeTimer },
         );
         fakeTimer.advanceTime(5_001);
         await monitor.tick();
@@ -173,7 +173,7 @@ describe("DevicePool", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        fakeTimer,
+        { timer: fakeTimer },
       );
       fakeTimer.advanceTime(60_001);
       await monitor.tick();
@@ -190,7 +190,7 @@ describe("DevicePool", () => {
         async upsertActiveSession() {
           throw new Error("same-serial replacement must not create a recovered session");
         },
-        async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+        async markReleased(_sessionUuid, _status, _releasedAtMs, { reason: releaseReason }) {
           releaseReasons.push(releaseReason);
           persisted.release_reason = releaseReason;
         },
@@ -256,7 +256,7 @@ describe("DevicePool", () => {
           async upsertActiveSession() {
             throw new Error("an absent recovery target must not create a recovered session");
           },
-          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+          async markReleased(_sessionUuid, _status, _releasedAtMs, { reason: releaseReason }) {
             releaseReasons.push(releaseReason);
             persisted.release_reason = releaseReason;
           },

@@ -415,7 +415,7 @@ describe("network tool schema", () => {
 
   test("network simulateErrors cancel syncs bundled iOS runner once the supporting release is pinned", async () => {
     const state = NetworkState.getInstance();
-    state.startSimulation(iosDevice.deviceId, "timeout", 30, null);
+    state.startSimulation(iosDevice.deviceId, "timeout", 30, { limit: null });
     const tool = ToolRegistry.getTool("network");
 
     const response = await tool!.deviceAwareHandler!(iosDevice, {

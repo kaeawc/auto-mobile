@@ -276,7 +276,7 @@ describe("session broker provider restart handoff", () => {
     const uuid = await grant(first);
 
     // SIGKILL: no shutdown stages run. Startup tags the dead daemon's active rows for recovery.
-    await repository.markReleased(uuid, "expired", timer.now(), "daemon-restart");
+    await repository.markReleased(uuid, "expired", timer.now(), { reason: "daemon-restart" });
     const next = await restart();
     expect(await next.broker.ownedStatus(REQUEST, TOKEN)).toMatchObject({
       outcome: "failed",

@@ -144,7 +144,7 @@ function hostTooling(tooling: DaemonBindingTooling = {}, source?: ForeignAndroid
  * tool module. Exported so the real-handler integration test drives exactly this seam (#11266).
  */
 export const defaultBindingToolInvoker: BindingToolInvoker = async (name, args, signal) => {
-  return await daemonToolRegistry().callInternal(name, args, undefined, signal);
+  return await daemonToolRegistry().callInternal(name, args, { signal });
 };
 
 export interface DaemonBrokerDeviceAcquisitionHandle {

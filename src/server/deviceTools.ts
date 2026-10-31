@@ -58,7 +58,9 @@ export function registerDeviceTools() {
       return deleteWatchAsDaemon(args, signal);
     }
     const deps = getDeviceToolsDependencies();
-    return executeDeleteDevice(args, deps, signal, getDeviceTeardownService(deps));
+    return executeDeleteDevice(args, deps, signal, {
+      teardownService: getDeviceTeardownService(deps),
+    });
   });
 
   const provisionHandlers = createProvisionDeviceHandlers({
@@ -79,25 +81,20 @@ export function registerDeviceTools() {
 
   // Register with the tool registry
   registerDeviceResourceTools(getDeviceToolsDependencies);
-  ToolRegistry.register(
-    "listDeviceImages",
-    "List device images",
-    listDeviceImagesSchema,
-    listDeviceImagesHandler,
-    {
-      defaultEnabled: true,
-      outputSchema: listDeviceImagesOutputSchema,
-      readOnly: true,
-      hostInventory: true,
-    },
-  );
+  ToolRegistry.register("listDeviceImages", "List device images", listDeviceImagesSchema, {
+    handler: listDeviceImagesHandler,
+    defaultEnabled: true,
+    outputSchema: listDeviceImagesOutputSchema,
+    readOnly: true,
+    hostInventory: true,
+  });
 
   ToolRegistry.register(
     "listDevices",
     "List booted devices; pending configured-image enrichment includes retry hints and failed provenance includes a non-retryable reason; resource pointers for images and detail in the note",
     listDevicesSchema,
-    listDevicesHandler,
     {
+      handler: listDevicesHandler,
       defaultEnabled: true,
       outputSchema: listDevicesOutputSchema,
       readOnly: true,
@@ -112,56 +109,60 @@ export function registerDeviceTools() {
     "getAndroid",
     "Find or recover an Android AVD and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     getAndroidSchema,
-    (args, progress, signal) =>
-      acquireUndoneIfUndelivered(signal, () => getAndroidHandler(args, progress, signal)),
-    { defaultEnabled: true, supportsProgress: true, transportRecovery: "connect" },
+    {
+      handler: (args, progress, signal) =>
+        acquireUndoneIfUndelivered(signal, () => getAndroidHandler(args, progress, signal)),
+      defaultEnabled: true,
+      supportsProgress: true,
+      transportRecovery: "connect",
+    },
   );
 
   ToolRegistry.register(
     "getApple",
     "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     getAppleSchema,
-    (args, progress, signal) =>
-      acquireUndoneIfUndelivered(signal, () => getAppleHandler(args, progress, signal)),
-    { defaultEnabled: true, supportsProgress: true, transportRecovery: "connect" },
-  );
-
-  ToolRegistry.register(
-    "startDevice",
-    "Start device",
-    startDeviceRegistrationSchema,
-    (args, progress, signal) =>
-      acquireUndoneIfUndelivered(signal, () => startDeviceHandler(args, progress, signal)),
     {
-      outputSchema: startDeviceOutputSchema,
+      handler: (args, progress, signal) =>
+        acquireUndoneIfUndelivered(signal, () => getAppleHandler(args, progress, signal)),
       defaultEnabled: true,
       supportsProgress: true,
-      hidden: true,
       transportRecovery: "connect",
     },
   );
+
+  ToolRegistry.register("startDevice", "Start device", startDeviceRegistrationSchema, {
+    handler: (args, progress, signal) =>
+      acquireUndoneIfUndelivered(signal, () => startDeviceHandler(args, progress, signal)),
+    outputSchema: startDeviceOutputSchema,
+    defaultEnabled: true,
+    supportsProgress: true,
+    hidden: true,
+    transportRecovery: "connect",
+  });
 
   ToolRegistry.register(
     "provisionDevice",
     "Provision exact virtual device",
     provisionDeviceRegistrationSchema,
-    // An Apple Watch simulator has its own provisioning path (#15882); like provisionDevice, it
-    // undoes an acquisition its caller never received.
-    (args, progress, signal) =>
-      isWatchProvisionRequest(args)
-        ? acquireUndoneIfUndelivered(signal, () =>
-            provisionWatchDevice(args, bindBootedDeviceSession, signal),
-          )
-        : // The Android/iOS handler re-parses its own request with provisionDeviceSchema.
-          provisionDeviceHandler(args as Partial<ProvisionDeviceArgs>, progress, signal),
     {
+      // An Apple Watch simulator has its own provisioning path (#15882); like provisionDevice, it
+      // undoes an acquisition its caller never received.
+      handler: (args, progress, signal) =>
+        isWatchProvisionRequest(args)
+          ? acquireUndoneIfUndelivered(signal, () =>
+              provisionWatchDevice(args, bindBootedDeviceSession, signal),
+            )
+          : // The Android/iOS handler re-parses its own request with provisionDeviceSchema.
+            provisionDeviceHandler(args as Partial<ProvisionDeviceArgs>, progress, signal),
       defaultEnabled: false,
       outputSchema: provisionDeviceOutputSchema,
       transportRecovery: "connect",
     },
   );
 
-  ToolRegistry.register("killDevice", "Kill device", killDeviceSchema, killDeviceHandler, {
+  ToolRegistry.register("killDevice", "Kill device", killDeviceSchema, {
+    handler: killDeviceHandler,
     defaultEnabled: true,
     transportRecovery: "connect",
   });
@@ -170,7 +171,10 @@ export function registerDeviceTools() {
     "deleteDevice",
     "Stop and permanently delete a device, with verified platform-inventory absence",
     teardownDeviceRegistrationSchema,
-    deleteDeviceHandler,
-    { defaultEnabled: false, transportRecovery: "connect" },
+    {
+      handler: deleteDeviceHandler,
+      defaultEnabled: false,
+      transportRecovery: "connect",
+    },
   );
 }

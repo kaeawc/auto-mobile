@@ -69,13 +69,9 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       currentUser: true,
       signal,
     });
-    const installed = await isPackageInstalledForUser(
-      this.deps.adb,
-      PROTOVIEWER_PACKAGE,
-      userId,
-      undefined,
+    const installed = await isPackageInstalledForUser(this.deps.adb, PROTOVIEWER_PACKAGE, userId, {
       signal,
-    );
+    });
     this.userId = installed ? userId : undefined;
     return installed;
   }

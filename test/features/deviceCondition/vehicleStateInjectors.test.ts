@@ -7,6 +7,7 @@ import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { DeviceTraits } from "../../../src/utils/android-cmdline-tools/deviceTraits";
 import { DeviceConditionController } from "../../../src/features/deviceCondition/DeviceConditionController";
 import {
+  createVehiclePropertyAccess,
   parsePropertyValue,
   resolveVehicleStateInjector,
 } from "../../../src/features/deviceCondition/vehicleStateInjectors";
@@ -393,6 +394,71 @@ describe("vehicle state injectors (#14919)", () => {
     // Nothing was written, so no restore is owed and release reads clean.
     expect(controller.hasActiveConditions()).toBe(false);
     expect((await controller.restore()).verifiedClean).toBe(true);
+  });
+
+  test.each([
+    ["get-property-value", "error"],
+    ["get-property-value", "stdout"],
+    ["get-property-value", "throw"],
+    ["inject-vhal-event", "error"],
+    ["inject-vhal-event", "stdout"],
+    ["inject-vhal-event", "throw"],
+  ])("a user-build %s refusal via %s is unsupported before any write", async (command, form) => {
+    const car = vehicleAdb({ ...PARKED });
+    const refusal = new FakeAdbExecutor();
+    const message = `java.lang.SecurityException: The command '${command}' requires non-user build`;
+    if (form === "throw") {
+      refusal.setCommandError(command, new Error(message));
+    } else {
+      refusal.setCommandResponse(command, {
+        ...execResult(form === "stdout" ? message : ""),
+        ...(form === "error" ? { error: `Command failed (exit 255): ${message}` } : {}),
+      });
+    }
+    const real = car.adb.execute.bind(car.adb);
+    car.adb.execute = (args, options) =>
+      args.includes(command) ? refusal.execute(args, options) : real(args, options);
+    const injector = injectorFor(automotive, "vehicle.motion", car.adb);
+    const controller = new DeviceConditionController(() => injector);
+    const result = await controller.apply({ vehicle: { motion: "driving" } });
+    expect(result.changes[0].status).toBe("unsupported");
+    expect(result.changes[0].detail).toContain(
+      "unsupported on this image: this AAOS image is a user build",
+    );
+    expect(result.changes[0].detail).toContain("vehicle.motion needs a userdebug/eng image");
+    expect(result.changes[0].detail).toContain("`android-automotive` API 34 ext9");
+    expect(car.props).toEqual(PARKED);
+    expect(car.log.some((entry) => entry.includes("inject-"))).toBe(false);
+    expect(controller.hasActiveConditions()).toBe(false);
+    expect((await controller.restore()).verifiedClean).toBe(true);
+  });
+
+  test("night mode still applies and resets when user-build motion commands are refused", async () => {
+    const car = vehicleAdb({ ...PARKED });
+    const real = car.adb.execute.bind(car.adb);
+    car.adb.execute = (args, options) => {
+      if (args.includes("get-property-value") || args.includes("inject-vhal-event")) {
+        return Promise.resolve({
+          ...execResult(""),
+          error: "java.lang.SecurityException: The command requires non-user build",
+        });
+      }
+      return real(args, options);
+    };
+    const injector = injectorFor(automotive, "vehicle.nightMode", car.adb);
+    const result = await injector.apply("on");
+    expect(result.status).toBe("applied");
+    expect(car.props[NIGHT]).toBe("1");
+    await result.reset?.();
+    expect(car.props[NIGHT]).toBe("0");
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("unrelated car service errors pass through unchanged", async () => {
+    const adb = new FakeAdbExecutor();
+    const failure = new ActionableError("device disconnected");
+    adb.setCommandError("get-property-value", failure);
+    await expect(createVehiclePropertyAccess(adb).read(GEAR)).rejects.toBe(failure);
   });
 
   test("a failure after a write owes the restore, which puts the baseline back", async () => {

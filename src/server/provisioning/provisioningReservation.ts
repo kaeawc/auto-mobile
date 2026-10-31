@@ -27,20 +27,16 @@ export async function reserveExistingIosProvisionDeviceLifecycle(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  totalDeadlineMs: number,
-  signal: AbortSignal | undefined,
+  { totalDeadlineMs, signal }: { totalDeadlineMs: number; signal?: AbortSignal },
 ): Promise<VirtualDeviceLifecycleLease | undefined> {
-  const discovery = await runProvisionDeviceWithinDeadline(
-    deps.timer,
-    totalDeadlineMs,
-    signal,
-    async (deadlineSignal) =>
+  const discovery = await runProvisionDeviceWithinDeadline(deps.timer, totalDeadlineMs, signal, {
+    operation: async (deadlineSignal) =>
       await deviceManager.getDeviceImagesDetailed("ios", {
         bypassIosDeviceListCache: true,
         signal: deadlineSignal,
       }),
-    { phase: "resolving the exact iOS simulator identity" },
-  );
+    phase: "resolving the exact iOS simulator identity",
+  });
   if (!discovery.succeededPlatforms.has("ios")) {
     throw new ProvisionDeviceError(
       "platform_command_failed",
@@ -57,14 +53,16 @@ export async function reserveExistingIosProvisionDeviceLifecycle(
         args,
         deps,
         { deviceId: args.device.deviceId },
-        totalDeadlineMs,
-        signal,
+        { totalDeadlineMs, signal },
       );
     }
     return undefined;
   }
   admitRestartReservedProvision(args, existing.deviceId);
-  return await reserveIosProvisionDeviceLifecycle(args, deps, existing, totalDeadlineMs, signal);
+  return await reserveIosProvisionDeviceLifecycle(args, deps, existing, {
+    totalDeadlineMs,
+    signal,
+  });
 }
 
 /**
@@ -85,17 +83,14 @@ export async function reserveIosSelectorProvisionDeviceLifecycle(
       { operation: "provision", deadlineMs: totalDeadlineMs, signal },
     );
   } catch (error) {
-    rethrowDeviceLifecycleReservationFailure(
-      error,
-      deps.timer,
-      totalDeadlineMs,
-      (detail) =>
+    rethrowDeviceLifecycleReservationFailure(error, deps.timer, totalDeadlineMs, {
+      timeoutError: (detail) =>
         new ProvisionDeviceError(
           "timeout",
           `Timed out provisioning ios device '${args.device.name}': ${detail}.`,
         ),
-      "waiting for the device lifecycle reservation",
-    );
+      timeoutDetail: "waiting for the device lifecycle reservation",
+    });
   }
 }
 
@@ -103,8 +98,7 @@ async function reserveIosProvisionDeviceLifecycle(
   args: ProvisionDeviceArgs,
   deps: DeviceToolsDependencies,
   device: Pick<DeviceInfo, "deviceId">,
-  totalDeadlineMs: number,
-  signal: AbortSignal | undefined,
+  { totalDeadlineMs, signal }: { totalDeadlineMs: number; signal?: AbortSignal },
 ): Promise<VirtualDeviceLifecycleLease> {
   if (!device.deviceId) {
     throw new ProvisionDeviceError(
@@ -121,8 +115,8 @@ async function reserveIosProvisionDeviceLifecycle(
       deviceId: target.stableId,
     },
     deps.timer,
-    totalDeadlineMs,
     {
+      deadlineMs: totalDeadlineMs,
       requestAbortSignal: signal,
       timeoutError: (detail) =>
         new ProvisionDeviceError(

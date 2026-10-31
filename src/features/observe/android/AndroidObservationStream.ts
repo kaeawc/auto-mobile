@@ -4,7 +4,7 @@ import type { BootedDevice, ScreenScaleMetadata, ViewHierarchyResult } from "../
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { logger } from "../../../utils/logger";
 import type {
-  DefaultScreenshotBackoffScheduler,
+  ScreenshotBackoffConfigInput,
   ScreenshotBackoffScheduler,
   ScreenshotCaptureResult,
 } from "../ScreenshotBackoffScheduler";
@@ -44,7 +44,7 @@ export interface AndroidObservationStreamContext {
   createScreenshotBackoffScheduler(
     capture: () => Promise<ScreenshotCaptureResult>,
     emit: (result: ScreenshotCaptureResult) => void,
-    options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2],
+    options: ScreenshotBackoffConfigInput,
   ): ScreenshotBackoffScheduler;
   forwardHierarchyToObservationStream(
     hierarchy: ViewHierarchyResult,
@@ -168,20 +168,16 @@ export class AndroidObservationStream {
       // client's LATEST metadata at delivery. Android bounds are already physical pixels
       // (nativeScale === 1), so a post-#4548 runner's frame is canonical pixels as-is; the binding
       // carries that declaration so a mid-flight metadata flip cannot relabel the frame.
-      server.pushScreenshotUpdate(
-        this.context.device.deviceId,
-        screenshotBase64,
+      server.pushScreenshotUpdate(this.context.device.deviceId, screenshotBase64, {
         screenWidth,
         screenHeight,
-        {
-          metadata,
-          options: {
-            ...screenshotBindingPushOptions(binding),
-            rotation,
-            ...(frameContext === undefined ? {} : { frameContext }),
-          },
+        metadata,
+        options: {
+          ...screenshotBindingPushOptions(binding),
+          rotation,
+          ...(frameContext === undefined ? {} : { frameContext }),
         },
-      );
+      });
     } catch (error) {
       // Stream delivery is best effort; a disconnected subscriber must not fail observation.
       logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);

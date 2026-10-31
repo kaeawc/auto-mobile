@@ -105,6 +105,8 @@ by default. The `vehicle` family supports emulators:
 - `vehicle.motion`: `parked` or `driving` (gear, speed and parking brake are set together), or `unset`.
 - `vehicle.nightMode`: `on`, `off`, or `unset`.
 
+`vehicle.motion` needs a non-user image (userdebug or eng, such as `android-automotive` API 34 ext9); on a `user` build such as the Play Store AAOS image it returns `unsupported`; `vehicle.nightMode` works on both.
+
 Motion uses gear and parking-brake events with continuous speed events that renew while driving is
 active. The result includes `Current Driving State`: driving must remain MOVING (2) for two seconds;
 parked accepts PARKED (0) or IDLING (1). Night mode uses the car service's day/night override and checks

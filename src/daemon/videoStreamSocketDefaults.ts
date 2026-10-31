@@ -11,13 +11,20 @@ import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEv
 import { resolveStreamDevice } from "./streamDeviceResolver";
 import { type VideoStreamSocketServerDependencies } from "./videoStreamSocketSupport";
 
-/** Legacy video requests discover either platform; explicit platform requests stay scoped. */
+/**
+ * Legacy video requests discover either platform; explicit platform requests stay scoped.
+ *
+ * @param deviceManager - Booted-device source
+ * @param deviceId - Requested device, if any
+ * @param platform - Platform scope for discovery
+ * @param options.timer - Clock for discovery retries
+ * @param options.signal - Cancels discovery
+ */
 export async function resolveVideoStreamDevice(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
   platform: "android" | "ios" | "either" = "either",
-  timer: Timer = defaultTimer,
-  signal?: AbortSignal,
+  { timer = defaultTimer, signal }: { timer?: Timer; signal?: AbortSignal } = {},
 ): Promise<BootedDevice> {
   return resolveStreamDevice(deviceManager, deviceId, platform, {
     timer,

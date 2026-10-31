@@ -214,8 +214,10 @@ function iosModelMetadataState(
   deviceType: AppleDeviceType,
   snapshotState: CatalogMetadataState,
   duplicate: boolean,
-  classificationConflict: boolean,
-  malformedBounds: boolean,
+  {
+    classificationConflict,
+    malformedBounds,
+  }: { classificationConflict: boolean; malformedBounds: boolean },
 ): CatalogMetadataState {
   const requiredFieldsPresent =
     deviceType.identifier.length > 0 &&
@@ -239,13 +241,10 @@ function iosModel(
   const classification = classifyDeviceType(deviceType, classifications);
   const bounds = deviceTypeRuntimeBounds(deviceType);
   const malformedBounds = hasRuntimeRangeMetadata(deviceType) && bounds === undefined;
-  const metadataState = iosModelMetadataState(
-    deviceType,
-    snapshotState,
-    duplicate,
-    classification.conflict,
+  const metadataState = iosModelMetadataState(deviceType, snapshotState, duplicate, {
+    classificationConflict: classification.conflict,
     malformedBounds,
-  );
+  });
   const aliases = cleanAliases(classification.aliases);
 
   return {

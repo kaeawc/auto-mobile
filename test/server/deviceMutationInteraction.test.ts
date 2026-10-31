@@ -336,18 +336,28 @@ describe("Interaction rows are recorded before the tool acts", () => {
     const family = new FamilyMutationPriorReader([new InteractionMutationPriorReader(() => adb)]);
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, scope),
-      new DefaultMutationPriorReader({
-        observationReaders: {
-          dataReader: family,
-        },
-      }),
-      { appId: async () => undefined },
+      {
+        reader: new DefaultMutationPriorReader({
+          observationReaders: {
+            dataReader: family,
+          },
+        }),
+        artifactReader: { appId: async () => undefined },
+      },
     );
-    await recording.beforeToolCall("pressButton", { button: "power" }, ANDROID, "session");
-    await recording.beforeToolCall("pressButton", { button: "volume_up" }, ANDROID, "session");
+    await recording.beforeToolCall("pressButton", { button: "power" }, ANDROID, {
+      sessionUuid: "session",
+    });
+    await recording.beforeToolCall("pressButton", { button: "volume_up" }, ANDROID, {
+      sessionUuid: "session",
+    });
     // The first press's levels win: a second press neither re-reads nor re-journals them.
-    await recording.beforeToolCall("pressButton", { button: "volume_down" }, ANDROID, "session");
-    await recording.beforeToolCall("pressButton", { button: "back" }, ANDROID, "session");
+    await recording.beforeToolCall("pressButton", { button: "volume_down" }, ANDROID, {
+      sessionUuid: "session",
+    });
+    await recording.beforeToolCall("pressButton", { button: "back" }, ANDROID, {
+      sessionUuid: "session",
+    });
     expect(
       adb.getExecutedCommands().filter((command) => command.includes("volume --stream")),
     ).toHaveLength(1);

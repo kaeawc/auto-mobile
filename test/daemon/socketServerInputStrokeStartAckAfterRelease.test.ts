@@ -99,7 +99,11 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-      hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
+      hasActiveSessionExecution(
+        { tracker: executionTracker, sessionManager, devicePool: pool },
+        sessionId,
+        query,
+      ),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
     await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });

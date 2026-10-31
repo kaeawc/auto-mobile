@@ -152,7 +152,7 @@ export class DaemonSessions {
       ...(this.host.foreignCtrlProxyForwardEvidence()
         ? {
             foreignDeviceOwnership: androidOwnershipWithMirror(
-              new ForwardLeaseForeignDeviceOwnership(undefined, undefined, undefined, undefined, {
+              new ForwardLeaseForeignDeviceOwnership(undefined, undefined, undefined, {
                 timer: this.host.services.timer(),
                 forwardEvidence: this.host.foreignCtrlProxyForwardEvidence(),
               }),
@@ -168,8 +168,7 @@ export class DaemonSessions {
         sessionId,
         _deviceId,
         releaseReason,
-        shouldCommit,
-        releaseOptions,
+        { shouldCommit, releaseOptions } = {},
       ) =>
         this.host.cancelAndReleaseSession(sessionId, releaseReason, {
           shouldCommit,
@@ -326,9 +325,11 @@ export class DaemonSessions {
     query?: ActiveSessionExecutionQuery,
   ): boolean {
     return hasActiveSessionExecution(
-      executionTracker,
-      this.host.services.sessionManager(),
-      this.host.services.devicePool(),
+      {
+        tracker: executionTracker,
+        sessionManager: this.host.services.sessionManager(),
+        devicePool: this.host.services.devicePool(),
+      },
       sessionId,
       query,
     );
@@ -360,9 +361,11 @@ export class DaemonSessions {
     options: { onSessionClock?: boolean; excludeReads?: boolean } = {},
   ): number | undefined {
     return latestSessionExecutionDeadlineMs(
-      executionTracker,
-      this.host.services.sessionManager(),
-      this.host.services.devicePool(),
+      {
+        tracker: executionTracker,
+        sessionManager: this.host.services.sessionManager(),
+        devicePool: this.host.services.devicePool(),
+      },
       sessionId,
       options,
     );
@@ -439,8 +442,7 @@ export class DaemonSessions {
       let deviceId: string | null = null;
       let superseded = false;
       await releaseSessionAndDevice(
-        this.host.services.sessionManager(),
-        this.host.services.devicePool(),
+        { manager: this.host.services.sessionManager(), pool: this.host.services.devicePool() },
         assignedDeviceId,
         sessionId,
         {

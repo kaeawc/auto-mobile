@@ -180,7 +180,10 @@ describe("findOrStartIosDevice rollback of a created simulator", () => {
 
   test.each([
     new Error("simctl shutdown timed out"),
-    new SimulatorStillShuttingDownError(CREATED, "Created simulator", "Shutting Down", 10_000),
+    new SimulatorStillShuttingDownError(CREATED, "Created simulator", {
+      lastState: "Shutting Down",
+      waitedMs: 10_000,
+    }),
   ])(
     "a failed shutdown attempts delete and warns when Booted prevents deletion: %s",
     async (shutdownError) => {

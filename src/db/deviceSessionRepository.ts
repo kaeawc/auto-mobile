@@ -676,8 +676,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
-    options: MarkReleasedOptions = {},
+    { reason, ...options }: MarkReleasedOptions & { reason: string },
   ): Promise<void> {
     const { expectedRowGeneration, onlyIfRecoverable, onlyIfExpiredAtMs, onlyIfOwnedByDaemon } =
       options;
@@ -879,7 +878,8 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
     for (const row of expired) {
       try {
         const reason = persistedSessionExpiryReason(row, nowMs)!;
-        await this.markReleased(row.session_uuid, "expired", nowMs, reason, {
+        await this.markReleased(row.session_uuid, "expired", nowMs, {
+          reason,
           expectedRowGeneration: row.stable_identity_generation ?? 0,
           onlyIfRecoverable: true,
           ...(reason === "restart-recovery-timeout"

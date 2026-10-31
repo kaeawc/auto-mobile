@@ -488,13 +488,10 @@ export async function sendCommand<T>(
             error,
           } as T);
 
-  const promise = context.requestManager.register<T>(
-    requestId,
-    options.responseType,
-    timeoutMs,
-    timeoutFactory,
+  const promise = context.requestManager.register<T>(requestId, options.responseType, timeoutMs, {
+    timeoutErrorFactory: timeoutFactory,
     responseErrorFactory,
-  );
+  });
 
   const abortListener = registerCommandAbort(context, options, requestId);
 

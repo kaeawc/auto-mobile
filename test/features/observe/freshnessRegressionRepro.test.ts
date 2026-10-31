@@ -108,7 +108,7 @@ function createObserveScreen(
       ...noopObserveAudits(),
       platformValidator,
     },
-    fakeTimer,
+    { timer: fakeTimer },
   );
   return { observeScreen };
 }

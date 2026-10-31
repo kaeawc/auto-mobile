@@ -190,12 +190,9 @@ describe("ToolExecutionContext", () => {
       const managerLookup = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(manager);
       const clientLookup = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
       try {
-        await createToolExecutionContext(
-          "real-provider",
-          sessionManager,
-          devicePool,
+        await createToolExecutionContext("real-provider", sessionManager, devicePool, {
           sessionOptions,
-        );
+        });
         expect(calls).toEqual(
           expect.arrayContaining(["resetSetupState", "setup", "waitForConnection"]),
         );
@@ -345,12 +342,9 @@ describe("ToolExecutionContext", () => {
       close: async () => {},
     });
 
-    const context = await createToolExecutionContext(
-      "session-1",
-      sessionManager,
-      devicePool,
+    const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
       sessionOptions,
-    );
+    });
 
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(1);
@@ -386,12 +380,9 @@ describe("ToolExecutionContext", () => {
         close: async () => {},
       });
 
-      const context = await createToolExecutionContext(
-        "session-1",
-        sessionManager,
-        devicePool,
+      const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
         sessionOptions,
-      );
+      });
 
       expect(context.deviceId).toBe("device-1");
       expect(calls).toEqual(["resetConnectionBudget", "waitForConnection"]);
@@ -436,12 +427,9 @@ describe("ToolExecutionContext", () => {
         await sessionManager.createSession("connection-recovers", "device-1", "android");
         sessionManager.setDeviceReadiness("connection-recovers", "booted");
       }
-      await createToolExecutionContext(
-        "connection-recovers",
-        sessionManager,
-        devicePool,
+      await createToolExecutionContext("connection-recovers", sessionManager, devicePool, {
         sessionOptions,
-      );
+      });
       expect(sessionManager.getDeviceReadiness("connection-recovers")).toBe("automationReady");
       expect(setupCalls).toBe(2);
       expect(rebindCalls).toBe(2);
@@ -466,12 +454,9 @@ describe("ToolExecutionContext", () => {
         isVersionCompatible: async () => true,
       }));
       await expect(
-        createToolExecutionContext(
-          "connection-never-recovers",
-          sessionManager,
-          devicePool,
+        createToolExecutionContext("connection-never-recovers", sessionManager, devicePool, {
           sessionOptions,
-        ),
+        }),
       ).rejects.toThrow("CtrlProxy connection");
       expect(sessionManager.getDeviceReadiness("connection-never-recovers")).not.toBe(
         "automationReady",
@@ -508,12 +493,9 @@ describe("ToolExecutionContext", () => {
       }));
       await sessionManager.createSession("upgrade-health", "device-1", "android");
       sessionManager.setDeviceReadiness("upgrade-health", "booted");
-      await createToolExecutionContext(
-        "upgrade-health",
-        sessionManager,
-        devicePool,
+      await createToolExecutionContext("upgrade-health", sessionManager, devicePool, {
         sessionOptions,
-      );
+      });
       expect(sessionManager.getDeviceReadiness("upgrade-health")).toBe("automationReady");
       expect(calls).toEqual(["rebind", "connect", "probe", "restart", "probe"]);
     },
@@ -536,12 +518,9 @@ describe("ToolExecutionContext", () => {
     }));
     await sessionManager.createSession("upgrade-no-probe", "device-1", "android");
     sessionManager.setDeviceReadiness("upgrade-no-probe", "booted");
-    await createToolExecutionContext(
-      "upgrade-no-probe",
-      sessionManager,
-      devicePool,
+    await createToolExecutionContext("upgrade-no-probe", sessionManager, devicePool, {
       sessionOptions,
-    );
+    });
     expect(sessionManager.getDeviceReadiness("upgrade-no-probe")).toBe("automationReady");
     expect(calls).toEqual(["setup", "connect"]);
   });
@@ -573,12 +552,9 @@ describe("ToolExecutionContext", () => {
         isInstalled: async () => true,
         isVersionCompatible: async () => true,
       }));
-      await createToolExecutionContext(
-        `setup-retries-${category}`,
-        sessionManager,
-        devicePool,
+      await createToolExecutionContext(`setup-retries-${category}`, sessionManager, devicePool, {
         sessionOptions,
-      );
+      });
       expect(sessionManager.getDeviceReadiness(`setup-retries-${category}`)).toBe(
         "automationReady",
       );
@@ -610,12 +586,9 @@ describe("ToolExecutionContext", () => {
         isVersionCompatible: async () => true,
       }));
       await expect(
-        createToolExecutionContext(
-          `setup-terminal-${category}`,
-          sessionManager,
-          devicePool,
+        createToolExecutionContext(`setup-terminal-${category}`, sessionManager, devicePool, {
           sessionOptions,
-        ),
+        }),
       ).rejects.toThrow("Failed to setup accessibility service");
       expect(setupCalls).toBe(1);
     },
@@ -637,7 +610,7 @@ describe("ToolExecutionContext", () => {
       isVersionCompatible: async () => true,
     }));
     await expect(
-      createToolExecutionContext("setup-transport", sessionManager, devicePool, sessionOptions),
+      createToolExecutionContext("setup-transport", sessionManager, devicePool, { sessionOptions }),
     ).rejects.toBe(typed);
   });
 
@@ -666,7 +639,7 @@ describe("ToolExecutionContext", () => {
       "setup-device-lost-terminal",
       sessionManager,
       devicePool,
-      sessionOptions,
+      { sessionOptions },
     ).catch((error: unknown) => error);
     expect((failure as Error).message).toContain("Failed to setup accessibility service");
     expect((failure as Error).cause).toBe(lost);
@@ -713,8 +686,7 @@ describe("ToolExecutionContext", () => {
         "session-abort-retry-sleep",
         sessionManager,
         devicePool,
-        sessionOptions,
-        { requireIssuedSession: false, signal: controller.signal },
+        { sessionOptions, requireIssuedSession: false, signal: controller.signal },
       );
       // The fake timer's auto-advance fires the retry sleep only once the microtask
       // queue goes quiet, so waiting for the microtask-scheduled `firstSetupDone`
@@ -727,12 +699,9 @@ describe("ToolExecutionContext", () => {
       await drainTurns();
       expect(setupCalls).toBe(1);
       expect(sessionManager.getDeviceReadiness("session-abort-retry-sleep")).toBeUndefined();
-      await createToolExecutionContext(
-        "session-abort-retry-sleep",
-        sessionManager,
-        devicePool,
+      await createToolExecutionContext("session-abort-retry-sleep", sessionManager, devicePool, {
         sessionOptions,
-      );
+      });
       expect(setupCalls).toBe(2);
       expect(sessionManager.getDeviceReadiness("session-abort-retry-sleep")).toBe(
         "automationReady",
@@ -772,7 +741,8 @@ describe("ToolExecutionContext", () => {
     };
 
     const startContext = (sessionId: string, signal?: AbortSignal) =>
-      createToolExecutionContext(sessionId, manualSessionManager, manualPool, sessionOptions, {
+      createToolExecutionContext(sessionId, manualSessionManager, manualPool, {
+        sessionOptions,
         requireIssuedSession: false,
         signal,
       });
@@ -949,8 +919,7 @@ describe("ToolExecutionContext", () => {
       "session-abort-during-setup",
       sessionManager,
       devicePool,
-      sessionOptions,
-      { requireIssuedSession: false, signal: controller.signal },
+      { sessionOptions, requireIssuedSession: false, signal: controller.signal },
     );
     await setupStarted.promise;
     controller.abort(reason);
@@ -982,7 +951,7 @@ describe("ToolExecutionContext", () => {
     });
 
     await expect(
-      createToolExecutionContext("session-stale", sessionManager, stalePool, sessionOptions),
+      createToolExecutionContext("session-stale", sessionManager, stalePool, { sessionOptions }),
     ).rejects.toThrow(/No devices in pool|not available|disconnected/);
     expect(setupCalls).toBe(0);
     expect(stalePool.getDevice("emulator-5554")).toBeNull();
@@ -1003,7 +972,7 @@ describe("ToolExecutionContext", () => {
 
       // keepScreenAwake:false → apply() short-circuits to an applied:false state,
       // which ensureKeepScreenAwake must persist to the typed slot (not customData).
-      await createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions);
+      await createToolExecutionContext("session-1", sessionManager, devicePool, { sessionOptions });
 
       const state = sessionManager.getKeepScreenAwake("session-1");
       expect(state).toBeDefined();
@@ -1031,8 +1000,10 @@ describe("ToolExecutionContext", () => {
       });
 
       const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
-        ...sessionOptions,
-        deviceReadiness: "booted",
+        sessionOptions: {
+          ...sessionOptions,
+          deviceReadiness: "booted",
+        },
       });
 
       expect(context.deviceId).toBe("device-1");
@@ -1062,7 +1033,9 @@ describe("ToolExecutionContext", () => {
     await sessionManager.createSession("unbound-service", "device-1", "android");
     sessionManager.setDeviceReadiness("unbound-service", "booted");
 
-    await createToolExecutionContext("unbound-service", sessionManager, devicePool, sessionOptions);
+    await createToolExecutionContext("unbound-service", sessionManager, devicePool, {
+      sessionOptions,
+    });
 
     expect(calls).toEqual(["reset", "rebind", "setup", "wait"]);
     expect(sessionManager.getDeviceReadiness("unbound-service")).toBe("automationReady");
@@ -1090,7 +1063,9 @@ describe("ToolExecutionContext", () => {
     await sessionManager.createSession("binding-probe", "device-1", "android");
     sessionManager.setDeviceReadiness("binding-probe", "booted");
 
-    await createToolExecutionContext("binding-probe", sessionManager, devicePool, sessionOptions);
+    await createToolExecutionContext("binding-probe", sessionManager, devicePool, {
+      sessionOptions,
+    });
 
     expect(calls).toEqual(["rebind", "setup", "wait"]);
     expect(sessionManager.getDeviceReadiness("binding-probe")).toBe("automationReady");
@@ -1114,8 +1089,10 @@ describe("ToolExecutionContext", () => {
       });
 
       const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
-        ...sessionOptions,
-        deviceReadiness: "automationReady",
+        sessionOptions: {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
       });
 
       expect(context.deviceId).toBe("device-1");
@@ -1146,7 +1123,7 @@ describe("ToolExecutionContext", () => {
         "session-1",
         sessionManager,
         devicePool,
-        sessionOptions,
+        { sessionOptions },
       );
       expect(freshContext.deviceId).toBe("device-1");
       expect(setupCalls).toBe(1);
@@ -1157,7 +1134,7 @@ describe("ToolExecutionContext", () => {
         "session-1",
         sessionManager,
         devicePool,
-        sessionOptions,
+        { sessionOptions },
       );
       expect(existingContext.deviceId).toBe("device-1");
       expect(setupCalls).toBe(1);
@@ -1199,16 +1176,20 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         {
-          ...sessionOptions,
-          deviceReadiness: "automationReady",
+          sessionOptions: {
+            ...sessionOptions,
+            deviceReadiness: "automationReady",
+          },
         },
       );
 
       expect(context.deviceId).toBe("device-1");
       expect(setupCalls).toBe(0);
       await createToolExecutionContext("session-acquired", sessionManager, devicePool, {
-        ...sessionOptions,
-        deviceReadiness: "automationReady",
+        sessionOptions: {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
       });
       expect(setupCalls).toBe(0);
     },
@@ -1233,7 +1214,9 @@ describe("ToolExecutionContext", () => {
     sessionManager.setDeviceReadiness("lost-service", "automationReady");
     sessionManager.invalidateAutomationReadiness("lost-service", "test");
 
-    await createToolExecutionContext("lost-service", sessionManager, devicePool, sessionOptions);
+    await createToolExecutionContext("lost-service", sessionManager, devicePool, {
+      sessionOptions,
+    });
 
     expect(setupCalls).toBe(1);
     expect(sessionManager.getDeviceReadiness("lost-service")).toBe("automationReady");
@@ -1269,7 +1252,7 @@ describe("ToolExecutionContext", () => {
         "session-unrecorded-recovery",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" } },
       );
 
       expect(context.deviceId).toBe("device-1");
@@ -1304,8 +1287,10 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         {
-          ...sessionOptions,
-          deviceReadiness: "booted",
+          sessionOptions: {
+            ...sessionOptions,
+            deviceReadiness: "booted",
+          },
         },
       );
       expect(bootedContext.deviceId).toBe("device-1");
@@ -1319,8 +1304,10 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         {
-          ...sessionOptions,
-          deviceReadiness: "automationReady",
+          sessionOptions: {
+            ...sessionOptions,
+            deviceReadiness: "automationReady",
+          },
         },
       );
       expect(upgradedContext.deviceId).toBe("device-1");
@@ -1344,9 +1331,13 @@ describe("ToolExecutionContext", () => {
       close: async () => {},
     });
 
-    await createToolExecutionContext("restore-session", sessionManager, devicePool, sessionOptions);
+    await createToolExecutionContext("restore-session", sessionManager, devicePool, {
+      sessionOptions,
+    });
     sessionManager.resetDeviceReadinessForDevice("device-1");
-    await createToolExecutionContext("restore-session", sessionManager, devicePool, sessionOptions);
+    await createToolExecutionContext("restore-session", sessionManager, devicePool, {
+      sessionOptions,
+    });
 
     expect(setupCalls).toBe(2);
   });
@@ -1373,8 +1364,10 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         {
-          ...sessionOptions,
-          deviceReadiness: "automationReady",
+          sessionOptions: {
+            ...sessionOptions,
+            deviceReadiness: "automationReady",
+          },
         },
       );
       expect(readyContext.deviceId).toBe("device-1");
@@ -1387,8 +1380,10 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         {
-          ...sessionOptions,
-          deviceReadiness: "booted",
+          sessionOptions: {
+            ...sessionOptions,
+            deviceReadiness: "booted",
+          },
         },
       );
       expect(bootedContext.deviceId).toBe("device-1");
@@ -1436,8 +1431,10 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         {
-          ...sessionOptions,
-          deviceReadiness: "automationReady",
+          sessionOptions: {
+            ...sessionOptions,
+            deviceReadiness: "automationReady",
+          },
         },
       );
 
@@ -1495,7 +1492,7 @@ describe("ToolExecutionContext", () => {
         "session-race-concurrent",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" } },
       );
 
       // Let call1 run until it has actually entered `setup()` (i.e. it has
@@ -1507,7 +1504,7 @@ describe("ToolExecutionContext", () => {
         "session-race-concurrent",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" } },
       );
 
       // Give call2 a chance to observe the in-flight upgrade and start
@@ -1553,14 +1550,14 @@ describe("ToolExecutionContext", () => {
       "lost-service-concurrent",
       sessionManager,
       devicePool,
-      sessionOptions,
+      { sessionOptions },
     );
     await setupEntered.promise;
     const call2 = createToolExecutionContext(
       "lost-service-concurrent",
       sessionManager,
       devicePool,
-      sessionOptions,
+      { sessionOptions },
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -1628,13 +1625,13 @@ describe("ToolExecutionContext", () => {
         "session-race-fresh-both",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" } },
       );
       const call2 = createToolExecutionContext(
         "session-race-fresh-both",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" } },
       );
 
       // Let the single in-flight setup actually enter `setup()` before
@@ -1696,7 +1693,7 @@ describe("ToolExecutionContext", () => {
         "session-booted-bypass",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" } },
       );
 
       // Let the automationReady call actually enter (and register as the
@@ -1707,7 +1704,7 @@ describe("ToolExecutionContext", () => {
         "session-booted-bypass",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "booted" },
+        { sessionOptions: { ...sessionOptions, deviceReadiness: "booted" } },
       );
 
       // The booted call must succeed without waiting for the still-pending
@@ -1772,8 +1769,10 @@ describe("ToolExecutionContext", () => {
         "session-incarnation-scope",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
-        { admittedSession: original },
+        {
+          sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" },
+          admittedSession: original,
+        },
       );
       await oldEntered;
 
@@ -1802,8 +1801,10 @@ describe("ToolExecutionContext", () => {
         "session-incarnation-scope",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
-        { admittedSession: replacement },
+        {
+          sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" },
+          admittedSession: replacement,
+        },
       );
 
       releaseOldGate();
@@ -1856,7 +1857,7 @@ describe("ToolExecutionContext", () => {
           "session-skip-dl",
           sessionManager,
           devicePool,
-          { ...sessionOptions, deviceReadiness: "booted" },
+          { sessionOptions: { ...sessionOptions, deviceReadiness: "booted" } },
         );
         expect(bootedContext.deviceId).toBe("device-1");
         expect(setupCalls).toBe(0);
@@ -1867,8 +1868,10 @@ describe("ToolExecutionContext", () => {
         // `setup()` (the download/install path) must never run.
         await expect(
           createToolExecutionContext("session-skip-dl", sessionManager, devicePool, {
-            ...sessionOptions,
-            deviceReadiness: "automationReady",
+            sessionOptions: {
+              ...sessionOptions,
+              deviceReadiness: "automationReady",
+            },
           }),
         ).rejects.toThrow(/not installed and runner downloads are disabled/);
         expect(setupCalls).toBe(0);
@@ -1882,8 +1885,10 @@ describe("ToolExecutionContext", () => {
         versionCompatible = false;
         await expect(
           createToolExecutionContext("session-skip-dl", sessionManager, devicePool, {
-            ...sessionOptions,
-            deviceReadiness: "automationReady",
+            sessionOptions: {
+              ...sessionOptions,
+              deviceReadiness: "automationReady",
+            },
           }),
         ).rejects.toThrow(/CtrlProxy version mismatch/);
         expect(setupCalls).toBe(0);
@@ -1896,7 +1901,7 @@ describe("ToolExecutionContext", () => {
           "session-skip-dl",
           sessionManager,
           devicePool,
-          { ...sessionOptions, deviceReadiness: "automationReady" },
+          { sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" } },
         );
         expect(upgraded.deviceId).toBe("device-1");
         expect(setupCalls).toBe(1);
@@ -1946,8 +1951,10 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         {
-          ...sessionOptions,
-          deviceReadiness: "automationReady",
+          sessionOptions: {
+            ...sessionOptions,
+            deviceReadiness: "automationReady",
+          },
         },
       );
 
@@ -2016,7 +2023,7 @@ describe("ToolExecutionContext", () => {
         "session-acquisition-race",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
+        { sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" } },
       );
 
       // While the acquisition marker is set, the upgrade must wait on it
@@ -2061,8 +2068,11 @@ describe("ToolExecutionContext", () => {
         "session-cancelled-readiness",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
-        { requireIssuedSession: false, signal: controller.signal },
+        {
+          sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" },
+          requireIssuedSession: false,
+          signal: controller.signal,
+        },
       );
 
       controller.abort(new Error("request cancelled"));
@@ -2089,13 +2099,11 @@ describe("ToolExecutionContext", () => {
       await sessionManager.createSession("session-signal-readiness", "device-1", "android");
       const controller = new AbortController();
 
-      await createToolExecutionContext(
-        "session-signal-readiness",
-        sessionManager,
-        devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
-        { requireIssuedSession: false, signal: controller.signal },
-      );
+      await createToolExecutionContext("session-signal-readiness", sessionManager, devicePool, {
+        sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" },
+        requireIssuedSession: false,
+        signal: controller.signal,
+      });
 
       expect(setupSignal).toBeDefined();
       expect(setupSignal).not.toBe(controller.signal);
@@ -2130,8 +2138,11 @@ describe("ToolExecutionContext", () => {
         "session-shared-flight",
         sessionManager,
         devicePool,
-        { ...sessionOptions, deviceReadiness: "automationReady" },
-        { requireIssuedSession: false, signal: firstController.signal },
+        {
+          sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" },
+          requireIssuedSession: false,
+          signal: firstController.signal,
+        },
       );
       await new Promise((resolve) => setImmediate(resolve));
       const second = createToolExecutionContext(
@@ -2139,8 +2150,10 @@ describe("ToolExecutionContext", () => {
         sessionManager,
         devicePool,
         {
-          ...sessionOptions,
-          deviceReadiness: "automationReady",
+          sessionOptions: {
+            ...sessionOptions,
+            deviceReadiness: "automationReady",
+          },
         },
       );
       await new Promise((resolve) => setImmediate(resolve));
@@ -2178,8 +2191,11 @@ describe("ToolExecutionContext", () => {
       "session-cancelled-flight-retry",
       sessionManager,
       devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
-      { requireIssuedSession: false, signal: cancelled.signal },
+      {
+        sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" },
+        requireIssuedSession: false,
+        signal: cancelled.signal,
+      },
     );
     await setupEntered.promise;
     cancelled.abort(new Error("first request cancelled"));
@@ -2191,7 +2207,7 @@ describe("ToolExecutionContext", () => {
       "session-cancelled-flight-retry",
       sessionManager,
       devicePool,
-      { ...sessionOptions, deviceReadiness: "automationReady" },
+      { sessionOptions: { ...sessionOptions, deviceReadiness: "automationReady" } },
     );
     resolveSetup();
 
@@ -2232,8 +2248,7 @@ describe("ToolExecutionContext", () => {
         "session-shared-cancellation",
         sessionManager,
         devicePool,
-        sessionOptions,
-        { requireIssuedSession: false, signal: firstController.signal },
+        { sessionOptions, requireIssuedSession: false, signal: firstController.signal },
       );
       await setupEntered.promise;
       expect(resetCalls).toBe(1);
@@ -2248,7 +2263,7 @@ describe("ToolExecutionContext", () => {
         "session-shared-cancellation",
         sessionManager,
         devicePool,
-        sessionOptions,
+        { sessionOptions },
       );
       finishSetup.resolve();
       await expect(later).resolves.toMatchObject({ deviceId: "device-1" });
@@ -2282,13 +2297,11 @@ describe("ToolExecutionContext", () => {
     controller.abort(new Error("cancelled before readiness"));
 
     await expect(
-      createToolExecutionContext(
-        "session-preaborted-readiness",
-        sessionManager,
-        devicePool,
+      createToolExecutionContext("session-preaborted-readiness", sessionManager, devicePool, {
         sessionOptions,
-        { requireIssuedSession: false, signal: controller.signal },
-      ),
+        requireIssuedSession: false,
+        signal: controller.signal,
+      }),
     ).rejects.toThrow("cancelled before readiness");
     expect(resetCalls).toBe(0);
     expect(setupCalls).toBe(0);
@@ -2324,8 +2337,10 @@ describe("ToolExecutionContext", () => {
 
     await expect(
       createToolExecutionContext("session-acquisition-loop-bound", sessionManager, devicePool, {
-        ...sessionOptions,
-        deviceReadiness: "automationReady",
+        sessionOptions: {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
       }),
     ).rejects.toThrow(/iterations exhausted.*device-1/i);
     expect(setupPasses).toBe(5);
@@ -2364,8 +2379,10 @@ describe("ToolExecutionContext", () => {
 
     await expect(
       createToolExecutionContext("session-acquisition-deadline", sessionManager, devicePool, {
-        ...sessionOptions,
-        deviceReadiness: "automationReady",
+        sessionOptions: {
+          ...sessionOptions,
+          deviceReadiness: "automationReady",
+        },
       }),
     ).rejects.toThrow(/deadline.*device-1/i);
     expect(setupCalls).toBe(1);
@@ -2389,12 +2406,9 @@ describe("ToolExecutionContext", () => {
     // setup entirely, so record the readiness explicitly, exactly as a real
     // setup pass would have by the time a session is genuinely "existing".
     sessionManager.setDeviceReadiness("session-1", "automationReady");
-    const context = await createToolExecutionContext(
-      "session-1",
-      sessionManager,
-      devicePool,
+    const context = await createToolExecutionContext("session-1", sessionManager, devicePool, {
       sessionOptions,
-    );
+    });
 
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(0);
@@ -2405,7 +2419,8 @@ describe("ToolExecutionContext", () => {
     await sessionManager.releaseSession("session-1", "explicit-release");
 
     await expect(
-      createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions, {
+      createToolExecutionContext("session-1", sessionManager, devicePool, {
+        sessionOptions,
         admittedSession,
       }),
     ).rejects.toThrow("Session session-1 was released during setup");
@@ -2453,7 +2468,9 @@ describe("ToolExecutionContext", () => {
 
       try {
         await expect(
-          createToolExecutionContext("reset-session-2", sessionManager, devicePool, sessionOptions),
+          createToolExecutionContext("reset-session-2", sessionManager, devicePool, {
+            sessionOptions,
+          }),
         ).rejects.toThrow(/device-disconnected:emulator-5556;incident=/);
       } finally {
         await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
@@ -2499,7 +2516,7 @@ describe("ToolExecutionContext", () => {
           sessionId,
         );
         await expect(
-          createToolExecutionContext(sessionId, sessionManager, devicePool, sessionOptions),
+          createToolExecutionContext(sessionId, sessionManager, devicePool, { sessionOptions }),
         ).rejects.toThrow(/device-disconnected:emulator-5554;incident=/);
         expect(devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android")).toBe(
           sessionId,
@@ -2543,12 +2560,9 @@ describe("ToolExecutionContext", () => {
       );
       const release = sessionManager.releaseSession("session-recreated", PLAN_AUTO_RELEASE_REASON);
       await Promise.resolve();
-      const context = createToolExecutionContext(
-        "session-recreated",
-        sessionManager,
-        devicePool,
+      const context = createToolExecutionContext("session-recreated", sessionManager, devicePool, {
         sessionOptions,
-      );
+      });
       finishSetup();
       await setup;
       await release;
@@ -2572,7 +2586,8 @@ describe("ToolExecutionContext", () => {
     await Promise.resolve();
 
     await expect(
-      createToolExecutionContext("session-releasing", sessionManager, devicePool, sessionOptions, {
+      createToolExecutionContext("session-releasing", sessionManager, devicePool, {
+        sessionOptions,
         admittedSession: session,
       }),
     ).rejects.toThrow("released during setup");
@@ -2598,13 +2613,10 @@ describe("ToolExecutionContext", () => {
 
     try {
       await expect(
-        createToolExecutionContext(
-          "session-releasing",
-          sessionManager,
-          devicePool,
+        createToolExecutionContext("session-releasing", sessionManager, devicePool, {
           sessionOptions,
-          { admittedSession: session },
-        ),
+          admittedSession: session,
+        }),
       ).rejects.toThrow("released during setup");
     } finally {
       trackSetup.mockRestore();
@@ -2649,7 +2661,7 @@ describe("ToolExecutionContext", () => {
       await pool.initializeWithDevices([createBootedDevice("device-race")]);
       await manager.createSession("session-race", "device-race", "android");
 
-      const context = createToolExecutionContext("session-race", manager, pool, sessionOptions);
+      const context = createToolExecutionContext("session-race", manager, pool, { sessionOptions });
       await activityStartedPromise;
       await manager.releaseSession("session-race");
       allowActivityWrite();
@@ -2713,7 +2725,7 @@ describe("ToolExecutionContext", () => {
         "session-setup-race",
         boundedSessionManager,
         boundedPool,
-        sessionOptions,
+        { sessionOptions },
       );
       await setupStartedPromise;
       const release = boundedSessionManager.releaseSession("session-setup-race");
@@ -2819,8 +2831,7 @@ describe("ToolExecutionContext", () => {
             "kumquat-D",
             sessionManager,
             devicePool,
-            sessionOptions,
-            { requireIssuedSession: true }, // requireIssuedSession — the device-tool boundary
+            { sessionOptions, requireIssuedSession: true }, // requireIssuedSession — the device-tool boundary
           ),
         ).rejects.toThrow(/not an active daemon session/);
 
@@ -2874,8 +2885,7 @@ describe("ToolExecutionContext", () => {
           "restarted-session",
           recoveryManager,
           recoveryPool,
-          sessionOptions,
-          { requireIssuedSession: true }, // requireIssuedSession must NOT block restart recovery
+          { sessionOptions, requireIssuedSession: true }, // requireIssuedSession must NOT block restart recovery
         );
         expect(context.deviceId).toBe("device-1");
         expect(recoveryManager.getSession("restarted-session")?.assignedDevice).toBe("device-1");
@@ -2900,13 +2910,10 @@ describe("ToolExecutionContext", () => {
         await sessionManager.createSession("mine", "device-1", "android");
         const assignSpy = spyOn(devicePool, "assignDeviceToSession");
 
-        const context = await createToolExecutionContext(
-          "mine",
-          sessionManager,
-          devicePool,
+        const context = await createToolExecutionContext("mine", sessionManager, devicePool, {
           sessionOptions,
-          { requireIssuedSession: true },
-        );
+          requireIssuedSession: true,
+        });
 
         expect(context.deviceId).toBe("device-1");
         expect(assignSpy).not.toHaveBeenCalled();
@@ -2929,12 +2936,9 @@ describe("ToolExecutionContext", () => {
 
         // Mirrors deviceLabelMapping.registerDeviceLabelMap, which mints a fresh
         // derived session without passing requireIssuedSession.
-        const context = await createToolExecutionContext(
-          "base:B",
-          sessionManager,
-          devicePool,
+        const context = await createToolExecutionContext("base:B", sessionManager, devicePool, {
           sessionOptions,
-        );
+        });
         expect(context.deviceId).toBe("device-1");
         expect(sessionManager.getSession("base:B")?.assignedDevice).toBe("device-1");
       },

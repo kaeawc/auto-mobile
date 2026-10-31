@@ -130,8 +130,8 @@ async function stuckRelease(
       result.reapedAt = timer.now();
       await manager.releaseSession(sessionId, reason);
     },
-    timer,
     {
+      timer,
       forceStuckRelease: async (sessionId) => {
         forced.push(sessionId);
         result.forcedAt.push(timer.now());
@@ -241,8 +241,8 @@ describe("a stuck idle release is held to the same deadline", () => {
       manager,
       () => false,
       async () => {},
-      timer,
       {
+        timer,
         forceStuckRelease: async (sessionId) => {
           forced.push(sessionId);
         },

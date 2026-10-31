@@ -36,7 +36,6 @@ describe("physical iOS device resolution reaches ListInstalledApps", () => {
         getBootedSimulators: async () => [],
       }),
       createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
-      undefined,
       {
         physicalIosDevices: {
           listConnectedDevices: async () => ({ devices: [physical], complete: true }),

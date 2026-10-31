@@ -134,12 +134,11 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
     };
     const barrier = new FakeDbWriteBarrier();
     const listeners: DeviceIncarnationListener[] = [
-      createInstalledAppsDeviceIncarnationListener(
-        installedApps,
-        new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
+      createInstalledAppsDeviceIncarnationListener(installedApps, {
+        coordinator: new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
         barrier,
-        () => {},
-      ),
+        invalidateCache: () => {},
+      }),
     ];
 
     await expect(
@@ -157,15 +156,14 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
       const failure = new Error("notify failed");
       const calls: string[] = [];
       const invalidator = new DefaultDeviceIncarnationInvalidator([
-        createInstalledAppsDeviceIncarnationListener(
-          apps,
-          new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
+        createInstalledAppsDeviceIncarnationListener(apps, {
+          coordinator: new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
           barrier,
-          () => {},
-          async () => {
+          invalidateCache: () => {},
+          notifyResourcesUpdated: async () => {
             throw failure;
           },
-        ),
+        }),
         {
           name: "sync-failure",
           onDeviceIncarnationChanged: () => {},
@@ -223,15 +221,14 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
     const installedApps = new FakeInstalledAppsRepository();
     const barrier = new FakeDbWriteBarrier();
     const calls: string[] = [];
-    const listener = createInstalledAppsDeviceIncarnationListener(
-      installedApps,
-      new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
+    const listener = createInstalledAppsDeviceIncarnationListener(installedApps, {
+      coordinator: new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
       barrier,
-      (deviceId) => calls.push(`clear:${deviceId}`),
-      async (deviceId) => {
+      invalidateCache: (deviceId) => calls.push(`clear:${deviceId}`),
+      notifyResourcesUpdated: async (deviceId) => {
         calls.push(`notify:${deviceId}`);
       },
-    );
+    });
 
     await listener.onDeviceIncarnationChanged(ANDROID_DEVICE.deviceId);
 

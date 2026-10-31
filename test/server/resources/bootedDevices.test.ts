@@ -2275,17 +2275,15 @@ describe("ResourceRegistry Template Matching", () => {
 
   test("should prefer exact resource match over template", () => {
     // Register both exact resource and template
-    ResourceRegistry.register(
-      "test://items/special",
-      "Special Item",
-      "A special item",
-      "application/json",
-      async () => ({
+    ResourceRegistry.register("test://items/special", "Special Item", {
+      description: "A special item",
+      mimeType: "application/json",
+      handler: async () => ({
         uri: "test://items/special",
         mimeType: "application/json",
         text: JSON.stringify({ type: "exact" }),
       }),
-    );
+    });
 
     ResourceRegistry.registerTemplate("test://items/{id}", "Generic Item", {
       description: "A generic item",
@@ -2579,7 +2577,7 @@ describe("booted device readiness", () => {
         device,
         undefined,
         { getVersion: async () => undefined },
-        timer,
+        { timer },
       );
       expect(exhausted?.recovery).toEqual({
         state: "exhausted",
@@ -2597,7 +2595,7 @@ describe("booted device readiness", () => {
         device,
         undefined,
         { getVersion: async () => undefined },
-        timer,
+        { timer },
       );
       expect(idle?.recovery).toBeUndefined();
     } finally {
@@ -2638,7 +2636,7 @@ describe("booted device readiness", () => {
             return pendingVersion;
           },
         },
-        timer,
+        { timer },
       );
       await versionEntered;
       budget.suspend("device disappeared from discovery");
@@ -2673,7 +2671,7 @@ describe("booted device readiness", () => {
         device,
         undefined,
         { getVersion: async () => undefined },
-        timer,
+        { timer },
       );
       expect(status?.recovery?.reason).toBe("CtrlProxy restart failed");
     } finally {
@@ -2792,7 +2790,7 @@ describe("booted device readiness", () => {
       },
       lookup,
       { getVersion: async () => new Promise(() => {}) },
-      timer,
+      { timer },
     );
 
     await Promise.resolve();
@@ -2827,7 +2825,7 @@ describe("booted device readiness", () => {
         },
         undefined,
         { getVersion: async () => new Promise(() => {}) },
-        timer,
+        { timer },
       );
 
       await Promise.resolve();

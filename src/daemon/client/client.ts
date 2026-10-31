@@ -91,6 +91,8 @@ export interface DaemonClientRecoveryOptions {
 
 /** Everything the {@link DaemonClient} constructor takes after its recovery options. */
 export interface DaemonClientOptions {
+  /** Stale-socket recovery hints; defaults to none. */
+  recoveryOptions?: DaemonClientRecoveryOptions;
   /** `null` = no handshake, so doctor reaches a wrong-build daemon ungated; omitted = live identity. */
   clientIdentity?: { version: string; build: BuildIdentity } | null;
   idGenerator?: IdGenerator;
@@ -164,12 +166,18 @@ export class DaemonClient {
   private readonly maxInboundFrameBytes: number;
   private readonly env: NodeJS.ProcessEnv;
 
+  /**
+   * @param socketPath - Daemon control socket path
+   * @param connectionTimeout - Connect timeout in ms
+   * @param timer - Clock for connect and request timeouts
+   * @param options - Recovery hints, client identity and other client seams
+   */
   constructor(
     socketPath: string = SOCKET_PATH,
     connectionTimeout: number = CONNECTION_TIMEOUT_MS,
     timer: Timer = defaultTimer,
-    recoveryOptions: DaemonClientRecoveryOptions = {},
     {
+      recoveryOptions = {},
       clientIdentity,
       idGenerator = defaultIdGenerator,
       platformOverride = platform(),
@@ -692,13 +700,10 @@ export class DaemonClient {
   async getDaemonStatus(timeoutMs?: number): Promise<DaemonStatus> {
     // ide/status is side-effect-free and existed before structured handshake
     // errors. Like doctor, this diagnostic request deliberately omits identity.
-    const diagnostic = new DaemonClient(
-      this.socketPath,
-      this.connectionTimeout,
-      this.timer,
-      {},
-      { clientIdentity: null },
-    );
+    const diagnostic = new DaemonClient(this.socketPath, this.connectionTimeout, this.timer, {
+      recoveryOptions: {},
+      clientIdentity: null,
+    });
     try {
       const rawStatus = await diagnostic.callDaemonMethod("ide/status", {}, { timeoutMs });
       return toDaemonStatus(rawStatus, this.socketPath);
@@ -712,12 +717,16 @@ export class DaemonClient {
    * `params._meta.progressToken` (issue #6205) so the daemon can relay
    * `notifications/progress` ticks back tagged with that SAME token — omit it
    * to request no progress relay, never fabricate one downstream.
+   *
+   * @param toolName - The tool to call
+   * @param params - The tool's arguments
+   * @param progressToken - The MCP client's own progress token, if any
+   * @param options - Request-id callback, cancellation signal and task relay
    */
   async callTool(
     toolName: string,
     params: Record<string, any>,
     progressToken?: string | number,
-    onRequestId?: (requestId: string) => void,
     options: DaemonToolCallOptions = {},
   ): Promise<any> {
     return this.sendRequest(
@@ -727,7 +736,6 @@ export class DaemonClient {
         arguments: params,
       },
       progressToken,
-      onRequestId,
       options,
     );
   }
@@ -742,7 +750,7 @@ export class DaemonClient {
     tasks: TaskRelayFrame,
     { signal }: { signal?: AbortSignal } = {},
   ): Promise<any> {
-    return this.sendRequest(method, params, undefined, undefined, { signal, tasks });
+    return this.sendRequest(method, params, undefined, { signal, tasks });
   }
 
   /**
@@ -753,15 +761,14 @@ export class DaemonClient {
     params: Record<string, any> = {},
     { signal }: { signal?: AbortSignal } = {},
   ): Promise<any> {
-    return this.sendRequest("resources/read", { uri, ...params }, undefined, undefined, { signal });
+    return this.sendRequest("resources/read", { uri, ...params }, undefined, { signal });
   }
 
   private async sendRequest(
     method: string,
     params: Record<string, any>,
     progressToken?: string | number,
-    onRequestId?: (requestId: string) => void,
-    { signal, tasks }: DaemonToolCallOptions = {},
+    { onRequestId, signal, tasks }: DaemonToolCallOptions = {},
   ): Promise<any> {
     signal?.throwIfAborted();
     // Ensure we're connected

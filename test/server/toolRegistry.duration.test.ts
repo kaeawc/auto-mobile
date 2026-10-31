@@ -42,8 +42,8 @@ describe("ToolRegistry tool call duration recording", () => {
       z.object({
         sessionUuid: z.string().optional(),
       }),
-      async () => ({ success: true }),
       {
+        handler: async () => ({ success: true }),
         shouldEnsureDevice: () => false,
         nonDeviceHandler: async () => {
           timer.advanceTime(37);
@@ -72,8 +72,8 @@ describe("ToolRegistry tool call duration recording", () => {
       "durationFailureProbe",
       "Measures failed tool call duration",
       z.object({}),
-      async () => ({ success: true }),
       {
+        handler: async () => ({ success: true }),
         shouldEnsureDevice: () => false,
         nonDeviceHandler: async () => {
           timer.advanceTime(19);
@@ -111,8 +111,8 @@ describe("ToolRegistry tool call duration recording", () => {
       "durationAwaitProbe",
       "Waits for duration recording",
       z.object({}),
-      async () => ({ success: true }),
       {
+        handler: async () => ({ success: true }),
         shouldEnsureDevice: () => false,
         nonDeviceHandler: async () => {
           timer.advanceTime(11);
@@ -150,8 +150,8 @@ describe("ToolRegistry tool call duration recording", () => {
       "durationRejectProbe",
       "Handles duration recording failure",
       z.object({}),
-      async () => ({ success: true }),
       {
+        handler: async () => ({ success: true }),
         shouldEnsureDevice: () => false,
         nonDeviceHandler: async () => ({ success: true }),
       },

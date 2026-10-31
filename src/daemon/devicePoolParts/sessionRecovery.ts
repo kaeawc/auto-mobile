@@ -100,8 +100,7 @@ export interface SessionRecoveryOperations {
     record: AndroidRecoveryRecord,
     recovered: boolean,
     device: AndroidEmulatorRecoveryDevice,
-    session: Session,
-    incidentId: string | undefined,
+    options: { session: Session; incidentId?: string },
   ): Promise<"recovered" | "released">;
   refreshEmulatorLossRecoverySettlement(
     incidentId: string | undefined,
@@ -454,15 +453,13 @@ export class DevicePoolSessionRecovery {
     record: AndroidRecoveryRecord,
     recovered: boolean,
     device: AndroidEmulatorRecoveryDevice,
-    session: Session,
-    incidentId: string | undefined,
+    { session, incidentId }: { session: Session; incidentId?: string },
   ): Promise<"recovered" | "released"> {
     return await this.state.adbResetSessionRecovery.finishAdbResetRecoveryAfterReboot(
       record,
       recovered,
       device,
-      session,
-      incidentId,
+      { session, incidentId },
     );
   }
 

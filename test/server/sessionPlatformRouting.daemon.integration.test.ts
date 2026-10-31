@@ -141,16 +141,13 @@ async function acquireBoth(): Promise<void> {
 test("daemon routes both platforms and explicit session wins over platform", async () => {
   await acquireBoth();
   const received: string[] = [];
-  ToolRegistry.registerDeviceAware(
-    "platformProbe",
-    "platformProbe",
-    z.object({}),
-    async (device) => {
+  ToolRegistry.registerDeviceAware("platformProbe", "platformProbe", z.object({}), {
+    handler: async (device) => {
       received.push(device.deviceId);
       return { success: true };
     },
-    { deviceReadiness: "booted" },
-  );
+    deviceReadiness: "booted",
+  });
   const tool = ToolRegistry.getTool("platformProbe")!;
   await tool.handler({ platform: "android", __mcpSessionId: "client", keepScreenAwake: false });
   await tool.handler({ platform: "ios", __mcpSessionId: "client", keepScreenAwake: false });
@@ -267,11 +264,13 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
           sessionUuid: z.string().optional(),
           keepScreenAwake: z.boolean().optional(),
         }),
-        async (device) => {
-          received.push(device.deviceId);
-          return { content: [{ type: "text" as const, text: device.deviceId }] };
+        {
+          handler: async (device) => {
+            received.push(device.deviceId);
+            return { content: [{ type: "text" as const, text: device.deviceId }] };
+          },
+          deviceReadiness: "booted",
         },
-        { deviceReadiness: "booted" },
       );
       ToolRegistry.registerDeviceAware(
         "readRoutingProbe",
@@ -281,11 +280,11 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
           deviceId: z.string().optional(),
           sessionUuid: z.string().optional(),
         }),
-        async (device) => {
-          received.push(`read:${device.deviceId}`);
-          return { content: [{ type: "text" as const, text: device.deviceId }] };
-        },
         {
+          handler: async (device) => {
+            received.push(`read:${device.deviceId}`);
+            return { content: [{ type: "text" as const, text: device.deviceId }] };
+          },
           deviceReadiness: "booted",
           deviceReadOnly: true,
           sessionlessDeviceRead: {

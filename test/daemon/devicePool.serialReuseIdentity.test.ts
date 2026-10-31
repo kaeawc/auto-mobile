@@ -876,14 +876,14 @@ warmedTest(
     const h = await setup(original, true, undefined, {
       recoveryPolicy: { onLoss: true, maxAttempts: 1 },
       deviceSessionContinuityEnabled: true,
-      releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason, shouldCommit) => {
+      releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason, options) => {
         if (reason === "explicit-release" && !paused) {
           paused = true;
           await gate.promise;
           return;
         }
         const result = await h.sessions.releaseSessionUnlessSuperseded(sessionId, reason, {
-          commitFence: shouldCommit ?? (() => true),
+          commitFence: options?.shouldCommit ?? (() => true),
         });
         return !result.superseded;
       },

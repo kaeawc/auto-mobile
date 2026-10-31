@@ -129,7 +129,8 @@ describe("daemon request budget notification (#13797)", () => {
 function captureClient(env: NodeJS.ProcessEnv = {}) {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new DaemonClient("/fake/socket", 120_000, timer, ISOLATED_DAEMON_RECOVERY, {
+  const client = new DaemonClient("/fake/socket", 120_000, timer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
     clientIdentity: null,
     env,
     idGenerator: new FakeIdGenerator(),

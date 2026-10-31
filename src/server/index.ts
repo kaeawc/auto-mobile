@@ -444,8 +444,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       version: getMcpServerVersion(),
     },
     sdkServerCapabilities(options.era),
-    options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
-    modernRequestState(options),
+    {
+      cacheHints: options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
+      requestState: modernRequestState(options),
+    },
   );
   startupBenchmark.endPhase("sdkInitialization");
 

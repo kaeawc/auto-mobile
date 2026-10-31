@@ -988,13 +988,10 @@ describe("registerRecordingSessionCleanup", () => {
       now: () => new Date(timer.now()),
     });
     try {
-      const first = await startDeviceGestureRecording(
-        device,
-        timer,
-        new FakeIdGenerator(["R1"]),
-        recorder("R1"),
-        { ownerSessionUuid: "session-a" },
-      );
+      const first = await startDeviceGestureRecording(device, timer, new FakeIdGenerator(["R1"]), {
+        recorderFactory: recorder("R1"),
+        ownerSessionUuid: "session-a",
+      });
       registerRecordingSessionCleanup(manager, {
         ...defaultRecordingSessionCleanupDeps,
         timer,
@@ -1017,13 +1014,10 @@ describe("registerRecordingSessionCleanup", () => {
       await timer.advanceTimersByTimeAsync(120_000);
       await freed;
       expect(stops).toEqual([first.recordingId]);
-      const second = await startDeviceGestureRecording(
-        device,
-        timer,
-        new FakeIdGenerator(["R2"]),
-        recorder("R2"),
-        { ownerSessionUuid: "session-a" },
-      );
+      const second = await startDeviceGestureRecording(device, timer, new FakeIdGenerator(["R2"]), {
+        recorderFactory: recorder("R2"),
+        ownerSessionUuid: "session-a",
+      });
       expect(second.recordingId).not.toBe(first.recordingId);
       wedge.resolve();
       await lateStage.promise;
@@ -1071,11 +1065,8 @@ describe("registerRecordingSessionCleanup", () => {
         const testId = "test-session-a";
         try {
           await startVideoRecording({ device, ownerSessionUuid: "session-a" });
-          await startDeviceGestureRecording(
-            device,
-            timer,
-            new FakeIdGenerator([testId]),
-            () => ({
+          await startDeviceGestureRecording(device, timer, new FakeIdGenerator([testId]), {
+            recorderFactory: () => ({
               stepCount: 1,
               start: async () => undefined,
               stop: async () => {
@@ -1083,8 +1074,8 @@ describe("registerRecordingSessionCleanup", () => {
                 return { steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 };
               },
             }),
-            { ownerSessionUuid: "session-a" },
-          );
+            ownerSessionUuid: "session-a",
+          });
           registerRecordingSessionCleanup(manager, {
             ...defaultRecordingSessionCleanupDeps,
             timer,

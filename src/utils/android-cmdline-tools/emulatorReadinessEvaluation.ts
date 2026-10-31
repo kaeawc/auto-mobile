@@ -118,8 +118,10 @@ export function unmetReadinessPredicate(
   deviceId: string,
   stateOutput: string,
   packageManager: ExecResult,
-  sysBootCompleted: string,
-  bootAnimationState: string,
+  {
+    sysBootCompleted,
+    bootAnimationState,
+  }: { sysBootCompleted: string; bootAnimationState: string },
 ): ReadinessDiagnostic | undefined {
   if (!stateOutput.includes("device")) {
     return unmetReadinessDiagnostic(

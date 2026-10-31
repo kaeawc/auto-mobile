@@ -103,19 +103,14 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   test("stores registerDeviceAware flags from the options bag", () => {
-    ToolRegistry.registerDeviceAware(
-      "optionsProbe",
-      "Options probe",
-      z.object({}),
-      async () => ({ success: true }),
-      {
-        supportsProgress: true,
-        debugOnly: true,
-        embeddedSdkOnly: true,
-        planExecutable: true,
-        outputSchema: z.object({ success: z.boolean() }),
-      },
-    );
+    ToolRegistry.registerDeviceAware("optionsProbe", "Options probe", z.object({}), {
+      handler: async () => ({ success: true }),
+      supportsProgress: true,
+      debugOnly: true,
+      embeddedSdkOnly: true,
+      planExecutable: true,
+      outputSchema: z.object({ success: z.boolean() }),
+    });
 
     const tool = ToolRegistry.getAllTools({ includeUnavailable: true })[0];
     expect(tool.supportsProgress).toBe(true);
@@ -126,17 +121,12 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   test("stores register flags from the options bag", () => {
-    ToolRegistry.register(
-      "plainOptionsProbe",
-      "Plain options probe",
-      z.object({}),
-      async () => ({ success: true }),
-      {
-        supportsProgress: true,
-        debugOnly: true,
-        outputSchema: z.object({ success: z.boolean() }),
-      },
-    );
+    ToolRegistry.register("plainOptionsProbe", "Plain options probe", z.object({}), {
+      handler: async () => ({ success: true }),
+      supportsProgress: true,
+      debugOnly: true,
+      outputSchema: z.object({ success: z.boolean() }),
+    });
 
     const tool = ToolRegistry.getAllTools({ includeUnavailable: true })[0];
     expect(tool.requiresDevice).toBe(false);
@@ -231,16 +221,13 @@ describe("ToolRegistry device-aware pipeline", () => {
       },
     });
 
-    ToolRegistry.registerDeviceAware(
-      "pipelineProbe",
-      "Pipeline probe",
-      z.object({}),
-      async () => {
+    ToolRegistry.registerDeviceAware("pipelineProbe", "Pipeline probe", z.object({}), {
+      handler: async () => {
         events.push("handler");
         return { success: true };
       },
-      { supportsProgress: true },
-    );
+      supportsProgress: true,
+    });
 
     const tool = ToolRegistry.getTool("pipelineProbe")!;
     const response = await tool.handler(args);
@@ -542,8 +529,8 @@ describe("ToolRegistry device-aware pipeline", () => {
       "readinessProbe",
       "Readiness probe",
       z.object({ quick: z.boolean() }),
-      async () => ({ success: true }),
       {
+        handler: async () => ({ success: true }),
         deviceReadiness: (args: { quick: boolean }) => (args.quick ? "booted" : "automationReady"),
       },
     );

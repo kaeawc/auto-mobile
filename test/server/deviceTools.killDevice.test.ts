@@ -846,11 +846,8 @@ describe("killDevice handler", () => {
    */
   const callKillDeviceAsItsHolder = () => {
     const tool = ToolRegistry.getRegisteredTool("killDevice")!;
-    ToolRegistry.register(
-      "killDevice",
-      tool.description,
-      tool.schema,
-      (args, progress, signal) => {
+    ToolRegistry.register("killDevice", tool.description, tool.schema, {
+      handler: (args, progress, signal) => {
         const deviceId = (args as { device?: { deviceId?: string } }).device?.deviceId;
         const holder =
           deviceId && DaemonState.getInstance().isInitialized()
@@ -858,8 +855,9 @@ describe("killDevice handler", () => {
             : null;
         return tool.handler(holder ? { ...args, sessionUuid: holder } : args, progress, signal);
       },
-      { defaultEnabled: true, transportRecovery: "connect" },
-    );
+      defaultEnabled: true,
+      transportRecovery: "connect",
+    });
   };
 
   const cleanup = () => {
@@ -1205,8 +1203,11 @@ describe("killDevice handler", () => {
         unknownEmulator,
         { avdName: "Pixel_8_Old", incarnation: entry.incarnation },
         pool,
-        async () => undefined,
-        { budget: { timer: new FakeTimer(), deadlineMs: 30_000 }, force: false },
+        {
+          resolveRunningAvdName: async () => undefined,
+          budget: { timer: new FakeTimer(), deadlineMs: 30_000 },
+          force: false,
+        },
       );
       expect(confirmation.kind).toBe("refusal");
       if (confirmation.kind !== "refusal") {
@@ -3852,18 +3853,14 @@ describe("killDevice handler", () => {
     });
     let socketCreations = 0;
     const iosManager = new FakeIOSCtrlProxyManager(timer);
-    const client = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      (url) => {
+    const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: (url) => {
         socketCreations++;
         return new FakeWebSocket(url, "none", 0, timer);
       },
       timer,
-      {
-        serviceManagerFactory: () => iosManager,
-      },
-    );
+      serviceManagerFactory: () => iosManager,
+    });
     IOSCtrlProxyClient.registerForTesting(client, device.deviceId);
     const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
       stop: async () => {},

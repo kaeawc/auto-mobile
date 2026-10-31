@@ -553,8 +553,7 @@ export class TwoDaemonWorld {
       pid,
       this.claims.forProcess(current),
       this.probe,
-      () => socketPath,
-      { timer },
+      { ownerSocketPath: () => socketPath, timer },
     );
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, daemonSessionId, {
@@ -572,11 +571,11 @@ export class TwoDaemonWorld {
       () => false,
       async (sessionId, reason) => {
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+        await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
           reason,
         });
       },
-      timer,
+      { timer },
     );
     registerDerivedLabelSessionReleaseCascade(manager, pool);
     const registry = new DeviceSessionRegistry();
@@ -1141,7 +1140,6 @@ export class TwoDaemonWorld {
           device.deviceId,
           undefined,
           undefined,
-          undefined,
           { foreignClaim: { toolName: "killDevice", force: false } },
         );
         if (!reservation || process.dead) {
@@ -1199,9 +1197,14 @@ export class TwoDaemonWorld {
         const pooled = process.pool.getDevice(device.deviceId);
         const sessionId = pooled?.sessionId ?? null;
         if (sessionId && process.manager.getSession(sessionId)) {
-          await releaseSessionAndDevice(process.manager, process.pool, device.deviceId, sessionId, {
-            reason: deviceLossCancellationReason(device.deviceId),
-          });
+          await releaseSessionAndDevice(
+            { manager: process.manager, pool: process.pool },
+            device.deviceId,
+            sessionId,
+            {
+              reason: deviceLossCancellationReason(device.deviceId),
+            },
+          );
         }
         await process.pool.removeDisconnectedDevice(
           device.deviceId,
@@ -1332,9 +1335,14 @@ export class TwoDaemonWorld {
             const deviceId =
               process.pool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??
               null;
-            await releaseSessionAndDevice(process.manager, process.pool, deviceId, sessionId, {
-              reason: "daemon-shutdown",
-            });
+            await releaseSessionAndDevice(
+              { manager: process.manager, pool: process.pool },
+              deviceId,
+              sessionId,
+              {
+                reason: "daemon-shutdown",
+              },
+            );
           }),
         );
         process.pool.releaseDeviceClaimsForShutdown();

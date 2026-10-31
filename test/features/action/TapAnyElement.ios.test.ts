@@ -87,14 +87,12 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     fakeWindow.configureCachedActiveWindow(null);
 
     const iosModule = await import("../../../src/features/observe/ios");
-    const client = iosModule.IOSCtrlProxyClient.createForTesting(
-      IOS_DEVICE,
-      8766,
-      () => {
+    const client = iosModule.IOSCtrlProxyClient.createForTesting(IOS_DEVICE, 8766, {
+      wsFactory: () => {
         throw new Error("Unexpected live iOS socket");
       },
-      fakeTimer,
-    );
+      timer: fakeTimer,
+    });
     client.requestTapCoordinates = (...args) => fakeIosClient.requestTapCoordinates(...args);
     client.requestDoubleTapCoordinates = (...args) =>
       fakeIosClient.requestDoubleTapCoordinates(...args);
@@ -458,7 +456,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     await tapAny.execute({ action: "tap" }, { signal: controller.signal });
 
-    const [, , , , signalArg] = probeSpy.mock.calls[0] ?? [];
+    const signalArg = probeSpy.mock.calls[0]?.[2]?.signal;
     expect(signalArg).toBe(controller.signal);
   });
 

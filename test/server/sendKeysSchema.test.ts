@@ -9,6 +9,7 @@ import {
 } from "../../src/server/interactionTools";
 import { assertSendKeysRunnerCompatible } from "../../src/server/interactionToolHandlers";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { deviceAwareHandler } from "../helpers/registeredHandler";
 import type { SendKeys } from "../../src/features/action/SendKeys";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 
@@ -50,7 +51,7 @@ describe("sendKeysSchema", () => {
     const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation(
       (...args) => {
         if (args[0] === "sendKeys") {
-          handler = (device, input) => args[3](device, args[2].parse(input));
+          handler = (device, input) => deviceAwareHandler(args[3])(device, args[2].parse(input));
         }
       },
     );

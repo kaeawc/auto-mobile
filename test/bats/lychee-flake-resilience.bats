@@ -55,7 +55,12 @@ self_referential_exclude_pattern() {
 # Extracts the kaeawc/auto-mobile release-download base exclude pattern as a
 # raw (non-JSON-escaped) string usable directly as a bash =~ regex.
 release_download_base_exclude_pattern() {
-  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/releases/download"))' "$CONFIG"
+  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/releases/download") and (test("%7B") | not))' "$CONFIG"
+}
+
+# Extracts the exclude pattern for a shell sample's unexpanded release tag.
+release_download_placeholder_exclude_pattern() {
+  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/releases/download") and test("%7B"))' "$CONFIG"
 }
 
 @test "lychee retries failed requests with a backoff (retry_wait_time)" {
@@ -175,6 +180,26 @@ release_download_base_exclude_pattern() {
   local other_repo="https://github.com/lycheeverse/lychee/releases/download"
   [[ ! "$asset" =~ $pattern ]]
   [[ ! "$releases" =~ $pattern ]]
+  [[ ! "$other_repo" =~ $pattern ]]
+}
+
+@test "release-download placeholder exclude matches an unexpanded tag and nothing real" {
+  requires_yq
+  run release_download_placeholder_exclude_pattern
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  local pattern="$output"
+
+  # The form lychee extracts from BASE="…/download/${VERSION}".
+  local placeholder='https://github.com/kaeawc/auto-mobile/releases/download/$%7BVERSION%7D'
+  [[ "$placeholder" =~ $pattern ]]
+
+  # Real tags and assets stay checked, as does a placeholder in another repo.
+  local real_tag="https://github.com/kaeawc/auto-mobile/releases/download/0.0.89"
+  local asset='https://github.com/kaeawc/auto-mobile/releases/download/$%7BVERSION%7D/automobile-protoviewer.apk'
+  local other_repo='https://github.com/lycheeverse/lychee/releases/download/$%7BVERSION%7D'
+  [[ ! "$real_tag" =~ $pattern ]]
+  [[ ! "$asset" =~ $pattern ]]
   [[ ! "$other_repo" =~ $pattern ]]
 }
 

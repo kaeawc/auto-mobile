@@ -189,8 +189,7 @@ export class DeviceState {
       () => this.device,
       () => this.adbFactory,
       () => this.deviceTraits,
-      () => this.timer,
-      dependencies.power,
+      { timer: () => this.timer, seams: dependencies.power },
     );
     this.clock = new ClockOperations(
       {

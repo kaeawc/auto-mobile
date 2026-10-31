@@ -209,8 +209,13 @@ export const expandAndRematchIfCollapsed = async (
   device: BootedDevice,
   notification: SystemTrayNotificationArgs,
   appMatchTexts: string[],
-  deadlineMs: number,
-  result: { observation: ObserveResult; match: SystemTrayNotificationMatch } & SystemTrayCall,
+  {
+    deadlineMs,
+    result,
+  }: {
+    deadlineMs: number;
+    result: { observation: ObserveResult; match: SystemTrayNotificationMatch } & SystemTrayCall;
+  },
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch }> => {
   const { signal, progress } = result;
   throwIfAborted(signal);
@@ -249,7 +254,8 @@ export const expandAndRematchIfCollapsed = async (
       "Expanded collapsed notification group but the notification wait timed out before it could be re-matched.",
     );
   }
-  const reMatch = await waitForNotificationMatch(device, notification, appMatchTexts, remainingMs, {
+  const reMatch = await waitForNotificationMatch(device, notification, appMatchTexts, {
+    awaitTimeoutMs: remainingMs,
     progress,
     signal,
   });

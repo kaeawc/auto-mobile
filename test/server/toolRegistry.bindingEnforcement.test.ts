@@ -124,16 +124,13 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         return { success: true };
       },
     );
-    ToolRegistry.registerDeviceAware(
-      "readProbe",
-      "Read probe",
-      z.object({}).passthrough(),
-      async (device: BootedDevice) => {
+    ToolRegistry.registerDeviceAware("readProbe", "Read probe", z.object({}).passthrough(), {
+      handler: async (device: BootedDevice) => {
         handled.push(`read:${device.deviceId}`);
         return { success: true };
       },
-      { deviceReadOnly: true },
-    );
+      deviceReadOnly: true,
+    });
   }
 
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
@@ -262,9 +259,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       });
       const internal = async (sessionUuid: string): Promise<unknown> => {
         try {
-          return await ToolRegistry.callInternal("getAndroid", {}, undefined, undefined, {
-            sessionUuid,
-          });
+          return await ToolRegistry.callInternal("getAndroid", {}, { sessionUuid });
         } catch (error) {
           return error;
         }
@@ -318,8 +313,6 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
           await ToolRegistry.callInternal(
             "controlProbe",
             { platform: "ios", deviceId: free.deviceId },
-            undefined,
-            undefined,
             { sessionUuid: execA },
           );
         } catch (error) {
@@ -332,9 +325,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         });
         expect(handled).toEqual([]);
 
-        await ToolRegistry.callInternal("controlProbe", {}, undefined, undefined, {
-          sessionUuid: execA,
-        });
+        await ToolRegistry.callInternal("controlProbe", {}, { sessionUuid: execA });
         expect(handled).toEqual([`control:${slotA.deviceId}`]);
       },
     );

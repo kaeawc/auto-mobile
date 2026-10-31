@@ -31,11 +31,14 @@ test("stateless ingress carries each server's header binding key to the device p
           "setActiveDevice",
           "Select device",
           z.object({ deviceId: z.string() }),
-          async (args) => {
-            receivedIds.push(Reflect.get(args, "__mcpSessionId"));
-            return handler(args);
+          {
+            handler: async (args) => {
+              receivedIds.push(Reflect.get(args, "__mcpSessionId"));
+              return handler(args);
+            },
+            defaultEnabled: true,
+            ...SELECTS_ACTIVE_DEVICE,
           },
-          { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
         );
       },
       async () => {

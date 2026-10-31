@@ -277,8 +277,7 @@ export class EmulatorProcessLifecycle {
     try {
       await this.withProcessExitIncident(
         deviceId,
-        code,
-        signal,
+        { code, signal },
         childProcess,
         async (incidentId) => {
           if (
@@ -313,10 +312,16 @@ export class EmulatorProcessLifecycle {
     }
   }
 
+  /**
+   * @param deviceId - The emulator whose process exited
+   * @param exit.code - The process exit code
+   * @param exit.signal - The signal that ended the process
+   * @param childProcess - The exited process, when tracked
+   * @param handleIncident - Runs once the shared incident id is known
+   */
   private async withProcessExitIncident(
     deviceId: string,
-    code: number | null,
-    signal: NodeJS.Signals | null,
+    { code, signal }: { code: number | null; signal: NodeJS.Signals | null },
     childProcess: ChildProcess | undefined,
     handleIncident: (incidentId: string | undefined) => Promise<void>,
   ): Promise<void> {

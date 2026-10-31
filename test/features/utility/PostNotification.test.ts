@@ -52,7 +52,12 @@ describe("PostNotification", () => {
   const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
   const IMAGE_DIR = path.join(path.sep, "fake-host", "images");
   const newNotifier = (fileSystem: FakeFileSystem) =>
-    new PostNotification(device, fakeAdb, fakeWindow, null, fileSystem);
+    new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+      simctl: null,
+      fileSystem,
+    });
   const configureBroadcastResult = (code: number) => {
     configureReceiverProbe();
     fakeAdb.setCommandResponse(
@@ -73,7 +78,10 @@ describe("PostNotification", () => {
 
   test("logs failures preparing SDK extras and preserves the Android failure", async () => {
     const error = new Error("action unavailable");
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({
       title: "Hello",
       body: "World",
@@ -168,7 +176,10 @@ describe("PostNotification", () => {
       createExecResult("Broadcast completed: result=1", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({
       title: "Hello",
       body: "World",
@@ -194,7 +205,10 @@ describe("PostNotification", () => {
       createExecResult("Broadcast completed: result=1", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
@@ -214,7 +228,10 @@ describe("PostNotification", () => {
   });
 
   test("rejects invalid explicit Android appId before SDK broadcast", async () => {
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
@@ -244,7 +261,10 @@ describe("PostNotification", () => {
       createExecResult("Broadcast completed: result=1", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
@@ -265,7 +285,10 @@ describe("PostNotification", () => {
     configureReceiverProbe();
     fakeAdb.setCommandResponse("am broadcast", createExecResult("Error: No receiver found", ""));
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({
       title: "Fallback",
       body: "Body",
@@ -277,7 +300,10 @@ describe("PostNotification", () => {
   });
 
   test("requires imagePath for bigPicture imageType", async () => {
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({
       title: "Big",
       body: "Picture",
@@ -296,7 +322,10 @@ describe("PostNotification", () => {
       createExecResult("Broadcast completed: result=0", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({
       title: "Fail",
       body: "Body",
@@ -529,7 +558,10 @@ describe("PostNotification", () => {
 
   test("iOS-only category and payload are ignored on Android with a warning (#14097)", async () => {
     configureBroadcastResult(1);
-    const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+    const result = await new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    }).execute({
       title: "Hello",
       body: "World",
       appId: "com.example.app",
@@ -544,7 +576,10 @@ describe("PostNotification", () => {
   describe("imagePath without bigPicture (#10014)", () => {
     test("does not push or send image_path and warns that the image was ignored", async () => {
       configureBroadcastResult(1);
-      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+      const result = await new PostNotification(device, {
+        adbFactoryOrExecutor: fakeAdb,
+        window: fakeWindow,
+      }).execute({
         title: "Hello",
         body: "World",
         imagePath: "./hero.png",
@@ -561,7 +596,10 @@ describe("PostNotification", () => {
 
     test("explicit normal imageType with imagePath also warns", async () => {
       configureBroadcastResult(1);
-      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+      const result = await new PostNotification(device, {
+        adbFactoryOrExecutor: fakeAdb,
+        window: fakeWindow,
+      }).execute({
         title: "Hello",
         body: "World",
         imageType: "normal",
@@ -575,7 +613,10 @@ describe("PostNotification", () => {
 
     test("no warning when imagePath is absent", async () => {
       configureBroadcastResult(1);
-      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+      const result = await new PostNotification(device, {
+        adbFactoryOrExecutor: fakeAdb,
+        window: fakeWindow,
+      }).execute({
         title: "Hello",
         body: "World",
         appId: "com.example.app",
@@ -605,7 +646,10 @@ describe("PostNotification", () => {
 
     test("result=0 stays a failure", async () => {
       configureBroadcastResult(0);
-      const failed = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+      const failed = await new PostNotification(device, {
+        adbFactoryOrExecutor: fakeAdb,
+        window: fakeWindow,
+      }).execute({
         title: "Hello",
         body: "World",
         appId: "com.example.app",
@@ -618,7 +662,10 @@ describe("PostNotification", () => {
       "fails closed on result code %i, which this host does not know, and says to update the host",
       async (code) => {
         configureBroadcastResult(code);
-        const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+        const result = await new PostNotification(device, {
+          adbFactoryOrExecutor: fakeAdb,
+          window: fakeWindow,
+        }).execute({
           title: "Hello",
           body: "World",
           appId: "com.example.app",
@@ -636,7 +683,10 @@ describe("PostNotification", () => {
       createExecResult("No receivers found", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({ title: "Missing", body: "Receiver" });
 
     expect(result.success).toBe(false);
@@ -657,7 +707,10 @@ describe("PostNotification", () => {
       createExecResult("Broadcast completed: result=1", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({
       title: "Short form",
       body: "Receiver",
@@ -675,7 +728,10 @@ describe("PostNotification", () => {
       createExecResult("1 receivers found:\n    com.example.app/.SomeOtherReceiver", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({ title: "Other", body: "Receiver" });
 
     expect(result).toEqual({
@@ -695,7 +751,10 @@ describe("PostNotification", () => {
       createExecResult("Broadcast completed: result=0", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({ title: "Fail", body: "Broadcast" });
 
     expect(result).toEqual({
@@ -715,7 +774,10 @@ describe("PostNotification", () => {
       createExecResult("Broadcast completed: result=1", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({ title: "Success", body: "Broadcast" });
 
     expect(result.success).toBe(true);
@@ -730,7 +792,10 @@ describe("PostNotification", () => {
       createExecResult("Broadcast completed: result=1", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({ title: "Fallback", body: "Broadcast" });
 
     expect(result.success).toBe(true);
@@ -749,7 +814,10 @@ describe("PostNotification", () => {
       createExecResult("Broadcast completed: result=1", ""),
     );
 
-    const postNotification = new PostNotification(device, fakeAdb, fakeWindow);
+    const postNotification = new PostNotification(device, {
+      adbFactoryOrExecutor: fakeAdb,
+      window: fakeWindow,
+    });
     const result = await postNotification.execute({ title: "Fallback", body: "Broadcast" });
 
     expect(result.success).toBe(true);

@@ -53,8 +53,10 @@ export async function runSessionBiometricMutation<T>(
   sessionManager: SessionManager | undefined,
   sessionUuid: string | undefined,
   deviceId: string,
-  initialEnrollment: BiometricEnrollment | undefined,
-  mutation: () => Promise<T>,
+  {
+    initialEnrollment,
+    mutation,
+  }: { initialEnrollment?: BiometricEnrollment; mutation: () => Promise<T> },
 ): Promise<T> {
   if (!sessionManager || !sessionUuid) {
     return await mutation();

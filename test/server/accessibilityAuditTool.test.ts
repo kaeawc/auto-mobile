@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { deviceAwareHandler } from "../helpers/registeredHandler";
 import type { BootedDevice } from "../../src/models";
 import { NativeAccessibilityAudit } from "../../src/features/accessibility/NativeAccessibilityAudit";
 import { createAccessibilityAuditTool } from "../../src/server/accessibilityAuditTool";
@@ -11,7 +12,7 @@ function registeredHandler(tool: ReturnType<typeof createAccessibilityAuditTool>
   const registrar = {
     register: () => {},
     registerDeviceAware: (_name, _description, _schema, registered) => {
-      handler = registered;
+      handler = deviceAwareHandler(registered);
     },
   } as ToolRegistrar;
   tool.register(registrar);

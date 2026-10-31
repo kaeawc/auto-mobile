@@ -21,7 +21,7 @@ function setup(reader = new FakeViewHierarchy()) {
   timer.enableAutoAdvance();
   const adb = new FakeAdbExecutor();
   const factory = new FakeAdbClientFactory(adb);
-  const idle = new AwaitIdle(device, factory, timer, reader);
+  const idle = new AwaitIdle(device, factory, timer, { hierarchyReader: reader });
   return { timer, adb, idle, reader, factory };
 }
 
@@ -85,7 +85,7 @@ describe("Android stability signal regressions", () => {
         return cached;
       },
     };
-    const idle = new AwaitIdle(device, factory, timer, reader);
+    const idle = new AwaitIdle(device, factory, timer, { hierarchyReader: reader });
     const result = await idle.waitForUiStability("com.android.launcher3", 500);
     expect(timer.now()).toBe(34);
     expect(result?.isStable).toBe(true);
@@ -160,7 +160,7 @@ describe("Android stability signal regressions", () => {
         return new Promise(() => {});
       },
     };
-    const idle = new AwaitIdle(device, factory, timer, reader);
+    const idle = new AwaitIdle(device, factory, timer, { hierarchyReader: reader });
     const result = await idle.waitForUiStability("com.android.launcher3", 50);
     expect(result?.isStable).toBe(true);
     expect(readSignal?.aborted).toBe(true);

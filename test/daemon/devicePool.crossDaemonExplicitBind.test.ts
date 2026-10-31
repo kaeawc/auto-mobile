@@ -128,7 +128,7 @@ for (const [platform, deviceId] of [
       expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       expect(b.sessions.getSession("b-session")).toBeNull();
 
-      await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "a-session", {
+      await releaseSessionAndDevice({ manager: a.sessions, pool: a.pool }, deviceId, "a-session", {
         reason: "explicit-release",
       });
       expect(store.claims.has(deviceId)).toBe(false);
@@ -201,7 +201,7 @@ for (const [platform, deviceId] of [
       expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       expect(b.pool.getDevice(deviceId)?.autolockSessionId).toBeUndefined();
 
-      await releaseSessionAndDevice(a.sessions, a.pool, deviceId, aSession!, {
+      await releaseSessionAndDevice({ manager: a.sessions, pool: a.pool }, deviceId, aSession!, {
         reason: "explicit-release",
       });
       const bSession = await autolock(b.pool, "mcp-b");
@@ -380,7 +380,7 @@ for (const [platform, deviceId] of [
           const a = await daemon(DAEMON_A_PID);
           const receipt: AcquisitionReceipt = {};
           const first = (await acquire(a.pool, receipt))!;
-          await releaseSessionAndDevice(a.sessions, a.pool, deviceId, first, {
+          await releaseSessionAndDevice({ manager: a.sessions, pool: a.pool }, deviceId, first, {
             reason: "explicit-release",
           });
           await bind(a.pool, "second");
@@ -414,7 +414,7 @@ for (const [platform, deviceId] of [
 
         const first = bind(a.pool, "first", receipt);
         await untilPending(pending, 1);
-        await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "first", {
+        await releaseSessionAndDevice({ manager: a.sessions, pool: a.pool }, deviceId, "first", {
           reason: "explicit-release",
         });
         const second = bind(a.pool, "second");

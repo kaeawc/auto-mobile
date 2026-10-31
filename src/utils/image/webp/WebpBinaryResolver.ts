@@ -133,20 +133,19 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
 
   async runCwebp(args: string[], input: Buffer): Promise<Buffer> {
     const command = await this.resolveCwebp();
-    return this.runCodecProcess("cwebp", command, args, input, ENV.CWEBP_PATH.name);
+    return this.runCodecProcess("cwebp", command, args, { input, envVar: ENV.CWEBP_PATH.name });
   }
 
   async runDwebp(args: string[], input: Buffer): Promise<Buffer> {
     const command = await this.resolveDwebp();
-    return this.runCodecProcess("dwebp", command, args, input, ENV.DWEBP_PATH.name);
+    return this.runCodecProcess("dwebp", command, args, { input, envVar: ENV.DWEBP_PATH.name });
   }
 
   private async runCodecProcess(
     toolName: WebpBinary,
     command: string,
     args: string[],
-    input: Buffer,
-    envVar: string,
+    { input, envVar }: { input: Buffer; envVar: string },
   ): Promise<Buffer> {
     const child = this.processExecutor.spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
     const stdout: Buffer[] = [];
@@ -167,7 +166,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     const codecTimeoutMs = this.codecTimeoutMs ?? WEBP_CODEC_TIMEOUT_MS;
     await raceWithDeadline(
       () => {
-        const completion = waitForCompletion(child, child.stdin!, toolName, envVar, stderr);
+        const completion = waitForCompletion(child, child.stdin!, toolName, { envVar, stderr });
         try {
           child.stdin!.end(input);
         } catch (error) {
@@ -432,8 +431,7 @@ async function waitForCompletion(
   child: ReturnType<HostProcessExecutor["spawn"]>,
   stdin: Writable,
   toolName: WebpBinary,
-  envVar: string,
-  stderr: Buffer[],
+  { envVar, stderr }: { envVar: string; stderr: Buffer[] },
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     child.once("error", (error) => {

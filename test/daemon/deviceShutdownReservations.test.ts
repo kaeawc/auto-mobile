@@ -138,7 +138,6 @@ describe("DeviceShutdownReservations", () => {
       deviceId,
       controller.signal,
       undefined,
-      undefined,
       { fenceUnpooled: true },
     );
     await flushUntil(() => h.calls.includes("capture"));
@@ -222,7 +221,7 @@ test("aborted unpooled shutdown clears its own fence after the lock", async () =
     controller.abort(new Error("cancelled after reservation"));
   });
   await expect(
-    h.reservations.reserveDeviceForShutdown(deviceId, controller.signal, undefined, undefined, {
+    h.reservations.reserveDeviceForShutdown(deviceId, controller.signal, undefined, {
       fenceUnpooled: true,
     }),
   ).rejects.toThrow("cancelled after reservation");
@@ -238,14 +237,14 @@ test("aborted unpooled shutdown preserves a newer concurrent kill fence", async 
     }
     replaced = true;
     expect(
-      await h.reservations.reserveDeviceForShutdown(deviceId, undefined, undefined, undefined, {
+      await h.reservations.reserveDeviceForShutdown(deviceId, undefined, undefined, {
         fenceUnpooled: true,
       }),
     ).toBeUndefined();
     controller.abort(new Error("older kill cancelled"));
   });
   await expect(
-    h.reservations.reserveDeviceForShutdown(deviceId, controller.signal, undefined, undefined, {
+    h.reservations.reserveDeviceForShutdown(deviceId, controller.signal, undefined, {
       fenceUnpooled: true,
     }),
   ).rejects.toThrow("older kill cancelled");

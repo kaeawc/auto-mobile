@@ -223,11 +223,9 @@ test("implementation-supported drag duration reaches the fake action unchanged",
       return { success: true, duration: 1500, distance: 10 };
     },
   });
-  expect(
-    toolIsError(
-      await dragAndDropHandler(device, parsedDrag, undefined, undefined, interactionDeps),
-    ),
-  ).toBe(false);
+  expect(toolIsError(await dragAndDropHandler(device, parsedDrag, { deps: interactionDeps }))).toBe(
+    false,
+  );
 });
 
 test.each([{ apexPause: 3000 }, { returnSpeed: 0.1 }, { returnSpeed: 4 }])(
@@ -241,9 +239,9 @@ test.each([{ apexPause: 3000 }, { returnSpeed: 0.1 }, { returnSpeed: 4 }])(
         return { success: true, targetType: "screen", x1: 0, y1: 0, x2: 0, y2: 0, duration: 0 };
       },
     });
-    expect(
-      toolIsError(await swipeOnHandler(device, parsedSwipe, undefined, undefined, interactionDeps)),
-    ).toBe(false);
+    expect(toolIsError(await swipeOnHandler(device, parsedSwipe, { deps: interactionDeps }))).toBe(
+      false,
+    );
   },
 );
 

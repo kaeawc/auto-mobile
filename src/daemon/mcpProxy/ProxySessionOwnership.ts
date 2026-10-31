@@ -329,7 +329,7 @@ export class ProxySessionOwnership {
                 sessionUuid,
                 null,
                 releaseReasonFromError(error),
-                daemonInstanceFromError(error),
+                { daemonInstance: daemonInstanceFromError(error) },
               ),
             )
           : error;
@@ -466,10 +466,7 @@ export class ProxySessionOwnership {
             sessionUuid,
             null,
             releaseReasonFromError(error),
-            daemonInstanceFromError(error),
-            {
-              establishes: true,
-            },
+            { daemonInstance: daemonInstanceFromError(error), establishes: true },
           ),
         );
         return;

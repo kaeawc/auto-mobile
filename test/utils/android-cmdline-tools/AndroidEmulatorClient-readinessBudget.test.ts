@@ -95,13 +95,10 @@ describe("emulator readiness ADB work budget", () => {
       adb.snapshotAdvanceMs = 20;
       adb.slowPackageManagerMs = [probeMs];
 
-      const device = await clientWith(adb, timer).waitForEmulatorReady(
-        "Pixel_9_Pro",
-        5_000,
-        null,
-        "emulator-5554",
-        { options: { skipWakeAndUnlock: true } },
-      );
+      const device = await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 5_000, null, {
+        targetDeviceId: "emulator-5554",
+        options: { skipWakeAndUnlock: true },
+      });
 
       console.log(
         `probe ${probeMs}ms: poller ready at ${20 + probeMs}ms, caller released at ${timer.now()}ms`,
@@ -125,12 +122,9 @@ describe("emulator readiness ADB work budget", () => {
       }));
       const adb = new SnapshotAdb(timer, states);
 
-      const device = await clientWith(adb, timer).waitForEmulatorReady(
-        "Pixel_9_Pro",
-        5_000,
-        null,
-        "emulator-5554",
-      );
+      const device = await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 5_000, null, {
+        targetDeviceId: "emulator-5554",
+      });
 
       expect(device.deviceId).toBe("emulator-5554");
       expect(adb.snapshotCalls).toHaveLength(1);
@@ -162,7 +156,9 @@ describe("emulator readiness ADB work budget", () => {
     const adb = new SnapshotAdb(timer, [{ deviceId: "emulator-5554", state: "device" }]);
     adb.snapshotAdvanceMs = 700;
 
-    await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 1_000, null, "emulator-5554");
+    await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 1_000, null, {
+      targetDeviceId: "emulator-5554",
+    });
 
     expect(adb.commandBudgets.length).toBeGreaterThan(0);
     for (const call of [...adb.snapshotCalls, ...adb.commandBudgets]) {
@@ -178,12 +174,9 @@ describe("emulator readiness ADB work budget", () => {
     const adb = new SnapshotAdb(timer, [{ deviceId: "emulator-5554", state: "device" }]);
     adb.slowPackageManagerMs = [11_000, 3_000];
 
-    const device = await clientWith(adb, timer).waitForEmulatorReady(
-      "Pixel_9_Pro",
-      25_000,
-      null,
-      "emulator-5554",
-    );
+    const device = await clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 25_000, null, {
+      targetDeviceId: "emulator-5554",
+    });
 
     expect(device.deviceId).toBe("emulator-5554");
     expect(
@@ -204,7 +197,8 @@ describe("emulator readiness ADB work budget", () => {
       adb.snapshotFailureCall = 2;
 
       await expect(
-        clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 20_000, null, "emulator-5554", {
+        clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 20_000, null, {
+          targetDeviceId: "emulator-5554",
           options: { freshProvision: true },
         }),
       ).rejects.toThrow();
@@ -227,7 +221,9 @@ describe("emulator readiness ADB work budget", () => {
     adb.snapshotAdvanceMs = 100;
 
     await expect(
-      clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, "emulator-5554"),
+      clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, {
+        targetDeviceId: "emulator-5554",
+      }),
     ).rejects.toThrow();
 
     expect(adb.snapshotCalls).toHaveLength(1);
@@ -240,7 +236,9 @@ describe("emulator readiness ADB work budget", () => {
     const adb = new SnapshotAdb(timer, [{ deviceId: "emulator-5554", state: "offline" }]);
 
     await expect(
-      clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, "emulator-5554"),
+      clientWith(adb, timer).waitForEmulatorReady("Pixel_9_Pro", 100, null, {
+        targetDeviceId: "emulator-5554",
+      }),
     ).rejects.toThrow("target=emulator-5554; state=offline");
     expect(adb.snapshotCalls.length).toBeGreaterThan(0);
   });

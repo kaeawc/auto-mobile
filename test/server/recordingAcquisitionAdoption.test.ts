@@ -312,10 +312,9 @@ describe("ownerless recording acquisition adoption", () => {
               announced.push(extras?.recordingIds ?? []);
             },
           },
-          { fallbacks: null, announced: null },
           id,
           reason,
-          { snapshot },
+          { shutdown: { fallbacks: null, announced: null }, snapshot },
         );
       });
       await manager.releaseSession("holder");
@@ -433,10 +432,9 @@ describe("ownerless recording acquisition adoption", () => {
                   announced.push(extras?.recordingIds ?? []);
                 },
               },
-              { fallbacks: null, announced: null },
               id,
               reason,
-              { snapshot },
+              { shutdown: { fallbacks: null, announced: null }, snapshot },
             );
           });
           await manager.releaseSession("holder");

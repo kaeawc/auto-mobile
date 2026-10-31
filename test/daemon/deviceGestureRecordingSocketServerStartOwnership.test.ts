@@ -59,8 +59,8 @@ describe("device gesture recording start holder admission (#11665)", () => {
       undefined,
       timer,
       new SessionScopedStreamAuthenticator(() => manager, "deviceGestureRecording", {}),
-      { assertDeviceActionable: () => {} },
       {
+        admissionGate: { assertDeviceActionable: () => {} },
         deviceResolution: {
           selectDevice: async () => {
             selectionCalls++;
@@ -171,8 +171,8 @@ describe("device gesture recording start holder admission (#11665)", () => {
       undefined,
       timer,
       new SessionScopedStreamAuthenticator(() => manager, "deviceGestureRecording", {}),
-      { assertDeviceActionable: () => {} },
       {
+        admissionGate: { assertDeviceActionable: () => {} },
         deviceResolution: {
           selectDevice: async () => device,
           readyDevice: async (selected) => {
@@ -199,8 +199,8 @@ describe("device gesture recording start holder admission (#11665)", () => {
       undefined,
       timer,
       new SessionScopedStreamAuthenticator(() => manager, "deviceGestureRecording", {}),
-      { assertDeviceActionable: () => {} },
       {
+        admissionGate: { assertDeviceActionable: () => {} },
         deviceResolution: {
           selectDevice: async () => device,
           readyDevice: async (selected) => {
@@ -228,8 +228,8 @@ describe("device gesture recording start holder admission (#11665)", () => {
       undefined,
       timer,
       new SessionScopedStreamAuthenticator(() => manager, "deviceGestureRecording", {}),
-      { assertDeviceActionable: () => {} },
       {
+        admissionGate: { assertDeviceActionable: () => {} },
         deviceResolution: {
           selectDevice: async () => device,
           readyDevice: async (selected) => {
@@ -261,17 +261,14 @@ describe("device gesture recording start holder admission (#11665)", () => {
 
   arranged("the holder starts successfully with readiness called once", async () => {
     // An already-active fake capture keeps the ingress's real manager call device-free.
-    const active = await startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator(),
-      () => ({
+    const active = await startDeviceGestureRecording(device, timer, new CountingIdGenerator(), {
+      recorderFactory: () => ({
         start: async () => {},
         stop: async () => ({ steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 }),
         stepCount: 1,
       }),
-      { ownerSessionUuid: "holder" },
-    );
+      ownerSessionUuid: "holder",
+    });
     const response = await server.invoke({
       command: "start",
       deviceId: device.deviceId,
@@ -294,17 +291,14 @@ describe("device gesture recording start holder admission (#11665)", () => {
     expect(
       pool.resolveOwnedDeviceSessionForMcpSession("acquiring-connection", device.deviceId),
     ).toBe(acquired);
-    const active = await startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator(),
-      () => ({
+    const active = await startDeviceGestureRecording(device, timer, new CountingIdGenerator(), {
+      recorderFactory: () => ({
         start: async () => {},
         stop: async () => ({ steps: [{ tool: "tapOn", params: { text: "OK" } }], stepCount: 1 }),
         stepCount: 1,
       }),
-      { ownerSessionUuid: acquired },
-    );
+      ownerSessionUuid: acquired,
+    });
     const response = await server.invoke({
       command: "start",
       deviceId: device.deviceId,

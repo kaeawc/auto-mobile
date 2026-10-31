@@ -2904,7 +2904,7 @@ describe("InstallApp", () => {
         const installChildren: Array<{ aborted: boolean }> = [];
         const simctl = new SimCtlClient(
           null,
-          async (_file, args, _maxBuffer, signal) => {
+          async (_file, args, { signal } = {}) => {
             if (args[1] !== "install") {
               return createExecResult("", "");
             }

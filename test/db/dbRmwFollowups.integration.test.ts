@@ -232,7 +232,10 @@ describe("DB RMW follow-up fixes (#3415)", () => {
 
     await runConcurrentSameKeyStress({
       count: N,
-      act: () => manager.updateBaseline("device-1", "com.example.app", "tapOn", memoryMetrics(10)),
+      act: () =>
+        manager.updateBaseline("device-1", "com.example.app", "tapOn", {
+          metrics: memoryMetrics(10),
+        }),
     });
 
     const baseline = await manager.getBaseline("device-1", "com.example.app", "tapOn");

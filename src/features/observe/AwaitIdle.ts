@@ -51,8 +51,10 @@ export class AwaitIdle implements AwaitIdleInterface {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
-    hierarchyReader?: ViewHierarchyRequestReader,
-    rotationPollBackoff: BackoffPolicy = ROTATION_POLL_BACKOFF,
+    {
+      hierarchyReader,
+      rotationPollBackoff = ROTATION_POLL_BACKOFF,
+    }: { hierarchyReader?: ViewHierarchyRequestReader; rotationPollBackoff?: BackoffPolicy } = {},
   ) {
     this.rotationPollBackoff = rotationPollBackoff;
     this.adbFactory = adbFactory;
@@ -265,8 +267,10 @@ export class AwaitIdle implements AwaitIdleInterface {
     packageName: string,
     timeoutMs: number,
     initState: UiStabilityState,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
+    {
+      perf = new NoOpPerformanceTracker(),
+      signal,
+    }: { perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<GfxMetrics | null> {
     return (
       (await this.idle.waitForQuietTreeStability(
@@ -448,6 +452,6 @@ export class AwaitIdle implements AwaitIdleInterface {
     const state = await perf.track("initUiStabilityTracking", async () => {
       return this.initializeUiStabilityTracking(packageName, timeoutMs, signal);
     });
-    return this.waitForUiStabilityWithState(packageName, timeoutMs, state, perf, signal);
+    return this.waitForUiStabilityWithState(packageName, timeoutMs, state, { perf, signal });
   }
 }

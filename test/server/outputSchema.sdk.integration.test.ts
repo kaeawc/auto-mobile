@@ -13,14 +13,12 @@ let advertised: unknown;
 
 beforeAll(async () => {
   const shared = z.object({ value: z.string() });
-  ToolRegistry.register(
-    name,
-    "Reference validation probe",
-    z.object({}),
-    async () =>
+  ToolRegistry.register(name, "Reference validation probe", z.object({}), {
+    handler: async () =>
       createStructuredToolResponse({ left: { value: "ok" }, right: { value: valid ? "ok" : 42 } }),
-    { defaultEnabled: true, outputSchema: z.object({ left: shared, right: shared }) },
-  );
+    defaultEnabled: true,
+    outputSchema: z.object({ left: shared, right: shared }),
+  });
   await fixture.setup();
   const result = await fixture.client.listTools();
   advertised = result.tools.find((tool) => tool.name === name)?.outputSchema;

@@ -27,7 +27,7 @@ export function createObserveScreenForTest(
       accessibilityAuditor: overrides.accessibilityAuditor ?? noopAudit,
       accessibilityStateDetector: overrides.accessibilityStateDetector ?? noopAudit,
     },
-    timer,
+    { timer },
   );
 }
 

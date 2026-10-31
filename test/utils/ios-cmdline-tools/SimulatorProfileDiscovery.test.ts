@@ -233,7 +233,7 @@ test("two-device discovery overlaps lists then profiles and both enumerations (s
   const profiles = new SimCtlSimulatorDeviceTypeProfiles(lister, plist, r.store, timer);
   const client = new SimCtlClient(
     null,
-    async (_file, args, _buffer, signal) => {
+    async (_file, args, { signal } = {}) => {
       if (args.includes("devices")) {
         started.add("devices");
         await listGate.promise;

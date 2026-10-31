@@ -558,8 +558,10 @@ async function resolveSnapshotSizeBytes(
   snapshotName: string,
   manifest: DeviceSnapshotManifest,
   snapshotStore: DeviceSnapshotStorePort,
-  avdSnapshots: AvdSnapshotOperations,
-  pathOptions: SnapshotPathOptions | undefined,
+  {
+    avdSnapshots,
+    pathOptions,
+  }: { avdSnapshots: AvdSnapshotOperations; pathOptions?: SnapshotPathOptions },
 ): Promise<number | null> {
   if (!isVmSnapshotRecord(manifest)) {
     return snapshotStore.getSnapshotSizeBytes(snapshotName, pathOptions);
@@ -588,8 +590,7 @@ async function deleteUnrecordedVmSnapshot(
   device: BootedDevice,
   snapshotName: string,
   avdSnapshots: AvdSnapshotOperations,
-  vmSnapshotTimeoutMs: number,
-  context: string,
+  { vmSnapshotTimeoutMs, context }: { vmSnapshotTimeoutMs: number; context: string },
 ): Promise<void> {
   try {
     const liveDeviceId = await avdSnapshots.findLiveEmulatorSerial(device.name);
@@ -666,13 +667,10 @@ async function recordFailedVmSnapshotReclaim({
         `[DeviceSnapshot] Same-named capture '${snapshotName}' failed on AVD '${device.name}' ` +
           `(${device.deviceId}); preserving the existing row because ${preservationReason}: ${reason}`,
       );
-      await deleteUnrecordedVmSnapshot(
-        device,
-        snapshotName,
-        avdSnapshots,
+      await deleteUnrecordedVmSnapshot(device, snapshotName, avdSnapshots, {
         vmSnapshotTimeoutMs,
-        "failed same-named",
-      );
+        context: "failed same-named",
+      });
       return false;
     }
 
@@ -711,13 +709,10 @@ async function recordFailedVmSnapshotReclaim({
         `on AVD '${device.name}': ${errorMessage(recordError)}`,
       recordError,
     );
-    await deleteUnrecordedVmSnapshot(
-      device,
-      snapshotName,
-      avdSnapshots,
+    await deleteUnrecordedVmSnapshot(device, snapshotName, avdSnapshots, {
       vmSnapshotTimeoutMs,
-      "unrecordable",
-    );
+      context: "unrecordable",
+    });
     return false;
   }
 }
@@ -927,17 +922,21 @@ async function importLegacySnapshot(
   snapshotName: string,
   manifest: DeviceSnapshotManifest,
   snapshotStore: DeviceSnapshotStorePort,
-  snapshotRepository: DeviceSnapshotRepositoryPort,
-  { now, pathOptions }: { now: () => Date; pathOptions?: SnapshotPathOptions },
+  {
+    snapshotRepository,
+    now,
+    pathOptions,
+  }: {
+    snapshotRepository: DeviceSnapshotRepositoryPort;
+    now: () => Date;
+    pathOptions?: SnapshotPathOptions;
+  },
 ): Promise<DeviceSnapshotRecord | null> {
   const { avdSnapshots } = await getDeviceSnapshotDependencies();
-  const sizeBytes = await resolveSnapshotSizeBytes(
-    snapshotName,
-    manifest,
-    snapshotStore,
+  const sizeBytes = await resolveSnapshotSizeBytes(snapshotName, manifest, snapshotStore, {
     avdSnapshots,
     pathOptions,
-  );
+  });
   const fallbackTimestamp = now().toISOString();
   const createdAt = resolveLegacyTimestamp(manifest.timestamp, fallbackTimestamp);
 
@@ -972,7 +971,8 @@ async function hydrateLegacySnapshot(
 ): Promise<DeviceSnapshotRecord | null> {
   const flatManifest = await discoverSnapshotManifest(snapshotName, snapshotStore, undefined, now);
   if (flatManifest) {
-    return importLegacySnapshot(snapshotName, flatManifest, snapshotStore, snapshotRepository, {
+    return importLegacySnapshot(snapshotName, flatManifest, snapshotStore, {
+      snapshotRepository,
       now,
     });
   }
@@ -985,7 +985,8 @@ async function hydrateLegacySnapshot(
     return null;
   }
 
-  return importLegacySnapshot(snapshotName, scoped.manifest, snapshotStore, snapshotRepository, {
+  return importLegacySnapshot(snapshotName, scoped.manifest, snapshotStore, {
+    snapshotRepository,
     now,
     pathOptions: scoped.pathOptions,
   });
@@ -1102,13 +1103,10 @@ async function importFlatLegacySnapshots(
       continue;
     }
 
-    const record = await importLegacySnapshot(
-      snapshotName,
-      manifest,
-      snapshotStore,
+    const record = await importLegacySnapshot(snapshotName, manifest, snapshotStore, {
       snapshotRepository,
-      { now },
-    );
+      now,
+    });
     if (record) {
       existingSnapshots.add(snapshotName);
       imported = true;
@@ -1171,13 +1169,11 @@ async function importScopedLegacySnapshots(
         continue;
       }
 
-      const record = await importLegacySnapshot(
-        snapshotName,
-        manifest,
-        snapshotStore,
+      const record = await importLegacySnapshot(snapshotName, manifest, snapshotStore, {
         snapshotRepository,
-        { now, pathOptions },
-      );
+        now,
+        pathOptions,
+      });
       if (record) {
         existingSnapshots.add(snapshotName);
         imported = true;
@@ -2253,8 +2249,7 @@ export async function captureDeviceSnapshot(
                 snapshotName,
                 captured.manifest,
                 snapshotStore,
-                avdSnapshots,
-                pathOptions,
+                { avdSnapshots, pathOptions },
               );
               const timestamp = captured.manifest.timestamp;
 

@@ -177,15 +177,13 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
-    options?: MarkReleasedOptions,
+    { reason, ...options }: MarkReleasedOptions & { reason: string },
   ): Promise<void> {
     return this.inner.markReleased(
       sessionUuid,
       status,
       this.store(sessionUuid, "released", releasedAtMs),
-      reason,
-      options,
+      { reason, ...options },
     );
   }
 }

@@ -230,8 +230,7 @@ const classifyNotificationDismissal = (
   detector: NotificationUIDetector,
   swiped: NotificationDismissBaseline,
   criteria: SystemTrayNotificationArgs,
-  appMatchTexts: string[],
-  candidate: ObserveResult,
+  { appMatchTexts, candidate }: { appMatchTexts: string[]; candidate: ObserveResult },
 ): "dismissed" | "present" | "snapped-back" | "indeterminate" => {
   const hierarchy = candidate.viewHierarchy;
   if (!hierarchy || !detector.isTrayOpen(hierarchy)) {
@@ -269,12 +268,18 @@ export const verifyNotificationDismissed = async (
   device: BootedDevice,
   swiped: NotificationDismissBaseline,
   criteria: SystemTrayNotificationArgs,
-  appMatchTexts: string[],
-  { observation, signal }: { observation: ObserveResult } & Pick<SystemTrayCall, "signal">,
+  {
+    appMatchTexts,
+    observation,
+    signal,
+  }: { observation: ObserveResult } & Pick<SystemTrayCall, "signal"> & { appMatchTexts: string[] },
 ): Promise<NotificationDismissVerification> => {
   const detector = getDetector(device, signal);
   let verified = observation;
-  let outcome = classifyNotificationDismissal(detector, swiped, criteria, appMatchTexts, verified);
+  let outcome = classifyNotificationDismissal(detector, swiped, criteria, {
+    appMatchTexts,
+    candidate: verified,
+  });
   if (outcome === "present" || outcome === "snapped-back") {
     await sleep(SYSTEM_TRAY_DISMISS_SETTLE_MS, signal);
     throwIfAborted(signal);
@@ -287,7 +292,10 @@ export const verifyNotificationDismissed = async (
       }),
       signal,
     );
-    outcome = classifyNotificationDismissal(detector, swiped, criteria, appMatchTexts, verified);
+    outcome = classifyNotificationDismissal(detector, swiped, criteria, {
+      appMatchTexts,
+      candidate: verified,
+    });
   }
   if (outcome === "present" || outcome === "snapped-back") {
     return {
@@ -352,8 +360,11 @@ const waitForClearAllDismissal = async (
   device: BootedDevice,
   swiped: NotificationDismissBaseline,
   criteria: SystemTrayNotificationArgs,
-  appMatchTexts: string[],
-  options: {
+  {
+    appMatchTexts,
+    ...options
+  }: {
+    appMatchTexts: string[];
     awaitTimeoutMs: number;
     observation: ObserveResult;
     reexpandState: { lastAttemptAtMs: number };
@@ -398,7 +409,10 @@ const waitForClearAllDismissal = async (
       observation = await read();
       throwIfAborted(signal);
       const outcome = isReadableNotificationShade(detector, observation)
-        ? classifyNotificationDismissal(detector, swiped, criteria, appMatchTexts, observation)
+        ? classifyNotificationDismissal(detector, swiped, criteria, {
+            appMatchTexts,
+            candidate: observation,
+          })
         : "indeterminate";
       if (outcome === "dismissed") {
         return { observation, dismissed: true, missedSwipe: false };
@@ -445,8 +459,15 @@ const readClearAllShadeOnce = async (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
-  awaitTimeoutMs: number,
-  options: { progress?: ProgressCallback; signal?: AbortSignal; shadeKnownClosed: boolean },
+  {
+    awaitTimeoutMs,
+    ...options
+  }: {
+    awaitTimeoutMs: number;
+    progress?: ProgressCallback;
+    signal?: AbortSignal;
+    shadeKnownClosed: boolean;
+  },
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const { timer, observeScreenFactory } = getSystemTrayDependencies();
   const controller = new AbortController();
@@ -513,8 +534,15 @@ const waitForReadableClearAllMatch = (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
-  awaitTimeoutMs: number,
-  options: { progress?: ProgressCallback; signal?: AbortSignal; shadeKnownClosed?: boolean },
+  {
+    awaitTimeoutMs,
+    ...options
+  }: {
+    awaitTimeoutMs: number;
+    progress?: ProgressCallback;
+    signal?: AbortSignal;
+    shadeKnownClosed?: boolean;
+  },
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   let shadeKnownClosed = options.shadeKnownClosed ?? false;
   return retryTransientPreSwipe(
@@ -522,7 +550,8 @@ const waitForReadableClearAllMatch = (
     () => {
       const attemptKnowsShade = shadeKnownClosed;
       shadeKnownClosed = false;
-      return readClearAllShadeOnce(device, criteria, appMatchTexts, awaitTimeoutMs, {
+      return readClearAllShadeOnce(device, criteria, appMatchTexts, {
+        awaitTimeoutMs,
         progress: options.progress,
         signal: options.signal,
         shadeKnownClosed: attemptKnowsShade,
@@ -563,27 +592,29 @@ export const clearMatchingSystemTrayNotifications = async (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
-  awaitTimeoutMs: number,
-  options: {
+  {
+    awaitTimeoutMs,
+    ...options
+  }: {
+    awaitTimeoutMs: number;
     maxSwipes?: number;
     progress?: ProgressCallback;
     signal?: AbortSignal;
     /** The caller just collapsed the shade, so the first readiness attempt can expand it directly. */
     shadeKnownClosed?: boolean;
-  } = {},
+  },
 ): Promise<ClearAllDrainResult> => {
   const { signal, progress } = options;
   if (options.maxSwipes === 0) {
     return { swipeCount: 0, dismissedCount: 0, stalled: false };
   }
   const { timer } = getSystemTrayDependencies();
-  let current = await waitForReadableClearAllMatch(
-    device,
-    criteria,
-    appMatchTexts,
+  let current = await waitForReadableClearAllMatch(device, criteria, appMatchTexts, {
     awaitTimeoutMs,
-    { progress, signal, shadeKnownClosed: options.shadeKnownClosed },
-  );
+    progress,
+    signal,
+    shadeKnownClosed: options.shadeKnownClosed,
+  });
   let deadlineMs = timer.now() + awaitTimeoutMs;
   // The initial app inventory includes rows below the viewport that move into
   // view as siblings leave. Without it, drain newly visible matches up to the cap.
@@ -601,13 +632,10 @@ export const clearMatchingSystemTrayNotifications = async (
   // Keep reopen attempts throttled across consecutive rows.
   const reexpandState = { lastAttemptAtMs: Number.NEGATIVE_INFINITY };
   while (current.match && rowSwipeCount < maxSwipes && timer.now() < deadlineMs) {
-    const expanded = await expandAndRematchIfCollapsed(
-      device,
-      criteria,
-      appMatchTexts,
+    const expanded = await expandAndRematchIfCollapsed(device, criteria, appMatchTexts, {
       deadlineMs,
-      { observation: current.observation, match: current.match, signal, progress },
-    );
+      result: { observation: current.observation, match: current.match, signal, progress },
+    });
     const swipeTarget = resolveNotificationSwipeElement(expanded.match, criteria, appMatchTexts);
     if (!swipeTarget || !isSwipeTargetIsolatedFromGroup(expanded.match, swipeTarget)) {
       throw new ActionableError(
@@ -626,7 +654,8 @@ export const clearMatchingSystemTrayNotifications = async (
     if (missedSwipes === 0) {
       rowSwipeCount++;
     }
-    const verified = await waitForClearAllDismissal(device, baseline, criteria, appMatchTexts, {
+    const verified = await waitForClearAllDismissal(device, baseline, criteria, {
+      appMatchTexts,
       awaitTimeoutMs: Math.max(0, deadlineMs - timer.now()),
       observation: expanded.observation,
       reexpandState,
@@ -716,7 +745,8 @@ export const clearIosSystemTrayNotifications = async (
 ): Promise<ClearAllDrainResult> => {
   let swipeCount = 0;
   for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
-    const { match } = await waitForNotificationMatch(device, criteria, appMatchTexts, 500, {
+    const { match } = await waitForNotificationMatch(device, criteria, appMatchTexts, {
+      awaitTimeoutMs: 500,
       progress: options.progress,
       signal: options.signal,
     });

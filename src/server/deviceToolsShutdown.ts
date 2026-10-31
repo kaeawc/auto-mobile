@@ -157,13 +157,10 @@ async function recoverAfterShutdownFailure(
   ) {
     await releaseShutdownReservation();
   }
-  await resumeCtrlProxyAfterUnconfirmedFailure(
-    device,
-    error,
-    requestAbortSignal,
+  await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal, {
     daemonState,
     shutdownWasConfirmed,
-  );
+  });
 }
 
 function rethrowShutdownFailure(
@@ -190,7 +187,8 @@ async function runPostShutdownStep(
   perf.startOperation(operationName);
   try {
     if (strictDeadline) {
-      await runWithinShutdownDeadline(context.device, context.timer, context.deadlineMs, detail, {
+      await runWithinShutdownDeadline(context.device, context.timer, context.deadlineMs, {
+        detail,
         requestAbortSignal: context.requestAbortSignal,
         operation: async () => await operation(),
         timeoutMs: context.timeoutMs,
@@ -237,11 +235,13 @@ async function resolvePooledAvdKillTarget(
   dependencies: DeviceToolsDependencies,
   device: BootedDevice,
   devicePool: DevicePool | undefined,
-  budget: Pick<ShutdownEntryContext, "deadlineMs" | "requestAbortSignal">,
   {
+    budget,
     pooledAvdIdentity,
     assertHolder: assertStopIdentity,
-  }: Pick<ShutdownDeviceOptions, "pooledAvdIdentity" | "assertHolder">,
+  }: Pick<ShutdownDeviceOptions, "pooledAvdIdentity" | "assertHolder"> & {
+    budget: Pick<ShutdownEntryContext, "deadlineMs" | "requestAbortSignal">;
+  },
 ): Promise<BootedDevice> {
   if (!pooledAvdIdentity?.capture) {
     return device;
@@ -250,8 +250,8 @@ async function resolvePooledAvdKillTarget(
     device,
     pooledAvdIdentity.capture,
     devicePool,
-    dependencies.resolveRunningAndroidAvdName,
     {
+      resolveRunningAvdName: dependencies.resolveRunningAndroidAvdName,
       budget: {
         timer: dependencies.timer,
         deadlineMs: budget.deadlineMs,
@@ -401,7 +401,7 @@ async function handleUnconfirmedKillCommandError(
     devicePool?.clearIntentionalShutdown(device.deviceId);
     await releaseShutdownReservation();
   }
-  await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal, daemonState);
+  await resumeCtrlProxyAfterUnconfirmedFailure(device, error, requestAbortSignal, { daemonState });
   await restoreAndroidObserverAfterCommandFailure(
     { deviceManager, device, timer, shutdownDeadlineMs: deadlineMs, requestAbortSignal, timeoutMs },
     androidObserverState,
@@ -423,18 +423,13 @@ export async function commitStoppedRestartHold(
   }
   try {
     const attempt = Promise.resolve(commit());
-    await runWithinShutdownDeadline(
-      context.device,
-      dependencies.timer,
-      context.deadlineMs,
-      "restart holder terminal write did not complete",
-      {
-        // Invoke before racing: even a spent shutdown budget must attempt the durable write.
-        requestAbortSignal: undefined,
-        operation: async () => await attempt,
-        timeoutMs,
-      },
-    );
+    await runWithinShutdownDeadline(context.device, dependencies.timer, context.deadlineMs, {
+      detail: "restart holder terminal write did not complete",
+      // Invoke before racing: even a spent shutdown budget must attempt the durable write.
+      requestAbortSignal: undefined,
+      operation: async () => await attempt,
+      timeoutMs,
+    });
   } catch (error) {
     logger.warn(
       `[DeviceTools] Stopped device ${context.device.deviceId} restart holder write failed: ${error}`,
@@ -505,8 +500,10 @@ async function killProcessAndRetireOwnership(
     >,
   dependencies: DeviceToolsDependencies,
   perf: ReturnType<typeof createPerformanceTracker>,
-  devicePool: DevicePool | undefined,
-  options: KillProcessAndRetireOwnershipOptions,
+  {
+    devicePool,
+    options,
+  }: { devicePool?: DevicePool; options: KillProcessAndRetireOwnershipOptions },
 ): Promise<string | undefined> {
   const { device, expectedPooledDevice, requestAbortSignal } = context;
   const {
@@ -549,8 +546,8 @@ async function killProcessAndRetireOwnership(
       device,
       dependencies.timer,
       shutdownDeadlineMs,
-      "platform shutdown command did not complete",
       {
+        detail: "platform shutdown command did not complete",
         requestAbortSignal: requestAbortSignal,
         operation: async (signal, timeoutMs) => {
           platformShutdown = deviceManager
@@ -767,13 +764,10 @@ async function resolveRestartStopKillTarget(
   devicePool: DevicePool | undefined,
 ): Promise<{ killTarget: BootedDevice; stopIdentity: RestartStopIdentity | undefined }> {
   const { device } = context;
-  const pooledKillTarget = await resolvePooledAvdKillTarget(
-    dependencies,
-    device,
-    devicePool,
-    context,
-    options,
-  );
+  const pooledKillTarget = await resolvePooledAvdKillTarget(dependencies, device, devicePool, {
+    budget: context,
+    ...options,
+  });
   // A kill-time re-probe supersedes entry evidence before any destructive preparation.
   const stopIdentity =
     pooledKillTarget !== device ? { confirmed: pooledKillTarget.name } : options.stopIdentity;
@@ -844,17 +838,15 @@ export async function shutdownDevice(
           device,
           dependencies.timer,
           shutdownDeadlineMs,
-          "shutdown preparation did not complete",
           {
+            detail: "shutdown preparation did not complete",
             requestAbortSignal: requestAbortSignal,
             operation: async (signal) =>
-              await devicePool?.reserveDeviceForShutdown(
-                device.deviceId,
-                signal,
-                undefined,
+              await devicePool?.reserveDeviceForShutdown(device.deviceId, signal, undefined, {
                 assertHolder,
-                { foreignClaim: options.foreignClaim, fenceUnpooled: true },
-              ),
+                foreignClaim: options.foreignClaim,
+                fenceUnpooled: true,
+              }),
             timeoutMs: timeoutMs,
           },
         );
@@ -907,20 +899,22 @@ export async function shutdownDevice(
             },
             dependencies,
             perf,
-            devicePool,
             {
-              androidObserverState,
-              stoppingSessionUuid: options.stoppingSessionUuid,
-              stoppingMcpSessionId: options.stoppingMcpSessionId,
-              stableIds: options.stableIds,
-              stopIdentity,
-              releaseShutdownReservation,
-              retainReservationUntil: retainShutdownUntil,
-              strictDeadline,
-              timeoutMs,
-              killTarget,
-              force: pooledAvdIdentity?.force ?? false,
-              processStop: androidKillProcessStop(dependencies, device, pooledAvdIdentity),
+              devicePool,
+              options: {
+                androidObserverState,
+                stoppingSessionUuid: options.stoppingSessionUuid,
+                stoppingMcpSessionId: options.stoppingMcpSessionId,
+                stableIds: options.stableIds,
+                stopIdentity,
+                releaseShutdownReservation,
+                retainReservationUntil: retainShutdownUntil,
+                strictDeadline,
+                timeoutMs,
+                killTarget,
+                force: pooledAvdIdentity?.force ?? false,
+                processStop: androidKillProcessStop(dependencies, device, pooledAvdIdentity),
+              },
             },
           );
 

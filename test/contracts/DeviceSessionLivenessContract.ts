@@ -112,7 +112,7 @@ export function runDeviceSessionLivenessContract(
         await expect(repository.recordLivenessOwnership("missing", "x")).rejects.toBeInstanceOf(
           DeviceSessionNotActiveError,
         );
-        await repository.markReleased("s1", "released", 4_000, "explicit");
+        await repository.markReleased("s1", "released", 4_000, { reason: "explicit" });
         await expect(repository.replaceLivenessOwnership("s1", "x")).rejects.toBeInstanceOf(
           DeviceSessionNotActiveError,
         );
@@ -128,7 +128,7 @@ export function runDeviceSessionLivenessContract(
           undefined,
         );
 
-        await repository.markReleased("s1", "released", 4_000, "daemon-shutdown");
+        await repository.markReleased("s1", "released", 4_000, { reason: "daemon-shutdown" });
         expect(
           await repository.claimRecoverableSession(
             "s1",

@@ -239,12 +239,10 @@ describe("DragAndDrop - iOS", () => {
 
   test("iOS client forwards drag cancellation and dispatch to the shared gesture delegate", async () => {
     const controller = new AbortController();
-    const client = IOSCtrlProxyClient.createForTesting(
-      IOS_DEVICE,
-      8765,
-      createSuccessWebSocketFactory(fakeTimer),
-      fakeTimer,
-    );
+    const client = IOSCtrlProxyClient.createForTesting(IOS_DEVICE, 8765, {
+      wsFactory: createSuccessWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+    });
     const delegate = spyOn(client["gestures"], "requestDrag").mockResolvedValue({
       success: true,
       totalTimeMs: 1850,

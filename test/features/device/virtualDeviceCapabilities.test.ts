@@ -5,6 +5,35 @@ import {
 } from "../../../src/utils/virtualDeviceCapabilities";
 
 describe("virtual device capability inventories", () => {
+  test("passes through the gRPC audio probe result and sorts the full Android inventory", () => {
+    const inventory = buildAndroidAvdCapabilityInventory(
+      { "hw.audioInput": "yes", "hw.audioOutput": "yes", "hw.gps": "yes" },
+      {
+        launchWithoutAudio: false,
+        hostAudio: { probed: false, input: null, output: null, outputCaptureable: false },
+        grpc: { state: "unreachable", reason: "Connection refused." },
+      },
+    );
+    expect(inventory.capabilities).toEqual([
+      { id: "android.emulator.audioInput", state: "available", source: "avd_config" },
+      {
+        id: "android.emulator.audioInputInjection",
+        state: "unavailable",
+        source: "platform",
+        reason: "Connection refused.",
+      },
+      { id: "android.emulator.audioOutput", state: "available", source: "avd_config" },
+      {
+        id: "android.emulator.audioOutputCapture",
+        state: "unavailable",
+        source: "platform",
+        reason: "Connection refused.",
+      },
+      { id: "android.emulator.cameraPoster", state: "available", source: "platform" },
+      { id: "android.hardware.location.gps", state: "available", source: "avd_config" },
+    ]);
+  });
+
   test("normalizes configured Android hardware features into stable, deduplicated identifiers", () => {
     expect(
       buildAndroidAvdCapabilityInventory({

@@ -606,13 +606,22 @@ register a dependency and a scoped preflight call when they ship.
 The `capabilityInventory` of a device reports whether it can record or play audio, so a scheduler can
 keep audio tests off hosts that can never pass them.
 
-| id                                 | `supported` when                                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `ios.simulator.audioInput`         | the host's CoreAudio default input has at least one input stream                                  |
-| `ios.simulator.audioOutput`        | the host's CoreAudio default output has at least one output stream                                |
-| `ios.simulator.audioOutputCapture` | the default output is virtual or a known loopback driver, so its signal can be read back (#13629) |
-| `android.emulator.audioInput`      | `hw.audioInput=yes`, no `-no-audio` (`AUTOMOBILE_EMULATOR_AUDIO=false`), and a host input exists  |
-| `android.emulator.audioOutput`     | `hw.audioOutput=yes` and no `-no-audio`                                                           |
+| id                                     | `supported` when                                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `ios.simulator.audioInput`             | the host's CoreAudio default input has at least one input stream                                  |
+| `ios.simulator.audioOutput`            | the host's CoreAudio default output has at least one output stream                                |
+| `ios.simulator.audioOutputCapture`     | the default output is virtual or a known loopback driver, so its signal can be read back (#13629) |
+| `android.emulator.audioInput`          | `hw.audioInput=yes`, no `-no-audio` (`AUTOMOBILE_EMULATOR_AUDIO=false`), and a host input exists  |
+| `android.emulator.audioOutput`         | `hw.audioOutput=yes` and no `-no-audio`                                                           |
+| `android.emulator.audioInputInjection` | the supplied emulator gRPC probe result is reachable                                              |
+| `android.emulator.audioOutputCapture`  | the supplied emulator gRPC probe result is reachable                                              |
+
+The two Android gRPC entries use source `platform` and are omitted when no probe result is supplied.
+A reachable result makes both `available`; unreachable makes both `unavailable` with the probe's
+reason; `not_configured` makes both `unsupported` with the supplied reason or a default naming the
+missing emulator gRPC port. Blank reasons use a non-empty default. These entries are independent of
+the host audio probe, AVD audio settings, and `-no-audio`; the latter still makes the existing
+`android.emulator.audioInput` and `android.emulator.audioOutput` entries unsupported.
 
 An unsupported entry carries an actionable `reason`, for example "No host audio input device;
 install a virtual loopback device and make it the default input". A supported host entry names the

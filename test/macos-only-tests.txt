@@ -73,10 +73,6 @@ portable test/server/inventoryIdeIosPhysicalSource.test.ts               # disco
 portable test/devices/watchOsSimctlListingExclusion.test.ts             # keeps watchOS rows out of the iOS listing; pure fakes
 portable test/devices/watchOsInventory.test.ts                          # watchOS listing and catalog filters over a fake simctl
 portable test/devices/appleTvInventory.test.ts                          # tvOS listing and catalog filters over a fake simctl
-portable test/devices/appleTvBootedDiscovery.test.ts                     # tvOS booted discovery over fake simctl
-portable test/server/resources/appleTvDeviceImages.test.ts                # tvOS resources over fake inventories
-portable test/server/appleTvListing.test.ts                               # tvOS tool listings over fake simctl
-portable test/server/appleTvKillDevice.test.ts                            # simulator shutdown routing with fakes
 portable test/devices/watchOsProvision.test.ts                          # watch adopt/create/delete over a fake simctl
 portable test/devices/nonIosSimctlListingExclusion.test.ts             # keeps tvOS/xrOS rows out of the iOS listing; pure fakes
 portable test/server/resources/nonIosDeviceImageCatalog.test.ts         # iOS catalog family filter over a fake simctl and captures

@@ -1,3 +1,6 @@
+import { join } from "node:path";
+import { tvConfigReader } from "../fixtures/android-tv-avd";
+import { createdImageFor } from "../../src/devices/deviceBootSelection";
 import { readFileSync } from "node:fs";
 import { describe, it, expect, spyOn } from "bun:test";
 import {
@@ -1163,7 +1166,7 @@ describe("DefaultDeviceProvisioner", () => {
     expect(created).toEqual({
       platform: "android",
       name: "AutoMobile-android-34-uuid1",
-      deviceType: "system-images;android-34;google_apis;arm64-v8a",
+      deviceType: undefined,
       runtime: "android-34",
       runtimeId: "system-images;android-34;google_apis;arm64-v8a",
     });
@@ -1312,7 +1315,7 @@ describe("DefaultDeviceProvisioner", () => {
     expect(created).toEqual({
       platform: "android",
       name: "AutoMobile-android-automotive-34-uuid1",
-      deviceType: "system-images;android-34;android-automotive-playstore;x86_64",
+      deviceType: "automotive_1024p_landscape",
       runtime: "android-34",
       runtimeId: "system-images;android-34;android-automotive-playstore;x86_64",
     });
@@ -1408,7 +1411,7 @@ describe("DefaultDeviceProvisioner", () => {
     expect(created).toEqual({
       platform: "android",
       name: "AutoMobile-android-tv-34-uuid1",
-      deviceType: "system-images;android-34;android-tv;x86_64",
+      deviceType: "tv_1080p",
       runtime: "android-34",
       runtimeId: "system-images;android-34;android-tv;x86_64",
     });
@@ -1553,3 +1556,37 @@ it.each(["none", "minimal", "failed"] as const)(
     }
   },
 );
+
+it("returns configured TV metadata on the automatic create path before boot", async () => {
+  const { reader, reads } = tvConfigReader();
+  const avd = new FakeAndroidAvdCreator([systemImage(36, "android-tv", "arm64-v8a")]);
+  const provisioner = new DefaultDeviceProvisioner({
+    iosCreator: () => undefined,
+    androidCreator: () => avd,
+    androidConfigReader: reader,
+    idGenerator: new CountingIdGenerator("uuid"),
+    architecture: "arm64",
+  });
+  const created = await provisioner.provision({ platform: "android", formFactor: "tv" });
+  const image = createdImageFor(created, { platform: "android", formFactor: "tv" });
+  expect(image).toMatchObject({
+    deviceType: "tv_1080p",
+    apiLevel: 36,
+    osVersion: "16",
+    screenWidth: 1920,
+    screenHeight: 1080,
+    screenDensity: 320,
+    runtimeId: "system-images;android-36;android-tv;arm64-v8a",
+    isRunning: false,
+  });
+  expect(reads).toContain(
+    join(
+      "/fixture/sdk",
+      "system-images",
+      "android-36",
+      "android-tv",
+      "arm64-v8a",
+      "source.properties",
+    ),
+  );
+});

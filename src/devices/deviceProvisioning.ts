@@ -1,3 +1,5 @@
+import type { DeviceInfo } from "../models";
+import { enrichDeviceInfoList } from "../utils/android-cmdline-tools/avdDeviceInfoEnrichment";
 import type { ConfigurableDeviceResource } from "../models/DeviceResourceConfiguration";
 import { isIosDuoDeviceType } from "../utils/ios-cmdline-tools/iosDeviceType";
 import type { SimulatorCreator } from "./SimulatorCreator";
@@ -20,7 +22,11 @@ import type { FormFactor } from "../models/DeviceMatchCriteria";
 import type { AppleDeviceType } from "../utils/ios-cmdline-tools/SimCtlClient";
 import type { CreateAvdParams, SystemImage } from "../utils/android-cmdline-tools/avdmanager";
 import { createAvd, listInstalledSystemImages } from "../utils/android-cmdline-tools/avdmanager";
-import { versionToApiLevelRange } from "../utils/android-cmdline-tools/AvdConfigReader";
+import {
+  FileAvdConfigReader,
+  type AvdConfigReader,
+  versionToApiLevelRange,
+} from "../utils/android-cmdline-tools/AvdConfigReader";
 import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "../utils/androidVersionBounds";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
@@ -43,8 +49,10 @@ export interface ProvisionedDevice {
   name: string;
   /** Simulator UDID; Android AVDs are addressed by name, so this is undefined there. */
   deviceId?: string;
-  /** iOS device type identifier, or the Android system-image package. */
-  deviceType: string;
+  /** iOS device type identifier or Android AVD profile, when known. */
+  deviceType?: string;
+  /** Configured pre-boot facts carried into the acquisition image. */
+  configuredImage?: DeviceInfo;
   /** Exact CoreSimulator runtime identifier or Android system-image package. */
   runtimeId?: string;
   /** iOS runtime identifier, or the Android API level. */
@@ -704,6 +712,7 @@ export interface DefaultDeviceProvisionerDependencies {
   prebootProfile?: Pick<SimulatorPrebootProfile, "apply">;
   iosCreator: () => IosSimulatorCreator | undefined;
   androidCreator: () => AndroidAvdCreator;
+  androidConfigReader?: AvdConfigReader;
   idGenerator?: IdGenerator;
   architecture?: string;
   /** Internal caller-owned device naming policy; the default remains unique user provisioning. */
@@ -856,7 +865,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     const identitySignal = await identityHooks?.reserveBeforeCreate({
       platform: "android",
       name,
-      deviceType: image.packageName,
+      deviceType: family.deviceProfile,
       runtimeId: image.packageName,
       runtime: `android-${image.apiIdentifier}`,
     });
@@ -880,13 +889,7 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
       );
     }
 
-    const provisioned = {
-      platform: "android" as const,
-      name,
-      deviceType: image.packageName,
-      runtimeId: image.packageName,
-      runtime: `android-${image.apiIdentifier}`,
-    };
+    const provisioned = await this.androidCreatedDevice(name, image, family.deviceProfile);
     logger.info(
       `[DeviceProvisioner] Created Android AVD '${name}' ` +
         `(systemImage=${image.packageName}, api=${image.apiIdentifier}, tag=${image.tag}, abi=${image.abi}` +
@@ -895,6 +898,31 @@ export class DefaultDeviceProvisioner implements DeviceProvisioner {
     );
     await identityHooks?.bindAfterCreate(provisioned);
     return provisioned;
+  }
+
+  private async androidCreatedDevice(
+    name: string,
+    image: SystemImage,
+    deviceProfile: string | undefined,
+  ): Promise<ProvisionedDevice> {
+    const baseImage: DeviceInfo = {
+      platform: "android",
+      name,
+      isRunning: false,
+      deviceType: deviceProfile,
+      runtimeId: image.packageName,
+    };
+    const configuredImage = this.dependencies.androidConfigReader
+      ? (await enrichDeviceInfoList(this.dependencies.androidConfigReader, [baseImage]))[0]
+      : undefined;
+    return {
+      ...(configuredImage ? { configuredImage } : {}),
+      platform: "android" as const,
+      name,
+      deviceType: configuredImage?.deviceType ?? deviceProfile,
+      runtimeId: image.packageName,
+      runtime: `android-${image.apiIdentifier}`,
+    };
   }
 }
 
@@ -917,6 +945,7 @@ export function createDefaultDeviceProvisioner(
     simulatorCreation,
     prebootProfile: new SimulatorPrebootProfile(),
     androidCreator: createDefaultAndroidAvdCreator,
+    androidConfigReader: new FileAvdConfigReader(),
     identityHooks,
   });
 }

@@ -1148,6 +1148,13 @@ public struct SdkBounds: Codable, Sendable, Hashable
   public var width: Int
   public var height: Int
 
+// sdk-wire/SdkCancellableContinuation.swift
+public final class SdkContinuationResumeOnce<Value: Sendable>: @unchecked Sendable
+  @discardableResult public func resume(returning value: Value) -> Bool
+  @discardableResult public func resume(throwing error: Error) -> Bool
+  public func withCancellableCheckedContinuation<Value: Sendable>( _ body: @Sendable (SdkContinuationResumeOnce<Value>) -> Void, onCancel: @escaping @Sendable () -> Void )
+  public func withSdkTimeout<Value: Sendable>( seconds: UInt64, timeoutError: Error, _ body: @escaping @Sendable () async throws -> Value, sleep: @escaping @Sendable (UInt64) async throws -> Void =
+
 // sdk-wire/SdkChromeModels.swift
 public struct SdkEdgeInsets: Codable, Sendable
   public let top: Double

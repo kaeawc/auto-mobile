@@ -146,6 +146,7 @@ export async function createFakeBrokerDaemon(
     return result;
   };
   const client: BrokerDaemonClient = {
+    drainPool: () => broker.drainIdlePool(),
     status: (requestId, token) => broker.ownedStatus(requestId, token),
     abandon: (requestId, token) => broker.abandon(requestId, token),
     release: async (sessionUuid, token) => {

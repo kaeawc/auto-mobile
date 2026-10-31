@@ -355,9 +355,10 @@ makes a device allowed: the batch ledger must also bind it.
 Broker teardown order: `broker1 down`, `broker1 report`, stop the private daemon,
 then stop the batch's caffeinate by its recorded PID. For separate plain batches use
 `shutdown-devices` before daemon stop. Broker-held rows must be released through the
-broker; no force bypass. `broker1 down` does not evict idle pooled devices (pooling
-requires reuse enabled). They stay running, and `shutdown-devices` refuses them as
-broker-held; never signal them. No harness drain exists yet (#15653).
+broker; no force bypass. After closing clients and joining release receipts,
+`broker1 down` drains the broker pool through `daemon/drainBrokerPool` before checking
+native absence. Devices the drain leaves running are reported as retained;
+`shutdown-devices` refuses them as broker-held, and they are never signalled.
 
 ## Persistent stdio-proxy sessions
 

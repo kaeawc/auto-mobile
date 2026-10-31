@@ -43,6 +43,13 @@ const launchSchema = z.object({
   exitCode: z.number().optional(),
 });
 const stateSchema = z.object({ launches: z.array(launchSchema) });
+const poolDrainSchema = z.array(
+  z.object({
+    resourceId: z.string(),
+    outcome: z.enum(["destroyed", "cleanup_pending"]),
+    cleanupPending: z.boolean(),
+  }),
+);
 type Launch = z.infer<typeof launchSchema>;
 const sessionSchema = z.object({
   requestId: z.string(),
@@ -129,6 +136,10 @@ function readState(deps: BrokerBatchOrchestratorDeps): { launches: Launch[] } {
   return deps.fs.exists(statePath(deps))
     ? stateSchema.parse(JSON.parse(deps.fs.readFile(statePath(deps))))
     : { launches: [] };
+}
+function readPoolDrain(deps: BrokerBatchOrchestratorDeps) {
+  const path = join(deps.batchDir, "evidence/pool-drain.json");
+  return deps.fs.exists(path) ? poolDrainSchema.parse(JSON.parse(deps.fs.readFile(path))) : [];
 }
 function writeEvidence(name: string, data: unknown, deps: BrokerBatchOrchestratorDeps): void {
   deps.fs.mkdir(join(deps.batchDir, "evidence"));
@@ -354,6 +365,31 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
       failed = true;
     }
   }
+  if (grants.length) {
+    try {
+      const merged = new Map(
+        readPoolDrain(deps)
+          .filter((resource) => resource.cleanupPending)
+          .map((resource) => [resource.resourceId, resource]),
+      );
+      const { resources } = await raceWithDeadline(() => deps.daemonClient.drainPool(), {
+        timer: deps.timer,
+        timeoutMs: deps.cleanupTimeoutMs ?? BROKER_CLEANUP_TIMEOUT_MS,
+        label: "Drain broker pool",
+      });
+      for (const resource of resources) {
+        merged.set(resource.resourceId, resource);
+        deps.log(
+          `Drained pool resource ${resource.resourceId}: ${resource.outcome} (cleanupPending=${resource.cleanupPending})`,
+        );
+      }
+      writeEvidence("pool-drain.json", [...merged.values()], deps);
+    } catch (error) {
+      deps.log(`Drain broker pool: ${errorMessage(error)}`);
+      failed = true;
+    }
+  }
+  let absenceResolved = false;
   if (ledger.devices().length) {
     try {
       await assertReleasedAndAbsent({
@@ -364,16 +400,36 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
         budgetMs: deps.cleanupTimeoutMs ?? BROKER_CLEANUP_TIMEOUT_MS,
         log: deps.log,
       });
+      absenceResolved = true;
     } catch (error) {
       deps.log(`Release/absence: ${errorMessage(error)}`);
       failed = true;
     }
   }
+  const resources = readPoolDrain(deps);
+  const pending = resources.filter((resource) => resource.cleanupPending);
+  const devices = ledger.devices();
+  if (
+    pending.length &&
+    absenceResolved &&
+    devices.length > 0 &&
+    devices.every((row) => ledger.hasEvent(row, "absent"))
+  ) {
+    writeEvidence(
+      "pool-drain.json",
+      resources.filter((resource) => !resource.cleanupPending),
+      deps,
+    );
+  } else if (pending.length) {
+    failed = true;
+  }
   const unresolved = grants.filter((row) => !ledger.releaseComplete(row));
-  const pooled = ledger.devices().filter((row) => ledger.hasEvent(row, "pooled"));
+  const pooled = ledger
+    .devices()
+    .filter((row) => ledger.hasEvent(row, "pooled") && !ledger.hasEvent(row, "absent"));
   for (const device of pooled) {
     deps.log(
-      `Pooled ${device.client} on ${device.device!.name} (device ID ${device.device!.deviceId}): clean idle device retained by the broker pool. No harness command evicts idle pooled devices yet (product path pending, #15653); do not signal the device; shutdown-devices refuses it as broker-held until the product evicts it.`,
+      `Pooled ${device.client} on ${device.device!.name} (device ID ${device.device!.deviceId}): still retained by the broker pool after drain; do not signal the device; shutdown-devices refuses it as broker-held.`,
     );
   }
   if (pooled.length) {

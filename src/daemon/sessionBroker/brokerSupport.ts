@@ -7,6 +7,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import { SessionBrokerFailureError } from "./devicePort";
+import { BindingRegistrySchemaUnsupportedError } from "./provisioning/BindingRegistrySchemaUnsupportedError";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { SESSION_BROKER_RETRY_AFTER_MS } from "./timing";
 import type { BrokerRequestRecord, BrokerResourceRecord } from "./store";
@@ -42,6 +43,15 @@ export function storedBrokerFailure(
 export { unwrap } from "./devicePort";
 
 export function failureFor(error: unknown): SessionBrokerFailure {
+  if (error instanceof BindingRegistrySchemaUnsupportedError) {
+    return {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      remedy: error.remedy,
+      writerVersions: error.writerVersions,
+    };
+  }
   return error instanceof SessionBrokerFailureError
     ? error.failure
     : { code: "session_preparation_failed", message: errorMessage(error), retryable: false };

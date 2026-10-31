@@ -1,0 +1,542 @@
+{
+  "hierarchy": {
+    "node": {
+      "$": {
+        "text": " ",
+        "class": "XCUIApplication",
+        "bounds": [
+          0,
+          0,
+          402,
+          874
+        ],
+        "view-id": "s2-52e6df615948c43b"
+      },
+      "node": [
+        {
+          "$": {
+            "resource-id": "jindo-container-view:1",
+            "class": "UIView",
+            "bounds": [
+              138,
+              13,
+              263,
+              50
+            ],
+            "view-id": "jindo-container-view:1"
+          },
+          "extras": {
+            "automobile:iosWindowLayer": "2"
+          }
+        },
+        {
+          "$": {
+            "resource-id": "SBCoverSheetWindow",
+            "class": "UIWindow",
+            "bounds": [
+              0,
+              0,
+              402,
+              874
+            ],
+            "view-id": "SBCoverSheetWindow"
+          },
+          "extras": {
+            "automobile:iosWindowLayer": "1"
+          },
+          "node": [
+            {
+              "$": {
+                "class": "UIScrollView",
+                "bounds": [
+                  0,
+                  0,
+                  402,
+                  874
+                ],
+                "scrollable": "true",
+                "view-id": "s2-afc14e5319cb11fc"
+              },
+              "node": [
+                {
+                  "$": {
+                    "class": "UIScrollView",
+                    "bounds": [
+                      0,
+                      0,
+                      402,
+                      874
+                    ],
+                    "scrollable": "true",
+                    "view-id": "s2-2f141846333fad49"
+                  },
+                  "node": [
+                    {
+                      "$": {
+                        "class": "UIScrollView",
+                        "bounds": [
+                          14,
+                          0,
+                          388,
+                          219
+                        ],
+                        "scrollable": "true",
+                        "view-id": "s2-bd2e83c81c8646a0"
+                      },
+                      "node": [
+                        {
+                          "$": {
+                            "class": "UIScrollView",
+                            "bounds": [
+                              14,
+                              0,
+                              388,
+                              219
+                            ],
+                            "scrollable": "true",
+                            "view-id": "s2-190458cd80f36bb1"
+                          },
+                          "node": [
+                            {
+                              "$": {
+                                "resource-id": "ListCell",
+                                "class": "UIButton",
+                                "bounds": [
+                                  14,
+                                  0,
+                                  388,
+                                  219
+                                ],
+                                "clickable": "true",
+                                "role": "button",
+                                "view-id": "ListCell"
+                              },
+                              "node": {
+                                "$": {
+                                  "resource-id": "ListCell.ContentView",
+                                  "class": "UIView",
+                                  "bounds": [
+                                    14,
+                                    0,
+                                    388,
+                                    219
+                                  ],
+                                  "view-id": "ListCell.ContentView"
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "Vertical scroll bar, 1 page",
+                                "class": "UIView",
+                                "bounds": [
+                                  355,
+                                  49,
+                                  385,
+                                  219
+                                ],
+                                "view-id": "s2-edd1e9ee444fedac-1"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "$": {
+                            "text": "Vertical scroll bar, 1 page",
+                            "class": "UIView",
+                            "bounds": [
+                              355,
+                              49,
+                              385,
+                              219
+                            ],
+                            "view-id": "s2-edd1e9ee444fedac-2"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$": {
+                        "class": "UIScrollView",
+                        "bounds": [
+                          14,
+                          680,
+                          388,
+                          746
+                        ],
+                        "scrollable": "true",
+                        "view-id": "s2-d6da62fa04a595a4"
+                      },
+                      "node": [
+                        {
+                          "$": {
+                            "class": "UIScrollView",
+                            "bounds": [
+                              14,
+                              680,
+                              388,
+                              746
+                            ],
+                            "scrollable": "true",
+                            "view-id": "s2-f70857d6582aa49d"
+                          },
+                          "node": [
+                            {
+                              "$": {
+                                "text": "MESSAGES, now, Lane 16148, Capture notification",
+                                "resource-id": "ListCell",
+                                "class": "UIButton",
+                                "bounds": [
+                                  14,
+                                  680,
+                                  388,
+                                  746
+                                ],
+                                "clickable": "true",
+                                "role": "button",
+                                "view-id": "ListCell"
+                              },
+                              "node": {
+                                "$": {
+                                  "resource-id": "ListCell.ContentView",
+                                  "class": "UIView",
+                                  "bounds": [
+                                    14,
+                                    680,
+                                    388,
+                                    746
+                                  ],
+                                  "view-id": "ListCell.ContentView"
+                                },
+                                "node": {
+                                  "$": {
+                                    "text": "MESSAGES, now, Lane 16148, Capture notification",
+                                    "resource-id": "NotificationShortLookView",
+                                    "class": "UIView",
+                                    "bounds": [
+                                      14,
+                                      680,
+                                      388,
+                                      746
+                                    ],
+                                    "view-id": "NotificationShortLookView"
+                                  },
+                                  "node": {
+                                    "$": {
+                                      "resource-id": "ShortLook.Platter",
+                                      "class": "UIView",
+                                      "bounds": [
+                                        14,
+                                        680,
+                                        388,
+                                        746
+                                      ],
+                                      "view-id": "ShortLook.Platter"
+                                    },
+                                    "node": {
+                                      "$": {
+                                        "resource-id": "ShortLook.Platter.Content",
+                                        "class": "UIView",
+                                        "bounds": [
+                                          14,
+                                          680,
+                                          388,
+                                          746
+                                        ],
+                                        "view-id": "ShortLook.Platter.Content"
+                                      },
+                                      "node": {
+                                        "$": {
+                                          "text": "now, Lane 16148, Capture notification",
+                                          "resource-id": "ShortLook.Platter.Content.Seamless",
+                                          "class": "UIButton",
+                                          "bounds": [
+                                            14,
+                                            680,
+                                            388,
+                                            746
+                                          ],
+                                          "clickable": "true",
+                                          "role": "button",
+                                          "view-id": "ShortLook.Platter.Content.Seamless"
+                                        },
+                                        "node": {
+                                          "$": {
+                                            "resource-id": "ShortLook.Platter.Content.Seamless.CrossFade",
+                                            "class": "UIView",
+                                            "bounds": [
+                                              14,
+                                              680,
+                                              388,
+                                              746
+                                            ],
+                                            "view-id": "ShortLook.Platter.Content.Seamless.CrossFade"
+                                          },
+                                          "node": [
+                                            {
+                                              "$": {
+                                                "text": "Lane 16148",
+                                                "resource-id": "NotificationTitle",
+                                                "class": "UILabel",
+                                                "bounds": [
+                                                  78,
+                                                  694,
+                                                  336,
+                                                  712
+                                                ],
+                                                "role": "text",
+                                                "view-id": "NotificationTitle"
+                                              }
+                                            },
+                                            {
+                                              "$": {
+                                                "resource-id": "NotificationBody.TopAligned.originalMessage",
+                                                "class": "UIView",
+                                                "bounds": [
+                                                  78,
+                                                  712,
+                                                  371,
+                                                  730
+                                                ],
+                                                "view-id": "NotificationBody.TopAligned.originalMessage"
+                                              },
+                                              "node": {
+                                                "$": {
+                                                  "text": "Capture notification",
+                                                  "resource-id": "TextContent.Primary",
+                                                  "class": "UILabel",
+                                                  "bounds": [
+                                                    78,
+                                                    712,
+                                                    371,
+                                                    730
+                                                  ],
+                                                  "role": "text",
+                                                  "view-id": "TextContent.Primary"
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "$": {
+                                "text": "Vertical scroll bar, 1 page",
+                                "class": "UIView",
+                                "bounds": [
+                                  355,
+                                  713,
+                                  385,
+                                  746
+                                ],
+                                "view-id": "s2-edd1e9ee444fedac-3"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "$": {
+                            "text": "Vertical scroll bar, 1 page",
+                            "class": "UIView",
+                            "bounds": [
+                              355,
+                              680,
+                              385,
+                              746
+                            ],
+                            "view-id": "s2-edd1e9ee444fedac-4"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "$": {
+                        "class": "UIScrollView",
+                        "bounds": [
+                          14,
+                          753,
+                          388,
+                          762
+                        ],
+                        "scrollable": "true",
+                        "view-id": "s2-9c50464cb8e8a7a9"
+                      },
+                      "node": {
+                        "$": {
+                          "text": "Vertical scroll bar, 1 page",
+                          "class": "UIView",
+                          "bounds": [
+                            355,
+                            753,
+                            385,
+                            762
+                          ],
+                          "view-id": "s2-edd1e9ee444fedac-5"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$": {
+                    "text": "Vertical scroll bar, 1 page",
+                    "class": "UIView",
+                    "bounds": [
+                      369,
+                      55,
+                      399,
+                      818
+                    ],
+                    "view-id": "s2-edd1e9ee444fedac-6"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "resource-id": "lockscreen-date-view",
+                "class": "UIView",
+                "bounds": [
+                  0,
+                  0,
+                  402,
+                  874
+                ],
+                "view-id": "lockscreen-date-view"
+              },
+              "node": [
+                {
+                  "$": {
+                    "text": "Saturday, October 31",
+                    "class": "UILabel",
+                    "bounds": [
+                      51,
+                      72,
+                      350,
+                      108
+                    ],
+                    "role": "text",
+                    "view-id": "s2-b61207bd394e1840"
+                  }
+                },
+                {
+                  "$": {
+                    "text": "4:52 PM",
+                    "class": "UILabel",
+                    "bounds": [
+                      56,
+                      89,
+                      343,
+                      232
+                    ],
+                    "role": "text",
+                    "view-id": "s2-e9090db1d823a300"
+                  }
+                }
+              ]
+            },
+            {
+              "$": {
+                "text": "Home indicator",
+                "class": "UIView",
+                "bounds": [
+                  129,
+                  861,
+                  273,
+                  866
+                ],
+                "view-id": "s2-a98c831348621af1"
+              }
+            }
+          ]
+        },
+        {
+          "$": {
+            "text": "Cellular",
+            "class": "UIView",
+            "bounds": [
+              288,
+              26,
+              307,
+              38
+            ],
+            "view-id": "s2-55febb7b5d2fd450"
+          },
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          }
+        },
+        {
+          "$": {
+            "resource-id": "3 of 3 Wi-Fi bars",
+            "class": "UIView",
+            "bounds": [
+              315,
+              26,
+              332,
+              38
+            ],
+            "view-id": "3 of 3 Wi-Fi bars"
+          },
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          }
+        },
+        {
+          "$": {
+            "text": "100% battery power",
+            "class": "UIView",
+            "bounds": [
+              339,
+              26,
+              366,
+              39
+            ],
+            "view-id": "s2-bcee4fb354cade76"
+          },
+          "extras": {
+            "automobile:iosWindowLayer": "0"
+          }
+        }
+      ]
+    }
+  },
+  "packageName": "com.apple.springboard",
+  "fallbackToSpringboard": true,
+  "updatedAt": 1793483555773,
+  "windows": [
+    {
+      "bounds": [
+        0,
+        0,
+        402,
+        874
+      ],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ],
+  "screenScale": 3,
+  "screenWidth": 402,
+  "screenHeight": 874,
+  "nativeScale": 3,
+  "pixelWidth": 1206,
+  "pixelHeight": 2622,
+  "insets": {
+    "available": false,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "source": "unavailable",
+    "units": "unknown"
+  },
+  "frameContext": "D93370D1-2D9A-4A21-B274-8C0923100270:1:1225592d22a7bf37",
+  "fresh": true
+}

@@ -37,7 +37,7 @@ public final class NetworkCaptureRecorder: Sendable {
 
     private let lock = OSAllocatedUnfairLock<[String: InFlightRequest]>(initialState: [:])
     private let emit: Emit
-    private let emissionLock = OSAllocatedUnfairLock<UInt64>(initialState: 0)
+    private let sequenceAllocator: NetworkSequenceAllocator
     private let idGenerator: IDGenerator
     private let isEnabled: @Sendable () -> Bool
     private let isBodyCaptureEnabled: @Sendable () -> Bool
@@ -46,7 +46,7 @@ public final class NetworkCaptureRecorder: Sendable {
     private let headerRedactor: @Sendable ([String: String]) -> [String: String]
     private let maxBodyBytes: Int
 
-    public init(
+    public convenience init(
         emit: @escaping Emit,
         maxBodyBytes: Int = 32 * 1024,
         idGenerator: @escaping IDGenerator = { UUID().uuidString },
@@ -58,7 +58,34 @@ public final class NetworkCaptureRecorder: Sendable {
             NetworkCaptureRecorder.redactHeaders($0)
         }
     ) {
+        self.init(
+            emit: emit,
+            maxBodyBytes: maxBodyBytes,
+            idGenerator: idGenerator,
+            isEnabled: isEnabled,
+            isBodyCaptureEnabled: isBodyCaptureEnabled,
+            samplingRate: samplingRate,
+            sampler: sampler,
+            headerRedactor: headerRedactor,
+            sequenceAllocator: NetworkSequenceAllocator()
+        )
+    }
+
+    init(
+        emit: @escaping Emit,
+        maxBodyBytes: Int = 32 * 1024,
+        idGenerator: @escaping IDGenerator = { UUID().uuidString },
+        isEnabled: @escaping @Sendable () -> Bool = { true },
+        isBodyCaptureEnabled: @escaping @Sendable () -> Bool = { true },
+        samplingRate: Double = 1,
+        sampler: @escaping @Sendable () -> Double = { Double.random(in: 0 ..< 1) },
+        headerRedactor: @escaping @Sendable ([String: String]) -> [String: String] = {
+            NetworkCaptureRecorder.redactHeaders($0)
+        },
+        sequenceAllocator: NetworkSequenceAllocator
+    ) {
         self.emit = emit
+        self.sequenceAllocator = sequenceAllocator
         self.maxBodyBytes = max(0, maxBodyBytes)
         self.idGenerator = idGenerator
         self.isEnabled = isEnabled
@@ -269,10 +296,9 @@ public final class NetworkCaptureRecorder: Sendable {
     }
 
     private func emitRecord(_ record: NetworkRequestRecord) {
-        // Assign the monotonic sequence number under the lock, then RELEASE it before
-        // calling the caller-supplied `emit`. Holding the non-recursive emissionLock across
-        // `emit` — which reaches AutoMobileNetwork.lock -> buffer.add and could re-enter
-        // emitRecord — would self-deadlock or invert lock order.
+        // Assign the sequence number from the shared allocator before calling `emit`.
+        // `emit` runs outside any lock so re-entrant callbacks cannot self-deadlock
+        // or invert lock order.
         //
         // `emit` is called SYNCHRONOUSLY (not via a recorder-owned queue): a completion is
         // therefore fully delivered to the sink before `recordCompletion` returns — nothing
@@ -283,12 +309,8 @@ public final class NetworkCaptureRecorder: Sendable {
         // record carries `sequenceNumber`, which exists precisely so a consumer can restore
         // the total order. Preserving strict delivery order here would require either holding
         // the lock across `emit` (the deadlock above) or an unbounded in-recorder queue.
-        let sequencedRecord = emissionLock.withLock { nextSequenceNumber in
-            nextSequenceNumber += 1
-            var sequencedRecord = record
-            sequencedRecord.sequenceNumber = nextSequenceNumber
-            return sequencedRecord
-        }
+        var sequencedRecord = record
+        sequencedRecord.sequenceNumber = sequenceAllocator.next()
         emit(sequencedRecord)
     }
 

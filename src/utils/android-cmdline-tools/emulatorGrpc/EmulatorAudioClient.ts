@@ -188,7 +188,15 @@ export class EmulatorAudioClient {
     done.catch((error: unknown) =>
       logger.debug(`audio injection ended with ${errorMessage(error)}`),
     );
-    await this.throwStartRefusal(call);
+    try {
+      await this.throwStartRefusal(call);
+    } catch (error) {
+      // The caller gets no handle to stop it, so end it here: this clears the start delay and
+      // max-duration timers and lets the stream settle before the refusal propagates.
+      control.end("stopped");
+      await done.catch(() => undefined);
+      throw error;
+    }
     return {
       durationMs: durationMs(pcm),
       sampleRate: pcm.sampleRate,

@@ -185,6 +185,17 @@ describe("EmulatorAudioClient.injectAudio", () => {
     },
   );
 
+  test("a refused start ends the injection, leaving no delay or deadline timer behind", async () => {
+    const { client, transport, timer } = setup();
+    transport.onOpen = (call) => call.finish(NOT_ALLOWLISTED);
+    await expect(
+      client.injectAudio(CLIP, { startDelayMs: 60_000, maxDurationMs: 600_000 }),
+    ).rejects.toMatchObject({ code: "audio_grpc_auth_rejected" });
+    expect(transport.calls[0].cancelled).toBe(true);
+    expect(transport.calls[0].written).toHaveLength(0);
+    expect(timer.getMsUntilNextDueEvent()).toBeUndefined();
+  });
+
   test("an INVALID_ARGUMENT that is not about the token stays audio_grpc_failed", async () => {
     const { client, transport } = setup();
     transport.onOpen = (call) =>

@@ -167,7 +167,7 @@ describe("daemon shutdown while a multi-device plan runs", () => {
           },
         );
       },
-      hunt.timer,
+      { timer: hunt.timer },
     );
     monitor.start();
 

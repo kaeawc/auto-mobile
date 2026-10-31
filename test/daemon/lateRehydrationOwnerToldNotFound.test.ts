@@ -145,7 +145,7 @@ async function ownerOutcomeAfterRestart(recovery: "lands-before-owner" | "lands-
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason, { allowExpired: true });
       },
-      timer,
+      { timer },
     );
     manager.startRehydratedOwnerWindows();
     monitor.start();

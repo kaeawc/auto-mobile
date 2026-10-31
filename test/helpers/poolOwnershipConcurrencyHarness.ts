@@ -468,7 +468,7 @@ class OwnershipWorld {
           reason,
         });
       },
-      timer,
+      { timer },
     );
     registerDerivedLabelSessionReleaseCascade(manager, pool);
     manager.onSessionCreated((session) => {

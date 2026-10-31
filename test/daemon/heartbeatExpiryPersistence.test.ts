@@ -27,7 +27,7 @@ test.each<[number, "monitor" | "lookup"]>([[60_000, "monitor"]])(
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
 
     try {

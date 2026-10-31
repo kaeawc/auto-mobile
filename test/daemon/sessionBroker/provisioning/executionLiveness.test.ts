@@ -141,7 +141,7 @@ describe("managed-execution session liveness", () => {
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await manager.createSession(SESSION, DEVICE, "android", {
       stableDeviceId: "Pixel_managed_execution",
@@ -295,7 +295,7 @@ describe("managed-execution session liveness", () => {
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await manager.getOrCreateSession(SESSION, undefined, undefined, {
       execution: {

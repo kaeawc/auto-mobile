@@ -179,7 +179,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
         sessionManager.cancelExecutionsCutByRelease(sessionId, reason);
         await sessionManager.releaseSession(sessionId, reason, { allowExpired: true });
       },
-      timer,
+      { timer },
     );
     monitor.start();
   }

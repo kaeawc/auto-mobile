@@ -522,8 +522,7 @@ export function makeReapingMonitor(
     async (_id, reason) => {
       reaped.push(reason);
     },
-    timer,
-    { preFirstHeartbeatGraceMs },
+    { timer, preFirstHeartbeatGraceMs },
   );
   return { monitor, reaped };
 }

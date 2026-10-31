@@ -174,7 +174,7 @@ class DaemonUnderTest {
           reason,
         });
       },
-      timer,
+      { timer },
     );
     this.monitor.start();
     const server = createHarnessServer("unused", DaemonState.getInstance(), timer);

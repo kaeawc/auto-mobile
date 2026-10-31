@@ -318,7 +318,7 @@ class ScheduleWorld {
           reason,
         });
       },
-      this.timer,
+      { timer: this.timer },
     );
     manager.onSessionRelease((_sessionId, _deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), reason });

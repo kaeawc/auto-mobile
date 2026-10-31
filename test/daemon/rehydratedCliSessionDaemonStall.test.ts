@@ -76,7 +76,7 @@ describe("a rehydrated cli-idle session across a daemon stall", () => {
           reaped.push(`${sessionId}:${reason}`);
           await manager.releaseSession(sessionId, reason);
         },
-        timer,
+        { timer },
       );
       manager.startRehydratedOwnerWindows();
       monitor.start();

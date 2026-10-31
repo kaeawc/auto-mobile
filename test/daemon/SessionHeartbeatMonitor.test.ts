@@ -66,7 +66,7 @@ describe("SessionHeartbeatMonitor", () => {
         sessionManager,
         () => false,
         async () => {},
-        timer,
+        { timer },
       );
 
       monitor.start();
@@ -89,7 +89,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sid) => {
           reaped.push(sid);
         },
-        timer,
+        { timer },
       );
       monitor.start();
 
@@ -124,7 +124,7 @@ describe("SessionHeartbeatMonitor", () => {
             await slowTeardown.promise;
           }
         },
-        timer,
+        { timer },
       );
       monitor.start();
       // "slow" lapses first; its teardown never finishes during this test.
@@ -159,7 +159,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        timer,
+        { timer },
       );
 
       timer.advanceTime(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
@@ -196,7 +196,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        timer,
+        { timer },
       );
 
       timer.advanceTime(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS + 1);
@@ -230,7 +230,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        timer,
+        { timer },
       );
 
       // The owner gets its own lease plus the suspect grace to come back.
@@ -259,7 +259,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        timer,
+        { timer },
       );
 
       // Judged only on the owner window (the default lease plus the suspect grace), never the 5 s
@@ -288,7 +288,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sid) => {
           reaped.push(sid);
         },
-        timer,
+        { timer },
       );
 
       timer.advanceTime(5_000);
@@ -306,7 +306,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        timer,
+        { timer },
       );
 
       timer.advanceTime(5_001);
@@ -328,7 +328,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        timer,
+        { timer },
       );
 
       timer.advanceTime(1_001 + SUSPECT_GRACE_MS);
@@ -353,7 +353,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        timer,
+        { timer },
       );
 
       // The owner stops heartbeating; tool calls keep stamping the activity heartbeat.
@@ -384,7 +384,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sessionId) => {
           reaped.push(sessionId);
         },
-        timer,
+        { timer },
       );
 
       for (let elapsed = 0; elapsed <= 1_000 + SUSPECT_GRACE_MS; elapsed += 500) {
@@ -405,7 +405,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sid) => {
           reaped.push(sid);
         },
-        timer,
+        { timer },
       );
 
       timer.advanceTime(4_000);
@@ -428,7 +428,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sid) => {
           reaped.push(sid);
         },
-        timer,
+        { timer },
       );
 
       timer.advanceTime(5_001);
@@ -450,7 +450,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sid) => {
           reaped.push(sid);
         },
-        timer,
+        { timer },
       );
 
       timer.advanceTime(31_000);
@@ -474,7 +474,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sid) => {
           reaped.push(sid);
         },
-        timer,
+        { timer },
       );
 
       timer.advanceTime(5_001);
@@ -495,8 +495,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sid) => {
           reaped.push(sid);
         },
-        timer,
-        { preFirstHeartbeatGraceMs: 1_000 },
+        { timer, preFirstHeartbeatGraceMs: 1_000 },
       );
 
       timer.advanceTime(1_001);
@@ -516,7 +515,7 @@ describe("SessionHeartbeatMonitor", () => {
         async (sid) => {
           reaped.push(sid);
         },
-        timer,
+        { timer },
       );
 
       monitor.start();
@@ -549,8 +548,7 @@ describe("SessionHeartbeatMonitor", () => {
           reapCount++;
           return blockedReap;
         },
-        timer,
-        { checkIntervalMs: 1, preFirstHeartbeatGraceMs: 0 },
+        { timer, checkIntervalMs: 1, preFirstHeartbeatGraceMs: 0 },
       );
 
       monitor.start();
@@ -591,7 +589,7 @@ describe("SessionHeartbeatMonitor", () => {
             timer.advanceTime(50);
           }
         },
-        timer,
+        { timer },
       );
 
       await monitor.tick();
@@ -614,7 +612,7 @@ describe("SessionHeartbeatMonitor", () => {
           }
           await finishSlow.promise;
         },
-        timer,
+        { timer },
       );
 
       const tick = monitor.tick();
@@ -639,7 +637,7 @@ describe("SessionHeartbeatMonitor", () => {
           }
           return Promise.resolve();
         },
-        timer,
+        { timer },
       );
 
       await expect(monitor.tick()).rejects.toThrow("synchronous release failure");
@@ -698,7 +696,7 @@ describe("SessionHeartbeatMonitor", () => {
         sessionManager,
         () => false,
         reapVia(sessionManager, pool),
-        timer,
+        { timer },
       );
 
       // The owner's proxy keeps heartbeating (liveness only, #10729): well within the 60s
@@ -732,7 +730,7 @@ describe("SessionHeartbeatMonitor", () => {
         sessionManager,
         () => false,
         reapVia(sessionManager, pool),
-        timer,
+        { timer },
       );
 
       // Interact every 40s (exceeds old 10s window, within 60s idle window).
@@ -761,7 +759,7 @@ describe("SessionHeartbeatMonitor", () => {
           sessionManager,
           hasActiveExecutions,
           reapVia(sessionManager, pool),
-          timer,
+          { timer },
         );
         const execution = executionTracker.startExecution("tapOn", "mcp-session-1");
         executionTracker.setResolvedAutolockSessionUuid(execution.id, firstSessionId!);
@@ -809,7 +807,7 @@ describe("SessionHeartbeatMonitor", () => {
         sessionManager,
         hasActiveExecutions,
         reapVia(sessionManager, pool),
-        timer,
+        { timer },
       );
       const execution = tracker.startExecution("tapOn", "mcp-session-1", undefined, {
         unresolvedAutolockMcpSessionId: "mcp-session-1",
@@ -847,7 +845,7 @@ describe("SessionHeartbeatMonitor", () => {
           sessionManager,
           hasActiveExecutions,
           reapVia(sessionManager, pool),
-          timer,
+          { timer },
         );
         const execution = executionTracker.startExecution(
           "tapOn",

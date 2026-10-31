@@ -43,26 +43,11 @@ TV navigation is a focus problem: D-pad keys can be sent and the focused element
 
 `focusedElement` follows Leanback's focus ring (`focused: true`). `tapOn` and `swipeOn` work on the verified image, which reports a touchscreen; no-touchscreen behaviour remains unverified. Google TV is unverified. `focusNavigate` can reach a row but return `max_steps` or `stuck` when the target text belongs only to a child view (#16029); match the focused element's own `contentDesc` or `resourceId` instead. Prototype overlay buttons are not reachable with D-pad focus.
 
-### Android TV: verified results
+### Android TV: behaviour and limits
 
-Verified on `system-images;android-36;android-tv;arm64-v8a`, profile `tv_1080p`, 1920×1080 at 320 dpi, on a macOS arm64 host with a private daemon and CtrlProxy debug APK. The image is a user build and refuses `adb root`.
+The TV image is `system-images;android-36;android-tv;arm64-v8a` with profile `tv_1080p` (1920×1080 at 320 dpi), a user build that refuses `adb root`. The SDK tags `android-tv`, `google-tv`, `google-tv-ps16k` and the profiles `tv_1080p`, `tv_4k`, `tv_720p` match `src/models/formFactor.ts`. CtrlProxy installs and its accessibility service enables from the host with no TV-specific setup, and `observe` returns the hierarchy for the launcher and Settings.
 
-| Check                                                       | Result                                                                                                                            |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| SDK tags and profiles                                       | Pass: `android-tv`, `google-tv`, `google-tv-ps16k` and `tv_1080p`, `tv_4k`, `tv_720p` exist and match `src/models/formFactor.ts`. |
-| CtrlProxy install and host accessibility enable             | Pass unchanged; no TV-specific setup.                                                                                             |
-| `observe` hierarchy                                         | Pass on launcher and Settings.                                                                                                    |
-| `focusedElement`                                            | Pass: follows Leanback focus and the focus ring.                                                                                  |
-| `sendKeys` arrows and `enter`                               | Pass: arrows move focus; `enter` activates.                                                                                       |
-| `focusNavigate`: target's own `contentDesc` or `resourceId` | Pass.                                                                                                                             |
-| `focusNavigate`: child-view label text                      | Pass: a target inside the focused node's bounds counts as focused.                                                                |
-| `tapOn`, `swipeOn`                                          | Pass with touchscreen reported; no-touchscreen behaviour unverified.                                                              |
-| `pressButton` back/home                                     | Pass.                                                                                                                             |
-| `launchApp`, `terminateApp`                                 | Pass for apps with only a `LEANBACK_LAUNCHER` entry.                                                                              |
-| `listApps`                                                  | Pass.                                                                                                                             |
-| Screenshot and video recording                              | Pass.                                                                                                                             |
-| Prototype show/dismiss                                      | Overlay renders and dismisses; its button is not reachable with D-pad focus.                                                      |
-| `observe.accessibilityState`                                | Reports disabled and service unknown while the service is bound; unexplored oddity.                                               |
+`focusedElement` follows the Leanback focus ring. `sendKeys` arrows move focus and `enter` activates. `focusNavigate` matches the target's own `contentDesc` or `resourceId`, and a target inside the focused node's bounds counts as focused, so child-view label text matches too. `pressButton` back and home, screenshots and video recording work. `launchApp` and `terminateApp` work for apps that only have a `LEANBACK_LAUNCHER` entry, and `listApps` includes them. The prototype overlay renders and dismisses, but its button is not reachable with D-pad focus. `observe.accessibilityState` reports the service as disabled and unknown while it is bound, which is an unexplained oddity.
 
 **Signals and classification.** `ro.build.characteristics` is `emulator`, with no `tv`. Booted-device traits (`src/utils/android-cmdline-tools/deviceTraits.ts`) derive `formFactor` from this property, and on an emulator with no form factor there they fall back to `pm has-feature android.software.leanback`. AVD classification comes from the config's system-image tag or `tv_*` profile. The image reports `android.software.leanback`, `android.hardware.type.television`, `android.software.leanback_only` and `android.hardware.touchscreen` as present.
 
@@ -71,7 +56,6 @@ Verified on `system-images;android-36;android-tv;arm64-v8a`, profile `tv_1080p`,
 - The Google TV image; only `android-tv` was booted.
 - Real no-touchscreen behaviour.
 - D-pad reach of prototype overlays (known gap).
-- Successful child-label `focusNavigate` matching (known gap; use the focused element's own `contentDesc` or `resourceId`).
 
 ## Wear OS: conditional go
 

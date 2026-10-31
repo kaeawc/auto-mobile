@@ -54,9 +54,12 @@ export interface PrototypeNavigationDiff {
 
 const NAME_SUFFIX = /(screen|activity|fragment|page|viewcontroller|controller|view)$/;
 
-/** Lower-case letters and digits only, without a trailing platform suffix: `DetailActivity` -> `detail`. */
+/**
+ * Lower-case letters and digits of any script, without a trailing platform suffix:
+ * `DetailActivity` -> `detail`, `设置页` stays `设置页`.
+ */
 const normalizeName = (name: string): string => {
-  const compact = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const compact = name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
   const stripped = compact.replace(NAME_SUFFIX, "");
   return stripped === "" ? compact : stripped;
 };
@@ -93,7 +96,12 @@ function matchScreen(
   if (node.testTag && real.screens.includes(node.testTag)) {
     return { real: node.testTag, by: "identifier" };
   }
-  const wanted = new Set(screenNames(node).map(normalizeName));
+  // A name with no letters or digits left says nothing, so it never matches.
+  const wanted = new Set(
+    screenNames(node)
+      .map(normalizeName)
+      .filter((name) => name !== ""),
+  );
   const byName = real.screens.find((screen) => wanted.has(normalizeName(screen)));
   return byName === undefined ? undefined : { real: byName, by: "name" };
 }

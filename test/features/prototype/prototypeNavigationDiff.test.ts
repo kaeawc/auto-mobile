@@ -138,6 +138,47 @@ describe("diffPrototypeNavigation", () => {
     expect(result.unmatchedPrototypeScreens.some((s) => s.id === "root")).toBe(false);
   });
 
+  test("non-Latin names keep their letters, and an empty name never matches", () => {
+    const pager = (labels: string[]) => ({
+      id: "tabs",
+      root: {
+        type: "column",
+        children: [
+          {
+            type: "pager",
+            id: "main",
+            children: labels.map((text) => ({ type: "text", text })),
+          },
+          {
+            type: "bottomNav",
+            pager: "main",
+            items: labels.map((label) => ({ label, icon: "home" })),
+          },
+        ],
+      },
+    });
+    const real = (names: string[]): ExportedGraph => ({
+      ...graph(),
+      nodes: names.map((screenName) => ({
+        screenName,
+        firstSeenAt: 1,
+        lastSeenAt: 1,
+        visitCount: 1,
+      })),
+      edges: [],
+    });
+    const result = diffPrototypeNavigation(
+      buildPrototypeScreenMap(pager(["首页", "设置", "!!!"])),
+      realNavigationGraphFrom(real(["个人资料", "设置Screen", "---"])),
+    );
+    expect(result.matched).toEqual([{ prototype: "pager:main/1", real: "设置Screen", by: "name" }]);
+    expect(result.unmatchedPrototypeScreens.map((s) => s.id)).toEqual([
+      "pager:main/0",
+      "pager:main/2",
+    ]);
+    expect(result.unmatchedRealScreens).toEqual(["个人资料", "---"]);
+  });
+
   test("pager pages match their tab label", () => {
     const tabs = {
       id: "tabs",

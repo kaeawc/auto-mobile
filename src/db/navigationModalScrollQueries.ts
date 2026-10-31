@@ -119,8 +119,12 @@ export async function setScrollPosition(
   ctx: NavigationQueryContext,
   edgeId: number,
   targetElementId: number,
-  direction: string,
-  { containerElementId, speed, swipeCount }: ScrollPositionOptions,
+  {
+    direction,
+    containerElementId,
+    speed,
+    swipeCount,
+  }: ScrollPositionOptions & { direction: string },
 ): Promise<void> {
   const db = ctx.getDb();
   const scrollPos: NewScrollPosition = {

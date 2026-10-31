@@ -239,7 +239,10 @@ describe("NavigationGraphManager provenance write path", () => {
 
     // Seed a named node + correlated fingerprint for APP.
     const node = await switchingRepo.getOrCreateNode(APP, "Home", 100);
-    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", "{}", 100);
+    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", {
+      data: "{}",
+      timestamp: 100,
+    });
 
     let appSwitch: Promise<void> | undefined;
     switchingRepo.onLookup = () => {
@@ -291,7 +294,10 @@ describe("NavigationGraphManager provenance write path", () => {
     await m.setCurrentApp(APP);
     m.setBuildContext({ appId: APP, deviceId: "device-A", versionCode: 7, contentHash: "hashA" });
     const node = await switchingRepo.getOrCreateNode(APP, "Home", 100);
-    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", "{}", 100);
+    await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", {
+      data: "{}",
+      timestamp: 100,
+    });
 
     // Device B swaps APP's context in the manager during the awaited lookup.
     switchingRepo.onLookup = () => {
@@ -487,13 +493,12 @@ describe("NavigationGraphManager provenance write path", () => {
     await repo.getOrCreateApp(otherApp);
     const suggestion = await repo.addOrUpdateSuggestion(otherApp, "foreign-fp", "{}", 100);
     const otherBuild = await repo.getOrCreateBuildKey(otherApp, 7, "foreign-build");
-    await repo.recordSuggestionObservation(
-      suggestion.id,
-      otherBuild.id,
-      "other-device",
-      "other",
-      100,
-    );
+    await repo.recordSuggestionObservation(suggestion.id, {
+      buildKeyId: otherBuild.id,
+      deviceId: "other-device",
+      sessionUuid: "other",
+      seenAt: 100,
+    });
 
     await manager.promoteSuggestion(suggestion.id, "Promoted");
 

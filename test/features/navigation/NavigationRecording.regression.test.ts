@@ -144,20 +144,14 @@ describe("navigation recording source state and routing", () => {
   });
 
   test("old routed DB rows collapse in reads, counts, adjacency, and replay identity", async () => {
-    const older = await repository.createEdge(
-      APP,
-      "Home",
-      "DemoIndex",
-      { toolName: "tapOn", toolArgs: args },
-      200,
-    );
-    const newest = await repository.createEdge(
-      APP,
-      "Home",
-      "DemoIndex",
-      { toolName: "tapOn", toolArgs: routed },
-      100,
-    );
+    const older = await repository.createEdge(APP, "Home", "DemoIndex", {
+      tool: { toolName: "tapOn", toolArgs: args },
+      timestamp: 200,
+    });
+    const newest = await repository.createEdge(APP, "Home", "DemoIndex", {
+      tool: { toolName: "tapOn", toolArgs: routed },
+      timestamp: 100,
+    });
     expect(newest.id).toBeGreaterThan(older.id);
     expect(await repository.getDistinctEdges(APP)).toEqual([newest]);
     expect(await repository.getEdgesFrom(APP, "Home")).toEqual([newest]);
@@ -179,14 +173,14 @@ describe("navigation recording source state and routing", () => {
   test("normalization preserves action arguments, inputs, and distinct actions", async () => {
     expect(stripNavigationToolParams(routed)).toEqual(args);
     expect(routed.deviceId).toBe("emulator-5600");
-    await repository.createEdge(APP, "Home", "DemoIndex", { toolName: "tapOn", toolArgs: args }, 1);
-    await repository.createEdge(
-      APP,
-      "Home",
-      "DemoIndex",
-      { toolName: "tapOn", toolArgs: { ...args, action: "longPress" } },
-      2,
-    );
+    await repository.createEdge(APP, "Home", "DemoIndex", {
+      tool: { toolName: "tapOn", toolArgs: args },
+      timestamp: 1,
+    });
+    await repository.createEdge(APP, "Home", "DemoIndex", {
+      tool: { toolName: "tapOn", toolArgs: { ...args, action: "longPress" } },
+      timestamp: 2,
+    });
     expect(await repository.getDistinctEdges(APP)).toHaveLength(2);
   });
 });

@@ -38,6 +38,10 @@ describe("GestureClassifier", () => {
     [0, 0, 0],
     [90, 90, Math.PI / 2],
   ])("pen tilt converts signed degrees (%d, %d) to Android radians", (tiltX, tiltY, expected) => {
+    c = new GestureClassifier(identityScaler, DENSITY, undefined, {
+      x: { min: -90, max: 90, resolution: 0 },
+      y: { min: -90, max: 90, resolution: 0 },
+    });
     c.feedFrame({
       arrivedAt: 0,
       releasedSlots: [],
@@ -59,6 +63,10 @@ describe("GestureClassifier", () => {
   });
 
   test("pen tilt is averaged over contact samples and omitted without both axes", () => {
+    c = new GestureClassifier(identityScaler, DENSITY, undefined, {
+      x: { min: -90, max: 90 },
+      y: { min: -90, max: 90 },
+    });
     const slot = {
       slotId: 0,
       trackingId: 1,

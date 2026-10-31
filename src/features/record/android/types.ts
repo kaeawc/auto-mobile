@@ -37,7 +37,7 @@ export interface TouchSlot {
   toolType?: PointerToolType;
   /** Held stylus buttons (BTN_STYLUS / BTN_STYLUS2); absent when none. */
   buttons?: StylusButton[];
-  /** Raw ABS_TILT_X / ABS_TILT_Y (signed degrees), when the digitizer reports them. */
+  /** Raw ABS_TILT_X / ABS_TILT_Y (device units), when the digitizer reports them. */
   tiltX?: number;
   tiltY?: number;
   /** Raw ABS_DISTANCE (hover height), when reported. */

@@ -129,10 +129,12 @@ Rationale:
   press or swipe exports as `tapAt`/`swipeAt` with `pointer.toolType: "stylus"` and
   normalized mean contact `pressure`, mean `tilt` (radians), and `buttons` (`primary`,
   `secondary`, held at any point during contact). Pressure and tilt use four decimal
-  places; pressure is omitted without a known axis range or non-zero measurements.
-  Tilt uses Android's `acos(cos(tiltX * PI/180) * cos(tiltY * PI/180))` magnitude
-  from signed degree axes, and is omitted unless both axes were reported. Empty
-  buttons are omitted. These scalar fields summarize the contact, not its pressure
+  places, with tilt clamped to PI/2 after rounding; pressure is omitted without a
+  known axis range or non-zero measurements. Tilt subtracts each device axis range's
+  midpoint and scales by the reported units-per-radian resolution (PI/180 when
+  resolution is zero or absent), then uses Android's `acos(cos(xAngle) * cos(yAngle))`
+  magnitude. It is omitted unless both samples and valid axis ranges are available.
+  Empty buttons are omitted. These scalar fields summarize the contact, not its pressure
   ramp or button timing. Rich pointers replay through instrumentation; an eraser
   gesture is left out with the existing warning and hover-only input produces no step.
 
@@ -213,11 +215,9 @@ The probe receives pressure 0.98 from raw 4000/4095, tilt 0.55 and
 `STYLUS_PRIMARY` (32). `recordDeviceGestures` round-trips the stylus stroke;
 eraser input is not exported and hover-only input produces no step.
 
-Do not add a uinput route to `PointerInjector` now: instrumentation is the replay
-path. A uinput route is only worthwhile for rooted or userdebug emulator
-record-replay symmetry, as recommended in #13105; the owner has not accepted that
-route. Any uinput `PointerInjector` route is owed post-merge device acceptance.
-CtrlProxy now advertises the flags and injects through its instrumentation (below).
+Instrumentation is the replay path; CtrlProxy advertises the capability flags
+and injects through its instrumentation (below). A uinput route would serve
+rooted-device or userdebug-emulator record-replay symmetry.
 
 ## Instrumentation route (#13097)
 

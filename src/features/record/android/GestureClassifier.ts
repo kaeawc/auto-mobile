@@ -1,6 +1,7 @@
 import type { RawTouchFrame, GestureEvent, PointerToolType, StylusButton } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
 import type { CoordScaler, GestureScaler } from "./AxisRanges";
+import type { TiltAxes } from "./TouchNodeDiscovery";
 import type { Point } from "../../../models/Point";
 
 interface ContactInfo {
@@ -80,6 +81,7 @@ export class GestureClassifier {
     private readonly scaler: GestureScaler,
     private readonly densityDp: number,
     private readonly pressureRange?: PressureRange,
+    private readonly tiltAxes?: TiltAxes,
   ) {}
 
   private scalerAt(time: number): CoordScaler {
@@ -161,10 +163,10 @@ export class GestureClassifier {
         existing.lastX = slot.x;
         existing.lastY = slot.y;
         existing.unknownAxes = mergeUnknownAxes(existing.unknownAxes, slot.unknownAxes);
-        observePen(existing.pen, slot);
+        observePen(existing.pen, slot, this.tiltAxes);
       } else {
         const pen = newPenObservation();
-        observePen(pen, slot);
+        observePen(pen, slot, this.tiltAxes);
         this.contacts.set(slot.slotId, {
           startX: slot.x,
           startY: slot.y,
@@ -256,7 +258,10 @@ export class GestureClassifier {
       };
     }
     if (contact.pen.tiltCount > 0) {
-      fields.tilt = Math.round((contact.pen.tiltSum / contact.pen.tiltCount) * 1e4) / 1e4;
+      fields.tilt = Math.min(
+        Math.PI / 2,
+        Math.round((contact.pen.tiltSum / contact.pen.tiltCount) * 1e4) / 1e4,
+      );
     }
     if (buttons.size > 0) {
       fields.buttons = [...buttons];
@@ -408,7 +413,11 @@ function newPenObservation(): PenObservation {
   };
 }
 
-function observePen(pen: PenObservation, slot: RawTouchFrame["activeSlots"][number]): void {
+function observePen(
+  pen: PenObservation,
+  slot: RawTouchFrame["activeSlots"][number],
+  tiltAxes?: TiltAxes,
+): void {
   if (slot.toolType) {
     pen.toolType = slot.toolType;
   }
@@ -416,19 +425,9 @@ function observePen(pen: PenObservation, slot: RawTouchFrame["activeSlots"][numb
     pen.buttons.add(button);
   }
   if (slot.toolType === "stylus" || slot.toolType === "eraser") {
-    if (
-      slot.tiltX !== undefined &&
-      slot.tiltY !== undefined &&
-      Number.isFinite(slot.tiltX) &&
-      Number.isFinite(slot.tiltY)
-    ) {
-      // Android TouchInputMapper combines the signed degree axes into AXIS_TILT radians.
-      const cosine =
-        Math.cos((slot.tiltX * Math.PI) / 180) * Math.cos((slot.tiltY * Math.PI) / 180);
-      pen.tiltCount += 1;
-      pen.tiltSum += Math.acos(clamp01(cosine));
-    }
+    observeTilt(pen, slot, tiltAxes);
   }
+
   // A zero pressure sample means "not reported" for fingers and "no force" for a pen; neither
   // is a measurement worth averaging.
   if (slot.pressure > 0) {
@@ -437,6 +436,44 @@ function observePen(pen: PenObservation, slot: RawTouchFrame["activeSlots"][numb
     pen.pressureMin = Math.min(pen.pressureMin, slot.pressure);
     pen.pressureMax = Math.max(pen.pressureMax, slot.pressure);
   }
+}
+
+function observeTilt(
+  pen: PenObservation,
+  slot: RawTouchFrame["activeSlots"][number],
+  tiltAxes?: TiltAxes,
+): void {
+  if (
+    tiltAxes &&
+    validTiltAxis(tiltAxes.x) &&
+    validTiltAxis(tiltAxes.y) &&
+    slot.tiltX !== undefined &&
+    slot.tiltY !== undefined &&
+    Number.isFinite(slot.tiltX) &&
+    Number.isFinite(slot.tiltY)
+  ) {
+    // TouchInputMapper centers each range and uses units/radian resolution when reported;
+    // zero or absent resolution means the legacy degree axis (PI/180).
+    const x = tiltAngle(slot.tiltX, tiltAxes.x);
+    const y = tiltAngle(slot.tiltY, tiltAxes.y);
+    const cosine = Math.cos(x) * Math.cos(y);
+    pen.tiltCount += 1;
+    pen.tiltSum += Math.acos(clamp01(cosine));
+  }
+}
+
+function tiltAngle(raw: number, axis: TiltAxes["x"]): number {
+  const scale = axis.resolution ? 1 / axis.resolution : Math.PI / 180;
+  return (raw - (axis.min + axis.max) / 2) * scale;
+}
+
+function validTiltAxis(axis: TiltAxes["x"]): boolean {
+  return (
+    Number.isFinite(axis.min) &&
+    Number.isFinite(axis.max) &&
+    axis.max > axis.min &&
+    (axis.resolution === undefined || (Number.isFinite(axis.resolution) && axis.resolution >= 0))
+  );
 }
 
 function clamp01(value: number): number {

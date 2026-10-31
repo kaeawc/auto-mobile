@@ -9,6 +9,7 @@ import {
   parseTouchNodes,
 } from "../../../../src/features/record/android/InputNodeDiscovery";
 import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
+import type { TiltAxes } from "../../../../src/features/record/android/TouchNodeDiscovery";
 import type { GestureEvent, RawTouchFrame } from "../../../../src/features/record/android/types";
 import type { AdbProcess } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
@@ -138,8 +139,25 @@ describe("InputNodeDiscovery.parseInputNodes", () => {
         kind: "pen",
         pressureMin: 0,
         pressureMax: 4095,
+        tiltAxes: {
+          x: { min: -90, max: 90, resolution: 0 },
+          y: { min: -90, max: 90, resolution: 0 },
+        },
       },
     ]);
+  });
+
+  test("preserves tilt resolution and omits tilt metadata with one missing axis", () => {
+    const input = PEN_ONLY_P.replaceAll("resolution 0", "resolution 57");
+    expect(parseInputNodes(input).pen[0].tiltAxes).toEqual({
+      x: { min: -90, max: 90, resolution: 57 },
+      y: { min: -90, max: 90, resolution: 57 },
+    });
+    const missingY = input
+      .split("\n")
+      .filter((line) => !line.includes("001b"))
+      .join("\n");
+    expect(parseInputNodes(missingY).pen[0].tiltAxes).toBeUndefined();
   });
 
   test("separates touch and pen nodes and ignores an accelerometer", () => {
@@ -413,8 +431,15 @@ describe("pen contacts", () => {
 });
 
 describe("parser parity and real layouts", () => {
-  test("the named -lp layout parses to the same pen node as the hex -p layout", () => {
-    expect(parseInputNodes(PEN_ONLY_LP)).toEqual(parseInputNodes(PEN_ONLY_P));
+  test("named and hex layouts preserve the same declared pen metadata", () => {
+    // This named fixture does not list tilt; compare its declared axes only.
+    const { tiltAxes, ...hexPen } = parseInputNodes(PEN_ONLY_P).pen[0];
+    expect(parseInputNodes(PEN_ONLY_LP).pen).toEqual([hexPen]);
+    const namedTilt = PEN_ONLY_P.replace("001a  :", "ABS_TILT_X :").replace(
+      "001b  :",
+      "ABS_TILT_Y :",
+    );
+    expect(parseInputNodes(namedTilt).pen[0].tiltAxes).toEqual(tiltAxes);
   });
 
   test("parseInputNodes().touch is parseTouchNodes()[0] for every captured getevent -p", () => {
@@ -565,7 +590,7 @@ class ReaderAdb extends FakeAdbExecutor {
 
 afterEach(() => mock.restore());
 
-function penReader() {
+function penReader(tiltAxes?: TiltAxes) {
   const adb = new ReaderAdb();
   const procs = new Map<string, FakeAdbProcess>([
     ["/dev/input/event3", new FakeAdbProcess()],
@@ -591,7 +616,7 @@ function penReader() {
     density: 1,
     touchNode: touch!,
     scaler: scaler(1079, 1919),
-    penNodes: [{ node: pen[0], scaler: scaler(2159, 3839) }],
+    penNodes: [{ node: { ...pen[0], tiltAxes }, scaler: scaler(2159, 3839) }],
   });
   const onGesture = mock<(event: GestureEvent) => void>();
   const onError = mock<(error: Error) => void>();
@@ -649,6 +674,33 @@ describe("GetEventReader with touch and pen nodes", () => {
     expect(onGesture.mock.calls[1][0].toolType).toBeUndefined();
     reader.stop();
   });
+
+  test.each([true, false])(
+    "reader uses discovered tilt metadata when available (%s)",
+    async (known) => {
+      const axes = parseInputNodes(PEN_ONLY_P).pen[0].tiltAxes;
+      expect(axes).toBeDefined();
+      const { penProc, reader, onGesture } = penReader(known ? axes : undefined);
+      reader.start(onGesture);
+      await Promise.resolve();
+      await Promise.resolve();
+      // Supply the second axis absent from the existing stroke input.
+      const lines = PEN_STROKE.flatMap((line) =>
+        line.includes("ABS_TILT_X") ? [line, line.replace("ABS_TILT_X", "ABS_TILT_Y")] : [line],
+      );
+      emitLines(penProc, lines);
+      const contact = onGesture.mock.calls
+        .map(([event]) => event)
+        .find((event) => event.type === "tap");
+      expect(contact).toBeDefined();
+      if (known) {
+        expect(contact?.tilt).toBeCloseTo(0.4885, 4);
+      } else {
+        expect(contact?.tilt).toBeUndefined();
+      }
+      reader.stop();
+    },
+  );
 
   test("a pen that only hovers reaches the recorder as a hover event", async () => {
     const { penProc, reader, onGesture } = penReader();

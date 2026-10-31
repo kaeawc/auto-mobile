@@ -11,6 +11,8 @@ import type {
   GestureEmitter,
   GestureEvent,
 } from "../../../../src/features/record/android/types";
+import { pointerSchema } from "../../../../src/server/pointerSchema";
+import type { TiltAxes } from "../../../../src/features/record/android/TouchNodeDiscovery";
 import type { BootedDevice } from "../../../../src/models";
 import { defaultAdbClientFactory } from "../../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbProcess } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -202,6 +204,89 @@ describe("pressure in recorded plan steps", () => {
       buttons: ["primary"],
     });
   });
+
+  // Arithmetic inputs, not a device capture: Android centers raw tilt on each axis midpoint.
+  test.each([
+    {
+      name: "90 degree endpoint",
+      min: -90,
+      max: 90,
+      raw: 90,
+      resolution: 0,
+      expected: Math.PI / 2,
+    },
+    { name: "unsigned midpoint", min: 0, max: 127, raw: 64, resolution: 0, expected: 0.0123 },
+    { name: "signed midpoint", min: -90, max: 90, raw: 0, resolution: 0, expected: 0 },
+    { name: "units per radian", min: 0, max: 200, raw: 150, resolution: 100, expected: 0.6917 },
+  ])(
+    "$name exports a pointer accepted by the replay schema",
+    async ({ min, max, raw, resolution, expected }) => {
+      const axis = { min, max, resolution };
+      const classifier = new GestureClassifier(
+        { toScreenPoint: (x, y) => ({ x, y }) },
+        1,
+        undefined,
+        { x: axis, y: axis },
+      );
+      classifier.feedFrame({
+        arrivedAt: 0,
+        releasedSlots: [],
+        activeSlots: [
+          {
+            slotId: 0,
+            trackingId: 1,
+            x: 100,
+            y: 200,
+            pressure: 0,
+            toolType: "stylus",
+            tiltX: raw,
+            tiltY: raw,
+          },
+        ],
+      });
+      const gesture = classifier.feedFrame({ arrivedAt: 50, releasedSlots: [0], activeSlots: [] });
+      const pointer = (await stepsFor(gesture!))[0].params.pointer;
+      expect(pointer).toEqual({ toolType: "stylus", tilt: expected });
+      expect(pointerSchema.parse(pointer)).toEqual(pointer);
+    },
+  );
+
+  test.each([
+    { name: "missing metadata", axes: undefined },
+    { name: "degenerate range", axes: { x: { min: 0, max: 0 }, y: { min: 0, max: 127 } } },
+    { name: "nonfinite range", axes: { x: { min: NaN, max: 127 }, y: { min: 0, max: 127 } } },
+  ] satisfies { name: string; axes: TiltAxes | undefined }[])(
+    "$name omits tilt from the exported pointer",
+    async ({ axes }) => {
+      const classifier = new GestureClassifier(
+        { toScreenPoint: (x, y) => ({ x, y }) },
+        1,
+        undefined,
+        axes,
+      );
+      classifier.feedFrame({
+        arrivedAt: 0,
+        releasedSlots: [],
+        activeSlots: [
+          {
+            slotId: 0,
+            trackingId: 1,
+            x: 100,
+            y: 200,
+            pressure: 0,
+            toolType: "stylus",
+            tiltX: 64,
+            tiltY: 64,
+          },
+        ],
+      });
+      const gesture = classifier.feedFrame({ arrivedAt: 50, releasedSlots: [0], activeSlots: [] });
+      expect(gesture?.tilt).toBeUndefined();
+      const pointer = (await stepsFor(gesture!))[0].params.pointer;
+      expect(pointer).toEqual({ toolType: "stylus" });
+      expect(pointerSchema.parse(pointer)).toEqual(pointer);
+    },
+  );
 
   test("a pressured finger tap records the same step as an unpressured one", async () => {
     const withPressure = classify(FINGER(true));

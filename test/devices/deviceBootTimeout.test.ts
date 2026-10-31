@@ -26,7 +26,7 @@ async function bootTimeout(image: BootableImage): Promise<unknown> {
   timer.enableAutoAdvance();
   devices.setDeviceImages(image.platform, [image]);
   matcher.setImageResult(image);
-  devices.waitForDeviceReady = async (_device, _timeout, _handle, signal) =>
+  devices.waitForDeviceReady = async (_device, _timeout, _handle, { signal } = {}) =>
     new Promise((_resolve, reject) => {
       signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
     });

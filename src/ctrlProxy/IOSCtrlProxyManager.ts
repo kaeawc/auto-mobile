@@ -422,9 +422,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static createForTesting(
     device: BootedDevice,
     timer: Timer,
-    builder?: IosCtrlProxyBuilderSurface,
-    tunnelClient?: IosTunnelClient,
-    processExecutor?: HostProcessExecutor,
+    {
+      builder,
+      tunnelClient,
+      processExecutor,
+    }: {
+      builder?: IosCtrlProxyBuilderSurface;
+      tunnelClient?: IosTunnelClient;
+      processExecutor?: HostProcessExecutor;
+    } = {},
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager({
       device,

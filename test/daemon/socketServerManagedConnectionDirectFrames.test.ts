@@ -164,7 +164,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     const ctrlProxyManager = AndroidCtrlProxyManager.createForTestingWithDeps(
       slotDevice,
       new FakeAdbExecutor(),
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
     spyOn(ctrlProxyManager, "ensureCompatibleVersion").mockImplementation(async () => {
       writes.push("ensureCompatibleVersion");

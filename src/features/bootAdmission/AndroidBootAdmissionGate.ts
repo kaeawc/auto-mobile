@@ -704,11 +704,8 @@ export class AndroidBootAdmissionGate
     inFlight: readonly InFlightBootMemory[],
     candidate?: CandidateHardware,
   ): CapacityLimits {
-    const limits = resolveBootCapacityLimits(
-      this.env,
-      ANDROID_MAX_BOOTED_ENV,
-      sample.host,
-      raisePerDeviceBytes(
+    const limits = resolveBootCapacityLimits(this.env, ANDROID_MAX_BOOTED_ENV, sample.host, {
+      perDeviceBytes: raisePerDeviceBytes(
         estimateSettledPerDeviceBytes(
           sample.emulatorProcessRssBytes?.map((rssBytes, index) => ({
             rssBytes,
@@ -720,8 +717,8 @@ export class AndroidBootAdmissionGate
         candidate?.guestBytes,
         ANDROID_EMULATOR_MEMORY_POLICY,
       ),
-      this.coresPerDevice(candidate),
-    );
+      coresPerDevice: this.coresPerDevice(candidate),
+    });
     if (limits.warning && limits.warning !== this.warnedLimit) {
       this.warnedLimit = limits.warning;
       logger.warn(`[BootAdmission] ${limits.warning}`);

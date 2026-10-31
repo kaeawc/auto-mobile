@@ -375,8 +375,8 @@ function configureProvisionBootAndTeardown(
     new ProvisionBootProcess(() => manager.setBootedDevices(platform, [])),
   );
   const originalWaitForDeviceReady = manager.waitForDeviceReady.bind(manager);
-  manager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
-    const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
+  manager.waitForDeviceReady = async (device, timeoutMs, childProcess, { signal } = {}) => {
+    const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, { signal });
     const resolved = {
       ...booted,
       deviceId: platform === "android" ? "emulator-5554" : "SIM-123",
@@ -4545,7 +4545,7 @@ describe("provisionDevice handler", () => {
       const provisioned = provisionedTestDevice(platform, false);
       exactProvisioner.provision = async () => provisioned;
       deviceManager.setDeviceImages(platform, [provisioned.device]);
-      deviceManager.waitForDeviceReady = async (_device, _timeout, _handle, signal) => {
+      deviceManager.waitForDeviceReady = async (_device, _timeout, _handle, { signal } = {}) => {
         return new Promise((_resolve, reject) => {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
         });
@@ -4795,8 +4795,8 @@ describe("provisionDevice handler", () => {
     };
     deviceManager.setMockChildProcess("phone-api-36-a", handle);
     const originalWaitForDeviceReady = deviceManager.waitForDeviceReady.bind(deviceManager);
-    deviceManager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
-      const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
+    deviceManager.waitForDeviceReady = async (device, timeoutMs, childProcess, { signal } = {}) => {
+      const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, { signal });
       const resolved = { ...booted, deviceId: "emulator-5554" };
       deviceManager.setBootedDevices("android", [resolved]);
       return resolved;
@@ -4860,12 +4860,11 @@ describe("provisionDevice handler", () => {
       setDeviceToolsDependencies({
         timer,
         ensureCtrlProxyReady: async () => {
-          throw new RunnerReadinessError(
-            "runner failure",
-            false,
-            kind !== "platform-fault",
-            "runner-connect",
-          );
+          throw new RunnerReadinessError("runner failure", {
+            retryableAndroidFrameworkFailure: false,
+            deadlineExhausted: kind !== "platform-fault",
+            phase: "runner-connect",
+          });
         },
       });
       try {
@@ -4894,8 +4893,7 @@ describe("provisionDevice handler", () => {
         throw new RunnerReadinessError(
           "provisionDevice automation runner readiness failed: phase=runner-setup " +
             "attempts=1 remainingBudgetMs=0: readiness budget exhausted before setup lock",
-          false,
-          true,
+          { retryableAndroidFrameworkFailure: false, deadlineExhausted: true },
         );
       },
     });
@@ -5131,10 +5129,10 @@ describe("provisionDevice handler", () => {
         throw new RunnerReadinessError(
           "provisionDevice automation runner readiness failed: phase=runner-setup attempts=1: " +
             "error: device 'emulator-5554' not found",
-          false,
-          false,
-          "runner-setup",
           {
+            retryableAndroidFrameworkFailure: false,
+            deadlineExhausted: false,
+            phase: "runner-setup",
             attempts: 1,
             diagnosticCause: new DeviceLostError(
               "emulator-5554",
@@ -5241,7 +5239,11 @@ describe("provisionDevice handler", () => {
           if (!retryable) {
             throw new ProvisionDeviceError("timeout", "terminal readiness timeout", false);
           }
-          throw new RunnerReadinessError("readiness deadline", false, deadline, "runner-connect");
+          throw new RunnerReadinessError("readiness deadline", {
+            retryableAndroidFrameworkFailure: false,
+            deadlineExhausted: deadline,
+            phase: "runner-connect",
+          });
         },
         idGenerator: new FakeIdGenerator(["readiness-policy"]),
       });
@@ -5318,7 +5320,11 @@ describe("provisionDevice handler", () => {
       exactDeviceProvisionerFactory: () => exactProvisioner,
       ensureCtrlProxyReady: async () => {
         if (++readinessCalls === 1) {
-          throw new RunnerReadinessError("readiness deadline", false, true, "runner-connect");
+          throw new RunnerReadinessError("readiness deadline", {
+            retryableAndroidFrameworkFailure: false,
+            deadlineExhausted: true,
+            phase: "runner-connect",
+          });
         }
       },
     });
@@ -5512,12 +5518,12 @@ describe("provisionDevice handler", () => {
     };
     deviceManager.setMockChildProcess("phone-api-36-a", handle);
     const originalWaitForDeviceReady = deviceManager.waitForDeviceReady.bind(deviceManager);
-    deviceManager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
+    deviceManager.waitForDeviceReady = async (device, timeoutMs, childProcess, { signal } = {}) => {
       // Yield once so the boot phase has registered its deadline timer, then
       // model a slow cold boot that ends 1ms before the whole provision deadline.
       await Promise.resolve();
       timer.advanceTime(59_999);
-      const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
+      const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, { signal });
       const resolved = { ...booted, deviceId: "emulator-5554" };
       deviceManager.setBootedDevices("android", [resolved]);
       return resolved;

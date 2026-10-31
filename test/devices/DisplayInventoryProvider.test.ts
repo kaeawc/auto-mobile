@@ -64,7 +64,9 @@ describe("CachingDisplayInventoryProvider", () => {
         throw new Error("source offline");
       },
     };
-    const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+    const provider = new CachingDisplayInventoryProvider(source, source, {
+      timer: new FakeTimer(),
+    });
     const fold = await provider.hydrate({ ...device, screenWidth: 1080, screenHeight: 2400 }, "1");
     expect(fold[displayInventoryOutcome]).toEqual({
       kind: "unreadable",
@@ -89,7 +91,7 @@ describe("CachingDisplayInventoryProvider", () => {
       degraded: false,
       outcome: { kind: "unreadable", reason: "no matched physical display records" },
     });
-    const provider = new CachingDisplayInventoryProvider(source, source, timer);
+    const provider = new CachingDisplayInventoryProvider(source, source, { timer });
     expect((await provider.hydrate(device, "1"))[displayInventoryOutcome]?.kind).toBe("unreadable");
     await provider.hydrate(device, "1");
     expect(source.reads).toBe(1);
@@ -132,7 +134,9 @@ describe("CachingDisplayInventoryProvider", () => {
 
   test("dedupes fifty calls and caches a confirmed single panel", async () => {
     const source = new FakeDisplayInventorySource({ displays, degraded: false });
-    const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+    const provider = new CachingDisplayInventoryProvider(source, source, {
+      timer: new FakeTimer(),
+    });
     const results = await Promise.all(
       Array.from({ length: 50 }, () => provider.hydrate(device, "1")),
     );
@@ -183,11 +187,9 @@ describe("CachingDisplayInventoryProvider", () => {
       const fake = scriptedSource((read) =>
         read === 1 ? { degraded: false } : { displays, degraded: false },
       );
-      const provider = new CachingDisplayInventoryProvider(
-        fake.source,
-        fake.source,
-        new FakeTimer(),
-      );
+      const provider = new CachingDisplayInventoryProvider(fake.source, fake.source, {
+        timer: new FakeTimer(),
+      });
       const call = provider.hydrate(device, "1");
       await fake.release(1);
       provider.invalidate(device.deviceId);
@@ -203,11 +205,9 @@ describe("CachingDisplayInventoryProvider", () => {
       const fake = scriptedSource((read) =>
         read === 1 ? { degraded: false } : { displays, degraded: false },
       );
-      const provider = new CachingDisplayInventoryProvider(
-        fake.source,
-        fake.source,
-        new FakeTimer(),
-      );
+      const provider = new CachingDisplayInventoryProvider(fake.source, fake.source, {
+        timer: new FakeTimer(),
+      });
       const callers = [provider.hydrate(device, "1"), provider.hydrate(device, "1")];
       provider.invalidate(device.deviceId);
       await fake.release(1);
@@ -221,11 +221,9 @@ describe("CachingDisplayInventoryProvider", () => {
       const fake = scriptedSource((read) =>
         read === 1 ? { displays, degraded: false } : new Error(`read ${read} failed`),
       );
-      const provider = new CachingDisplayInventoryProvider(
-        fake.source,
-        fake.source,
-        new FakeTimer(),
-      );
+      const provider = new CachingDisplayInventoryProvider(fake.source, fake.source, {
+        timer: new FakeTimer(),
+      });
       const call = provider.hydrate(device, "1");
       for (const read of [1, 2, 3]) {
         await fake.release(read);
@@ -241,11 +239,9 @@ describe("CachingDisplayInventoryProvider", () => {
 
     test("an unreadable-only storm still reports unreadable rather than no outcome", async () => {
       const fake = scriptedSource((read) => new Error(`read ${read} failed`));
-      const provider = new CachingDisplayInventoryProvider(
-        fake.source,
-        fake.source,
-        new FakeTimer(),
-      );
+      const provider = new CachingDisplayInventoryProvider(fake.source, fake.source, {
+        timer: new FakeTimer(),
+      });
       const call = provider.hydrate(device, "1");
       for (const read of [1, 2, 3]) {
         await fake.release(read);
@@ -262,7 +258,9 @@ describe("CachingDisplayInventoryProvider", () => {
 
   test("serial reuse and explicit invalidation refetch", async () => {
     const source = new FakeDisplayInventorySource({ displays, degraded: false });
-    const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+    const provider = new CachingDisplayInventoryProvider(source, source, {
+      timer: new FakeTimer(),
+    });
     expect((await provider.hydrate(device, "1:Fold")).displays).toBe(displays);
     source.result = { degraded: false };
     expect(
@@ -291,7 +289,10 @@ describe("CachingDisplayInventoryProvider", () => {
             });
       },
     };
-    const provider = new CachingDisplayInventoryProvider(source, source, timer, 5000);
+    const provider = new CachingDisplayInventoryProvider(source, source, {
+      timer,
+      degradedRetryMs: 5000,
+    });
     expect((await provider.hydrate(device, "1")).displays).toBe(displays);
     await provider.hydrate(device, "1");
     expect(reads).toBe(1);
@@ -318,7 +319,7 @@ describe("CachingDisplayInventoryProvider", () => {
         return { displays, degraded: false };
       },
     };
-    const provider = new CachingDisplayInventoryProvider(source, source, timer);
+    const provider = new CachingDisplayInventoryProvider(source, source, { timer });
     expect(await provider.hydrate({ ...device, displays }, "1")).toEqual({ ...device, displays });
     expect((await provider.hydrate(device, "1")).displays).toBeUndefined();
     timer.advanceTime(29_999);
@@ -342,13 +343,11 @@ describe("CachingDisplayInventoryProvider", () => {
         throw new Error("boom");
       },
     };
-    const provider = new CachingDisplayInventoryProvider(
-      source,
-      source,
+    const provider = new CachingDisplayInventoryProvider(source, source, {
       timer,
-      5000,
+      degradedRetryMs: 5000,
       failureRetryMs,
-    );
+    });
     expect((await provider.hydrate(device, "1"))[displayInventoryOutcome]).toEqual({
       kind: "unreadable",
       reason: "boom",
@@ -373,13 +372,11 @@ describe("CachingDisplayInventoryProvider", () => {
         throw new Error("boom");
       },
     };
-    const provider = new CachingDisplayInventoryProvider(
-      source,
-      source,
+    const provider = new CachingDisplayInventoryProvider(source, source, {
       timer,
-      5000,
+      degradedRetryMs: 5000,
       failureRetryMs,
-    );
+    });
     const initial = await Promise.all(
       Array.from({ length: 50 }, () => provider.hydrate(device, "1")),
     );
@@ -407,7 +404,7 @@ describe("CachingDisplayInventoryProvider", () => {
         return Promise.resolve({ displays, degraded: false });
       },
     };
-    const provider = new CachingDisplayInventoryProvider(source, source, timer);
+    const provider = new CachingDisplayInventoryProvider(source, source, { timer });
     expect((await provider.hydrate(device, "1"))[displayInventoryOutcome]?.kind).toBe("unreadable");
     timer.advanceTime(30_000);
     expect((await provider.hydrate(device, "1")).displays).toBeUndefined();
@@ -431,7 +428,9 @@ describe("CachingDisplayInventoryProvider", () => {
         });
       },
     };
-    const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+    const provider = new CachingDisplayInventoryProvider(source, source, {
+      timer: new FakeTimer(),
+    });
     const controller = new AbortController();
     const callerA = provider.hydrate(device, "1", controller.signal);
     const callerB = provider.hydrate(device, "1");
@@ -446,7 +445,7 @@ describe("CachingDisplayInventoryProvider", () => {
 
 test("cached panels are synchronous, settled only, and disappear on invalidation", async () => {
   const source = new FakeDisplayInventorySource({ displays, degraded: false });
-  const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+  const provider = new CachingDisplayInventoryProvider(source, source, { timer: new FakeTimer() });
   expect(provider.cachedPanels(device.deviceId)).toBeUndefined();
   const pending = provider.hydrate(device, "fingerprint");
   expect(provider.cachedPanels(device.deviceId)).toBeUndefined();

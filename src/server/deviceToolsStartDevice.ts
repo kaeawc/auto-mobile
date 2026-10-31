@@ -575,10 +575,12 @@ export async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Pro
             `platform=${request.device.platform} requested=[${request.requestedIdentity}] ` +
             `resolved=[${request.device.name} (${request.device.deviceId})] phase=runner-setup ` +
             "attempts=0 remainingBudgetMs=0: device preparation deadline exhausted",
-          false,
-          true,
-          "runner-setup",
-          { attempts: 0 },
+          {
+            retryableAndroidFrameworkFailure: false,
+            deadlineExhausted: true,
+            phase: "runner-setup",
+            attempts: 0,
+          },
         ),
     };
     const pool = getStartDevicePool(getDeviceToolsDependencies().daemonState);

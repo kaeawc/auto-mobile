@@ -43,13 +43,10 @@ function fakeFixture() {
   const timer = timerFixture();
   const fake = new FakeIosTunnelClient();
   // The manager asks `idevice_id` whether the device is attached before it tunnels.
-  const manager = IOSCtrlProxyManager.createForTesting(
-    device,
-    timer,
-    undefined,
-    fake,
-    new FakeProcessExecutor(),
-  );
+  const manager = IOSCtrlProxyManager.createForTesting(device, timer, {
+    tunnelClient: fake,
+    processExecutor: new FakeProcessExecutor(),
+  });
   manager.testHooks.setState({ servicePort: 8765 });
   return { timer, fake, manager };
 }

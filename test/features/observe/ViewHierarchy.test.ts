@@ -1902,7 +1902,7 @@ describe("Offscreen Node Filtering", function () {
       const recoveryManager = AndroidCtrlProxyManager.createForTestingWithDeps(
         device,
         new FakeAdbExecutor(),
-        timer,
+        { timer },
       );
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), connectedClient, timer, {
         observeAccessibilityManagerFactory: () => recoveryManager,

@@ -92,6 +92,7 @@ export type { DeviceDiscoveryError };
 
 /** Trailing MultiPlatformDeviceManager seams; absent ones use the production defaults. */
 export interface MultiPlatformDeviceManagerOptions {
+  lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   timer?: Pick<Timer, "now">;
   physicalIosDevices?: IosPhysicalDeviceLister | null;
 }
@@ -116,6 +117,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * @param adb - An instance of AdbExecutor for interacting with Android Debug Bridge
    * @param simctl - An instance of SimCtlClient for interacting with iOS simulator controls
    * @param emulator - An instance of AndroidEmulatorClient for managing Android emulators
+   * @param options.lifecycleCoordinator - Virtual-device lifecycle lease coordinator
    * @param options.timer - Clock for discovery bookkeeping
    * @param options.physicalIosDevices - Discovery seam for connected physical iOS devices (devicectl)
    */
@@ -123,8 +125,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     adb: AdbExecutor | null = null,
     simctl: DeviceManagerSimCtl | null = null,
     emulator: AndroidEmulatorForDeviceManager | null = null,
-    lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
-    { timer = defaultTimer, physicalIosDevices }: MultiPlatformDeviceManagerOptions = {},
+    {
+      lifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
+      timer = defaultTimer,
+      physicalIosDevices,
+    }: MultiPlatformDeviceManagerOptions = {},
   ) {
     this.adb = adb || defaultAdbClientFactory.create(null);
     this.simctl = simctl || new SimCtlClient();
@@ -992,8 +997,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
     childProcess?: ChildProcess | null,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    { signal, options }: { signal?: AbortSignal; options?: AndroidEmulatorReadinessOptions } = {},
   ): Promise<BootedDevice> {
     switch (device.platform) {
       case "android":

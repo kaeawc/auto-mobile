@@ -510,8 +510,7 @@ export class FakeDeviceUtils implements FakeDeviceUtilsContract {
     device: DeviceInfo,
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    { signal, options }: { signal?: AbortSignal; options?: AndroidEmulatorReadinessOptions } = {},
   ): Promise<BootedDevice> {
     this.waitForDeviceReadyChildProcess = childProcess;
     this.waitForDeviceReadySignal = signal;

@@ -170,12 +170,11 @@ describe("shapeToolCallError", () => {
   });
 
   test("runner-connect deadline is a typed retryable timeout on every tool boundary", () => {
-    const error = new RunnerReadinessError(
-      "runner connect timed out",
-      false,
-      true,
-      "runner-connect",
-    );
+    const error = new RunnerReadinessError("runner connect timed out", {
+      retryableAndroidFrameworkFailure: false,
+      deadlineExhausted: true,
+      phase: "runner-connect",
+    });
     expect(typedRefusalFields(error)).toEqual({ code: "timeout", retryable: true });
     for (const source of ["MCP", "ProxyServer"] as const) {
       expect(JSON.parse(shapeToolCallError(error, { ...context, source }).content[0].text)).toEqual(
@@ -190,7 +189,11 @@ describe("shapeToolCallError", () => {
   });
 
   test("terminal runner readiness stays an untyped error", () => {
-    const error = new RunnerReadinessError("platform fault", false, false, "runner-setup");
+    const error = new RunnerReadinessError("platform fault", {
+      retryableAndroidFrameworkFailure: false,
+      deadlineExhausted: false,
+      phase: "runner-setup",
+    });
     expect(typedRefusalFields(error)).toBeUndefined();
     expect(shapeToolCallError(error, context).content[0].text).toBe("Error: platform fault");
   });

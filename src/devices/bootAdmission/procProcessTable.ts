@@ -85,6 +85,7 @@ function processExited(error: unknown): boolean {
 interface PidReadResult {
   row?: AndroidProcessRow;
   deniedError?: unknown;
+  incomplete?: boolean;
 }
 
 function processReadDenied(error: unknown): boolean {
@@ -100,12 +101,13 @@ async function readPid(procFs: ProcFs, entry: string): Promise<PidReadResult> {
   try {
     const status = await procFs.readText(`/proc/${entry}/status`);
     const cmdline = await procFs.readText(`/proc/${entry}/cmdline`);
-    return { row: parseRow(Number(entry), status, cmdline) };
+    const row = parseRow(Number(entry), status, cmdline);
+    return { row, incomplete: row === undefined };
   } catch (error) {
     if (processReadDenied(error)) {
       // Restricted pid reads are expected on hidepid mounts; readable rows still give a count floor.
       logger.debug(`[BootAdmission] skipping denied /proc/${entry}: ${errorMessage(error)}`);
-      return { deniedError: error };
+      return { deniedError: error, incomplete: true };
     }
     if (!processExited(error)) {
       throw toActionableError(error, `Reading /proc/${entry}`);
@@ -119,12 +121,21 @@ async function readPid(procFs: ProcFs, entry: string): Promise<PidReadResult> {
 /** Read in bounded batches, checking cancellation before opening the next batch. */
 export async function readProcProcessTable(
   procFs: ProcFs,
-  { signal }: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal } = {},
 ): Promise<AndroidProcessRow[]> {
+  return (await readProcProcessInventory(procFs, options)).value;
+}
+
+/** Readable rows remain a count floor; denied or unparseable rows cannot prove absence. */
+export async function readProcProcessInventory(
+  procFs: ProcFs,
+  { signal }: { signal?: AbortSignal } = {},
+): Promise<{ value: AndroidProcessRow[]; incomplete: boolean }> {
   signal?.throwIfAborted();
   const entries = (await procFs.listEntries()).filter((entry) => /^\d+$/.test(entry));
   const rows: AndroidProcessRow[] = [];
   let skipped = 0;
+  let incomplete = false;
   let deniedError: unknown;
   for (let offset = 0; offset < entries.length; offset += PROC_BATCH_SIZE) {
     signal?.throwIfAborted();
@@ -134,6 +145,7 @@ export async function readProcProcessTable(
     const parsed = batch.flatMap(({ row }) => (row ? [row] : []));
     rows.push(...parsed);
     skipped += batch.length - parsed.length;
+    incomplete ||= batch.some((result) => result.incomplete);
     deniedError ??= batch.find((result) => result.deniedError !== undefined)?.deniedError;
   }
   signal?.throwIfAborted();
@@ -146,5 +158,5 @@ export async function readProcProcessTable(
     }
     throw new Error(`/proc returned no parseable processes (${skipped} unparseable rows)`);
   }
-  return rows;
+  return { value: rows, incomplete };
 }

@@ -70,6 +70,7 @@ export type SessionBrokerProtocolErrorCode =
   | "session_broker_exclusive"
   | "session_broker_unavailable"
   | "session_broker_stopping"
+  | "session_broker_maintenance"
   | "session_config_invalid"
   | "session_request_not_found"
   | "session_restart_handoff_pending"

@@ -7,7 +7,7 @@ import type { SessionConfig } from "../../devices/sessionConfig";
 import type { SessionBrokerReadiness } from "../../devices/sessionBrokerResult";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionBrokerOptions } from "./brokerOptions";
-import { unwrap } from "./brokerSupport";
+import { unwrap } from "./devicePort";
 import { nativeProfile, poolProfile } from "./profile";
 import { WATCH_BOOTED_READINESS } from "./provisioning/bindingReadiness";
 import type { BrokerAdmissionInput, BrokerExportIdentity, BrokerResourceRecord } from "./store";

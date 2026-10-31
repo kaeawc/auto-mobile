@@ -92,7 +92,11 @@ refusal neither admits a request nor stores a receipt. Already-admitted
 preparations interrupted by shutdown store a terminal `session_broker_stopping`
 receipt with `retryable: true`, `retryAfterMs: 5000`,
 `retryRequires: "new_request_id"` (even while cleanup is pending); first reply and
-replays carry identical guidance.
+replays carry identical guidance. Operator `daemon/cleanupBrokerAvdSnapshots` maintenance
+refuses new prepare calls with `session_broker_maintenance` and the same retry hints,
+without storing a receipt. Its fence waits for all admitted preparations to settle
+before AVD discovery or snapshot deletion, and releases even when cleanup fails.
+Pool drain and idle expiry remain outside this fence.
 
 `session_restart_handoff_pending` and configured-but-unavailable refusals use the
 same hint, matching the service's five-second recovery interval. It is a pacing

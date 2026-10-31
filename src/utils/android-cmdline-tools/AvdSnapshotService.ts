@@ -1,3 +1,4 @@
+import { lookupLiveEmulatorSerial } from "./lookupLiveEmulatorSerial";
 import * as path from "path";
 import { combineWithAmbientAbort } from "../AbortContext";
 import { errorMessage } from "../describeUnknownError";
@@ -181,8 +182,7 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
       return null;
     }
     try {
-      const devices = await this.emulator.getBootedDevices(true);
-      return devices.find((device) => device.name === avdName)?.deviceId ?? null;
+      return await lookupLiveEmulatorSerial(avdName, () => this.emulator.getBootedDevices(true));
     } catch (error) {
       // Device enumeration failing means "we cannot prove the emulator is live",
       // which is the same decision as "it is not live": the caller records a

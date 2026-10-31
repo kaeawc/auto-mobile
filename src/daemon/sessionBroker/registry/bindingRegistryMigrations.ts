@@ -1,4 +1,4 @@
-import * as registryWriters016 from "./migrations/2026_10_28_016_binding_registry_writers";
+import * as registryWriters017 from "./migrations/2026_10_31_017_binding_registry_writers";
 import { getMcpServerVersion } from "../../../utils/mcpVersion";
 import { logger } from "../../../utils/logger";
 import * as resourceIndexes011 from "./migrations/2026_10_20_011_session_broker_resource_indexes";
@@ -26,6 +26,7 @@ import * as sessionBrokerExports010 from "./migrations/2026_10_19_010_session_br
 import * as receiptRetention009 from "./migrations/2026_10_16_009_session_broker_receipt_retention";
 
 export const BROKER_TIMING_MIGRATION = "2026_10_21_013_session_broker_timing";
+export const BINDING_REGISTRY_WRITERS_MIGRATION = "2026_10_31_017_binding_registry_writers";
 
 /**
  * The binding registry's own migration set (#11174). Statically imported rather than read from a
@@ -49,8 +50,8 @@ export const BINDING_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = 
   [BROKER_TIMING_MIGRATION]: brokerTiming013,
   "2026_10_26_014_device_claims": deviceClaims014,
   "2026_10_27_015_device_claims_metadata": deviceClaimsMetadata015,
-  "2026_10_28_016_binding_registry_writers": registryWriters016,
   "2026_10_30_016_watchos_binding_platform": watchosPlatform016,
+  [BINDING_REGISTRY_WRITERS_MIGRATION]: registryWriters017,
 };
 
 export const KNOWN_BINDING_REGISTRY_SCHEMA_VERSION = Object.keys(BINDING_REGISTRY_MIGRATIONS).at(
@@ -71,7 +72,7 @@ export function withBindingRegistryMigrationWriters(
 ): Record<string, Migration> {
   return Object.fromEntries(
     Object.entries(migrations).map(([name, migration]) => {
-      if (name < "2026_10_28_016_binding_registry_writers") {
+      if (name < BINDING_REGISTRY_WRITERS_MIGRATION) {
         return [name, migration];
       }
       const wrapped: Migration = {

@@ -179,7 +179,7 @@ describe("watchos rows in the binding registry (real SQLite)", () => {
   });
 
   test("a downgrade narrows the platform again, but never drops watch rows", async () => {
-    await migrateBindingRegistry(db, ":memory:");
+    expect((await migrator().migrateTo(WATCH_MIGRATION)).error).toBeUndefined();
     raw.exec(`INSERT INTO device_claims (platform, device_id, kind, pid, owner_token,
       claimed_at_ms, updated_at_ms) VALUES ('watchos', 'W', 'allocation', 1, 't', 1, 1)`);
     const refused = await migrator().migrateDown();

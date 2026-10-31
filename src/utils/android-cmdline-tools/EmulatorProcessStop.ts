@@ -21,10 +21,13 @@ export interface EmulatorHostProcessRow {
   command: string;
 }
 export interface EmulatorProcessTableSource {
-  read(options: {
-    signal?: AbortSignal;
-    deadlineMs?: number;
-  }): Promise<{ value?: EmulatorHostProcessRow[]; error?: string; failure?: ProcessTableFailure }>;
+  read(options: { signal?: AbortSignal; deadlineMs?: number }): Promise<{
+    value?: EmulatorHostProcessRow[];
+    /** Readable rows are a count floor, not a complete inventory. */
+    incomplete?: boolean;
+    error?: string;
+    failure?: ProcessTableFailure;
+  }>;
 }
 export type EmulatorGroupProbe =
   | { kind: "own-group"; pgid: number }

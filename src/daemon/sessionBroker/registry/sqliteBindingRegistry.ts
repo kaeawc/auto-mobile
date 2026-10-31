@@ -1,4 +1,5 @@
 import { getMcpServerVersion } from "../../../utils/mcpVersion";
+import { SqliteAvdSnapshotCleanupRegistry } from "./avdSnapshotCleanupRegistry";
 import { SqliteDeviceClaims } from "./sqliteDeviceClaims";
 import { Kysely } from "kysely";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
@@ -267,6 +268,11 @@ export class SqliteBindingRegistry implements BindingRegistry {
       ids,
       clock: this.timer,
     });
+  }
+
+  /** Complete cleanup references on this already-open registry connection. */
+  avdSnapshotCleanupRegistry(): SqliteAvdSnapshotCleanupRegistry {
+    return new SqliteAvdSnapshotCleanupRegistry(this.db);
   }
 
   deviceMutationJournal(): SqliteDeviceMutationJournal {

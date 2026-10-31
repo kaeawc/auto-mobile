@@ -142,7 +142,8 @@
     "start": "home",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "home": {
@@ -886,7 +887,7 @@
               },
               {
                 "label": "Messages",
-                "icon": "chat"
+                "icon": "forum"
               }
             ]
           },
@@ -1291,7 +1292,7 @@
                 "type": "button",
                 "testTag": "message_seller",
                 "label": "Message seller",
-                "icon": "chat",
+                "icon": "forum",
                 "onTap": [
                   {
                     "type": "pop",

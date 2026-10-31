@@ -3,9 +3,8 @@ import { Kysely } from "kysely";
 import { BunSqliteDialect } from "../../../src/db/bunSqliteDialect";
 import type { BindingRegistryDatabase } from "../../../src/daemon/sessionBroker/registry/bindingRegistryRows";
 import { SqliteAvdSnapshotCleanupRegistry } from "../../../src/daemon/sessionBroker/registry/avdSnapshotCleanupRegistry";
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, lstat, realpath, rm, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { mkdir, lstat, realpath, rm, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { sortedReaddir } from "../../../src/utils/io";
 import type { AvdDirectoryResolver } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
@@ -17,6 +16,7 @@ import {
   type AvdSnapshotCleanupRegistry,
   type AvdSnapshotCleanupLiveness,
 } from "../../../src/daemon/sessionBroker/AvdSnapshotCleanup";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 
 const baseline = "automobile-broker-baseline-v1";
 class FakeRegistry implements AvdSnapshotCleanupRegistry {
@@ -232,55 +232,50 @@ describe("stale broker snapshot cleanup", () => {
   });
 });
 
-const temporary: string[] = [];
-afterEach(async () => {
-  for (const directory of temporary.splice(0)) {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-const diskFilesystem = nodeAvdSnapshotCleanupFilesystem;
+describe("snapshot cleanup on disk", () => {
+  const scratch = useScratchRoot("avd-cleanup-");
+  const diskFilesystem = nodeAvdSnapshotCleanupFilesystem;
 
-test("real temporary AVD tree deletes only stale capture directories", async () => {
-  const home = await realpath(await mkdtemp(join(tmpdir(), "avd-cleanup-")));
-  temporary.push(home);
-  const f = fixture();
-  f.resolver = new FakeResolver(home, f.name);
-  const root = join(f.resolver.directory!, "snapshots");
-  for (const name of ["capture", baseline, "default_boot"]) {
-    await mkdir(join(root, name), { recursive: true });
-  }
-  const [report] = await cleanupAvdSnapshots([f.name], {
-    ...f.ports,
-    resolver: f.resolver,
-    filesystem: diskFilesystem,
-  });
-  expect(report.deletedSnapshotNames).toEqual(["capture"]);
-  expect(await sortedReaddir(root)).toEqual([baseline, "default_boot"]);
-});
-for (const linkAt of ["avd", "snapshots", "capture"]) {
-  test(`does not follow a ${linkAt} symlink`, async () => {
-    const home = await realpath(await mkdtemp(join(tmpdir(), "avd-cleanup-link-")));
-    temporary.push(home);
+  test("real temporary AVD tree deletes only stale capture directories", async () => {
+    const home = await realpath(scratch.next());
     const f = fixture();
-    const resolver = new FakeResolver(home, f.name);
-    const avd = resolver.directory!;
-    const root = join(avd, "snapshots");
-    const outside = join(home, "outside");
-    await mkdir(outside);
-    await mkdir(root, { recursive: true });
-    const target = linkAt === "avd" ? avd : linkAt === "snapshots" ? root : join(root, "capture");
-    await rm(target, { recursive: true, force: true });
-    await symlink(outside, target, "junction");
+    f.resolver = new FakeResolver(home, f.name);
+    const root = join(f.resolver.directory!, "snapshots");
+    for (const name of ["capture", baseline, "default_boot"]) {
+      await mkdir(join(root, name), { recursive: true });
+    }
     const [report] = await cleanupAvdSnapshots([f.name], {
       ...f.ports,
-      resolver,
+      resolver: f.resolver,
       filesystem: diskFilesystem,
     });
-    expect(report.deletedSnapshotNames).toEqual([]);
-    expect(report.error).toBeDefined();
-    expect(await lstat(outside)).toBeDefined();
+    expect(report.deletedSnapshotNames).toEqual(["capture"]);
+    expect(await sortedReaddir(root)).toEqual([baseline, "default_boot"]);
   });
-}
+  for (const linkAt of ["avd", "snapshots", "capture"]) {
+    test(`does not follow a ${linkAt} symlink`, async () => {
+      const home = await realpath(scratch.next());
+      const f = fixture();
+      const resolver = new FakeResolver(home, f.name);
+      const avd = resolver.directory!;
+      const root = join(avd, "snapshots");
+      const outside = join(home, "outside");
+      await mkdir(outside);
+      await mkdir(root, { recursive: true });
+      const target = linkAt === "avd" ? avd : linkAt === "snapshots" ? root : join(root, "capture");
+      await rm(target, { recursive: true, force: true });
+      await symlink(outside, target, "junction");
+      const [report] = await cleanupAvdSnapshots([f.name], {
+        ...f.ports,
+        resolver,
+        filesystem: diskFilesystem,
+      });
+      expect(report.deletedSnapshotNames).toEqual([]);
+      expect(report.error).toBeDefined();
+      expect(await lstat(outside)).toBeDefined();
+    });
+  }
+});
 
 test("canonical resolution outside snapshots root is kept", async () => {
   const f = fixture();

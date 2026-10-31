@@ -80,8 +80,7 @@ describe("ConnectionRecovery", () => {
       },
       undefined,
       false,
-      true,
-      { nonIdempotentToolName: "tapOn" },
+      { fenceSessionNotFoundOnRetry: true, nonIdempotentToolName: "tapOn" },
     );
     expect(result).toBe("second");
     expect(events).toEqual(["connect", "reset", "connect"]);
@@ -97,8 +96,7 @@ describe("ConnectionRecovery", () => {
       },
       undefined,
       false,
-      true,
-      { nonIdempotentToolName: "tapOn" },
+      { fenceSessionNotFoundOnRetry: true, nonIdempotentToolName: "tapOn" },
     );
     await expect(attempt).rejects.toBeInstanceOf(DaemonToolOutcomeUnknownError);
     expect(calls).toBe(1);

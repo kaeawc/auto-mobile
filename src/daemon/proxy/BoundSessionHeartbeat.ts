@@ -163,11 +163,7 @@ export class BoundSessionHeartbeat {
           () => this.askSessionHeartbeat(sessionUuid, claimLivenessOwnership, asked),
           sessionUuid,
           undefined,
-          // A replacement daemon has not materialized a persisted session until a
-          // device operation reaches recovery. Heartbeat misses before that point
-          // are not proof that the UUID is terminal; the first tool call remains
-          // responsible for either restoring it or applying the existing fence.
-          false,
+          { fenceSessionNotFoundOnRetry: false },
         ),
       );
       this.recordBoundSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership, isCurrent);

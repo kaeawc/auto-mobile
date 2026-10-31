@@ -84,12 +84,21 @@ export class ExecutionTracker {
     this.autolockSessionResolver = resolver;
   }
 
+  /**
+   * @param toolName - The tool being executed
+   * @param sessionId - The device session the call runs under
+   * @param sessionUuid - The session UUID the caller named
+   * @param transport.transportSessionId - The MCP transport session carrying the call
+   * @param transport.unresolvedAutolockMcpSessionId - MCP session whose autolock session is resolved now
+   */
   startExecution(
     toolName: string,
     sessionId?: string,
     sessionUuid?: string,
-    transportSessionId?: string,
-    unresolvedAutolockMcpSessionId?: string,
+    {
+      transportSessionId,
+      unresolvedAutolockMcpSessionId,
+    }: { transportSessionId?: string; unresolvedAutolockMcpSessionId?: string } = {},
   ): ActiveExecution {
     if (this.isDaemonRestartPrepared() || this.isDaemonMaintenancePrepared()) {
       throw new DaemonRestartPendingError();

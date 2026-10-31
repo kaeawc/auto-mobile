@@ -105,7 +105,9 @@ describe("explicit release of a session with a call in flight", () => {
       const execution =
         binding === "resolved"
           ? tracker.startExecution("tapOn", "conn-1")
-          : tracker.startExecution("tapOn", "conn-1", undefined, undefined, "conn-1");
+          : tracker.startExecution("tapOn", "conn-1", undefined, {
+              unresolvedAutolockMcpSessionId: "conn-1",
+            });
       if (binding === "resolved") {
         tracker.setResolvedAutolockSessionUuid(execution.id, SESSION);
       }

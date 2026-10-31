@@ -811,13 +811,9 @@ describe("SessionHeartbeatMonitor", () => {
         reapVia(sessionManager, pool),
         timer,
       );
-      const execution = tracker.startExecution(
-        "tapOn",
-        "mcp-session-1",
-        undefined,
-        undefined,
-        "mcp-session-1",
-      );
+      const execution = tracker.startExecution("tapOn", "mcp-session-1", undefined, {
+        unresolvedAutolockMcpSessionId: "mcp-session-1",
+      });
 
       timer.advanceTime(60_001);
       await monitor.tick();

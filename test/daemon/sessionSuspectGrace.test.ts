@@ -105,7 +105,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         reaped.push({ sessionId, reason });
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
   }
 
@@ -387,7 +387,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
             reaped.push({ sessionId, reason });
             await sessionManager.releaseSession(sessionId, reason);
           },
-          timer,
+          { timer },
         );
 
         await admitControlCall("exec-lapsed").then(
@@ -506,7 +506,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
               tracker,
             );
           },
-          timer,
+          { timer },
         );
       });
 
@@ -902,8 +902,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
           reaped.push({ sessionId, reason });
           await sessionManager.releaseSession(sessionId, reason);
         },
-        timer,
-        { stallThresholdMs: LEASE_MS },
+        { timer, stallThresholdMs: LEASE_MS },
       );
       try {
         strictMonitor.start();

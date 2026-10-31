@@ -40,8 +40,7 @@ async function monitorOn(timer: FakeTimer, idleMs: number, bunVersion: string) {
     async (sessionId, reason) => {
       await sessions.releaseSession(sessionId, reason);
     },
-    timer,
-    { bunVersion },
+    { timer, bunVersion },
   );
   const session = await sessions.createSession(SESSION, DEVICE, "android", { timeoutMs: idleMs });
   monitor.start();

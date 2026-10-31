@@ -121,8 +121,7 @@ async function setUp(activeControl = false) {
         await release(current, reason);
       }
     },
-    timer,
-    { checkIntervalMs: SCAN, heartbeatTimeoutMs: LEASE },
+    { timer, checkIntervalMs: SCAN, heartbeatTimeoutMs: LEASE },
   );
   const control = activeControl ? tracker.startExecution("tapOn", undefined, ID) : undefined;
   const settle = (ms: number) =>

@@ -85,7 +85,7 @@ describe("deliberate liveness ownership release", () => {
         reaped.push({ sessionId, reason });
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await manager.createSession(SESSION, DEVICE, "android", {
       timeoutMs: 60_000,

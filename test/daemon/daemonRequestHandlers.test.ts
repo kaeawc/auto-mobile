@@ -914,8 +914,7 @@ describe("handleDaemonRequest", () => {
         reaped.push({ sessionId: id, reason });
         await sessionManager.releaseSession(id, reason);
       },
-      fakeTimer,
-      { heartbeatTimeoutMs: timeoutMs },
+      { timer: fakeTimer, heartbeatTimeoutMs: timeoutMs },
     );
     try {
       const tickMs = Math.floor(timeoutMs / 5);

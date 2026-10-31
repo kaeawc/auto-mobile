@@ -575,7 +575,7 @@ export class TwoDaemonWorld {
           reason,
         });
       },
-      timer,
+      { timer },
     );
     registerDerivedLabelSessionReleaseCascade(manager, pool);
     const registry = new DeviceSessionRegistry();

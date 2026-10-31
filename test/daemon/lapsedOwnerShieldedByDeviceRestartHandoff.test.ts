@@ -69,7 +69,7 @@ describe("a device restart under a session whose owner already lost its heartbea
         reaped.push(reason);
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     const session = await createOnPixelA(SESSION);
     if (restoreMs > 0) {

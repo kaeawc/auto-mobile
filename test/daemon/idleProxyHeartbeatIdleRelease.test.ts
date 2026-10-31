@@ -180,7 +180,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
           reason,
         });
       },
-      timer,
+      { timer },
     );
     monitor.start();
 

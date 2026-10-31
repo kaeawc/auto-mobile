@@ -58,7 +58,7 @@ async function harness(hostClock: HostClock) {
     manager,
     () => false,
     async () => undefined,
-    timer,
+    { timer },
   );
   monitor.start();
   monitors.push(monitor);
@@ -182,7 +182,7 @@ describe("observer lease forgiveness wiring", () => {
       manager,
       () => false,
       async () => undefined,
-      timer,
+      { timer },
     );
     monitor.start();
     monitors.push(monitor);

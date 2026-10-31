@@ -1618,7 +1618,7 @@ describe("post-handler cancellation guard scope", () => {
           await pool.releaseDevice(deviceId, reapedSessionUuid);
         }
       },
-      timer,
+      { timer },
     );
     timer.advanceTime(getDefaultPreFirstHeartbeatGraceMs() + 1);
     await monitor.tick();

@@ -72,7 +72,7 @@ test("silent owner hint never disappears between suspect and the next reap; read
       expect(reason).toBe("heartbeat-timeout");
       await manager.releaseSession(id, reason);
     },
-    timer,
+    { timer },
   );
   await monitor.tick();
   await monitor.stop();

@@ -353,7 +353,7 @@ describe("CLI idle is measured from tool activity, not heartbeats", () => {
       async (_sessionId, reason) => {
         reaped.push(reason);
       },
-      timer,
+      { timer },
     );
     const step = PROXY_HEARTBEAT_INTERVAL_MS;
     for (let at = step; at <= DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS; at += step) {

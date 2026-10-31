@@ -109,7 +109,7 @@ describe("DevicePool", () => {
           async (sessionId, reason) => {
             reaped.push({ sessionId, reason });
           },
-          fakeTimer,
+          { timer: fakeTimer },
         );
         fakeTimer.advanceTime(5_001);
         await monitor.tick();
@@ -173,7 +173,7 @@ describe("DevicePool", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        fakeTimer,
+        { timer: fakeTimer },
       );
       fakeTimer.advanceTime(60_001);
       await monitor.tick();

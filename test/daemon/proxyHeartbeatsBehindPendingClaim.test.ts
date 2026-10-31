@@ -54,7 +54,7 @@ describe("the proxy heartbeats behind a claim whose reply is still outstanding",
         reaped.push(reason);
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await manager.createSession(SESSION, "emulator-5554", "android");
     const state: DaemonStateAccess = {

@@ -34,12 +34,9 @@ export async function deleteWatchAsDaemon(
       `[DeviceTools] daemon delete of watchos:${args.target.stableId} failed: ${errorMessage(error)}`,
       error,
     );
-    return createTeardownFailureResponse(
-      args,
-      "destroy",
-      "watch_delete_failed",
-      errorMessage(error),
-    );
+    return createTeardownFailureResponse(args, "destroy", "watch_delete_failed", {
+      message: errorMessage(error),
+    });
   }
 }
 
@@ -57,8 +54,12 @@ async function stopWatchAsDaemon(device: BootedDevice, signal: AbortSignal): Pro
     { platform: "watchos", stableId: device.deviceId },
     device,
     deps.timer,
-    deadlineMs,
-    { requestAbortSignal: signal, operation: "shutdown", coordinator: deps.lifecycleCoordinator },
+    {
+      deadlineMs,
+      requestAbortSignal: signal,
+      operation: "shutdown",
+      coordinator: deps.lifecycleCoordinator,
+    },
   );
   let retained = false;
   try {

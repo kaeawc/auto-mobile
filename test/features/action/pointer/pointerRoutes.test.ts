@@ -24,8 +24,9 @@ const env = (over: Partial<PointerEnvironment> & { caps?: string[] } = {}): Poin
   ...over,
 });
 const noop = async () => {};
-const routes = (dispatches = { a11y: noop, adbInputSource: noop, instrumentation: noop }) =>
-  defaultPointerRoutes(dispatches);
+const routes = (
+  dispatches = { a11y: noop, adbInputSource: noop, instrumentation: noop, uinput: noop },
+) => defaultPointerRoutes(dispatches);
 const tap: PointerRequest = { features: { toolType: "finger" }, points: [{ x: 1, y: 2 }] };
 
 describe("route support", () => {
@@ -170,6 +171,7 @@ describe("selectPointerRoute", () => {
       a11y: async () => void sent.push("a11y"),
       adbInputSource: async () => void sent.push("adb"),
       instrumentation: async () => void sent.push("instr"),
+      uinput: async () => void sent.push("uinput"),
     });
     const choice = selectPointerRoute({ toolType: "stylus", hover: true }, env(), injectors);
     expect(choice.selected).toBeNull();
@@ -199,6 +201,7 @@ describe("selectPointerRoute", () => {
       a11y: async () => void calls.push("a11y"),
       adbInputSource: async () => void calls.push("adb"),
       instrumentation: async () => void calls.push("instr"),
+      uinput: async () => void calls.push("uinput"),
     });
     await requirePointerRoute({ toolType: "finger" }, env(), injectors).inject(tap);
     await requirePointerRoute({ toolType: "stylus" }, env(), injectors).inject({
@@ -234,7 +237,8 @@ describe("refusals", () => {
         "stylus input cannot be injected on this device, and a finger touch is never substituted. " +
           "ctrlproxy-a11y: accessibility dispatchGesture only produces a finger touch, not stylus; " +
           "adb-input-source: adb input stylus needs Android API 31 or newer (this device reports API 29); " +
-          "instrumentation: the connected runner does not advertise stylus_input_v1: this device runs Android API 29 and the route needs Android 12 (API 31). " +
+          "instrumentation: the connected runner does not advertise stylus_input_v1: this device runs Android API 29 and the route needs Android 12 (API 31); " +
+          "uinput: uinput injection needs a root adb shell (run adb root on an emulator or userdebug build). " +
           "Use a device whose runner advertises stylus_input_v1.",
       );
     }

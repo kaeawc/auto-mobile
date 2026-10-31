@@ -14,6 +14,7 @@ import {
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import { logger } from "../../../utils/logger";
 import { hasElementPredicate } from "./WaitEvaluation";
+import type { PlatformArg } from "../../../utils/schemaHelpers";
 
 // Schema definitions
 // waitFor accepts legacy selectors plus richer predicates. Element predicates are
@@ -440,7 +441,7 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
 // platform + waitFor + settled): iOS rejects Android-only activityName, and
 // `settled` requires a `waitFor` predicate to settle after.
 export const refineWaitForArgs = (
-  value: { platform?: "android" | "ios"; waitFor?: ObserveWaitForOptions; settled?: unknown },
+  value: { platform?: PlatformArg; waitFor?: ObserveWaitForOptions; settled?: unknown },
   ctx: z.RefinementCtx,
 ): void => {
   const activeWindow = value.waitFor?.activeWindow;

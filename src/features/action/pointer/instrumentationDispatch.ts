@@ -1,4 +1,3 @@
-import { Mutex } from "async-mutex";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
@@ -6,6 +5,7 @@ import { ActionableError } from "../../../models/ActionableError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { PointerDispatch } from "./DispatchingRoute";
 import type { PointerRequest } from "./PointerInjector";
+import { pointerDispatchLock } from "./pointerDispatchLock";
 
 /** The instrumentation CtrlProxy ships for stylus and hover injection (#13097). */
 export const POINTER_INSTRUMENTATION_COMPONENT =
@@ -13,8 +13,6 @@ export const POINTER_INSTRUMENTATION_COMPONENT =
 
 /** The first Android release whose `am instrument` has `--no-restart` (measured; see the design note). */
 export const POINTER_INSTRUMENTATION_MIN_SDK = 31;
-
-const dispatchLocks = new WeakMap<AdbExecutor, Mutex>();
 
 const REQUEST_VERSION = 1;
 /** The segment time a point without `durationMs` takes (the same default as `dragPath`). */
@@ -132,12 +130,8 @@ async function unreportedFailure(output: string, adb: AdbExecutor): Promise<Acti
  * A refusal the instrumentation itself reports (`success=false`) means nothing past the reported
  * count ran; no report at all means the outcome is unknown.
  */
-export function createInstrumentationDispatch(adb: AdbExecutor): PointerDispatch {
-  let lock = dispatchLocks.get(adb);
-  if (!lock) {
-    lock = new Mutex();
-    dispatchLocks.set(adb, lock);
-  }
+export function createInstrumentationDispatch(adb: AdbExecutor, deviceId: string): PointerDispatch {
+  const lock = pointerDispatchLock(deviceId);
   return async (request, signal) => {
     throwIfAborted(signal);
     await lock.runExclusive(async () => {

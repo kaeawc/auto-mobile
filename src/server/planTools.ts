@@ -39,7 +39,7 @@ const executePlanSchema = z
   .object({
     planContent: z.string().describe("YAML plan content"),
     startStep: z.number().default(0).describe("Start step index"),
-    platform: z.enum(["android", "ios"]),
+    platform: z.enum(["android", "ios", "tvos"]),
     sessionUuid: z.string().optional().describe("Session"),
     keepScreenAwake: z.boolean().optional(),
     deviceId: z.string().optional(),

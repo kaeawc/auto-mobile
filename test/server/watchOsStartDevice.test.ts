@@ -321,6 +321,6 @@ describe("startDevice on an Apple Watch simulator", () => {
   test("the registered schema admits a watch request and keeps refusing an unknown platform", () => {
     const schema = ToolRegistry.getTool("startDevice")?.schema;
     expect(schema?.safeParse({ platform: "watchos", deviceId: WATCH_UDID }).success).toBe(true);
-    expect(schema?.safeParse({ platform: "tvos", deviceId: WATCH_UDID }).success).toBe(false);
+    expect(schema?.safeParse({ platform: "visionos", deviceId: WATCH_UDID }).success).toBe(false);
   });
 });

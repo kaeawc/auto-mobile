@@ -31,6 +31,7 @@ import { ANDROID_INVENTORY_RETRY_AFTER_MS } from "../../../constants/deviceResou
 import { type DeviceMatchCriteria } from "../../../models/DeviceMatchCriteria";
 import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../../../daemon/wire/constants";
 import { type AvdInfo } from "../../../utils/android-cmdline-tools/avdmanager";
+import type { PlatformArg } from "../../../utils/schemaHelpers";
 
 export function androidSourceImageWithBootedMetadata(
   device: BootedDevice,
@@ -326,7 +327,7 @@ export interface ListDeviceImagesArgs {
 }
 
 export interface ListDevicesArgs {
-  platform?: "android" | "ios";
+  platform?: PlatformArg;
   requires?: DeviceMatchCriteria["requires"];
 }
 

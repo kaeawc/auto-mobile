@@ -103,12 +103,9 @@ describe("iOS stalled command recovery", () => {
     });
     const instanceSpy = spyOnIosClientInstance(client);
     restoreInstance = () => instanceSpy.mockRestore();
-    subject = new ViewHierarchy(
-      device,
-      new FakeAdbClientFactory(),
-      {} as AndroidCtrlProxyClient,
+    subject = new ViewHierarchy(device, new FakeAdbClientFactory(), {} as AndroidCtrlProxyClient, {
       timer,
-    );
+    });
     expect(await client.ensureConnected()).toBe(true);
     // Finish the original socket's stability window before testing recovery.
     await timer.advanceTimeAsync(2000);

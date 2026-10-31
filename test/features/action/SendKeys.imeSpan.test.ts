@@ -203,7 +203,7 @@ test("real observer commit verification only captures hierarchy, never device st
     h.device,
     h.adbFactory,
     { hierarchyCapture: capture, viewHierarchy },
-    h.timer,
+    { timer: h.timer },
   );
   const audit = spyOn(screen["performanceAuditor"], "run").mockResolvedValue(undefined);
   const deviceState = screen["deviceStateCollector"];

@@ -70,7 +70,7 @@ describe("ObserveScreen", function () {
         mockDevice,
         new FakeAdbClientFactory(fakeAdb),
         undefined,
-        timer,
+        { timer },
       );
 
       const result = pinnedObserveScreen.createBaseResult();
@@ -84,8 +84,7 @@ describe("ObserveScreen", function () {
         mockDevice,
         new FakeAdbClientFactory(fakeAdb),
         undefined,
-        defaultTimer,
-        idGenerator,
+        { timer: defaultTimer, idGenerator },
       );
 
       expect(screen.createBaseResult().observationId).toBe("observation-1");
@@ -425,7 +424,7 @@ describe("ObserveScreen", function () {
             viewHierarchy,
             ...noopObserveAudits(),
           },
-          timer,
+          { timer },
         );
 
         await screen.execute({
@@ -460,7 +459,7 @@ describe("ObserveScreen", function () {
           {
             cacheStore,
           },
-          timer,
+          { timer },
         );
         const result = {
           ...screen.createBaseResult(),
@@ -1305,13 +1304,13 @@ describe("ObserveScreen", function () {
         deviceA,
         new FakeAdbClientFactory(new FakeAdbExecutor()),
         undefined,
-        timerA,
+        { timer: timerA },
       );
       const screenB = new RealObserveScreen(
         deviceB,
         new FakeAdbClientFactory(new FakeAdbExecutor()),
         undefined,
-        timerB,
+        { timer: timerB },
       );
 
       await screenA.cacheObserveResult({
@@ -1465,7 +1464,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
         display: scenario.display,
         screenshotRecorder: recorder,
       },
-      timer,
+      { timer },
     );
     const observation = scenario.key === undefined ? undefined : observe.createBaseResult();
     if (observation && scenario.key) {
@@ -1496,7 +1495,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
       { deviceId: "terminal-all", name: "Android", platform: "android" },
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       { display: "all", screenshotRecorder: recorder },
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
     const observation = observe.createBaseResult();
     await expect(

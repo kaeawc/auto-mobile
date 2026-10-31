@@ -730,7 +730,7 @@ describe("observe crop failures", () => {
           getActivityHash: async () => "",
         },
       },
-      timer,
+      { timer },
     );
     await expect(
       screen.executeDeviceRead(undefined, "settled", undefined, { requireFreshScreenshot: true }),
@@ -763,7 +763,7 @@ describe("observe crop failures", () => {
           getActivityHash: async () => "",
         },
       },
-      timer,
+      { timer },
     );
     await expect(
       screen.executeDeviceRead(undefined, "settled", undefined, {

@@ -313,7 +313,7 @@ describe("display transitions", () => {
           rotatingDevice,
           new FakeAdbClientFactory(adb),
           { viewHierarchy: hierarchy, cacheStore: new FakeObserveCacheStore(timer) },
-          timer,
+          { timer },
         );
         expect((await screen.execute(options)).displayRevision).toBe(0);
         expect((await screen.execute(options)).displayRevision).toBe(multiplePanels ? 1 : 0);
@@ -366,7 +366,7 @@ describe("display transitions", () => {
           }),
         }),
       },
-      timer,
+      { timer },
     );
     // Action calls still execute the real observe pipeline, with host work disabled.
     const execute = screen.execute.bind(screen);
@@ -733,7 +733,7 @@ describe("display transitions", () => {
         viewHierarchy: hierarchy,
         cacheStore: cache,
       },
-      timer,
+      { timer },
     );
     try {
       await screen.execute(options);
@@ -822,7 +822,7 @@ describe("display transitions", () => {
       device,
       new FakeAdbClientFactory(adb),
       { viewHierarchy: hierarchy, cacheStore: cache },
-      timer,
+      { timer },
     );
     const first = await screen.execute(options);
     const folded = await screen.execute(options);
@@ -909,7 +909,7 @@ describe("display transitions", () => {
           viewHierarchy: hierarchy,
           cacheStore: new FakeObserveCacheStore(timer),
         },
-        timer,
+        { timer },
       );
       const observed = await screen.execute(options);
       expect(observed.display).toMatchObject({ key: "external", posture: "closed" });

@@ -192,7 +192,7 @@ test.each(ownerCommands)(
           screenshotStateStore: new FakeScreenshotStateStore(timer),
           hierarchyCapture: createDeviceHierarchyCapture(device, { adbFactory: factory, timer }),
         },
-        timer,
+        { timer },
       );
       const observation = screen.execute({
         observerMode: true,

@@ -383,7 +383,7 @@ export function createDeviceHierarchyCapture(
       getViewHierarchy: (queryOptions, request) => {
         const hierarchy: ViewHierarchyRequestReader =
           dependencies.viewHierarchy ??
-          new ViewHierarchy(device, dependencies.adbFactory, null, dependencies.timer);
+          new ViewHierarchy(device, dependencies.adbFactory, null, { timer: dependencies.timer });
         return hierarchy.getViewHierarchy(queryOptions, request);
       },
       filterOffscreenNodes,

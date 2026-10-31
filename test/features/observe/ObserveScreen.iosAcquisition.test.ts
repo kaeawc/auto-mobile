@@ -112,7 +112,7 @@ function harness(
   );
   const instance = spyOnIosClientInstance(client);
   const adb = new FakeAdbClientFactory(new FakeAdbExecutor());
-  const hierarchy = new ViewHierarchy(device, adb, undefined, timer);
+  const hierarchy = new ViewHierarchy(device, adb, undefined, { timer });
   const screen = createObserveScreenForTest(
     device,
     adb,

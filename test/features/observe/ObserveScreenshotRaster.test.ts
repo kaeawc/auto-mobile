@@ -100,7 +100,7 @@ function setup(
       cacheStore,
       screenshotStateStore: store,
     },
-    timer,
+    { timer },
   );
   spyOn(screen["performanceAuditor"], "run").mockResolvedValue(undefined);
   spyOn(screen["accessibilityAuditor"], "run").mockResolvedValue(undefined);

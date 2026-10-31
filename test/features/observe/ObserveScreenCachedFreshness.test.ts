@@ -38,7 +38,7 @@ function setup() {
     device,
     new FakeAdbClientFactory(new FakeAdbExecutor()),
     { cacheStore, screenshotPathProtection: protection },
-    timer,
+    { timer },
   );
   const result = screen.createBaseResult();
   result.screenSize = { width: 1080, height: 2400 };
@@ -138,8 +138,7 @@ function panelSetup(singleDisplay = false) {
         hierarchyCapture: capture,
         screenshotPathProtection: new FakeScreenshotPathProtection(timer),
       },
-      timer,
-      new FakeIdGenerator(),
+      { timer, idGenerator: new FakeIdGenerator() },
     );
   const screen = createScreen();
   const observe = (display?: string) =>

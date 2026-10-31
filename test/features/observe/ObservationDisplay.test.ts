@@ -90,7 +90,7 @@ describe("Android observe disconnected fold panels", () => {
       device,
       new FakeAdbClientFactory(adb),
       { viewHierarchy: new FakeViewHierarchy(), cacheStore: new FakeObserveCacheStore(timer) },
-      timer,
+      { timer },
     );
     try {
       return await screen.execute({ display, skipScreenshot: true, skipBackStack: true });
@@ -430,7 +430,8 @@ describe("observation display stamp", () => {
     const client = makeViewHierarchyCtrlProxy({
       getAccessibilityHierarchy: async () => converter.convertToViewHierarchyResult(raw),
     });
-    const hierarchy = new ViewHierarchy(device, new FakeAdbClientFactory(adb), client, timer, {
+    const hierarchy = new ViewHierarchy(device, new FakeAdbClientFactory(adb), client, {
+      timer,
       observeAccessibilityManagerFactory: () => ({
         isAccessibilityServiceHealthy: async () => false,
         rebindIfUnhealthy: async () => false,
@@ -442,7 +443,7 @@ describe("observation display stamp", () => {
         device,
         new FakeAdbClientFactory(adb),
         { viewHierarchy: hierarchy, cacheStore: new FakeObserveCacheStore(timer) },
-        timer,
+        { timer },
       );
       const result = await screen.execute({
         skipScreenshot: true,
@@ -475,12 +476,14 @@ describe("observation display stamp", () => {
     };
     const getInstance = spyOnIosClientInstance(fakeClient);
     try {
-      const hierarchy = new ViewHierarchy(device, new FakeAdbClientFactory(adb), undefined, timer);
+      const hierarchy = new ViewHierarchy(device, new FakeAdbClientFactory(adb), undefined, {
+        timer,
+      });
       const screen = new RealObserveScreen(
         device,
         new FakeAdbClientFactory(adb),
         { viewHierarchy: hierarchy, cacheStore: new FakeObserveCacheStore(timer) },
-        timer,
+        { timer },
       );
       const result = await screen.execute({
         skipScreenshot: true,
@@ -536,7 +539,7 @@ describe("observation display stamp", () => {
           device,
           new FakeAdbClientFactory(adb),
           { viewHierarchy: hierarchy, cacheStore: new FakeObserveCacheStore(timer) },
-          timer,
+          { timer },
         );
         await screen.execute(options);
       }

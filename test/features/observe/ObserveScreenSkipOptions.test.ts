@@ -67,7 +67,7 @@ function createObserveScreen(
       deviceStateCollector: fakeDeviceStateCollector,
       ...noopObserveAudits(),
     },
-    fakeTimer,
+    { timer: fakeTimer },
   );
 
   return {
@@ -163,7 +163,7 @@ describe("ObserveScreen skip options", () => {
         cacheStore: new FakeObserveCacheStore(timer),
         accessibilityStateDetector: detector as AccessibilityStateDetector,
       },
-      timer,
+      { timer },
     );
     const options = {
       skipScreenshot: true,
@@ -460,7 +460,7 @@ test("freshness capture failure reaches hierarchy collection and reports viewHie
       ...noopObserveAudits(),
       onAvailabilityLost: (reason) => lost.push(reason),
     },
-    timer,
+    { timer },
   );
   try {
     const result = await screen.execute({

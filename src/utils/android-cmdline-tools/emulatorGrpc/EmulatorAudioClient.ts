@@ -22,9 +22,8 @@ export const STREAM_AUDIO_METHOD = `${SERVICE}/streamAudio`;
 
 /** Packet length for injection. The emulator buffers ~300ms and rejects oversized packets. */
 const INJECT_PACKET_MS = 20;
-// Trailers-only rejections follow the request on the same local HTTP/2 connection; under load, a first connection can take well over 200ms.
-// Cover that delay; accepted injects stay silent until the client ends them, so this window costs only startup latency.
-const INJECT_ACCEPTANCE_WINDOW_MS = 1000;
+// Bound the wait for response headers; a server that stays silent counts as accepted.
+const INJECT_ACCEPTANCE_WINDOW_MS = 200;
 /** How long capture waits past the requested duration before reporting what it has. */
 const CAPTURE_GRACE_MS = 2_000;
 /** Mono 16-bit PCM at a rate the emulator accepts, the one format injection sends. */
@@ -179,7 +178,7 @@ export class EmulatorAudioClient {
     });
     try {
       const status = await raceWithDeadline<GrpcStatusResult | undefined>(
-        [call.status(), acceptanceWindow],
+        [call.status(), call.responseHeaders(), acceptanceWindow],
         { timer: this.timer, label: "Audio injection acceptance" },
       );
       if (status && status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {

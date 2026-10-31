@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   EmulatorAudioClient,
   INJECT_AUDIO_METHOD,
@@ -57,6 +57,52 @@ function sentFrames(written: Uint8Array[]): number {
 }
 
 describe("EmulatorAudioClient.injectAudio", () => {
+  test.each([GrpcStatus.PERMISSION_DENIED, GrpcStatus.INVALID_ARGUMENT])(
+    "rejects headers status %i at call time without waiting for close",
+    async (code) => {
+      const { client, transport, timer } = setup();
+      const status = { code, message: "refused" };
+      transport.onOpen = (call) => call.respondHeaders(status);
+      const error = await client.injectAudio(CLIP).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(EmulatorAudioError);
+      expect(error).toMatchObject({ code: "audio_grpc_failed", grpcStatus: status });
+      expect(transport.calls[0].written).toHaveLength(0);
+      expect(transport.calls[0].ended).toBe(false);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(timer.now()).toBe(0);
+    },
+  );
+
+  test.each([undefined, GrpcStatus.OK, GrpcStatus.CANCELLED])(
+    "accepts headers status %s before the window and preserves the close status",
+    async (code) => {
+      const { client, transport, timer } = setup();
+      const armTimeout = spyOn(timer, "setTimeout");
+      transport.onOpen = (call) => {
+        call.statusOnEnd = undefined;
+        call.respondHeaders(code === undefined ? undefined : { code, message: "" });
+      };
+      const injection = await client.injectAudio(CLIP);
+      expect(armTimeout).toHaveBeenCalledWith(expect.any(Function), 200);
+      expect(timer.now()).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      const call = transport.calls[0];
+      let closed = false;
+      const status = call.status().then((result) => {
+        closed = true;
+        return result;
+      });
+      await drainMicrotasks(20);
+      expect(call.ended).toBe(true);
+      expect(closed).toBe(false);
+      const finalStatus = { code: GrpcStatus.OK, message: "completed" };
+      call.finish(finalStatus);
+      expect(await status).toEqual(finalStatus);
+      expect(await injection.done).toMatchObject({ framesQueued: 1600, reason: "completed" });
+      armTimeout.mockRestore();
+    },
+  );
+
   test.each([
     [GrpcStatus.UNIMPLEMENTED, "audio_injection_unsupported"],
     [GrpcStatus.FAILED_PRECONDITION, "audio_injection_busy"],
@@ -81,17 +127,18 @@ describe("EmulatorAudioClient.injectAudio", () => {
     await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
       description: "acceptance timer",
     });
-    timer.advanceTime(999);
-    transport.calls[0].finish({ code: GrpcStatus.FAILED_PRECONDITION, message: "busy" });
+    timer.advanceTime(199);
+    transport.calls[0].respondHeaders({ code: GrpcStatus.FAILED_PRECONDITION, message: "busy" });
     expect(await starting).toMatchObject({ code: "audio_injection_busy" });
     expect(transport.calls[0].written).toHaveLength(0);
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(timer.getSleepCallCount()).toBe(0);
-    expect(timer.now()).toBe(999);
+    expect(timer.now()).toBe(199);
   });
 
   test("waits for the acceptance window before streaming an open call", async () => {
     const { client, transport, timer } = setup(true);
+    const armTimeout = spyOn(timer, "setTimeout");
     let resolved = false;
     const starting = client.injectAudio(CLIP).then((injection) => {
       resolved = true;
@@ -100,8 +147,9 @@ describe("EmulatorAudioClient.injectAudio", () => {
     await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
       description: "acceptance timer",
     });
-    expect(timer.getMsUntilNextDueEvent()).toBe(1000);
-    timer.advanceTime(999);
+    expect(armTimeout).toHaveBeenCalledWith(expect.any(Function), 200);
+    expect(timer.getMsUntilNextDueEvent()).toBe(200);
+    timer.advanceTime(199);
     await drainMicrotasks(20);
     expect(resolved).toBe(false);
     expect(transport.calls[0].written).toHaveLength(0);
@@ -114,6 +162,10 @@ describe("EmulatorAudioClient.injectAudio", () => {
     });
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(timer.getSleepCallCount()).toBe(0);
+    expect(
+      await Promise.race([transport.calls[0].responseHeaders(), Promise.resolve("pending")]),
+    ).toBe("pending");
+    armTimeout.mockRestore();
   });
 
   test.each([GrpcStatus.OK, GrpcStatus.CANCELLED])(

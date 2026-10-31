@@ -228,11 +228,9 @@ specified and reviewed when the work is picked up.
 
 Open items are answered by running them, each as a follow-up issue (below):
 
-1. **Android emulator:** the probe in #13082 (API 30, 31, 32, 33 and 37 `google_apis`
-   arm64 userdebug AVDs, base `f8d061423c9`) fills the route table above. Still open: a
-   physical pen device's `dumpsys input` axes, emulator-console `event send`, how a panel
-   key or role maps onto `-d DISPLAY_ID`, and whether two shell invocations hold a
-   double-tap interval.
+1. **Android:** a physical pen device's `dumpsys input` axes, emulator-console
+   `event send`, how a panel key or role maps onto `-d DISPLAY_ID`, and whether two shell
+   invocations hold a double-tap interval.
 2. **iOS simulator:** the probe in #13083 (Xcode 26.6, iPad Pro 13-inch (M5),
    iOS 26.5, base `f8d061423c9`) establishes pressure and Pencil injection as a
    no-go: accepted pressure leaves `UITouch.force` at 0, and no Pencil tool type

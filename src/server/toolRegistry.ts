@@ -17,7 +17,7 @@ import type { ToolRegistryHost, ToolRegistrySchema } from "./registryHost";
 import { ToolDefinitionListing } from "./ToolDefinitionListing";
 import { TOOL_ANNOTATIONS } from "./toolAnnotations";
 import { toolExecutionError } from "./toolExecutionError";
-import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
+import { erased, eraseDeviceAware, erasePlain, splitRegistration } from "./toolRegistryErasure";
 
 import { logger, type Logger } from "../utils/logger";
 import "./featureWiring";
@@ -109,6 +109,7 @@ export type {
   DeviceAwareToolHandler,
   DeviceAwareToolOptions,
   PlainToolOptions,
+  PlainToolRegistration,
   ProgressCallback,
   RegisteredTool,
   SessionlessDeviceRead,
@@ -124,9 +125,10 @@ import {
   DeviceAwareToolOptions,
   deviceReadOnlyMetadata,
   InternalToolCallOptions,
+  InternalToolCallRequest,
   InternalToolInvocationContext,
   pickToolTraits,
-  PlainToolOptions,
+  PlainToolRegistration,
   PLAN_ONLY_GATE_REASON,
   ProgressCallback,
   RegisteredTool,
@@ -275,14 +277,14 @@ export class ToolRegistryClass {
     }
   }
 
-  // Register a new tool
+  /** Register a new tool. @param registration - The handler, or `{ handler, ...options }`. */
   register<S extends ZodType>(
     name: string,
     description: string,
     inSchema: S,
-    inHandler: ToolHandler<z.output<S>>,
-    inOptions: PlainToolOptions<z.output<S>> = {},
+    registration: ToolHandler<z.output<S>> | PlainToolRegistration<z.output<S>>,
   ): void {
+    const { handler: inHandler, options: inOptions } = splitRegistration(registration);
     const { schema, handler, options } = erasePlain(inSchema, inHandler, inOptions);
     this.invalidateToolListing();
     if (this === ToolRegistry) {
@@ -617,13 +619,13 @@ export class ToolRegistryClass {
     });
   }
 
+  /** @param request - Handler progress and abort signal, plus internal routing options. */
   async callInternal(
     tool: string | RegisteredTool,
     args: Record<string, unknown>,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    options: InternalToolCallOptions = {},
+    request: InternalToolCallRequest = {},
   ): Promise<unknown> {
+    const { progress, signal, ...options } = request;
     const resolved =
       typeof tool === "string"
         ? options.forPlan
@@ -730,7 +732,7 @@ export class ToolRegistryClass {
       options?: InternalToolCallOptions;
     } = {},
   ): Promise<StructuredToolResponse<InternalToolPayloads[K]> | undefined> {
-    const response = await this.callInternal(name, args, progress, signal, options);
+    const response = await this.callInternal(name, args, { progress, signal, ...options });
     return narrowInternalToolEnvelope(name, response);
   }
 

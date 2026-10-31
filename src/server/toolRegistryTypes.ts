@@ -66,6 +66,12 @@ export interface InternalToolCallOptions {
   sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled">;
 }
 
+/** `ToolRegistry.callInternal`'s trailing request: handler progress/abort plus routing options. */
+export interface InternalToolCallRequest extends InternalToolCallOptions {
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+}
+
 export interface InternalToolInvocationContext {
   args: Record<string, unknown>;
   routingSessionUuid?: string;
@@ -126,6 +132,14 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   selectsActiveDevice?: boolean;
   /** See {@link ToolTraits.hostInventory}. */
   hostInventory?: boolean;
+}
+
+/**
+ * A plain tool's handler together with its options: `ToolRegistry.register`'s fourth argument
+ * when the tool has options. A tool without options passes the bare handler instead.
+ */
+export interface PlainToolRegistration<T = Record<string, unknown>> extends PlainToolOptions<T> {
+  handler: ToolHandler<T>;
 }
 
 /** Resolves a device for a read without acquiring, readying or changing a device session. */

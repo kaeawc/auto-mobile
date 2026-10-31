@@ -98,13 +98,10 @@ beforeEach(async () => {
     received.push(device.deviceId);
     return { content: [{ type: "text" as const, text: device.deviceId }] };
   });
-  ToolRegistry.register(
-    "setActiveDevice",
-    "setActiveDevice",
-    schema,
-    async () => ({ content: [] }),
-    SELECTS_ACTIVE_DEVICE,
-  );
+  ToolRegistry.register("setActiveDevice", "setActiveDevice", schema, {
+    handler: async () => ({ content: [] }),
+    ...SELECTS_ACTIVE_DEVICE,
+  });
   await fixture.client.callTool({ name: "getAndroid", arguments: {} });
   await fixture.client.callTool({ name: "getApple", arguments: {} });
 });

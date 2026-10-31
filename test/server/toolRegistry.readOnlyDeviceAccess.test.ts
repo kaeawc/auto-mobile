@@ -1120,9 +1120,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     arrangedNested3("a plan with a read step stays a control call", async () => {
       await underExecution("executePlan", () =>
-        ToolRegistry.callInternal("readProbe", { sessionUuid: agent }, undefined, undefined, {
-          forPlan: true,
-        }),
+        ToolRegistry.callInternal("readProbe", { sessionUuid: agent }, { forPlan: true }),
       );
 
       expect(reads).toHaveLength(1);
@@ -1131,15 +1129,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     arrangedNested3("a plan's failure observe leaves it a control call", async () => {
       await underExecution("executePlan", async () => {
-        await ToolRegistry.callInternal(
-          "controlProbe",
-          { sessionUuid: agent },
-          undefined,
-          undefined,
-          {
-            forPlan: true,
-          },
-        );
+        await ToolRegistry.callInternal("controlProbe", { sessionUuid: agent }, { forPlan: true });
         // PlanStepExecutor's failure observe: an internal read with no plan options.
         await ToolRegistry.callInternal("readProbe", { sessionUuid: agent });
       });

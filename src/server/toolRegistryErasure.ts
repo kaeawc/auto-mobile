@@ -17,6 +17,23 @@ export function erased<Stored>(value: unknown): Stored {
   return value as Stored;
 }
 
+/**
+ * A registration's fourth argument as its handler and options: a bare handler (a tool with no
+ * options) or a `{ handler, ...options }` registration.
+ */
+export function splitRegistration<
+  Handler extends (...args: never[]) => unknown,
+  Registration extends { handler: Handler },
+>(
+  registration: Handler | Registration,
+): { handler: Handler; options: Omit<Registration, "handler"> | Record<string, never> } {
+  if (typeof registration === "function") {
+    return { handler: registration, options: {} };
+  }
+  const { handler, ...options } = registration;
+  return { handler, options };
+}
+
 /** A plain registration's schema, handler and options, stored by wire shape. */
 export function erasePlain(schema: ZodType, handler: unknown, options: unknown) {
   return {

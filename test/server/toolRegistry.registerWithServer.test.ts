@@ -64,11 +64,13 @@ describe("ToolRegistry.registerWithServer", () => {
       "shadowedTool",
       "A tool whose SDK callback must never dispatch",
       z.object({}),
-      async () => {
-        handlerRuns += 1;
-        return { content: [{ type: "text", text: "ran" }] };
+      {
+        handler: async () => {
+          handlerRuns += 1;
+          return { content: [{ type: "text", text: "ran" }] };
+        },
+        supportsProgress: true,
       },
-      { supportsProgress: true },
     );
     await connect();
 
@@ -81,13 +83,10 @@ describe("ToolRegistry.registerWithServer", () => {
 
   test("keeps output schemas internal instead of advertising them through MCP registration", async () => {
     const outputSchema = z.object({ ok: z.boolean() });
-    ToolRegistry.register(
-      "schemaTool",
-      "Tool with a structured result contract",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ok" }] }),
-      { outputSchema: outputSchema },
-    );
+    ToolRegistry.register("schemaTool", "Tool with a structured result contract", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      outputSchema: outputSchema,
+    });
     await connect();
 
     const { tools } = await client.listTools();

@@ -35,16 +35,13 @@ describe("ToolRegistry.callInternal (#3108)", () => {
 
   function registerCapturingTool(name: string, options?: { debugOnly?: boolean }): void {
     captured = [];
-    ToolRegistry.register(
-      name,
-      `Mock ${name}`,
-      schema,
-      async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
+    ToolRegistry.register(name, `Mock ${name}`, schema, {
+      handler: async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
         captured.push({ args, progress, signal });
         return SENTINEL;
       },
-      options,
-    );
+      ...options,
+    });
   }
 
   beforeEach(() => {
@@ -87,7 +84,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     const progress: ProgressCallback = async () => {};
     const controller = new AbortController();
 
-    await ToolRegistry.callInternal(tool, { text: "Go" }, progress, controller.signal);
+    await ToolRegistry.callInternal(tool, { text: "Go" }, { progress, signal: controller.signal });
 
     expect(captured[0].progress).toBe(progress);
     expect(captured[0].signal).toBe(controller.signal);
@@ -137,8 +134,6 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     const response = await ToolRegistry.callInternal(
       "hiddenStep",
       { text: "Go" },
-      undefined,
-      undefined,
       { forPlan: true },
     );
     expect(response).toBe(SENTINEL);
@@ -150,9 +145,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     const profileService = { isEnabled: async () => false };
 
     await runWithToolSelectionContext({ sessionToolSelectionService: profileService }, () =>
-      ToolRegistry.callInternal("clipboard", {}, undefined, undefined, {
-        forPlan: true,
-      }),
+      ToolRegistry.callInternal("clipboard", {}, { forPlan: true }),
     );
 
     expect(captured).toHaveLength(1);
@@ -165,14 +158,12 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       return SENTINEL;
     });
     ToolRegistry.register("criticalSection", "Mock critical section", schema, async () => {
-      return ToolRegistry.callInternal("clipboard", {}, undefined, undefined, { forPlan: true });
+      return ToolRegistry.callInternal("clipboard", {}, { forPlan: true });
     });
     const profileService = { isEnabled: async () => false };
 
     await runWithToolSelectionContext({ sessionToolSelectionService: profileService }, () =>
-      ToolRegistry.callInternal("criticalSection", {}, undefined, undefined, {
-        forPlan: true,
-      }),
+      ToolRegistry.callInternal("criticalSection", {}, { forPlan: true }),
     );
 
     expect(captured).toHaveLength(1);
@@ -223,7 +214,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
 
       await runWithToolSelectionContext(
         { execution: { executionId: "outer-execution", startTime: 123 } },
-        () => ToolRegistry.callInternal("nestedStep", {}, undefined, undefined, { forPlan: true }),
+        () => ToolRegistry.callInternal("nestedStep", {}, { forPlan: true }),
       );
 
       expect(captured).toHaveLength(1);
@@ -244,9 +235,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
       registerCapturingTool("clipboard");
 
       await runWithToolSelectionContext({ planRequest: {} }, () =>
-        ToolRegistry.callInternal("clipboard", { text: "Go" }, undefined, undefined, {
-          forPlan: true,
-        }),
+        ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true }),
       );
 
       expect(captured).toHaveLength(1);
@@ -272,10 +261,7 @@ describe("ToolRegistry.callInternal (#3108)", () => {
             liveDeadlineKey: "live-key",
           },
         },
-        () =>
-          ToolRegistry.callInternal("clipboard", { text: "Go" }, undefined, undefined, {
-            forPlan: true,
-          }),
+        () => ToolRegistry.callInternal("clipboard", { text: "Go" }, { forPlan: true }),
       );
 
       expect(captured[0].args[INTERNAL_LIVE_DEADLINE_KEY_PARAM]).toBe("live-key");
@@ -291,8 +277,6 @@ describe("ToolRegistry.callInternal (#3108)", () => {
         ToolRegistry.callInternal(
           "clipboard",
           { text: "Go", [INTERNAL_LIVE_DEADLINE_KEY_PARAM]: "forged-key" },
-          undefined,
-          undefined,
           { forPlan: true },
         ),
       );

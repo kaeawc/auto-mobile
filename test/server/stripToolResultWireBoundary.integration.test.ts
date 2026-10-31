@@ -61,13 +61,13 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
       TOOL,
       "probe tool for structuredContent strip",
       z.object({}).passthrough(),
-      async () =>
-        createStructuredToolResponse({
-          success: true,
-          marker: "probe",
-          observationDiff: { mode: "full", reason: "screen_changed" },
-        }),
       {
+        handler: async () =>
+          createStructuredToolResponse({
+            success: true,
+            marker: "probe",
+            observationDiff: { mode: "full", reason: "screen_changed" },
+          }),
         outputSchema: z.object({
           success: z.boolean(),
           marker: z.string(),
@@ -173,8 +173,10 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
       SCHEMA_TOOL,
       "probe tool for omission debug log (schema)",
       z.object({}).passthrough(),
-      async () => createStructuredToolResponse({ success: true, marker: "probe" }),
-      { outputSchema: z.object({ success: z.boolean(), marker: z.string() }) },
+      {
+        handler: async () => createStructuredToolResponse({ success: true, marker: "probe" }),
+        outputSchema: z.object({ success: z.boolean(), marker: z.string() }),
+      },
     );
     ToolRegistry.register(
       NOSCHEMA_TOOL,

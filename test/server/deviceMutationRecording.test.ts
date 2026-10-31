@@ -1007,9 +1007,7 @@ describe("review regression coverage", () => {
       z.object({ action: z.string() }),
       async () => ({ content: [] }),
     );
-    await registry.callInternal("clipboard", { action: "clear" }, undefined, undefined, {
-      targetDevice: DEVICE,
-    });
+    await registry.callInternal("clipboard", { action: "clear" }, { targetDevice: DEVICE });
     const restore = registry.setPipelineOverridesForTesting({
       mutationRecording: {
         beforeToolCall: async (name) => {
@@ -1035,9 +1033,7 @@ describe("review regression coverage", () => {
     } finally {
       restore();
     }
-    await registry.callInternal("clipboard", { action: "clear" }, undefined, undefined, {
-      targetDevice: DEVICE,
-    });
+    await registry.callInternal("clipboard", { action: "clear" }, { targetDevice: DEVICE });
     expect(calls).toEqual(["clipboard", "override:clipboard", "clipboard"]);
   });
 

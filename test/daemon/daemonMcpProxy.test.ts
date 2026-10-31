@@ -233,15 +233,10 @@ class ScriptedDaemonClient implements DaemonClientLike {
 
 describe("DaemonMcpProxy", () => {
   beforeEach(() => {
-    ToolRegistry.register(
-      "observe",
-      "read-only observation",
-      z.object({}),
-      async () => ({ content: [] }),
-      {
-        transportRecovery: "replay",
-      },
-    );
+    ToolRegistry.register("observe", "read-only observation", z.object({}), {
+      handler: async () => ({ content: [] }),
+      transportRecovery: "replay",
+    });
   });
 
   afterEach(() => {

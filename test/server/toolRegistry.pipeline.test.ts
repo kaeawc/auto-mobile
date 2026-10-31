@@ -126,17 +126,12 @@ describe("ToolRegistry device-aware pipeline", () => {
   });
 
   test("stores register flags from the options bag", () => {
-    ToolRegistry.register(
-      "plainOptionsProbe",
-      "Plain options probe",
-      z.object({}),
-      async () => ({ success: true }),
-      {
-        supportsProgress: true,
-        debugOnly: true,
-        outputSchema: z.object({ success: z.boolean() }),
-      },
-    );
+    ToolRegistry.register("plainOptionsProbe", "Plain options probe", z.object({}), {
+      handler: async () => ({ success: true }),
+      supportsProgress: true,
+      debugOnly: true,
+      outputSchema: z.object({ success: z.boolean() }),
+    });
 
     const tool = ToolRegistry.getAllTools({ includeUnavailable: true })[0];
     expect(tool.requiresDevice).toBe(false);

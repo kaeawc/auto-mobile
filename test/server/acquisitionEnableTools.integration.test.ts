@@ -51,20 +51,22 @@ describe("acquisition-time enableTools (#6869)", () => {
     }),
     options: Record<string, unknown> = {},
   ) => {
-    ToolRegistry.register(
-      name,
-      "acquire",
-      z.object({ enableTools: enableToolsSchemaField }),
+    ToolRegistry.register(name, "acquire", z.object({ enableTools: enableToolsSchemaField }), {
       handler,
-      { defaultEnabled: true, hidden: name === "startDevice", ...options },
-    );
-    ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
+      defaultEnabled: true,
+      hidden: name === "startDevice",
+      ...options,
+    });
+    ToolRegistry.register("sendKeys", "input", z.object({}), {
+      handler: async () => ({ content: [] }),
       defaultEnabled: false,
     });
-    ToolRegistry.register("clipboard", "clear", z.object({}), async () => ({ content: [] }), {
+    ToolRegistry.register("clipboard", "clear", z.object({}), {
+      handler: async () => ({ content: [] }),
       defaultEnabled: false,
     });
-    ToolRegistry.register("observe", "observe", z.object({}), async () => ({ content: [] }), {
+    ToolRegistry.register("observe", "observe", z.object({}), {
+      handler: async () => ({ content: [] }),
       defaultEnabled: true,
     });
     registerToolSelectionTools();
@@ -142,18 +144,22 @@ describe("acquisition-time enableTools (#6869)", () => {
         acquisition,
         "acquire",
         z.object({ enableTools: enableToolsSchemaField }),
-        async () => {
-          acquisitionsRun += 1;
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({ runtime: { session: { sessionUuid: "acquired-session" } } }),
-              },
-            ],
-          };
+        {
+          handler: async () => {
+            acquisitionsRun += 1;
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    runtime: { session: { sessionUuid: "acquired-session" } },
+                  }),
+                },
+              ],
+            };
+          },
+          defaultEnabled: true,
         },
-        { defaultEnabled: true },
       );
       registerToolSelectionTools();
 
@@ -189,7 +195,8 @@ describe("acquisition-time enableTools (#6869)", () => {
     ];
     for (const name of gatedNames) {
       if (!ToolRegistry.getRegisteredTool(name)) {
-        ToolRegistry.register(name, name, z.object({}), async () => ({ content: [] }), {
+        ToolRegistry.register(name, name, z.object({}), {
+          handler: async () => ({ content: [] }),
           defaultEnabled: false,
         });
       }

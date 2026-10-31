@@ -35,7 +35,10 @@ describe("gated tools carry a structured marker over the MCP wire (issue #10177)
     setDebugModeEnabled(false);
     serverConfig.setEmbeddedSdkEnabled(false);
     const noop = async () => ({ content: [] });
-    ToolRegistry.register("__gate_debug__", "debug", z.object({}), noop, { debugOnly: true });
+    ToolRegistry.register("__gate_debug__", "debug", z.object({}), {
+      handler: noop,
+      debugOnly: true,
+    });
     ToolRegistry.registerDeviceAware("__gate_embedded__", "sdk", z.object({}), noop, {
       embeddedSdkOnly: true,
     });

@@ -1,3 +1,4 @@
+import { internalMcpSessionId } from "../../../daemon/wire/internalToolParams";
 import { type DeviceBootResult } from "../../../devices/deviceBootService";
 import { SystemUiAnrRecoveryRequiredError } from "../../../ctrlProxy/RunnerReadinessService";
 import { logger } from "../../../utils/logger";
@@ -315,9 +316,9 @@ export async function prepareStartDeviceRunnerReadiness(
   const recoveryAutolockClient =
     autolockEnabled && devicePool
       ? {
-          mcpSessionId: input.args.__mcpSessionId,
+          mcpSessionId: internalMcpSessionId(input.args),
           expectedSessionId: devicePool.captureAutolockSessionForMcpSession(
-            input.args.__mcpSessionId,
+            internalMcpSessionId(input.args),
           ),
         }
       : undefined;

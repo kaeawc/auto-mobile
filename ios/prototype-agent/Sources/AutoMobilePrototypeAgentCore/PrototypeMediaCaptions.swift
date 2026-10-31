@@ -37,16 +37,17 @@ enum PrototypeMediaCaptions {
     }
 
     private static func validateCues(_ pointer: String?, data: [String: JSONValue]?, path: String) throws {
-        guard let pointer, pointer.hasPrefix("/data/"),
-              case let .array(cues)? = PrototypeDataPointer.resolve(data, pointer: String(pointer.dropFirst(5)))
+        guard let pointer, let dataPointer = PrototypeDataWrite.pointer(ofPath: pointer),
+              case let .array(cues)? = PrototypeDataPointer.resolve(data, pointer: dataPointer)
         else { throw PrototypeLimits.violation(path, "Caption data must point to a /data array") }
-        let base = PrototypeDataPointer.tokens(String(pointer.dropFirst(5)))
+        let base = PrototypeDataPointer.tokens(dataPointer)
             .reduce(into: "data") { $0 = PrototypeContractValidator.keyPath($0, $1) }
         for (index, cue) in cues.enumerated() {
             let at = "\(base)[\(index)]"
             try PrototypeContractValidator.validateValue(cue, rule: cueRule, path: at)
             if case let .number(start)? = cue.objectFields?["startMs"],
-               case let .number(end)? = cue.objectFields?["endMs"], end <= start {
+               case let .number(end)? = cue.objectFields?["endMs"], end <= start
+            {
                 throw PrototypeLimits.violation("\(at).endMs", "A caption cue must end after it starts")
             }
         }

@@ -165,6 +165,19 @@ export function prototypePlatformCall(
   return name && definition ? { module: name.module, op: name.member, definition } : undefined;
 }
 
+/** The module and event a handler name identifies, when both exist in the table. */
+export function prototypePlatformEvent(
+  event: unknown,
+):
+  | { module: string; op: string; definition: PrototypePlatformModule["events"][string] }
+  | undefined {
+  const name = qualified(event);
+  const owner = name && module(name.module);
+  const definition =
+    owner && Object.hasOwn(owner.events, name.member) ? owner.events[name.member] : undefined;
+  return name && definition ? { module: name.module, op: name.member, definition } : undefined;
+}
+
 /** The module a `<module>.<event>` handler name belongs to, when the event exists. */
 export function prototypePlatformEventModule(event: unknown): string | undefined {
   const name = qualified(event);

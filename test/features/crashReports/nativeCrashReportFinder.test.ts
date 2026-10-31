@@ -96,6 +96,32 @@ describe("iOS Simulator .ips finder (#14103)", () => {
     ]);
   });
 
+  test("tolerates the duplicate .000.ips ReportCrash can write in the same second", async () => {
+    const captured = fixture("ios-simulator-playground-sigabrt-captured.ips");
+    const capturedSimulator = "B131B3E7-52E7-4FC9-B698-0A73E66BB494";
+    const crashedAt = Date.parse("2026-10-30T15:17:10-05:00");
+    const writtenAt = Date.parse("2026-10-30T15:17:29-05:00");
+    const reports = new MemoryReports();
+    reports.add("Playground-2026-10-30-151729.ips", captured, writtenAt);
+    reports.add("Playground-2026-10-30-151729.000.ips", captured, writtenAt);
+    const finder = new IosSimulatorCrashReportFinder(capturedSimulator, reports, REPORTS);
+
+    const lookup = await finder.find({
+      appId: "dev.jasonpearson.automobile.Playground",
+      processId: 73194,
+      notBeforeTimestampMs: crashedAt,
+    });
+
+    expect(lookup).toMatchObject({
+      status: "found",
+      report: { id: "3F55C604-EC99-4CA7-95B5-0E22E44A5EA5", processId: 73194 },
+    });
+    // One report per crash: the first match ends the lookup, so the copy is never read.
+    expect(reports.reads).toHaveLength(1);
+    const body = await finder.read("3F55C604-EC99-4CA7-95B5-0E22E44A5EA5");
+    expect(body?.text).toBe(captured);
+  });
+
   test("reports notFound when the DiagnosticReports folder does not exist", async () => {
     const finder = new IosSimulatorCrashReportFinder(SIMULATOR, new MemoryReports(), "/missing");
     expect(await finder.find(query)).toEqual({ status: "notFound" });

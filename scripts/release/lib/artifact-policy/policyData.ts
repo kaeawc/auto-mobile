@@ -39,7 +39,6 @@ const policySchema = z.object({
 export type ArtifactPolicy = z.infer<typeof policySchema>;
 export type AndroidPolicy = z.infer<typeof androidPolicy>;
 export type IosPolicy = z.infer<typeof iosPolicy>;
-export type ExportedComponentPolicy = z.infer<typeof exportedComponent>;
 
 export function parseArtifactPolicy(json: string): ArtifactPolicy {
   return policySchema.parse(JSON.parse(json));

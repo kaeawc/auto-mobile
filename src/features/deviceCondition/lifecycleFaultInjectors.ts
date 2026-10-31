@@ -15,20 +15,6 @@ import { logger } from "../../utils/logger";
 import { OwedResetError } from "./OwedResetError";
 import { rejectValue, shell, unsupported } from "./injectorSupport";
 
-/**
- * Process-lifecycle fault injectors for `deviceCondition.faults` (#14068). Android
- * only and root-free. Each is paired with a reset and a read-back so release can
- * verify a clean device.
- *
- * Only the stateful fault is here: "Don't keep activities". Killing a background
- * process or sending a trim-memory level are one-shot actions against a named
- * package and need a parameterised request shape, so they are not part of this
- * enum-valued surface yet.
- */
-
-/** Keys this module owns, under the `faults.` prefix of the deviceCondition surface. */
-export const LIFECYCLE_FAULT_KEYS = ["faults.dontKeepActivities"] as const;
-
 /** The Developer options "Don't keep activities" switch. */
 const ALWAYS_FINISH_ACTIVITIES = "always_finish_activities";
 

@@ -411,30 +411,3 @@ export interface DeviceConditionResult {
   leaseExpiresAt?: number;
   error?: string;
 }
-
-export const deviceConditionResultSchema = z
-  .object({
-    success: z.boolean(),
-    version: z.literal(DEVICE_CONDITION_SCHEMA_VERSION),
-    changes: z.array(
-      z
-        .object({
-          key: z.string(),
-          status: z.enum(["applied", "cleared", "unchanged", "unsupported"]),
-          detail: z.string().optional(),
-        })
-        .passthrough(),
-    ),
-    restore: z
-      .object({
-        restored: z.array(z.string()),
-        failures: z.array(z.object({ key: z.string(), error: z.string() }).passthrough()),
-        verifiedClean: z.boolean(),
-      })
-      .passthrough()
-      .optional(),
-    active: z.array(z.string()),
-    leaseExpiresAt: z.number().optional(),
-    error: z.string().optional(),
-  })
-  .passthrough();

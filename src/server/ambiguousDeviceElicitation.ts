@@ -219,16 +219,6 @@ export async function askDeviceChoice(
   }
 }
 
-/** {@link askDeviceChoice} reduced to the chosen deviceId, or undefined for any other outcome. */
-export async function elicitDeviceChoice(
-  peer: DeviceChoicePeer,
-  toolName: string,
-  candidates: readonly DeviceCandidate[],
-  options: { timer: Timer; timeoutMs: number; callSignal: AbortSignal },
-): Promise<string | undefined> {
-  return (await askDeviceChoice(peer, toolName, candidates, options)).deviceId;
-}
-
 /**
  * Wraps a backend so an `ambiguous_device_target` result becomes a device question for a client
  * that declared elicitation, then one retry with the chosen `deviceId`. Everything else, including

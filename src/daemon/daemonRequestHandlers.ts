@@ -84,10 +84,8 @@ export type {
   DaemonStateAccess,
   DevicePoolStats,
   DaemonMethodResult,
-  DaemonRequestContext,
   DaemonRequestOptions,
   InitializedDaemonMethodHandler,
-  InitializedDaemonMethodOptions,
 } from "./daemonRequestHandlersParts/contracts";
 export {
   isTokenOwnedOrClaimPending,

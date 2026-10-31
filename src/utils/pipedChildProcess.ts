@@ -17,14 +17,3 @@ export function requirePipedOutput(child: HostChildProcess, label: string): Pipe
   child.kill();
   throw new Error(`Failed to open stdout/stderr pipes for ${label}`);
 }
-
-/**
- * True when a child started with piped stdin, stdout and stderr; narrows to the caller's
- * stricter process contract `P`.
- */
-export function hasPipedStdio<
-  T extends { stdin: unknown; stdout: unknown; stderr: unknown },
-  P extends T,
->(child: T): child is P {
-  return child.stdin !== null && child.stdout !== null && child.stderr !== null;
-}

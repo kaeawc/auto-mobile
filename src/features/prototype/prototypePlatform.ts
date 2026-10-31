@@ -79,7 +79,6 @@ export const PROTOTYPE_PLATFORM_ERROR_CODES = [
   "too_many_in_flight",
   "platform_error",
 ] as const;
-export type PrototypePlatformErrorCode = (typeof PROTOTYPE_PLATFORM_ERROR_CODES)[number];
 
 export interface PrototypePlatformArgument {
   optional: boolean;

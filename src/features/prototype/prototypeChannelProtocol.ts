@@ -44,7 +44,6 @@ export const prototypeChannelOpenMessageSchema = z.object({
   /** SSE only: sent as `Last-Event-ID` when the device reconnects. */
   lastEventId: z.string().optional(),
 });
-export type PrototypeChannelOpenMessage = z.infer<typeof prototypeChannelOpenMessageSchema>;
 
 export const prototypeChannelSendMessageSchema = z.object({
   type: z.literal(PROTOTYPE_CHANNEL_SEND_MESSAGE_TYPE),

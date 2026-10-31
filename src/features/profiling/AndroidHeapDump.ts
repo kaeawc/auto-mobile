@@ -8,7 +8,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { deviceFileSize, removeDeviceFile } from "../performanceTrace/perfettoDevice";
 import { HeapDumpRefusedError } from "./HeapDumpRefusedError";
 
-export { HeapDumpRefusedError, HEAP_DUMP_NOT_DEBUGGABLE } from "./HeapDumpRefusedError";
+export { HeapDumpRefusedError } from "./HeapDumpRefusedError";
 import type { ProfilingArtifactStore } from "./ProfilingArtifactStore";
 import type { ProfilingRegistry } from "./ProfilingRegistry";
 

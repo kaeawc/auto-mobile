@@ -60,7 +60,7 @@ export { SESSION_BROKER_RELEASE_REPLY_BUDGET_MS } from "./releaseReply";
 
 export { RECEIPT_RETENTION_MS } from "./retention";
 
-export type { SessionBrokerPoolDrainEntry, SessionBrokerPoolDrainResult } from "./destructionQueue";
+export type { SessionBrokerPoolDrainResult } from "./destructionQueue";
 /** Rows deleted per retention call, so one pass never holds the write lock for long. */
 export const RECEIPT_PRUNE_BATCH = 500;
 

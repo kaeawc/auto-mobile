@@ -92,8 +92,6 @@ import { RegistrySqliteDialect } from "./RegistrySqliteDialect";
 import { createRegistryWriteGuard } from "./registryWriteGuard";
 export { type BindingRegistryDatabase, parseJournalTarget } from "./bindingRegistryRows";
 
-export { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
-
 /** Scope under the ADB-server coordination root: host-wide, independent of any one adb server. */
 
 export const BINDINGS_REGISTRY_SUBDIR = "registry";

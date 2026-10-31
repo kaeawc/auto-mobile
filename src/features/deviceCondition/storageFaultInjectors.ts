@@ -15,19 +15,6 @@ import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { OwedResetError } from "./OwedResetError";
 import { createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
 
-/**
- * Storage fault injectors for `deviceCondition.faults` (#14066). Android only and
- * root-free: a ballast file on `/data` uses up free space until the device reads
- * "low" or "full", so apps can be tested for the I/O errors and install failures
- * (`INSTALL_FAILED_INSUFFICIENT_STORAGE`) that come with it.
- *
- * Read-only remounts and DB/preferences corruption need root and a target app, so
- * they are not part of this enum-valued surface yet.
- */
-
-/** Keys this module owns, under the `faults.` prefix of the deviceCondition surface. */
-export const STORAGE_FAULT_KEYS = ["faults.storage"] as const;
-
 const MIB = 1024 * 1024;
 
 /** Free space left on `/data` for each value. `full` leaves just enough for the system to keep running. */

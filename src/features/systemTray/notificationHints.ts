@@ -153,23 +153,21 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   return matchesResourceId || matchesClassName;
 };
 
-/** The captured iOS 27 cover sheet must contain its notification list. */
+/** A cover sheet contains the notification list or, when empty, the lock-screen clock. */
 export const nodeIsIosCoverSheetNotificationCenter = (node: ViewHierarchyNode | null): boolean => {
   const props = getNodeProperties(node);
   if (!props) {
     return false;
   }
-  // Require the notification list INSIDE its cover-sheet window: the date/clock,
-  // a generic ListCell, or a cover sheet without the list is insufficient.
-  // Evidence: fixtures/ios-notification-center/ios27-notification-center-hierarchy.json.
+  // Require the list or clock INSIDE its cover-sheet UIWindow, never a standalone clock.
+  // An empty locked screen also matches; this hierarchy cannot distinguish it from the tray.
   return (
     String(props.className ?? props.class ?? "") === "UIWindow" &&
     rawResourceId(props, ["identifier"]) === "SBCoverSheetWindow" &&
-    traverseForHint(
-      node,
-      (descendant: ViewHierarchyNode) =>
-        rawResourceId(getNodeProperties(descendant)) === "combined-list-view",
-    )
+    traverseForHint(node, (descendant: ViewHierarchyNode) => {
+      const resourceId = rawResourceId(getNodeProperties(descendant));
+      return resourceId === "combined-list-view" || resourceId === "lockscreen-date-view";
+    })
   );
 };
 

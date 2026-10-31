@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.Gravity
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.union
+import androidx.compose.ui.unit.Density
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -62,5 +65,58 @@ class PrototypeInsetFloorTest {
   fun `a hidden or unreadable bar leaves nothing to keep clear of`() {
     assertEquals(0, floor(PrototypePlacement.Fullscreen(), navigationBar = 0))
     assertEquals(0, floor(PrototypePlacement.Fullscreen(), navigationBar = -5))
+  }
+
+  @Test
+  fun `AAOS fullscreen clears the 76 px top bar despite a 46 px window inset`() {
+    // Captured AAOS API 35 display: 1024x768; overlay dispatch reports only 46 px at the top.
+    val floor = prototypeInsetFloor(PrototypePlacement.Fullscreen(), 1f, 96, 76)
+    assertEquals(76, floor.top)
+    assertEquals(96, floor.bottom)
+    val resolved = WindowInsets(0, 46, 0, 0).union(floor.asComposeInsets())
+    assertEquals(76, resolved.getTop(Density(1f)))
+    val largerWindowInset = WindowInsets(0, 100, 0, 0).union(floor.asComposeInsets())
+    assertEquals(100, largerWindowInset.getTop(Density(1f)))
+  }
+
+  @Test
+  fun `top floating offsets clear only the covered portion of the top bar`() {
+    fun top(dp: Float) =
+      prototypeInsetFloor(
+          PrototypePlacement.Floating(Gravity.TOP or Gravity.CENTER_HORIZONTAL, offsetYDp = dp),
+          density,
+          bar,
+          76,
+        )
+        .top
+    assertEquals(76, top(0f))
+    assertEquals(50, top(10f))
+    assertEquals(0, top(29f))
+    assertEquals(0, top(100f))
+    assertEquals(102, top(-10f))
+  }
+
+  @Test
+  fun `other placements have no top floor`() {
+    val placements =
+      listOf(
+        PrototypePlacement.Floating(Gravity.CENTER),
+        PrototypePlacement.Floating(Gravity.BOTTOM),
+        PrototypePlacement.Sheet(PrototypePlacement.Edge.TOP, 120f),
+        PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 120f),
+        PrototypePlacement.Sheet(PrototypePlacement.Edge.START, 120f),
+        PrototypePlacement.Sheet(PrototypePlacement.Edge.END, 120f),
+      )
+    for (placement in placements) {
+      assertEquals(0, prototypeInsetFloor(placement, density, bar, 76).top)
+    }
+  }
+
+  @Test
+  fun `a hidden or unreadable top bar leaves no top floor`() {
+    assertEquals(0, prototypeInsetFloor(PrototypePlacement.Fullscreen(), density, bar, 0).top)
+    assertEquals(0, prototypeInsetFloor(PrototypePlacement.Fullscreen(), density, bar, -5).top)
+    assertEquals(0, prototypeInsetFloor(PrototypePlacement.Fullscreen(), density, bar).top)
+    assertEquals(0, PrototypeInsetFloor(bottom = bar).top)
   }
 }

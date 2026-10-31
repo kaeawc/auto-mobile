@@ -430,6 +430,7 @@ class DefaultPrototypeHost(
         context,
         windowManager,
         navigationBarBottomPx = { navigationBarBottomPx(windowManager, sdkInt) },
+        systemBarTopPx = { systemBarTopPx(windowManager) },
         density = densityProvider,
       )
     } else {
@@ -622,7 +623,12 @@ class DefaultPrototypeHost(
           request.motionActivity,
         ) {
           PrototypeWindowContent(request, current.view.escapeState) {
-            prototypeInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+            prototypeInsetFloor(
+              request.placement,
+              target.density(),
+              target.navigationBarBottomPx(),
+              target.systemBarTopPx(),
+            )
           }
         }
       }
@@ -1301,6 +1307,7 @@ private fun PrototypeChrome(
           .background(dismissColors.background)
           .windowInsetsPadding(
             WindowInsets.systemBars
+              .union(floor.asComposeInsets())
               .union(WindowInsets.displayCutout)
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
           )
@@ -1343,6 +1350,7 @@ private fun PrototypeChrome(
           Modifier.align(Alignment.TopEnd)
             .windowInsetsPadding(
               WindowInsets.systemBars
+                .union(floor.asComposeInsets())
                 .union(WindowInsets.displayCutout)
                 .only(WindowInsetsSides.Top + WindowInsetsSides.End),
             ),
@@ -1410,6 +1418,7 @@ private fun PrototypeChromelessContent(
         Modifier.align(Alignment.TopCenter)
           .windowInsetsPadding(
             WindowInsets.systemBars
+              .union(floor.asComposeInsets())
               .union(WindowInsets.displayCutout)
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
           )

@@ -36,6 +36,20 @@ let package = Package(
             path: "Sources/CtrlProxy",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        // Pure tvOS policy is separate from the shipped iOS library.
+        .target(
+            name: "TVCommandPolicy",
+            path: "Tests/CtrlProxyTVUITests",
+            exclude: ["CtrlProxyTVUITests.swift", "TVCommandRouter.swift", "TVWebSocketServer.swift"],
+            sources: ["TVCommandPolicy.swift", "ConnectedEvent.swift"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "TVCommandPolicyTests",
+            dependencies: ["TVCommandPolicy", "CtrlProxy"],
+            path: "Tests/TVCommandPolicyTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         // Shared test doubles + fixtures for the implementation. NOT a dependency of the
         // shipped `.library`, so the product stays fake-free and Sendable-clean.
         .target(

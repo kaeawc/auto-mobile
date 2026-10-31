@@ -31,13 +31,17 @@ import {
   DefaultManagedSpecResolver,
   type BindingReconcileRequest,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import type { ManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import { DeviceManagerBindingInventory } from "../../../../src/daemon/sessionBroker/provisioning/DeviceManagerBindingInventory";
 import { GateBindingBootCapacity } from "../../../../src/daemon/sessionBroker/provisioning/GateBindingBootCapacity";
 import { PoolBindingDeviceClaims } from "../../../../src/daemon/sessionBroker/provisioning/PoolBindingDeviceClaims";
 import { ToolBindingProvisioner } from "../../../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
 import { WorkflowBindingDeviceDeleter } from "../../../../src/daemon/sessionBroker/provisioning/deviceDeleter";
 import { RegistryBindingResourceBudget } from "../../../../src/daemon/sessionBroker/provisioning/resourceBudget";
-import type { BindingKey } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
+import type {
+  BindingKey,
+  BindingPlatform,
+} from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../../../fakes/FakeDeviceUtils";
@@ -68,6 +72,28 @@ const IPHONE_SPEC = {
   deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
 };
 
+function isIphoneProvision(args: Record<string, unknown>): boolean {
+  const device = args.device;
+  return typeof device === "object" && device !== null && Reflect.get(device, "platform") === "ios";
+}
+
+/**
+ * The watch resolver, also resolving an iPhone request: its spec is resolved against the watch
+ * catalog, which is all a test needs to reach the replacement's boot reservation.
+ */
+function iphoneResolvingResolver(watch: ManagedSpecResolver): ManagedSpecResolver {
+  const asWatch = (platform: BindingPlatform): BindingPlatform =>
+    platform === "ios" ? "watchos" : platform;
+  return {
+    resolve: (platform, spec, options) =>
+      watch.resolve(asWatch(platform), platform === "ios" ? SPEC : spec, options),
+    checkCreatable: async (platform, resolved, options) =>
+      (await watch.checkCreatable?.(asWatch(platform), resolved, options)) ?? {
+        kind: "creatable",
+      },
+  };
+}
+
 describe("broker watch bindings over the real watch modules", () => {
   const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
   let restoreEnv: (() => void) | undefined;
@@ -86,7 +112,14 @@ describe("broker watch bindings over the real watch modules", () => {
   afterEach(cleanup);
   afterAll(cleanup);
 
-  async function arrange({ limit }: { limit?: number } = {}) {
+  async function arrange({
+    limit,
+    resolveIphoneSpec = false,
+  }: {
+    limit?: number;
+    /** Resolve an iPhone request too (as if its catalog listed it), so a platform switch proceeds. */
+    resolveIphoneSpec?: boolean;
+  } = {}) {
     restoreEnv = ToolRegistry.setPipelineOverridesForTesting({ env });
     const simctl = new FakeWatchProvisionSimctl([]);
     simctl.deviceTypes.push(ULTRA);
@@ -199,6 +232,7 @@ describe("broker watch bindings over the real watch modules", () => {
           },
         }),
     );
+    const watchResolver = new DefaultManagedSpecResolver(undefined, { watchCatalog: watches });
     const reconciler = new BindingReconciler({
       registry,
       inventory,
@@ -207,10 +241,14 @@ describe("broker watch bindings over the real watch modules", () => {
           throw new Error("a watch has no AVD config");
         },
       }),
-      resolver: new DefaultManagedSpecResolver(undefined, { watchCatalog: watches }),
+      resolver: resolveIphoneSpec ? iphoneResolvingResolver(watchResolver) : watchResolver,
       provisioner: new ToolBindingProvisioner({
         invokeTool: async (name, args, signal) => {
           toolCalls.push({ name, ...args });
+          if (isIphoneProvision(args)) {
+            // No iPhone simulator tooling here: an iPhone request stops at its provision step.
+            throw new ActionableError("iPhone provisioning is outside this test's simulator fake");
+          }
           return await ToolRegistry.getTool(name)!.handler(args, undefined, signal);
         },
         deviceManager: { listDeviceImages: async () => [] },
@@ -384,6 +422,24 @@ describe("broker watch bindings over the real watch modules", () => {
     const replaced = await reconciler.reconcile(request(0, ULTRA_SPEC));
 
     expect(replaced).toMatchObject({ outcome: "ready", disposition: "replaced" });
+    expect(gates[0]).toBe(`ios-reserve:${first.device.stableId}`);
+  });
+
+  // An iPhone and a watch share the simulator boot gate, so switching a binding between them must
+  // reserve the new boot against the old simulator's slot, not demand an extra one (#15882).
+  test("switching a watch binding to an iPhone reserves against the watch's simulator slot", async () => {
+    const { reconciler, request, gates, releaseSession } = await arrange({
+      resolveIphoneSpec: true,
+    });
+    const first = await reconciler.reconcile(request(0));
+    if (first.outcome !== "ready") {
+      throw new Error("first acquisition failed");
+    }
+    await releaseSession(first.sessionUuid);
+    gates.length = 0;
+
+    await reconciler.reconcile(request(0, IPHONE_SPEC, "ios"));
+
     expect(gates[0]).toBe(`ios-reserve:${first.device.stableId}`);
   });
 

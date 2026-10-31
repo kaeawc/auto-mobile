@@ -1,5 +1,6 @@
 import type { BootSlotReservation } from "../../../devices/bootAdmission/BootSlotReservation";
 import { withVerifiedBootCapacity } from "../../../devices/bootAdmission/VerifiedBootCapacity";
+import { bootGatePlatform } from "../../../features/bootAdmission/sharedBootAdmissionGates";
 import {
   BindingJournalRemovalRegistryTimeout,
   type BindingJournal,
@@ -834,7 +835,11 @@ export class BindingDeviceCreation {
     if (!this.deps.capacity) {
       return undefined;
     }
-    const freesSlot = assignment.platform === request.platform && holdsBootBinding(device);
+    // The old device frees a slot on the gate the new boot uses: an iPhone and an Apple Watch share
+    // the simulator gate, so switching a binding between them reserves against the old simulator.
+    const freesSlot =
+      bootGatePlatform(assignment.platform) === bootGatePlatform(request.platform) &&
+      holdsBootBinding(device);
     this.host.checkBudget(request);
     const check = await this.deps.capacity.reserve(request.platform, {
       replacingDeviceId: freesSlot ? device.deviceId : undefined,

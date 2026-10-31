@@ -152,6 +152,9 @@ export const INTERNAL_EXECUTION_START_TIME_PARAM = "__executionStartTime";
  */
 export const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
 
+/** Routing snapshot carried across acquisition schema parsing. */
+export const INTERNAL_REQUESTER_SESSION_UUID_PARAM = "__requesterSessionUuid";
+
 /** This execution's id, injected alongside {@link INTERNAL_EXECUTION_START_TIME_PARAM}. */
 export const INTERNAL_EXECUTION_ID_PARAM = "__executionId";
 

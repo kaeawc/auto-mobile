@@ -1,9 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.graphics.Rect
-import android.os.Build
-import android.util.Log
-import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
@@ -132,36 +129,6 @@ private fun nodeIsOnScreen(
   val bounds = Rect()
   node.getBoundsInScreen(bounds)
   return !ElementBounds(bounds).isCompletelyOffscreen(screenDimensions)
-}
-
-/** Resolve dimensions from the lookup root without querying or selecting other windows. */
-internal fun findNodeByResourceIdOnRootDisplay(
-  root: AccessibilityNodeInfo?,
-  resourceId: String,
-  dimensionsProvider: (Int) -> ScreenDimensions?,
-): AccessibilityNodeInfo? {
-  val dimensions =
-    try {
-      val displayId =
-        if (root == null) {
-          null
-        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-          Display.DEFAULT_DISPLAY
-        } else {
-          root.window?.let { window ->
-            try {
-              window.displayId
-            } finally {
-              window.recycle()
-            }
-          }
-        }
-      displayId?.let(dimensionsProvider)
-    } catch (e: Exception) {
-      Log.w("CtrlProxy", "Failed to get lookup root screen dimensions", e)
-      null
-    }
-  return findNodeByResourceId(root, resourceId, dimensions)
 }
 
 internal data class NodeSelectorFields(

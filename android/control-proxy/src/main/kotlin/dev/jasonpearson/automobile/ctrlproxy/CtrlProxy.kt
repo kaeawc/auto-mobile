@@ -36,6 +36,7 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
@@ -153,6 +154,36 @@ import okhttp3.OkHttpClient
 private const val SPEECH_STATE_CHANGE_EVENT = 0x02000000 // TYPE_SPEECH_STATE_CHANGE, API 33.
 private const val VIEW_TARGETED_BY_SCROLL_EVENT =
   0x04000000 // TYPE_VIEW_TARGETED_BY_SCROLL, API 34.
+
+/** Resolve dimensions from the lookup root without querying or selecting other windows. */
+internal fun findNodeByResourceIdOnRootDisplay(
+  root: AccessibilityNodeInfo?,
+  resourceId: String,
+  dimensionsProvider: (Int) -> ScreenDimensions?,
+): AccessibilityNodeInfo? {
+  val dimensions =
+    try {
+      val displayId =
+        if (root == null) {
+          null
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+          Display.DEFAULT_DISPLAY
+        } else {
+          root.window?.let { window ->
+            try {
+              window.displayId
+            } finally {
+              window.recycle()
+            }
+          }
+        }
+      displayId?.let(dimensionsProvider)
+    } catch (e: Exception) {
+      Log.w("CtrlProxy", "Failed to get lookup root screen dimensions", e)
+      null
+    }
+  return findNodeByResourceId(root, resourceId, dimensions)
+}
 
 internal fun crashEventTimestamp(reportedMs: Long, nowMs: Long): Long =
   if (reportedMs > 0) reportedMs else nowMs

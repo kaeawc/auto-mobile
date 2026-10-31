@@ -262,7 +262,10 @@ export const registerDeviceGestureRecordingTools = () => {
     "exportPlan",
     "Stop active recording and export a YAML plan.",
     exportPlanSchema,
-    exportPlanTool,
-    { defaultEnabled: false, outputSchema: exportPlanResultSchema },
+    {
+      handler: exportPlanTool,
+      defaultEnabled: false,
+      outputSchema: exportPlanResultSchema,
+    },
   );
 };

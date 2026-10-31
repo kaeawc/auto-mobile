@@ -24,12 +24,14 @@ describe("CallTool progress notifications echo the client's token (issue #6118)"
       TOOL,
       "probe tool that reports two progress ticks",
       z.object({}).passthrough(),
-      async (_args: unknown, progress?: ProgressCallback) => {
-        await progress?.(1, 2, "tick one");
-        await progress?.(2, 2, "tick two");
-        return createStructuredToolResponse({ success: true });
+      {
+        handler: async (_args: unknown, progress?: ProgressCallback) => {
+          await progress?.(1, 2, "tick one");
+          await progress?.(2, 2, "tick two");
+          return createStructuredToolResponse({ success: true });
+        },
+        supportsProgress: true,
       },
-      { supportsProgress: true },
     );
     fixture = new McpTestFixture();
     await fixture.setup();

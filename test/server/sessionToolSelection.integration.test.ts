@@ -140,11 +140,8 @@ describe("per-session exact-tool selection", () => {
       });
       await fixture.setup();
       ToolRegistry.clearTools();
-      ToolRegistry.register(
-        acquisition,
-        "acquire",
-        z.object({}),
-        async () => {
+      ToolRegistry.register(acquisition, "acquire", z.object({}), {
+        handler: async () => {
           if (stage === "handler") {
             lookupStarted.resolve();
             await releaseLookup.promise;
@@ -155,16 +152,14 @@ describe("per-session exact-tool selection", () => {
             ],
           };
         },
-        { defaultEnabled: true },
-      );
-      ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
+        defaultEnabled: true,
+      });
+      ToolRegistry.register("sendKeys", "input", z.object({}), {
+        handler: async () => ({ content: [] }),
         defaultEnabled: false,
       });
-      ToolRegistry.register(
-        "inspectRouting",
-        "routing",
-        z.object({}),
-        async () => ({
+      ToolRegistry.register("inspectRouting", "routing", z.object({}), {
+        handler: async () => ({
           content: [
             {
               type: "text",
@@ -174,8 +169,8 @@ describe("per-session exact-tool selection", () => {
             },
           ],
         }),
-        { defaultEnabled: true },
-      );
+        defaultEnabled: true,
+      });
       const pending = fixture.client.request(
         { method: "tools/call", params: { name: acquisition, arguments: {} } },
         z.any(),
@@ -207,16 +202,14 @@ describe("per-session exact-tool selection", () => {
       });
       await fixture.setup();
       ToolRegistry.clearTools();
-      ToolRegistry.register(
-        acquisition,
-        "acquire",
-        z.object({}),
-        async () => ({
+      ToolRegistry.register(acquisition, "acquire", z.object({}), {
+        handler: async () => ({
           content: [{ type: "text", text: JSON.stringify(acquisitionPayload("new-session")) }],
         }),
-        { defaultEnabled: true },
-      );
-      ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
+        defaultEnabled: true,
+      });
+      ToolRegistry.register("sendKeys", "input", z.object({}), {
+        handler: async () => ({ content: [] }),
         defaultEnabled: false,
       });
       expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
@@ -256,23 +249,18 @@ describe("per-session exact-tool selection", () => {
       });
       await fixture.setup();
       ToolRegistry.clearTools();
-      ToolRegistry.register(
-        acquisition,
-        "acquire",
-        z.object({ target: z.string() }),
-        async (args) => ({
+      ToolRegistry.register(acquisition, "acquire", z.object({ target: z.string() }), {
+        handler: async (args) => ({
           content: [{ type: "text", text: JSON.stringify(acquisitionPayload(args.target)) }],
         }),
-        { defaultEnabled: true },
-      );
-      ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
+        defaultEnabled: true,
+      });
+      ToolRegistry.register("sendKeys", "input", z.object({}), {
+        handler: async () => ({ content: [] }),
         defaultEnabled: false,
       });
-      ToolRegistry.register(
-        "inspectRouting",
-        "routing",
-        z.object({}),
-        async () => ({
+      ToolRegistry.register("inspectRouting", "routing", z.object({}), {
+        handler: async () => ({
           content: [
             {
               type: "text",
@@ -280,8 +268,8 @@ describe("per-session exact-tool selection", () => {
             },
           ],
         }),
-        { defaultEnabled: true },
-      );
+        defaultEnabled: true,
+      });
       const acquire = async (target: string) => {
         const response = await fixture!.client.request(
           { method: "tools/call", params: { name: acquisition, arguments: { target } } },
@@ -331,11 +319,8 @@ describe("per-session exact-tool selection", () => {
       });
       await fixture.setup();
       ToolRegistry.clearTools();
-      ToolRegistry.register(
-        acquisition,
-        "acquire",
-        z.object({}),
-        async () => ({
+      ToolRegistry.register(acquisition, "acquire", z.object({}), {
+        handler: async () => ({
           content: [
             {
               type: "text",
@@ -345,9 +330,10 @@ describe("per-session exact-tool selection", () => {
             },
           ],
         }),
-        { defaultEnabled: true },
-      );
-      ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
+        defaultEnabled: true,
+      });
+      ToolRegistry.register("sendKeys", "input", z.object({}), {
+        handler: async () => ({ content: [] }),
         defaultEnabled: false,
       });
       const response = await fixture.client.request(
@@ -367,11 +353,8 @@ describe("per-session exact-tool selection", () => {
         fixture = new McpTestFixture();
         await fixture.setup();
         ToolRegistry.clearTools();
-        ToolRegistry.register(
-          acquisition,
-          "acquire",
-          z.object({}),
-          async () => ({
+        ToolRegistry.register(acquisition, "acquire", z.object({}), {
+          handler: async () => ({
             content: [
               {
                 type: "text",
@@ -381,12 +364,14 @@ describe("per-session exact-tool selection", () => {
               },
             ],
           }),
-          { defaultEnabled: true },
-        );
-        ToolRegistry.register("sendKeys", "input", z.object({}), async () => ({ content: [] }), {
+          defaultEnabled: true,
+        });
+        ToolRegistry.register("sendKeys", "input", z.object({}), {
+          handler: async () => ({ content: [] }),
           defaultEnabled: false,
         });
-        ToolRegistry.register("hiddenTool", "hidden", z.object({}), async () => ({ content: [] }), {
+        ToolRegistry.register("hiddenTool", "hidden", z.object({}), {
+          handler: async () => ({ content: [] }),
           defaultEnabled: false,
           hidden: true,
         });
@@ -442,20 +427,14 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "clipboard",
-      "clipboard",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "clipboard" }] }),
-      { defaultEnabled: false },
-    );
-    ToolRegistry.register(
-      "selectAllText",
-      "selectAllText",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "selectAllText" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "clipboard" }] }),
+      defaultEnabled: false,
+    });
+    ToolRegistry.register("selectAllText", "selectAllText", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "selectAllText" }] }),
+      defaultEnabled: false,
+    });
     registerToolSelectionTools();
 
     await fixture.client.request(
@@ -489,13 +468,10 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "observe",
-      "observe",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "observe" }] }),
-      { defaultEnabled: true },
-    );
+    ToolRegistry.register("observe", "observe", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "observe" }] }),
+      defaultEnabled: true,
+    });
     registerToolSelectionTools();
 
     await fixture.client.request(
@@ -537,13 +513,10 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "observe",
-      "observe",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: true },
-    );
+    ToolRegistry.register("observe", "observe", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: true,
+    });
 
     expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
       "observe",
@@ -590,21 +563,16 @@ describe("per-session exact-tool selection", () => {
       await Promise.all([first.setup(), second.setup()]);
       ToolRegistry.clearTools();
       for (const toolName of ["profileATool", "profileBTool"]) {
-        ToolRegistry.register(
-          toolName,
-          toolName,
-          z.object({}),
-          async () => ({ content: [{ type: "text" as const, text: toolName }] }),
-          { defaultEnabled: false },
-        );
+        ToolRegistry.register(toolName, toolName, z.object({}), {
+          handler: async () => ({ content: [{ type: "text" as const, text: toolName }] }),
+          defaultEnabled: false,
+        });
       }
-      ToolRegistry.register(
-        "schemaTool",
-        "schema tool",
-        z.object({}),
-        async () => createStructuredToolResponse({ success: true }),
-        { defaultEnabled: true, outputSchema: z.object({ success: z.boolean() }) },
-      );
+      ToolRegistry.register("schemaTool", "schema tool", z.object({}), {
+        handler: async () => createStructuredToolResponse({ success: true }),
+        defaultEnabled: true,
+        outputSchema: z.object({ success: z.boolean() }),
+      });
       registerToolSelectionTools();
 
       const apply = async (
@@ -705,13 +673,11 @@ describe("per-session exact-tool selection", () => {
     try {
       await fixture.setup();
       ToolRegistry.clearTools();
-      ToolRegistry.register(
-        "schemaTool",
-        "schema tool",
-        z.object({}),
-        async () => createStructuredToolResponse({ success: true }),
-        { defaultEnabled: true, outputSchema: z.object({ success: z.boolean() }) },
-      );
+      ToolRegistry.register("schemaTool", "schema tool", z.object({}), {
+        handler: async () => createStructuredToolResponse({ success: true }),
+        defaultEnabled: true,
+        outputSchema: z.object({ success: z.boolean() }),
+      });
 
       const listed = await fixture.client.listTools();
       expect(listed.tools.find(({ name }) => name === "schemaTool")?.outputSchema).toBeUndefined();
@@ -739,13 +705,10 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "clipboard",
-      "clipboard",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "clipboard" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "clipboard" }] }),
+      defaultEnabled: false,
+    });
     registerToolSelectionTools();
 
     await fixture.client.request(
@@ -781,13 +744,10 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "observe",
-      "observe",
-      z.object({ sessionUuid: z.string().optional() }),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: true },
-    );
+    ToolRegistry.register("observe", "observe", z.object({ sessionUuid: z.string().optional() }), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: true,
+    });
     registerToolSelectionTools();
 
     await fixture.client.request(
@@ -849,15 +809,12 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "getAndroid",
-      "acquire",
-      z.object({}),
-      async () => ({
+    ToolRegistry.register("getAndroid", "acquire", z.object({}), {
+      handler: async () => ({
         content: [{ type: "text", text: JSON.stringify(acquisitionPayload("acquired-session")) }],
       }),
-      { defaultEnabled: true },
-    );
+      defaultEnabled: true,
+    });
     ToolRegistry.registerDeviceAware(
       "observe",
       "observe",
@@ -872,13 +829,10 @@ describe("per-session exact-tool selection", () => {
       async () => ({ content: [{ type: "text", text: "ran" }] }),
       { defaultEnabled: false },
     );
-    ToolRegistry.register(
-      "clipboard",
-      "clipboard",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
     registerToolSelectionTools();
 
     await fixture.client.request(
@@ -976,13 +930,10 @@ describe("per-session exact-tool selection", () => {
       async () => ({ content: [{ type: "text", text: "ran" }] }),
       { defaultEnabled: false },
     );
-    ToolRegistry.register(
-      "clipboard",
-      "clipboard",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
     registerToolSelectionTools();
 
     const profileUpdate = await fixture.client.request(
@@ -1020,13 +971,10 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "clipboard",
-      "clipboard",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
 
     expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain(
       "clipboard",
@@ -1063,13 +1011,10 @@ describe("per-session exact-tool selection", () => {
       async () => ({ content: [{ type: "text", text: "ran" }] }),
       { defaultEnabled: false },
     );
-    ToolRegistry.register(
-      "clipboard",
-      "clipboard",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
 
     const listedNames = (await fixture.client.listTools()).tools.map((tool) => tool.name);
     expect(listedNames).toContain("observe");
@@ -1111,13 +1056,10 @@ describe("per-session exact-tool selection", () => {
       async () => ({ content: [{ type: "text", text: "ran" }] }),
       { defaultEnabled: false },
     );
-    ToolRegistry.register(
-      "clipboard",
-      "clipboard",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
     registerToolSelectionTools();
 
     const result = await fixture.client.request(
@@ -1166,13 +1108,10 @@ describe("per-session exact-tool selection", () => {
       async () => ({ content: [{ type: "text", text: "ran" }] }),
       { defaultEnabled: false },
     );
-    ToolRegistry.register(
-      "clipboard",
-      "clipboard",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
     registerToolSelectionTools();
 
     const result = await fixture.client.request(
@@ -1405,11 +1344,8 @@ describe("post-handler cancellation guard scope", () => {
     fixture = new McpTestFixture({ sessionContext: { sessionId } });
     await fixture.setup();
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "clipboard",
-      "clipboard",
-      z.object({}),
-      async () => {
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => {
         // Model transport/session teardown landing while the handler is
         // finishing, after it already produced a complete, correct result.
         await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
@@ -1417,8 +1353,8 @@ describe("post-handler cancellation guard scope", () => {
           content: [{ type: "text" as const, text: JSON.stringify({ value: "finished" }) }],
         };
       },
-      { defaultEnabled: true },
-    );
+      defaultEnabled: true,
+    });
 
     const response = await fixture.client.request(
       { method: "tools/call", params: { name: "clipboard", arguments: {} } },
@@ -1471,11 +1407,8 @@ describe("post-handler cancellation guard scope", () => {
     fixture = new McpTestFixture({ sessionContext: { sessionId } });
     await fixture.setup();
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "getAndroid",
-      "acquire",
-      z.object({ which: z.string() }),
-      async (args: { which: string }) => {
+    ToolRegistry.register("getAndroid", "acquire", z.object({ which: z.string() }), {
+      handler: async (args: { which: string }) => {
         if (args.which === "minter") {
           const sessionUuid = await pool.autolockDevice(device.deviceId, "android", sessionId);
           if (!sessionUuid) {
@@ -1501,8 +1434,8 @@ describe("post-handler cancellation guard scope", () => {
           content: [{ type: "text" as const, text: JSON.stringify(acquisitionPayload(reused)) }],
         };
       },
-      { defaultEnabled: true },
-    );
+      defaultEnabled: true,
+    });
 
     const minterCall = fixture.client.request(
       { method: "tools/call", params: { name: "getAndroid", arguments: { which: "minter" } } },
@@ -1570,11 +1503,8 @@ describe("post-handler cancellation guard scope", () => {
     fixture = new McpTestFixture({ sessionContext: { sessionId } });
     await fixture.setup();
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "getAndroid",
-      "acquire",
-      z.object({}),
-      async () => {
+    ToolRegistry.register("getAndroid", "acquire", z.object({}), {
+      handler: async () => {
         await pool.assignDeviceToSession(mintedSessionUuid, "android");
         await executionTracker.cancelSessionExecutions(sessionId, "test-cancel");
         return {
@@ -1586,8 +1516,8 @@ describe("post-handler cancellation guard scope", () => {
           ],
         };
       },
-      { defaultEnabled: true },
-    );
+      defaultEnabled: true,
+    });
 
     const response = await fixture.client.request(
       { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
@@ -1641,11 +1571,8 @@ describe("post-handler cancellation guard scope", () => {
     fixture = new McpTestFixture({ sessionContext: { sessionId } });
     await fixture.setup();
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "getAndroid",
-      "acquire",
-      z.object({}),
-      async () => {
+    ToolRegistry.register("getAndroid", "acquire", z.object({}), {
+      handler: async () => {
         registerDirectSessionDevice("direct-minted-session", {
           platform: "android",
           name: "Pixel_9",
@@ -1661,8 +1588,8 @@ describe("post-handler cancellation guard scope", () => {
           ],
         };
       },
-      { defaultEnabled: true },
-    );
+      defaultEnabled: true,
+    });
 
     const response = await fixture.client.request(
       { method: "tools/call", params: { name: "getAndroid", arguments: {} } },

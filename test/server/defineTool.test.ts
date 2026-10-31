@@ -17,7 +17,9 @@ interface Registration {
 function fakeRegistrar(): { registrar: ToolRegistrar; registrations: Registration[] } {
   const registrations: Registration[] = [];
   const registrar = {
-    register: (name, description, schema, handler, options) => {
+    register: (name, description, schema, registration) => {
+      const { handler, ...options } =
+        typeof registration === "function" ? { handler: registration } : registration;
       registrations.push({ kind: "plain", name, description, schema, handler, options });
     },
     registerDeviceAware: (name, description, schema, handler, options) => {

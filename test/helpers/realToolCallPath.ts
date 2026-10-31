@@ -178,17 +178,15 @@ export class RealToolCallPath {
       }),
     });
     // The real handler and registration; only the CtrlProxy resume at the device boundary is fake.
-    ToolRegistry.register(
-      "setActiveDevice",
-      "Set active device",
-      setActiveDeviceSchema,
-      createSetActiveDeviceHandler({
+    ToolRegistry.register("setActiveDevice", "Set active device", setActiveDeviceSchema, {
+      handler: createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider(),
         resumeCtrlProxy: async () => undefined,
         legacyDeviceSelection: () => this.deviceReadiness,
       }),
-      { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
-    );
+      defaultEnabled: true,
+      ...SELECTS_ACTIVE_DEVICE,
+    });
     return this;
   }
 

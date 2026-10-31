@@ -47,15 +47,22 @@ function registerResetKeychain(simctl: FakeSimctl): void {
     "resetKeychain",
     "Fake resetKeychain over a fake simctl",
     resetKeychainSchema,
-    async (args: { appId: string; confirm: boolean; deviceId?: string; sessionUuid?: string }) => {
-      const result = await new ResetKeychain(SIMULATOR, simctl).execute({
-        appId: args.appId,
-        confirm: args.confirm,
-        explicitlyTargeted: Boolean(args.deviceId || args.sessionUuid),
-      });
-      return createJSONToolResponse({ ...result });
+    {
+      handler: async (args: {
+        appId: string;
+        confirm: boolean;
+        deviceId?: string;
+        sessionUuid?: string;
+      }) => {
+        const result = await new ResetKeychain(SIMULATOR, simctl).execute({
+          appId: args.appId,
+          confirm: args.confirm,
+          explicitlyTargeted: Boolean(args.deviceId || args.sessionUuid),
+        });
+        return createJSONToolResponse({ ...result });
+      },
+      defaultEnabled: true,
     },
-    { defaultEnabled: true },
   );
   const tool = ToolRegistry.getTool("resetKeychain");
   expect(tool).toBeDefined();
@@ -269,18 +276,15 @@ test("executor passes step geometry through the real tapAt handler", async () =>
   const { createTapAt } = tapAtCoordinate;
   const fake = createTapAt(SIMULATOR);
   {
-    ToolRegistry.register(
-      "tapAt",
-      "fake native tap",
-      tapAtSchema,
-      (args, progress, signal) =>
+    ToolRegistry.register("tapAt", "fake native tap", tapAtSchema, {
+      handler: (args, progress, signal) =>
         tapAtHandler(SIMULATOR, args, {
           progress,
           signal,
           deps: { tapAtElementFactory: () => fake.tapAt },
         }),
-      { defaultEnabled: true },
-    );
+      defaultEnabled: true,
+    });
     const geometry = {
       platform: "ios" as const,
       deviceWidth: 10,

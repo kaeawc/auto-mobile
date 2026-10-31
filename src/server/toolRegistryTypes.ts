@@ -134,6 +134,14 @@ export interface PlainToolOptions<T = Record<string, unknown>> extends ToolRegis
   hostInventory?: boolean;
 }
 
+/**
+ * A plain tool's handler together with its options: `ToolRegistry.register`'s fourth argument
+ * when the tool has options. A tool without options passes the bare handler instead.
+ */
+export interface PlainToolRegistration<T = Record<string, unknown>> extends PlainToolOptions<T> {
+  handler: ToolHandler<T>;
+}
+
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
 export interface SessionlessDeviceRead {
   resolve(deviceId: string, signal?: AbortSignal, platform?: SomePlatform): Promise<BootedDevice>;

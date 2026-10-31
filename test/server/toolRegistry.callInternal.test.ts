@@ -35,16 +35,13 @@ describe("ToolRegistry.callInternal (#3108)", () => {
 
   function registerCapturingTool(name: string, options?: { debugOnly?: boolean }): void {
     captured = [];
-    ToolRegistry.register(
-      name,
-      `Mock ${name}`,
-      schema,
-      async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
+    ToolRegistry.register(name, `Mock ${name}`, schema, {
+      handler: async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
         captured.push({ args, progress, signal });
         return SENTINEL;
       },
-      options,
-    );
+      ...options,
+    });
   }
 
   beforeEach(() => {

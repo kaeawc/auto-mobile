@@ -846,11 +846,8 @@ describe("killDevice handler", () => {
    */
   const callKillDeviceAsItsHolder = () => {
     const tool = ToolRegistry.getRegisteredTool("killDevice")!;
-    ToolRegistry.register(
-      "killDevice",
-      tool.description,
-      tool.schema,
-      (args, progress, signal) => {
+    ToolRegistry.register("killDevice", tool.description, tool.schema, {
+      handler: (args, progress, signal) => {
         const deviceId = (args as { device?: { deviceId?: string } }).device?.deviceId;
         const holder =
           deviceId && DaemonState.getInstance().isInitialized()
@@ -858,8 +855,9 @@ describe("killDevice handler", () => {
             : null;
         return tool.handler(holder ? { ...args, sessionUuid: holder } : args, progress, signal);
       },
-      { defaultEnabled: true, transportRecovery: "connect" },
-    );
+      defaultEnabled: true,
+      transportRecovery: "connect",
+    });
   };
 
   const cleanup = () => {

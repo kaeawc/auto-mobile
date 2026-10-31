@@ -147,8 +147,10 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
       PLAIN_READ_PROBE,
       PLAIN_READ_PROBE,
       z.object({ sessionUuid: z.string() }),
-      async () => ({ content: [{ type: "text", text: "plain read" }] }),
-      { readOnly: true },
+      {
+        handler: async () => ({ content: [{ type: "text", text: "plain read" }] }),
+        readOnly: true,
+      },
     );
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();

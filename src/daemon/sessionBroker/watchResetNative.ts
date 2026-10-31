@@ -45,6 +45,16 @@ export function nativeWatchReset(config: SessionBrokerHostConfig, timer: Timer):
     lifecycle: new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl), {
       run: (request, boot) => bootAdmissionServices.iosBootInstrumentation().run(request, boot),
     }),
+    reserveBoot: (options) => {
+      const reserve = bootAdmissionServices.iosBootInstrumentation().reserveBoot;
+      return reserve
+        ? reserve(options)
+        : Promise.resolve({
+            run: (operation) => operation(),
+            markReplacedDeviceGone: () => {},
+            release: () => {},
+          });
+    },
     stopDevice: async (device) => {
       // As for an iPhone: the lifecycle handler ends the watch's sessions before the erase.
       const result = readToolPayload(

@@ -35,7 +35,11 @@ const PROFILE = {
   deviceType: WATCH_DEVICE_TYPE.identifier,
 } as const;
 
-function rig(policy: WatchResetPolicy, state = "Booted") {
+function rig(
+  policy: WatchResetPolicy,
+  state = "Booted",
+  { refuseReservation }: { refuseReservation?: Error } = {},
+) {
   const simctl = new FakeWatchLifecycleSimctl([watchDevice({ udid: UDID, state })]);
   const gates: string[] = [];
   const lifecycle = new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl), {
@@ -52,7 +56,26 @@ function rig(policy: WatchResetPolicy, state = "Booted") {
     lifecycle,
     stopDevice: async (device) => {
       stopped.push(device.deviceId);
+      gates.push(`stop:${device.deviceId}`);
       await simctl.killSimulator(device);
+    },
+    reserveBoot: async (options) => {
+      gates.push(`reserve:${options.replacingDeviceId ?? "none"}:${options.reason ?? "none"}`);
+      if (refuseReservation) {
+        throw refuseReservation;
+      }
+      return {
+        run: async (operation) => {
+          gates.push("reserved:start");
+          try {
+            return await operation();
+          } finally {
+            gates.push("reserved:end");
+          }
+        },
+        markReplacedDeviceGone: () => {},
+        release: () => void gates.push("reserved:release"),
+      };
     },
   });
   let owned = true;
@@ -86,7 +109,31 @@ describe("watch release reset follows the iOS reuse mode", () => {
       `erase ${UDID}`,
       `boot ${UDID} ${DEFAULT_DEVICE_READY_TIMEOUT_MS}`,
     ]);
-    expect(r.gates).toEqual([`simulator-boot-gate:${UDID}`]);
+    // The boot slot is reserved against the watch itself before its stop frees it, and held
+    // through the reboot, so no other boot can take it in between (as the iPhone reset does).
+    expect(r.gates).toEqual([
+      `reserve:${UDID}:reset`,
+      "reserved:start",
+      `stop:${UDID}`,
+      `simulator-boot-gate:${UDID}`,
+      "reserved:end",
+      "reserved:release",
+    ]);
+    expect(r.simctl.stateOf(UDID)).toBe("Booted");
+  });
+
+  test("erase refused a boot slot leaves the watch booted and untouched", async () => {
+    const full = new Error("simulator capacity reached");
+    const r = rig({ mode: "erase" }, "Booted", { refuseReservation: full });
+
+    const error = await r.reset().then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(ResetFailureError);
+    expect(r.stopped).toEqual([]);
+    expect(r.simctl.commands).toEqual([]);
     expect(r.simctl.stateOf(UDID)).toBe("Booted");
   });
 

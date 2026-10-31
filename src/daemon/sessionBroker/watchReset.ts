@@ -1,5 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
+import type { BootCapacityReserver } from "../../models/IosBootInstrumentation";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../utils/deviceTimeouts";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -57,6 +58,12 @@ export interface WatchResetDependencies {
   stopDevice: (device: BootedDevice) => Promise<void>;
   timer: Pick<Timer, "now">;
   policy: WatchResetPolicy;
+  /**
+   * The simulator gate's slot reservation. The erase reserves the watch's reboot against its own
+   * UDID before stopping it, as the iPhone reset does, so the slot the stop frees cannot be taken
+   * by another boot before the reboot. Absent when the host gates no simulator boots.
+   */
+  reserveBoot?: BootCapacityReserver["reserveBoot"];
 }
 
 /**
@@ -133,7 +140,7 @@ export class WatchSimulatorReset {
     };
     try {
       await owned();
-      const operation = () => this.eraseAndBoot(device, profile, owned, { phases, signal });
+      const operation = () => this.reservedEraseAndBoot(device, profile, owned, { phases, signal });
       await (runResetBoot ? runResetBoot(operation) : operation());
       await owned();
     } catch (error) {
@@ -146,6 +153,30 @@ export class WatchSimulatorReset {
     return mode === "erase"
       ? { outcome: "clean", mode, phases }
       : { outcome: "fallback:erase", mode, phases, ...(fallbackReason ? { fallbackReason } : {}) };
+  }
+
+  /**
+   * Holds the watch's boot slot from before its stop until its reboot. A refused reservation
+   * happens before any mutation, so the watch is left booted and untouched.
+   */
+  private async reservedEraseAndBoot(
+    device: BootedDevice,
+    profile: WatchResetProfile,
+    owned: () => Promise<void>,
+    options: { phases: Record<string, number>; signal?: AbortSignal },
+  ): Promise<void> {
+    const reservation = await this.dependencies.reserveBoot?.({
+      replacingDeviceId: device.deviceId,
+      timeoutMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+      reason: "reset",
+      signal: options.signal,
+    });
+    const operation = () => this.eraseAndBoot(device, profile, owned, options);
+    try {
+      await (reservation ? reservation.run(operation) : operation());
+    } finally {
+      reservation?.release();
+    }
   }
 
   private async eraseAndBoot(

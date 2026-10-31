@@ -75,17 +75,44 @@ export interface AndroidSessionDeviceRequirement {
 }
 
 /**
+ * An exact Apple Watch simulator (#15882): provisionDevice's watch spec, a watchOS
+ * CoreSimulator runtime and an Apple Watch CoreSimulator device type. There are no
+ * defaults, archetypes or OS predicates: a watch request names exactly one configuration.
+ */
+export interface WatchSessionDeviceSpec {
+  runtime: string;
+  deviceType: string;
+}
+
+export interface WatchSessionDeviceRequirement {
+  schemaVersion: 1;
+  platform: "watchos";
+  spec: WatchSessionDeviceSpec;
+}
+
+/**
  * Consumer-owned device intent. Allocation controls such as slots, lanes, and
  * capacity are deliberately absent.
  */
 export type SessionDeviceRequirement =
   | IosSessionDeviceRequirement
-  | AndroidSessionDeviceRequirement;
+  | AndroidSessionDeviceRequirement
+  | WatchSessionDeviceRequirement;
+
+/** The iOS and Android requirements, which resolve through host defaults and OS predicates. */
+export type DefaultedSessionDeviceRequirement = Exclude<
+  SessionDeviceRequirement,
+  WatchSessionDeviceRequirement
+>;
 
 export interface CatalogProvenance {
   source: string;
   revision: string;
-  state: "ready" | "unavailable";
+  /**
+   * `unavailable`: the catalog could not be read (transient). `not-installed`: this host cannot
+   * have the catalog at all (Apple Watch simulators off macOS), which is permanent.
+   */
+  state: "ready" | "unavailable" | "not-installed";
   message?: string;
 }
 
@@ -152,7 +179,30 @@ export interface AndroidSessionDeviceCatalog {
   hostAbis?: readonly string[];
 }
 
-export type SessionDeviceCatalog = IosSessionDeviceCatalog | AndroidSessionDeviceCatalog;
+export interface WatchCatalogRuntime {
+  runtime: string;
+  osVersion?: string;
+  /** simctl reports the runtime available on this host. */
+  installed: boolean;
+}
+
+export interface WatchCatalogDeviceType {
+  deviceType: string;
+  name: string;
+}
+
+/** Installed watchOS runtimes and Apple Watch device types; `unavailable` is never "empty". */
+export interface WatchSessionDeviceCatalog {
+  platform: "watchos";
+  provenance: CatalogProvenance;
+  runtimes: readonly WatchCatalogRuntime[];
+  deviceTypes: readonly WatchCatalogDeviceType[];
+}
+
+export type SessionDeviceCatalog =
+  | IosSessionDeviceCatalog
+  | AndroidSessionDeviceCatalog
+  | WatchSessionDeviceCatalog;
 
 export interface OsDefaultPolicy {
   /** Predicate applied when the request omits OS intent. */
@@ -249,6 +299,15 @@ export type NormalizedSessionDeviceRequirement =
   | NormalizedIosSessionDeviceRequirement
   | NormalizedAndroidSessionDeviceRequirement;
 
+/** A watch request validated against the installed watch catalog; it resolves to itself. */
+export interface NormalizedWatchSessionDeviceRequirement {
+  platform: "watchos";
+  original: WatchSessionDeviceRequirement;
+  profile: WatchSessionDeviceProfile;
+  catalogSource: string;
+  catalogRevision: string;
+}
+
 export interface IosSessionDeviceProfile {
   platform: "ios";
   metadataState: CatalogMetadataState;
@@ -274,7 +333,18 @@ export interface AndroidSessionDeviceProfile {
   flavor?: string;
 }
 
-export type SessionDeviceProfile = IosSessionDeviceProfile | AndroidSessionDeviceProfile;
+/** An Apple Watch simulator's exact identity: the runtime and device type it was created with. */
+export interface WatchSessionDeviceProfile {
+  platform: "watchos";
+  metadataState: "current";
+  runtime: string;
+  deviceType: string;
+}
+
+export type SessionDeviceProfile =
+  | IosSessionDeviceProfile
+  | AndroidSessionDeviceProfile
+  | WatchSessionDeviceProfile;
 
 export type DevicePredicateMismatchReason =
   | "platform"

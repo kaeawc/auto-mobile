@@ -121,6 +121,15 @@ export class FakeWatchLifecycleSimctl extends FakeWatchSimctl implements WatchLi
     this.setState(device.deviceId, "Shutdown");
   }
 
+  /** `simctl erase`: like simctl, it refuses a simulator that is not shut down. */
+  async eraseSimulator(udid: string): Promise<void> {
+    this.commands.push(`erase ${udid}`);
+    const state = this.stateOf(udid);
+    if (state !== "Shutdown") {
+      throw new Error(`Unable to erase contents and settings in current state: ${state}`);
+    }
+  }
+
   stateOf(udid: string): string | undefined {
     return this.find(udid)?.state;
   }

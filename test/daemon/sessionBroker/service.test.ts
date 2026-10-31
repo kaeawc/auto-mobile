@@ -40,6 +40,8 @@ import { DEFAULT_ANDROID_RESET_TIMEOUT_MS } from "../../../src/daemon/sessionBro
 import { FakeAndroidKeepBootedResetPort } from "../../fakes/FakeAndroidKeepBootedResetPort";
 import { FakeDeviceMutationJournal } from "../../fakes/FakeDeviceMutationJournal";
 import { ANDROID_RESET_DEVICE } from "./fixtures/androidReset";
+import { adaptWatchSessionDeviceCatalog } from "../../../src/devices/sessionCatalog/watchCatalogAdapter";
+import { WATCH_DEVICE_TYPE, WATCH_RUNTIME, WATCH_RUNTIME_ID } from "../../fakes/FakeWatchSimctl";
 
 const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
@@ -414,6 +416,72 @@ describe("session broker service lifecycle", () => {
     expect(controller.signal.aborted).toBe(false);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
+  test("never attaches a mutation recorder to a recovered watch session", async () => {
+    const timer = new FakeTimer();
+    await registry.ensureScope(SESSION_BROKER_SCOPE);
+    const store = registry.sessionBrokerStore(BROKER_SCOPE_KEY);
+    const devices = new FakeNativePort(registry, undefined, OWNER);
+    const bootstrap = new SessionBroker({
+      store,
+      devices,
+      owner: OWNER,
+      timer,
+      limits: {},
+      catalog: async (platform) =>
+        platform === "watchos"
+          ? adaptWatchSessionDeviceCatalog({
+              runtimes: [WATCH_RUNTIME],
+              deviceTypes: [WATCH_DEVICE_TYPE],
+            })
+          : iosCatalog(),
+      defaults: () => iosDefaults(),
+    });
+    const result = await bootstrap.prepare(
+      {
+        contractVersion: 1,
+        requestId: "restore-watch-recorder",
+        device: {
+          schemaVersion: 1,
+          platform: "watchos",
+          spec: { runtime: WATCH_RUNTIME_ID, deviceType: WATCH_DEVICE_TYPE.identifier },
+        },
+      },
+      "consumer-token",
+    );
+    expect(result.outcome).toBe("ready");
+    const sessionUuid = result.sessionUuid!;
+    const resource = devices.sessions.get(sessionUuid)!;
+    const assignment = (await registry.getAssignment({
+      scopeKey: BROKER_SCOPE_KEY,
+      bindingIndex: resource.allocationIndex,
+    }))!;
+    // The session names the binding's exact device, so only the watch guard can refuse it.
+    const session: Pick<
+      Session,
+      "sessionId" | "assignedDevice" | "mutationRecorder" | "heartbeatTimeoutMs"
+    > = {
+      sessionId: sessionUuid,
+      assignedDevice: assignment.stableDeviceId!,
+      heartbeatTimeoutMs: 4000,
+    };
+    const service = await openSessionBrokerService({
+      ...openOptions(timer, new RecordingLock()),
+      deferStart: true,
+      recordingGaps: new InMemoryMutationRecordingGaps(),
+      mutationSessions: {
+        peekSession: (uuid) => (uuid === sessionUuid ? session : null),
+        recordHeartbeat: () => {},
+      },
+      liveSessionIds: () => [sessionUuid],
+    });
+    try {
+      expect(await service.recoverMutationRecorder(sessionUuid)).toBeUndefined();
+      expect(session.mutationRecorder).toBeUndefined();
+    } finally {
+      await service.close();
+    }
+  });
+
   test.each([
     "startup",
     "late recovery",

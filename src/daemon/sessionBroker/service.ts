@@ -10,7 +10,11 @@ import type { BootedDevice } from "../../models/DeviceInfo";
 import {
   readAndroidSessionDeviceCatalog,
   readIosSessionDeviceCatalog,
+  readWatchSessionDeviceCatalog,
 } from "../../devices/sessionCatalog";
+import { WatchSimulatorInventory } from "../../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import type { SessionCatalogPlatform } from "./brokerOptions";
+import { nativeWatchReset } from "./watchResetNative";
 import type { SessionDeviceCatalog } from "../../devices/sessionRequirements";
 import {
   listDevices,
@@ -146,7 +150,10 @@ export interface OpenSessionBrokerServiceOptions {
   liveSessionIds?: () => readonly string[];
   /** Tests supply a fake host lock; production shares the registry's physical namespace. */
   hostLock?: SessionBrokerHostLock;
-  catalog?: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
+  catalog?: (
+    platform: SessionCatalogPlatform,
+    signal?: AbortSignal,
+  ) => Promise<SessionDeviceCatalog>;
   androidReset?: {
     inventory(options: {
       signal?: AbortSignal;
@@ -160,7 +167,15 @@ export interface OpenSessionBrokerServiceOptions {
 
 function nativeCatalogReader(config: SessionBrokerHostConfig) {
   const ios = new SimCtlClient(null);
-  return (platform: "ios" | "android", signal?: AbortSignal): Promise<SessionDeviceCatalog> => {
+  // Apple Watch simulators exist only where simctl does; elsewhere the catalog is not installed.
+  const watches = process.platform === "darwin" ? new WatchSimulatorInventory(ios) : undefined;
+  return (
+    platform: SessionCatalogPlatform,
+    signal?: AbortSignal,
+  ): Promise<SessionDeviceCatalog> => {
+    if (platform === "watchos") {
+      return readWatchSessionDeviceCatalog(watches, { signal });
+    }
     if (platform === "ios") {
       return readIosSessionDeviceCatalog(ios, {
         signal,
@@ -261,6 +276,7 @@ export async function openSessionBrokerService(
             resetBaseline: {
               ios: resetIosBaseline,
               android: reset.android,
+              watch: reset.watch,
             },
             captureIosBaseline,
             isCurrentReset: (resource: BrokerResourceRecord) => isCurrentReset(store, resource),
@@ -351,6 +367,23 @@ async function recoverActiveMutationRecorders(
   }
 }
 
+/**
+ * The resource of an active broker session whose device mutations are recorded. A watch session
+ * never records them (no journal, baseline or runner): its binding skips the recorder, so recovery
+ * must not attach one either (#15882).
+ */
+async function recordableSessionResource(
+  store: Pick<SqliteSessionBrokerStore, "getSession" | "getResource">,
+  sessionUuid: string,
+): Promise<BrokerResourceRecord | undefined | "not-recordable"> {
+  const request = await store.getSession(sessionUuid);
+  if (request?.state !== "active" || !request.resourceId) {
+    return "not-recordable";
+  }
+  const resource = await store.getResource(request.resourceId);
+  return resource && nativeProfile(resource).platform === "watchos" ? "not-recordable" : resource;
+}
+
 async function recoverSessionMutationRecorder(
   options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "registry">,
   store: Pick<SqliteSessionBrokerStore, "getSession" | "getResource">,
@@ -370,11 +403,10 @@ async function recoverSessionMutationRecorder(
   if (!session) {
     return undefined;
   }
-  const request = await store.getSession(sessionUuid);
-  if (request?.state !== "active" || !request.resourceId) {
+  const resource = await recordableSessionResource(store, sessionUuid);
+  if (resource === "not-recordable") {
     return undefined;
   }
-  const resource = await store.getResource(request.resourceId);
   const assignment = resource
     ? await options.registry.getAssignment({ scopeKey, bindingIndex: resource.allocationIndex })
     : null;
@@ -570,6 +602,8 @@ function nativeBaselineReset(
   return reuseIos || config.reuseAndroidCleanDevices
     ? {
         ios: reuseIos ? nativeIosBaselineReset() : undefined,
+        // An Apple Watch follows the iOS reuse mode (#15882).
+        watch: nativeWatchReset(config, timer),
         android:
           config.reuseAndroidCleanDevices && config.defaults.android
             ? nativeAndroidBaselineReset(androidReset!, timer, config, { journal, recordingGaps })

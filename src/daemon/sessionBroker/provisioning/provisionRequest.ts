@@ -12,7 +12,10 @@ export type BrokerDeviceRequest = {
   bindingIndex: number;
   role: string;
   priorDeviceHint?: { stableId: string };
-} & (
+} & BrokerDeviceSpecRequest;
+
+/** A binding request's platform and its requested spec, correlated per platform. */
+export type BrokerDeviceSpecRequest =
   | {
       platform: "android";
       requestedSpec: Omit<AndroidDeviceSpecification, "deviceType"> & {
@@ -28,8 +31,7 @@ export type BrokerDeviceRequest = {
       };
     }
   /** One unpaired Apple Watch simulator, by exact runtime and device type (#15882). */
-  | { platform: "watchos"; requestedSpec: WatchBindingSpec }
-);
+  | { platform: "watchos"; requestedSpec: WatchBindingSpec };
 /** Internal provisioning request, built directly by the broker without launch contract parsing. */
 export interface BrokerProvisionRequest {
   contractVersion: 1;

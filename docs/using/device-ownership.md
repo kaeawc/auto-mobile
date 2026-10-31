@@ -345,6 +345,20 @@ watch, even after one was selected.
   read the screenshot rather than treating the screen as empty. Options that
   need a hierarchy (`waitFor`, `raw`, `project`, `scope`, `layer`, `crop` and
   the like), `screenshot: "none"` and `screenshotOptions` are refused by name.
+- A session request (`--session-config` / `AUTOMOBILE_SESSION_CONFIG`) asks for
+  a watch with `device: { "schemaVersion": 1, "platform": "watchos", "spec": {
+  "runtime": "...", "deviceType": "..." } }`: the exact watchOS runtime and Apple
+  Watch device type identifiers, as for `provisionDevice`. An unknown device type
+  fails with `unsupported_hardware` and an unknown or unavailable runtime with
+  `missing_installed_runtime`, both naming the available ones; a host that is not
+  a Mac fails with `unsupported_hardware`, and an unreadable simulator catalog with
+  retryable `catalog_unavailable`. A ready result carries the watch's `profile`
+  and `readiness: { "mode": "none", "status": "device_ready" }`: the watch is
+  booted, with no automation runner. A watch counts against the same device limit
+  as every other device. On release the host's iOS reuse mode decides what
+  happens to the watch: `erase` erases and reboots it for the next request with
+  the same runtime and device type, `keep-booted` erases it (or destroys it when
+  its fallback is `destroy`), and `minimal` or no reuse deletes it.
 - Every other device tool refuses a watch with `<tool> does not support watchOS
   yet`. `startDevice` and `killDevice` start and stop a watch named with
   `platform: "watchos"`.

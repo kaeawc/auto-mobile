@@ -5,7 +5,10 @@ import { nativeProfile } from "./profile";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import { destructionTicket, type BrokerResourceRecord, type DestructionTicket } from "./store";
 
-/** Per-platform idle time-to-live; an omitted platform keeps idle devices until evicted. */
+/**
+ * Per-platform idle time-to-live; an omitted platform keeps idle devices until evicted. An Apple
+ * Watch simulator follows the iOS simulator entry (#15882).
+ */
 export type IdlePoolTtlMs = Partial<Record<"ios" | "android", number>>;
 
 interface IdleObservation {
@@ -82,7 +85,8 @@ export class IdlePoolExpiry {
 
   private ttlFor(resource: BrokerResourceRecord): number | undefined {
     try {
-      return this.ttlMs[nativeProfile(resource).platform];
+      const platform = nativeProfile(resource).platform;
+      return this.ttlMs[platform === "watchos" ? "ios" : platform];
     } catch (error) {
       // A damaged profile is never expired here; recovery owns that resource's reservation.
       logger.warn(

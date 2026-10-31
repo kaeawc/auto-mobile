@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { batchClientDevice } from "./brokerBatch";
 import { osSelectorMatchesVersion } from "../../src/devices/sessionRequirements/version";
 import {
   NO_PREPARATION_BUDGET_REASON,
@@ -223,11 +224,13 @@ async function ended(ctx: BrokerScenarioContext, c: BrokerScenarioClient) {
 function profile(c: BrokerScenarioClient, result: SessionBrokerResult) {
   assert.equal(result.profile?.platform, c.config.device.platform);
   const p = result.profile!;
-  const hardware = c.config.device.hardware;
+  const device = batchClientDevice(c.config);
+  assert(p.platform !== "watchos", "Manual-test device scenarios drive only iOS and Android.");
+  const hardware = device.hardware;
   if (hardware.kind === "archetype") {
     assert.equal(p.archetype, hardware.archetype);
   }
-  const os = c.config.device.os;
+  const os = device.os;
   if (os.kind !== "omitted") {
     assert(
       p.osVersion && osSelectorMatchesVersion(os, p.osVersion),

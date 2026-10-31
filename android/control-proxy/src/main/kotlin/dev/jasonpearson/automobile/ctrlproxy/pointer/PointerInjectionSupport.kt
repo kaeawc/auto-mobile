@@ -7,8 +7,8 @@ package dev.jasonpearson.automobile.ctrlproxy.pointer
  * it is given `--no-restart`. The instrumentation targets CtrlProxy's own package, so without that
  * flag every injection would kill the accessibility service and its WebSocket server. Measured on
  * emulators (#13082): API 30's `am` rejects the flag, while API 31, 32, 33 and 37 accept it,
- * inject, and keep the service bound. The host always passes it, and older devices do not
- * advertise the route, so a hover is refused there instead of dropping the connection.
+ * inject, and keep the service bound. The host always passes it, and older devices do not advertise
+ * the route, so a hover is refused there instead of dropping the connection.
  */
 internal object PointerInjectionSupport {
   const val MIN_SDK = 31

@@ -8,8 +8,9 @@ injection path can carry and the direction that follows (#12539). Companion spik
 
 **Status:** shipped so far (#13081): a stylus pointer on `tapAt` and a straight
 `swipeAt` for Android 12+, at pressure 1.0. Otherwise a research note. Nothing was
-run on an emulator, simulator or device; claims needing a device are marked
-**unverified** and carried into the [verification plan](#verification-plan).
+verified on physical hardware; the iOS simulator probe is recorded below. Remaining
+claims needing a device are marked **unverified** and carried into the
+[verification plan](#verification-plan).
 
 ## Evidence levels
 
@@ -156,23 +157,22 @@ them. That header declares:
 It declares nothing for Apple Pencil tilt, azimuth, roll or hover, and no stylus
 tool type.
 
-Two consequences, both **unverified** until run:
+The simulator probe in #13083 establishes two limits:
 
-- **Pressure.** The private API accepts a pressure value, but whether the simulator
-  or a device honors it for a plain touch is not established. **Reported:** a
-  pressure value sent through Appium's touch actions to WebDriverAgent returns
-  success on an iPad simulator and device and has no visible effect
+- **Pressure.** The private pressure selectors accept and range-check values, and
+  raw `XCPointerEvent` pressure is delivered, but `UITouch.force` stays `0.000`.
+  Pressure and Pencil injection are a no-go on the simulator: pressure has no
+  observable effect, and selector inventory exposes no pen, Pencil, tilt, azimuth,
+  altitude or tool-type selector on `XCPointerEvent`, `XCPointerEventPath` or
+  `XCSynthesizedEventRecord`. `setDeviceID` values 0–3 still produce touch type 0.
+  Public force press returns "Force press events are not supported for this device."
+  A pressure fallback cannot be validated there. **Reported:** Appium pressure
+  actions likewise succeed without visible effect
   ([Appium forum thread](https://discuss.appium.io/t/uitouch-with-force-pressure/30470)).
-  **Reported:** force touch in the Simulator is enabled via _I/O → Touch Pressure_
-  with trackpad force, not XCUITest
-  ([Apple developer forums](https://developer.apple.com/forums/thread/705708)).
-- **Hover.** The public route to try first is XCTest's own `XCUIElement.hover()` and
-  the coordinate-based `XCUICoordinate.hover()`, which would give a coordinate `hoverAt`
-  a documented primitive. Their availability on iOS and iPadOS (reported as iPadOS 15
-  and later) was **not confirmed** here. Only if the public call fails the probe is
-  the fallback a mouse-style private path moved without a pressed button, which needs
-  the runner to declare and call the mouse selectors first; whether the simulator's
-  iPadOS delivers hover to the app for either is unknown.
+- **Hover.** Mouse pointer paths produce `UIHoverGestureRecognizer` begin/end
+  callbacks on the simulator. Pencil hover is not observed. Public
+  `XCUIElement.hover()` and `XCUICoordinate.hover()` exist, but this observation is
+  from mouse pointer paths and does not establish the public calls' behavior.
 
 ### Physical devices
 
@@ -184,16 +184,16 @@ platforms), so there is no iOS recorder representation to extend.
 
 ## Capability matrix
 
-| Capability                          | Android emulator                                                                                    | Android device                                     | iOS simulator                                                                       | iOS device                  |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------- |
-| Stylus tool type, constant pressure | Supported via `adb shell input stylus` on API 31+; earlier releases drop the tool type (**Source**) | Same (**Source**)                                  | Unverified (no stylus selector in the header)                                       | Unverified                  |
-| Pressure curve                      | Unverified (`uinput`/console)                                                                       | Unverified (`UiAutomation`; `uinput` is root-only) | Unverified (private `pressDownWithPressure`; **Reported** no effect through Appium) | Unverified                  |
-| Tilt, eraser, barrel button         | Unverified                                                                                          | Unverified (`UiAutomation`; `uinput` is root-only) | Impossible via known paths (**Source**)                                             | Impossible without a Pencil |
-| Hover                               | Unverified (evdev only)                                                                             | Unverified (`UiAutomation`; `uinput` is root-only) | Unverified (mouse path)                                                             | Unverified                  |
-| Records the above                   | Partly: tool type, pressure, buttons (#13101); not hover or replay (**Source**)                     | Same (**Source**)                                  | No (**Source**, Android-only recorder)                                              | No (**Source**)             |
+| Capability                          | Android emulator                                                                                    | Android device                                     | iOS simulator                                                         | iOS device                  |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------- | --------------------------- |
+| Stylus tool type, constant pressure | Supported via `adb shell input stylus` on API 31+; earlier releases drop the tool type (**Source**) | Same (**Source**)                                  | No-go: no Pencil tool type; accepted pressure leaves force 0 (#13083) | Unverified                  |
+| Pressure curve                      | Unverified (`uinput`/console)                                                                       | Unverified (`UiAutomation`; `uinput` is root-only) | No-go: accepted pressure leaves force 0 (#13083)                      | Unverified                  |
+| Tilt, eraser, barrel button         | Unverified                                                                                          | Unverified (`UiAutomation`; `uinput` is root-only) | No-go via known paths: no pen or tool-type selectors (#13083)         | Impossible without a Pencil |
+| Hover                               | Unverified (evdev only)                                                                             | Unverified (`UiAutomation`; `uinput` is root-only) | Observed on mouse pointer paths; Pencil hover not observed (#13083)   | Unverified                  |
+| Records the above                   | Partly: tool type, pressure, buttons (#13101); not hover or replay (**Source**)                     | Same (**Source**)                                  | No (**Source**, Android-only recorder)                                | No (**Source**)             |
 
-"Supported" means a documented path exists in source. Nothing in the table other
-than the `adb shell input stylus` cells has been demonstrated.
+"Supported" means a documented path exists in source. Mouse pointer hover is
+observed on the iOS simulator; pressure and Pencil injection are a no-go there.
 
 ## Direction
 
@@ -230,11 +230,11 @@ Open items are answered by running them, each as a follow-up issue (below):
    `uinput` and emulator-console evdev for a pressure curve, tilt, `BTN_TOOL_PEN`
    hover, `BTN_TOOL_RUBBER` (eraser) and `BTN_STYLUS`/`BTN_STYLUS2` (barrel buttons),
    recording the root and image requirements for each.
-2. **iOS simulator:** probe the public `XCUIElement.hover()` and `XCUICoordinate.hover()`
-   first, against a probe view that logs `UITouch.force`, `maximumPossibleForce`,
-   `UITouch.type` and hover callbacks, and confirm their availability. Only if they fail,
-   declare the pressure and mouse selectors in the runner (behind the existing selector
-   probes) and try `pressDownWithPressure` and a mouse-style path.
+2. **iOS simulator:** the probe in #13083 (Xcode 26.6, iPad Pro 13-inch (M5),
+   iOS 26.5, base `f8d061423c9`) establishes pressure and Pencil injection as a
+   no-go: accepted pressure leaves `UITouch.force` at 0, and no Pencil tool type
+   is exposed. Mouse pointer hover produces `UIHoverGestureRecognizer` begin/end;
+   Pencil hover is not observed.
 3. **Physical iOS device:** repeat the probe if a device is available; otherwise
    record Pencil as out of scope.
 

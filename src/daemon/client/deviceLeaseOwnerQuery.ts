@@ -78,13 +78,34 @@ type OwnerAnswer<T> =
 export class DaemonDeviceLeaseOwnerProbe
   implements ForwardLeaseOwnerProbe, ForwardLeaseRelinquishProbe
 {
+  private readonly exchange: DaemonSocketExchange;
+  private readonly timer: Timer;
+  private readonly ids: IdGenerator;
+  private readonly timeoutMs: number;
+  private readonly relinquishTimeoutMs: number;
+
+  /**
+   * @param exchange - Sends one frame to the owner socket and reads its answer
+   * @param timer - Clock for request timeouts
+   * @param ids - Request id source
+   * @param options.timeoutMs - Status query timeout
+   * @param options.relinquishTimeoutMs - Relinquish request timeout
+   */
   constructor(
-    private readonly exchange: DaemonSocketExchange = rawDaemonSocketExchange,
-    private readonly timer: Timer = defaultTimer,
-    private readonly ids: IdGenerator = defaultIdGenerator,
-    private readonly timeoutMs: number = DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS,
-    private readonly relinquishTimeoutMs: number = DEVICE_LEASE_RELINQUISH_TIMEOUT_MS,
-  ) {}
+    exchange: DaemonSocketExchange = rawDaemonSocketExchange,
+    timer: Timer = defaultTimer,
+    ids: IdGenerator = defaultIdGenerator,
+    {
+      timeoutMs = DEVICE_LEASE_OWNER_QUERY_TIMEOUT_MS,
+      relinquishTimeoutMs = DEVICE_LEASE_RELINQUISH_TIMEOUT_MS,
+    }: { timeoutMs?: number; relinquishTimeoutMs?: number } = {},
+  ) {
+    this.exchange = exchange;
+    this.timer = timer;
+    this.ids = ids;
+    this.timeoutMs = timeoutMs;
+    this.relinquishTimeoutMs = relinquishTimeoutMs;
+  }
 
   async query(socketPath: string, deviceId: string): Promise<ForwardLeaseOwnerReport> {
     const answer = await this.request(socketPath, DAEMON_DEVICE_LEASE_STATUS_METHOD, deviceId, {

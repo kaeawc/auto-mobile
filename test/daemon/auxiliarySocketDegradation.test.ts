@@ -65,7 +65,10 @@ function identityHarness(
     writeEarlyOwnerRecord: async () => {},
     persistPidFileData: persist,
   };
-  return new DaemonIdentity(host, { stat }, platform, () => ":memory:", reportStartupFailure);
+  return new DaemonIdentity(host, { stat }, platform, {
+    databasePath: () => ":memory:",
+    reportStartupFailure,
+  });
 }
 
 class RefusedStream implements SocketServerLifecycle {

@@ -22,7 +22,10 @@ function setup(): {
   const queue = new FakeQueue();
   const timer = new FakeTimer();
   const stalls: OutboundWriteStall[] = [];
-  const guard = new OutboundWriteGuard(queue, timer, (stall) => stalls.push(stall), MAX, STALL_MS);
+  const guard = new OutboundWriteGuard(queue, timer, (stall) => stalls.push(stall), {
+    maxQueuedBytes: MAX,
+    stallTimeoutMs: STALL_MS,
+  });
   return { queue, guard, timer, stalls };
 }
 

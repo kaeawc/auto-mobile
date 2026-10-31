@@ -70,16 +70,11 @@ async function harness() {
     heartbeatTimeoutMs: 1000,
     hasReceivedHeartbeat: false,
   });
-  const writer = new SerializedSessionRowWriter(
-    persistence,
-    timer,
-    sequenceBackoff([10, 20, 30]),
+  const writer = new SerializedSessionRowWriter(persistence, timer, sequenceBackoff([10, 20, 30]), {
     logger,
-    {
-      timeoutMs: TIMEOUT,
-      timeoutError: () => new Error("deadline"),
-    },
-  );
+    timeoutMs: TIMEOUT,
+    timeoutError: () => new Error("deadline"),
+  });
   return {
     persistence,
     timer,

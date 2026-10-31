@@ -2821,7 +2821,7 @@ describe("Daemon manager process detection", () => {
       () => "20 1 12 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
       "linux",
       timer,
-      () => token,
+      { linuxProcessGenerationTokenForPid: () => token },
     );
 
     const beforeClockJump = finder.findDaemonProcesses()[0]!;
@@ -2931,7 +2931,7 @@ describe("Daemon manager process detection", () => {
         },
         platform,
         new FakeTimer(),
-        () => linuxProcessGenerationToken,
+        { linuxProcessGenerationTokenForPid: () => linuxProcessGenerationToken },
       );
 
       expect(finder.findDaemonProcesses()).toEqual([
@@ -2993,7 +2993,7 @@ describe("Daemon manager process detection", () => {
       },
       "linux",
       timer,
-      () => linuxProcessGenerationToken,
+      { linuxProcessGenerationTokenForPid: () => linuxProcessGenerationToken },
     );
 
     expect(finder.findDaemonProcesses()).toEqual([

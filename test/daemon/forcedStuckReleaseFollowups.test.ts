@@ -48,7 +48,7 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
+    { reason }: { reason: string },
   ): Promise<void> {
     this.releaseWrites.push(`${sessionUuid}:${status}:${reason}`);
     if (this.failReleases > 0) {
@@ -56,7 +56,7 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
       throw new Error("SQLITE_BUSY");
     }
     await this.parkRelease;
-    await super.markReleased(sessionUuid, status, releasedAtMs, reason);
+    await super.markReleased(sessionUuid, status, releasedAtMs, { reason });
   }
 }
 

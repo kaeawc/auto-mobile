@@ -121,7 +121,7 @@ describe("persisted session stamps cross daemons as wall epoch ms (#11162)", () 
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: true,
     });
-    await repository.markReleased("s", "expired", timer.now(), "daemon-restart");
+    await repository.markReleased("s", "expired", timer.now(), { reason: "daemon-restart" });
 
     timer.advanceTime(60_000);
     const summary = await reader.rehydratePersistedSessions(assigner(reader));
@@ -206,7 +206,9 @@ describe("a daemon reads back its own rows without a wall step shifting them (#1
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: true,
     });
-    await repository.markReleased("s", "released", timer.now(), deviceRestartReleaseReason("P"));
+    await repository.markReleased("s", "released", timer.now(), {
+      reason: deviceRestartReleaseReason("P"),
+    });
     timer.advanceTime(10_000);
 
     expect(await writer.isReleasedSessionInRestartRecoveryWindow("s")).toBe(true);

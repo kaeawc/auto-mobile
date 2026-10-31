@@ -87,7 +87,7 @@ class Run {
     this.manager = this.newManager();
     const mark = this.persistence.markReleased.bind(this.persistence);
     this.persistence.markReleased = (...args) => {
-      this.effects.push(`attempt:${args[3]}`);
+      this.effects.push(`attempt:${args[3].reason}`);
       return mark(...args);
     };
     const upsert = this.persistence.upsertActiveSession.bind(this.persistence);
@@ -187,7 +187,7 @@ class Run {
     };
     let first = true;
     this.persistence.markReleased = async (...args) => {
-      this.effects.push(`attempt:${args[3]}`);
+      this.effects.push(`attempt:${args[3].reason}`);
       if (first) {
         first = false;
         await this.parked!.promise;
@@ -345,7 +345,9 @@ class Run {
     const intent = new FileTerminalReleaseJournal(FILE, this.files).loadUnconfirmed()[0];
     if (!intent && before?.status === "active") {
       // Bootstrap marks a dead daemon's active rows recoverable before manager rehydration.
-      await this.persistence.markReleased(UUID, "released", this.timer.now(), "daemon-restart");
+      await this.persistence.markReleased(UUID, "released", this.timer.now(), {
+        reason: "daemon-restart",
+      });
     }
     await this.manager.rehydratePersistedSessions(pool);
     this.manager.stopCleanupTimer();

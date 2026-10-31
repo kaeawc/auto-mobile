@@ -90,8 +90,8 @@ class DeferredRowRepository extends DeviceSessionRepository {
   override async markReleased(
     ...args: Parameters<DeviceSessionRepository["markReleased"]>
   ): Promise<void> {
-    this.releases.push(args[3]);
-    this.releaseGenerations.push(args[4]?.expectedRowGeneration);
+    this.releases.push(args[3].reason);
+    this.releaseGenerations.push(args[3].expectedRowGeneration);
     this.releaseEntered?.(this.releases.length);
     await (this.releaseGates.shift() ?? this.releaseGate);
     if (this.failReleases > 0) {
@@ -393,7 +393,7 @@ describe("remaining session row writes (#11557)", () => {
     await settle();
     expect(timer.getPendingTimeouts()).toEqual([RETRY_MS]);
     // Another shutdown handoff already landed before the retry: equal-reason writes stay legal.
-    await peer.markReleased(SESSION, "released", timer.now(), "daemon-shutdown");
+    await peer.markReleased(SESSION, "released", timer.now(), { reason: "daemon-shutdown" });
     await timer.advanceTimeAsync(RETRY_MS);
     await settle();
     gate.resolve();
@@ -412,7 +412,7 @@ describe("remaining session row writes (#11557)", () => {
       if (reason === "daemon-restart") {
         await sweep();
       } else if (reason !== "active") {
-        await peer.markReleased(SESSION, "released", timer.now(), reason);
+        await peer.markReleased(SESSION, "released", timer.now(), { reason });
       }
       await manager.releaseSession(SESSION, PLAN);
       expect(await row()).toMatchObject({
@@ -510,7 +510,7 @@ describe("remaining session row writes (#11557)", () => {
     store.activityGate = gate.promise;
     const activity = refresh();
     await settle();
-    await peer.markReleased(SESSION, "released", timer.now(), "owner-disconnected");
+    await peer.markReleased(SESSION, "released", timer.now(), { reason: "owner-disconnected" });
     await db
       .updateTable("device_sessions")
       .set({ daemon_session_id: "daemon-peer" })

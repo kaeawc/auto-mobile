@@ -56,7 +56,7 @@ describe("restart-recovery reservation vs. an autolock acquisition by another cl
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: true,
     });
-    await persistence.markReleased(ROW, "expired", 0, "daemon-restart");
+    await persistence.markReleased(ROW, "expired", 0, { reason: "daemon-restart" });
     sessions = new SessionManager(timer, persistence);
     sessions.stopCleanupTimer();
     const manager = new FakeDeviceManager();

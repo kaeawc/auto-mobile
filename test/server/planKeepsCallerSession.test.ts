@@ -157,12 +157,9 @@ test.each(["plan", "caller", "released-and-reacquired"] as const)(
           heartbeatTimeoutMs: 60_000,
           hasReceivedHeartbeat: false,
         });
-        await hunt.persistence.markReleased(
-          BASE,
-          "released",
-          hunt.timer.now(),
-          "plan-auto-release",
-        );
+        await hunt.persistence.markReleased(BASE, "released", hunt.timer.now(), {
+          reason: "plan-auto-release",
+        });
       }
       hunt.setProbeStep(async () => {
         throw new Error("recoverable probe failure");

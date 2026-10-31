@@ -254,7 +254,7 @@ export async function setupAwaitingOwner(manager: LaggingShutdownManager) {
     heartbeatTimeoutMs: 10_000,
     hasReceivedHeartbeat: true,
   });
-  await persistence.markReleased("session", "expired", 0, "daemon-restart");
+  await persistence.markReleased("session", "expired", 0, { reason: "daemon-restart" });
   const sessions = new SessionManager(timer, persistence);
   const pool = new DevicePool(
     createDevicePoolDependencies(sessions, "restarted-daemon", {

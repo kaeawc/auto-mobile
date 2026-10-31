@@ -455,7 +455,9 @@ describe("managed-execution session liveness", () => {
         await manager.adoptManagedExecutionLivenessPolicy(SESSION);
       }
       manager.stopCleanupTimer();
-      await persistence.markReleased(SESSION, "released", timer.now(), "daemon-restart");
+      await persistence.markReleased(SESSION, "released", timer.now(), {
+        reason: "daemon-restart",
+      });
       timer.setCurrentTime(30 * MINUTE);
       manager = new SessionManager(timer, persistence);
       await manager.rehydratePersistedSessions({

@@ -44,7 +44,7 @@ async function harness() {
   let maxActive = 0;
   const mark = persistence.markReleased.bind(persistence);
   persistence.markReleased = async (...args) => {
-    attempts.push(args[3]);
+    attempts.push(args[3].reason);
     active++;
     maxActive = Math.max(active, maxActive);
     try {

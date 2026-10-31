@@ -125,7 +125,7 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
           upserts.push(session.sessionUuid);
         },
         async recordActivity() {},
-        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+        async markReleased(_sessionUuid, status, releasedAtMs, { reason: releaseReason }) {
           releaseReasons.push(releaseReason);
           persisted.status = status;
           persisted.released_at_ms = releasedAtMs;

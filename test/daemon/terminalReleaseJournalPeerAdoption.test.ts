@@ -112,12 +112,9 @@ async function world() {
       timeoutMs: IDLE_MS,
       stableDeviceId: STABLE_ID,
     });
-    await repository.markReleased(
-      "s",
-      "expired",
-      timer.now(),
-      deviceRestartReleaseReason(STABLE_ID),
-    );
+    await repository.markReleased("s", "expired", timer.now(), {
+      reason: deviceRestartReleaseReason(STABLE_ID),
+    });
     // B starts while A is live: startup adoption leaves A's journal alone.
     return { a, b: start("daemon-b") };
   };

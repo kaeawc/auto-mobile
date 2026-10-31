@@ -58,7 +58,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       hasReceivedHeartbeat: true,
     });
     if (reason) {
-      await repo.markReleased(SESSION, "released", 1_000, reason);
+      await repo.markReleased(SESSION, "released", 1_000, { reason });
     }
   }
 

@@ -31,7 +31,7 @@ describe("liveness handoff through the real repository without a schema change",
   }
 
   async function rehydrate() {
-    await repo.markReleased("handoff", "expired", timer.now(), "daemon-restart");
+    await repo.markReleased("handoff", "expired", timer.now(), { reason: "daemon-restart" });
     manager.stopCleanupTimer();
     timer.advanceTime(1_000);
     manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });

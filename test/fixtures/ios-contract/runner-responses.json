@@ -691,6 +691,7 @@
             "right" : 390,
             "top" : 0
           },
+          "bundleId" : "fixture.app",
           "capabilities" : [
 
           ],

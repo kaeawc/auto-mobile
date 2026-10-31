@@ -30,6 +30,7 @@ public struct ObservationBridgeState: Codable, Equatable, Sendable {
 }
 
 // MARK: - Observation bridge values (#5159)
+
 //
 // Shared by the SDK, which serves them, and CtrlProxy, which relays them.
 
@@ -98,6 +99,8 @@ public struct AutoMobileObservationNode: Codable, Sendable, Equatable {
 
 /// Immutable in-process UI observation. `captureIdentity` changes for every capture.
 public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable {
+    /// New captures name the host app; older wire snapshots decode this as nil.
+    public let bundleId: String?
     public let captureIdentity: UInt64
     public let orientation: AutoMobileDeviceOrientation
     public let coordinateSpace: AutoMobileCoordinateSpace
@@ -108,6 +111,7 @@ public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable {
 
     public init(
         captureIdentity: UInt64,
+        bundleId: String? = Bundle.main.bundleIdentifier,
         orientation: AutoMobileDeviceOrientation = .unknown,
         coordinateSpace: AutoMobileCoordinateSpace,
         bounds: SdkBounds,
@@ -115,6 +119,7 @@ public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable {
         focusedElementId: String? = nil,
         capabilities: Set<String> = []
     ) {
+        self.bundleId = bundleId
         self.captureIdentity = captureIdentity
         self.orientation = orientation
         self.coordinateSpace = coordinateSpace

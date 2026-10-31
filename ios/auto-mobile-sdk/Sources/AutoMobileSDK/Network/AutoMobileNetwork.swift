@@ -103,6 +103,7 @@ public final class AutoMobileNetwork: Sendable {
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
+    private let sequenceAllocator = NetworkSequenceAllocator()
     let hostTransports = HostTransportRegistry()
 
     // Keep the internal testing seam while storing its value under the same lock.
@@ -209,17 +210,20 @@ public final class AutoMobileNetwork: Sendable {
 
     /// Creates a recorder for custom transports that cannot install a URLProtocol.
     public func captureRecorder() -> NetworkCaptureRecorder {
+        makeCaptureRecorder(emit: { [weak self] record in self?.recordRequest(record) })
+    }
+
+    func makeCaptureRecorder(emit: @escaping NetworkCaptureRecorder.Emit) -> NetworkCaptureRecorder {
         NetworkCaptureRecorder(
-            emit: { [weak self] record in
-                self?.recordRequest(record)
-            },
+            emit: emit,
             maxBodyBytes: maxBodyBytes,
             isEnabled: { [weak self] in
                 self?.isEnabled ?? false
             },
             isBodyCaptureEnabled: { [weak self] in
                 self?.requestBodyCaptureLimit != nil
-            }
+            },
+            sequenceAllocator: sequenceAllocator
         )
     }
 

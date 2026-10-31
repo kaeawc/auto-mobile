@@ -8,7 +8,7 @@ import {
   HOVER_INPUT_CAPABILITY,
   STYLUS_INPUT_CAPABILITY,
 } from "../../observe/android/ctrlProxyProtocol/capabilities";
-import type { PointerEnvironment } from "./PointerInjector";
+import type { PointerEnvironment, PointerToolType } from "./PointerInjector";
 import { pointerCapabilities } from "./selectPointerRoute";
 
 const API_READ_TIMEOUT_MS = 5000;
@@ -16,10 +16,18 @@ const ROOT_READ_TIMEOUT_MS = 5000;
 
 /**
  * The uinput route only carries what the runner cannot: with both pointer capabilities advertised
- * it is never chosen, so the extra `id -u` round trip is skipped.
+ * it is never chosen for a stylus, so the extra `id -u` round trip is skipped. The runner never
+ * injects an eraser, so an eraser always needs the uid.
  */
-export function needsRootProbe(advertised: ReadonlySet<string>): boolean {
-  return !advertised.has(STYLUS_INPUT_CAPABILITY) || !advertised.has(HOVER_INPUT_CAPABILITY);
+export function needsRootProbe(
+  advertised: ReadonlySet<string>,
+  toolType?: PointerToolType,
+): boolean {
+  return (
+    toolType === "eraser" ||
+    !advertised.has(STYLUS_INPUT_CAPABILITY) ||
+    !advertised.has(HOVER_INPUT_CAPABILITY)
+  );
 }
 
 /**
@@ -52,6 +60,8 @@ export async function readPointerEnvironment(
   device: BootedDevice,
   adb: AdbExecutor,
   signal?: AbortSignal,
+  /** The requested tool, when known: it decides whether the root shell matters. */
+  toolType?: PointerToolType,
 ): Promise<PointerEnvironment> {
   // An established runner connection only: with none, no capability is advertised.
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
@@ -87,6 +97,8 @@ export async function readPointerEnvironment(
     platform: "android",
     apiLevel: apiLevel ?? undefined,
     capabilities: pointerCapabilities((name) => advertised.has(name)),
-    ...(needsRootProbe(advertised) ? { rootShell: await readRootShell(adb, signal) } : {}),
+    ...(needsRootProbe(advertised, toolType)
+      ? { rootShell: await readRootShell(adb, signal) }
+      : {}),
   };
 }

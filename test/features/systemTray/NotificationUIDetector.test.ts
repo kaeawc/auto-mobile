@@ -344,6 +344,25 @@ describe("NotificationUIDetector", () => {
       now: () => 0,
     });
 
+    it.each([
+      ["lock-screen", false],
+      ["notification-center-empty", true],
+      ["notification-center-notifications", true],
+    ] as const)("detects captured iOS 26 %s tray state", (name, expected) => {
+      const hierarchy = wireCapture(
+        JSON.parse(
+          readFileSync(
+            new URL(
+              `../../fixtures/ios-notification-center/ios26-${name}-hierarchy.json`,
+              import.meta.url,
+            ),
+            "utf8",
+          ),
+        ),
+      );
+      expect(capturedDetector.isTrayOpen(hierarchy)).toBe(expected);
+    });
+
     it("detects the captured empty iOS 27 Notification Center", () => {
       expect(capturedDetector.isTrayOpen(ios27NotificationCenterHierarchy)).toBe(true);
       // The captured ListCell is an empty list placeholder, not a notification.

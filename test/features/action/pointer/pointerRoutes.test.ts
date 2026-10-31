@@ -136,6 +136,8 @@ describe("invalidPointerFeatures", () => {
       { toolType: "stylus" as const, variablePressure: true },
       { toolType: "stylus" as const, hover: true },
       { toolType: "mouse" as const, hover: true },
+      { toolType: "eraser" as const },
+      { toolType: "eraser" as const, variablePressure: true, path: true },
     ]) {
       expect(invalidPointerFeatures(features)).toBeUndefined();
     }

@@ -15,7 +15,7 @@ export type PointerRouteId =
   | "uinput"
   | "emulator-grpc";
 
-export type PointerToolType = "finger" | "stylus" | "mouse";
+export type PointerToolType = "finger" | "stylus" | "eraser" | "mouse";
 
 /** What a request needs from the injector. */
 export interface PointerFeatures {
@@ -118,8 +118,8 @@ export function invalidPointerFeatures(features: PointerFeatures): string | unde
     return invalidHover(features);
   }
   const stylusOnly = features.variablePressure || features.extendedAxes || features.path;
-  if (stylusOnly && features.toolType !== "stylus") {
-    return `${features.toolType} input has no variable pressure, tilt, buttons or stroke; only a stylus does`;
+  if (stylusOnly && features.toolType !== "stylus" && features.toolType !== "eraser") {
+    return `${features.toolType} input has no variable pressure, tilt, buttons or stroke; only a stylus or eraser does`;
   }
   if (features.toolType === "mouse") {
     return "mouse input is supported for hover only";

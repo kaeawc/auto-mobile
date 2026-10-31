@@ -8,6 +8,7 @@ import type { BootedDevice } from "../../models";
 import { CheckResult } from "../types";
 import type { DoctorOptions, DoctorProbeOptions } from "../types";
 import { awaitDoctorProbe, DoctorDeadlineError, remainingDoctorProbe } from "../deadline";
+import { runWithTargetDeviceExecutionBinding } from "../../utils/deviceExecutionBinding";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { platform as getHostPlatform } from "node:os";
 import { DaemonManager } from "../../daemon/manager";
@@ -553,7 +554,11 @@ export async function checkCtrlProxy(
         currentProbe.signal?.throwIfAborted();
         const deviceProbe = remainingDoctorProbe(currentProbe);
         try {
-          results.push(await checkDeviceCtrlProxy(device, adbFactory, deviceProbe));
+          results.push(
+            await runWithTargetDeviceExecutionBinding(device.deviceId, targetDeviceId, () =>
+              checkDeviceCtrlProxy(device, adbFactory, deviceProbe),
+            ),
+          );
         } catch (error) {
           results.push(
             androidDoctorDeviceFailure("CtrlProxy", device, currentProbe, { log, error }),
@@ -682,7 +687,11 @@ export async function checkWorkProfileAccessibility(
       currentProbe.signal?.throwIfAborted();
       const deviceProbe = remainingDoctorProbe(currentProbe);
       try {
-        results.push(await checkDeviceWorkProfileAccessibility(device, adbFactory, deviceProbe));
+        results.push(
+          await runWithTargetDeviceExecutionBinding(device.deviceId, undefined, () =>
+            checkDeviceWorkProfileAccessibility(device, adbFactory, deviceProbe),
+          ),
+        );
       } catch (error) {
         results.push(
           androidDoctorDeviceFailure("Work Profile Accessibility", device, currentProbe, {

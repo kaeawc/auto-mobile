@@ -60,6 +60,7 @@ describe("Fast Validation independence from XCTestRunner", () => {
     const paths = filters.ios_sdk_contract ?? [];
     expect(paths).toContain("src/features/observe/ios/**");
     expect(paths).toContain("ios/auto-mobile-sdk/Sources/**");
+    expect(paths).toContain("ios/control-proxy/Sources/**");
     // Broad trees would bring back the PR-minute cost #10895 removed.
     for (const broad of ["src/**", "ios/**", "test/**"]) {
       expect(paths).not.toContain(broad);

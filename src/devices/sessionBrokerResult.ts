@@ -83,6 +83,9 @@ export interface SessionBrokerFailure {
   code: string;
   message: string;
   retryable: boolean;
+  /** Upgrade guidance when the registry was written by an unsupported daemon version. */
+  remedy?: string;
+  writerVersions?: Readonly<Record<string, string>>;
   /** Suggested delay; durable `eviction_pending` receipts derive 1000 ms and require a new request ID. */
   retryAfterMs?: number;
   /**

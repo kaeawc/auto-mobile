@@ -17,6 +17,13 @@ const SETUP = ".circleci/config.yml";
 const CONTINUE = ".circleci/continue_config.yml";
 const MAIN_MAPPING = ".circleci/main-macos-paths.txt";
 
+function assertContractAfterNavigation(names: string[]): void {
+  expect(names.indexOf("Run iOS navigation graph Simulator workflow")).toBeGreaterThanOrEqual(0);
+  expect(names.indexOf("Run iOS SDK contract suite")).toBeGreaterThan(
+    names.indexOf("Run iOS navigation graph Simulator workflow"),
+  );
+}
+
 type CircleStep = string | Record<string, Record<string, unknown> | undefined>;
 type CircleInvocation = string | Record<string, Record<string, unknown> | undefined>;
 
@@ -340,6 +347,10 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
     expect(runStep("xctestrunner-simulator-tests", name)?.no_output_timeout).toBe("12m");
   });
 
+  test("contract ordering rejects a missing navigation step", () => {
+    expect(() => assertContractAfterNavigation(["Run iOS SDK contract suite"])).toThrow();
+  });
+
   test("iOS SDK contract suite runs after navigation in both CI systems (#5164)", () => {
     const name = "Run iOS SDK contract suite";
     const githubNames = loadJobSteps(
@@ -355,9 +366,7 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
     );
     for (const names of [githubNames, circleNames]) {
       expect(names.filter((stepName) => stepName === name)).toHaveLength(1);
-      expect(names.indexOf(name)).toBeGreaterThan(
-        names.indexOf("Run iOS navigation graph Simulator workflow"),
-      );
+      assertContractAfterNavigation(names);
       expect(names.indexOf(name)).toBeLessThan(
         names.indexOf("Stop AutoMobile daemon before odd-width boot"),
       );

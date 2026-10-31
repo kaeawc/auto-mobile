@@ -216,6 +216,10 @@ On an emulator or userdebug build whose `adb shell` already runs as root (after 
 stroke with `pressure` and a `dragPath` also work without `stylus_input_v1`, through a virtual pen; `tilt`,
 `orientation` and `buttons` still need the runner, and each stroke starts about 4 seconds later while the pen attaches.
 
+`pointer: { toolType: "eraser" }` touches with the pen's eraser end (apps see `TOOL_TYPE_ERASER`) on `tapAt`, `swipeAt` and
+`dragPath`, with optional `pressure`. It needs that same root `adb shell` with the `uinput` tool, and is refused before any
+input everywhere else; `tilt`, `orientation` and `buttons` are refused with an eraser.
+
 `dragPath` points also take `pressure` and `tilt` (they need `pointer`), interpolated between points; `holdMs` and
 `releaseHoldMs` become holds at the first and last point. A device or runner that cannot honour the request is refused before
 anything is sent, naming the missing capability. `tilt`, `orientation` and `buttons` are Android only; `doubleTap` and a panel

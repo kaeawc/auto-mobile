@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { wrapCommandError } from "../../../src/utils/CommandError";
+import { errorMessage } from "../../../src/utils/describeUnknownError";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { runWithAbortSignal, getAbortSignal } from "../../../src/utils/AbortContext";
@@ -13,6 +16,11 @@ import {
 } from "../../../src/features/deviceCondition/vehicleStateInjectors";
 import { deviceConditionChanges } from "../../../src/features/deviceCondition/DeviceConditionTypes";
 import { resolveIosRefusalInjector } from "../../../src/features/deviceCondition/iosRefusalInjector";
+
+const userBuildRefusal = readFileSync(
+  new URL("../../fixtures/android-car-service/car-service-user-build-refusal.txt", import.meta.url),
+  "utf8",
+);
 
 const GEAR = "0x11400400";
 const SPEED = "0x11600207";
@@ -400,14 +408,42 @@ describe("vehicle state injectors (#14919)", () => {
     ["get-property-value", "error"],
     ["get-property-value", "stdout"],
     ["get-property-value", "throw"],
+    ["get-property-value", "wrapped"],
+    ["get-property-value", "stdout-error"],
+    ["get-property-value", "stderr-error"],
     ["inject-vhal-event", "error"],
     ["inject-vhal-event", "stdout"],
     ["inject-vhal-event", "throw"],
+    ["inject-vhal-event", "wrapped"],
+    ["inject-vhal-event", "stdout-error"],
+    ["inject-vhal-event", "stderr-error"],
+    ["day-night-mode", "wrapped"],
+    ["day-night-mode", "stdout-error"],
+    ["day-night-mode", "stderr-error"],
   ])("a user-build %s refusal via %s is unsupported before any write", async (command, form) => {
     const car = vehicleAdb({ ...PARKED });
     const refusal = new FakeAdbExecutor();
     const message = `java.lang.SecurityException: The command '${command}' requires non-user build`;
-    if (form === "throw") {
+    if (form === "wrapped") {
+      const args = ["shell", "cmd", "car_service", command];
+      const raw = Object.assign(
+        new Error(`Command failed: adb ${args.join(" ")}\n${userBuildRefusal}`),
+        {
+          code: 255,
+          stdout: userBuildRefusal,
+          stderr: "",
+        },
+      );
+      const wrapped = wrapCommandError(raw, { command: "adb", args, stdout: userBuildRefusal });
+      expect(errorMessage(wrapped)).not.toContain("requires non-user build");
+      refusal.setCommandError(command, wrapped);
+    } else if (form === "stdout-error" || form === "stderr-error") {
+      refusal.setCommandResponse(command, {
+        ...execResult(form === "stdout-error" ? userBuildRefusal : ""),
+        stderr: form === "stderr-error" ? userBuildRefusal : "",
+        error: "Command failed (exit 255)",
+      });
+    } else if (form === "throw") {
       refusal.setCommandError(command, new Error(message));
     } else {
       refusal.setCommandResponse(command, {
@@ -418,14 +454,18 @@ describe("vehicle state injectors (#14919)", () => {
     const real = car.adb.execute.bind(car.adb);
     car.adb.execute = (args, options) =>
       args.includes(command) ? refusal.execute(args, options) : real(args, options);
-    const injector = injectorFor(automotive, "vehicle.motion", car.adb);
+    const nightMode = command === "day-night-mode";
+    const feature = nightMode ? "vehicle.nightMode" : "vehicle.motion";
+    const injector = injectorFor(automotive, feature, car.adb);
     const controller = new DeviceConditionController(() => injector);
-    const result = await controller.apply({ vehicle: { motion: "driving" } });
+    const result = await controller.apply({
+      vehicle: nightMode ? { nightMode: "on" } : { motion: "driving" },
+    });
     expect(result.changes[0].status).toBe("unsupported");
     expect(result.changes[0].detail).toContain(
       "unsupported on this image: this AAOS image is a user build",
     );
-    expect(result.changes[0].detail).toContain("vehicle.motion needs a userdebug/eng image");
+    expect(result.changes[0].detail).toContain(`${feature} needs a userdebug/eng image`);
     expect(result.changes[0].detail).toContain("`android-automotive` API 34 ext9");
     expect(car.props).toEqual(PARKED);
     expect(car.log.some((entry) => entry.includes("inject-"))).toBe(false);

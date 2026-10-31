@@ -533,13 +533,9 @@ export class DeviceAutolockManager {
       mcpSessionId &&
       this.mcpSessionAutolockMap.get(mcpSessionId) !== client.expectedSessionId
     ) {
-      throw heldDeviceBindRefusal(
-        this.pool,
-        device.id,
-        holderOf(device) ?? undefined,
-        undefined,
-        "another",
-      );
+      throw heldDeviceBindRefusal(this.pool, device.id, holderOf(device) ?? undefined, {
+        wording: "another",
+      });
     }
     const session = holderOf(device)
       ? this.pool.getSessionManager().getSession(holderOf(device)!)
@@ -548,13 +544,9 @@ export class DeviceAutolockManager {
       return undefined;
     }
     if (!this.isOwnedAutolockSession(device, session, mcpSessionId)) {
-      throw heldDeviceBindRefusal(
-        this.pool,
-        device.id,
-        holderOf(device) ?? undefined,
-        undefined,
-        "another",
-      );
+      throw heldDeviceBindRefusal(this.pool, device.id, holderOf(device) ?? undefined, {
+        wording: "another",
+      });
     }
     return session;
   }

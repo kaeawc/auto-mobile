@@ -299,17 +299,12 @@ export async function assertToolControlTargetIdentity(
     return;
   }
   const sessionManager = defaultDaemonContext.requireSessionManager();
-  await assertFrameTargetIdentityProven(
-    defaultDaemonContext.devicePool(),
-    device,
-    input.toolName,
-    Boolean(sessionManager.getSessionForDevice(device.deviceId)),
-    {
-      sessions: frameHeldSessionsFrom(sessionManager),
-      requesterSessionUuid: input.sessionUuid,
-      sessionManager,
-    },
-  );
+  await assertFrameTargetIdentityProven(defaultDaemonContext.devicePool(), device, input.toolName, {
+    heldBySession: Boolean(sessionManager.getSessionForDevice(device.deviceId)),
+    sessions: frameHeldSessionsFrom(sessionManager),
+    requesterSessionUuid: input.sessionUuid,
+    sessionManager,
+  });
 }
 
 /**

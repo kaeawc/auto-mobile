@@ -140,13 +140,21 @@ export type SessionClockToWall = (sessionClockMs: number) => number;
  * The reported instants are epoch ms, but a session stamps them on the steady session clock; a
  * wall-clock step makes the two differ. `toWall` converts at this boundary (wall now + (instant -
  * session now)) so the daemon stays authoritative for the value and clients read it as epoch ms.
+ *
+ * @param session - The held session's snapshot
+ * @param activeExecutions - Tool calls running for the session
+ * @param veto - Execution veto deferring idle release
+ * @param options.toWall - Session-clock to wall-clock conversion (defaults to identity)
+ * @param options.leasePhase - The owner liveness lease phase
  */
 export function sessionHoldDiagnostics(
   session: SessionHoldSnapshot,
   activeExecutions: number,
   veto?: IdleReleaseExecutionVeto,
-  toWall: SessionClockToWall = (ms) => ms,
-  leasePhase?: LivenessLeasePhase,
+  {
+    toWall = (ms) => ms,
+    leasePhase,
+  }: { toWall?: SessionClockToWall; leasePhase?: LivenessLeasePhase } = {},
 ): SessionHoldDiagnostics {
   const idleDeadline = vetoedIdleReleaseAt(session, veto, leasePhase);
   return {

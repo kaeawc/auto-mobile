@@ -279,13 +279,16 @@ export function wireSessionLifecycle(
         takeRecordingIds: takeRecordingIdsFinalizedByRelease,
         emit: (...args) => SessionReleaseBroadcaster.emit(...args),
       },
-      {
-        fallbacks: host.shutdownFallbackReleaseNotifications(),
-        announced: host.shutdownReleaseNotifications(),
-      },
       sessionId,
       releaseReason,
-      { snapshot, upgradeOnly: opts?.upgradeOnly },
+      {
+        shutdown: {
+          fallbacks: host.shutdownFallbackReleaseNotifications(),
+          announced: host.shutdownReleaseNotifications(),
+        },
+        snapshot,
+        upgradeOnly: opts?.upgradeOnly,
+      },
     );
     if (host.shutdownFallbackReleaseNotifications()?.has(sessionId)) {
       return;

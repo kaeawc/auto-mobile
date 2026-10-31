@@ -158,7 +158,11 @@ class DaemonUnderTest {
     // The daemon's own wiring: a tool call's END restarts the idle window.
     this.unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
     manager.setActiveSessionExecutionChecker((sessionId, query) =>
-      hasActiveSessionExecution(executionTracker, manager, pool, sessionId, query),
+      hasActiveSessionExecution(
+        { tracker: executionTracker, sessionManager: manager, devicePool: pool },
+        sessionId,
+        query,
+      ),
     );
     // daemon.ts wires the reaper's release to releaseSessionAndDevice.
     this.monitor = new SessionHeartbeatMonitor(

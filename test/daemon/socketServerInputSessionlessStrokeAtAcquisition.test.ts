@@ -83,7 +83,11 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     startAck = undefined;
     sessionManager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-      hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
+      hasActiveSessionExecution(
+        { tracker: executionTracker, sessionManager, devicePool: pool },
+        sessionId,
+        query,
+      ),
     );
     // daemon.ts: a session acquiring a device cancels the sessionless calls admitted on it and
     // lifts the sessionless strokes parked on it.

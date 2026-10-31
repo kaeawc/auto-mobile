@@ -237,8 +237,7 @@ export function createSystemUiAnrRebooter(
           devicePool,
           candidate.device.deviceId,
           liveHolderOtherThanThisRequest(candidate.device.deviceId),
-          entitlement.requesterSessionUuid,
-          "another",
+          { requesterSessionUuid: entitlement.requesterSessionUuid, wording: "another" },
         );
       }
     };

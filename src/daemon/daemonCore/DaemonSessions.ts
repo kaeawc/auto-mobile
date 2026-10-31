@@ -325,9 +325,11 @@ export class DaemonSessions {
     query?: ActiveSessionExecutionQuery,
   ): boolean {
     return hasActiveSessionExecution(
-      executionTracker,
-      this.host.services.sessionManager(),
-      this.host.services.devicePool(),
+      {
+        tracker: executionTracker,
+        sessionManager: this.host.services.sessionManager(),
+        devicePool: this.host.services.devicePool(),
+      },
       sessionId,
       query,
     );
@@ -359,9 +361,11 @@ export class DaemonSessions {
     options: { onSessionClock?: boolean; excludeReads?: boolean } = {},
   ): number | undefined {
     return latestSessionExecutionDeadlineMs(
-      executionTracker,
-      this.host.services.sessionManager(),
-      this.host.services.devicePool(),
+      {
+        tracker: executionTracker,
+        sessionManager: this.host.services.sessionManager(),
+        devicePool: this.host.services.devicePool(),
+      },
       sessionId,
       options,
     );

@@ -688,8 +688,8 @@ export class IdeDeviceRoutes {
       this.ports.daemonState().getDevicePool(),
       device,
       action,
-      Boolean(sessionManager.getSessionForDevice?.(device.deviceId)),
       {
+        heldBySession: Boolean(sessionManager.getSessionForDevice?.(device.deviceId)),
         sessions: frameHeldSessionsFrom(sessionManager),
         requester,
         sessionManager,

@@ -436,8 +436,10 @@ export class DaemonDisconnect {
         this.host.offlineRecoveryAttemptedDeviceIds(),
         candidateDeviceIds,
         offlineDeviceIds,
-        this.host.offlineRecoveryAttemptedIncarnations(),
-        candidateIncarnations,
+        {
+          attemptedIncarnations: this.host.offlineRecoveryAttemptedIncarnations(),
+          candidateIncarnations,
+        },
       ),
     );
     // A serial that is mid-provisionDevice/startDevice already has its
@@ -938,8 +940,7 @@ export class DaemonDisconnect {
         candidateDeviceIds,
         candidatePlatforms,
         bootedDeviceIds,
-        listed.listedNonDeviceIds,
-        transportRestarts,
+        { listedNonDeviceIds: listed.listedNonDeviceIds, transportRestarts },
       ),
     });
     if (disconnectResult.skippedAllDiscoveryFailed) {
@@ -964,11 +965,13 @@ export class DaemonDisconnect {
       discovery.succeededPlatforms,
       this.host.lifecycle.deviceDisconnectMisses().size,
       candidateDeviceIds,
-      bootedDeviceIds,
-      this.host.services
-        .devicePool()
-        .getAllDevices()
-        .map((device) => device.id),
+      {
+        bootedDeviceIds,
+        pooledDeviceIds: this.host.services
+          .devicePool()
+          .getAllDevices()
+          .map((device) => device.id),
+      },
     );
     await this.cleanupDisconnects(bootedDeviceIds, succeededPlatforms, missingByDevice, {
       activeRecordings,

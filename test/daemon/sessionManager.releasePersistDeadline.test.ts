@@ -50,8 +50,7 @@ class ParkableReleasePersistence extends FakeDeviceSessionPersistence {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
-    options: MarkReleasedOptions = {},
+    { reason, ...options }: MarkReleasedOptions & { reason: string },
   ): Promise<void> {
     this.releaseOptions.push(options);
     await this.park;
@@ -62,7 +61,7 @@ class ParkableReleasePersistence extends FakeDeviceSessionPersistence {
     }
     this.releaseWrites.push(`${sessionUuid}:${reason}`);
     try {
-      await super.markReleased(sessionUuid, status, releasedAtMs, reason, options);
+      await super.markReleased(sessionUuid, status, releasedAtMs, { reason, ...options });
       this.terminalizedGenerations.push(
         (await this.getSession(sessionUuid))?.stable_identity_generation ?? 0,
       );
@@ -388,7 +387,9 @@ describe("a crash while a terminal release write is parked does not revive the U
       const intent = { sessionId: "old", reason: "heartbeat-timeout", at: h.timer.now() };
       new FileTerminalReleaseJournal(JOURNAL, h.files).record(intent);
       // Daemon.initializeDatabase's stale-active sweep precedes journal attachment in startOn.
-      await h.persistence.markReleased("old", "expired", h.timer.now(), "daemon-restart");
+      await h.persistence.markReleased("old", "expired", h.timer.now(), {
+        reason: "daemon-restart",
+      });
       expect((await h.persistence.getSession("old"))?.release_reason).toBe("daemon-restart");
       const restarted = restart(h, h.files);
       const assign = spyOn(h.pool, "assignDeviceToSession");
@@ -665,7 +666,9 @@ describe("a superseded device-loss release leaves the live session's row active 
   async function expectRehydratedAfterRestart(h: Harness): Promise<void> {
     // The next daemon's startup sweep retires only rows still active, as daemon-restart.
     if ((await h.persistence.getSession!("old"))?.status === "active") {
-      await h.persistence.markReleased("old", "expired", h.timer.now(), "daemon-restart");
+      await h.persistence.markReleased("old", "expired", h.timer.now(), {
+        reason: "daemon-restart",
+      });
     }
     const restarted = makeSessionManager({
       timer: h.timer,

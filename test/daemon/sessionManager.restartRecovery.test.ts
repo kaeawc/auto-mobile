@@ -247,7 +247,7 @@ describe("SessionManager", () => {
       restartRow("rehydrate-me", { heartbeatTimeoutSource: "custom" }),
     );
     await persistence.recordLivenessOwnership("rehydrate-me", "owner-token");
-    await persistence.markReleased("rehydrate-me", "expired", 30, "daemon-restart");
+    await persistence.markReleased("rehydrate-me", "expired", 30, { reason: "daemon-restart" });
     const restarted = makeSessionManager({ timer: fakeTimer, persistence });
     const devicePool = recoveringAssigner(restarted);
 
@@ -275,7 +275,9 @@ describe("SessionManager", () => {
   test("terminalizes missing rehydration targets without aborting the sweep", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     await persistence.upsertActiveSession(restartRow("gone-after-restart"));
-    await persistence.markReleased("gone-after-restart", "expired", 30, "daemon-restart");
+    await persistence.markReleased("gone-after-restart", "expired", 30, {
+      reason: "daemon-restart",
+    });
     const restarted = makeSessionManager({ timer: fakeTimer, persistence });
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
@@ -543,7 +545,7 @@ describe("SessionManager", () => {
       heartbeatTimeoutMs: 15_000,
       hasReceivedHeartbeat: true,
     });
-    await persistence.markReleased("terminal-row", "released", 30, "device-killed");
+    await persistence.markReleased("terminal-row", "released", 30, { reason: "device-killed" });
     const restarted = makeSessionManager({ timer: fakeTimer, persistence });
     let assignments = 0;
 

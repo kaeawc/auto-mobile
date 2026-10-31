@@ -601,8 +601,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
         snapshot.sessionId,
         releasedRowStatus(snapshot.releaseReason),
         snapshot.releasedAtMs,
-        snapshot.releaseReason,
-        conditions,
+        { reason: snapshot.releaseReason, ...conditions },
       );
     };
     let refusedWrite: Promise<void> | undefined;

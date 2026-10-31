@@ -226,8 +226,7 @@ export class SessionReleasePersistence {
       snapshot.sessionId,
       releasedRowStatus(snapshot.releaseReason),
       snapshot.releasedAtMs,
-      snapshot.releaseReason,
-      options,
+      { reason: snapshot.releaseReason, ...options },
     );
   }
 

@@ -48,7 +48,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: true,
     });
-    await persistence.markReleased(SESSION, "expired", 0, "daemon-restart");
+    await persistence.markReleased(SESSION, "expired", 0, { reason: "daemon-restart" });
 
     sessions = new SessionManager(timer, persistence);
     sessions.stopCleanupTimer();

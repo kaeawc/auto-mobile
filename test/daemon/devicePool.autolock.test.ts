@@ -157,7 +157,9 @@ describe("DevicePool autolock", () => {
         heartbeatTimeoutMs: 15_000,
         hasReceivedHeartbeat: true,
       });
-      await persistence.markReleased("recovered-autolock", "released", 30, "daemon-restart");
+      await persistence.markReleased("recovered-autolock", "released", 30, {
+        reason: "daemon-restart",
+      });
 
       try {
         await recoveringManager.rehydratePersistedSessions(recoveringPool);

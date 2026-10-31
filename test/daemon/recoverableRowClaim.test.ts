@@ -53,7 +53,7 @@ describe("recoverable-row claim lifecycle (#11243)", () => {
       heartbeatTimeoutMs: 60_000,
       hasReceivedHeartbeat: true,
     });
-    await repo.markReleased(SESSION, "released", 1_000, "daemon-shutdown");
+    await repo.markReleased(SESSION, "released", 1_000, { reason: "daemon-shutdown" });
   }
 
   function daemon(
@@ -169,7 +169,8 @@ describe("recoverable-row claim lifecycle (#11243)", () => {
       ) {
         if (record.sessionUuid === SESSION) {
           const row = (await repo.getSession(SESSION))!;
-          await repo.markReleased(SESSION, "released", 2_000, "explicit-release", {
+          await repo.markReleased(SESSION, "released", 2_000, {
+            reason: "explicit-release",
             expectedRowGeneration: row.stable_identity_generation ?? 0,
           });
         }

@@ -91,7 +91,7 @@ describe("managed execution recovery is gated before publication", () => {
       await before.claimLivenessOwnership(ID, "proxy-token");
       await before.adoptManagedExecutionLivenessPolicy(ID);
     }
-    await persistence.markReleased(ID, "expired", timer.now(), "daemon-restart");
+    await persistence.markReleased(ID, "expired", timer.now(), { reason: "daemon-restart" });
     return { timer, persistence, sessions: manager(timer, persistence) };
   }
 
@@ -348,7 +348,9 @@ describe("managed execution recovery is gated before publication", () => {
     const { sessions, persistence, timer } = await persisted();
     const before = manager(timer, persistence);
     await before.createSession("broken-row", "other-ios", "ios");
-    await persistence.markReleased("broken-row", "expired", timer.now(), "daemon-restart");
+    await persistence.markReleased("broken-row", "expired", timer.now(), {
+      reason: "daemon-restart",
+    });
     const wait = Promise.withResolvers<void>();
     const reowner = new ManagedExecutionReowner({
       registry: async () => {

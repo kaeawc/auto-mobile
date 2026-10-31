@@ -120,7 +120,7 @@ describe("terminal persisted recovery MCP transport", () => {
           throw new Error("target-busy recovery must not assign a sibling");
         },
         async recordActivity() {},
-        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+        async markReleased(_sessionUuid, status, releasedAtMs, { reason: releaseReason }) {
           persisted.status = status;
           persisted.released_at_ms = releasedAtMs;
           persisted.release_reason = releaseReason;

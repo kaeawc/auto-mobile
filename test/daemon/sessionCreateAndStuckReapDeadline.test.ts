@@ -54,10 +54,10 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
+    { reason }: { reason: string },
   ): Promise<void> {
     await this.parkRelease;
-    await super.markReleased(sessionUuid, status, releasedAtMs, reason);
+    await super.markReleased(sessionUuid, status, releasedAtMs, { reason });
   }
 }
 

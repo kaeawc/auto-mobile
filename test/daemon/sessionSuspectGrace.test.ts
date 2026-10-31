@@ -976,7 +976,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         hasReceivedHeartbeat: true,
       });
       await persistence.recordLivenessOwnership(SESSION, OWNER);
-      await persistence.markReleased(SESSION, "expired", 30, "daemon-restart");
+      await persistence.markReleased(SESSION, "expired", 30, { reason: "daemon-restart" });
       // The restarted daemon comes up long after the persisted heartbeat.
       timer.setCurrentTime(40);
       const restarted = new SessionManager(timer, persistence);

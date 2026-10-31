@@ -528,9 +528,9 @@ describe("device restart reserves the entire recovery window", () => {
       });
       const original = persistence.markReleased.bind(persistence);
       persistence.markReleased = async (...args) => {
-        if (args[3] === "restart-recovery-timeout") {
+        if (args[3].reason === "restart-recovery-timeout") {
           events.push("write");
-          expect(args[4]).toMatchObject({
+          expect(args[3]).toMatchObject({
             expectedRowGeneration: 0,
             onlyIfOwnedByDaemon: DAEMON_A,
             onlyIfRecoverable: true,
@@ -557,8 +557,8 @@ describe("device restart reserves the entire recovery window", () => {
       await handoff();
       const original = persistence.markReleased.bind(persistence);
       persistence.markReleased = async (...args) => {
-        if (args[3] === "restart-recovery-timeout") {
-          await original(HOLDER, "released", timer.now(), "daemon-shutdown");
+        if (args[3].reason === "restart-recovery-timeout") {
+          await original(HOLDER, "released", timer.now(), { reason: "daemon-shutdown" });
         }
         await original(...args);
       };
@@ -600,7 +600,7 @@ describe("device restart reserves the entire recovery window", () => {
       if (race) {
         const original = persistence.markReleased.bind(persistence);
         persistence.markReleased = async (...args) => {
-          if (args[3] === "restart-recovery-timeout") {
+          if (args[3].reason === "restart-recovery-timeout") {
             await claim();
           }
           await original(...args);
@@ -697,11 +697,11 @@ describe("device restart reserves the entire recovery window", () => {
         }
       });
       const markReleased = persistence.markReleased.bind(persistence);
-      let expiryOptions: Parameters<typeof markReleased>[4];
+      let expiryOptions: Parameters<typeof markReleased>[3] | undefined;
       let claimedGeneration: number | undefined;
       persistence.markReleased = async (...args) => {
-        if (args[3] === "expired") {
-          expiryOptions = args[4];
+        if (args[3].reason === "expired") {
+          expiryOptions = args[3];
           const row = (await persistence.getSession(HOLDER))!;
           claimedGeneration = await persistence.claimRecoverableSession(
             HOLDER,
@@ -1285,7 +1285,7 @@ describe("device restart reserves the entire recovery window", () => {
       });
       const markReleased = persistence.markReleased.bind(persistence);
       persistence.markReleased = async (...args) => {
-        if (args[3].startsWith("device-restart:")) {
+        if (args[3].reason.startsWith("device-restart:")) {
           releaseAttempts++;
           if (releaseAttempts === 1) {
             throw new Error("transient restart release failure");

@@ -463,7 +463,7 @@ test("rehydrated awaiting-owner keeps its release window and claim behaviour wit
       hasReceivedHeartbeat: false,
     });
     await persistence.recordLivenessOwnership(id, "minter");
-    await persistence.markReleased(id, "released", 0, "daemon-restart");
+    await persistence.markReleased(id, "released", 0, { reason: "daemon-restart" });
   }
   const manager = new SessionManager(timer, persistence, {
     barrier: () => new FakeDbWriteBarrier(),

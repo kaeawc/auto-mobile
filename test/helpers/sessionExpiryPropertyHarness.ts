@@ -392,12 +392,9 @@ class ScheduleWorld {
   async restart(): Promise<void> {
     const old = this.daemon;
     for (const session of old.manager.getAllSessions()) {
-      await this.persistence.markReleased(
-        session.sessionId,
-        "expired",
-        this.timer.now(),
-        "daemon-restart",
-      );
+      await this.persistence.markReleased(session.sessionId, "expired", this.timer.now(), {
+        reason: "daemon-restart",
+      });
     }
     await old.monitor.stop();
     old.manager.stopCleanupTimer();

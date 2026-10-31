@@ -20,6 +20,8 @@ internal class DeviceInfoController(
   }
 
   /** Get device wakefulness state: "Awake", "Asleep", or "Dozing". */
+  // Wakefulness queries must return a fallback even for unexpected platform exceptions.
+  @Suppress("TooGenericExceptionCaught")
   fun getWakefulness(): String {
     return try {
       val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -44,6 +46,8 @@ internal class DeviceInfoController(
    * TYPE_WINDOW_STATE_CHANGED events, avoiding the restricted ActivityManager.getRunningTasks()
    * API.
    */
+  // Foreground activity queries must return null even for unexpected exceptions.
+  @Suppress("TooGenericExceptionCaught")
   fun getForegroundActivity(
     rootPackage: String? = null,
     windowClass: String? = null,

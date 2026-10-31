@@ -112,11 +112,11 @@ commands:
     steps:
       - run:
           name: "Compute SwiftPM cache key"
-          command: cat ios/*/Package.swift > /tmp/spm-lock.txt
+          command: |
+            find ios/*/Package.swift ios/sdk-wire/Sources ios/sdk-wire/Tests ios/auto-mobile-sdk/Sources ios/auto-mobile-sdk/Tests -type f | LC_ALL=C sort | xargs cat > /tmp/spm-lock.txt
       - restore_cache:
           keys:
-            - spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
-            - spm-v1-
+            - spm-v2-{{ checksum "/tmp/spm-lock.txt" }}
 
   install_bun:
     steps:
@@ -332,7 +332,7 @@ jobs:
           name: "Test Swift packages"
           command: ./scripts/ios/swift-test.sh
       - save_cache:
-          key: spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
+          key: spm-v2-{{ checksum "/tmp/spm-lock.txt" }}
           paths:
             - ~/Library/Caches/org.swift.swiftpm
             - ios/auto-mobile-sdk/.build

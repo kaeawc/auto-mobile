@@ -67,7 +67,7 @@ export function strokeRequest(
   // What the request actually needs, so a refusal names the real reason.
   return {
     features: {
-      toolType: "stylus",
+      toolType: pointer.toolType,
       ...(filled.some((point) => point.pressure !== undefined && point.pressure !== 1)
         ? { variablePressure: true }
         : {}),

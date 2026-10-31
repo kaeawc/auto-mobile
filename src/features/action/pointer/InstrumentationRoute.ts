@@ -21,6 +21,9 @@ export class InstrumentationRoute extends DispatchingRoute {
     if (features.toolType === "finger") {
       return unsupported("finger touches use the accessibility route");
     }
+    if (features.toolType === "eraser") {
+      return unsupported("the instrumentation runner does not inject an eraser");
+    }
     const needed = features.hover ? HOVER_INPUT_CAPABILITY : STYLUS_INPUT_CAPABILITY;
     if (device.capabilities.has(needed)) {
       return SUPPORTED;

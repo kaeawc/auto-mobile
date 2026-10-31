@@ -124,14 +124,14 @@ export interface GestureEvent {
 }
 
 /**
- * The replayable pointer for a recorded pen gesture. Only "stylus" can be injected, so an eraser
- * has none (the recorder skips those gestures instead of replaying them as another tool).
+ * The replayable pointer for a recorded pen gesture: the stylus tip or its eraser end. A finger has
+ * none.
  */
 export function pointerOf(gesture: GestureEvent): PointerOption | undefined {
-  if (gesture.toolType !== "stylus") {
+  if (gesture.toolType !== "stylus" && gesture.toolType !== "eraser") {
     return undefined;
   }
-  const pointer: PointerOption = { toolType: "stylus" };
+  const pointer: PointerOption = { toolType: gesture.toolType };
   if (gesture.pressure?.normalized) {
     pointer.pressure = Math.round(gesture.pressure.mean * 1e4) / 1e4;
   }

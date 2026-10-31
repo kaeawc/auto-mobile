@@ -67,10 +67,29 @@ describe("PointerOption helpers", () => {
       { buttons: ["primary", "primary"] },
       { buttons: ["tertiary"] },
       { pressure: 1.1 },
-      { toolType: "eraser" },
+      { toolType: "finger" },
     ]) {
       expect(pointerSchema.safeParse({ toolType: "stylus", ...bad }).success).toBe(false);
     }
+  });
+});
+
+describe("eraser pointer (#13105)", () => {
+  test("the schema takes an eraser with pressure", () => {
+    expect(pointerSchema.safeParse({ toolType: "eraser", pressure: 0.5 }).success).toBe(true);
+  });
+
+  test("an eraser always needs a pointer route, even at full pressure", () => {
+    expect(pointerNeedsInstrumentation({ toolType: "eraser" })).toBe(true);
+    expect(pointerNeedsInstrumentation({ toolType: "stylus" })).toBe(false);
+  });
+
+  test("an eraser stroke asks the routes for an eraser", () => {
+    const request = strokeRequest({ toolType: "eraser" }, [
+      { x: 1, y: 2 },
+      { x: 3, y: 4, durationMs: 100 },
+    ]);
+    expect(request.features.toolType).toBe("eraser");
   });
 });
 

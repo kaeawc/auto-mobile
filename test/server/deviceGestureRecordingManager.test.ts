@@ -868,22 +868,23 @@ describe("deviceGestureRecordingManager stylus export (#13084)", () => {
   });
 
   test("a recording where every pen gesture was skipped says why instead of reporting nothing", async () => {
-    const attempt = recordPenGestures("pen-eraser-only", [
-      { type: "tap", arrivedAt: 0, screenX: 90, screenY: 99, toolType: "eraser" },
+    const attempt = recordPenGestures("pen-unplaced-only", [
+      { type: "tap", arrivedAt: 0, toolType: "stylus" },
     ]);
 
     await expect(attempt).rejects.toBeInstanceOf(NoUserInputCapturedError);
-    await expect(attempt).rejects.toThrow("eraser");
+    await expect(attempt).rejects.toThrow("without a known position");
   });
 
-  test("an eraser gesture is left out and the result says so", async () => {
+  test("an eraser gesture exports as an eraser step and says where it can replay (#13105)", async () => {
     const result = await recordPenGestures("pen-eraser", [
       { type: "tap", arrivedAt: 0, screenX: 40, screenY: 80, toolType: "stylus" },
       { type: "tap", arrivedAt: 0, screenX: 90, screenY: 99, toolType: "eraser" },
     ]);
 
-    expect(result.stepCount).toBe(1);
+    expect(result.stepCount).toBe(2);
+    expect(result.planContent).toMatch(/pointer:\s+toolType: eraser/);
     expect(result.error).toStartWith("Warning:");
-    expect(result.error).toContain("eraser");
+    expect(result.error).toContain("root adb shell");
   });
 });

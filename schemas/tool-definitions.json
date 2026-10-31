@@ -5825,9 +5825,9 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool",
+              "description": "Inject a stylus, or the pen's eraser end, instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool. An eraser needs a root adb shell with a uinput tool and takes pressure but not tilt, orientation or buttons",
               "type": "string",
-              "enum": ["stylus"]
+              "enum": ["stylus", "eraser"]
             },
             "pressure": {
               "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) or a root adb shell with a uinput tool, and is refused before input otherwise",
@@ -58209,9 +58209,9 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool",
+              "description": "Inject a stylus, or the pen's eraser end, instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool. An eraser needs a root adb shell with a uinput tool and takes pressure but not tilt, orientation or buttons",
               "type": "string",
-              "enum": ["stylus"]
+              "enum": ["stylus", "eraser"]
             },
             "pressure": {
               "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) or a root adb shell with a uinput tool, and is refused before input otherwise",
@@ -61455,9 +61455,9 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool",
+              "description": "Inject a stylus, or the pen's eraser end, instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool. An eraser needs a root adb shell with a uinput tool and takes pressure but not tilt, orientation or buttons",
               "type": "string",
-              "enum": ["stylus"]
+              "enum": ["stylus", "eraser"]
             },
             "pressure": {
               "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) or a root adb shell with a uinput tool, and is refused before input otherwise",

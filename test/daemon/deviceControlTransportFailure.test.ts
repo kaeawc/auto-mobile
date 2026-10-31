@@ -33,7 +33,8 @@ describe("device-control transport failure wire type", () => {
   test("clearing another registry preserves the singleton's observe replay permission", () => {
     const handler = async () => ({ content: [] });
     const otherRegistry = new ToolRegistryClass();
-    ToolRegistry.registerDeviceAware("observe", "Read device state", z.object({}), handler, {
+    ToolRegistry.registerDeviceAware("observe", "Read device state", z.object({}), {
+      handler,
       transportRecovery: "replay",
     });
     try {

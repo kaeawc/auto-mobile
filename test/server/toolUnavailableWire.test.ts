@@ -39,10 +39,12 @@ describe("gated tools carry a structured marker over the MCP wire (issue #10177)
       handler: noop,
       debugOnly: true,
     });
-    ToolRegistry.registerDeviceAware("__gate_embedded__", "sdk", z.object({}), noop, {
+    ToolRegistry.registerDeviceAware("__gate_embedded__", "sdk", z.object({}), {
+      handler: noop,
       embeddedSdkOnly: true,
     });
-    ToolRegistry.registerDeviceAware("__gate_plan__", "plan", z.object({}), noop, {
+    ToolRegistry.registerDeviceAware("__gate_plan__", "plan", z.object({}), {
+      handler: noop,
       planOnly: true,
       planExecutable: true,
     });

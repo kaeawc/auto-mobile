@@ -68,8 +68,12 @@ export function registerDeepLinkTools() {
     "getDeepLinks",
     "Query app deep links. On Android 12+ also reports appLinks: each web domain's App Links verification state, user selection, and whether the app may open it without a chooser.",
     getDeepLinksSchema,
-    createGetDeepLinksHandler(),
-    // Reads only; read-only access never requires a session (#10965).
-    { defaultEnabled: false, deviceReadOnly: true, outputSchema: getDeepLinksResultSchema },
+    {
+      handler: createGetDeepLinksHandler(),
+      // Reads only; read-only access never requires a session (#10965).
+      defaultEnabled: false,
+      deviceReadOnly: true,
+      outputSchema: getDeepLinksResultSchema,
+    },
   );
 }

@@ -201,16 +201,13 @@ describe("ToolRegistry.callInternal (#3108)", () => {
     ToolRegistry.setCollaboratorsForTesting({ navigationToolCallRecorder: { record() {} } });
     ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: { async recordToolCall() {} } });
     try {
-      ToolRegistry.registerDeviceAware(
-        "nestedStep",
-        "Nested step",
-        z.object({}),
-        async (_device, args) => {
+      ToolRegistry.registerDeviceAware("nestedStep", "Nested step", z.object({}), {
+        handler: async (_device, args) => {
           captured.push({ args });
           return SENTINEL;
         },
-        { planExecutable: true },
-      );
+        planExecutable: true,
+      });
 
       await runWithToolSelectionContext(
         { execution: { executionId: "outer-execution", startTime: 123 } },

@@ -183,21 +183,26 @@ function registerTools(): void {
       sessionUuid: z.string().optional(),
       keepScreenAwake: z.boolean().optional(),
     }),
-    async (device) => {
-      received.push(device.deviceId);
-      return { content: [{ type: "text" as const, text: device.deviceId }] };
+    {
+      handler: async (device) => {
+        received.push(device.deviceId);
+        return { content: [{ type: "text" as const, text: device.deviceId }] };
+      },
+      deviceReadiness: "booted",
     },
-    { deviceReadiness: "booted" },
   );
   ToolRegistry.registerDeviceAware(
     "watchProbe",
     "watchProbe",
     z.object({ deviceId: z.string().optional(), sessionUuid: z.string().optional() }),
-    async (device) => {
-      received.push(device.deviceId);
-      return { content: [{ type: "text" as const, text: device.deviceId }] };
+    {
+      handler: async (device) => {
+        received.push(device.deviceId);
+        return { content: [{ type: "text" as const, text: device.deviceId }] };
+      },
+      deviceReadiness: "booted",
+      deviceReadOnly: true,
     },
-    { deviceReadiness: "booted", deviceReadOnly: true },
   );
 }
 

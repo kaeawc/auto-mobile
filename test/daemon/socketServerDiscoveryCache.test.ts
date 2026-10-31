@@ -342,13 +342,10 @@ describe("control socket discovery cache", () => {
     try {
       await manager.createSession("base", "fake-device", "android");
       ToolRegistry.clearToolsForTesting();
-      ToolRegistry.registerDeviceAware(
-        "cacheLabelTool",
-        "label tool",
-        z.object({}),
-        async () => ({}),
-        { defaultEnabled: false },
-      );
+      ToolRegistry.registerDeviceAware("cacheLabelTool", "label tool", z.object({}), {
+        handler: async () => ({}),
+        defaultEnabled: false,
+      });
       const list = createListSessionTools({
         options: {
           toolSelectionSessionManager: manager,

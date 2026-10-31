@@ -347,12 +347,12 @@ export function registerCriticalSectionTools(timer: Timer = defaultTimer): void 
     "criticalSection",
     "Synchronize multiple devices at a barrier, then run steps serially.",
     criticalSectionSchema,
-    (device, params, progress, signal) =>
-      criticalSectionHandler(stepExecutor, device, params, { progress, signal }),
-    // Plan-only: a multi-device coordination primitive that only makes sense as
-    // a plan step (a single direct call would just block). Hidden from tools/list
-    // discovery, still runnable in plans via getToolForPlan.
     {
+      handler: (device, params, progress, signal) =>
+        criticalSectionHandler(stepExecutor, device, params, { progress, signal }),
+      // Plan-only: a multi-device coordination primitive that only makes sense as
+      // a plan step (a single direct call would just block). Hidden from tools/list
+      // discovery, still runnable in plans via getToolForPlan.
       defaultEnabled: false,
       planOnly: true,
       planExecutable: true,

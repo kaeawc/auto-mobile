@@ -265,6 +265,16 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
   };
 }
 
+/**
+ * A device-aware tool's handler together with its options: `ToolRegistry.registerDeviceAware`'s
+ * fourth argument when the tool has options. A tool without options passes the bare handler.
+ */
+export interface DeviceAwareToolRegistration<
+  T = Record<string, unknown>,
+> extends DeviceAwareToolOptions<T> {
+  handler: DeviceAwareToolHandler<T>;
+}
+
 export interface DeviceAwareToolOptions<T = Record<string, unknown>>
   extends ToolRegistrationOptions, ToolTraits {
   shouldEnsureDevice?: (args: T) => boolean;

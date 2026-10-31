@@ -124,16 +124,13 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
         return { success: true };
       },
     );
-    ToolRegistry.registerDeviceAware(
-      "readProbe",
-      "Read probe",
-      z.object({}).passthrough(),
-      async (device: BootedDevice) => {
+    ToolRegistry.registerDeviceAware("readProbe", "Read probe", z.object({}).passthrough(), {
+      handler: async (device: BootedDevice) => {
         handled.push(`read:${device.deviceId}`);
         return { success: true };
       },
-      { deviceReadOnly: true },
-    );
+      deviceReadOnly: true,
+    });
   }
 
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.

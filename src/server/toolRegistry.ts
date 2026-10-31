@@ -108,6 +108,7 @@ export { toolHasOutputSchema } from "./toolRegistryTypes";
 export type {
   DeviceAwareToolHandler,
   DeviceAwareToolOptions,
+  DeviceAwareToolRegistration,
   PlainToolOptions,
   PlainToolRegistration,
   ProgressCallback,
@@ -123,6 +124,7 @@ import { installDaemonToolRegistryPort } from "../daemon/toolRegistryPort";
 import {
   DeviceAwareToolHandler,
   DeviceAwareToolOptions,
+  DeviceAwareToolRegistration,
   deviceReadOnlyMetadata,
   InternalToolCallOptions,
   InternalToolCallRequest,
@@ -365,14 +367,14 @@ export class ToolRegistryClass {
     });
   }
 
-  // Register a device-aware tool
+  /** Register a device-aware tool. @param registration - The handler, or `{ handler, ...options }`. */
   registerDeviceAware<S extends ZodType>(
     name: string,
     description: string,
     inSchema: S,
-    inHandler: DeviceAwareToolHandler<z.output<S>>,
-    inOptions: DeviceAwareToolOptions<z.output<S>> = {},
+    registration: DeviceAwareToolHandler<z.output<S>> | DeviceAwareToolRegistration<z.output<S>>,
   ): void {
+    const { handler: inHandler, options: inOptions } = splitRegistration(registration);
     // A UI interaction answers the device's system-alert policy first (#14106).
     const erased = eraseDeviceAware(inSchema, inHandler, inOptions);
     const { schema, handler, options } = gateUiInteraction(erased);

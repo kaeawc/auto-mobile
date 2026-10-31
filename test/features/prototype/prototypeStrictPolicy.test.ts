@@ -1,9 +1,84 @@
 import { describe, expect, test } from "bun:test";
 import hostFixture from "../../fixtures/prototype-spec/invalid/strict-library-via-host.json";
 import nestedFixture from "../../fixtures/prototype-spec/invalid/strict-library-via-host-nested.json";
+import protectedFixture from "../../fixtures/prototype-spec/valid/platform-requires.json";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 describe("library request policy", () => {
+  test.each([
+    {
+      call: "clipboard.paste",
+      requires: { platform: ["clipboard"] },
+      action: { type: "platform", call: "clipboard.paste" },
+    },
+    {
+      call: "share.open",
+      requires: { platform: ["share"] },
+      action: { type: "platform", call: "share.open", args: { text: { value: "Hello" } } },
+    },
+    {
+      call: "test.protected",
+      requires: protectedFixture.requires,
+      action: protectedFixture.root.onTap[0],
+    },
+  ])("rejects sensitive call $call only in a library", ({ call, requires, action }) => {
+    const spec = {
+      ...hostFixture.spec,
+      requires,
+      root: { ...hostFixture.spec.root, onTap: [action] },
+    };
+    const capabilities = {
+      supportedCapabilities: [
+        "prototype_platform_v1",
+        "prototype_platform_clipboard_v1",
+        "prototype_platform_share_v1",
+        "prototype_platform_test_v1",
+      ],
+    };
+    expect(validatePrototypeSpec(spec, { ...capabilities, library: true })).toEqual({
+      success: false,
+      error: {
+        path: "root.onTap[0]",
+        message: `Sensitive platform call ${call} is unavailable in a library`,
+      },
+    });
+    expect(validatePrototypeSpec(spec, capabilities).success).toBe(true);
+    expect(validatePrototypeSpec(spec, { ...capabilities, library: false }).success).toBe(true);
+  });
+
+  test("rejects a sensitive platform event handler in a library", () => {
+    const spec = {
+      ...hostFixture.spec,
+      requires: { platform: ["notifications"] },
+      platform: { on: { "notifications.reply": [{ type: "dismiss" }] } },
+      root: { type: "spacer" },
+    };
+    expect(validatePrototypeSpec(spec, { library: true })).toEqual({
+      success: false,
+      error: {
+        path: 'platform.on["notifications.reply"]',
+        message: "Sensitive platform event notifications.reply is unavailable in a library",
+      },
+    });
+    expect(validatePrototypeSpec(spec).success).toBe(true);
+  });
+
+  test("accepts haptics, sound and a device event handler in a library", () => {
+    const spec = {
+      ...hostFixture.spec,
+      requires: { platform: ["haptics", "sound", "device"] },
+      platform: { on: { "device.changed": [{ type: "dismiss" }] } },
+      root: {
+        ...hostFixture.spec.root,
+        onTap: [
+          { type: "platform", call: "haptics.perform", args: { effect: { value: "tick" } } },
+          { type: "platform", call: "sound.play", args: { sound: { value: "send" } } },
+        ],
+      },
+    };
+    expect(validatePrototypeSpec(spec, { library: true }).success).toBe(true);
+  });
+
   test.each([hostFixture, nestedFixture])("rejects host requests at $expectedPath", (fixture) => {
     expect(validatePrototypeSpec(fixture.spec, fixture.options)).toEqual({
       success: false,

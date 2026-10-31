@@ -109,3 +109,14 @@ private fun packageEventAction(action: String, isReplacing: Boolean): String? =
     Intent.ACTION_PACKAGE_REPLACED -> "replaced"
     else -> null
   }
+
+/** Android multi-user range: a package uid is `userId * PER_USER_RANGE + appId`. */
+internal const val PACKAGE_EVENT_USER_ID_RANGE = 100_000
+
+/**
+ * The Android user id for a package broadcast's `Intent.EXTRA_UID` (#10067). The extra is the
+ * package's kernel uid (e.g. 10234 for user 0, 1010234 for user 10), not a user id; an absent extra
+ * (`-1`) means the primary user.
+ */
+internal fun packageEventUserId(uid: Int): Int =
+  if (uid >= 0) uid / PACKAGE_EVENT_USER_ID_RANGE else 0

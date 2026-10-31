@@ -418,12 +418,9 @@ export class ExecutionTracker {
       ) {
         continue;
       }
-      const reason = new InputDeviceOwnedError(
-        execution.toolName,
-        deviceId,
-        undefined,
-        SESSIONLESS_DEVICE_ACQUIRED_REMEDY,
-      );
+      const reason = new InputDeviceOwnedError(execution.toolName, deviceId, undefined, {
+        remedy: SESSIONLESS_DEVICE_ACQUIRED_REMEDY,
+      });
       if (execution.sessionlessControlUse?.has(deviceId)) {
         this.abortExecution(execution, reason);
       } else if (!this.cancelReadReadiness(execution, deviceId, reason)) {

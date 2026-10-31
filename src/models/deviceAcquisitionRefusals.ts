@@ -78,7 +78,7 @@ export function freshStartAlreadyBoundError(
 ): InputDeviceOwnedError {
   // Typed device_owned_by_other_session (#11351): clients branch on the code, not this wording.
   const refusal = (message: string) =>
-    new InputDeviceOwnedError("startDevice", deviceId, undefined, undefined, {
+    new InputDeviceOwnedError("startDevice", deviceId, undefined, {
       message:
         retryAfterMs === undefined
           ? message

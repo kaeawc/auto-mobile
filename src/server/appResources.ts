@@ -585,14 +585,13 @@ async function getAppResource(
 function registerDeviceAppResource(device: BootedDevice, deps: AppResourceDependencies = {}): void {
   const uri = getDeviceAppsUri(device.deviceId);
 
-  ResourceRegistry.register(
-    uri,
-    `Installed Apps (${device.deviceId})`,
-    `List of installed user apps for device ${device.deviceId} (${device.platform}). ` +
+  ResourceRegistry.register(uri, `Installed Apps (${device.deviceId})`, {
+    description:
+      `List of installed user apps for device ${device.deviceId} (${device.platform}). ` +
       `System apps: use automobile:apps?deviceId=${device.deviceId}&type=system.`,
-    "application/json",
-    () => getAppsResource(device.deviceId, deps),
-  );
+    mimeType: "application/json",
+    handler: () => getAppsResource(device.deviceId, deps),
+  });
 
   registeredDeviceResources.set(device.deviceId, uri);
 }
@@ -883,13 +882,12 @@ async function getAppMetadataResource(
 }
 
 export function registerAppResources(deps: AppResourceDependencies = {}): void {
-  ResourceRegistry.register(
-    APPS_RESOURCE_URIS.BASE,
-    "Installed Apps",
-    "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile (deviceId required).",
-    "application/json",
-    () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE, deps),
-  );
+  ResourceRegistry.register(APPS_RESOURCE_URIS.BASE, "Installed Apps", {
+    description:
+      "List installed apps across booted devices, with optional display label and launchability fields when reported by the platform or transport (label is typically omitted on Android without CtrlProxy label support; launchable is typically omitted for physical iOS/devicectl records), with optional query filters: type (launchable|user|system|all, default launchable), search, profile (deviceId required).",
+    mimeType: "application/json",
+    handler: () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE, deps),
+  });
 
   ResourceRegistry.registerTemplate(APPS_QUERY_TEMPLATE, "Installed Apps", {
     description:

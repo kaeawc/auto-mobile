@@ -601,7 +601,10 @@ export async function invokeResolvedDeviceHandler(input: {
     internalExecutionStartTime(args),
     target.device.deviceId,
   );
-  const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);
+  const withdraw = navigationRecorder.record(name, args, target.device, {
+    sessionUuid: target.sessionUuid,
+    traits,
+  });
   const onAbort = () => withdraw?.();
   signal?.addEventListener("abort", onAbort, { once: true });
   let succeeded = false;

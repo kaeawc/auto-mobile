@@ -98,6 +98,8 @@ interface TemplateRegistration<Handler> {
   paginationParams?: string[];
 }
 
+// What a caller supplies when registering a fixed-URI resource, beyond its URI and name.
+type ResourceRegistration = Omit<TemplateRegistration<ResourceHandler>, "paginationParams">;
 type ResourceTemplateRegistration = TemplateRegistration<ResourceTemplateHandler>;
 type ContextualResourceTemplateRegistration =
   TemplateRegistration<ContextualResourceTemplateHandler>;
@@ -315,13 +317,17 @@ class ResourceRegistryClass {
     }
   }
 
-  // Register a new resource
+  /**
+   * Register a new resource.
+   *
+   * @param registration.description - Description shown in resources/list.
+   * @param registration.mimeType - MIME type of the resource contents.
+   * @param registration.handler - Reads the resource.
+   */
   register(
     uri: string,
     name: string,
-    description: string,
-    mimeType: string,
-    handler: ResourceHandler,
+    { description, mimeType, handler }: ResourceRegistration,
   ): void {
     ListChangedBroadcaster.invalidate("resources");
     this.resources.set(uri, { uri, name, description, mimeType, handler });

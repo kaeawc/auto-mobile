@@ -378,7 +378,7 @@ function parseValueOptions(
       }
       continue;
     }
-    const consumed = parseScalarOption(view, at, log, options, video);
+    const consumed = parseScalarOption(view, at, log, { options, video });
     if (consumed !== undefined) {
       // Invalid scalar values still belong to their option; keep the existing
       // warning/default behavior rather than diagnosing them as stray commands.
@@ -410,14 +410,19 @@ const INLINE_LAUNCH_OPTIONS: ReadonlySet<string> = new Set([
   "--video-archive-size-mb",
 ]);
 
-/** The index of the last token the scalar option at `i` consumed, or undefined if none matched. */
+/**
+ * The index of the last token the scalar option at `i` consumed, or undefined if none matched.
+ *
+ * @param targets.options - Scalar option state the connection/accessibility/readiness parsers fill.
+ * @param targets.video - Video recording defaults the video parser fills.
+ */
 function parseScalarOption(
   args: string[],
   i: number,
   log: ParseLogger,
-  options: ScalarOptions,
-  video: ReturnType<typeof createVideoRecordingDefaults>,
+  targets: { options: ScalarOptions; video: ReturnType<typeof createVideoRecordingDefaults> },
 ): number | undefined {
+  const { options, video } = targets;
   const connection = parseConnectionOption(args, i, log, options);
   if (connection !== undefined) {
     return Math.max(connection, optionValueEnd(args, i));

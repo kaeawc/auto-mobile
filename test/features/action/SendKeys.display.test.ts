@@ -330,13 +330,10 @@ describe("sendKeys Android focus read routing", () => {
     test(`${route}: observation disconnection preserves the original message before dispatch`, async () => {
       const h = recordingHarness("cover");
       const error = new DisplaySelectionError(
-        buildDisconnectedPanelMessage(
-          "outside",
-          "cover",
-          [{ key: "inside", role: "inner" }],
-          true,
-          false,
-        ),
+        buildDisconnectedPanelMessage("outside", "cover", [{ key: "inside", role: "inner" }], {
+          hasPostures: true,
+          pinned: false,
+        }),
         {
           disconnectedPanel: {
             panel: multiDisplay.displays!.panels[1],

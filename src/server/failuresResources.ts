@@ -186,13 +186,11 @@ export function registerFailuresResources(
   timer: Timer = defaultTimer,
 ): void {
   // Register base failures resource
-  ResourceRegistry.register(
-    FAILURES_RESOURCE_URIS.BASE,
-    "Failures",
-    "List all failure groups (crashes, ANRs, tool failures) with aggregated data.",
-    "application/json",
-    () => getFailuresResource(FAILURES_RESOURCE_URIS.BASE, repository),
-  );
+  ResourceRegistry.register(FAILURES_RESOURCE_URIS.BASE, "Failures", {
+    description: "List all failure groups (crashes, ANRs, tool failures) with aggregated data.",
+    mimeType: "application/json",
+    handler: () => getFailuresResource(FAILURES_RESOURCE_URIS.BASE, repository),
+  });
 
   // Register timeline resource template
   ResourceRegistry.registerTemplate(TIMELINE_QUERY_TEMPLATE, "Failures Timeline", {

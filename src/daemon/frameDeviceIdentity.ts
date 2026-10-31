@@ -240,11 +240,9 @@ function frameAliasOwnershipError(
   if (managed?.entry) {
     return new DeviceAssignedToBindingError(action, deviceId, managed.entry);
   }
-  return new InputDeviceOwnedError(
-    action,
-    deviceId,
-    requesterSessionUuid,
-    "This transport cannot be told apart from a device another session holds; " +
+  return new InputDeviceOwnedError(action, deviceId, requesterSessionUuid, {
+    remedy:
+      "This transport cannot be told apart from a device another session holds; " +
       "address the device by its USB serial or emulator-NNNN id. Nothing was sent.",
-  );
+  });
 }

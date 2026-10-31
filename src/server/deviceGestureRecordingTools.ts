@@ -131,12 +131,9 @@ async function activeRecordingForExport(
   } catch (error) {
     if (error instanceof InputDeviceOwnedError) {
       // Same typed refusal, without the lifecycle remedy's offer of `force`.
-      throw new InputDeviceOwnedError(
-        "exportPlan",
-        error.deviceId,
-        holder.sessionUuid,
-        EXPORT_PLAN_REMEDY,
-      );
+      throw new InputDeviceOwnedError("exportPlan", error.deviceId, holder.sessionUuid, {
+        remedy: EXPORT_PLAN_REMEDY,
+      });
     }
     throw error;
   }

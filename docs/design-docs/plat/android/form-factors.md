@@ -55,7 +55,7 @@ Verified on `system-images;android-36;android-tv;arm64-v8a`, profile `tv_1080p`,
 | `focusedElement`                                            | Pass: follows Leanback focus and the focus ring.                                                                                  |
 | `sendKeys` arrows and `enter`                               | Pass: arrows move focus; `enter` activates.                                                                                       |
 | `focusNavigate`: target's own `contentDesc` or `resourceId` | Pass.                                                                                                                             |
-| `focusNavigate`: child-view label text                      | Fails with `max_steps` or `stuck` even when the row has focus; match the row's own `contentDesc` or `resourceId` (#16029).        |
+| `focusNavigate`: child-view label text                      | Pass: a target inside the focused node's bounds counts as focused.                                                                |
 | `tapOn`, `swipeOn`                                          | Pass with touchscreen reported; no-touchscreen behaviour unverified.                                                              |
 | `pressButton` back/home                                     | Pass.                                                                                                                             |
 | `launchApp`, `terminateApp`                                 | Pass for apps with only a `LEANBACK_LAUNCHER` entry.                                                                              |
@@ -64,7 +64,7 @@ Verified on `system-images;android-36;android-tv;arm64-v8a`, profile `tv_1080p`,
 | Prototype show/dismiss                                      | Overlay renders and dismisses; its button is not reachable with D-pad focus.                                                      |
 | `observe.accessibilityState`                                | Reports disabled and service unknown while the service is bound; unexplored oddity.                                               |
 
-**Signals and classification.** `ro.build.characteristics` is `emulator`, with no `tv`. Booted-device traits (`src/utils/android-cmdline-tools/deviceTraits.ts`) derive `formFactor` only from this property, so it is `null` on this image and booted traits report no TV form factor. TV classification comes only from the AVD config's system-image tag or `tv_*` profile. The image reports `android.software.leanback`, `android.hardware.type.television`, `android.software.leanback_only` and `android.hardware.touchscreen` as present. No code reads the Leanback feature for classification yet; this is a current gap.
+**Signals and classification.** `ro.build.characteristics` is `emulator`, with no `tv`. Booted-device traits (`src/utils/android-cmdline-tools/deviceTraits.ts`) derive `formFactor` from this property, and on an emulator with no form factor there they fall back to `pm has-feature android.software.leanback`. AVD classification comes from the config's system-image tag or `tv_*` profile. The image reports `android.software.leanback`, `android.hardware.type.television`, `android.software.leanback_only` and `android.hardware.touchscreen` as present.
 
 **Not covered:**
 

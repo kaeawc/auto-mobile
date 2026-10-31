@@ -83,10 +83,9 @@ emulator -avd tv-36
 
 A device is `tv` when its AVD uses a TV system image or a `tv_*` profile, so `formFactor: "tv"`
 appears in `listDevices` and can be asked for in a device `requires` clause or a broker
-`deviceFamily`. Booted device resources derive `traits.formFactor` from `ro.build.characteristics`
-separately. The verified image reports `emulator`, without `tv`, so its booted device resources
-report no TV form factor (`traits.formFactor` is `null`). TV recognition on this image depends on
-the AVD config.
+`deviceFamily`. Booted device resources derive `traits.formFactor` from `ro.build.characteristics`, and an
+emulator whose value carries no form factor reports `tv` when it has the
+`android.software.leanback` feature.
 
 ## Lifecycle
 
@@ -104,9 +103,9 @@ TV apps are driven by focus, not touch. Use `focusNavigate` to move D-pad focus 
 `sendKeys` with `enter` to activate the focused item; activation is verified on this image.
 `pressButton` handles back and home.
 
-`focusNavigate` matches a target by its own `contentDesc` or `resourceId`. A label that is only the
-text of a child view may not be found, even when its row has focus; the call can return `max_steps`
-or `stuck`. Use the focused element's `resourceId` or `contentDesc` in `until` instead.
+`focusNavigate` matches a target on the focused element or on a node inside its bounds, so a label
+on a child view of the focused row counts. A large focused container that holds the target also
+counts as focused.
 
 `tapOn` and `swipeOn` were checked only on an image that reports a touchscreen. Their behaviour
 on devices without a touchscreen is unverified.

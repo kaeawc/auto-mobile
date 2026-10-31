@@ -61,8 +61,8 @@ describe("navigation recorder handler outcomes", () => {
     harness = await installInMemoryNavManager();
     timer = new FakeTimer();
     harness.manager = NavigationGraphManager.createForTesting(
-      new NavigationRepository(harness.db),
-      { testCoverageRepository: new TestCoverageRepository(harness.db), timer },
+      new NavigationRepository({ db: harness.db }),
+      { testCoverageRepository: new TestCoverageRepository({ db: harness.db }), timer },
     );
     NavigationGraphManager.setInstanceForTesting(harness.manager);
     registry = new ToolRegistryClass(timer);
@@ -313,9 +313,9 @@ describe("navigation recorder handler outcomes", () => {
     const sessionId = "session-lifecycle";
     const sessionDb = await createTestDatabase();
     const sessionManager = NavigationGraphManager.createForTesting(
-      new NavigationRepository(sessionDb),
+      new NavigationRepository({ db: sessionDb }),
       {
-        testCoverageRepository: new TestCoverageRepository(sessionDb),
+        testCoverageRepository: new TestCoverageRepository({ db: sessionDb }),
         timer,
         sessionUuid: sessionId,
       },

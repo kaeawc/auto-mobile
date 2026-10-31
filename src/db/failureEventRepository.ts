@@ -11,6 +11,7 @@ import {
   pruneTableByRowCap,
   runAmortizedRetention,
 } from "./rowCapRetention";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 // `crashes`/`anrs` accumulate per crash/ANR detection with no prior cap (#6464).
 // Separate amortization counters since the two tables are inserted into
@@ -85,11 +86,16 @@ export class FailureEventRepository {
   };
 
   /** `retention` lets tests observe the amortized sweeps at small caps. */
-  constructor(
-    db?: Kysely<Database>,
-    timer: Timer = defaultTimer,
-    private readonly retention: { crashMaxRows?: number; anrMaxRows?: number } = {},
-  ) {
+  private readonly retention: { crashMaxRows?: number; anrMaxRows?: number };
+
+  constructor({
+    db,
+    timer = defaultTimer,
+    retention = {},
+  }: Pick<RepositoryDeps, "db" | "timer"> & {
+    retention?: { crashMaxRows?: number; anrMaxRows?: number };
+  } = {}) {
+    this.retention = retention;
     this.timer = timer;
     this.db = db ?? null;
   }

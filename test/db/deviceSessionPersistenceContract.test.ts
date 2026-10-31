@@ -74,7 +74,7 @@ const implementations: Array<[string, () => Promise<DeviceSessionPersistence>]> 
     "DeviceSessionRepository (SQLite)",
     async () => {
       db = await createTestDatabase();
-      return new DeviceSessionRepository(db, new FakeTimer());
+      return new DeviceSessionRepository({ db, timer: new FakeTimer() });
     },
   ],
   ["FakeDeviceSessionPersistence", async () => new FakeDeviceSessionPersistence()],

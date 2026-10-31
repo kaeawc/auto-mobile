@@ -5,10 +5,15 @@ import type {
   RetiredProvisionedDeviceTransport,
   ProvisionedDeviceTransportTombstoneStore,
 } from "../utils/provisionedDeviceTransportFence";
+import type { RepositoryDeps } from "./repositoryDeps";
 export type { RetiredProvisionedDeviceTransport } from "../utils/provisionedDeviceTransportFence";
 
 export class ProvisionedDeviceTransportTombstoneRepository implements ProvisionedDeviceTransportTombstoneStore {
-  constructor(private readonly database?: Kysely<Database>) {}
+  private readonly database?: Kysely<Database>;
+
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
+    this.database = db;
+  }
 
   async retire(input: RetiredProvisionedDeviceTransport, retiredAtMs: number): Promise<void> {
     await this.getDb()

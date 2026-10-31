@@ -41,7 +41,7 @@ describe("test timing sessionUuid scope (#10091)", () => {
     db = await createTestDatabase();
     const timer = new FakeTimer();
     timer.setCurrentTime(2_000_000);
-    repo = new TestExecutionRepository(db, timer);
+    repo = new TestExecutionRepository({ db, timer });
     await repo.recordExecution(execution());
   });
 

@@ -14,7 +14,7 @@ describe("PredictionHistoryRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new PredictionHistoryRepository(db);
+    repo = new PredictionHistoryRepository({ db });
   });
 
   afterEach(async () => {

@@ -75,7 +75,7 @@ async function createHarness(): Promise<Harness> {
   ]) {
     await migrate(db as Kysely<unknown>);
   }
-  const repository = new DeviceSessionRepository(db);
+  const repository = new DeviceSessionRepository({ db });
   const timer = new FakeTimer();
   const barrier = new FakeDbWriteBarrier();
   const manager = new SessionManager(timer, repository, { barrier: () => barrier });

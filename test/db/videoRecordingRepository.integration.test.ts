@@ -46,7 +46,7 @@ describe("VideoRecordingRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new VideoRecordingRepository(db);
+    repo = new VideoRecordingRepository({ db });
   });
 
   afterEach(async () => {

@@ -51,9 +51,9 @@ beforeEach(() => {
   db = new Kysely<unknown>({
     dialect: new BunSqliteDialect({ database: BunDatabase.deserialize(new Uint8Array(template)) }),
   });
-  repo = new VideoRecordingRepository(
-    db.withTables<{ [Table in keyof Database]: Database[Table] }>(),
-  );
+  repo = new VideoRecordingRepository({
+    db: db.withTables<{ [Table in keyof Database]: Database[Table] }>(),
+  });
 });
 afterEach(async () => {
   await db.destroy();

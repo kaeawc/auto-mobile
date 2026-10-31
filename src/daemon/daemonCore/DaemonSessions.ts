@@ -236,11 +236,10 @@ export class DaemonSessions {
       },
       // Subscribers to the booted-device resources learn of status and holder changes (#11413).
       onDeviceStateChanged: this.host.deviceStateChangeNotifier(),
-      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(
-        undefined,
-        this.host.services.timer(),
-        this.host.services.idGenerator(),
-      ),
+      emulatorLossIncidentStore: new EmulatorLossIncidentRepository({
+        timer: this.host.services.timer(),
+        idGenerator: this.host.services.idGenerator(),
+      }),
       ambientExecutionIdReader,
       cancelDeviceSessionExecutions: Object.assign(
         (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>

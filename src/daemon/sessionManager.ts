@@ -590,10 +590,7 @@ export class SessionManager extends SessionManagerForwarders {
 
   constructor(
     timer: Timer = defaultTimer,
-    deviceSessionRepository: Rows.DeviceSessionPersistence = new DeviceSessionRepository(
-      undefined,
-      timer,
-    ),
+    deviceSessionRepository: Rows.DeviceSessionPersistence = new DeviceSessionRepository({ timer }),
     options: Types.SessionManagerOptions = {},
   ) {
     super();

@@ -33,9 +33,9 @@ describe("NavigationGraphManager navigation write ordering", () => {
 
   beforeEach(async () => {
     appId = `${APP_ID}.${++appNumber}`;
-    repository = new NavigationRepository(harness.db);
+    repository = new NavigationRepository({ db: harness.db });
     manager = NavigationGraphManager.createForTesting(repository, {
-      testCoverageRepository: new TestCoverageRepository(harness.db),
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer: new FakeTimer(),
     });
     await manager.setCurrentApp(appId);
@@ -610,7 +610,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
   test("times out a stuck write, warns once, and releases the next write", async () => {
     const timer = new FakeTimer();
     const bounded = NavigationGraphManager.createForTesting(repository, {
-      testCoverageRepository: new TestCoverageRepository(harness.db),
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
       writeTimeoutMs: 50,
     });
@@ -664,7 +664,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
   test("late event completion cannot replace a newer screen", async () => {
     const timer = new FakeTimer();
     const bounded = NavigationGraphManager.createForTesting(repository, {
-      testCoverageRepository: new TestCoverageRepository(harness.db),
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
       writeTimeoutMs: 50,
     });
@@ -718,7 +718,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
   test("a settling write clears its deadline without warning", async () => {
     const timer = new FakeTimer();
     const bounded = NavigationGraphManager.createForTesting(repository, {
-      testCoverageRepository: new TestCoverageRepository(harness.db),
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
       writeTimeoutMs: 50,
     });

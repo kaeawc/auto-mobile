@@ -11,6 +11,7 @@ import type {
   FeatureFlagDefinition,
   FeatureFlagKey,
 } from "../models/FeatureFlagDefinitions";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 export interface FeatureFlagRecord {
   key: FeatureFlagKey;
@@ -58,11 +59,14 @@ export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
   private readonly injectedDb: Kysely<Database> | null;
   private readonly logger: Logger;
 
-  constructor(
-    db?: Kysely<Database>,
-    private readonly timer: Timer = defaultTimer,
-    log?: Logger,
-  ) {
+  private readonly timer: Timer;
+
+  constructor({
+    db,
+    timer = defaultTimer,
+    log,
+  }: Pick<RepositoryDeps, "db" | "timer"> & { log?: Logger } = {}) {
+    this.timer = timer;
     this.injectedDb = db ?? null;
     this.logger = log ?? logger;
   }

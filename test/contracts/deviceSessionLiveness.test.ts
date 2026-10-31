@@ -9,5 +9,5 @@ runDeviceSessionLivenessContract("FakeDeviceSessionPersistence", async () => ({
 // The real repository runs over createTestDatabase() (in-memory SQLite), never the file DB.
 runDeviceSessionLivenessContract("DeviceSessionRepository (SQLite)", async () => {
   const db = await createTestDatabase();
-  return { repository: new DeviceSessionRepository(db), dispose: () => db.destroy() };
+  return { repository: new DeviceSessionRepository({ db }), dispose: () => db.destroy() };
 });

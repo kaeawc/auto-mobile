@@ -623,9 +623,9 @@ describe("IOSCtrlProxyClient lazy build context", () => {
     "rebind applies provenance to the current session (already resolved=%j)",
     async (alreadyResolved) => {
       const nextManager = NavigationGraphManager.createForTesting(
-        new NavigationRepository(harness.db),
+        new NavigationRepository({ db: harness.db }),
         {
-          testCoverageRepository: new TestCoverageRepository(harness.db),
+          testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
           timer,
           sessionUuid: "session-B",
         },

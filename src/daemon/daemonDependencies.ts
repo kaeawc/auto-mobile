@@ -113,7 +113,7 @@ function defaultDaemonProcessBirthTime(): number {
 function resolveStores(dependencies: DaemonDependencies, timer: Timer) {
   return {
     deviceSessionRepository:
-      dependencies.deviceSessionRepository ?? new DeviceSessionRepository(undefined, timer),
+      dependencies.deviceSessionRepository ?? new DeviceSessionRepository({ timer }),
     idGenerator: dependencies.idGenerator ?? defaultIdGenerator,
     databaseInitializer: dependencies.databaseInitializer ?? new DefaultDatabaseInitializer(),
     startupFailureTracker: dependencies.startupFailureTracker ?? new DefaultStartupFailureTracker(),

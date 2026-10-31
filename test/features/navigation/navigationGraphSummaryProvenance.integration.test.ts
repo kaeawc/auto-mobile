@@ -19,7 +19,7 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
   beforeEach(async () => {
     harness = await installInMemoryNavManager();
     // Seed via a repository sharing the harness's single connection.
-    seedRepo = new NavigationRepository(harness.db);
+    seedRepo = new NavigationRepository({ db: harness.db });
     await seedRepo.getOrCreateApp(APP);
   });
 

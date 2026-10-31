@@ -204,15 +204,16 @@ is the replay route.
 
 ## Implemented: route selection (#13098)
 
-`src/features/action/pointer/` holds the `PointerInjector` interface and three routes:
-`ctrlproxy-a11y` (finger only), `adb-input-source` (constant-pressure stylus on API 31+) and
+`src/features/action/pointer/` holds the `PointerInjector` interface and four routes:
+`ctrlproxy-a11y` (finger only), `adb-input-source` (constant-pressure stylus on API 31+),
 `instrumentation` (stylus pressure, and stylus or mouse hover, gated on the runner flags
-`stylus_input_v1` / `hover_input_v1`). `selectPointerRoute` takes the first supporting route in that
+`stylus_input_v1` / `hover_input_v1`) and `uinput` (stylus pressure and hover through a virtual
+pen, root shells only; below). `selectPointerRoute` takes the first supporting route in that
 order, so finger touches keep the accessibility path; a request no route can honour is refused
 before dispatch with the missing capability named, and contradictory requests (a finger hover,
 hover with pressure, a mouse click) are refused as invalid. `derivePointerInput` reports, per
 feature, the route that would carry it from the same support, never a second source of truth.
-The `uinput` and emulator gRPC route ids are reserved. The uinput probe is **PASS**
+The emulator gRPC route id is reserved. The uinput probe is **PASS**
 on Android 17 / API 37 userdebug: `SOURCE_STYLUS` with X/Y, normalized PRESSURE
 0..1, ORIENTATION, DISTANCE and TILT 0..1.571 radians, without idc/keylayout files.
 The probe receives pressure 0.98 from raw 4000/4095, tilt 0.55 and
@@ -220,8 +221,41 @@ The probe receives pressure 0.98 from raw 4000/4095, tilt 0.55 and
 eraser input is not exported and hover-only input produces no step.
 
 Instrumentation is the replay path; CtrlProxy advertises the capability flags
-and injects through its instrumentation (below). A uinput route would serve
-rooted-device or userdebug-emulator record-replay symmetry.
+and injects through its instrumentation (below).
+
+## uinput route (#13105)
+
+The last route, for emulators and rooted devices: it is taken only when `adb shell` already runs as
+uid 0 (`id -u`), so a runner that injects without root always wins. AutoMobile never runs
+`adb root` itself, because that restarts adbd.
+
+**Shape.** `uinputPenScript` writes the command script Android's `uinput` tool reads: a `register`
+of the pen the probe verified (`INPUT_PROP_DIRECT`; `BTN_TOOL_PEN`, `BTN_TOOL_RUBBER`, `BTN_TOUCH`,
+`BTN_STYLUS`, `BTN_STYLUS2`; `ABS_X`/`Y` sized to the display in rotation 0, a `wm size` override winning over the physical size, `ABS_PRESSURE` 0..4095,
+`ABS_DISTANCE` 0..255, `ABS_TILT_X`/`Y` ±90), a 4 s wait for the device to attach (the probe's
+value), then the request as frames every 16 ms with the instrumentation planner's interpolation. A
+stroke is `BTN_TOOL_PEN` and `BTN_TOUCH` down with pressure, then touch up and pen out; a hover is
+`BTN_TOOL_PEN` in range with `ABS_DISTANCE` and no `BTN_TOUCH`. Screen points in the current rotation
+map to natural-orientation digitizer coordinates by inverting the recorder's touch mapping
+(`buildScaler`). The host pipes the script through base64 into `uinput -` on the device and reads
+the tool's exit status back from a marker line; the device closes the pen when the tool exits.
+
+**Limits.**
+
+| Case                                               | Behaviour                                                       |
+| -------------------------------------------------- | --------------------------------------------------------------- |
+| Tilt, orientation or barrel buttons                | Route refuses: their evdev mapping is not verified on a device  |
+| Eraser                                             | Not requestable yet; the pen registers `BTN_TOOL_RUBBER` for it |
+| A display other than 0                             | Refused, nothing sent                                           |
+| Rotation or `wm size` unreadable                   | Refused, nothing sent                                           |
+| No `uinput` tool, or `/dev/uinput` not writable    | Refused, nothing sent, with the fix named                       |
+| Any other `uinput` failure                         | Outcome unknown; verify with `observe` before retrying          |
+| A script over 100 KB of base64 (about ten seconds) | Refused, nothing sent: adbd runs it as one `sh -c` argument     |
+
+Runs hold one lock per device id that the instrumentation route shares, so a pen and an
+instrumentation stroke never play at once; it is keyed by device id because every tool call builds
+its own adb client. The 4 s attach wait, rotated displays and a pre-API 31 device are
+unverified on hardware.
 
 ## Instrumentation route (#13097)
 

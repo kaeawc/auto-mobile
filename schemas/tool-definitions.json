@@ -5825,12 +5825,12 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1",
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool",
               "type": "string",
               "enum": ["stylus"]
             },
             "pressure": {
-              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) and is refused before input without it",
+              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) or a root adb shell with a uinput tool, and is refused before input otherwise",
               "type": "number",
               "minimum": 0,
               "maximum": 1
@@ -14091,7 +14091,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1).",
+    "description": "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1 or, for a stylus, a root adb shell with a writable /dev/uinput).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -14184,7 +14184,7 @@
       },
       "required": ["points"],
       "additionalProperties": false,
-      "description": "Hover a stylus or mouse over a path of points with no contact: hover enter, move and exit (Android, needs the hover_input_v1 capability; refused on iOS and on runners without it, never turned into a touch)."
+      "description": "Hover a stylus or mouse over a path of points with no contact: hover enter, move and exit (Android, needs the hover_input_v1 capability or, for a stylus, a root adb shell with a writable /dev/uinput; refused on iOS and otherwise, never turned into a touch)."
     }
   },
   {
@@ -58209,12 +58209,12 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1",
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool",
               "type": "string",
               "enum": ["stylus"]
             },
             "pressure": {
-              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) and is refused before input without it",
+              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) or a root adb shell with a uinput tool, and is refused before input otherwise",
               "type": "number",
               "minimum": 0,
               "maximum": 1
@@ -61455,12 +61455,12 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1",
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool",
               "type": "string",
               "enum": ["stylus"]
             },
             "pressure": {
-              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) and is refused before input without it",
+              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) or a root adb shell with a uinput tool, and is refused before input otherwise",
               "type": "number",
               "minimum": 0,
               "maximum": 1

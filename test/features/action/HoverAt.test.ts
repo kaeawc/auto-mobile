@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { HoverAt } from "../../../src/features/action/HoverAt";
 import { InstrumentationRoute } from "../../../src/features/action/pointer/InstrumentationRoute";
+import { PointerNotSentError } from "../../../src/features/action/pointer/instrumentationDispatch";
 import type {
   PointerEnvironment,
   PointerInjector,
@@ -150,6 +151,34 @@ describe("HoverAt routing and refusal", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("injection died");
     expect(result.error).toContain("verify state");
+  });
+
+  test("a route that refused before sending says so, without partial-hover advice", async () => {
+    const fake = new FakePointerInjector("uinput");
+    fake.failure = new PointerNotSentError("/dev/uinput is not writable. No input was sent.");
+    const result = await create(android, [fake]).execute({ points: [{ x: 1, y: 1 }] });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("No input was sent");
+    expect(result.error).not.toContain("may have partially run");
+  });
+
+  test("the uinput route's pen attach wait counts against the request budget", async () => {
+    const points = [
+      { x: 1, y: 1 },
+      { x: 2, y: 2, durationMs: 100 },
+    ];
+    // 100 ms planned plus 2 s headroom fits 3 s; the 4 s pen attach on top does not.
+    const uinput = new FakePointerInjector("uinput");
+    await expect(
+      create(android, [uinput]).execute({ points }, { deadlineMs: 3000 }),
+    ).rejects.toThrow(/request budget/);
+    expect(uinput.injected).toEqual([]);
+    const instrumentation = new FakePointerInjector("instrumentation");
+    const result = await create(android, [instrumentation]).execute(
+      { points },
+      { deadlineMs: 3000 },
+    );
+    expect(result.success).toBe(true);
   });
 
   test("a path too long for the limit is refused before dispatch", async () => {

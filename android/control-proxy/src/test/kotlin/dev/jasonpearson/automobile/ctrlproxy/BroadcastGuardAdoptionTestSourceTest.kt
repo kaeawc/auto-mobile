@@ -242,6 +242,7 @@ internal class BroadcastGuardAdoptionTestSourceTest {
         "FailureReceivers.kt",
         "PackageScreenReceivers.kt",
         "CommandReceivers.kt",
+        "ScreenshotRequestHandler.kt",
       )
       .map { fileName ->
         fileName to locateSource(fileName).readText()

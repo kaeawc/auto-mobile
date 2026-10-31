@@ -89,11 +89,40 @@ async function unsupportedReason(
   return undefined;
 }
 
+/** CarService's user-build restriction can arrive as either a shell failure or output. */
+async function carServiceShell(
+  adb: AdbExecutor,
+  args: readonly string[],
+  signal?: AbortSignal,
+): Promise<string> {
+  const feature = args.includes("day-night-mode") ? "vehicle.nightMode" : "vehicle.motion";
+  const reason =
+    `this AAOS image is a user build; ${feature} needs a userdebug/eng image ` +
+    "such as `android-automotive` API 34 ext9";
+  let output: string;
+  try {
+    output = await shell(adb, args, signal);
+  } catch (error) {
+    if (errorMessage(error).includes("requires non-user build")) {
+      unsupported(reason);
+    }
+    throw error;
+  }
+  if (output.includes("requires non-user build")) {
+    unsupported(reason);
+  }
+  return output;
+}
+
 /** Reads and writes global vehicle properties through the car service. */
 export function createVehiclePropertyAccess(adb: AdbExecutor) {
   return {
     async read(property: string, signal?: AbortSignal): Promise<string> {
-      const out = await shell(adb, ["cmd", "car_service", "get-property-value", property], signal);
+      const out = await carServiceShell(
+        adb,
+        ["cmd", "car_service", "get-property-value", property],
+        signal,
+      );
       const value = parsePropertyValue(out);
       if (value === undefined) {
         unsupported(`could not read vehicle property ${property}, so it could not be restored`);
@@ -101,7 +130,7 @@ export function createVehiclePropertyAccess(adb: AdbExecutor) {
       return value;
     },
     async write(property: string, value: string, signal?: AbortSignal): Promise<void> {
-      const out = await shell(
+      const out = await carServiceShell(
         adb,
         ["cmd", "car_service", "inject-vhal-event", property, "0", value],
         signal,
@@ -117,7 +146,7 @@ async function readDrivingState(
   adb: AdbExecutor,
   signal?: AbortSignal,
 ): Promise<{ state: number; line: string } | undefined> {
-  const out = await shell(
+  const out = await carServiceShell(
     adb,
     ["dumpsys", "car_service", "--services", "CarDrivingStateService"],
     signal,
@@ -127,7 +156,7 @@ async function readDrivingState(
 }
 
 async function carCommand(adb: AdbExecutor, args: string[], signal?: AbortSignal): Promise<void> {
-  const out = await shell(adb, ["cmd", "car_service", ...args], signal);
+  const out = await carServiceShell(adb, ["cmd", "car_service", ...args], signal);
   if (COMMAND_FAILURE.test(out) || /invalid|usage:/i.test(out)) {
     unsupported(`car service ${args[0]} failed: ${out.split("\n")[0]}`);
   }

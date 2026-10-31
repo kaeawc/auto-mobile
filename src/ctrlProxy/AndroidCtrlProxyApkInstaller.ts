@@ -422,12 +422,7 @@ export class AndroidCtrlProxyApkInstaller {
     try {
       output = await this.host.executeApkStage(`install "${apkPath}"`, "CtrlProxy APK install");
       if (
-        !isEmptyStreamedInstallFailure(
-          output.stdout,
-          output.stderr,
-          "",
-          this.host.device.deviceId,
-        )
+        !isEmptyStreamedInstallFailure(output.stdout, output.stderr, "", this.host.device.deviceId)
       ) {
         return output;
       }

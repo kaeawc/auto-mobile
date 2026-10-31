@@ -13,6 +13,7 @@ import type {
   BootedDevice,
   Element,
   ObserveResult,
+  ViewHierarchyNode,
   ViewHierarchyResult,
 } from "../../../src/models";
 import type { NotificationUIDetector } from "../../../src/utils/interfaces/NotificationUIDetector";
@@ -24,7 +25,12 @@ import { wireCapture } from "../../helpers/wireCapture";
 import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { springBoardPhotosIcon } from "../../fixtures/observe/iosSpringBoardIcon";
 import settings from "../../fixtures/ios/ctrlproxy-golden/settings-tap-general/0002-push-hierarchy_update.json";
-import { IOS_NOTIFICATION_CENTER_CLASS_HINTS } from "../../../src/features/systemTray/notificationHints";
+import {
+  getHierarchyRoots,
+  IOS_NOTIFICATION_CENTER_CLASS_HINTS,
+  notificationResourceId,
+  traverseForHint,
+} from "../../../src/features/systemTray/notificationHints";
 import { collectNotificationCandidates } from "../../../src/features/systemTray/systemTrayHelpers";
 import {
   getSystemTrayDependencies,
@@ -303,6 +309,23 @@ describe("NotificationUIDetector", () => {
   );
 
   describe("IosNotificationUIDetector behavior", () => {
+    function deriveEmptyCoverSheetFake(): ViewHierarchyResult {
+      // Derived fake: replace with a device capture of the empty tray when one exists.
+      const fake = structuredClone(ios27NotificationCenterHierarchy);
+      for (const root of getHierarchyRoots(fake)) {
+        traverseForHint(root, (node: ViewHierarchyNode) => {
+          if (Array.isArray(node.node)) {
+            node.node = node.node.filter(
+              (child) => notificationResourceId(child) !== "combined-list-view",
+            );
+          }
+          return false;
+        });
+      }
+      return fake;
+    }
+    const derivedEmptyCoverSheetFake = deriveEmptyCoverSheetFake();
+
     // Closest captured home hierarchy: the Photos icon subtree from #8060/#8081.
     // ios-lock-state/observe-unlocked.json has no raw viewHierarchy.
     const capturedIosHomeIconHierarchy = convertIosHierarchy({
@@ -327,7 +350,34 @@ describe("NotificationUIDetector", () => {
       expect(collectNotificationCandidates(ios27NotificationCenterHierarchy)).toEqual([]);
     });
 
+    it("detects the derived empty cover sheet without a notification list", () => {
+      const resourceIds: string[] = [];
+      for (const root of getHierarchyRoots(derivedEmptyCoverSheetFake)) {
+        traverseForHint(root, (node) => {
+          resourceIds.push(notificationResourceId(node));
+          return false;
+        });
+      }
+      expect(resourceIds).toContain("SBCoverSheetWindow");
+      expect(resourceIds).toContain("lockscreen-date-view");
+      expect(resourceIds).not.toContain("combined-list-view");
+      expect(capturedDetector.isTrayOpen(derivedEmptyCoverSheetFake)).toBe(true);
+    });
+
     it.each([
+      [
+        "derived empty cover sheet in another package",
+        { ...derivedEmptyCoverSheetFake, packageName: "com.example.app" },
+      ],
+      [
+        "cover sheet without clock or list",
+        {
+          packageName: "com.apple.springboard",
+          hierarchy: {
+            node: { $: { class: "UIWindow", "resource-id": "SBCoverSheetWindow" } },
+          },
+        },
+      ],
       ["SpringBoard home icon subtree", capturedIosHomeIconHierarchy],
       ["Settings app", capturedIosSettingsHierarchy],
       [
@@ -403,6 +453,7 @@ describe("NotificationUIDetector", () => {
 
     it.each([
       ["cover sheet", ios27NotificationCenterHierarchy, 1, 0],
+      ["derived empty cover sheet", derivedEmptyCoverSheetFake, 1, 0],
       ["legacy Notification Center", iosNotificationCenterHierarchy, 0, 1],
     ] as const)(
       "closes %s with the appropriate action",
@@ -457,6 +508,15 @@ describe("NotificationUIDetector", () => {
         capturedDetector.collapseTray({
           ...observationWithSize,
           viewHierarchy: ios27NotificationCenterHierarchy,
+        }),
+      ).rejects.toThrow("Failed to close Notification Center: home press unavailable");
+    });
+
+    it("rejects derived empty cover-sheet close when home press is unavailable", async () => {
+      await expect(
+        capturedDetector.collapseTray({
+          ...observationWithSize,
+          viewHierarchy: derivedEmptyCoverSheetFake,
         }),
       ).rejects.toThrow("Failed to close Notification Center: home press unavailable");
     });

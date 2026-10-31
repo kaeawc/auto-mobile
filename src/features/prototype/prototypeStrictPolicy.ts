@@ -20,6 +20,9 @@ import {
   type FieldVisitor,
 } from "./prototypeTemplate";
 
+export const SECURE_SCAN_BUDGET_MESSAGE =
+  "Secure binding scan exceeds 4194304 expanded UTF-8 bytes";
+
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
   /**
@@ -180,9 +183,10 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
 }
 
 export function prototypeSensitiveWarnings(spec: unknown): string[] {
-  return prototypeSensitiveSinkErrors(spec).map(
-    ({ path, message }) =>
-      `${path}: ${message}; this is a warning only and does not block the show.`,
+  return prototypeSensitiveSinkErrors(spec).map(({ path, message }) =>
+    message === SECURE_SCAN_BUDGET_MESSAGE
+      ? `${path}: sensitive sink analysis stopped at the 4194304 expanded-byte budget at this path, so the sinks in this spec are unchecked and no sink findings are listed; this is a warning only and does not block the show.`
+      : `${path}: ${message}; this is a warning only and does not block the show.`,
   );
 }
 
@@ -262,7 +266,7 @@ function secureScanBudgetError(
     if (expandedBytes > 4194304) {
       return {
         path: field.path,
-        message: "Secure binding scan exceeds 4194304 expanded UTF-8 bytes",
+        message: SECURE_SCAN_BUDGET_MESSAGE,
       };
     }
   }

@@ -152,7 +152,8 @@ export class BrokerResetRelease {
 
   private needsResetBootSlot(resource: BrokerResourceRecord): boolean {
     return (
-      nativeProfile(resource).platform === "ios" && !this.options.devices.managesResetBootSlots
+      // An iPhone and an Apple Watch reset re-boot through the same simulator boot gate.
+      nativeProfile(resource).platform !== "android" && !this.options.devices.managesResetBootSlots
     );
   }
 

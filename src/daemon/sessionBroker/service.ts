@@ -10,7 +10,11 @@ import type { BootedDevice } from "../../models/DeviceInfo";
 import {
   readAndroidSessionDeviceCatalog,
   readIosSessionDeviceCatalog,
+  readWatchSessionDeviceCatalog,
 } from "../../devices/sessionCatalog";
+import { WatchSimulatorInventory } from "../../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import type { SessionCatalogPlatform } from "./brokerOptions";
+import { nativeWatchReset } from "./watchResetNative";
 import type { SessionDeviceCatalog } from "../../devices/sessionRequirements";
 import {
   listDevices,
@@ -146,7 +150,10 @@ export interface OpenSessionBrokerServiceOptions {
   liveSessionIds?: () => readonly string[];
   /** Tests supply a fake host lock; production shares the registry's physical namespace. */
   hostLock?: SessionBrokerHostLock;
-  catalog?: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
+  catalog?: (
+    platform: SessionCatalogPlatform,
+    signal?: AbortSignal,
+  ) => Promise<SessionDeviceCatalog>;
   androidReset?: {
     inventory(options: {
       signal?: AbortSignal;
@@ -160,7 +167,15 @@ export interface OpenSessionBrokerServiceOptions {
 
 function nativeCatalogReader(config: SessionBrokerHostConfig) {
   const ios = new SimCtlClient(null);
-  return (platform: "ios" | "android", signal?: AbortSignal): Promise<SessionDeviceCatalog> => {
+  // Apple Watch simulators exist only where simctl does; elsewhere the catalog is not installed.
+  const watches = process.platform === "darwin" ? new WatchSimulatorInventory(ios) : undefined;
+  return (
+    platform: SessionCatalogPlatform,
+    signal?: AbortSignal,
+  ): Promise<SessionDeviceCatalog> => {
+    if (platform === "watchos") {
+      return readWatchSessionDeviceCatalog(watches, { signal });
+    }
     if (platform === "ios") {
       return readIosSessionDeviceCatalog(ios, {
         signal,
@@ -261,6 +276,7 @@ export async function openSessionBrokerService(
             resetBaseline: {
               ios: resetIosBaseline,
               android: reset.android,
+              watch: reset.watch,
             },
             captureIosBaseline,
             isCurrentReset: (resource: BrokerResourceRecord) => isCurrentReset(store, resource),
@@ -570,6 +586,8 @@ function nativeBaselineReset(
   return reuseIos || config.reuseAndroidCleanDevices
     ? {
         ios: reuseIos ? nativeIosBaselineReset() : undefined,
+        // An Apple Watch follows the iOS reuse mode (#15882).
+        watch: nativeWatchReset(config, timer),
         android:
           config.reuseAndroidCleanDevices && config.defaults.android
             ? nativeAndroidBaselineReset(androidReset!, timer, config, { journal, recordingGaps })

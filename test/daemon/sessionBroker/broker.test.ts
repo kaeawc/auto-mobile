@@ -18,6 +18,7 @@ import {
 } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { BindingProcessIdentity } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { parseSessionConfig, type SessionConfig } from "../../../src/devices/sessionConfig";
+import type { IosSessionDeviceRequirement } from "../../../src/devices/sessionRequirements";
 import { logger } from "../../../src/utils/logger";
 import type { SessionBrokerReleaseResult } from "../../../src/devices/sessionBrokerResult";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
@@ -35,7 +36,7 @@ const OWNER: BindingProcessIdentity = {
   processGenerationToken: "start-a",
 };
 
-function config(requestId: string): SessionConfig {
+function config(requestId: string): SessionConfig & { device: IosSessionDeviceRequirement } {
   return {
     contractVersion: 1,
     requestId,

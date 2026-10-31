@@ -38,6 +38,13 @@ export const exactProfile = z.discriminatedUnion("platform", [
     abi: z.string().min(1),
     flavor: z.string().min(1),
   }),
+  // An Apple Watch simulator (#15882): exactly provisionDevice's watch spec, nothing inferred.
+  z.object({
+    platform: z.literal("watchos"),
+    metadataState: z.literal("current"),
+    runtime: z.string().min(1),
+    deviceType: z.string().min(1),
+  }),
 ]);
 
 export type BrokerNativeProfile = z.infer<typeof exactProfile>;

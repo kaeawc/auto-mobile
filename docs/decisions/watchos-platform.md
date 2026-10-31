@@ -85,13 +85,38 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   slot against the old watch's UDID), and publishes it at readiness `booted` (provisionDevice's
   `none` / `device_ready`): the automation-readiness gate accepts that for `watchos` only. Between
   executions a watch follows the iOS binding policy: the release keeps it assigned and booted, and
-  the next execution ends any leftover session and reuses it with a fresh one. The session
-  broker's per-release iOS resets (erase, keep-booted, minimal) do not apply: session-broker
-  requests resolve only Android and iOS profiles. A spec change replaces the watch; replacement,
+  the next execution ends any leftover session and reuses it with a fresh one. A spec change
+  replaces the watch; replacement,
   eviction and abandoned-binding cleanup delete it through the daemon's deleteDevice watch path
   (stop, `simctl delete`, then a fresh watch listing must not show it), and a failed delete
   leaves the binding `cleanup_pending`. Legacy slot rows never held watches, so legacy slot
   retirement refuses a watch target.
+- **Session-broker watch requests.** A session request names a watch exactly:
+  `{ schemaVersion: 1, platform: "watchos", spec: { runtime, deviceType } }`, the spec parsed by
+  provisionDevice's watch schema. There are no host defaults, archetypes or OS predicates. Before
+  anything is reserved, the request is checked against the session watch catalog (installed
+  watchOS runtimes and Apple Watch device types from `WatchSimulatorInventory.readCatalog`): an
+  unlisted device type is `unsupported_hardware`, an unlisted or unavailable runtime is
+  `missing_installed_runtime`, each naming the available ones; a host without simctl reports the
+  catalog `not-installed` (permanent `unsupported_hardware`), and an unreadable catalog is
+  transient `catalog_unavailable`. The exact profile (`platform`, `metadataState`, `runtime`,
+  `deviceType`) becomes the watch binding's requested spec, and a pooled watch is reused only for
+  the same runtime and device type. A ready watch receipt adds `readiness: { mode: "none", status:
+  "device_ready" }`; Android and iOS receipts carry no `readiness` field. A watch session binds no
+  device-mutation recorder.
+- **Watch release resets follow the iOS reuse mode.** `reuse.ios.mode` (and
+  `reuseCleanDevices`) decide a released watch's fate as they do an iPhone's; the iOS idle TTL,
+  reset-boot queue and wait-for-a-resetting-device admission apply to it too. `off`: destroyed. `erase`: the watch is stopped through
+  killDevice, `simctl erase`d while shut down, booted again through the simulator boot gate and
+  confirmed Booted with its exact runtime and device type; a redrive that finds it shut down
+  erases it again. `keep-booted`: the iOS cleaning replays the session's mutation journal against
+  a pool-entry app baseline and probes CtrlProxy health; a watch has none of these, so that step
+  is skipped with `fallbackReason` `watchos-keep-booted-unsupported` and the configured fallback
+  runs (`erase`: the watch erase, outcome `fallback:erase`; `destroy`: destroyed). `minimal`: its
+  steps need the session's journaled app installs, and its appearance, content-size, pasteboard and
+  Files-fixture steps have no watchOS equivalent; minimal never erases, so the watch is destroyed
+  with `fallbackReason` `watchos-minimal-unsupported`. No pool-entry baseline is captured for a
+  watch.
 - **`"either"` keeps meaning Android or iOS.** Listing `scanned` flags carry a `watchos` entry;
   until watch inventory exists it is `false`, so a watch is never treated as a freshly listed
   device.

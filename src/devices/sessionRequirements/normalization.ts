@@ -18,6 +18,7 @@ import type {
   OsDefaultPolicy,
   RequirementProvenance,
   RequirementResult,
+  DefaultedSessionDeviceRequirement,
   SessionDeviceCatalog,
   SessionDeviceRequirement,
   SessionRequirementCapabilities,
@@ -165,7 +166,7 @@ function optionalExactModel(
 }
 
 function appliedDefaults(
-  request: SessionDeviceRequirement,
+  request: DefaultedSessionDeviceRequirement,
 ): RequirementProvenance["defaultsApplied"] {
   const applied: Array<"hardware-archetype" | "os-predicate"> = [];
   if (request.hardware.kind === "omitted") {
@@ -272,6 +273,11 @@ export function normalizeSessionDeviceRequirement(
   const parsed = parseSessionDeviceRequirement(request);
   if (!parsed.ok) {
     return parsed;
+  }
+  if (parsed.value.platform === "watchos") {
+    // A watch request has no defaults to apply; it is validated by
+    // normalizeWatchSessionDeviceRequirement against the watch catalog instead.
+    return invalidConfig("A watchOS requirement is not resolved through host defaults.");
   }
   const context = validateContext(parsed.value.platform, defaults, catalog);
   if (!context.ok) {

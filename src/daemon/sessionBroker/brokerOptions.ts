@@ -16,7 +16,11 @@ export interface SessionBrokerOptions {
   devices: SessionBrokerDevicePort;
   owner: BindingProcessIdentity;
   limits: BrokerLimits;
-  catalog: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
+  catalog: (
+    platform: SessionCatalogPlatform,
+    signal?: AbortSignal,
+  ) => Promise<SessionDeviceCatalog>;
+  /** Watch requests are exact and have no defaults, so only iOS and Android are asked. */
   defaults: (platform: "ios" | "android") => SessionRequirementDefaults;
   /** Operator-enabled hardware capabilities; omitted capabilities refuse their requests. */
   capabilities?: SessionRequirementCapabilities;
@@ -40,11 +44,21 @@ export interface SessionBrokerOptions {
   timer?: Pick<Timer, "setTimeout" | "clearTimeout"> & Partial<Pick<Timer, "now">>;
 }
 
+export type SessionCatalogPlatform = SessionDeviceCatalog["platform"];
+
+/**
+ * Whether a released device of this platform is reset for reuse. An Apple Watch simulator
+ * follows the iOS simulator policy (owner decision, #15882).
+ */
 export function cleanDeviceReuseEnabled(
-  platform: "ios" | "android",
+  platform: SessionCatalogPlatform,
   options: Pick<SessionBrokerOptions, "reuseCleanDevices" | "reuseAndroidCleanDevices">,
 ): boolean {
-  return platform === "android"
-    ? options.reuseAndroidCleanDevices === true
-    : options.reuseCleanDevices === true;
+  switch (platform) {
+    case "android":
+      return options.reuseAndroidCleanDevices === true;
+    case "ios":
+    case "watchos":
+      return options.reuseCleanDevices === true;
+  }
 }

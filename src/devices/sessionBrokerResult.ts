@@ -99,9 +99,20 @@ export interface SessionBrokerResult {
   outcome: "ready" | "pending" | "released" | "failed";
   sessionUuid: string | null;
   profile: SessionDeviceProfile | null;
+  /**
+   * Present only on a ready Apple Watch session: a watch is ready once booted, reported with
+   * provisionDevice's watch readiness. Android and iOS sessions are automation-ready and omit it.
+   */
+  readiness?: SessionBrokerReadiness;
   cleanupPending: boolean;
   failure?: SessionBrokerFailure;
   timing?: SessionBrokerTiming;
+}
+
+/** provisionDevice's readiness for a booted Apple Watch simulator (#15882). */
+export interface SessionBrokerReadiness {
+  mode: "none";
+  status: "device_ready";
 }
 
 /**

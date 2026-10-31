@@ -16,6 +16,8 @@ import {
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 
+import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+
 const TTL_MS = 60_000;
 
 function config(requestId: string, platform: "ios" | "android" = "android"): SessionConfig {
@@ -94,6 +96,65 @@ describe("idle pool expiry", () => {
     );
     return resource!.resourceId;
   }
+
+  test("skips snapshot cleanup without mutation and expires on the next pass", async () => {
+    const resourceId = await pooled("pooled");
+    await broker.expireIdlePool();
+    timer.advanceTime(TTL_MS);
+    const before = await options.store.listResources();
+    const finish = Promise.withResolvers<void>();
+    const cleanup = broker.cleanupAvdSnapshots(async () => {
+      await finish.promise;
+      return [];
+    });
+    try {
+      expect(await broker.expireIdlePool()).toEqual({ resources: [] });
+      expect(devices.destroyed).toEqual([]);
+      expect(await options.store.listResources()).toEqual(before);
+    } finally {
+      finish.resolve();
+      await cleanup;
+    }
+    expect(await broker.expireIdlePool()).toEqual({
+      resources: [{ resourceId, outcome: "destroyed", cleanupPending: false }],
+    });
+    expect(devices.destroyed).toEqual([resourceId]);
+  });
+
+  test("snapshot cleanup waits for an expiry paused before its drain", async () => {
+    const resourceId = await pooled("pooled");
+    await broker.expireIdlePool();
+    timer.advanceTime(TTL_MS);
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const list = options.store.listLiveResources.bind(options.store);
+    options.store.listLiveResources = async () => {
+      const snapshot = await list();
+      entered.resolve();
+      await finish.promise;
+      return snapshot;
+    };
+    const expiring = broker.expireIdlePool();
+    await entered.promise;
+    let deleting = false;
+    let destroyedAtCleanup: string[] = [];
+    const cleanup = broker.cleanupAvdSnapshots(async () => {
+      deleting = true;
+      destroyedAtCleanup = [...devices.destroyed];
+      return [];
+    });
+    try {
+      await drainMicrotasks(20);
+      expect(deleting).toBe(false);
+      expect(devices.destroyed).toEqual([]);
+    } finally {
+      finish.resolve();
+      await expiring;
+      await cleanup;
+    }
+    expect(deleting).toBe(true);
+    expect(destroyedAtCleanup).toEqual([resourceId]);
+  });
 
   test("destroys an idle Android device only once it has been idle for the TTL", async () => {
     const resourceId = await pooled("first");

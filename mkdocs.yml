@@ -213,6 +213,7 @@ nav:
       - "Test runners": design-docs/plat/android/junit-runner/index.md
       - "InputConnection trace comparison": design-docs/plat/android/ime-trace-conformance.md
       - "Persona robustness harness": design-docs/plat/android/persona-robustness-harness.md
+      - "OEM identity lane": design-docs/plat/android/oem-identity-lane.md
       - "Android physical panel identity": design-docs/plat/android/physical-panel-identity.md
       - "Android windowing": design-docs/plat/android/windowing.md
       - "Android form factors": design-docs/plat/android/form-factors.md

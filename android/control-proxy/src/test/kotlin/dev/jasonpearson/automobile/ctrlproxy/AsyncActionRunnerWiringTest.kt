@@ -197,9 +197,15 @@ class AsyncActionRunnerWiringTest {
 
   // Extracted handlers keep their dispatch contract across the service and controllers.
   private fun readCtrlProxySource(): String =
-    listOf("CtrlProxy.kt", "StorageController.kt", "DeviceInfoController.kt").joinToString("\n") {
-      locateCtrlProxySource(it).readText()
-    }
+    listOf(
+        "CtrlProxy.kt",
+        "StorageController.kt",
+        "DeviceInfoController.kt",
+        "PermissionController.kt",
+      )
+      .joinToString("\n") {
+        locateCtrlProxySource(it).readText()
+      }
 
   private fun locateCtrlProxySource(fileName: String): File {
     // Forward slashes only: paths are compared/joined below and this test also runs on Windows CI.

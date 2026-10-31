@@ -325,7 +325,7 @@ class DefaultPrototypeHost(
     var request: PrototypeRequest,
   ) {
     /** A floating window's screen position as its anchored root last placed it (#9316). */
-    var anchoredOrigin: IntOffset? = null
+    var anchoredOrigin: IntOffset? by mutableStateOf(null)
     val visible = androidx.compose.runtime.mutableStateOf(true)
     /** A new marker for every content revision, including in-place replacements. */
     var firstComposition = CompletableDeferred<Unit>()
@@ -622,12 +622,14 @@ class DefaultPrototypeHost(
           ),
           request.motionActivity,
         ) {
-          PrototypeWindowContent(request, current.view.escapeState) {
+          val anchoredOriginYPx = current.anchoredOrigin?.y
+          PrototypeWindowContent(request, current.view.escapeState, anchoredOriginYPx) {
             prototypeInsetFloor(
               request.placement,
               target.density(),
               target.navigationBarBottomPx(),
               target.systemBarTopPx(),
+              anchoredOriginYPx,
             )
           }
         }
@@ -1250,11 +1252,12 @@ fun prototypeHostChrome(request: PrototypeRequest): PrototypeHostChrome {
 internal fun PrototypeWindowContent(
   request: PrototypeRequest,
   escapeState: PrototypeEscapeState = remember { PrototypeEscapeState() },
+  anchoredOriginYPx: Int? = null,
   insetFloor: () -> PrototypeInsetFloor,
 ) {
-  // Read again when the configuration changes (rotation), which is when the bar moves.
+  // Read again when the bar moves on rotation or an anchored window changes its screen origin.
   val configuration = LocalConfiguration.current
-  val floor = remember(request.placement, configuration) { insetFloor() }
+  val floor = remember(request.placement, configuration, anchoredOriginYPx) { insetFloor() }
   val chrome = prototypeHostChrome(request)
   val scope = rememberCoroutineScope()
   val shown = request.theme?.collectAsState()?.value

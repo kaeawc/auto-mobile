@@ -97,6 +97,32 @@ class PrototypeInsetFloorTest {
   }
 
   @Test
+  fun `an anchored floating window below the top bar has no top floor`() {
+    val floor =
+      prototypeInsetFloor(
+        PrototypePlacement.Floating(Gravity.TOP),
+        density,
+        bar,
+        76,
+        anchoredOriginYPx = 300,
+      )
+    assertEquals(0, floor.top)
+  }
+
+  @Test
+  fun `an anchored floating window overlapping the top bar clears only the overlap`() {
+    val floor =
+      prototypeInsetFloor(
+        PrototypePlacement.Floating(Gravity.TOP),
+        density,
+        bar,
+        76,
+        anchoredOriginYPx = 30,
+      )
+    assertEquals(46, floor.top)
+  }
+
+  @Test
   fun `other placements have no top floor`() {
     val placements =
       listOf(

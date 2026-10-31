@@ -41,7 +41,9 @@ val LocalPrototypeInsetFloor = staticCompositionLocalOf { PrototypeInsetFloor.No
  * positive `y` moves a bottom-gravity window up); anything else is not behind the bar.
  *
  * Fullscreen also sits behind the whole top bar. Top-gravity floating windows clear the portion
- * covered by their downward offset; other placements have no top floor.
+ * covered by their downward offset. Anchored floating windows use [anchoredOriginYPx] instead,
+ * since their gravity and offset are replaced by their screen origin; other placements have no top
+ * floor.
  */
 @InternalAutoMobilePrototypeApi
 fun prototypeInsetFloor(
@@ -49,6 +51,7 @@ fun prototypeInsetFloor(
   density: Float,
   navigationBarBottomPx: Int,
   systemBarTopPx: Int = 0,
+  anchoredOriginYPx: Int? = null,
 ): PrototypeInsetFloor {
   val bar = navigationBarBottomPx.coerceAtLeast(0)
   val behindBar =
@@ -65,8 +68,12 @@ fun prototypeInsetFloor(
     when (placement) {
       is PrototypePlacement.Fullscreen -> topBar
       is PrototypePlacement.Floating ->
-        if ((placement.gravity and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.TOP)
-          (topBar - (placement.offsetYDp * density).roundToInt()).coerceAtLeast(0)
+        if (
+          anchoredOriginYPx != null ||
+            (placement.gravity and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.TOP
+        )
+          (topBar - (anchoredOriginYPx ?: (placement.offsetYDp * density).roundToInt()))
+            .coerceAtLeast(0)
         else 0
       is PrototypePlacement.Sheet -> 0
     }

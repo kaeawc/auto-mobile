@@ -96,6 +96,76 @@ describe("Android install settle gate", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("retries adb authorization during first boot inside the settle budget", async () => {
+    class AuthorizingAdbExecutor extends FakeAdbExecutor {
+      attempts = 0;
+      override async executeCommand(
+        command: string,
+        options: Parameters<FakeAdbExecutor["executeCommand"]>[1] = {},
+      ) {
+        const result = await super.executeCommand(command, options);
+        if (command === "shell pm path android" && ++this.attempts === 1) {
+          throw new Error("adb: device still authorizing");
+        }
+        return result;
+      }
+    }
+    const adb = new AuthorizingAdbExecutor();
+    adb.setCommandResponse(
+      "pm path android",
+      createExecResult("package:/system/framework/framework-res.apk", ""),
+    );
+    adb.setCommandResponse("getprop sys.boot_completed", createExecResult("1", ""));
+    adb.setCommandResponse("am get-current-user", createExecResult("10", ""));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    await new AndroidInstallSettleGate(
+      createAdbAndroidInstallSettleProbe(adb, { formFactor: "automotive" }),
+      timer,
+      { backoff: sequenceBackoff([10]) },
+    ).wait("automotive");
+    expect(timer.now()).toBe(10);
+    const calls = adb.getCommandCalls().filter((call) => call.command === "shell pm path android");
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call.noRetry).toBe(true);
+      expect(call.signal).toBeInstanceOf(AbortSignal);
+      expect(call.signal).toBe(calls[0]!.signal);
+    }
+  });
+
+  test("persistent adb authorization exhausts the pm path android settle budget", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("pm path android", new Error("adb: device still authorizing"));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const pending = new AndroidInstallSettleGate(
+      createAdbAndroidInstallSettleProbe(adb, { formFactor: "automotive" }),
+      timer,
+      { budgetMs: 25, backoff: sequenceBackoff([10]) },
+    ).wait("automotive");
+    await expect(pending).rejects.toBeInstanceOf(ActionableError);
+    await expect(pending).rejects.toThrow("pm path android");
+    expect(timer.now()).toBe(25);
+  });
+
+  test("unrelated adb failures propagate without retrying pm path android", async () => {
+    const adb = new FakeAdbExecutor();
+    const error = new Error("adb: device offline");
+    adb.setCommandError("pm path android", error);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    await expect(
+      new AndroidInstallSettleGate(
+        createAdbAndroidInstallSettleProbe(adb, { formFactor: "automotive" }),
+        timer,
+        { backoff: sequenceBackoff([10]) },
+      ).wait("automotive"),
+    ).rejects.toBe(error);
+    expect(adb.getExecutedCommands()).toEqual(["shell pm path android"]);
+    expect(timer.now()).toBe(0);
+  });
+
   test("live probe uses the existing automotive user resolver through headless boot", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(

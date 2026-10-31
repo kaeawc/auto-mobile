@@ -83,8 +83,7 @@ function createHarness(resolveDevice: () => Promise<BootedDevice> = async () => 
     },
     "/unused/video-stream.sock",
     timer,
-    { authorize: () => {} },
-    permissiveDeviceAdmissionGate,
+    { authenticator: { authorize: () => {} }, admissionGate: permissiveDeviceAdmissionGate },
   );
   return {
     server,

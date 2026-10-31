@@ -188,17 +188,14 @@ describe("AppearanceSocketServer with per-session config", () => {
       triggerSync: async () => {},
       isSyncEnabled: () => true,
     };
-    const server = new Harness(
-      "/fake/appearance.sock",
-      new FakeTimer(),
-      authenticator,
-      {
+    const server = new Harness("/fake/appearance.sock", new FakeTimer(), authenticator, {
+      deviceSource: {
         getPooledDevices: () => pooled,
         getSessionDevice: () => undefined,
         getSessionForDevice: (deviceId) => owners.get(deviceId) ?? null,
       },
       dependencies,
-    );
+    });
     server.markListening();
     return { server, store, applied, keys };
   }

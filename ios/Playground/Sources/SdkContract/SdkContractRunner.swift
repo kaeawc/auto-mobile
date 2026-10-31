@@ -1,4 +1,5 @@
 import AutoMobileSDK
+import AutoMobileSdkWire
 import Foundation
 
 /// Runs the launch-requested SDK contract scenario once and always writes its manifest, so
@@ -69,7 +70,9 @@ enum SdkContractRunner {
         _ launch: SdkContractLaunch,
         server: SdkContractLoopbackServer,
         into manifest: inout SdkContractManifest
-    ) async throws {
+    )
+        async throws
+    {
         let runId = launch.runId
         switch launch.scenario {
         case networkScenario:
@@ -115,7 +118,9 @@ enum SdkContractRunner {
         seconds: Double,
         orThrow timeout: SdkContractError,
         fileManager: FileManager = .default
-    ) async throws {
+    )
+        async throws
+    {
         let documents = try fileManager.url(
             for: .documentDirectory,
             in: .userDomainMask,
@@ -135,8 +140,8 @@ enum SdkContractRunner {
     private static func waitForCapture(
         _ tap: SdkContractBatchTap,
         expectedCount: Int
-    ) async
-        -> SdkContractBatchTap.Snapshot
+    )
+        async -> SdkContractBatchTap.Snapshot
     {
         let deadline = Date().addingTimeInterval(captureWaitSeconds)
         var snapshot = tap.snapshot()
@@ -150,22 +155,9 @@ enum SdkContractRunner {
     private static func withTimeout<T: Sendable>(
         seconds: UInt64,
         _ body: @escaping @Sendable () async throws -> T
-    ) async throws
-        -> T
+    )
+        async throws -> T
     {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask {
-                try await body()
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-                throw SdkContractError.timedOut(seconds: seconds)
-            }
-            defer { group.cancelAll() }
-            guard let result = try await group.next() else {
-                throw SdkContractError.timedOut(seconds: seconds)
-            }
-            return result
-        }
+        try await withSdkTimeout(seconds: seconds, timeoutError: SdkContractError.timedOut(seconds: seconds), body)
     }
 }

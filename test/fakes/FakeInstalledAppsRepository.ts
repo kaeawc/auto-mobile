@@ -84,8 +84,7 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
     deviceId: string,
     userId: number,
     packageName: string,
-    isSystem: boolean,
-    timestampMs: number,
+    { isSystem, timestampMs }: { isSystem: boolean; timestampMs: number },
   ): Promise<void> {
     if (!this.rows.some((row) => row.device_id === deviceId)) {
       return;

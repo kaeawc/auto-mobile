@@ -237,13 +237,10 @@ export class NavigationGraphRecorder {
     const toolName = interaction?.toolName || null;
     const toolArgs = interaction?.args || null;
 
-    const edge = await repository.createEdge(
-      appId,
-      previousScreen,
-      screenName,
-      { toolName, toolArgs },
+    const edge = await repository.createEdge(appId, previousScreen, screenName, {
+      tool: { toolName, toolArgs },
       timestamp,
-    );
+    });
     // The action just led from this screen to that one, so a remembered replay
     // failure for it is stale.
     this.context.forgetFailedEdgeReplay(
@@ -524,13 +521,12 @@ export class NavigationGraphRecorder {
           provenance.versionCode,
           provenance.contentHash,
         );
-        await repository.recordSuggestionObservation(
-          suggestion.id,
-          buildKey.id,
-          provenance.deviceId,
-          provenance.sessionUuid,
-          timestamp,
-        );
+        await repository.recordSuggestionObservation(suggestion.id, {
+          buildKeyId: buildKey.id,
+          deviceId: provenance.deviceId,
+          sessionUuid: provenance.sessionUuid,
+          seenAt: timestamp,
+        });
       });
 
       logger.debug(
@@ -559,13 +555,10 @@ export class NavigationGraphRecorder {
       return false;
     }
 
-    await this.repository.getOrCreateFingerprint(
-      appId,
-      navigation.nodeId,
-      event.toFingerprint,
-      event.fingerprintData || JSON.stringify({ hash: event.toFingerprint }),
-      event.timestamp,
-    );
+    await this.repository.getOrCreateFingerprint(appId, navigation.nodeId, event.toFingerprint, {
+      data: event.fingerprintData || JSON.stringify({ hash: event.toFingerprint }),
+      timestamp: event.timestamp,
+    });
     assertNavigationWriteCurrent(epoch, this.navigationWriteState);
     logger.info(
       `[NAVIGATION_GRAPH] Correlated fingerprint to ${navigation.screenName} ` +

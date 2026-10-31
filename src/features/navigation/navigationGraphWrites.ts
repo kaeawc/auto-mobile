@@ -25,13 +25,12 @@ export async function recordNodeProvenance(
     provenance.versionCode,
     provenance.contentHash,
   );
-  await repository.recordNodeObservation(
-    nodeId,
-    buildKey.id,
-    provenance.deviceId,
-    provenance.sessionUuid,
-    timestamp,
-  );
+  await repository.recordNodeObservation(nodeId, {
+    buildKeyId: buildKey.id,
+    deviceId: provenance.deviceId,
+    sessionUuid: provenance.sessionUuid,
+    seenAt: timestamp,
+  });
 }
 
 /**
@@ -49,13 +48,12 @@ export async function recordEdgeProvenance(
     provenance.versionCode,
     provenance.contentHash,
   );
-  await repository.recordEdgeObservation(
-    edgeId,
-    buildKey.id,
-    provenance.deviceId,
-    provenance.sessionUuid,
-    timestamp,
-  );
+  await repository.recordEdgeObservation(edgeId, {
+    buildKeyId: buildKey.id,
+    deviceId: provenance.deviceId,
+    sessionUuid: provenance.sessionUuid,
+    seenAt: timestamp,
+  });
 }
 
 /**

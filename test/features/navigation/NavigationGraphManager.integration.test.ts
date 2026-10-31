@@ -1822,13 +1822,10 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     const navRepo = new NavigationRepository(navDb);
     await navRepo.getOrCreateApp(APP_ID);
     const home = await navRepo.getOrCreateNode(APP_ID, "Home", 1000);
-    await navRepo.getOrCreateFingerprint(
-      APP_ID,
-      home.id,
-      "fp_home",
-      JSON.stringify({ layout: "home" }),
-      1000,
-    );
+    await navRepo.getOrCreateFingerprint(APP_ID, home.id, "fp_home", {
+      data: JSON.stringify({ layout: "home" }),
+      timestamp: 1000,
+    });
     return navRepo;
   }
 
@@ -2125,7 +2122,7 @@ class ThrowingLinkPromoteRepo extends NavigationRepository {
   ): Promise<never> {
     // Create the fingerprint first (a real write on the transaction), then throw as
     // if the suggestion-link UPDATE failed.
-    await this.getOrCreateFingerprint(this.appId, nodeId, "fp_orphan", "{}", timestamp);
+    await this.getOrCreateFingerprint(this.appId, nodeId, "fp_orphan", { data: "{}", timestamp });
     throw new Error("injected suggestion-link failure");
   }
 }

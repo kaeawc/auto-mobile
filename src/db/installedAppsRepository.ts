@@ -101,8 +101,7 @@ export class InstalledAppsRepository implements InstalledAppsStore {
     deviceId: string,
     userId: number,
     packageName: string,
-    isSystem: boolean,
-    timestampMs: number,
+    { isSystem, timestampMs }: { isSystem: boolean; timestampMs: number },
   ): Promise<void> {
     const db = await this.getDb();
     const row: NewInstalledApp = {

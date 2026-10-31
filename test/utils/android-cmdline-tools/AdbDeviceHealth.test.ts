@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  isAdbTransportSettlingError,
+  isAdbDeviceAuthorizingError,
   extractAdbMissingDeviceId,
   isAdbMissingDeviceError,
   isAdbPostDispatchTransportError,
@@ -225,23 +225,22 @@ test("matches a missing alias only when it belongs to the expected canonical", (
   expect(isAdbMissingDeviceError(error, "emulator-5554", "localhost:5557")).toBe(false);
 });
 
-describe("isAdbTransportSettlingError", () => {
+describe("isAdbDeviceAuthorizingError", () => {
   test.each([
     // Captured from `adb shell pm path android` right after a fresh AAOS boot (#15879).
     "adb: device still authorizing",
     "Failed to install APK: Command failed: adb -s emulator-5554 shell pm path android\nadb: device still authorizing",
-    "error: device offline",
-    "adb: device is offline",
-  ])("matches a transport that is still settling: %s", (message) => {
-    expect(isAdbTransportSettlingError(new Error(message))).toBe(true);
-    expect(isAdbTransportSettlingError(message)).toBe(true);
+  ])("matches a device still completing the adb handshake: %s", (message) => {
+    expect(isAdbDeviceAuthorizingError(new Error(message))).toBe(true);
+    expect(isAdbDeviceAuthorizingError(message)).toBe(true);
   });
 
   test.each([
     "error: device 'emulator-5554' not found",
     "adb: device unauthorized.\nThis adb server's $ADB_VENDOR_KEYS is not set",
+    "error: device offline",
     "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]",
   ])("does not match other failures: %s", (message) => {
-    expect(isAdbTransportSettlingError(new Error(message))).toBe(false);
+    expect(isAdbDeviceAuthorizingError(new Error(message))).toBe(false);
   });
 });

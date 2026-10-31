@@ -87,9 +87,9 @@ device reports user 0, `ro.fw.mu.headless_system_user` (what `UserManager.isHead
 reads) is checked, and on a headless build the read throws `ForegroundUserPendingError`. Runner readiness
 treats that like a missing framework service and retries setup within its budget, so `sys.boot_completed`
 alone never lets CtrlProxy be set up for user 0 before the switch to the driver user. A freshly
-created AVD can also answer the first setup command with `adb: device still authorizing` or `device
-offline` before its adb transport settles; readiness retries those within the same budget too, so the
-create-and-boot path does not roll back the new AVD for them. A typed device loss stays terminal. Unverified on an AAOS emulator (#14916); the gate relies on the AVD's form factor, so a
+created AVD can also answer the first setup command with `adb: device still authorizing` before it
+finishes the adb key handshake; readiness retries that within the same budget too, so the
+create-and-boot path does not roll back the new AVD for it. Unverified on an AAOS emulator (#14916); the gate relies on the AVD's form factor, so a
 physical head unit is not covered.
 
 An AAOS image is a normal Android build with a car SystemUI; app windows are in the accessibility tree. Same three questions as TV (service enables, `observe` returns a hierarchy, multi-display behaviour for cluster/passenger screens; see `docs/design-docs/plat/android/windowing.md`).

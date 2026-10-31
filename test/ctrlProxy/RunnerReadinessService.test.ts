@@ -811,16 +811,20 @@ describe("RunnerReadinessService", () => {
     expect(timer.now()).toBe(600);
   });
 
-  test.each([
-    // Captured on a freshly created AAOS AVD right after boot (#15879).
-    "APK reinstall failed: Failed to install APK: Command failed: adb -s emulator-5554 shell pm path android\nadb: device still authorizing",
-    "Failed to install APK: error: device offline",
-  ])("retries a device still settling its adb transport after boot: %s", async (error) => {
+  test("retries a fresh device still completing its adb handshake (#15879)", async () => {
     const manager = new FakeAndroidManager();
     let attempts = 0;
     manager.ensureCompatibleVersion = async () => {
       attempts++;
-      return attempts === 1 ? { status: "failed", error } : { status: "compatible" };
+      return attempts === 1
+        ? {
+            status: "failed",
+            // Captured on a freshly created AAOS AVD right after boot.
+            error:
+              "APK reinstall failed: Failed to install APK: Command failed: adb -s emulator-5554 " +
+              "shell pm path android\nadb: device still authorizing",
+          }
+        : { status: "compatible" };
     };
     const { service } = createService({ androidManager: manager });
     await service.ensureReady({
@@ -833,7 +837,7 @@ describe("RunnerReadinessService", () => {
     expect(manager.resetSetupStateCalls).toBe(1);
   });
 
-  test("names the settling adb transport when it never settles within the budget", async () => {
+  test("names the adb handshake when it never completes within the budget", async () => {
     const manager = new FakeAndroidManager();
     let attempts = 0;
     manager.ensureCompatibleVersion = async () => {
@@ -851,26 +855,6 @@ describe("RunnerReadinessService", () => {
     ).rejects.toThrow(/device still authorizing/);
     expect(attempts).toBe(3);
     expect(timer.now()).toBe(600);
-  });
-
-  test("does not retry a typed device loss whose message reads offline", async () => {
-    const manager = new FakeAndroidManager();
-    let attempts = 0;
-    const loss = new DeviceLostError("emulator-5554", "error: device offline");
-    manager.ensureCompatibleVersion = async () => {
-      attempts++;
-      return { status: "failed", error: loss.message, cause: loss };
-    };
-    const { service } = createService({ androidManager: manager });
-    await expect(
-      service.ensureReady({
-        device: androidDevice(),
-        requestedIdentity: "android",
-        totalDeadlineMs: 1_000,
-        readinessTimeoutMs: 500,
-      }),
-    ).rejects.toBeInstanceOf(RunnerReadinessError);
-    expect(attempts).toBe(1);
   });
 
   test("does not retry an ordinary setup failure", async () => {

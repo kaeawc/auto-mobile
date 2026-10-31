@@ -59,13 +59,11 @@ export function isAdbDeviceOfflineError(error: unknown): boolean {
 }
 
 /**
- * ADB knows the device but its transport has not settled: a fresh boot still completing the
- * adb key handshake ("device still authorizing") or briefly offline. Both clear on their own.
+ * A freshly booted device still completing the adb key handshake ("device still authorizing").
+ * It clears on its own, unlike "unauthorized", which needs the user to accept the key.
  */
-export function isAdbTransportSettlingError(error: unknown): boolean {
-  return (
-    /\bdevice\s+still\s+authorizing\b/i.test(errorMessage(error)) || isAdbDeviceOfflineError(error)
-  );
+export function isAdbDeviceAuthorizingError(error: unknown): boolean {
+  return /\bdevice\s+still\s+authorizing\b/i.test(errorMessage(error));
 }
 
 /**

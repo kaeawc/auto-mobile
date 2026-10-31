@@ -1,3 +1,4 @@
+import { MAX_SETTIMEOUT_DELAY_MS } from "../../utils/SystemTimer";
 import type { BootedDevice, ObserveResult } from "../../models";
 import type { SwipeResult } from "../../models/SwipeResult";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -5,7 +6,11 @@ import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import type { IosSdkBridgeClient } from "../observe/ios/IosSdkBridgeReader";
 import { findIosSdkBridgeTarget, iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
 import type { IosSdkAction } from "../observe/ios/sdkObservationBridge";
-import { iosSdkBridgeActionOutcome, type IosSdkTapOutcome } from "./IosSdkBridgeTapRouter";
+import {
+  IOS_SDK_BRIDGE_TAP_TIMEOUT_MS,
+  iosSdkBridgeActionOutcome,
+  type IosSdkTapOutcome,
+} from "./IosSdkBridgeTapRouter";
 import type { SwipeGestureRequest, VoiceOverSwipeRunner } from "./swipeon/types";
 
 /**
@@ -25,13 +30,13 @@ import type { SwipeGestureRequest, VoiceOverSwipeRunner } from "./swipeon/types"
 
 /** Headroom over the gesture's own duration for the bridge's reply and post-action capture. */
 export const IOS_SDK_BRIDGE_SWIPE_HEADROOM_MS = 3000;
-export const IOS_SDK_BRIDGE_SWIPE_MIN_TIMEOUT_MS = 5000;
+export const IOS_SDK_BRIDGE_SWIPE_MIN_TIMEOUT_MS = IOS_SDK_BRIDGE_TAP_TIMEOUT_MS;
 
 /** The gesture budget never undercuts the gesture itself (compare #15821 for long presses). */
 export function iosSdkBridgeSwipeTimeoutMs(durationMs: number): number {
-  return Math.max(
-    IOS_SDK_BRIDGE_SWIPE_MIN_TIMEOUT_MS,
-    durationMs + IOS_SDK_BRIDGE_SWIPE_HEADROOM_MS,
+  return Math.min(
+    Math.max(IOS_SDK_BRIDGE_SWIPE_MIN_TIMEOUT_MS, durationMs + IOS_SDK_BRIDGE_SWIPE_HEADROOM_MS),
+    MAX_SETTIMEOUT_DELAY_MS,
   );
 }
 

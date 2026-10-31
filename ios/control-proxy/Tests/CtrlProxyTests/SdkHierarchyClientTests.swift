@@ -12,6 +12,42 @@ final class SdkHierarchyClientTests: XCTestCase {
         )
     }
 
+    func testObservationActionBudgetSetsRequestAndResourceTimeouts() async throws {
+        for budgetMs in [12000.0, 13000.0] {
+            let main = StubHTTPTransport([])
+            let action = StubHTTPTransport(status: 200)
+            let client = try SdkHierarchyClient(
+                baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
+                transport: main, healthTransport: main,
+                actionTransport: { configuration in
+                    XCTAssertEqual(configuration.timeoutIntervalForRequest, budgetMs / 1000)
+                    XCTAssertEqual(configuration.timeoutIntervalForResource, budgetMs / 1000)
+                    return action
+                }
+            )
+            let reply = await client.sendObservationRequest(
+                .observationAction,
+                body: Data("{}".utf8),
+                timeoutMs: budgetMs
+            )
+            XCTAssertEqual(reply?.statusCode, 200)
+            XCTAssertEqual(action.recordedRequests.first?.timeoutInterval, budgetMs / 1000)
+            XCTAssertEqual(action.recordedRequests.first?.url?.path, SdkRoute.observationAction.path)
+            XCTAssertTrue(main.recordedRequests.isEmpty)
+        }
+    }
+
+    func testObservationWithoutBudgetKeepsDataTimeoutDefaultsAndTransport() async throws {
+        let configuration = SdkHierarchyClient.dataConfiguration()
+        XCTAssertEqual(configuration.timeoutIntervalForRequest, 2)
+        XCTAssertEqual(configuration.timeoutIntervalForResource, 5)
+        let main = StubHTTPTransport(status: 200)
+        let client = try makeClient(main)
+        let reply = await client.sendObservationRequest(.observationSnapshot, body: Data("{}".utf8))
+        XCTAssertEqual(reply?.statusCode, 200)
+        XCTAssertEqual(main.recordedRequests.count, 1)
+    }
+
     func testMagicTapPostPreservesHandledFalseAndFailures() async throws {
         for handled in [true, false] {
             let transport = StubHTTPTransport(status: 200, body: Data("{\"handled\":\(handled)}".utf8))

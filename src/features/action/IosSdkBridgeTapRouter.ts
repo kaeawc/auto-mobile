@@ -8,6 +8,7 @@ import { iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
 import { iosSdkWebTarget } from "../observe/ios/iosSdkWebMerge";
 import type { IosSdkAction } from "../observe/ios/sdkObservationBridge";
 import type { CtrlProxySdkActionResult } from "../observe/ios/types";
+import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import {
   performIosSdkWebAction,
   webTapAction,
@@ -70,6 +71,12 @@ function bridgeAction(
     default:
       return null;
   }
+}
+
+function bridgeActionTimeoutMs(action: IosSdkAction): number {
+  return "longPress" in action
+    ? resolveGestureCtrlProxyTimeoutMs(action.longPress.durationMs)
+    : IOS_SDK_BRIDGE_TAP_TIMEOUT_MS;
 }
 
 function failClosed(reason: string, verb: string): never {
@@ -139,7 +146,7 @@ export function createIosSdkBridgeTapper(options: IosSdkBridgeTapperOptions): Io
         return { backend: "xctest", fallbackReason: "unavailable" };
       }
       const reply = await client.requestSdkActionForIos(action, {
-        timeoutMs: IOS_SDK_BRIDGE_TAP_TIMEOUT_MS,
+        timeoutMs: bridgeActionTimeoutMs(action),
         signal: request.signal,
       });
       return iosSdkBridgeActionOutcome(reply, "tap");

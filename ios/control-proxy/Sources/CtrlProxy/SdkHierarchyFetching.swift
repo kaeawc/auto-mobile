@@ -30,7 +30,7 @@ public protocol SdkHierarchyFetching: Sendable {
     /// Draw a highlight in the in-app SDK process.
     func addHighlight(id: String, shape: HighlightShape) async -> SdkHighlightOutcome
     /// POST to an observation-bridge route (#5159); nil means the SDK was unreachable.
-    func sendObservationRequest(_ route: SdkRoute, body: Data) async -> SdkBridgeReply?
+    func sendObservationRequest(_ route: SdkRoute, body: Data, timeoutMs: Double?) async -> SdkBridgeReply?
 }
 
 /// An SDK observation-bridge reply (#5159): the HTTP status and the raw JSON body.
@@ -101,5 +101,9 @@ extension SdkHierarchyFetching {
     /// Older implementations have no trigger bridge.
     public func sendTrigger(_: Data) async -> SdkTriggerReply? { nil }
     /// Older implementations have no observation bridge.
-    public func sendObservationRequest(_: SdkRoute, body _: Data) async -> SdkBridgeReply? { nil }
+    public func sendObservationRequest(_: SdkRoute, body _: Data, timeoutMs _: Double?) async -> SdkBridgeReply? { nil }
+
+    public func sendObservationRequest(_ route: SdkRoute, body: Data) async -> SdkBridgeReply? {
+        await sendObservationRequest(route, body: body, timeoutMs: nil)
+    }
 }

@@ -18,6 +18,8 @@ extension RequestSdkTrigger: CommandPayload {}
 public struct RequestSdkAction: Decodable, Sendable {
     public var requestId: String?
     public var actionJson: String?
+    /// Optional host reply budget in milliseconds; absent on older daemons.
+    public var timeoutMs: Double?
 }
 
 extension RequestSdkAction: CommandPayload {}

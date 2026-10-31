@@ -53,7 +53,7 @@ export async function requestSdkAction(
     idPrefix: "sdkAction",
     responseType: "sdk_action_result",
     messageType: "request_sdk_action",
-    params: { actionJson: JSON.stringify(action) },
+    params: { actionJson: JSON.stringify(action), timeoutMs: options.timeoutMs },
     timeoutMs: options.timeoutMs ?? IOS_SDK_OBSERVATION_TIMEOUT_MS,
     abortSignal: options.signal,
     cancelScreenshotBackoff: false,

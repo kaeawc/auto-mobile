@@ -1,3 +1,4 @@
+import { MAX_SETTIMEOUT_DELAY_MS } from "../../../src/utils/SystemTimer";
 import { describe, expect, test } from "bun:test";
 import { createIosSdkBridgeTapper } from "../../../src/features/action/IosSdkBridgeTapRouter";
 import type { IosSdkAction } from "../../../src/features/observe/ios/sdkObservationBridge";
@@ -7,9 +8,14 @@ const bridgeElement = { "sdk-element-id": "save", "sdk-capture-identity": "41" }
 
 class FakeActionClient {
   actions: IosSdkAction[] = [];
+  timeouts: Array<number | undefined> = [];
   constructor(private readonly reply: CtrlProxySdkActionResult) {}
-  async requestSdkActionForIos(action: IosSdkAction): Promise<CtrlProxySdkActionResult> {
+  async requestSdkActionForIos(
+    action: IosSdkAction,
+    options?: { timeoutMs?: number },
+  ): Promise<CtrlProxySdkActionResult> {
     this.actions.push(action);
+    this.timeouts.push(options?.timeoutMs);
     return this.reply;
   }
 }
@@ -46,7 +52,24 @@ describe("createIosSdkBridgeTapper (#5159)", () => {
       backend: "sdk",
       nextObservationIdentity: 42,
     });
+    expect(client.timeouts).toEqual([5000]);
     expect(client.actions).toEqual([{ tap: { observationIdentity: 41, elementId: "save" } }]);
+  });
+
+  test.each([
+    [10000, 12000],
+    [MAX_SETTIMEOUT_DELAY_MS, MAX_SETTIMEOUT_DELAY_MS],
+  ])("a long press of %i ms gets a duration-aware bounded timeout", async (duration, expected) => {
+    const { client, tapper: router } = tapper(accepted);
+    await router.tap({
+      action: "longPress",
+      element: bridgeElement,
+      longPressDurationMs: duration,
+    });
+    expect(client.timeouts).toEqual([expected]);
+    if (duration === 10000) {
+      expect(client.timeouts[0]).toBeGreaterThan(10000);
+    }
   });
 
   test("a long press carries its duration", async () => {

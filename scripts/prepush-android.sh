@@ -136,19 +136,24 @@ for changed_file in "${android_changes[@]}"; do
   esac
 done
 
+# A stale shared daemon with a removed JDK broke lint (#16011).
+run_gradle() {
+  (cd android && ./gradlew --no-daemon "$@")
+}
+
 validate_root_gradle_configuration() {
   echo "==> configuration validation (root Gradle files changed)"
-  (cd android && ./gradlew help)
+  run_gradle help
 }
 
 run_full_scope_detekt() {
   echo "==> full-scope Detekt (Detekt config changed)"
-  (cd android && ./gradlew detektMain detektTest)
+  run_gradle detektMain detektTest
 }
 
 run_sdk_api_check() {
   echo "==> SDK API baseline validation"
-  (cd android && ./gradlew :auto-mobile-sdk:apiCheck)
+  run_gradle :auto-mobile-sdk:apiCheck
 }
 
 # Lint also consumes non-Kotlin inputs, so run before Kotlin-only early exits.
@@ -168,10 +173,10 @@ elif [[ -n "$lint_selection" ]]; then
 fi
 if [[ "$lint_all" == true ]]; then
   echo "==> Android lint (all modules; build configuration or gate changed)"
-  (cd android && ./gradlew lintDebug --continue)
+  run_gradle lintDebug --continue
 elif [[ "${#lint_tasks[@]}" -gt 0 ]]; then
   echo "==> Android lint (${lint_tasks[*]})"
-  (cd android && ./gradlew ${lint_tasks[@]+"${lint_tasks[@]}"} --continue)
+  run_gradle ${lint_tasks[@]+"${lint_tasks[@]}"} --continue
 fi
 
 if [[ "$lint_all" == true || "$lint_baseline_changed" == true || "${#lint_tasks[@]}" -gt 0 ]]; then
@@ -328,10 +333,10 @@ if [[ "${detekt_config_changed}" == "true" ]]; then
 else
   echo "==> scoped Detekt (${modules[*]})"
 fi
-(cd android && ./gradlew "${detekt_tasks[@]+"${detekt_tasks[@]}"}")
+run_gradle "${detekt_tasks[@]+"${detekt_tasks[@]}"}"
 
 echo "==> compile (${modules[*]})"
-(cd android && ./gradlew "${compile_tasks[@]+"${compile_tasks[@]}"}")
+run_gradle "${compile_tasks[@]+"${compile_tasks[@]}"}"
 
 if [[ "${#test_tasks[@]}" -eq 0 ]]; then
   echo "No changed modules have unit-test sources; tests are a no-op."
@@ -340,5 +345,5 @@ if [[ "${#test_tasks[@]}" -eq 0 ]]; then
 fi
 
 echo "==> unit tests (${test_tasks[*]})"
-(cd android && ./gradlew "${test_tasks[@]}")
+run_gradle "${test_tasks[@]}"
 "${repo_root}/scripts/ci/record-attestations.sh" android "${attestation_options[@]}" --scope partial --scope-note "scoped Detekt/compile/tests for changed modules only; not a substitute for the full-tree CI Detekt job" 'Android pre-push smoke check=pass:0' 'Android unit tests=pass:0' || true

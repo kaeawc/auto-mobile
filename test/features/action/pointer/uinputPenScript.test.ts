@@ -142,3 +142,37 @@ describe("uinputPenScript", () => {
     expect(commands(stroke).at(-1)).toMatchObject({ command: "delay" });
   });
 });
+
+describe("uinputPenScript eraser (#13105)", () => {
+  const BTN_TOOL_RUBBER = 321;
+  const eraser: PointerRequest = {
+    features: { toolType: "eraser", path: true },
+    points: [
+      { x: 100, y: 200 },
+      { x: 100, y: 232, durationMs: 32 },
+    ],
+  };
+  const keyEvents = (request: PointerRequest) =>
+    commands(request)
+      .flatMap((command) => command.events ?? [])
+      .reduce<number[][]>((triples, value, index, all) => {
+        if (index % 3 === 0 && all[index] === EV_KEY) {
+          triples.push(all.slice(index, index + 3));
+        }
+        return triples;
+      }, []);
+
+  test("an eraser stroke puts the rubber end down and lifts it, never the pen tip", () => {
+    const keys = keyEvents(eraser);
+    expect(keys[0]).toEqual([EV_KEY, BTN_TOOL_RUBBER, 1]);
+    expect(keys.at(-1)).toEqual([EV_KEY, BTN_TOOL_RUBBER, 0]);
+    expect(keys.some(([, code]) => code === BTN_TOOL_PEN)).toBe(false);
+    expect(keys).toContainEqual([EV_KEY, BTN_TOUCH, 1]);
+  });
+
+  test("a stylus stroke keeps the pen tip", () => {
+    const keys = keyEvents({ ...eraser, features: { toolType: "stylus", path: true } });
+    expect(keys[0]).toEqual([EV_KEY, BTN_TOOL_PEN, 1]);
+    expect(keys.some(([, code]) => code === BTN_TOOL_RUBBER)).toBe(false);
+  });
+});

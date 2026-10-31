@@ -33,4 +33,9 @@ describe("needsRootProbe", () => {
     expect(needsRootProbe(new Set(["hover_input_v1"]))).toBe(true);
     expect(needsRootProbe(new Set())).toBe(true);
   });
+
+  test("always reads the uid for an eraser: only the uinput route injects one (#13105)", () => {
+    expect(needsRootProbe(new Set(["stylus_input_v1", "hover_input_v1"]), "eraser")).toBe(true);
+    expect(needsRootProbe(new Set(["stylus_input_v1", "hover_input_v1"]), "stylus")).toBe(false);
+  });
 });

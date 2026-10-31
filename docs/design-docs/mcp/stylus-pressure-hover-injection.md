@@ -140,7 +140,8 @@ Rationale:
   magnitude. It is omitted unless both samples and valid axis ranges are available.
   Empty buttons are omitted. These scalar fields summarize the contact, not its pressure
   ramp or button timing. Rich pointers replay through instrumentation; an eraser
-  gesture is left out with the existing warning and hover-only input produces no step.
+  gesture exports as an eraser step with a warning that only the uinput route replays it, and
+  hover-only input produces no step.
 
 Remaining `recordDeviceGestures` work (additive; finger recordings keep their shape):
 
@@ -218,7 +219,7 @@ on Android 17 / API 37 userdebug: `SOURCE_STYLUS` with X/Y, normalized PRESSURE
 0..1, ORIENTATION, DISTANCE and TILT 0..1.571 radians, without idc/keylayout files.
 The probe receives pressure 0.98 from raw 4000/4095, tilt 0.55 and
 `STYLUS_PRIMARY` (32). `recordDeviceGestures` round-trips the stylus stroke;
-eraser input is not exported and hover-only input produces no step.
+eraser input exports as an eraser step and hover-only input produces no step.
 
 Instrumentation is the replay path; CtrlProxy advertises the capability flags
 and injects through its instrumentation (below).
@@ -234,7 +235,8 @@ of the pen the probe verified (`INPUT_PROP_DIRECT`; `BTN_TOOL_PEN`, `BTN_TOOL_RU
 `BTN_STYLUS`, `BTN_STYLUS2`; `ABS_X`/`Y` sized to the display in rotation 0, a `wm size` override winning over the physical size, `ABS_PRESSURE` 0..4095,
 `ABS_DISTANCE` 0..255, `ABS_TILT_X`/`Y` ±90), a 4 s wait for the device to attach (the probe's
 value), then the request as frames every 16 ms with the instrumentation planner's interpolation. A
-stroke is `BTN_TOOL_PEN` and `BTN_TOUCH` down with pressure, then touch up and pen out; a hover is
+stroke is `BTN_TOOL_PEN` (`BTN_TOOL_RUBBER` for an eraser) and `BTN_TOUCH` down with pressure,
+then touch up and the tool out; a hover is
 `BTN_TOOL_PEN` in range with `ABS_DISTANCE` and no `BTN_TOUCH`. Screen points in the current rotation
 map to natural-orientation digitizer coordinates by inverting the recorder's touch mapping
 (`buildScaler`). The host pipes the script through base64 into `uinput -` on the device and reads
@@ -242,15 +244,15 @@ the tool's exit status back from a marker line; the device closes the pen when t
 
 **Limits.**
 
-| Case                                               | Behaviour                                                       |
-| -------------------------------------------------- | --------------------------------------------------------------- |
-| Tilt, orientation or barrel buttons                | Route refuses: their evdev mapping is not verified on a device  |
-| Eraser                                             | Not requestable yet; the pen registers `BTN_TOOL_RUBBER` for it |
-| A display other than 0                             | Refused, nothing sent                                           |
-| Rotation or `wm size` unreadable                   | Refused, nothing sent                                           |
-| No `uinput` tool, or `/dev/uinput` not writable    | Refused, nothing sent, with the fix named                       |
-| Any other `uinput` failure                         | Outcome unknown; verify with `observe` before retrying          |
-| A script over 100 KB of base64 (about ten seconds) | Refused, nothing sent: adbd runs it as one `sh -c` argument     |
+| Case                                               | Behaviour                                                         |
+| -------------------------------------------------- | ----------------------------------------------------------------- |
+| Tilt, orientation or barrel buttons                | Route refuses: their evdev mapping is not verified on a device    |
+| Eraser                                             | Only this route injects one; the instrumentation route refuses it |
+| A display other than 0                             | Refused, nothing sent                                             |
+| Rotation or `wm size` unreadable                   | Refused, nothing sent                                             |
+| No `uinput` tool, or `/dev/uinput` not writable    | Refused, nothing sent, with the fix named                         |
+| Any other `uinput` failure                         | Outcome unknown; verify with `observe` before retrying            |
+| A script over 100 KB of base64 (about ten seconds) | Refused, nothing sent: adbd runs it as one `sh -c` argument       |
 
 Runs hold one lock per device id that the instrumentation route shares, so a pen and an
 instrumentation stroke never play at once; it is keyed by device id because every tool call builds

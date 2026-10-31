@@ -303,6 +303,18 @@ describe("AvdSnapshotService (#6490)", () => {
     expect(await sut.findLiveEmulatorSerial("am-api28")).toBeNull();
   });
 
+  test("live emulator discovery remains best effort on failure", async () => {
+    const sut = new AvdSnapshotService(new FakeDirectories({}, {}), {
+      emulator: {
+        getBootedDevices: async () => {
+          throw new Error("discovery unavailable");
+        },
+        resolveAvdNameForSerial: async () => undefined,
+      },
+    });
+    expect(await sut.findLiveEmulatorSerial("ambroker-stale")).toBeNull();
+  });
+
   test("deleteVmSnapshot issues exactly one console delete and reports the outcome", async () => {
     const adb = recordingAdbFactory(execResult("OK"));
     const sut = service({}, {}, [], [], adb);

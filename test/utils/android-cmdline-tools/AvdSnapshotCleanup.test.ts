@@ -33,6 +33,7 @@ class FakeLiveness implements AvdSnapshotCleanupLiveness {
   process = false;
   serial: string | null = null;
   error = false;
+  serialError = false;
   calls = 0;
   async hasLiveProcess() {
     this.calls++;
@@ -42,6 +43,9 @@ class FakeLiveness implements AvdSnapshotCleanupLiveness {
     return this.process;
   }
   async findLiveEmulatorSerial() {
+    if (this.serialError) {
+      throw new Error("serial discovery uncertain");
+    }
     return this.serial;
   }
 }
@@ -149,6 +153,23 @@ describe("stale broker snapshot cleanup", () => {
       expect(f.filesystem.removed).toEqual([]);
     }
   });
+  test.each(["process", "serial"] as const)(
+    "%s discovery failure preserves every snapshot and reports the error",
+    async (method) => {
+      const f = fixture();
+      f.liveness.error = method === "process";
+      f.liveness.serialError = method === "serial";
+      const [report] = await f.run();
+      expect(report.error).toContain(
+        method === "process" ? "process uncertain" : "serial discovery uncertain",
+      );
+      expect(report.deletedSnapshotNames).toEqual([]);
+      expect(report.keptSnapshots.map(({ snapshotName }) => snapshotName)).toEqual(
+        f.filesystem.names,
+      );
+      expect(f.filesystem.removed).toEqual([]);
+    },
+  );
   test("registry failure or missing port retains the whole run", async () => {
     const f = fixture();
     f.registry.error = true;

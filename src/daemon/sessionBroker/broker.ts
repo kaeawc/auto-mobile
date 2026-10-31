@@ -1,23 +1,22 @@
-import { poolMatcher } from "./brokerPoolMatch";
+import { AvdSnapshotCleanupFence } from "./avdSnapshotCleanupFence";
+import type { AvdSnapshotCleanupReport } from "./AvdSnapshotCleanup";
+import { SessionBrokerMaintenanceError } from "./SessionBrokerMaintenanceError";
+import { brokerAdmissionInput } from "./brokerAdmission";
 import { RecoveryCleanup, type RecoveryCleanupItem } from "./RecoveryCleanup";
 import {
   abortedByBrokerStop,
   failedResult,
+  failedPreparationResult,
   failureFor,
   preparationFailureError,
   sameProcess,
-  storedBrokerFailure,
-  unwrap,
+  brokerResult,
 } from "./brokerSupport";
 import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 import { classifyCleanReleaseError } from "./cleanReleaseFailure";
 import { SessionBrokerStoppingError } from "./SessionBrokerStoppingError";
 import { DestructionQueue, type SessionBrokerPoolDrainResult } from "./destructionQueue";
 import { IdlePoolExpiry } from "./idlePoolExpiry";
-import {
-  normalizeSessionDeviceRequirement,
-  resolveSessionDeviceProfile,
-} from "../../devices/sessionRequirements";
 import { ActionableError } from "../../models/ActionableError";
 import type { SessionConfig } from "../../devices/sessionConfig";
 import {
@@ -38,10 +37,8 @@ import { BrokerTimingRecorder } from "./timingRecorder";
 import { BrokerResetRelease } from "./resetRelease";
 import { ResetReadiness } from "./resetReadiness";
 import { SessionBrokerFailureError } from "./devicePort";
-import { assertDeviceProfileEmulatable, requestedDeviceProfile } from "./deviceProfile";
+import { requestedDeviceProfile } from "./deviceProfile";
 import type { SessionBrokerOptions } from "./brokerOptions";
-import { nativeProfile } from "./profile";
-import { sessionReadiness, watchAdmissionInput } from "./watchAdmission";
 import { boundedReleaseReply, trackRelease, type TrackedRelease } from "./releaseReply";
 import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
 import {
@@ -83,6 +80,10 @@ export class SessionBroker {
     { controller: AbortController; requestId: string }
   >();
   private stopping = false;
+  private readonly snapshotCleanup = new AvdSnapshotCleanupFence({
+    isStopping: () => this.stopping,
+    preparations: () => this.preparationOwners.keys(),
+  });
 
   private readonly cleanup: RecoveryCleanup;
   private readonly destructions: DestructionQueue;
@@ -136,6 +137,13 @@ export class SessionBroker {
     return this.destructions.drainIdlePool();
   }
 
+  /** Fence discovery/deletion behind all admitted preparations, with no timeout escape. */
+  async cleanupAvdSnapshots(
+    operation: () => Promise<AvdSnapshotCleanupReport[]>,
+  ): Promise<AvdSnapshotCleanupReport[]> {
+    return this.snapshotCleanup.run(operation);
+  }
+
   /** Idle-expiry pass (#14364); a stopping broker expires nothing and its successor restarts clocks. */
   async expireIdlePool(): Promise<SessionBrokerPoolDrainResult> {
     if (this.stopping) {
@@ -153,6 +161,9 @@ export class SessionBroker {
     if (this.stopping) {
       // Refuse before prepareOnce/failureFor: no terminal receipt prevents a successor retry.
       return Promise.reject(new SessionBrokerStoppingError());
+    }
+    if (this.snapshotCleanup.inProgress) {
+      return Promise.reject(new SessionBrokerMaintenanceError());
     }
     const controller = new AbortController();
     const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -186,7 +197,11 @@ export class SessionBroker {
           exportIdentity,
         });
       }
-      const input = await this.admissionInput(config, fingerprint, signal, exportIdentity);
+      const input = await brokerAdmissionInput(this.options, config, {
+        fingerprint,
+        signal,
+        exportIdentity,
+      });
       input.timingStartedAtMs = startedAtMs;
       if (this.options.reuseCleanDevices && config.device.platform !== "android") {
         input.resetReadiness = await this.resetReadiness.snapshot(input.matches);
@@ -289,22 +304,7 @@ export class SessionBroker {
     }
     await this.timing.recordFailedAcquisition(request);
     const result = await this.result(request);
-    return request.errorCode === SESSION_REQUEST_ABANDONED_CODE
-      ? result
-      : {
-          ...result,
-          failure: {
-            ...failure,
-            retryable: Boolean(result.failure?.retryable),
-            // The stored receipt owns retry guidance, so the first reply matches every replay.
-            ...(result.failure?.retryAfterMs !== undefined
-              ? { retryAfterMs: result.failure.retryAfterMs }
-              : {}),
-            ...(result.failure?.retryRequires
-              ? { retryRequires: result.failure.retryRequires }
-              : {}),
-          },
-        };
+    return failedPreparationResult(request, result, failure);
   }
 
   private finishPreparation(requestId: string): void {
@@ -350,36 +350,6 @@ export class SessionBroker {
       );
     }
     return this.resultUnlessAborted(previous, signal);
-  }
-
-  private async admissionInput(
-    config: SessionConfig,
-    fingerprint: string,
-    signal: AbortSignal,
-    exportIdentity?: BrokerExportIdentity,
-  ): Promise<BrokerAdmissionInput> {
-    signal.throwIfAborted();
-    if (config.device.platform === "watchos") {
-      return watchAdmissionInput(this.options, config, { fingerprint, signal, exportIdentity });
-    }
-    const catalog = await this.options.catalog(config.device.platform, signal);
-    const defaults = this.options.defaults(config.device.platform);
-    const capabilities = this.options.capabilities ?? {};
-    const requirement = unwrap(
-      normalizeSessionDeviceRequirement(config.device, defaults, catalog, capabilities),
-    );
-    assertDeviceProfileEmulatable(requestedDeviceProfile(config));
-    return {
-      requestId: config.requestId,
-      fingerprint,
-      parameters: config,
-      owner: this.options.owner,
-      export: exportIdentity,
-      limits: this.options.limits,
-      matches: poolMatcher(requirement, defaults),
-      resolveCreation: () =>
-        unwrap(resolveSessionDeviceProfile(requirement, defaults, catalog, capabilities)),
-    };
   }
 
   private async prepareAdmission(
@@ -999,39 +969,7 @@ export class SessionBroker {
 
   private async result(request: BrokerRequestRecord): Promise<SessionBrokerResult> {
     const resource = await this.requestResource(request);
-    return {
-      contractVersion: 1,
-      requestId: request.requestId,
-      outcome:
-        request.state === "active"
-          ? "ready"
-          : request.state === "failed"
-            ? "failed"
-            : request.state === "released"
-              ? "released"
-              : "pending",
-      sessionUuid: request.sessionId,
-      profile: resource ? nativeProfile(resource) : null,
-      ...sessionReadiness(request.state === "active", resource),
-      cleanupPending: this.cleanupIsPending(request, resource),
-      ...(request.timing ? { timing: request.timing } : {}),
-      ...(request.error
-        ? { failure: storedBrokerFailure(request, this.cleanupIsPending(request, resource)) }
-        : {}),
-    };
-  }
-
-  private cleanupIsPending(
-    request: BrokerRequestRecord,
-    resource: BrokerResourceRecord | undefined,
-  ): boolean {
-    const durableCleanupPending =
-      resource?.requestId === request.requestId &&
-      ["destroying", "resetting", "unknown"].includes(resource.state);
-    const preparationPending =
-      request.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
-      this.hasPendingPreparation(request.requestId);
-    return Boolean(durableCleanupPending || preparationPending);
+    return brokerResult(request, resource, this.hasPendingPreparation(request.requestId));
   }
 
   private async resultUnlessAborted(

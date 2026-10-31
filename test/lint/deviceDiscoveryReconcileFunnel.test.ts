@@ -147,6 +147,11 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason: "Interface declaration only.",
     },
 
+    "src/daemon/sessionBroker/avdSnapshotCleanupPorts.ts": {
+      calls: 1,
+      reason:
+        "Operator snapshot cleanup liveness reads a checked, unfiltered booted-device inventory while the broker fence holds; it never reads or writes pooled identity, so no reconcile applies.",
+    },
     "src/daemon/sessionBroker/registry/platformLegacySlotDeviceStopper.ts": {
       calls: 1,
       reason:

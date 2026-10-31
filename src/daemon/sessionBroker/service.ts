@@ -1,3 +1,10 @@
+import { sessionBrokerHostLock, type SessionBrokerHostLock } from "./serviceHostLock";
+export { sessionBrokerHostLock, type SessionBrokerHostLock } from "./serviceHostLock";
+import { nativeCatalogReader } from "./serviceCatalog";
+import {
+  resolveAvdSnapshotCleanupPorts,
+  type BrokerAvdSnapshotCleanupPorts,
+} from "./avdSnapshotCleanupPorts";
 import { AdbAndroidFoldPostureRestore } from "./androidFoldPostureRestore";
 import {
   InMemoryMutationRecordingGaps,
@@ -7,36 +14,21 @@ import { ENV } from "../../config/env";
 import { readEnvInt } from "../../utils/envNumbers";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice } from "../../models/DeviceInfo";
-import {
-  readAndroidSessionDeviceCatalog,
-  readIosSessionDeviceCatalog,
-  readWatchSessionDeviceCatalog,
-} from "../../devices/sessionCatalog";
-import { WatchSimulatorInventory } from "../../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import type { SessionCatalogPlatform } from "./brokerOptions";
 import { nativeWatchReset } from "./watchResetNative";
 import type { SessionDeviceCatalog } from "../../devices/sessionRequirements";
-import {
-  listDevices,
-  listInstalledSystemImages,
-} from "../../utils/android-cmdline-tools/avdmanager";
 import { bootAdmissionServices } from "../../devices/bootAdmissionServices";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileLock";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { defaultLockOwnerGenerationProbe } from "../lockOwnerGeneration";
 import type { BrokerDeviceAcquisition } from "./provisioning/deviceAcquisition";
 import { defaultBindingToolInvoker } from "./provisioning/daemonDeviceAcquisition";
 import { readToolPayload } from "./provisioning/reconcilerPorts";
 import type { BrokerExecutionRelease } from "./provisioning/executionRelease";
 import type { BindingJournal } from "./registry/bindingJournal";
-import {
-  defaultBindingRegistryPath,
-  type SqliteBindingRegistry,
-} from "./registry/sqliteBindingRegistry";
+import type { SqliteBindingRegistry } from "./registry/sqliteBindingRegistry";
 import {
   computeBindingScopeKey,
   type BindingAssignmentRecord,
@@ -97,35 +89,8 @@ import { getHostEmulatorProcessStopper } from "../../devices/hostEmulatorProcess
 import { AVD_DEFAULT_BOOT_SNAPSHOT } from "../../utils/android-cmdline-tools/AvdSnapshotService";
 import { AVD_SNAPSHOTS_DIRNAME } from "../../utils/android-cmdline-tools/AvdConfigReader";
 
-export interface SessionBrokerHostLock {
-  acquire(): void;
-  release(): void;
-}
-
-/** Existing PID/generation lock primitive, held for the lifetime of the broker service. */
-export function sessionBrokerHostLock(
-  owner: BindingProcessIdentity,
-  path = `${defaultBindingRegistryPath()}.session-broker.lock`,
-): SessionBrokerHostLock {
-  return {
-    acquire: () => {
-      if (
-        !tryAcquireExclusiveLock(path, {
-          pid: owner.pid,
-          ownerToken: owner.daemonId,
-          ownerGeneration: defaultLockOwnerGenerationProbe,
-        })
-      ) {
-        throw new ActionableError(
-          "Another provider owns session-broker execution on this host; stop it before starting a replacement",
-        );
-      }
-    },
-    release: () => releaseExclusiveLock(path, owner.pid, owner.daemonId),
-  };
-}
-
 export interface OpenSessionBrokerServiceOptions {
+  avdSnapshotCleanup?: BrokerAvdSnapshotCleanupPorts;
   recordingGaps?: MutationRecordingGaps;
   mutationSessions?: {
     peekSession(
@@ -162,35 +127,6 @@ export interface OpenSessionBrokerServiceOptions {
     }): Promise<BootedDevice[]>;
     ctrlProxyReady: AndroidBaselineResetDependencies["ctrlProxyReady"];
     snapshot?: AndroidSnapshotReadiness;
-  };
-}
-
-function nativeCatalogReader(config: SessionBrokerHostConfig) {
-  const ios = new SimCtlClient(null);
-  // Apple Watch simulators exist only where simctl does; elsewhere the catalog is not installed.
-  const watches = process.platform === "darwin" ? new WatchSimulatorInventory(ios) : undefined;
-  return (
-    platform: SessionCatalogPlatform,
-    signal?: AbortSignal,
-  ): Promise<SessionDeviceCatalog> => {
-    if (platform === "watchos") {
-      return readWatchSessionDeviceCatalog(watches, { signal });
-    }
-    if (platform === "ios") {
-      return readIosSessionDeviceCatalog(ios, {
-        signal,
-        classifications: config.iosClassifications,
-      });
-    }
-    return readAndroidSessionDeviceCatalog(
-      {
-        listDevices: (signal) => listDevices(undefined, signal),
-        listInstalledSystemImages: (filter, signal) =>
-          listInstalledSystemImages(filter, undefined, signal),
-      },
-      { profileArchetypes: config.androidProfileArchetypes },
-      { signal },
-    );
   };
 }
 
@@ -314,6 +250,11 @@ export async function openSessionBrokerService(
     await recoverActiveMutationRecorders(store, recoverMutationRecorder, recordingGaps);
     const service = new SessionBrokerService(broker, scopeKey, lock, {
       timer: options.timer,
+      avdSnapshotCleanup: resolveAvdSnapshotCleanupPorts(
+        options.avdSnapshotCleanup,
+        options.registry,
+        options.timer,
+      ),
       mutations: {
         recordingGaps,
         recorderFor: recoverMutationRecorder,
@@ -874,6 +815,7 @@ export interface SessionBrokerServiceMutations {
 }
 
 export class SessionBrokerService {
+  readonly avdSnapshotCleanup: BrokerAvdSnapshotCleanupPorts;
   private stopped = false;
   private lastPruneAtMs: number | undefined;
   private running: Promise<void> | undefined;
@@ -890,13 +832,16 @@ export class SessionBrokerService {
     {
       timer,
       mutations,
+      avdSnapshotCleanup,
     }: {
       timer: Pick<Timer, "setTimeout" | "clearTimeout" | "now">;
       mutations: SessionBrokerServiceMutations;
+      avdSnapshotCleanup?: BrokerAvdSnapshotCleanupPorts;
     },
   ) {
     this.timer = timer;
     this.mutations = mutations;
+    this.avdSnapshotCleanup = resolveAvdSnapshotCleanupPorts(avdSnapshotCleanup);
   }
 
   markMutationUnrecorded(sessionUuid: string, reason: string): void {

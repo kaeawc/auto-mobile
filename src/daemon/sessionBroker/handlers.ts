@@ -1,3 +1,6 @@
+import { toActionableError } from "../../models/ActionableError";
+import { cleanupAvdSnapshots } from "./AvdSnapshotCleanup";
+import { SessionBrokerMaintenanceError } from "./SessionBrokerMaintenanceError";
 import {
   SessionRequestOwnerMismatchError,
   SESSION_BROKER_RETRY_AFTER_MS,
@@ -156,7 +159,8 @@ async function handleSessionExport(
 function brokerRejection(error: unknown): DaemonMethodResult {
   if (
     error instanceof SessionRequestOwnerMismatchError ||
-    error instanceof SessionBrokerStoppingError
+    error instanceof SessionBrokerStoppingError ||
+    error instanceof SessionBrokerMaintenanceError
   ) {
     const message = `Session broker rejected request: ${errorMessage(error)}`;
     if (error.retryable) {
@@ -385,6 +389,11 @@ export const BROKER_DAEMON_METHOD_HANDLERS: Array<[string, InitializedDaemonMeth
     "daemon/drainBrokerPool",
     (request, state, { context }) => handleDrainBrokerPool(request, state, context.socketSessionId),
   ],
+  [
+    "daemon/cleanupBrokerAvdSnapshots",
+    (request, state, { context }) =>
+      handleCleanupBrokerAvdSnapshots(request, state, context.socketSessionId),
+  ],
 ];
 
 /** Operator drain of idle pooled devices; takes no parameters and binds no connection. */
@@ -415,5 +424,51 @@ export async function handleDrainBrokerPool(
     return { success: true, result: { ...(await service.broker.drainIdlePool()) } };
   } catch (error) {
     return brokerRejection(error);
+  }
+}
+
+/** Operator snapshot maintenance; discovers AVDs under the broker's preparation fence. */
+export async function handleCleanupBrokerAvdSnapshots(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+  socketSessionId?: string,
+): Promise<DaemonMethodResult> {
+  const refusal = brokerConnectionHostMutationRefusal({
+    binding: state.getBrokerConnectionScopes?.().get(socketSessionId),
+    action: "daemon/cleanupBrokerAvdSnapshots",
+  });
+  if (refusal) {
+    return { success: false, code: refusal.code, error: refusal.message };
+  }
+  const service = state.getSessionBrokerService?.();
+  if (!service) {
+    return unavailable(state);
+  }
+  if (
+    !z
+      .object({})
+      .strict()
+      .safeParse(request.params ?? {}).success
+  ) {
+    return {
+      success: false,
+      code: "session_config_invalid",
+      error: "Snapshot cleanup takes no parameters",
+    };
+  }
+  try {
+    const reports = await service.broker.cleanupAvdSnapshots(async () => {
+      const ports = service.avdSnapshotCleanup;
+      const names = await ports.filesystem.listNames(ports.resolver.getAvdHome());
+      const avdNames = names
+        .filter((name) => name.endsWith(".avd") && name.length > 4)
+        .map((name) => name.slice(0, -4));
+      return cleanupAvdSnapshots(avdNames, ports);
+    });
+    return { success: true, result: { reports } };
+  } catch (error) {
+    return brokerRejection(
+      toActionableError(error, "Snapshot cleanup failed; verify AVD home access and retry"),
+    );
   }
 }

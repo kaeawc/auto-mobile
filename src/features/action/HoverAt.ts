@@ -86,8 +86,8 @@ export class HoverAt extends BaseVisualChange {
       defaultPointerRoutes({
         a11y: notAHoverRoute,
         adbInputSource: notAHoverRoute,
-        instrumentation: createInstrumentationDispatch(this.adb),
-        uinput: createUinputDispatch(this.adb),
+        instrumentation: createInstrumentationDispatch(this.adb, this.device.deviceId),
+        uinput: createUinputDispatch(this.adb, this.device.deviceId),
       });
     this.readEnvironment =
       dependencies.readPointerEnvironment ??

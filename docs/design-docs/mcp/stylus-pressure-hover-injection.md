@@ -252,7 +252,9 @@ the tool's exit status back from a marker line; the device closes the pen when t
 | Any other `uinput` failure                         | Outcome unknown; verify with `observe` before retrying          |
 | A script over 100 KB of base64 (about ten seconds) | Refused, nothing sent: adbd runs it as one `sh -c` argument     |
 
-Runs are serialised per device. The 4 s attach wait, rotated displays and a pre-API 31 device are
+Runs hold one lock per device id that the instrumentation route shares, so a pen and an
+instrumentation stroke never play at once; it is keyed by device id because every tool call builds
+its own adb client. The 4 s attach wait, rotated displays and a pre-API 31 device are
 unverified on hardware.
 
 ## Instrumentation route (#13097)

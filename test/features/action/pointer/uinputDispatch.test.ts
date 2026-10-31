@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PointerNotSentError } from "../../../../src/features/action/pointer/instrumentationDispatch";
 import type { PointerRequest } from "../../../../src/features/action/pointer/PointerInjector";
+import { createInstrumentationDispatch } from "../../../../src/features/action/pointer/instrumentationDispatch";
 import {
   createUinputDispatch,
   readAdbUinputGeometry,
@@ -13,6 +14,7 @@ import type { UinputDisplayGeometry } from "../../../../src/features/action/poin
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { createExecResult } from "../../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
+import { flushMicrotasks } from "../../../helpers/shutdownStageHarness";
 
 const stroke: PointerRequest = {
   features: { toolType: "stylus", variablePressure: true },
@@ -30,7 +32,7 @@ class FakeUinputDevice {
     private result: UinputScriptResult = { exitCode: 0, stderr: "" },
   ) {}
   dispatch() {
-    return createUinputDispatch(new FakeAdbExecutor(), {
+    return createUinputDispatch(new FakeAdbExecutor(), "emulator-5554", {
       readGeometry: async () => {
         this.geometryReads++;
         if (this.geometry instanceof Error) {
@@ -97,7 +99,7 @@ describe("createUinputDispatch (#13105)", () => {
   });
 
   test("a transport failure after the run started keeps the partial-run advice", async () => {
-    const dispatch = createUinputDispatch(new FakeAdbExecutor(), {
+    const dispatch = createUinputDispatch(new FakeAdbExecutor(), "emulator-5554", {
       readGeometry: async () => ({ width: 1080, height: 2400, rotation: 0 }),
       runScript: async () => {
         throw new Error("device offline");
@@ -201,5 +203,98 @@ describe("readAdbUinputGeometry", () => {
     await expect(readAdbUinputGeometry(device("Physical size: garbage\n"))).rejects.toThrow(
       "wm size",
     );
+  });
+});
+
+describe("uinput dispatch locking (#13105)", () => {
+  const geometry = { width: 1080, height: 2400, rotation: 0 };
+  const gatedRun = () => {
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const runs: string[] = [];
+    const deps = (label: string, gate: boolean) => ({
+      readGeometry: async () => geometry,
+      runScript: async () => {
+        runs.push(label);
+        if (gate) {
+          started.resolve();
+          await release.promise;
+        }
+        return { exitCode: 0, stderr: "" };
+      },
+    });
+    return { started, release, runs, deps };
+  };
+
+  test("runs on separate adb clients for one device play one at a time", async () => {
+    const gate = gatedRun();
+    const first = createUinputDispatch(
+      new FakeAdbExecutor(),
+      "uinput-same-device",
+      gate.deps("first", true),
+    )(stroke);
+    await gate.started.promise;
+    const second = createUinputDispatch(
+      new FakeAdbExecutor(),
+      "uinput-same-device",
+      gate.deps("second", false),
+    )(stroke);
+    await flushMicrotasks(50);
+    expect(gate.runs).toEqual(["first"]);
+    gate.release.resolve();
+    await Promise.all([first, second]);
+    expect(gate.runs).toEqual(["first", "second"]);
+  });
+
+  test("different devices do not wait for each other", async () => {
+    const gate = gatedRun();
+    const first = createUinputDispatch(
+      new FakeAdbExecutor(),
+      "uinput-device-a",
+      gate.deps("first", true),
+    )(stroke);
+    await gate.started.promise;
+    const second = createUinputDispatch(
+      new FakeAdbExecutor(),
+      "uinput-device-b",
+      gate.deps("second", false),
+    )(stroke);
+    try {
+      await flushMicrotasks(50);
+      expect(gate.runs).toEqual(["first", "second"]);
+    } finally {
+      gate.release.resolve();
+    }
+    await Promise.all([first, second]);
+  });
+
+  test("a uinput pen waits for an instrumentation stroke on the same device", async () => {
+    const instrumentationStarted = Promise.withResolvers<void>();
+    const instrumentationRelease = Promise.withResolvers<void>();
+    const adb = new FakeAdbExecutor();
+    const executeCommand = adb.executeCommand.bind(adb);
+    adb.executeCommand = async (command, options) => {
+      const response = executeCommand(command, options);
+      instrumentationStarted.resolve();
+      await instrumentationRelease.promise;
+      return response;
+    };
+    adb.setCommandResponse(
+      "am instrument",
+      createExecResult("INSTRUMENTATION_RESULT: success=true\n", ""),
+    );
+    const gate = gatedRun();
+    const instrumentation = createInstrumentationDispatch(adb, "mixed-route-device")(stroke);
+    await instrumentationStarted.promise;
+    const pen = createUinputDispatch(
+      new FakeAdbExecutor(),
+      "mixed-route-device",
+      gate.deps("pen", false),
+    )(stroke);
+    await flushMicrotasks(50);
+    expect(gate.runs).toEqual([]);
+    instrumentationRelease.resolve();
+    await Promise.all([instrumentation, pen]);
+    expect(gate.runs).toEqual(["pen"]);
   });
 });

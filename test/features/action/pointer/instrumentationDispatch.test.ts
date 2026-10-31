@@ -10,6 +10,7 @@ import {
 import type { PointerRequest } from "../../../../src/features/action/pointer/PointerInjector";
 import { createExecResult } from "../../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
+import { flushMicrotasks } from "../../../helpers/shutdownStageHarness";
 
 const hover: PointerRequest = {
   features: { toolType: "stylus", hover: true },
@@ -27,6 +28,8 @@ const refusal = (injected = 0, error = "the system refused HOVER_ENTER at 0 ms")
     `INSTRUMENTATION_RESULT: injected=${injected}`,
     `INSTRUMENTATION_RESULT: error=${error}`,
   ]);
+
+const DEVICE = "emulator-5554";
 
 class GatedAdbExecutor extends FakeAdbExecutor {
   readonly started = Promise.withResolvers<void>();
@@ -138,7 +141,7 @@ describe("createInstrumentationDispatch", () => {
   const run = async (response: ReturnType<typeof createExecResult>, request = hover) => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("am instrument", response);
-    await createInstrumentationDispatch(adb)(request);
+    await createInstrumentationDispatch(adb, DEVICE)(request);
     return adb;
   };
 
@@ -188,7 +191,7 @@ describe("createInstrumentationDispatch", () => {
     const adb = new FakeAdbExecutor();
     const request = { ...hover, points: [{ x: 500.4, y: 999.6 }] };
     adb.setCommandResponseSequence("am instrument", [refusal(), success]);
-    await createInstrumentationDispatch(adb)(request);
+    await createInstrumentationDispatch(adb, DEVICE)(request);
     expect(adb.getExecutedCommands()).toEqual([
       pointerInstrumentationCommand(request),
       "shell input stylus motionevent CANCEL 500 1000",
@@ -200,7 +203,7 @@ describe("createInstrumentationDispatch", () => {
   test("persistent refusal stops after exactly two instrumentation runs", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("am instrument", refusal());
-    await expect(createInstrumentationDispatch(adb)(hover)).rejects.toThrow(
+    await expect(createInstrumentationDispatch(adb, DEVICE)(hover)).rejects.toThrow(
       "the system refused HOVER_ENTER at 0 ms",
     );
     expect(adb.getExecutedCommands()).toEqual([
@@ -213,14 +216,18 @@ describe("createInstrumentationDispatch", () => {
   test("a refusal after two injected events never cancels or retries", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("am instrument", refusal(2));
-    await expect(createInstrumentationDispatch(adb)(hover)).rejects.toThrow("after 2 events");
+    await expect(createInstrumentationDispatch(adb, DEVICE)(hover)).rejects.toThrow(
+      "after 2 events",
+    );
     expect(adb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
   });
 
   test("a zero-event failure without a refusal never cancels or retries", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("am instrument", refusal(0, "invalid request"));
-    await expect(createInstrumentationDispatch(adb)(hover)).rejects.toThrow("invalid request");
+    await expect(createInstrumentationDispatch(adb, DEVICE)(hover)).rejects.toThrow(
+      "invalid request",
+    );
     expect(adb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
   });
 
@@ -228,7 +235,7 @@ describe("createInstrumentationDispatch", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("am instrument", [refusal(), success]);
     adb.setCommandError("motionevent CANCEL", new Error("CANCEL unavailable"));
-    await createInstrumentationDispatch(adb)(hover);
+    await createInstrumentationDispatch(adb, DEVICE)(hover);
     expect(adb.getExecutedCommands()).toEqual([
       pointerInstrumentationCommand(hover),
       "shell input stylus motionevent CANCEL 10 20",
@@ -246,7 +253,7 @@ describe("createInstrumentationDispatch", () => {
       result(["INSTRUMENTATION_RESULT: shortMsg=Process crashed."]),
     );
     adb.setCommandResponse("settings get", createExecResult(state, ""));
-    const dispatch = createInstrumentationDispatch(adb)(hover);
+    const dispatch = createInstrumentationDispatch(adb, DEVICE)(hover);
     await expect(dispatch).rejects.toThrow("may have partially run");
     await expect(dispatch).rejects.toThrow(`CtrlProxy's accessibility service ${note}`);
     expect(adb.getExecutedCommands()).toHaveLength(2);
@@ -263,34 +270,51 @@ describe("createInstrumentationDispatch", () => {
       result(["INSTRUMENTATION_RESULT: shortMsg=runner died"]),
     );
     adb.setCommandError("settings get", new Error("settings unavailable"));
-    await expect(createInstrumentationDispatch(adb)(hover)).rejects.toThrow(
+    await expect(createInstrumentationDispatch(adb, DEVICE)(hover)).rejects.toThrow(
       /^The pointer instrumentation crashed before reporting a result; the hover or stroke may have partially run\. Verify state with observe before retrying\.$/,
     );
   });
 
-  test("separate dispatch factories serialize instrumentation on the same adb", async () => {
-    const adb = new GatedAdbExecutor();
-    adb.setCommandResponse("am instrument", success);
-    const first = createInstrumentationDispatch(adb)(hover);
-    await adb.started.promise;
-    const second = createInstrumentationDispatch(adb)(hover);
-    await Promise.resolve();
-    expect(adb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
-    adb.release.resolve();
+  test("dispatches on separate adb clients for one device run one at a time", async () => {
+    // Each tool call builds its own adb client, so the lock must follow the device.
+    const firstAdb = new GatedAdbExecutor();
+    const secondAdb = new FakeAdbExecutor();
+    firstAdb.setCommandResponse("am instrument", success);
+    secondAdb.setCommandResponse("am instrument", success);
+    const first = createInstrumentationDispatch(firstAdb, "serial-same-device")(hover);
+    await firstAdb.started.promise;
+    const second = createInstrumentationDispatch(secondAdb, "serial-same-device")(hover);
+    await flushMicrotasks(50);
+    expect(secondAdb.getExecutedCommands()).toEqual([]);
+    firstAdb.release.resolve();
     await Promise.all([first, second]);
-    expect(adb.getExecutedCommands()).toEqual([
-      pointerInstrumentationCommand(hover),
-      pointerInstrumentationCommand(hover),
-    ]);
+    expect(secondAdb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
+  });
+
+  test("different devices do not wait for each other", async () => {
+    const firstAdb = new GatedAdbExecutor();
+    const secondAdb = new FakeAdbExecutor();
+    firstAdb.setCommandResponse("am instrument", success);
+    secondAdb.setCommandResponse("am instrument", success);
+    const first = createInstrumentationDispatch(firstAdb, "serial-device-a")(hover);
+    await firstAdb.started.promise;
+    const second = createInstrumentationDispatch(secondAdb, "serial-device-b")(hover);
+    try {
+      await flushMicrotasks(50);
+      expect(secondAdb.getExecutedCommands()).toEqual([pointerInstrumentationCommand(hover)]);
+    } finally {
+      firstAdb.release.resolve();
+    }
+    await Promise.all([first, second]);
   });
 
   test("a caller aborted while queued never starts instrumentation", async () => {
     const adb = new GatedAdbExecutor();
     adb.setCommandResponse("am instrument", success);
-    const first = createInstrumentationDispatch(adb)(hover);
+    const first = createInstrumentationDispatch(adb, DEVICE)(hover);
     await adb.started.promise;
     const controller = new AbortController();
-    const queued = createInstrumentationDispatch(adb)(hover, controller.signal);
+    const queued = createInstrumentationDispatch(adb, DEVICE)(hover, controller.signal);
     controller.abort();
     adb.release.resolve();
     await expect(queued).rejects.toThrow();
@@ -302,7 +326,9 @@ describe("createInstrumentationDispatch", () => {
     const adb = new FakeAdbExecutor();
     const controller = new AbortController();
     controller.abort();
-    await expect(createInstrumentationDispatch(adb)(hover, controller.signal)).rejects.toThrow();
+    await expect(
+      createInstrumentationDispatch(adb, DEVICE)(hover, controller.signal),
+    ).rejects.toThrow();
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
@@ -313,7 +339,9 @@ describe("createInstrumentationDispatch", () => {
       const controller = new AbortController();
       adb.setCommandResponseSequence("am instrument", [refusal(), success]);
       adb.abortAfterCommand(command, controller);
-      await expect(createInstrumentationDispatch(adb)(hover, controller.signal)).rejects.toThrow();
+      await expect(
+        createInstrumentationDispatch(adb, DEVICE)(hover, controller.signal),
+      ).rejects.toThrow();
       expect(
         adb.getExecutedCommands().filter((value) => value.includes("am instrument")),
       ).toHaveLength(1);

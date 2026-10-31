@@ -110,8 +110,8 @@ export async function dispatchRichStylus(
     defaultPointerRoutes({
       a11y: refuseNonStylus,
       adbInputSource: refuseNonStylus,
-      instrumentation: createInstrumentationDispatch(adb),
-      uinput: createUinputDispatch(adb),
+      instrumentation: createInstrumentationDispatch(adb, device.deviceId),
+      uinput: createUinputDispatch(adb, device.deviceId),
     });
   const route = requirePointerRoute(request.features, environment, injectors);
   options.assertCurrent?.();

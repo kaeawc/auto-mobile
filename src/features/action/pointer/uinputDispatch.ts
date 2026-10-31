@@ -1,4 +1,3 @@
-import { Mutex } from "async-mutex";
 import { ActionableError } from "../../../models/ActionableError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readWindowManagerRotation } from "../../../utils/android-cmdline-tools/readWindowManagerRotation";
@@ -12,6 +11,7 @@ import {
 import type { PointerDispatch } from "./DispatchingRoute";
 import { PointerNotSentError } from "./instrumentationDispatch";
 import { uinputPenScript, uinputPlannedMs, type UinputDisplayGeometry } from "./uinputPenScript";
+import { pointerDispatchLock } from "./pointerDispatchLock";
 
 const GEOMETRY_READ_TIMEOUT_MS = 5_000;
 /** adb start-up and the device shell, on top of the planned registration and event time. */
@@ -36,8 +36,6 @@ export interface UinputDispatchDeps {
   readGeometry(signal?: AbortSignal): Promise<UinputDisplayGeometry>;
   runScript(script: string, timeoutMs: number, signal?: AbortSignal): Promise<UinputScriptResult>;
 }
-
-const dispatchLocks = new WeakMap<AdbExecutor, Mutex>();
 
 /**
  * The default display's size in rotation 0 and its current rotation. A `wm size` override wins over
@@ -121,21 +119,18 @@ function scriptFailure(result: UinputScriptResult): ActionableError {
 
 /**
  * The uinput route's transport: register a virtual pen for the default display in its current
- * rotation, play the request, and close the device. Runs are serialised per device so two pens are
- * never live at once.
+ * rotation, play the request, and close the device. Runs share the device's pointer lock, so two
+ * pens, or a pen and an instrumentation stroke, are never live at once.
  */
 export function createUinputDispatch(
   adb: AdbExecutor,
+  deviceId: string,
   deps: UinputDispatchDeps = {
     readGeometry: (signal) => readAdbUinputGeometry(adb, signal),
     runScript: (script, timeoutMs, signal) => runAdbUinputScript(adb, script, timeoutMs, signal),
   },
 ): PointerDispatch {
-  let lock = dispatchLocks.get(adb);
-  if (!lock) {
-    lock = new Mutex();
-    dispatchLocks.set(adb, lock);
-  }
+  const lock = pointerDispatchLock(deviceId);
   return async (request, signal) => {
     throwIfAborted(signal);
     if ((request.displayId ?? 0) !== 0) {

@@ -159,9 +159,11 @@ describe("rebind stroke selection (#11667)", () => {
         cancelled.push(`${device.deviceId}:${id}`);
       },
     });
-    await registry.onStartAcked("pane", android(OLD_DEVICE), "left", HOLDER);
-    await registry.onStartAcked("pane", android(NEW_DEVICE), "kept", HOLDER);
-    await registry.onStartAcked("other-pane", android(OLD_DEVICE), "other", NEXT_OWNER);
+    await registry.onStartAcked("pane", android(OLD_DEVICE), "left", { holderSessionId: HOLDER });
+    await registry.onStartAcked("pane", android(NEW_DEVICE), "kept", { holderSessionId: HOLDER });
+    await registry.onStartAcked("other-pane", android(OLD_DEVICE), "other", {
+      holderSessionId: NEXT_OWNER,
+    });
     await registry.cancelAllHeldByOn(HOLDER, OLD_DEVICE);
     expect(cancelled).toEqual([`${OLD_DEVICE}:left`]);
     expect(registry.ownerCount).toBe(2);

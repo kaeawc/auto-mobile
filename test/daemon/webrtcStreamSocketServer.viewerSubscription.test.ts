@@ -207,9 +207,10 @@ function harness(
         },
       }),
     },
-    options.useDefaultAuthenticator
-      ? undefined
-      : (options.authenticator ??
+    {
+      authenticator: options.useDefaultAuthenticator
+        ? undefined
+        : (options.authenticator ??
           new SessionScopedStreamAuthenticator(
             () => ({
               getSession: (id) => (state.live.has(id) ? session : null),
@@ -220,11 +221,12 @@ function harness(
             "webrtcStream",
             options.authOff ? { AUTOMOBILE_DAEMON_STREAM_AUTH: "0" } : {},
           )),
-    {
-      assertDeviceActionable: () => {
-        if (state.quarantined) {
-          throw new Error("quarantined");
-        }
+      admissionGate: {
+        assertDeviceActionable: () => {
+          if (state.quarantined) {
+            throw new Error("quarantined");
+          }
+        },
       },
     },
   );
@@ -922,8 +924,7 @@ test("fix4: rejection keys distinguish action/session, evict oldest, and clear o
       getStream: () => null,
       getSubscriptionKind: () => "viewer",
     },
-    { authorize: () => {} },
-    { assertDeviceActionable: () => {} },
+    { authenticator: { authorize: () => {} }, admissionGate: { assertDeviceActionable: () => {} } },
   );
   servers.push(server);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});

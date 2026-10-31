@@ -165,6 +165,16 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   AppearanceSocketRequest,
   AppearanceSocketResponse
 > {
+  private readonly deviceSource: AppearanceDeviceSource;
+  private readonly dependencies: AppearanceSocketServerDependencies;
+
+  /**
+   * @param socketPath - Unix socket path to listen on
+   * @param timer - Clock for socket timers
+   * @param authenticator - Request authenticator
+   * @param options.deviceSource - Pooled-device and session-device lookups
+   * @param options.dependencies - Appearance config store and apply hooks
+   */
   constructor(
     socketPath: string = getSocketPath(APPEARANCE_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
@@ -173,10 +183,17 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
       // An observer may store its own config; it applies once the observer holds a device (#10976).
       { allowObserverSessions: true },
     ),
-    private readonly deviceSource: AppearanceDeviceSource = defaultAppearanceDeviceSource,
-    private readonly dependencies: AppearanceSocketServerDependencies = defaultDependencies,
+    {
+      deviceSource = defaultAppearanceDeviceSource,
+      dependencies = defaultDependencies,
+    }: {
+      deviceSource?: AppearanceDeviceSource;
+      dependencies?: AppearanceSocketServerDependencies;
+    } = {},
   ) {
     super(socketPath, timer, "Appearance");
+    this.deviceSource = deviceSource;
+    this.dependencies = dependencies;
   }
 
   protected bypassesRequestChain(request: AppearanceSocketRequest): boolean {
@@ -479,7 +496,7 @@ export async function startAppearanceSocketServer(
   deviceSource: AppearanceDeviceSource = defaultAppearanceDeviceSource,
 ): Promise<void> {
   await socketServer.start(
-    () => new AppearanceSocketServer(undefined, undefined, undefined, deviceSource),
+    () => new AppearanceSocketServer(undefined, undefined, undefined, { deviceSource }),
   );
 }
 

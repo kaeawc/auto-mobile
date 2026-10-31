@@ -62,13 +62,31 @@ function defaultCaptureFps(device: BootedDevice): number {
 
 /** H.264 delivery, replay, backpressure recovery and capture liveness for the socket relay. */
 export class VideoStreamCapturePipeline {
+  private readonly timer: Timer;
+  private readonly outboundStalls: Map<Socket, { timeout: NodeJS.Timeout; onDrain: () => void }>;
+
+  /**
+   * @param host - Relay callbacks for capture lookup, detach and stop
+   * @param deps - Capture-source collaborators
+   * @param captureRegistry - Shared device capture registry
+   * @param options.timer - Clock for heartbeats and liveness probes
+   * @param options.outboundStalls - The relay's per-socket backpressure stall table
+   */
   constructor(
     private readonly host: VideoStreamCapturePipelineHost,
     private readonly deps: VideoStreamCapturePipelineDependencies,
     private readonly captureRegistry: DeviceCaptureRegistry,
-    private readonly timer: Timer,
-    private readonly outboundStalls: Map<Socket, { timeout: NodeJS.Timeout; onDrain: () => void }>,
-  ) {}
+    {
+      timer,
+      outboundStalls,
+    }: {
+      timer: Timer;
+      outboundStalls: Map<Socket, { timeout: NodeJS.Timeout; onDrain: () => void }>;
+    },
+  ) {
+    this.timer = timer;
+    this.outboundStalls = outboundStalls;
+  }
 
   async createSource(
     capture: DeviceCapture,

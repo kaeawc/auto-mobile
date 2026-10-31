@@ -118,21 +118,16 @@ function harness(
   const timer = new FakeTimer();
   // Claims recorded at `acquiredAt: 1` are past their owner's startup grace (#11158).
   timer.setCurrentTime(1 + DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS);
-  const ownership = new ForwardLeaseForeignDeviceOwnership(
-    SELF_PID,
-    files,
-    probe,
-    () => SELF_SOCKET,
-    {
-      timer,
-      forwardEvidence:
-        forwardVerdict === undefined
-          ? undefined
-          : "read" in forwardVerdict
-            ? forwardVerdict
-            : ({ read: async () => forwardVerdict } satisfies ForeignCtrlProxyForwardEvidence),
-    },
-  );
+  const ownership = new ForwardLeaseForeignDeviceOwnership(SELF_PID, files, probe, {
+    ownerSocketPath: () => SELF_SOCKET,
+    timer,
+    forwardEvidence:
+      forwardVerdict === undefined
+        ? undefined
+        : "read" in forwardVerdict
+          ? forwardVerdict
+          : ({ read: async () => forwardVerdict } satisfies ForeignCtrlProxyForwardEvidence),
+  });
   const ownerOf = async (deviceId: string) => {
     await ownership.refresh([deviceId]);
     return ownership.foreignOwnerPid(deviceId);
@@ -711,15 +706,13 @@ describe("daemons in different coordination directories on one adb server (#1070
       FOREIGN_PID,
       daemon(home, join(root, "coord-a"), alive),
       probe,
-      () => "/sockets/first.sock",
-      { timer: new FakeTimer() },
+      { ownerSocketPath: () => "/sockets/first.sock", timer: new FakeTimer() },
     );
     const second = new ForwardLeaseForeignDeviceOwnership(
       SELF_PID,
       daemon(home, join(root, "coord-b"), alive),
       probe,
-      () => SELF_SOCKET,
-      { timer: new FakeTimer() },
+      { ownerSocketPath: () => SELF_SOCKET, timer: new FakeTimer() },
     );
 
     expect(await first.claim("emulator-5554")).toBe(true);
@@ -744,8 +737,7 @@ describe("daemons in different coordination directories on one adb server (#1070
       SELF_PID,
       daemon(home, coordinationDir, new Set([SELF_PID])),
       new FakeOwnerProbe(),
-      () => SELF_SOCKET,
-      { timer: new FakeTimer() },
+      { ownerSocketPath: () => SELF_SOCKET, timer: new FakeTimer() },
     );
     const claimPath = deviceAllocationClaimPath(
       "emulator-5554",
@@ -794,13 +786,10 @@ describe("the host-wide claims mirror (#11811 b)", () => {
   ): { ownership: ForwardLeaseForeignDeviceOwnership; mirror: StoreDeviceClaimMirror } {
     const timer = new FakeTimer();
     // No control socket is recorded, so a live PID alone decides ownership.
-    const ownership = new ForwardLeaseForeignDeviceOwnership(
-      pid,
-      files,
-      new FakeOwnerProbe(),
-      () => undefined,
-      { timer },
-    );
+    const ownership = new ForwardLeaseForeignDeviceOwnership(pid, files, new FakeOwnerProbe(), {
+      ownerSocketPath: () => undefined,
+      timer,
+    });
     const mirror = new StoreDeviceClaimMirror({
       platform: "android",
       store: () => store,
@@ -956,13 +945,10 @@ describe("reading the host-wide claims table (#11811 c)", () => {
     const probe = new FakeOwnerProbe();
     const timer = new FakeTimer();
     timer.setCurrentTime(1 + DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS);
-    const ownership = new ForwardLeaseForeignDeviceOwnership(
-      SELF_PID,
-      files,
-      probe,
-      () => undefined,
-      { timer },
-    );
+    const ownership = new ForwardLeaseForeignDeviceOwnership(SELF_PID, files, probe, {
+      ownerSocketPath: () => undefined,
+      timer,
+    });
     const mirror = new StoreDeviceClaimMirror({
       platform: "android",
       store: () => store,

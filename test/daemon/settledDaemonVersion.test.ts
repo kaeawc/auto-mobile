@@ -204,12 +204,9 @@ test("PID publication records the settled identity, not the import-time clean st
       written.push(data);
     },
   };
-  const identity = new DaemonIdentity(
-    host,
-    { stat: () => ({ dev: 0n, ino: 0n }) },
-    "linux",
-    () => "/fake/auto-mobile.db",
-  );
+  const identity = new DaemonIdentity(host, { stat: () => ({ dev: 0n, ino: 0n }) }, "linux", {
+    databasePath: () => "/fake/auto-mobile.db",
+  });
   try {
     await identity.writePidFile();
     expect(probe).toHaveBeenCalled();

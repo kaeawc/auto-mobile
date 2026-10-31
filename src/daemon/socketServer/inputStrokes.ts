@@ -191,15 +191,10 @@ export class InputStrokes {
     // (#11541). Evaluated in the same turn the stroke is recorded, so no release or acquisition
     // can land between the check and the record.
     const admissionHolds = !startAdmission || this.ports.strokeAdmissionStillHolds(startAdmission);
-    await this.ports
-      .ownedGestures()
-      .onStartAcked(
-        socketSessionId,
-        targetDevice,
-        gestureId,
-        startAdmission?.holderSessionId,
-        admissionHolds,
-      );
+    await this.ports.ownedGestures().onStartAcked(socketSessionId, targetDevice, gestureId, {
+      holderSessionId: startAdmission?.holderSessionId,
+      admissionStillHolds: admissionHolds,
+    });
     if (startAdmission && !admissionHolds) {
       throw strokeAdmissionEndedError(GESTURE_FRAME_METHODS.start, startAdmission);
     }

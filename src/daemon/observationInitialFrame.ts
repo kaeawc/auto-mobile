@@ -432,30 +432,24 @@ function pushInitialObservationScreenshot(
     (!subscriber || sequence !== null) &&
     (!subscriber || subscriber.replay || !frame.screenshotDelivered)
   ) {
-    const sent = streamServer.pushScreenshotUpdate(
-      deviceId,
-      screenshot.data,
-      screenshot.width,
-      screenshot.height,
-      {
-        metadata: screenshot.metadata,
-        options: {
-          ...captureSequenceOptions(sequence, frame.frameContext, screenshot.frameContext),
-          ...canonicalPixelScreenshotOptions(frame.hierarchy),
-          initialFrameSubscriber: subscriber
-            ? {
-                ...subscriber,
-                liveFrameGeneration: frame.liveFrameGeneration,
-                deviceSessionUuid: frame.deviceSessionUuid,
-              }
-            : undefined,
-          rotation: screenshot.rotation,
-          ...(screenshot.frameContext === undefined
-            ? {}
-            : { frameContext: screenshot.frameContext }),
-        },
+    const sent = streamServer.pushScreenshotUpdate(deviceId, screenshot.data, {
+      screenWidth: screenshot.width,
+      screenHeight: screenshot.height,
+      metadata: screenshot.metadata,
+      options: {
+        ...captureSequenceOptions(sequence, frame.frameContext, screenshot.frameContext),
+        ...canonicalPixelScreenshotOptions(frame.hierarchy),
+        initialFrameSubscriber: subscriber
+          ? {
+              ...subscriber,
+              liveFrameGeneration: frame.liveFrameGeneration,
+              deviceSessionUuid: frame.deviceSessionUuid,
+            }
+          : undefined,
+        rotation: screenshot.rotation,
+        ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
       },
-    );
+    });
     if (sent) {
       frame.screenshotDelivered = true;
     }

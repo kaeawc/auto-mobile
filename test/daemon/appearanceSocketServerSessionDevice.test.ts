@@ -56,8 +56,7 @@ function harness(auth: boolean, source?: AppearanceDeviceSource) {
     "/fake/appearance.sock",
     new FakeTimer(),
     { authorize: () => {}, isAuthenticationEnforced: () => auth },
-    source,
-    dependencies,
+    { deviceSource: source, dependencies },
   );
   return { server, applied, storedKeys };
 }

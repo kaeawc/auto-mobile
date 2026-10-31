@@ -816,21 +816,17 @@ export class TakeScreenshot implements ScreenshotService {
     }
 
     try {
-      server.pushScreenshotUpdate(
-        this.device.deviceId,
-        base64Data,
-        dimensions?.width,
-        dimensions?.height,
-        {
-          metadata: metadataForScreenshotFormat(
-            this.device.platform === "ios"
-              ? IOS_CTRLPROXY_SCREENSHOT_METADATA
-              : ANDROID_ADB_SCREENSHOT_METADATA,
-            format,
-          ),
-          options: { decodedImage: imageBuffer },
-        },
-      );
+      server.pushScreenshotUpdate(this.device.deviceId, base64Data, {
+        screenWidth: dimensions?.width,
+        screenHeight: dimensions?.height,
+        metadata: metadataForScreenshotFormat(
+          this.device.platform === "ios"
+            ? IOS_CTRLPROXY_SCREENSHOT_METADATA
+            : ANDROID_ADB_SCREENSHOT_METADATA,
+          format,
+        ),
+        options: { decodedImage: imageBuffer },
+      });
     } catch (error) {
       // The observation stream is an optional side channel; screenshot capture already succeeded.
       logger.debug(`[SCREENSHOT] Failed to push screenshot to observation stream: ${error}`);

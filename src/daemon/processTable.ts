@@ -472,15 +472,37 @@ function isUnsupportedGnuProcessTableFormat(error: unknown): boolean {
 }
 
 export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
+  private readonly runCommand: ProcessTableCommandRunner;
+  private readonly platform: NodeJS.Platform;
+  private readonly timer: Timer;
+  private readonly linuxProcessGenerationTokenForPid: (pid: number) => string | undefined;
+  private readonly activeEntryScript: string | undefined;
+
+  /**
+   * @param runCommand - Runs the `ps` scan
+   * @param platform - Host platform selecting the scan format
+   * @param timer - Clock for scan deadlines and snapshot ages
+   * @param options.linuxProcessGenerationTokenForPid - Linux generation-token reader
+   * @param options.activeEntryScript - This process's entry script (defaults to `process.argv[1]`)
+   */
   constructor(
-    private readonly runCommand: ProcessTableCommandRunner = execSync,
-    private readonly platform: NodeJS.Platform = process.platform,
-    private readonly timer: Timer = defaultTimer,
-    private readonly linuxProcessGenerationTokenForPid: (
-      pid: number,
-    ) => string | undefined = readLinuxProcessGenerationToken,
-    private readonly activeEntryScript: string | undefined = process.argv[1],
-  ) {}
+    runCommand: ProcessTableCommandRunner = execSync,
+    platform: NodeJS.Platform = process.platform,
+    timer: Timer = defaultTimer,
+    {
+      linuxProcessGenerationTokenForPid = readLinuxProcessGenerationToken,
+      activeEntryScript = process.argv[1],
+    }: {
+      linuxProcessGenerationTokenForPid?: (pid: number) => string | undefined;
+      activeEntryScript?: string;
+    } = {},
+  ) {
+    this.runCommand = runCommand;
+    this.platform = platform;
+    this.timer = timer;
+    this.linuxProcessGenerationTokenForPid = linuxProcessGenerationTokenForPid;
+    this.activeEntryScript = activeEntryScript;
+  }
 
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
     const isDarwin = this.platform === "darwin";

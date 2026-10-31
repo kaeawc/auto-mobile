@@ -197,9 +197,10 @@ async function harness(
     },
     "/unused/viewer.sock",
     timer,
-    options.useDefaultAuthenticator
-      ? undefined
-      : (options.authenticator ??
+    {
+      authenticator: options.useDefaultAuthenticator
+        ? undefined
+        : (options.authenticator ??
           new SessionScopedStreamAuthenticator(
             () => ({
               getSession: (id) => (state.live.has(id) ? session : null),
@@ -210,11 +211,12 @@ async function harness(
             "video-stream subscribe",
             options.authOff ? { AUTOMOBILE_DAEMON_STREAM_AUTH: "0" } : {},
           )),
-    {
-      assertDeviceActionable: () => {
-        if (state.quarantined) {
-          throw new Error("quarantined");
-        }
+      admissionGate: {
+        assertDeviceActionable: () => {
+          if (state.quarantined) {
+            throw new Error("quarantined");
+          }
+        },
       },
     },
   );

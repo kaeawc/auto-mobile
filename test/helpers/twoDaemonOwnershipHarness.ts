@@ -553,8 +553,7 @@ export class TwoDaemonWorld {
       pid,
       this.claims.forProcess(current),
       this.probe,
-      () => socketPath,
-      { timer },
+      { ownerSocketPath: () => socketPath, timer },
     );
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, daemonSessionId, {

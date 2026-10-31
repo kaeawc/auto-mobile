@@ -135,6 +135,7 @@ interface Row {
 }
 
 interface SessionRowWriterOptions {
+  logger: Pick<Logger, "warn" | "debug">;
   timeoutMs: number;
   timeoutError: (snapshot: SessionReleaseSnapshot) => Error;
 }
@@ -160,7 +161,8 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
       timeoutMs,
       timeoutError: TimeoutError,
     } = collaborators;
-    return new SerializedSessionRowWriter(persistence, timer, backoff, logger, {
+    return new SerializedSessionRowWriter(persistence, timer, backoff, {
+      logger,
       timeoutMs,
       timeoutError: (snapshot) =>
         new TimeoutError(snapshot.sessionId, snapshot.releaseReason, timeoutMs),
@@ -192,13 +194,25 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   private draining = false;
   readonly superseded: SupersededRowReasserts;
 
+  private readonly logger: Pick<Logger, "warn" | "debug">;
+  private readonly options: Omit<SessionRowWriterOptions, "logger">;
+
+  /**
+   * @param persistence - Durable session-row store
+   * @param timer - Clock for retries and write deadlines
+   * @param backoff - Retry backoff policy
+   * @param options.logger - Warn/debug sink
+   * @param options.timeoutMs - Per-release write deadline
+   * @param options.timeoutError - Builds the error a timed-out write rejects with
+   */
   constructor(
     private readonly persistence: DeviceSessionPersistence,
     private readonly timer: Timer,
     private backoff: BackoffPolicy,
-    private readonly logger: Pick<Logger, "warn" | "debug">,
-    private readonly options: SessionRowWriterOptions,
+    { logger, ...options }: SessionRowWriterOptions,
   ) {
+    this.logger = logger;
+    this.options = options;
     this.superseded = new SupersededRowReasserts({
       timer,
       logger,

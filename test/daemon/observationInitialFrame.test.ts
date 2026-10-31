@@ -57,12 +57,14 @@ class FakeObservationStreamServer {
   pushScreenshotUpdate(
     deviceId: string,
     screenshotBase64: string,
-    screenWidth: number,
-    screenHeight: number,
     {
+      screenWidth,
+      screenHeight,
       metadata,
       options,
     }: {
+      screenWidth: number;
+      screenHeight: number;
       metadata?: Record<string, unknown>;
       options?: {
         captureSequence?: number;
@@ -72,7 +74,7 @@ class FakeObservationStreamServer {
         rotation?: number;
         initialFrameSubscriber?: InitialFrameSubscriber;
       };
-    } = {},
+    },
   ): boolean {
     const screenshotOptions =
       options?.captureSequence === undefined && options?.rotation === undefined
@@ -1223,13 +1225,11 @@ class FakeTargetedInitialFrameServer extends FakeObservationStreamServer {
   override pushScreenshotUpdate(
     deviceId: string,
     data: string,
-    width: number,
-    height: number,
-    details: Parameters<FakeObservationStreamServer["pushScreenshotUpdate"]>[4] = {},
+    details: Parameters<FakeObservationStreamServer["pushScreenshotUpdate"]>[2],
   ): boolean {
     const destinations = this.destinations(deviceId, details.options?.initialFrameSubscriber);
     for (const destination of destinations) {
-      destination.pushScreenshotUpdate(deviceId, data, width, height, details);
+      destination.pushScreenshotUpdate(deviceId, data, details);
     }
     return destinations.length > 0;
   }

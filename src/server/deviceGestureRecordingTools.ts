@@ -47,7 +47,7 @@ const recordDeviceGesturesTool = async (
   try {
     // The owning session is recorded so releasing it stops the recording instead of leaving it
     // to capture the device's next owner.
-    const result = await startDeviceGestureRecording(device, undefined, undefined, undefined, {
+    const result = await startDeviceGestureRecording(device, undefined, undefined, {
       ownerSessionUuid: params?.sessionUuid,
     });
 

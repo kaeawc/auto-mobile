@@ -324,7 +324,9 @@ export const watchDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
 };
 
 /** The clock a foreign-ownership reader runs on, and its CtrlProxy forward evidence. */
-export interface ForeignOwnershipTiming {
+export interface ForeignOwnershipOptions {
+  /** This daemon's own control socket path (defaults to the CtrlProxy forward-lease socket). */
+  ownerSocketPath?: () => string | undefined;
   timer?: Timer;
   forwardEvidence?: ForeignCtrlProxyForwardEvidence;
 }
@@ -359,16 +361,28 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private readonly timer: Timer;
   private readonly forwardEvidence: ForeignCtrlProxyForwardEvidence | undefined;
 
+  private readonly ownerSocketPath: () => string | undefined;
+
+  /**
+   * @param selfPid - This daemon's PID
+   * @param source - Lease and claim file source
+   * @param probe - Asks a recorded owner over its control socket
+   * @param options.ownerSocketPath - This daemon's own control socket path
+   * @param options.timer - Clock for refresh deadlines and the unanswered lapse
+   * @param options.forwardEvidence - Unrecorded CtrlProxy forward evidence
+   */
   constructor(
     private readonly selfPid: number = process.pid,
     private readonly source: DeviceOwnershipFileSource = defaultDeviceOwnershipFileSource,
     private readonly probe: ForwardLeaseOwnerProbe &
       Partial<ForwardLeaseRelinquishProbe> = new DaemonDeviceLeaseOwnerProbe(),
-    private readonly ownerSocketPath: () =>
-      | string
-      | undefined = getCtrlProxyForwardLeaseOwnerSocketPath,
-    { timer = defaultTimer, forwardEvidence }: ForeignOwnershipTiming = {},
+    {
+      ownerSocketPath = getCtrlProxyForwardLeaseOwnerSocketPath,
+      timer = defaultTimer,
+      forwardEvidence,
+    }: ForeignOwnershipOptions = {},
   ) {
+    this.ownerSocketPath = ownerSocketPath;
     this.timer = timer;
     this.forwardEvidence = forwardEvidence;
   }

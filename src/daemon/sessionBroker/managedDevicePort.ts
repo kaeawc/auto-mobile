@@ -1,3 +1,4 @@
+import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -42,7 +43,7 @@ import {
   type ResetBootRunner,
   type SessionPreparationTiming,
 } from "./devicePort";
-import { nativeProfile, type BrokerNativeProfile } from "./profile";
+import { nativeProfile, brokerReceiptProfile, type BrokerNativeProfile } from "./profile";
 import type { BrokerResourceRecord } from "./store";
 import { preparationTiming } from "./preparationTiming";
 import {
@@ -63,6 +64,7 @@ type BrokerDeviceAcquisitionEntry = BrokerDeviceAcquisitionResult["bindings"][nu
 type DestructionProgress = "absent" | "pending";
 
 export interface ManagedDevicePortDependencies {
+  androidConfigReader?: Pick<AvdConfigReader, "readConfig">;
   bindMutationRecorder?: (scope: DeviceMutationScope) => void;
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
   scope: BindingScopeIdentity;
@@ -194,7 +196,11 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     const binding = result.bindings.find(
       (entry) => entry.bindingIndex === resource.allocationIndex,
     );
-    return { sessionId, profile, timing: preparationTiming(binding?.lifecycle) };
+    return {
+      sessionId,
+      profile: await brokerReceiptProfile(profile, binding, this.dependencies.androidConfigReader),
+      timing: preparationTiming(binding?.lifecycle),
+    };
   }
 
   /**

@@ -113,11 +113,22 @@ export function staticFactsFrom(
   device: DeviceInfo,
 ): Pick<
   DeviceDescription,
-  "formFactor" | "deviceType" | "model" | "architecture" | "osVersion" | "apiLevel" | "runtimeId"
+  | "formFactor"
+  | "deviceType"
+  | "model"
+  | "architecture"
+  | "osVersion"
+  | "apiLevel"
+  | "runtimeId"
+  | "configuredRamMb"
+  | "effectiveRamMb"
+  | "configuredCpuCores"
+  | "effectiveCpuCores"
 > {
   return {
     osVersion: device.osVersion ?? device.iosVersion ?? null,
     apiLevel: device.platform === "android" ? (device.apiLevel ?? null) : null,
+    ...guestHardwareFrom(device),
     runtimeId: device.runtimeId ?? device.runtime ?? null,
     deviceType: device.deviceType ?? null,
     architecture: device.architecture ?? null,
@@ -130,6 +141,28 @@ export function staticFactsFrom(
       density: device.screenDensity,
       deviceType: device.deviceType,
     }),
+  };
+}
+
+function guestHardwareFrom(
+  device: DeviceInfo,
+): Pick<
+  DeviceDescription,
+  "configuredRamMb" | "effectiveRamMb" | "configuredCpuCores" | "effectiveCpuCores"
+> {
+  if (device.platform !== "android") {
+    return {
+      configuredRamMb: null,
+      effectiveRamMb: null,
+      configuredCpuCores: null,
+      effectiveCpuCores: null,
+    };
+  }
+  return {
+    configuredRamMb: (device.configuredRamMb ?? 0) > 0 ? device.configuredRamMb : null,
+    effectiveRamMb: (device.effectiveRamMb ?? 0) > 0 ? device.effectiveRamMb : null,
+    configuredCpuCores: (device.configuredCpuCores ?? 0) > 0 ? device.configuredCpuCores : null,
+    effectiveCpuCores: (device.effectiveCpuCores ?? 0) > 0 ? device.effectiveCpuCores : null,
   };
 }
 

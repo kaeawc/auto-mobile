@@ -321,6 +321,8 @@ export interface IosSessionDeviceProfile {
 
 export interface AndroidSessionDeviceProfile {
   memoryMb?: number;
+  effectiveRamMb?: number | null;
+  effectiveCpuCores?: number | null;
   platform: "android";
   metadataState: CatalogMetadataState;
   profileId?: string;

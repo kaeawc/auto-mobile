@@ -418,7 +418,7 @@ export class SessionBroker {
       config.requestId,
       this.options.owner,
       prepared.sessionId,
-      prepared.timing,
+      { ...prepared.timing, profile: prepared.profile },
     );
     if (this.stopping) {
       try {

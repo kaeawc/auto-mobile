@@ -149,7 +149,16 @@ function judgeRoutedAction(
 ): ContractFinding[] {
   const { backend, fallbackReason } = backendOf(step, outcome.result);
   const toolSaysSdk = succeeded(outcome) && backend === "sdk";
-  if (hostRan > 0 && toolSaysSdk) {
+  if (hostRan > 1) {
+    return [
+      finding(
+        step.caseName,
+        "sdk-adapter",
+        `the host executed the action ${hostRan} times; expected exactly once`,
+      ),
+    ];
+  }
+  if (hostRan === 1 && toolSaysSdk) {
     return [];
   }
   if (hostRan > 0) {

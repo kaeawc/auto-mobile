@@ -152,6 +152,12 @@ export function prototypeSensitiveSinkErrors(spec: unknown): PrototypeValidation
   return errors;
 }
 
+export function prototypeSensitiveWarnings(spec: unknown): string[] {
+  return prototypeSensitiveSinkErrors(spec).map(
+    ({ path, message }) => `${path}: ${message}; ProtoViewer imports of this spec refuse it.`,
+  );
+}
+
 function sensitiveLibraryError(spec: unknown): PrototypeValidationError | undefined {
   return prototypeSensitiveSinkErrors(spec)[0];
 }

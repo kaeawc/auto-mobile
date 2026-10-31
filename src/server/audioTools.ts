@@ -165,16 +165,18 @@ export const createInjectAudioInputHandler =
       sessionManager,
       args.sessionUuid,
       device.deviceId,
-      (owner) =>
-        service.startInjection(device.deviceId, {
-          source,
-          loop: args.loop,
-          startDelayMs: args.startDelayMs,
-          gainDb: args.gainDb,
-          maxDurationMs: args.maxDurationMs,
-          sessionId: owner,
-        }),
-      { action: "inject audio", change: "audio injection" },
+      {
+        mutation: (owner) =>
+          service.startInjection(device.deviceId, {
+            source,
+            loop: args.loop,
+            startDelayMs: args.startDelayMs,
+            gainDb: args.gainDb,
+            maxDurationMs: args.maxDurationMs,
+            sessionId: owner,
+          }),
+        wording: { action: "inject audio", change: "audio injection" },
+      },
     );
     const outlived = startOutlivedBy(sessionManager, args.sessionUuid, device.deviceId, signal);
     if (outlived) {

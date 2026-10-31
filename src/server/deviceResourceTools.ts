@@ -50,12 +50,9 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
       const parsed = setDeviceResourcesSchema.parse(external);
       const deps = dependencies();
       const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);
-      return withDeviceResourceLease(
-        deps,
-        device,
-        deadlineMs,
+      return withDeviceResourceLease(deps, device, deadlineMs, {
         callerSignal,
-        async (operationSignal) => {
+        operation: async (operationSignal) => {
           const configured = await withDeviceReadiness(device, operationSignal, () =>
             deps.deviceResourceControllerFactory().setResources({
               device,
@@ -75,7 +72,7 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
             result.success,
           );
         },
-      );
+      });
     },
     {
       defaultEnabled: false,
@@ -98,12 +95,9 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
       const parsed = reconcileDeviceResourcesSchema.parse(external);
       const deps = dependencies();
       const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);
-      return withDeviceResourceLease(
-        deps,
-        device,
-        deadlineMs,
+      return withDeviceResourceLease(deps, device, deadlineMs, {
         callerSignal,
-        async (operationSignal) => {
+        operation: async (operationSignal) => {
           const result = await withDeviceReadiness(device, operationSignal, () =>
             deps.deviceResourceReconcilerFactory().reconcile({
               device,
@@ -119,7 +113,7 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
             result.success,
           );
         },
-      );
+      });
     },
     {
       defaultEnabled: false,
@@ -163,8 +157,10 @@ async function withDeviceResourceLease<T>(
   deps: Pick<DeviceToolsDependencies, "lifecycleCoordinator">,
   device: BootedDevice,
   deadlineMs: number,
-  callerSignal: AbortSignal | undefined,
-  operation: (signal: AbortSignal) => Promise<T>,
+  {
+    callerSignal,
+    operation,
+  }: { callerSignal?: AbortSignal; operation: (signal: AbortSignal) => Promise<T> },
 ): Promise<T> {
   const lease = await deps.lifecycleCoordinator.reserve(
     {

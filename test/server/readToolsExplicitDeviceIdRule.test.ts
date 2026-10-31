@@ -1846,11 +1846,19 @@ for (const platform of ["android", "ios"] as const) {
         list.mockClear();
         if (running) {
           expect(
-            await resolveDeviceForObservationRead(id, undefined, access, requested, { timer }),
+            await resolveDeviceForObservationRead(id, undefined, {
+              access,
+              platform: requested,
+              retry: { timer },
+            }),
           ).toEqual(device);
         } else {
           await expect(
-            resolveDeviceForObservationRead(id, undefined, access, requested, { timer }),
+            resolveDeviceForObservationRead(id, undefined, {
+              access,
+              platform: requested,
+              retry: { timer },
+            }),
           ).rejects.toThrow(`Device ${id} not found`);
         }
         expect(list).toHaveBeenCalledTimes(1);
@@ -1871,7 +1879,7 @@ for (const platform of ["android", "ios"] as const) {
       isAuthorized: () => true,
     };
     await expect(
-      resolveDeviceForObservationRead(id, undefined, access, other, { timer }),
+      resolveDeviceForObservationRead(id, undefined, { access, platform: other, retry: { timer } }),
     ).rejects.toThrow(`not found on ${other} platform`);
     expect(list).toHaveBeenCalledTimes(1);
     expect(timer.getSleepCallCount()).toBe(0);

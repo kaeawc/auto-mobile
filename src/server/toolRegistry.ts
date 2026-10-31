@@ -386,12 +386,10 @@ export class ToolRegistryClass {
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
       const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext, name);
-      return runRecordedToolCall(
-        this.toolCallRepository,
-        this.timer,
-        name,
-        typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined,
-        async (recording, toolStartMs) => {
+      return runRecordedToolCall(this.toolCallRepository, this.timer, name, {
+        sessionUuid:
+          typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined,
+        handler: async (recording, toolStartMs) => {
           await assertSessionBrokerToolCall(name, true, handlerArgs);
           const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
             name,
@@ -505,7 +503,7 @@ export class ToolRegistryClass {
             }),
           );
         },
-      );
+      });
     };
 
     this.tools.set(name, {
@@ -669,8 +667,11 @@ export class ToolRegistryClass {
             resolved,
             invocation.args,
             progress ?? getToolSelectionContext()?.planRequest?.progress,
-            signal,
-            { targetDevice: options.targetDevice, mutationRecording: this.mutationRecording },
+            {
+              signal,
+              targetDevice: options.targetDevice,
+              mutationRecording: this.mutationRecording,
+            },
           ),
         false,
       ),
@@ -719,9 +720,15 @@ export class ToolRegistryClass {
   async callInternalTyped<K extends InternalToolName>(
     name: K,
     args: Record<string, unknown>,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    options: InternalToolCallOptions = {},
+    {
+      progress,
+      signal,
+      options = {},
+    }: {
+      progress?: ProgressCallback;
+      signal?: AbortSignal;
+      options?: InternalToolCallOptions;
+    } = {},
   ): Promise<StructuredToolResponse<InternalToolPayloads[K]> | undefined> {
     const response = await this.callInternal(name, args, progress, signal, options);
     return narrowInternalToolEnvelope(name, response);

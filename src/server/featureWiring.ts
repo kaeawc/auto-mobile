@@ -13,7 +13,7 @@ registerInternalToolCaller({
   callInternal: (tool, args, progress, signal) =>
     ToolRegistry.callInternal(typeof tool === "string" ? tool : tool.name, args, progress, signal),
   callInternalTyped: (name, args, progress, signal) =>
-    ToolRegistry.callInternalTyped(name, args, progress, signal),
+    ToolRegistry.callInternalTyped(name, args, { progress, signal }),
 });
 registerConfigurableToolNameSource({
   getConfigurableToolNames: () => ToolRegistry.getConfigurableToolNames(),

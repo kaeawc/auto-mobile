@@ -851,9 +851,14 @@ function summarizePoolStatus(
   devicePool: DevicePool,
   discoveredDevices: BootedDeviceInfo[],
   sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>>,
-  requestedPlatforms: readonly Platform[],
-  /** Platforms whose whole read (listing, then held-device placement) returned within the budget. */
-  finishedPlatforms: ReadonlySet<Platform>,
+  {
+    requestedPlatforms,
+    finishedPlatforms,
+  }: {
+    requestedPlatforms: readonly Platform[];
+    /** Platforms whose whole read (listing, then held-device placement) returned within the budget. */
+    finishedPlatforms: ReadonlySet<Platform>;
+  },
 ): PoolStatusSummary {
   let idle = 0;
   let assigned = 0;
@@ -1672,13 +1677,10 @@ async function computeBootedDevicesForPlatforms(
   const physicalCount = devices.length - virtualCount;
   const poolStatus =
     daemonContext.poolStatus && daemonContext.devicePool
-      ? summarizePoolStatus(
-          daemonContext.devicePool,
-          devices,
-          sourceObservations,
-          platforms,
+      ? summarizePoolStatus(daemonContext.devicePool, devices, sourceObservations, {
+          requestedPlatforms: platforms,
           finishedPlatforms,
-        )
+        })
       : undefined;
 
   return {
@@ -1858,8 +1860,7 @@ async function queryAndroidDeviceServiceStatus(
   device: BootedDeviceProbeTarget,
   bootedDevice: BootedDevice,
   androidLookup: AndroidServiceStatusLookup,
-  resolvedVersionLookup: CtrlProxyVersionLookup,
-  timer: Timer,
+  { resolvedVersionLookup, timer }: { resolvedVersionLookup: CtrlProxyVersionLookup; timer: Timer },
 ): Promise<DeviceServiceStatus> {
   const manager = androidLookup.getManager(bootedDevice);
   const [installed, enabled, installedSha256, version] = await Promise.all([
@@ -2001,8 +2002,10 @@ export async function queryDeviceServiceStatus(
   device: BootedDeviceProbeTarget,
   androidLookup: AndroidServiceStatusLookup = defaultAndroidServiceStatusLookup,
   versionLookup?: CtrlProxyVersionLookup,
-  timer: Timer = defaultTimer,
-  options: { runnerCommandRequirements?: IosRunnerCommandRequirements } = {},
+  {
+    timer = defaultTimer,
+    ...options
+  }: { timer?: Timer; runnerCommandRequirements?: IosRunnerCommandRequirements } = {},
 ): Promise<DeviceServiceStatus | undefined> {
   const bootedDevice: BootedDevice = {
     name: device.name,
@@ -2039,13 +2042,10 @@ export async function queryDeviceServiceStatus(
 
   try {
     if (device.platform === "android") {
-      return await queryAndroidDeviceServiceStatus(
-        device,
-        bootedDevice,
-        androidLookup,
+      return await queryAndroidDeviceServiceStatus(device, bootedDevice, androidLookup, {
         resolvedVersionLookup,
         timer,
-      );
+      });
     } else if (device.platform === "ios" && iosProbe) {
       return buildIosDeviceServiceStatus(device, bootedDevice, iosProbe, options);
     }

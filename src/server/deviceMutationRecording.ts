@@ -67,10 +67,11 @@ export function createRecording(
         ? { recorder: baseRecorder, ownerSessionUuid: base }
         : undefined;
     },
-    new DefaultMutationPriorReader({ observationReaders }),
-    undefined,
-    undefined,
-    (uuid, reason) => context.sessionBrokerService()?.markMutationUnrecorded(uuid, reason),
+    {
+      reader: new DefaultMutationPriorReader({ observationReaders }),
+      markUnrecorded: (uuid, reason) =>
+        context.sessionBrokerService()?.markMutationUnrecorded(uuid, reason),
+    },
   );
 }
 
@@ -173,8 +174,7 @@ export interface DeviceMutationRecording {
     name: string,
     args: Record<string, unknown>,
     device: BootedDevice,
-    sessionUuid?: string,
-    signal?: AbortSignal,
+    options?: { sessionUuid?: string; signal?: AbortSignal },
   ): Promise<void>;
 }
 
@@ -187,28 +187,59 @@ type ResolvedMutationRecorder =
       ownerSessionUuid: string;
     };
 
+function assertRecorderScope(
+  recorder: MutationRecorder,
+  ownerSessionUuid: string,
+  device: BootedDevice,
+): void {
+  if (
+    recorder.scope.sessionUuid !== ownerSessionUuid ||
+    recorder.scope.deviceId !== device.deviceId
+  ) {
+    throw new ActionableError(
+      "Device mutation recorder must match the admitted broker session and device",
+    );
+  }
+}
+
 /**
  * Captures intent and trustworthy priors for best-effort reverts, not keep-booted admission.
  * Unobservable priors remain journaled; keep-booted cleaning runs unconditionally.
  */
 export class SessionDeviceMutationRecording implements DeviceMutationRecording {
+  private readonly reader: MutationPriorReader;
+  private readonly artifactReader: MutationArtifactReader;
+  private readonly specReader: MutationSpecReader;
+  private readonly markUnrecorded?: (sessionUuid: string, reason: string) => void;
+
   constructor(
     private readonly recorderFor: (
       sessionUuid: string,
       device: BootedDevice,
     ) => ResolvedMutationRecorder | undefined | Promise<ResolvedMutationRecorder | undefined>,
-    private readonly reader: MutationPriorReader = new DefaultMutationPriorReader(),
-    private readonly artifactReader: MutationArtifactReader = createDefaultMutationArtifactReader(),
-    private readonly specReader: MutationSpecReader = readJsonSpecFile,
-    private readonly markUnrecorded?: (sessionUuid: string, reason: string) => void,
-  ) {}
+    {
+      reader = new DefaultMutationPriorReader(),
+      artifactReader = createDefaultMutationArtifactReader(),
+      specReader = readJsonSpecFile,
+      markUnrecorded,
+    }: {
+      reader?: MutationPriorReader;
+      artifactReader?: MutationArtifactReader;
+      specReader?: MutationSpecReader;
+      markUnrecorded?: (sessionUuid: string, reason: string) => void;
+    } = {},
+  ) {
+    this.reader = reader;
+    this.artifactReader = artifactReader;
+    this.specReader = specReader;
+    this.markUnrecorded = markUnrecorded;
+  }
 
   async beforeToolCall(
     name: string,
     args: Record<string, unknown>,
     device: BootedDevice,
-    sessionUuid?: string,
-    signal: AbortSignal | undefined = getAbortSignal(),
+    { sessionUuid, signal = getAbortSignal() }: { sessionUuid?: string; signal?: AbortSignal } = {},
   ): Promise<void> {
     let mutations = deviceToolMutations(name, args, device.platform);
     if (mutations.length === 0) {
@@ -230,17 +261,10 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       const { recorder, ownerSessionUuid: owner } =
         "recorder" in resolved ? resolved : { recorder: resolved, ownerSessionUuid: sessionUuid };
       ownerSessionUuid = owner;
-      if (
-        recorder.scope.sessionUuid !== ownerSessionUuid ||
-        recorder.scope.deviceId !== device.deviceId
-      ) {
-        throw new ActionableError(
-          "Device mutation recorder must match the admitted broker session and device",
-        );
-      }
+      assertRecorderScope(recorder, ownerSessionUuid, device);
       matchingRecorder = recorder;
-      mutations = await this.resolveMutations(name, args, device, mutations, signal);
-      await this.recordMutations(name, device, recorder, mutations, signal);
+      mutations = await this.resolveMutations(name, args, device, { mutations, signal });
+      await this.recordMutations(name, device, recorder, { mutations, signal });
     } catch (error) {
       signal?.throwIfAborted();
       await this.recordingFailed(name, ownerSessionUuid, matchingRecorder, error);
@@ -271,8 +295,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     name: string,
     args: Record<string, unknown>,
     device: BootedDevice,
-    mutations: ToolMutation[],
-    signal?: AbortSignal,
+    { mutations, signal }: { mutations: ToolMutation[]; signal?: AbortSignal },
   ): Promise<ToolMutation[]> {
     if (name === "installApp") {
       const appId = await runWithAbortSignal(signal, () =>
@@ -300,8 +323,7 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     name: string,
     device: BootedDevice,
     recorder: MutationRecorder,
-    mutations: readonly ToolMutation[],
-    signal?: AbortSignal,
+    { mutations, signal }: { mutations: readonly ToolMutation[]; signal?: AbortSignal },
   ): Promise<void> {
     signal?.throwIfAborted();
     const baseline = async () => (await recorder.readBaseline?.()) ?? null;

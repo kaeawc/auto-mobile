@@ -80,8 +80,7 @@ function criticalSectionSuccess(
   lock: string,
   deviceId: string,
   executedSteps: number,
-  totalSteps: number,
-  warnings: string[],
+  { totalSteps, warnings }: { totalSteps: number; warnings: string[] },
 ) {
   return createStructuredToolResponse({
     success: true,
@@ -160,8 +159,7 @@ async function executeCriticalSectionSteps(
   device: BootedDevice,
   normalizedSteps: PlanStep[],
   params: CriticalSectionParams,
-  stepExecutor: PlanStepExecutor,
-  signal?: AbortSignal,
+  { stepExecutor, signal }: { stepExecutor: PlanStepExecutor; signal?: AbortSignal },
 ): Promise<{ executedSteps: Array<{ tool: string; success: boolean }>; warnings: string[] }> {
   const executedSteps: Array<{ tool: string; success: boolean }> = [];
   const warnings: string[] = [];
@@ -251,8 +249,7 @@ const criticalSectionHandler = async (
   stepExecutor: PlanStepExecutor,
   device: BootedDevice,
   params: CriticalSectionParams,
-  _progress?: unknown,
-  signal?: AbortSignal,
+  { progress: _progress, signal }: { progress?: unknown; signal?: AbortSignal } = {},
 ): Promise<any> => {
   const { lock, steps, deviceCount, timeout, __lockNamespace: namespace } = params;
   // Sub-steps are not in `plan.steps`, so migratePlan never saw them; apply the
@@ -284,13 +281,11 @@ const criticalSectionHandler = async (
     validateCriticalSectionSteps(normalizedSteps, lock, params.device);
 
     // Wait at barrier and acquire lock
-    release = await coordinator.enterCriticalSection(
-      lock,
-      device.deviceId,
+    release = await coordinator.enterCriticalSection(lock, device.deviceId, {
       timeout,
       namespace,
       signal,
-    );
+    });
 
     logger.info(
       `Device ${device.deviceId} executing ${normalizedSteps.length} steps in critical section "${lock}"`,
@@ -301,19 +296,15 @@ const criticalSectionHandler = async (
       device,
       normalizedSteps,
       params,
-      stepExecutor,
-      signal,
+      { stepExecutor, signal },
     );
 
     logger.info(`Device ${device.deviceId} completed all steps in critical section "${lock}"`);
 
-    return criticalSectionSuccess(
-      lock,
-      device.deviceId,
-      executedSteps.length,
-      normalizedSteps.length,
+    return criticalSectionSuccess(lock, device.deviceId, executedSteps.length, {
+      totalSteps: normalizedSteps.length,
       warnings,
-    );
+    });
   } catch (error) {
     // Force cleanup on error to prevent other devices from waiting forever
     coordinator.forceCleanup(lock, namespace);
@@ -357,7 +348,7 @@ export function registerCriticalSectionTools(timer: Timer = defaultTimer): void 
     "Synchronize multiple devices at a barrier, then run steps serially.",
     criticalSectionSchema,
     (device, params, progress, signal) =>
-      criticalSectionHandler(stepExecutor, device, params, progress, signal),
+      criticalSectionHandler(stepExecutor, device, params, { progress, signal }),
     // Plan-only: a multi-device coordination primitive that only makes sense as
     // a plan step (a single direct call would just block). Hidden from tools/list
     // discovery, still runnable in plans via getToolForPlan.

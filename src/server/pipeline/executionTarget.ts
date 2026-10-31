@@ -368,13 +368,10 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       { ...bindingAccessFor(state), deviceId: providedDeviceId },
       signal,
     );
-    assertToolCallerHoldsDevice(
-      name,
-      state.readOnly,
-      providedDeviceId,
+    assertToolCallerHoldsDevice(name, state.readOnly, providedDeviceId, {
       sessionUuid,
-      state.autolockEnabled,
-    );
+      autolockEnabled: state.autolockEnabled,
+    });
     if (providedDeviceId && !sessionUuid) {
       options.assertHeldDeviceStart?.(providedDeviceId, sessionUuid);
     }
@@ -441,37 +438,26 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // Only an admitted control call's end is session use (#10824, #10964).
       executionTracker.markSessionAdmitted(execution.executionId);
     }
-    assertSessionDeviceRouting(
-      name,
-      providedDeviceId,
-      sessionUuid,
-      admittedSession?.assignedDevice,
-      admittedSession?.platform,
-    );
+    assertSessionDeviceRouting(name, providedDeviceId, sessionUuid, {
+      sessionDeviceId: admittedSession?.assignedDevice,
+      sessionPlatform: admittedSession?.platform,
+    });
     await this.assertAdmittedSessionHeld(state, sessionUuid, admittedSession);
-    const context = await createToolExecutionContext(
-      sessionUuid,
-      sessionManager,
-      devicePool,
-      toolContextSessionOptions(state),
-      {
-        execution,
-        admittedSession,
-        // #6069: defense-in-depth. On this path `admitIssuedSessionForAutomation`
-        // above already partitions every state, so this flag rejects nothing
-        // admit does not already reject HERE. It exists so the pool-minting
-        // primitive itself refuses to mint a never-issued id.
-        requireIssuedSession: true,
-        signal,
-      },
-    );
-    assertSessionDeviceRouting(
-      name,
-      providedDeviceId,
-      sessionUuid,
-      context.deviceId,
-      context.devicePlatform,
-    );
+    const context = await createToolExecutionContext(sessionUuid, sessionManager, devicePool, {
+      sessionOptions: toolContextSessionOptions(state),
+      execution,
+      admittedSession,
+      // #6069: defense-in-depth. On this path `admitIssuedSessionForAutomation`
+      // above already partitions every state, so this flag rejects nothing
+      // admit does not already reject HERE. It exists so the pool-minting
+      // primitive itself refuses to mint a never-issued id.
+      requireIssuedSession: true,
+      signal,
+    });
+    assertSessionDeviceRouting(name, providedDeviceId, sessionUuid, {
+      sessionDeviceId: context.deviceId,
+      sessionPlatform: context.devicePlatform,
+    });
     if (context.deviceId && !providedDeviceId) {
       state.providedDeviceId = context.deviceId;
       logger.info(`[ToolRegistry] Resolved device from session: ${state.providedDeviceId}`);
@@ -624,11 +610,8 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   ) {
     const { options, signal } = state.input;
     const { sessionUuid, readOnly } = state;
-    return ensureReadTargetOrWatch(
-      state.input,
-      state.platform,
-      deviceId,
-      {
+    return ensureReadTargetOrWatch(state.input, state.platform, deviceId, {
+      options: {
         sessionId: sessionUuid,
         connectionId: state.deviceConnectionId,
         // A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
@@ -639,8 +622,9 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
         getConnectedPlatforms: state.getConnectedPlatforms,
       },
-      { read: options.sessionlessDeviceRead ?? this.defaultDeviceRead, readinessTarget },
-    );
+      read: options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+      readinessTarget,
+    });
   }
 
   /**
@@ -683,13 +667,10 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const { sessionUuid, providedDeviceId, platform, readOnly } = state;
     const sessionlessExplicitRead = readOnly && !sessionUuid && providedDeviceId;
     const runningReadMatch = sessionlessExplicitRead
-      ? await findRunningExplicitReadTarget(
-          state.input,
-          read,
-          platform,
-          state.getConnectedPlatforms,
-          state.runningReadAlreadyChecked,
-        )
+      ? await findRunningExplicitReadTarget(state.input, read, platform, {
+          getConnectedPlatforms: state.getConnectedPlatforms,
+          alreadyChecked: state.runningReadAlreadyChecked,
+        })
       : undefined;
     const runningReadTarget = runningReadMatch?.device;
     const readinessTarget = runningReadTarget?.deviceId ?? initialReadinessTarget;
@@ -763,13 +744,10 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
       );
     }
-    assertToolCallerHoldsDevice(
-      name,
-      readOnly,
-      readinessTarget,
+    assertToolCallerHoldsDevice(name, readOnly, readinessTarget, {
       sessionUuid,
-      state.autolockEnabled,
-    );
+      autolockEnabled: state.autolockEnabled,
+    });
     options.assertHeldDeviceStart?.(readinessTarget, sessionUuid);
     if (readinessTarget && execution && !sessionUuid && !readOnly) {
       executionTracker.markSessionlessDeviceUse(execution.executionId, readinessTarget);
@@ -797,13 +775,10 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
       );
     }
-    assertToolCallerHoldsDevice(
-      name,
-      readOnly,
-      device?.deviceId,
+    assertToolCallerHoldsDevice(name, readOnly, device?.deviceId, {
       sessionUuid,
-      state.autolockEnabled,
-    );
+      autolockEnabled: state.autolockEnabled,
+    });
     if (device) {
       options.assertHeldDeviceStart?.(device.deviceId, sessionUuid);
     }

@@ -127,8 +127,10 @@ export async function observeScreenshotOptions(
   args: ObserveArgs,
   device: BootedDevice,
   deviceRead: boolean,
-  screenshotMode: ScreenshotMode | undefined,
-  dependencies: ObserveToolDependencies,
+  {
+    screenshotMode,
+    dependencies,
+  }: { screenshotMode?: ScreenshotMode; dependencies: ObserveToolDependencies },
 ): Promise<ObserveScreenshotOptions | undefined> {
   if (args.layer !== "app" || deviceRead || screenshotMode === "none") {
     return args.screenshotOptions;

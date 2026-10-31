@@ -206,16 +206,15 @@ describe("setAppPermissions runtime permission journaling", () => {
     const journal = new FakeDeviceMutationJournal(new FakeTimer());
     await journal.captureBaseline(SCOPE, baseline([APP]));
     const recorder = new SessionMutationRecorder(journal, SCOPE);
-    const recording = new SessionDeviceMutationRecording(
-      () => recorder,
-      new FamilyMutationPriorReader([new PermissionMutationPriorReader(() => adb)]),
-      createDefaultMutationArtifactReader(undefined, undefined, () => adb),
-    );
+    const recording = new SessionDeviceMutationRecording(() => recorder, {
+      reader: new FamilyMutationPriorReader([new PermissionMutationPriorReader(() => adb)]),
+      artifactReader: createDefaultMutationArtifactReader(undefined, undefined, () => adb),
+    });
     await recording.beforeToolCall(
       "setAppPermissions",
       { appId: APP, permissions: ["CAMERA"], notificationPolicyAccess: true },
       DEVICE,
-      SCOPE.sessionUuid,
+      { sessionUuid: SCOPE.sessionUuid },
     );
     const rows = await journal.list(SCOPE);
     expect(rows).toMatchObject([
@@ -245,14 +244,16 @@ describe("setAppPermissions runtime permission journaling", () => {
     await journal.captureBaseline(SCOPE, baseline(["held.app"]));
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, SCOPE),
-      new FamilyMutationPriorReader([new PermissionMutationPriorReader(() => adb)]),
-      createDefaultMutationArtifactReader(undefined, undefined, () => adb),
+      {
+        reader: new FamilyMutationPriorReader([new PermissionMutationPriorReader(() => adb)]),
+        artifactReader: createDefaultMutationArtifactReader(undefined, undefined, () => adb),
+      },
     );
     await recording.beforeToolCall(
       "setAppPermissions",
       { appId: APP, permissions: [CAMERA] },
       DEVICE,
-      SCOPE.sessionUuid,
+      { sessionUuid: SCOPE.sessionUuid },
     );
     expect(await journal.list(SCOPE)).toEqual([]);
     expect(adb.getExecutedCommands()).toEqual([]);
@@ -268,14 +269,16 @@ describe("setAppPermissions runtime permission journaling", () => {
     await journal.captureBaseline(SCOPE, baseline([APP]));
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, SCOPE),
-      new FamilyMutationPriorReader([new PermissionMutationPriorReader(() => adb)]),
-      createDefaultMutationArtifactReader(undefined, undefined, () => adb),
+      {
+        reader: new FamilyMutationPriorReader([new PermissionMutationPriorReader(() => adb)]),
+        artifactReader: createDefaultMutationArtifactReader(undefined, undefined, () => adb),
+      },
     );
     await recording.beforeToolCall(
       "setAppPermissions",
       { appId: APP, permissions: [CAMERA] },
       DEVICE,
-      SCOPE.sessionUuid,
+      { sessionUuid: SCOPE.sessionUuid },
     );
     expect(await journal.list(SCOPE)).toMatchObject([
       { key: `["${APP}","default","${CAMERA}"]`, priorValue: { state: "unobservable" } },

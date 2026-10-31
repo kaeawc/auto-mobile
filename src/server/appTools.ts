@@ -422,13 +422,10 @@ const createLaunchAppHandler =
       mutationToken = prepared.mutationToken;
       const launchApp = dependencies.createLaunchApp(device);
       mutationMayHaveHappened = true;
-      const result = await executeLaunch(
-        launchApp,
-        args,
-        prepared.launchArguments,
+      const result = await executeLaunch(launchApp, args, prepared.launchArguments, {
         prototypeLaunch,
         signal,
-      );
+      });
       signal?.throwIfAborted();
 
       const safeResult = result.error

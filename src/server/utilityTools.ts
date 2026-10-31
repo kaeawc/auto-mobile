@@ -578,8 +578,7 @@ async function applyLocaleChange(
   manager: SystemConfigurationManager,
   device: BootedDevice,
   args: ChangeLocalizationArgs,
-  changes: LocalizationChanges,
-  errors: string[],
+  { changes, errors }: { changes: LocalizationChanges; errors: string[] },
 ): Promise<LocalizationLocaleMetadata> {
   const localeOptions =
     args.appId && device.platform === "android"
@@ -687,7 +686,7 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
   let localeMetadata: LocalizationLocaleMetadata = {};
 
   if (args.locale !== undefined) {
-    localeMetadata = await applyLocaleChange(manager, device, args, changes, errors);
+    localeMetadata = await applyLocaleChange(manager, device, args, { changes, errors });
   }
 
   const timeZoneMetadata = await applyAdditionalLocalizationChanges(manager, args, changes, errors);
@@ -730,8 +729,13 @@ function createSessionDeviceState(
   device: BootedDevice,
   sessionUuid: string | undefined,
   sessionManager: SessionManager | undefined,
-  networkFilterBridge: NetworkFilterBridge | undefined,
-  iosRunnerLocation: IosRunnerLocationResolver | undefined,
+  {
+    networkFilterBridge,
+    iosRunnerLocation,
+  }: {
+    networkFilterBridge?: NetworkFilterBridge;
+    iosRunnerLocation?: IosRunnerLocationResolver;
+  } = {},
 ): {
   deviceState: DeviceState;
   useIosAppNetworkRule: (rule: IosAppNetworkRuleCommandContext | undefined) => void;
@@ -811,8 +815,7 @@ export function registerUtilityTools(
       device,
       args.sessionUuid,
       sessionManager,
-      options.networkFilterBridge,
-      options.iosRunnerLocation,
+      options,
     );
     // Single decision for whether an applied networkCondition needs a session
     // restore slot: a degrading request on an Android emulator (issue #6012).
@@ -850,11 +853,13 @@ export function registerUtilityTools(
             sessionManager,
             { sessionUuid: args.sessionUuid, deviceId: device.deviceId },
             registerNetworkRestore,
-            (rule) => {
-              useIosAppNetworkRule(rule);
-              return deviceState.setState(input);
+            {
+              mutation: (rule) => {
+                useIosAppNetworkRule(rule);
+                return deviceState.setState(input);
+              },
+              expiresInSeconds: input.networkCondition.expiresInSeconds,
             },
-            input.networkCondition.expiresInSeconds,
           )
         : deviceState.setState(input);
 
@@ -897,8 +902,7 @@ export function registerUtilityTools(
       capture.sessionManager,
       args.sessionUuid,
       device.deviceId,
-      capture.initialEnrollment,
-      mutation,
+      { initialEnrollment: capture.initialEnrollment, mutation },
     );
 
     return createStructuredToolResponse({

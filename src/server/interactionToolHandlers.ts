@@ -97,9 +97,15 @@ export interface KeyboardProfileRecordOptions {
 export async function setKeyboardProfileForTool(
   device: BootedDevice,
   profile: KeyboardArgs["profile"],
-  client?: KeyboardProfileWriteClient,
-  signal?: AbortSignal,
-  record: KeyboardProfileRecordOptions = {},
+  {
+    client,
+    signal,
+    record = {},
+  }: {
+    client?: KeyboardProfileWriteClient;
+    signal?: AbortSignal;
+    record?: KeyboardProfileRecordOptions;
+  } = {},
 ): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
   if (!profile) {
     throw new ActionableError(
@@ -504,8 +510,7 @@ async function resolveIosOpenAlert(
   initialHierarchy: ObserveResult["viewHierarchy"] | undefined,
   refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
   tapSystemAlert: SystemAlertTap | undefined,
-  signal: AbortSignal | undefined,
-  timing: OpenAlertTiming,
+  { signal, timing }: { signal?: AbortSignal; timing: OpenAlertTiming },
 ): Promise<OpenAlertResolution> {
   if (isIosAppOpenAlertHierarchy(initialHierarchy) && !tapSystemAlert) {
     return initialHierarchy ? { hierarchy: initialHierarchy } : null;
@@ -548,9 +553,15 @@ function systemAlertTapResult(text: string): TapOnElementResult {
 export async function acceptIosAppOpenAlert(
   device: BootedDevice,
   observation: ObserveResult | undefined,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  options: AcceptIosAppOpenAlertOptions = {},
+  {
+    progress,
+    signal,
+    options = {},
+  }: {
+    progress?: ProgressCallback;
+    signal?: AbortSignal;
+    options?: AcceptIosAppOpenAlertOptions;
+  } = {},
 ): Promise<TapOnElementResult | null> {
   const { refreshHierarchy, tapSystemAlert, tapOnElementFactory } = options;
   if (device.platform !== "ios") {
@@ -566,8 +577,7 @@ export async function acceptIosAppOpenAlert(
     observation?.viewHierarchy,
     refreshHierarchy,
     tapSystemAlert,
-    signal,
-    timing,
+    { signal, timing },
   );
   if (!resolution) {
     return null;
@@ -829,13 +839,11 @@ export const createOpenLinkHandler =
     const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;
     const acceptedOpenAlert =
       args.acceptOpenAlert && result.success
-        ? await acceptIosAppOpenAlert(
-            device,
-            result.observation,
+        ? await acceptIosAppOpenAlert(device, result.observation, {
             progress,
             signal,
-            buildIosOpenAlertOptions(iosClient, signal, deps.tapOnElementFactory),
-          )
+            options: buildIosOpenAlertOptions(iosClient, signal, deps.tapOnElementFactory),
+          })
         : null;
     const effectiveResult: OpenURLResult & { openAlertAccepted?: true } = acceptedOpenAlert
       ? {
@@ -915,9 +923,13 @@ function setKeyboardProfileInSession(
     args.sessionUuid,
     device.deviceId,
     (owner) =>
-      setKeyboardProfileForTool(device, args.profile, profileDeps.clientFor?.(device), signal, {
-        owner,
-        registry: profileDeps.registry,
+      setKeyboardProfileForTool(device, args.profile, {
+        client: profileDeps.clientFor?.(device),
+        signal,
+        record: {
+          owner,
+          registry: profileDeps.registry,
+        },
       }),
   );
 }

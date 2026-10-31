@@ -457,13 +457,10 @@ export class PlanExecutionOrchestrator {
       const closeLabelMints = sessionManager.openPlanLabelMints(sessionUuid, labelToSessionMap);
       return Promise.resolve()
         .then(() =>
-          this.requestDeviceAllocation(
-            devicePool,
-            normalized,
-            effectiveLabels,
+          this.requestDeviceAllocation(devicePool, normalized, effectiveLabels, {
             labelToSessionMap,
             sessionIds,
-          ),
+          }),
         )
         .finally(closeLabelMints);
     });
@@ -484,13 +481,14 @@ export class PlanExecutionOrchestrator {
       this.perfLog(`  ${label} → ${deviceId} (session: ${sessionUuid})`);
     }
 
-    await registerDeviceLabelMap(
-      sessionUuid,
-      effectiveLabels,
-      this.request.device,
-      { keepScreenAwake: this.request.keepScreenAwake, platform: this.request.platform },
-      { execution: getToolSelectionContext()?.execution, signal: this.signal },
-    );
+    await registerDeviceLabelMap(sessionUuid, effectiveLabels, this.request.device, {
+      sessionOptions: {
+        keepScreenAwake: this.request.keepScreenAwake,
+        platform: this.request.platform,
+      },
+      execution: getToolSelectionContext()?.execution,
+      signal: this.signal,
+    });
 
     return deviceMapping;
   }
@@ -592,8 +590,10 @@ export class PlanExecutionOrchestrator {
     devicePool: DevicePool,
     normalized: NormalizedPlanDevices,
     effectiveLabels: string[],
-    labelToSessionMap: Record<string, string>,
-    sessionIds: string[],
+    {
+      labelToSessionMap,
+      sessionIds,
+    }: { labelToSessionMap: Record<string, string>; sessionIds: string[] },
   ): Promise<Map<string, string>> {
     if (!normalized.hasDefinitions) {
       return devicePool.assignMultipleDevices(

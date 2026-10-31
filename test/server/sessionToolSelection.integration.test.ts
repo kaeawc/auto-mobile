@@ -71,10 +71,9 @@ describe("per-session exact-tool selection", () => {
       getOverride: async (sessionUuid) => overrides.get(sessionUuid),
     };
 
-    const enabledTools = await listEnabledToolNames(service, ["base", "routing"], undefined, [
-      "base:A",
-      "base:B",
-    ]);
+    const enabledTools = await listEnabledToolNames(service, ["base", "routing"], {
+      labelSessionUuids: ["base:A", "base:B"],
+    });
 
     expect(enabledTools).toContain("labelAwareTool");
   });
@@ -94,13 +93,10 @@ describe("per-session exact-tool selection", () => {
       getOverride: async (sessionUuid) => overrides.get(sessionUuid),
     };
 
-    const enabledTools = await listEnabledToolNames(
-      service,
-      ["base:A"],
-      undefined,
-      ["base:A", "base:B"],
-      "base",
-    );
+    const enabledTools = await listEnabledToolNames(service, ["base:A"], {
+      labelSessionUuids: ["base:A", "base:B"],
+      baseSessionUuid: "base",
+    });
 
     expect(enabledTools).toContain("labelAwareTool");
     const listSessionToolsRoutes = buildToolSelectionCandidateRoutes(

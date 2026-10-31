@@ -237,14 +237,20 @@ export async function applyToolSelection(
  * a freshly minted session (provisionDevice) carries no override of its own.
  * Derived `${base}:${label}` device-label sessions stay a discovery-only
  * refinement: readback mirrors `tools/list`'s independent label routes.
- * @param baseSessionUuid The resolved base profile for device-label routes.
+ * @param options.baseSessionUuid The resolved base profile for device-label routes.
  */
 export async function listEnabledToolNames(
   service: ToolSelectionServiceLike,
   sessionUuids: ReadonlyArray<string | undefined>,
-  connectionProfileUuid?: string,
-  labelSessionUuids: readonly string[] = [],
-  baseSessionUuid?: string,
+  {
+    connectionProfileUuid,
+    labelSessionUuids = [],
+    baseSessionUuid,
+  }: {
+    connectionProfileUuid?: string;
+    labelSessionUuids?: readonly string[];
+    baseSessionUuid?: string;
+  } = {},
 ): Promise<string[]> {
   const resolved = service ?? getSessionToolSelectionService();
   const names = await Promise.all(
@@ -280,9 +286,11 @@ async function getEnabledToolsResponse(
       enabledTools: await listEnabledToolNames(
         context?.sessionToolSelectionService,
         [sessionUuid, context?.routingSessionUuid],
-        context?.toolSelectionProfileUuid,
-        context?.labelSessionUuids ?? [],
-        context?.routingBaseSessionUuid,
+        {
+          connectionProfileUuid: context?.toolSelectionProfileUuid,
+          labelSessionUuids: context?.labelSessionUuids ?? [],
+          baseSessionUuid: context?.routingBaseSessionUuid,
+        },
       ),
     };
   } catch (error) {

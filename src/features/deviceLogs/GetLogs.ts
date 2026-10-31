@@ -66,8 +66,7 @@ export interface IosUnifiedLogSource {
     appId: string,
     lastSeconds: number,
     level: UnifiedLogLevel,
-    signal?: AbortSignal,
-    processName?: string,
+    options?: { signal?: AbortSignal; processName?: string },
   ): Promise<{ text: string; truncated: boolean }>;
   /** The app's executable name (CFBundleExecutable), or undefined when it cannot be resolved. */
   resolveProcessName?(appId: string, signal?: AbortSignal): Promise<string | undefined>;
@@ -228,8 +227,7 @@ export class GetLogs {
       request.appId,
       sinceSeconds,
       unifiedLogLevel(minPriority),
-      signal,
-      processName,
+      { signal, processName },
     );
     if (collected.truncated) {
       warnings.push(

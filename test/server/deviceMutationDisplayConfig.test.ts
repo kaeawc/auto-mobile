@@ -119,12 +119,16 @@ describe("displayConfig recording on an iOS device (#14790)", () => {
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, scope),
       {
-        read: async (_device, mutations) =>
-          mutations.map(() => ({ state: "present" as const, value: "disabled" })),
+        reader: {
+          read: async (_device, mutations) =>
+            mutations.map(() => ({ state: "present" as const, value: "disabled" })),
+        },
+        artifactReader: { appId: async () => "com.example" },
       },
-      { appId: async () => "com.example" },
     );
-    await recording.beforeToolCall("displayConfig", { increaseContrast: true }, device, "session");
+    await recording.beforeToolCall("displayConfig", { increaseContrast: true }, device, {
+      sessionUuid: "session",
+    });
     expect(await journal.list(scope)).toMatchObject([
       {
         kind: "device-setting",

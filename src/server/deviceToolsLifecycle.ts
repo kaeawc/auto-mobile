@@ -517,8 +517,12 @@ async function prepareStoppedTeardownTarget(
   return undefined;
 }
 
-/** A delete's caller and private evidence, plus the stop identities its workflow records. */
+/**
+ * A delete's caller and private evidence, plus the stop identities its workflow records and the
+ * teardown timeout it reports.
+ */
 type DeleteDeviceWorkflowOptions = Omit<DeleteDeviceOptions, "lifecycleLease"> & {
+  timeoutMs: number;
   stopIdentities: TeardownStopIdentities;
 };
 
@@ -526,8 +530,7 @@ function createDeleteDeviceWorkflow(
   args: TeardownDeviceArgs,
   deps: DeviceToolsDependencies,
   deadlineMs: number,
-  timeoutMs: number,
-  { stopIdentities, requester, internal }: DeleteDeviceWorkflowOptions,
+  { timeoutMs, stopIdentities, requester, internal }: DeleteDeviceWorkflowOptions,
 ): DeviceTeardownWorkflow<TeardownState, "accepted" | "not_required", TeardownToolResponse> {
   return {
     resolve: async (requestAbortSignal, lifecycleLease) => {
@@ -703,8 +706,12 @@ async function runDeleteDevice(
   args: TeardownDeviceArgs,
   deps: DeviceToolsDependencies,
   callerSignal: AbortSignal | undefined,
-  teardownService: DeviceTeardownService,
-  { lifecycleLease, requester, internal }: DeleteDeviceOptions = {},
+  {
+    teardownService,
+    lifecycleLease,
+    requester,
+    internal,
+  }: DeleteDeviceOptions & { teardownService: DeviceTeardownService },
 ): Promise<TeardownToolResponse> {
   const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
   const deadlineMs = deps.timer.now() + timeoutMs;
@@ -739,7 +746,8 @@ async function runDeleteDevice(
         cancellationPolicy: args.cancellationPolicy ? "cancel-on-caller-abort" : undefined,
         lifecycleLease,
       },
-      createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs, {
+      createDeleteDeviceWorkflow(args, deps, deadlineMs, {
+        timeoutMs,
         stopIdentities,
         requester,
         internal,
@@ -868,7 +876,8 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
       }
     }
     try {
-      return await runDeleteDevice(args, deps, callerSignal, teardownService, {
+      return await runDeleteDevice(args, deps, callerSignal, {
+        teardownService,
         lifecycleLease,
         requester,
         internal,

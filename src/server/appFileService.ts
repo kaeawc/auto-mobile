@@ -545,13 +545,10 @@ class DefaultAppFileService implements AppFileService {
   async listFiles(request: AppFileListRequest): Promise<AppFileListResult> {
     const appId = normalizeAppId(request.appId);
     const device = await this.deviceResolver(request.deviceId);
-    const provider = this.getListProvider(
-      device.platform,
-      "app_containers",
-      "listFiles",
+    const provider = this.getListProvider(device.platform, "app_containers", "listFiles", {
       appId,
-      request.container,
-    );
+      container: request.container,
+    });
     return provider.listFiles({
       device,
       deviceId: device.deviceId,
@@ -565,13 +562,10 @@ class DefaultAppFileService implements AppFileService {
     const appId = normalizeAppId(request.appId);
     const path = normalizeAppFileRelativePath(request.path);
     const device = await this.deviceResolver(request.deviceId);
-    const provider = this.getReadProvider(
-      device.platform,
-      "app_containers",
-      "readFile",
+    const provider = this.getReadProvider(device.platform, "app_containers", "readFile", {
       appId,
-      request.container,
-    );
+      container: request.container,
+    });
     return provider.readFile({
       device,
       deviceId: device.deviceId,
@@ -596,18 +590,14 @@ class DefaultAppFileService implements AppFileService {
     platform: Platform,
     domain: "app_containers",
     operation: string,
-    appId: string,
-    container: AppFileContainer,
+    { appId, container }: { appId: string; container: AppFileContainer },
   ): AppFileListProvider {
     const provider = this.listProviders.get(providerKey(platform, domain));
     if (!provider) {
-      throw unsupportedAppFileOperation(
-        operation,
-        platform,
-        appId,
+      throw unsupportedAppFileOperation(operation, platform, appId, {
         container,
-        "no app file provider is registered",
-      );
+        reason: "no app file provider is registered",
+      });
     }
     return provider;
   }
@@ -616,18 +606,14 @@ class DefaultAppFileService implements AppFileService {
     platform: Platform,
     domain: "app_containers",
     operation: string,
-    appId: string,
-    container: AppFileContainer,
+    { appId, container }: { appId: string; container: AppFileContainer },
   ): AppFileReadProvider {
     const provider = this.readProviders.get(providerKey(platform, domain));
     if (!provider) {
-      throw unsupportedAppFileOperation(
-        operation,
-        platform,
-        appId,
+      throw unsupportedAppFileOperation(operation, platform, appId, {
         container,
-        "no app file provider is registered",
-      );
+        reason: "no app file provider is registered",
+      });
     }
     return provider;
   }

@@ -166,13 +166,10 @@ export async function enrichProvisionDeviceResult<
       // the call gate apply, and the session this call just minted carries no
       // override of its own — so a capability enabled on the profile is
       // callable and belongs in this report (#6886 review).
-      enabledTools: await listEnabledToolNames(
-        service,
-        [sessionUuid],
+      enabledTools: await listEnabledToolNames(service, [sessionUuid], {
         connectionProfileUuid,
-        [],
-        undefined,
-      ),
+        labelSessionUuids: [],
+      }),
       ...failure,
     });
   } catch (error) {

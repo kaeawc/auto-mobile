@@ -119,8 +119,7 @@ const bootAndPrepareDevice = async (
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   deps: DeviceToolsDependencies,
-  deviceUtils: PlatformDeviceManager,
-  options: BootPreparationOptions,
+  { deviceUtils, options }: { deviceUtils: PlatformDeviceManager; options: BootPreparationOptions },
 ) => {
   const {
     deviceMatcher,
@@ -212,7 +211,7 @@ const bootAndPrepareDevice = async (
     preparation.sourceImage,
     initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
   );
-  await reserveBootReadiness(args, budgets, deps, deps.daemonState, options);
+  await reserveBootReadiness(args, budgets, deps, { daemonState: deps.daemonState, ...options });
 
   // A new incarnation must not inherit a prior intentional-shutdown marker
   // while its per-device runner setup is in flight.
@@ -331,8 +330,13 @@ async function reserveBootReadiness(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   deps: DeviceToolsDependencies,
-  daemonState: DaemonStateLike,
-  { state, signal, requestedIdentity, releaseReadinessReservations }: BootPreparationOptions,
+  {
+    daemonState,
+    state,
+    signal,
+    requestedIdentity,
+    releaseReadinessReservations,
+  }: BootPreparationOptions & { daemonState: DaemonStateLike },
 ): Promise<void> {
   setAcquisitionStage(budgets, "reserving the device for readiness");
   const initialReservations: DeviceReadinessReservation[] = [];
@@ -698,7 +702,8 @@ export async function bindBootedDeviceSession(
       recoveryTarget,
     });
   if (resumeSessionId) {
-    return await resumePreparedDeviceSession(device, args, resumeSessionId, bind, {
+    return await resumePreparedDeviceSession(device, args, resumeSessionId, {
+      bind,
       autolockEnabled: useAutolock,
       achievedReadiness,
       daemonState,
@@ -714,12 +719,13 @@ async function resumePreparedDeviceSession(
   device: BootedDevice,
   args: StartDeviceSessionArgs,
   resumeSessionId: string,
-  bind: (target?: SessionRecoveryTarget) => Promise<string>,
   {
+    bind,
     autolockEnabled,
     achievedReadiness,
     daemonState,
   }: {
+    bind: (target?: SessionRecoveryTarget) => Promise<string>;
     autolockEnabled: boolean;
     achievedReadiness: DeviceReadinessLevel;
     daemonState: Pick<DaemonStateLike, "getDevicePool" | "getSessionManager">;
@@ -906,15 +912,17 @@ export function createBootAndPrepareDevice(rollbackCreatedDevice: CreatedDeviceR
     args: StartDeviceArgs,
     budgets: DevicePreparationBudgets,
     deps: DeviceToolsDependencies,
-    deviceUtils: PlatformDeviceManager,
-    options: BootPreparationOptions,
+    {
+      deviceUtils,
+      options,
+    }: { deviceUtils: PlatformDeviceManager; options: BootPreparationOptions },
   ) => {
     const bootOptions = { ...options, rollbackCreatedDevice };
     // Keep a close during boot visible through a resumed session's bind and autolock adoption.
     const pool = options.autolockEnabled ? initializedDevicePool() : undefined;
     const endAutolockBind = pool?.beginMcpBind(internalMcpSessionId(args));
     try {
-      return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, bootOptions);
+      return await bootAndPrepareDevice(args, budgets, deps, { deviceUtils, options: bootOptions });
     } catch (error) {
       await rollbackCreatedDeviceAfterBoot(bootOptions, error);
       throw error;
@@ -948,45 +956,47 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       rawArgs,
       getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
       signal,
-      "startDevice",
-      async (deadlineMs, requestSignal, stage) => {
-        // Poster rendering runs under the acquisition deadline and cancellation.
-        const resolvedArgs = await raceWithDeadline(resolveCameraPosterQr(args), {
-          timer: getDeviceToolsDependencies().timer,
-          signal: requestSignal,
-          label: "startDevice camera poster",
-        });
-        const target = {
-          ...resolvedArgs,
-          ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
-        };
-        return prepareDevice(
-          target,
-          {
-            bootTimeoutMs: totalTimeoutMs,
-            automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
-            automationDeadlineMs: deadlineMs,
-            stage,
-            operationName: "startDevice",
-            stableTarget:
-              args.platform === "android" && target.name && !args.deviceId
-                ? { platform: "android", stableId: target.name }
-                : args.platform === "ios" && args.deviceId
-                  ? { platform: "ios", stableId: args.deviceId }
-                  : undefined,
-            ...(args.platform === "android" && args.avdName && args.deviceId
-              ? {
-                  androidAvdName: args.avdName,
-                  requestedAndroidIdentifierPair: {
-                    avdName: args.avdName,
-                    deviceId: args.deviceId,
-                  },
-                }
-              : {}),
-          },
-          progress,
-          requestSignal,
-        );
+      {
+        operationName: "startDevice",
+        operation: async (deadlineMs, requestSignal, stage) => {
+          // Poster rendering runs under the acquisition deadline and cancellation.
+          const resolvedArgs = await raceWithDeadline(resolveCameraPosterQr(args), {
+            timer: getDeviceToolsDependencies().timer,
+            signal: requestSignal,
+            label: "startDevice camera poster",
+          });
+          const target = {
+            ...resolvedArgs,
+            ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
+          };
+          return prepareDevice(
+            target,
+            {
+              bootTimeoutMs: totalTimeoutMs,
+              automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
+              automationDeadlineMs: deadlineMs,
+              stage,
+              operationName: "startDevice",
+              stableTarget:
+                args.platform === "android" && target.name && !args.deviceId
+                  ? { platform: "android", stableId: target.name }
+                  : args.platform === "ios" && args.deviceId
+                    ? { platform: "ios", stableId: args.deviceId }
+                    : undefined,
+              ...(args.platform === "android" && args.avdName && args.deviceId
+                ? {
+                    androidAvdName: args.avdName,
+                    requestedAndroidIdentifierPair: {
+                      avdName: args.avdName,
+                      deviceId: args.deviceId,
+                    },
+                  }
+                : {}),
+            },
+            progress,
+            requestSignal,
+          );
+        },
       },
     );
   };

@@ -454,8 +454,7 @@ async function stopStartupOrphansForDevice(
   ctx: RecordingToolContext,
   target: BootedDevice,
   args: VideoRecordingArgs,
-  latest: VideoRecordingRecord | undefined,
-  singleTarget: boolean,
+  { latest, singleTarget }: { latest?: VideoRecordingRecord; singleTarget: boolean },
 ) {
   const orphans = (getStartupOrphanCaptures()?.list(target.deviceId) ?? []).filter(
     (orphan) => heldVideoRecordingOwner(orphan.recordingId) === undefined,
@@ -526,13 +525,10 @@ async function stopResolvedDeviceRecordings(
       });
       const matches = activeRecords.filter((record) => record.deviceId === target.deviceId);
       const latest = matches.length > 0 ? selectLatestRecording(matches) : undefined;
-      const stoppedOrphans = await stopStartupOrphansForDevice(
-        ctx,
-        target,
-        args,
+      const stoppedOrphans = await stopStartupOrphansForDevice(ctx, target, args, {
         latest,
-        targetDevices.length === 1,
-      );
+        singleTarget: targetDevices.length === 1,
+      });
       if (stoppedOrphans) {
         results.push(...stoppedOrphans.results);
         failures.push(...stoppedOrphans.failures);

@@ -247,6 +247,55 @@ final class PrototypeContractValidatorTests: XCTestCase {
         assertInvalid(duplicate, path: "storage.keys[1]")
     }
 
+    func testMediaQueueDataPrefixUsesUTF16() {
+        for (key, pointer) in [("\u{301}x", "/data/\u{301}x"), ("items", "/data/items"), ("x", "/other/x")] {
+            let input = #"""
+            {"id":"queue","window":{"placement":{"type":"fullscreen"}},
+              "data":{"\#(key)":[{"id":"ep1","title":"Pilot","source":{"sample":"tone440"}}]},
+              "requires":{"platform":["media"]},
+              "media":{"players":{"pod":{"kind":"audio","queue":"\#(pointer)"}}},
+              "root":{"type":"spacer"}}
+            """#
+            if pointer == "/other/x" {
+                XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: Data(input.utf8))) { error in
+                    XCTAssertEqual(
+                        error as? PrototypeLoadError,
+                        .invalidSpec(path: "media.players.pod.queue", message: "queue must point to a /data array")
+                    )
+                }
+            } else {
+                XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: Data(input.utf8)), pointer)
+            }
+        }
+    }
+
+    func testCaptionDataPrefixUsesUTF16() {
+        for (key, pointer) in [("\u{301}x", "/data/\u{301}x"), ("items", "/data/items"), ("x", "/other/x")] {
+            let input = #"""
+            {"id":"captions","window":{"placement":{"type":"fullscreen"}},
+              "data":{"\#(key)":[{"startMs":0,"endMs":1500,"text":"Hello"}]},
+              "requires":{"platform":["media"]},
+              "media":{"players":{"main":{"kind":"video","source":{"asset":"trailer"}}}},
+              "root":{"type":"videoPlayer","id":"hero","player":"main","captions":[
+                {"id":"en","language":"en","label":"English","source":{"data":"\#(pointer)"}}
+              ]}}
+            """#
+            if pointer == "/other/x" {
+                XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: Data(input.utf8))) { error in
+                    XCTAssertEqual(
+                        error as? PrototypeLoadError,
+                        .invalidSpec(
+                            path: "root.captions[0].source.data",
+                            message: "Caption data must point to a /data array"
+                        )
+                    )
+                }
+            } else {
+                XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: Data(input.utf8)), pointer)
+            }
+        }
+    }
+
     func testUnknownWidgetShowsLoadError() {
         assertInvalid(
             #"{"id":"x","window":{"placement":{"type":"fullscreen"}},"root":{"type":"futureWidget"}}"#,

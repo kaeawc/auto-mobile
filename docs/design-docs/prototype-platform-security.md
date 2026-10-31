@@ -32,8 +32,8 @@ Imported specs already lose privileged windows, host requests and AGSL shaders
 
 **R1: imported specs use no `sensitive` call.** `sensitive` in the contract's `platformModules`
 table marks calls and events that touch personal data (clipboard, share, contacts, location,
-camera and microphone output). The strict validator refuses them when `library` is set, with the
-call's path. Relaxing this is an owner decision. _Not yet enforced_
+camera and microphone output). The strict validator refuses sensitive calls and handlers when
+`library: true`, with the call or handler's path. Relaxing this is an owner decision
 ([#15636](https://github.com/kaeawc/auto-mobile/issues/15636)).
 
 **R2: sensitive results cannot reach a network or storage sink.** A `/data` path written by a

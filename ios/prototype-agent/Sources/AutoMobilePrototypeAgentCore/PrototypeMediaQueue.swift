@@ -27,10 +27,10 @@ enum PrototypeMediaQueue {
     }
 
     private static func validateQueue(_ queue: String?, data: [String: JSONValue]?, path: String) throws {
-        guard let queue, queue.hasPrefix("/data/"),
-              case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: String(queue.dropFirst(5)))
+        guard let queue, let pointer = PrototypeDataWrite.pointer(ofPath: queue),
+              case let .array(items)? = PrototypeDataPointer.resolve(data, pointer: pointer)
         else { throw PrototypeLimits.violation(path, "queue must point to a /data array") }
-        let base = PrototypeDataPointer.tokens(String(queue.dropFirst(5)))
+        let base = PrototypeDataPointer.tokens(pointer)
             .reduce(into: "data") { $0 = PrototypeContractValidator.keyPath($0, $1) }
         // Exact UTF-16 code units, as the host and Kotlin compare: a Swift String set would merge
         // canonically equivalent ids such as "\u{e9}" and "e\u{301}".

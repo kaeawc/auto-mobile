@@ -1398,10 +1398,8 @@ describe("killDevice handler", () => {
       expect(manager.killedDeviceIds).toEqual(["emulator-5554"]);
     });
 
-    // The probe borrows the kill's deadline. When that deadline is already spent
-    // by the time verification runs, there is no budget to probe with and no way
-    // to identify the target, so the refusal is immediate and the console is
-    // never contacted (#6863 review).
+    // The platform-resolution bound catches the spent deadline first, still
+    // refusing before any probe or kill (#16169).
     test("refuses without probing when the kill deadline is already spent", async () => {
       manager = new SuccessfulKillDeviceManager();
       const timer = new DeadlineSpendingFakeTimer();
@@ -1411,7 +1409,7 @@ describe("killDevice handler", () => {
       timer.spendDeadlineOnNextRead();
 
       await expect(killTool().handler({ device: unknownEmulator })).rejects.toThrow(
-        /did not answer/,
+        /to resolve platform/,
       );
       expect(runtimeAvdNameProbes).toEqual([]);
       expect(manager.killedDeviceIds).toEqual([]);

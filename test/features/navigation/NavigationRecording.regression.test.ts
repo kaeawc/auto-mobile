@@ -76,8 +76,11 @@ describe("navigation recording source state and routing", () => {
       capture.structuredContent,
     );
     try {
-      const handle = recorder.record("tapOn", recordedArgs, undefined, undefined, {
-        recordsNavigation: true,
+      const handle = recorder.record("tapOn", recordedArgs, undefined, {
+        sessionUuid: undefined,
+        traits: {
+          recordsNavigation: true,
+        },
       });
       if (!handle) {
         throw new Error("Expected navigation recording handle");

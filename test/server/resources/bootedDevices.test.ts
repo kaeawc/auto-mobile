@@ -2275,17 +2275,15 @@ describe("ResourceRegistry Template Matching", () => {
 
   test("should prefer exact resource match over template", () => {
     // Register both exact resource and template
-    ResourceRegistry.register(
-      "test://items/special",
-      "Special Item",
-      "A special item",
-      "application/json",
-      async () => ({
+    ResourceRegistry.register("test://items/special", "Special Item", {
+      description: "A special item",
+      mimeType: "application/json",
+      handler: async () => ({
         uri: "test://items/special",
         mimeType: "application/json",
         text: JSON.stringify({ type: "exact" }),
       }),
-    );
+    });
 
     ResourceRegistry.registerTemplate("test://items/{id}", "Generic Item", {
       description: "A generic item",

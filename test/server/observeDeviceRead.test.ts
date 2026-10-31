@@ -485,7 +485,7 @@ describe("session-free observe device read", () => {
     const events: string[] = [];
     const navigationRecorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const record = spyOn(navigationRecorder, "record").mockImplementation(
-      (_name, _args, _device, routedSessionUuid) => {
+      (_name, _args, _device, { sessionUuid: routedSessionUuid }) => {
         expect(routedSessionUuid).toBe(sessionUuid);
         events.push("navigation");
       },

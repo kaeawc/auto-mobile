@@ -2059,13 +2059,11 @@ export async function queryDeviceServiceStatus(
 
 // Register all booted device resources
 export function registerBootedDeviceResources(deps: BootedDeviceResourceDependencies = {}): void {
-  ResourceRegistry.register(
-    BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
-    "Booted Devices",
-    "List of all currently booted/running devices for both Android and iOS platforms.",
-    "application/json",
-    () => getAllBootedDevices(deps),
-  );
+  ResourceRegistry.register(BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED, "Booted Devices", {
+    description: "List of all currently booted/running devices for both Android and iOS platforms.",
+    mimeType: "application/json",
+    handler: () => getAllBootedDevices(deps),
+  });
 
   ResourceRegistry.registerTemplate(
     BOOTED_DEVICE_RESOURCE_URIS.PLATFORM_TEMPLATE,
@@ -2078,13 +2076,12 @@ export function registerBootedDeviceResources(deps: BootedDeviceResourceDependen
   );
 
   // Register the lightweight per-device lock-state resource (issue #5056).
-  ResourceRegistry.register(
-    DEVICE_LOCK_STATES_RESOURCE_URI,
-    "Device Lock States",
-    "Per-device keyguard/lock state (Android). Lightweight — enumerates booted devices and runs only the keyguard probe, without the service-status computation the full booted-devices resource does.",
-    "application/json",
-    getDeviceLockStates,
-  );
+  ResourceRegistry.register(DEVICE_LOCK_STATES_RESOURCE_URI, "Device Lock States", {
+    description:
+      "Per-device keyguard/lock state (Android). Lightweight — enumerates booted devices and runs only the keyguard probe, without the service-status computation the full booted-devices resource does.",
+    mimeType: "application/json",
+    handler: getDeviceLockStates,
+  });
 
   logger.info("[BootedDeviceResources] Registered booted device resources");
 }

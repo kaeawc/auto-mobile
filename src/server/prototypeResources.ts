@@ -42,17 +42,16 @@ export function defaultNativePrototypeSources(): NativePrototypeSources {
 export function registerPrototypeResources(
   nativeSources: NativePrototypeSources = defaultNativePrototypeSources(),
 ): void {
-  ResourceRegistry.register(
-    PROTOTYPE_GUIDE_URI,
-    "Prototype authoring guide",
-    "Node and action vocabulary, repeat grammar, limits, theme roles and icon lookup for the prototype tool",
-    "text/markdown",
-    async () => ({
+  ResourceRegistry.register(PROTOTYPE_GUIDE_URI, "Prototype authoring guide", {
+    description:
+      "Node and action vocabulary, repeat grammar, limits, theme roles and icon lookup for the prototype tool",
+    mimeType: "text/markdown",
+    handler: async () => ({
       uri: PROTOTYPE_GUIDE_URI,
       mimeType: "text/markdown",
       text: renderPrototypeGuide(),
     }),
-  );
+  });
 
   ResourceRegistry.registerTemplate(PROTOTYPE_ICONS_TEMPLATE, "Prototype icon lookup", {
     description: `Material icon names containing the query (at most ${ICON_LOOKUP_LIMIT} per read)`,

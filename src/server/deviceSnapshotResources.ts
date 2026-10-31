@@ -62,13 +62,11 @@ async function getSnapshotArchive(): Promise<ResourceContent> {
 }
 
 export function registerDeviceSnapshotResources(): void {
-  ResourceRegistry.register(
-    DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE,
-    "Device Snapshot Archive",
-    "Metadata list for captured device snapshots.",
-    "application/json",
-    getSnapshotArchive,
-  );
+  ResourceRegistry.register(DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE, "Device Snapshot Archive", {
+    description: "Metadata list for captured device snapshots.",
+    mimeType: "application/json",
+    handler: getSnapshotArchive,
+  });
 
   logger.info("[DeviceSnapshotResources] Registered device snapshot resources");
 }

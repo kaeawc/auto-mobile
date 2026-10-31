@@ -435,10 +435,14 @@ describe("control socket discovery cache", () => {
       await h.server.forwardRequest(context);
       expect(h.trips()).toBe(1);
       expect(refreshes).toBe(2);
-      ResourceRegistry.register(uri, "cache", "cache", "text/plain", async () => ({
-        uri,
-        text: "ok",
-      }));
+      ResourceRegistry.register(uri, "cache", {
+        description: "cache",
+        mimeType: "text/plain",
+        handler: async () => ({
+          uri,
+          text: "ok",
+        }),
+      });
       const changed = await h.server.forwardRequest(context);
       expect(changed).toEqual({ resources: ResourceRegistry.getResourceDefinitions() });
       expect(h.trips()).toBe(2);
@@ -457,10 +461,14 @@ describe("control socket discovery cache", () => {
     const h = harness({
       refreshResources: async () => {
         if (changed && !ResourceRegistry.getResource(uri)) {
-          ResourceRegistry.register(uri, "refreshed", "refreshed", "text/plain", async () => ({
-            uri,
-            text: "ok",
-          }));
+          ResourceRegistry.register(uri, "refreshed", {
+            description: "refreshed",
+            mimeType: "text/plain",
+            handler: async () => ({
+              uri,
+              text: "ok",
+            }),
+          });
         }
       },
     });

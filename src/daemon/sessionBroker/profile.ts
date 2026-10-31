@@ -1,3 +1,7 @@
+import type { AvdConfig, AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
+import type { BindingResultEntry } from "./provisioning/acquisitionResult";
+import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { z } from "zod";
 import type { SessionDeviceProfile } from "../../devices/sessionRequirements";
 import { ActionableError } from "../../models/ActionableError";
@@ -31,6 +35,8 @@ export const exactProfile = z.discriminatedUnion("platform", [
     profileId: z.string().min(1),
     archetype: z.enum(["phone", "tablet", "foldable"]),
     memoryMb: z.number().int().positive().optional(),
+    effectiveRamMb: z.number().positive().nullable().optional(),
+    effectiveCpuCores: z.number().int().positive().nullable().optional(),
     systemImagePackage: z.string().min(1),
     osVersion: z.string().regex(/^\d+(?:\.\d+)*$/),
     versionPrecision: z.enum(["major", "minor", "patch"]),
@@ -69,4 +75,53 @@ export function nativeProfile(
 
 export function poolProfile(value: unknown): SessionDeviceProfile {
   return nativeProfile({ profile: value });
+}
+
+export async function brokerReceiptProfile(
+  profile: BrokerNativeProfile,
+  binding: Pick<BindingResultEntry, "device"> | undefined,
+  reader: Pick<AvdConfigReader, "readConfig"> | undefined,
+): Promise<BrokerNativeProfile> {
+  let hardware: AvdConfig | null | undefined;
+  if (profile.platform === "android" && binding?.device) {
+    try {
+      hardware = await reader?.readConfig(binding.device.name);
+    } catch (error) {
+      logger.warn(
+        `Cannot read effective Android hardware for broker receipt: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+  const receiptProfile =
+    profile.platform === "android"
+      ? {
+          ...profile,
+          effectiveRamMb: hardware?.effectiveRamMb ?? null,
+          effectiveCpuCores: hardware?.effectiveCpuCores ?? null,
+        }
+      : profile;
+  return receiptProfile;
+}
+
+/** Persist launch facts with the existing receipt profile without changing its configured identity. */
+export function activationHardware(
+  resource: BrokerResourceRecord,
+  profile: SessionDeviceProfile | undefined,
+): { profile_json?: string } {
+  if (profile?.platform !== "android") {
+    return {};
+  }
+  return {
+    profile_json: JSON.stringify({
+      ...(typeof resource.profile === "object" && resource.profile !== null
+        ? resource.profile
+        : {}),
+      profile: {
+        ...nativeProfile(resource),
+        effectiveRamMb: profile.effectiveRamMb ?? null,
+        effectiveCpuCores: profile.effectiveCpuCores ?? null,
+      },
+    }),
+  };
 }

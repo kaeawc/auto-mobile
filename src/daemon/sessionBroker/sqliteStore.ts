@@ -1,3 +1,5 @@
+import { activationHardware } from "./profile";
+import { sameProcess } from "./brokerSupport";
 import { countSessionAdmissions, occupiedResources } from "./sqliteAdmissions";
 import { completedAcquisitionTiming, pendingAcquisitionTiming } from "./timingRecorder";
 import { requestRecord, resourceRecord, readRequest, readResource } from "./sqliteRecords";
@@ -53,14 +55,6 @@ type Executor = Kysely<BindingRegistryDatabase> | Transaction<BindingRegistryDat
 
 function isTerminalState(state: BrokerRequestsTable["state"] | undefined): boolean {
   return state === "released" || state === "failed";
-}
-
-function sameOwner(left: BindingProcessIdentity, right: BindingProcessIdentity): boolean {
-  return (
-    left.daemonId === right.daemonId &&
-    left.pid === right.pid &&
-    left.processGenerationToken === right.processGenerationToken
-  );
 }
 
 function ownsReadyBinding(
@@ -361,7 +355,7 @@ export class SqliteSessionBrokerStore {
           ...(await this.currentDestructionTicket(trx, previous)),
         };
       }
-      if (!sameOwner(previous.owner, owner)) {
+      if (!sameProcess(previous.owner, owner)) {
         throw new SessionRequestOwnerMismatchError(previous.restartHandoff === true);
       }
       let ticket: DestructionTicket | undefined;
@@ -415,7 +409,7 @@ export class SqliteSessionBrokerStore {
     requestId: string,
     owner: BindingProcessIdentity,
     sessionId: string,
-    phases?: SessionPreparationTiming,
+    preparation?: SessionPreparationTiming & { profile?: SessionDeviceProfile },
   ): Promise<BrokerRequestRecord> {
     if (!sessionId.trim()) {
       throw new ActionableError("A prepared session must have a non-empty session UUID");
@@ -440,11 +434,14 @@ export class SqliteSessionBrokerStore {
           "Prepared session does not own the current physical device binding",
         );
       }
-      await this.updateResource(trx, resource, { state: "active" });
+      await this.updateResource(trx, resource, {
+        state: "active",
+        ...activationHardware(resource, preparation?.profile),
+      });
       return this.updateRequest(trx, requestId, {
         state: "active",
         session_id: sessionId,
-        ...completedAcquisitionTiming(request, resource, phases, this.clock.now()),
+        ...completedAcquisitionTiming(request, resource, preparation, this.clock.now()),
       });
     });
   }
@@ -687,7 +684,7 @@ export class SqliteSessionBrokerStore {
   ): Promise<DestructionTicket | undefined> {
     return this.db.transaction().execute(async (trx) => {
       const request = requireValue(await readRequest(trx, requestId), "Unknown session request");
-      if (sameOwner(request.owner, owner) || this.isOwnerLive(request.owner)) {
+      if (sameProcess(request.owner, owner) || this.isOwnerLive(request.owner)) {
         return undefined;
       }
       if (request.state === "released" || request.state === "failed") {
@@ -748,7 +745,7 @@ export class SqliteSessionBrokerStore {
       if (!request.restartHandoff || request.state !== "active" || !request.sessionId) {
         return "not-handoff";
       }
-      if (sameOwner(request.owner, owner)) {
+      if (sameProcess(request.owner, owner)) {
         return "adopted";
       }
       if (this.isOwnerLive(request.owner)) {
@@ -978,7 +975,7 @@ export class SqliteSessionBrokerStore {
     owner: BindingProcessIdentity,
   ): Promise<BrokerRequestRecord> {
     const request = requireValue(await readRequest(db, id), "Unknown session request");
-    if (!sameOwner(request.owner, owner)) {
+    if (!sameProcess(request.owner, owner)) {
       throw new SessionRequestOwnerMismatchError(request.restartHandoff === true);
     }
     return request;
@@ -1004,7 +1001,10 @@ export class SqliteSessionBrokerStore {
     trx: Transaction<BindingRegistryDatabase>,
     resource: BrokerResourceRecord,
     changes: Partial<
-      Pick<Selectable<BrokerResourcesTable>, "state" | "request_id" | "idle_order" | "reuse_count">
+      Pick<
+        Selectable<BrokerResourcesTable>,
+        "state" | "request_id" | "idle_order" | "reuse_count" | "profile_json"
+      >
     >,
   ): Promise<BrokerResourceRecord> {
     const row = await trx

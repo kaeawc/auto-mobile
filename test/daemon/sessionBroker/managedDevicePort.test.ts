@@ -439,15 +439,26 @@ describe("ManagedDevicePort preparation and release", () => {
     expect(prepared).toEqual({ sessionId: "session-1", profile: IOS.profile });
   });
 
-  test.each([undefined, 4096])(
-    "maps Android profile RAM %s and rejects inconsistent metadata",
-    async (memoryMb) => {
+  test.each([
+    [undefined, undefined],
+    [2048, 2560],
+    [4096, 4096],
+  ])(
+    "maps Android profile RAM %s beside effective RAM %s and rejects inconsistent metadata",
+    async (memoryMb, effectiveRamMb) => {
       const android = {
         ...ANDROID,
         profile: { ...ANDROID.profile, ...(memoryMb === undefined ? {} : { memoryMb }) },
       };
       const configs: BrokerProvisionRequest[] = [];
       const port = new ManagedDevicePort({
+        timer: new FakeTimer(),
+        androidConfigReader: {
+          readConfig: async () => ({
+            effectiveRamMb,
+            effectiveCpuCores: effectiveRamMb ? 4 : undefined,
+          }),
+        },
         scope: SCOPE,
         brokerDeviceAcquisition: acquisition(async (config) => {
           configs.push(config);
@@ -456,7 +467,7 @@ describe("ManagedDevicePort preparation and release", () => {
         brokerExecutionRelease: {
           releaseExecution: async (sessionId) => releaseResult(sessionId),
         },
-        registry: {} as never,
+        registry: new FakeBindingRegistry(new FakeTimer()),
         bindingJournal: {
           owner: OWNER,
           redriveBinding: async () => ({ kind: "clear", redriven: [] }),
@@ -465,7 +476,13 @@ describe("ManagedDevicePort preparation and release", () => {
 
       expect(
         await port.prepare(resource(android), { livenessOwnerToken: "consumer-liveness" }),
-      ).toMatchObject({ profile: ANDROID.profile });
+      ).toMatchObject({
+        profile: {
+          ...android.profile,
+          effectiveRamMb: effectiveRamMb ?? null,
+          effectiveCpuCores: effectiveRamMb ? 4 : null,
+        },
+      });
       expect(configs[0]?.requests[0]).toEqual({
         bindingIndex: 7,
         role: "session-broker-device",

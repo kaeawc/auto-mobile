@@ -199,6 +199,7 @@ export async function openSessionBrokerService(
         }
       : undefined;
     const devices = new ManagedDevicePort({
+      androidConfigReader: new FileAvdConfigReader(),
       scope: SESSION_BROKER_SCOPE,
       timer: options.timer,
       leaseKeepalive: preparationLeaseKeepalive(options),

@@ -445,6 +445,10 @@ export const deviceDescriptionSchema = z
     architecture: nullableString,
     osVersion: nullableString,
     apiLevel: nullableNumber,
+    configuredRamMb: z.number().positive().nullable().optional(),
+    effectiveRamMb: z.number().positive().nullable().optional(),
+    configuredCpuCores: z.number().int().positive().nullable().optional(),
+    effectiveCpuCores: z.number().int().positive().nullable().optional(),
     runtimeId: nullableString,
     runtime: z
       .object({

@@ -3,6 +3,7 @@ import {
   toActionableError,
   type BootedDevice,
   type Platform,
+  requireAndroidOrIosPlatform,
   type SomePlatform,
 } from "../models";
 import type { BootedDeviceDiscovery, DeviceDiscoveryError } from "../devices/deviceUtils";
@@ -222,7 +223,11 @@ export function createListingHandlers() {
     // here — enumerate booted devices directly instead of forcing a modality
     // switch to resources. The resource pointers (which also cover not-yet-booted
     // images and richer per-device detail) survive as a `note`.
-    const platform: SomePlatform = args.platform ?? "either";
+    // An Apple TV is never discovered yet, so naming it is refused rather than listed as empty.
+    const platform: SomePlatform =
+      args.platform === undefined
+        ? "either"
+        : requireAndroidOrIosPlatform(args.platform, "listDevices");
     const presentationOrder = acceptancePresentationOrder(args);
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const deps = getDeviceToolsDependencies();

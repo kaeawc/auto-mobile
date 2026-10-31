@@ -27,9 +27,10 @@ import {
   responseShapeControlFields,
   withJsonSchemaOverride,
 } from "../utils/schemaHelpers";
+import type { PlatformArg } from "../utils/schemaHelpers";
 
 export type MultiTouchArgs = MultiTouchOptions & {
-  platform?: "android" | "ios";
+  platform?: PlatformArg;
   raw?: boolean;
   project?: "full" | "skeleton";
 };

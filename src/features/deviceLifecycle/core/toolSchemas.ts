@@ -103,7 +103,9 @@ export const listDevicesOutputSchema = z.object({
 export const provisionDeviceOutputSchema = z
   .object({
     // Its own platform enum: provisionDevice provisions Apple Watch simulators too (#15882).
-    device: provisionedDeviceSchema.extend({ platform: z.enum(["android", "ios", "watchos"]) }),
+    device: provisionedDeviceSchema.extend({
+      platform: z.enum(["android", "ios", "watchos", "tvos"]),
+    }),
     disabledResources: disabledResourcesSchema.optional(),
     requestedSpec: z.unknown(),
     resolvedSpec: z.unknown(),
@@ -139,7 +141,7 @@ export const killDeviceSchema = z
       deviceId: z.string(),
       // Its own enum: killDevice stops Apple Watch simulators too (#14908); the shared
       // platform schema stays Android/iOS for the tools that do not.
-      platform: z.enum(["android", "ios", "watchos"]),
+      platform: z.enum(["android", "ios", "watchos", "tvos"]),
     }),
     force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),
   })
@@ -199,5 +201,5 @@ export const teardownDeviceSchema = teardownSchemaFor(platformSchema);
  * (#15882). The Android and iOS workflow keeps {@link teardownDeviceSchema}'s narrower type.
  */
 export const teardownDeviceRegistrationSchema = teardownSchemaFor(
-  z.enum(["android", "ios", "watchos"]),
+  z.enum(["android", "ios", "watchos", "tvos"]),
 );

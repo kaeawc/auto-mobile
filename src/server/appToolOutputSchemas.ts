@@ -3,7 +3,7 @@ import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
 
 const appPlatformOutputSchema = z.enum(["android", "ios"]);
 /** listApps also answers for an Apple Watch simulator (#14908). */
-const listAppsPlatformOutputSchema = z.enum(["android", "ios", "watchos"]);
+const listAppsPlatformOutputSchema = z.enum(["android", "ios", "watchos", "tvos"]);
 
 const listAppsAppOutputSchema = z
   .object({

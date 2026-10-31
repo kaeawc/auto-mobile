@@ -59,8 +59,11 @@ export class AndroidClientRequests {
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    { signal, onDispatch }: DispatchOptions = {},
+    {
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      onDispatch,
+    }: DispatchOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yClipboardResult & { acknowledged?: boolean }> {
     const startTime = this.context.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
@@ -125,8 +128,7 @@ export class AndroidClientRequests {
             error: `Clipboard ${action} timeout after ${timeout}ms`,
           }),
         },
-        { signal: combinedSignal, startTime },
-        perf,
+        { cancellation: { signal: combinedSignal, startTime }, perf },
       );
       const result = await perf.track("waitForClipboard", () =>
         clipboardPromise.then((result) => ({
@@ -173,9 +175,11 @@ export class AndroidClientRequests {
   requestSettingsGet(
     namespace: SettingsNamespace,
     key: string,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
+    {
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      signal,
+    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<A11ySettingsGetResult> {
     return this.sendSettingsCommand(
       "get",
@@ -193,8 +197,10 @@ export class AndroidClientRequests {
     namespace: SettingsNamespace,
     key: string,
     value: string | null,
-    valueType: SettingsValueType = "string",
-    options: AndroidSettingsPutOptions = {},
+    {
+      valueType = "string",
+      ...options
+    }: AndroidSettingsPutOptions & { valueType?: SettingsValueType } = {},
   ): Promise<A11ySettingsPutResult> {
     const { timeoutMs = 5000, perf = new NoOpPerformanceTracker(), signal } = options;
     return this.sendSettingsCommand(
@@ -352,7 +358,7 @@ export class AndroidClientRequests {
               acknowledged: false,
             }),
           },
-          { signal: combinedSignal, startTime },
+          { cancellation: { signal: combinedSignal, startTime } },
         )
         .then((result) => ({
           ...result,
@@ -429,7 +435,7 @@ export class AndroidClientRequests {
             error: `Frame context validation timeout after ${timeout}ms`,
           }),
         },
-        { signal: combinedSignal, startTime },
+        { cancellation: { signal: combinedSignal, startTime } },
       );
     } catch (error) {
       const logger = this.context.logger;

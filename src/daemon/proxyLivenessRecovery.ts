@@ -484,7 +484,7 @@ export class LivenessRecovery {
           restoredAfterLapse,
           deviceAtStart,
         }) ||
-        this.recoveredByLateAck(sessionUuid, code, attempt, lastAckBefore, restoredAfterLapse)
+        this.recoveredByLateAck(sessionUuid, code, attempt, { lastAckBefore, restoredAfterLapse })
       ) {
         return;
       }
@@ -492,13 +492,10 @@ export class LivenessRecovery {
     }
     const restoredAfterLapse = startedAt - lastAckBefore > this.deps.leaseMs;
     if (
-      this.recoveredByLateAck(
-        sessionUuid,
-        code,
-        LIVENESS_RECOVERY_ATTEMPTS,
+      this.recoveredByLateAck(sessionUuid, code, LIVENESS_RECOVERY_ATTEMPTS, {
         lastAckBefore,
         restoredAfterLapse,
-      )
+      })
     ) {
       return;
     }
@@ -523,8 +520,7 @@ export class LivenessRecovery {
     sessionUuid: string,
     code: LivenessStallCode,
     attempts: number,
-    lastAckBefore: number,
-    restoredAfterLapse: boolean,
+    { lastAckBefore, restoredAfterLapse }: { lastAckBefore: number; restoredAfterLapse: boolean },
   ): boolean {
     if (!this.deps.hasAcknowledgedSince(sessionUuid, lastAckBefore)) {
       return false;

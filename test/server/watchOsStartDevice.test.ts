@@ -18,7 +18,10 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { WatchSimulatorInventory } from "../../src/utils/ios-cmdline-tools/WatchSimulatorInventory";
-import { WatchSimulatorLifecycle } from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
+import {
+  WatchSimulatorLifecycle,
+  type WatchBootAdmission,
+} from "../../src/utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -79,7 +82,12 @@ describe("startDevice on an Apple Watch simulator", () => {
     {
       listingFollowsBoot = true,
       ownership,
-    }: { listingFollowsBoot?: boolean; ownership?: ForeignDeviceOwnership } = {},
+      admission,
+    }: {
+      listingFollowsBoot?: boolean;
+      ownership?: ForeignDeviceOwnership;
+      admission?: WatchBootAdmission;
+    } = {},
   ) {
     restoreEnv = ToolRegistry.setPipelineOverridesForTesting({ env });
     const simctl = new FakeWatchLifecycleSimctl(devices);
@@ -124,7 +132,8 @@ describe("startDevice on an Apple Watch simulator", () => {
         runnerCalls.push(request.device.deviceId);
         throw new Error("a watch start must never prepare an automation runner");
       },
-      watchSimulatorLifecycleFactory: () => new WatchSimulatorLifecycle(simctl, inventory),
+      watchSimulatorLifecycleFactory: () =>
+        new WatchSimulatorLifecycle(simctl, inventory, admission),
     });
     registerDeviceTools();
     return { simctl, pool, sessions: sessionManager, runnerCalls, deviceUtils };
@@ -195,6 +204,39 @@ describe("startDevice on an Apple Watch simulator", () => {
       expect(claims.held.size).toBe(0);
     },
   );
+
+  // A start cancelled while its boot waits for simulator capacity must leave the admission queue
+  // instead of holding its place and lease until a slot frees (#15882).
+  test("a start cancelled while its boot waits for admission cancels the admission", async () => {
+    const request = new AbortController();
+    const seen: Array<boolean | undefined> = [];
+    const { simctl } = await arrange([watchDevice()], {
+      admission: {
+        run: async (boot) => {
+          seen.push(boot.signal?.aborted);
+          request.abort();
+          seen.push(boot.signal?.aborted);
+          boot.signal?.throwIfAborted();
+          throw new Error("admission must observe the cancelled request");
+        },
+      },
+    });
+
+    const outcome = await ToolRegistry.getTool("startDevice")!
+      .handler(
+        { __mcpSessionId: "client-a", platform: "watchos", deviceId: WATCH_UDID },
+        undefined,
+        request.signal,
+      )
+      .then(
+        () => "delivered",
+        () => "refused",
+      );
+
+    expect(outcome).toBe("refused");
+    expect(seen).toEqual([false, true]);
+    expect(simctl.commands).toEqual([]);
+  });
 
   test("adopts an already-booted, pooled idle watch by exact name without booting it", async () => {
     const { simctl, pool } = await arrange([watchDevice({ state: "Booted" })]);

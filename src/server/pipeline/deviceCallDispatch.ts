@@ -66,7 +66,7 @@ export function journaledDeviceHandler(
       typeof args.sessionUuid === "string"
         ? args.sessionUuid
         : getToolSelectionContext()?.routingSessionUuid;
-    await recording.beforeToolCall(name, args, device, sessionUuid, signal);
+    await recording.beforeToolCall(name, args, device, { sessionUuid, signal });
     signal?.throwIfAborted();
     return handler(device, args, progress, signal);
   };
@@ -167,8 +167,7 @@ export function assertSessionDeviceRouting(
   toolName: string,
   providedDeviceId: string | undefined,
   sessionUuid: string,
-  sessionDeviceId: string | undefined,
-  sessionPlatform: string | undefined,
+  { sessionDeviceId, sessionPlatform }: { sessionDeviceId?: string; sessionPlatform?: string } = {},
 ): void {
   if (providedDeviceId && sessionDeviceId && providedDeviceId !== sessionDeviceId) {
     // The same refusal a pinned connection gets for a foreign device (#11351), typed so clients
@@ -197,13 +196,10 @@ export function refuseControlCallBeforeAdmission(
   sessionUuid: string,
 ): void {
   const session = defaultDaemonContext.sessionManager()?.getSession(sessionUuid);
-  assertSessionDeviceRouting(
-    toolName,
-    providedDeviceId,
-    sessionUuid,
-    session?.assignedDevice,
-    session?.platform,
-  );
+  assertSessionDeviceRouting(toolName, providedDeviceId, sessionUuid, {
+    sessionDeviceId: session?.assignedDevice,
+    sessionPlatform: session?.platform,
+  });
   defaultDaemonContext.devicePool()?.assertSessionReadyForAutomation(sessionUuid);
 }
 
@@ -303,17 +299,12 @@ export async function assertToolControlTargetIdentity(
     return;
   }
   const sessionManager = defaultDaemonContext.requireSessionManager();
-  await assertFrameTargetIdentityProven(
-    defaultDaemonContext.devicePool(),
-    device,
-    input.toolName,
-    Boolean(sessionManager.getSessionForDevice(device.deviceId)),
-    {
-      sessions: frameHeldSessionsFrom(sessionManager),
-      requesterSessionUuid: input.sessionUuid,
-      sessionManager,
-    },
-  );
+  await assertFrameTargetIdentityProven(defaultDaemonContext.devicePool(), device, input.toolName, {
+    heldBySession: Boolean(sessionManager.getSessionForDevice(device.deviceId)),
+    sessions: frameHeldSessionsFrom(sessionManager),
+    requesterSessionUuid: input.sessionUuid,
+    sessionManager,
+  });
 }
 
 /**
@@ -326,8 +317,7 @@ export function assertToolCallerHoldsDevice(
   toolName: string,
   readOnly: boolean,
   deviceId: string | undefined,
-  sessionUuid: string | undefined,
-  autolockEnabled: boolean,
+  { sessionUuid, autolockEnabled }: { sessionUuid?: string; autolockEnabled: boolean },
 ): void {
   const devicePool = defaultDaemonContext.devicePool();
   const sessionManager = defaultDaemonContext.sessionManager();
@@ -611,7 +601,10 @@ export async function invokeResolvedDeviceHandler(input: {
     internalExecutionStartTime(args),
     target.device.deviceId,
   );
-  const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);
+  const withdraw = navigationRecorder.record(name, args, target.device, {
+    sessionUuid: target.sessionUuid,
+    traits,
+  });
   const onAbort = () => withdraw?.();
   signal?.addEventListener("abort", onAbort, { once: true });
   let succeeded = false;
@@ -619,13 +612,10 @@ export async function invokeResolvedDeviceHandler(input: {
     // The dispatch boundary: a call cancelled since admission (for instance because another
     // session acquired its device, #10829) never reaches the device. `finally` withdraws it.
     signal?.throwIfAborted();
-    await input.mutationRecording.beforeToolCall(
-      name,
-      args,
-      target.device,
-      target.sessionUuid,
+    await input.mutationRecording.beforeToolCall(name, args, target.device, {
+      sessionUuid: target.sessionUuid,
       signal,
-    );
+    });
     signal?.throwIfAborted();
     // The action reports when its gesture goes out, so a tool that waited for its target
     // is attributed from the dispatch, not from the start (#10196).

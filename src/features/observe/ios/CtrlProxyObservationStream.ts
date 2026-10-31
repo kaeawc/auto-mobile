@@ -151,7 +151,9 @@ export class CtrlProxyObservationStream {
       // Identity, coordinate space, and native scale travel with the frame from request initiation,
       // never from the latest metadata at delivery time. A hierarchy that flips scale metadata
       // while pixels are in flight must not relabel their geometry or their swipe threshold.
-      server.pushScreenshotUpdate(this.host.deviceId, screenshotBase64, screenWidth, screenHeight, {
+      server.pushScreenshotUpdate(this.host.deviceId, screenshotBase64, {
+        screenWidth,
+        screenHeight,
         metadata,
         options: {
           captureSequence,

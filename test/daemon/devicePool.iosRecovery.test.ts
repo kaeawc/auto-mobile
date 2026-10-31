@@ -106,7 +106,7 @@ async function seedRecoverableIOSSession(
     heartbeatTimeoutMs: 10_000,
     hasReceivedHeartbeat: true,
   });
-  await persistence.markReleased("ios-session", "released", 0, releaseReason);
+  await persistence.markReleased("ios-session", "released", 0, { reason: releaseReason });
 }
 
 test("owned iOS simulator loss and same-UDID return preserve the session with a new connection", async () => {

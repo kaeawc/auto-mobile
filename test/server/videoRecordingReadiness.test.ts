@@ -14,7 +14,7 @@ test("video recording requires CtrlProxy only when startup highlights need it", 
   let readiness: ((args: VideoRecordingArgs) => string) | undefined;
 
   registry.registerDeviceAware = (...args: any[]) => {
-    readiness = args[4]?.deviceReadiness;
+    readiness = args[3]?.deviceReadiness;
   };
 
   try {

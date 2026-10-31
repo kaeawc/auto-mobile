@@ -121,7 +121,7 @@ async function observe(device: BootedDevice) {
         }),
       },
     },
-    timer,
+    { timer },
   );
   const result = await screen.executeDeviceRead();
   return { result, commands: adb.getExecutedCommands() };

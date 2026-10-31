@@ -202,13 +202,12 @@ export class DeviceAllocation {
           lossIncident = await this.settledRecoveryLossIncident(sessionId, recoveryTarget);
         }
         // Try to assign device (mutex ensures atomic assignment)
-        const assignResult = await this.tryAssignDevice(
-          sessionId,
+        const assignResult = await this.tryAssignDevice(sessionId, {
           platform,
           recoveryTarget,
-          lossIncident !== undefined,
+          settledRecoveryLoss: lossIncident !== undefined,
           signal,
-        );
+        });
         if (assignResult.refreshCompleted) {
           refreshFailure = assignResult.refreshFailure;
         }
@@ -430,10 +429,17 @@ export class DeviceAllocation {
    */
   async tryAssignDevice(
     sessionId: string,
-    platform?: Platform,
-    recoveryTarget?: SessionRecoveryTarget,
-    settledRecoveryLoss = false,
-    signal?: AbortSignal,
+    {
+      platform,
+      recoveryTarget,
+      settledRecoveryLoss,
+      signal,
+    }: {
+      platform?: Platform;
+      recoveryTarget?: SessionRecoveryTarget;
+      settledRecoveryLoss?: boolean;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<{
     success: boolean;
     deviceId?: string;
@@ -458,8 +464,7 @@ export class DeviceAllocation {
         sessionId,
         () => this.port.getGenericallyAllocatableDevices(platform),
         "platform pool empty",
-        () => this.port.hasPendingAndroidRecovery(platform),
-        { signal },
+        { hasPendingRecovery: () => this.port.hasPendingAndroidRecovery(platform), signal },
       );
     }
     const ownership = this.port.foreignOwnershipFor(recoveryTarget.platform);
@@ -470,17 +475,18 @@ export class DeviceAllocation {
       sessionId,
       () => this.port.getDevicesMatchingRecoveryTarget(recoveryTarget),
       "recovery target pool empty",
-      () => this.port.hasPendingAndroidRecovery(platform),
-      { recoveryTarget, settledRecoveryLoss, signal },
+      {
+        hasPendingRecovery: () => this.port.hasPendingAndroidRecovery(platform),
+        recoveryTarget,
+        settledRecoveryLoss,
+        signal,
+      },
     );
     if (ownership && result.success && result.deviceId !== undefined && result.session) {
-      await this.claimRecoveredDevice(
-        sessionId,
-        recoveryTarget,
-        ownership,
-        result.deviceId,
-        result.session,
-      );
+      await this.claimRecoveredDevice(sessionId, recoveryTarget, ownership, {
+        deviceId: result.deviceId,
+        session: result.session,
+      });
     }
     return result;
   }
@@ -509,8 +515,7 @@ export class DeviceAllocation {
     sessionId: string,
     target: SessionRecoveryTarget,
     ownership: ForeignDeviceOwnership,
-    deviceId: string,
-    session: Session,
+    { deviceId, session }: { deviceId: string; session: Session },
   ): Promise<void> {
     if (await this.port.publishDeviceClaim(deviceId)) {
       return;
@@ -565,8 +570,7 @@ export class DeviceAllocation {
             .getGenericallyAllocatableDevices(platform)
             .filter((device) => !this.port.isDrivenByForeignDaemon(device)),
         "platform pool empty",
-        () => this.port.hasPendingAndroidRecovery(platform),
-        { signal },
+        { hasPendingRecovery: () => this.port.hasPendingAndroidRecovery(platform), signal },
       ),
     );
   }
@@ -637,8 +641,7 @@ export class DeviceAllocation {
         sessionId,
         () => this.port.getUnownedDevicesMatchingCriteria(criteria),
         "criteria pool empty",
-        () => this.port.hasPendingAndroidRecoveryMatching(criteria),
-        { signal },
+        { hasPendingRecovery: () => this.port.hasPendingAndroidRecoveryMatching(criteria), signal },
       ),
     );
   }
@@ -658,8 +661,7 @@ export class DeviceAllocation {
     sessionId: string,
     selectCandidates: () => PooledDevice[],
     emptyCandidatePoolReason: string,
-    hasPendingRecovery: () => boolean,
-    options: AssignFromOptions = {},
+    { hasPendingRecovery, ...options }: AssignFromOptions & { hasPendingRecovery: () => boolean },
   ): Promise<{
     success: boolean;
     deviceId?: string;

@@ -32,18 +32,14 @@ function tree(flag?: boolean): XCTestHierarchy {
 }
 function client(deviceId = "device-a") {
   const timer = new FakeTimer();
-  return IOSCtrlProxyClient.createForTesting(
-    { deviceId, platform: "ios", name: deviceId },
-    8765,
-    createSuccessWebSocketFactory(timer),
+  return IOSCtrlProxyClient.createForTesting({ deviceId, platform: "ios", name: deviceId }, 8765, {
+    wsFactory: createSuccessWebSocketFactory(timer),
     timer,
-    {
-      serviceManagerFactory: undefined,
-      bootedDeviceLister: undefined,
-      deviceConnectionLostNotifier: { onDeviceConnectionLost() {} },
-      sdkEventIngestor: new FakeIosSdkEventIngestor(),
-    },
-  );
+    serviceManagerFactory: undefined,
+    bootedDeviceLister: undefined,
+    deviceConnectionLostNotifier: { onDeviceConnectionLost() {} },
+    sdkEventIngestor: new FakeIosSdkEventIngestor(),
+  });
 }
 function push(target: IOSCtrlProxyClient, hierarchy: XCTestHierarchy) {
   target.getInboundMessageTestHooks().processMessage({ type: "hierarchy_update", data: hierarchy });

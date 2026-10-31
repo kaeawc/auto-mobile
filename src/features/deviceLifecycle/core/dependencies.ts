@@ -301,8 +301,10 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       androidAdbFactory: unadmittedAdbClientFactory,
       daemonState: daemonStateLikeFrom(defaultDaemonContext),
       deviceResourceControllerFactory: () =>
-        new DefaultDeviceResourceController(undefined, undefined, undefined, undefined, {
-          applications: new DeviceResourceApplicationRepository(),
+        new DefaultDeviceResourceController(undefined, {
+          extras: {
+            applications: new DeviceResourceApplicationRepository(),
+          },
         }),
       deviceResourceObserverFactory: () =>
         new DefaultDeviceResourceObserver({ timer: getDeviceToolsDependencies().timer }),

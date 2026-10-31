@@ -72,8 +72,7 @@ async function runAudit(hierarchy: ViewHierarchyResult, image: ReturnType<typeof
   const result = await auditWith(image).audit(
     projection.elements,
     hierarchy.hierarchy,
-    { screenshotPath: SCREENSHOT, packageName: "dev.jasonpearson.automobile.playground" },
-    config,
+    { screenshotPath: SCREENSHOT, packageName: "dev.jasonpearson.automobile.playground", config },
     {
       density: hierarchy.density,
       windows: hierarchy.windows,

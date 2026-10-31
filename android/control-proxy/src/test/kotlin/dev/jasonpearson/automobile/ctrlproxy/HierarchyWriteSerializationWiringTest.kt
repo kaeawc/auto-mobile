@@ -151,7 +151,7 @@ class HierarchyWriteSerializationWiringTest {
   private fun deliverHierarchyFrameBody(source: String): String {
     val marker = "internal suspend fun deliverHierarchyFrame("
     val start = source.indexOf(marker)
-    assertTrue("deliverHierarchyFrame not found in CtrlProxy.kt", start >= 0)
+    assertTrue("deliverHierarchyFrame not found in HierarchyController.kt", start >= 0)
     // The signature has nested parens (e.g. `broadcast: suspend (String) -> Unit`), so balance from
     // the parameter-list '(' rather than scanning for the first ')'.
     val parenClose = KotlinSourceScan.matchParen(source, start + marker.length - 1)
@@ -168,8 +168,8 @@ class HierarchyWriteSerializationWiringTest {
     return source.substring(braceOpen, KotlinSourceScan.matchBrace(source, braceOpen))
   }
 
-  // Hierarchy delivery lives in HierarchyController (#11876); the leak-safe seam and the ADB
-  // delivery site remain in CtrlProxy.kt, so scan both files together.
+  // Hierarchy delivery and the leak-safe seam live in HierarchyController (#11876); the ADB
+  // delivery site remains in CtrlProxy.kt, so scan both files together.
   private fun readCtrlProxySource(): String {
     val service = locateCtrlProxySource()
     return service.readText() + "\n" + File(service.parentFile, "HierarchyController.kt").readText()

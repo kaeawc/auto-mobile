@@ -60,13 +60,21 @@ export class GestureOwnershipRegistry {
    * when `admissionStillHolds` is false: the holder the start was admitted under left the device
    * while the ack was awaited, so its release-time lift found nothing to lift (#11541). The caller
    * evaluates it synchronously with this call, so no release can land between the two.
+   *
+   * @param socketSessionId - The socket that started the gesture
+   * @param targetDevice - The device the gesture runs on
+   * @param gestureId - The acked gesture
+   * @param options.holderSessionId - The device holder the start was admitted under
+   * @param options.admissionStillHolds - False when that holder left while the ack was awaited
    */
   async onStartAcked(
     socketSessionId: string,
     targetDevice: BootedDevice,
     gestureId: string,
-    holderSessionId?: string,
-    admissionStillHolds: boolean = true,
+    {
+      holderSessionId,
+      admissionStillHolds = true,
+    }: { holderSessionId?: string; admissionStillHolds?: boolean } = {},
   ): Promise<"owned" | "cancelled"> {
     if (!admissionStillHolds || !this.deps.isSocketLive(socketSessionId)) {
       await this.cancelOne(targetDevice, gestureId, socketSessionId);

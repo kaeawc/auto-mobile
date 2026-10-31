@@ -42,7 +42,6 @@ export interface HeartbeatKeeperPort {
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
-    fenceSessionNotFoundOnRetry?: boolean,
     options?: RecoverableReconnectOptions,
   ): Promise<T>;
   askSessionHeartbeat(
@@ -173,7 +172,7 @@ export class HeartbeatKeeper {
             },
             sessionUuid,
             true,
-            false,
+            { fenceSessionNotFoundOnRetry: false },
           ),
         );
         if (sent && isCurrent()) {

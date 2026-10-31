@@ -58,7 +58,7 @@ export function registerDerivedLabelSessionReleaseCascade(
     ).catch((error: unknown) => {
       logger.warn(`[DeviceLabelMap] Failed to cancel executions of ${cut.sessionId}`, error);
     });
-    await releaseSessionAndDevice(manager, pool, cut.deviceId, cut.sessionId, {
+    await releaseSessionAndDevice({ manager, pool }, cut.deviceId, cut.sessionId, {
       reason,
     });
   };
@@ -97,7 +97,7 @@ export function registerDerivedLabelSessionReleaseCascade(
     }
   };
 
-  manager.onSessionRelease((sessionId, _deviceId, reason, _snapshot, options) => {
+  manager.onSessionRelease((sessionId, _deviceId, reason, options) => {
     // A terminal upgrade of an already-notified release has nothing new to cascade.
     if (options?.upgradeOnly) {
       return;

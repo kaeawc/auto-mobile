@@ -337,14 +337,15 @@ export interface PlatformDeviceManager {
    * @param device - The device to wait for
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
    * @param childProcess - Optional child process to monitor for early exit
+   * @param options.signal - Optional abort signal that cancels the wait
+   * @param options.options - Optional Android emulator readiness settings
    * @returns Promise that resolves with the booted device information when device is ready
    */
   waitForDeviceReady(
     device: DeviceInfo,
     timeoutMs?: number,
     childProcess?: ChildProcess | null,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    options?: { signal?: AbortSignal; options?: AndroidEmulatorReadinessOptions },
   ): Promise<BootedDevice>;
 }
 
@@ -400,13 +401,10 @@ export async function waitForDeviceReadyOrCancel(
       },
       (readinessSignal) =>
         runWithAbortSignal(readinessSignal, () =>
-          deviceManager.waitForDeviceReady(
-            device,
-            timeoutMs,
-            handle,
-            readinessSignal,
-            readinessOptions,
-          ),
+          deviceManager.waitForDeviceReady(device, timeoutMs, handle, {
+            signal: readinessSignal,
+            options: readinessOptions,
+          }),
         ),
     );
   } catch (failure) {

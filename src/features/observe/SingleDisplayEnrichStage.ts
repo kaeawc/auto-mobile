@@ -99,21 +99,19 @@ export class SingleDisplayEnrichStage {
     stampPrototypeHidden(result, capture);
     if (screenshotMode === "settled") {
       result.screenshotOrientation = this.d.platformTraits().settledScreenshotOrientation();
-      await this.d.captureSettledScreenshot(
-        result,
-        perf,
-        signal,
-        options?.screenshot === "settled",
-        { displayId: screenshotDisplayId, screenshotOptions: options?.screenshotOptions },
-      );
+      await this.d.captureSettledScreenshot(result, perf, signal, {
+        strict: options?.screenshot === "settled",
+        displayId: screenshotDisplayId,
+        screenshotOptions: options?.screenshotOptions,
+      });
     } else if (serverConfig.getAccessibilityAuditConfig()) {
       await this.d
         .screenshotRecorder()
-        .capture(result.observationId, perf, signal, screenshotDisplayId, capture);
+        .capture(result.observationId, { perf, signal, displayId: screenshotDisplayId, capture });
     } else {
       this.d
         .screenshotRecorder()
-        .start(result.observationId, perf, signal, screenshotDisplayId, capture);
+        .start(result.observationId, { perf, signal, displayId: screenshotDisplayId, capture });
     }
   }
 

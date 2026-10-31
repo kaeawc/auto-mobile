@@ -74,11 +74,11 @@ export abstract class BaseSocketServer {
     socketPath: string,
     timer: Timer = defaultTimer,
     serverName: string = "Socket",
-    idleTimeoutMs: number = DEFAULT_SOCKET_IDLE_TIMEOUT_MS,
     {
+      idleTimeoutMs = DEFAULT_SOCKET_IDLE_TIMEOUT_MS,
       socketReachability = new DaemonSocketReachability(),
       socketOwner = new AuxiliarySocketOwner(),
-    }: SocketBindOwnership = {},
+    }: SocketBindOwnership & { idleTimeoutMs?: number } = {},
   ) {
     this.socketPath = socketPath;
     this.timer = timer;

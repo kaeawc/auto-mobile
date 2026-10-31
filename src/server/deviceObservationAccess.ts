@@ -89,11 +89,15 @@ async function findObservationReadTarget(
   deviceId: string,
   signal: AbortSignal | undefined,
   access: DeviceObservationAccess,
-  platform: SomePlatform,
   {
+    platform,
     retry,
     confirmStopped,
-  }: { retry: DeviceReadRetryOptions; confirmStopped?: ConfirmStoppedReadTarget },
+  }: {
+    platform: SomePlatform;
+    retry: DeviceReadRetryOptions;
+    confirmStopped?: ConfirmStoppedReadTarget;
+  },
 ): Promise<{ device: BootedDevice | undefined; devices: BootedDevice[] }> {
   const targetPlatform = explicitReadTargetPlatform(deviceId, platform);
   try {
@@ -152,11 +156,18 @@ async function findObservationReadTarget(
 export async function resolveDeviceForObservationRead(
   deviceId: string,
   signal: AbortSignal | undefined,
-  access: DeviceObservationAccess = defaultDeviceObservationAccess,
-  platform: SomePlatform = "either",
-  retry: DeviceReadRetryOptions = {},
+  {
+    access = defaultDeviceObservationAccess,
+    platform = "either",
+    retry = {},
+  }: {
+    access?: DeviceObservationAccess;
+    platform?: SomePlatform;
+    retry?: DeviceReadRetryOptions;
+  } = {},
 ): Promise<BootedDevice> {
-  const { device, devices } = await findObservationReadTarget(deviceId, signal, access, platform, {
+  const { device, devices } = await findObservationReadTarget(deviceId, signal, access, {
+    platform,
     retry,
   });
   if (!device) {
@@ -194,15 +205,13 @@ export function sessionlessDeviceReadFor(
 } {
   return {
     resolve: (deviceId, signal, platform) =>
-      resolveDeviceForObservationRead(deviceId, signal, access, platform, retry),
+      resolveDeviceForObservationRead(deviceId, signal, { access, platform, retry }),
     findRunning: async (deviceId, signal, platform, confirmStopped) => {
-      const { device } = await findObservationReadTarget(
-        deviceId,
-        signal,
-        access,
-        platform ?? "either",
-        { retry, confirmStopped },
-      );
+      const { device } = await findObservationReadTarget(deviceId, signal, access, {
+        platform: platform ?? "either",
+        retry,
+        confirmStopped,
+      });
       return device;
     },
     assertAuthorized: (device) => assertObservationReadAccess(device, access),

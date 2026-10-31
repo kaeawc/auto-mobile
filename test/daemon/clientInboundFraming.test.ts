@@ -25,7 +25,8 @@ class RecordingDaemonClient extends DaemonClient {
 function setup(limit = 256) {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const client = new RecordingDaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+  const client = new RecordingDaemonClient("/fake/socket", 1000, timer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
     clientIdentity: null,
     idGenerator: new FakeIdGenerator(["p"]),
     platformOverride: "darwin",
@@ -35,7 +36,7 @@ function setup(limit = 256) {
   const feed = (frame: unknown) =>
     client.testHooks.simulateIncomingData(Buffer.from(JSON.stringify(frame) + "\n"));
   const request = (signal?: AbortSignal) =>
-    client.callTool("tapOn", {}, undefined, undefined, { signal }).catch((error: unknown) => error);
+    client.callTool("tapOn", {}, undefined, { signal }).catch((error: unknown) => error);
   return { client, timer, socket, feed, request };
 }
 
@@ -220,7 +221,8 @@ async function withSocketConnection(
     callbacks.push(connectionListenerOf(args)!);
     return socket;
   });
-  const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, {
+  const client = new DaemonClient("/fake/socket", 1000, timer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
     clientIdentity: null,
     idGenerator: new FakeIdGenerator(["p", "q"]),
     platformOverride: "win32",
@@ -252,7 +254,7 @@ test("overflow preserves the frame error when a connection-closed handler closes
       void client.close();
     });
     const first = client
-      .callTool("tapOn", {}, undefined, undefined, { signal: controller.signal })
+      .callTool("tapOn", {}, undefined, { signal: controller.signal })
       .catch((error: unknown) => error);
     const second = client.callTool("tapOn", {}).catch((error: unknown) => error);
     try {
@@ -314,7 +316,8 @@ test("overflow destroys the socket and rejects requests even when a connection-c
 
 test("test socket attachment adds no listeners", async () => {
   const socket = new FakeSocket();
-  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), ISOLATED_DAEMON_RECOVERY, {
+  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
     clientIdentity: null,
   });
   const listeners = socket.eventNames().map((event) => [event, socket.listeners(event)]);

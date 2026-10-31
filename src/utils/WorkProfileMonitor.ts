@@ -185,13 +185,10 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
 
       // Upsert each package into the repository
       for (const pkg of packages) {
-        await this.installedAppsStore.upsertInstalledApp(
-          this.deviceId,
-          userId,
-          pkg.packageName,
-          pkg.isSystem,
+        await this.installedAppsStore.upsertInstalledApp(this.deviceId, userId, pkg.packageName, {
+          isSystem: pkg.isSystem,
           timestampMs,
-        );
+        });
       }
 
       state.lastRefreshMs = timestampMs;

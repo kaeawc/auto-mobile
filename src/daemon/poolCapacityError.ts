@@ -12,6 +12,8 @@ export interface PoolCapacityStats {
 
 /** What else counts toward, and is reported with, a pool capacity check. */
 export interface PoolCapacityContext {
+  /** The requested platform; undefined means any. */
+  platform?: Platform;
   /** Android emulators being recovered, which count toward capacity. */
   recoveringAndroidImages: number;
   /** The already-rendered refresh-failure prefix (empty when the last refresh succeeded). */
@@ -28,8 +30,7 @@ export function assertPoolCapacity(
   matcher: Pick<DeviceCriteriaMatcher, "hasSufficientCapacityIncludingAndroidRecovery">,
   stats: PoolCapacityStats,
   requiredCount: number,
-  platform: Platform | undefined,
-  { recoveringAndroidImages, refreshContext }: PoolCapacityContext,
+  { platform, recoveringAndroidImages, refreshContext }: PoolCapacityContext,
 ): void {
   if (
     matcher.hasSufficientCapacityIncludingAndroidRecovery(

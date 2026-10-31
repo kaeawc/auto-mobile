@@ -59,11 +59,8 @@ function harness(simctl = new FakeSimctl()) {
     pending,
     unbound,
     release: (sessionId: string, deviceId = ios.deviceId) =>
-      release(
-        sessionId,
-        deviceId,
-        "test",
-        {
+      release(sessionId, deviceId, "test", {
+        snapshot: {
           sessionId,
           deviceId,
           releaseReason: "test",
@@ -71,8 +68,7 @@ function harness(simctl = new FakeSimctl()) {
           terminal: true,
           heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1000, ageMs: 0 },
         },
-        {},
-      ),
+      }),
   };
 }
 

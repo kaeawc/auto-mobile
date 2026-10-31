@@ -106,7 +106,7 @@ test.each([false, true])(
     const client: AndroidCtrlProxyClient = Object.create(AndroidCtrlProxyClient.prototype);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     spyOn(client, "requestImeAction").mockImplementation(async (...args) => {
-      args[4]?.();
+      args[3]?.onDispatch?.();
       return { success: true, action: "done", totalTimeMs: 0 };
     });
     server.evictDeviceInputCache = () => {};
@@ -149,7 +149,7 @@ test("submit is the first dispatch when append sends no keyevents", async () => 
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
   spyOn(client, "requestImeAction").mockImplementation(async (...args) => {
     expect(marks).toBe(0);
-    args[4]?.();
+    args[3]?.onDispatch?.();
     return { success: true, action: "done", totalTimeMs: 0 };
   });
   server.getAppendTextInput = () => ({

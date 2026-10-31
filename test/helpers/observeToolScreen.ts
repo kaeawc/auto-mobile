@@ -13,8 +13,8 @@ export function observeToolScreen(screen: FakeObserveScreen): ObserveToolScreen 
   return {
     execute: (options) => screen.execute(options),
     executeDeviceRead: () => screen.execute({}),
-    captureScreenshot: (perf, signal, observation) =>
-      screen.captureScreenshot(perf, signal, observation),
+    captureScreenshot: (perf, { signal, observation } = {}) =>
+      screen.captureScreenshot(perf, { signal, observation }),
     appendRawViewHierarchy: screen.appendRawViewHierarchy.bind(screen),
     getMostRecentCachedObserveResult: screen.getMostRecentCachedObserveResult.bind(screen),
   };

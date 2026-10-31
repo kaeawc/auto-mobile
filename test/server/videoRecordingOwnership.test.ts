@@ -132,7 +132,7 @@ describe("video recording daemon ownership", () => {
     await insertSession("peer-session", "peer");
     await insertSession("dead-session", "dead");
     await insertSession("released-session", "peer");
-    await sessions.markReleased("released-session", "released", timer.now(), "test");
+    await sessions.markReleased("released-session", "released", timer.now(), { reason: "test" });
     await insertRecording("peer-recording", "peer-session");
     await insertRecording("orphan-recording", "dead-session");
     await insertRecording("missing-session-recording", "missing");

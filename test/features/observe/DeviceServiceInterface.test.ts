@@ -72,12 +72,10 @@ describe("DeviceService Interface Compliance", () => {
       };
 
       IOSCtrlProxyClient.resetInstances();
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        8765,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+        wsFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       const deviceService: DeviceService = client;
       expect(deviceService.isConnected()).toBe(false);
@@ -123,12 +121,10 @@ describe("DeviceService Interface Compliance", () => {
       };
 
       IOSCtrlProxyClient.resetInstances();
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        8765,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+        wsFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       // Pin the Apple-specific control surface at compile time: dropping any of these
       // from IOSCtrlProxyClient fails tsc HERE, which is what this test's name guards.
@@ -216,12 +212,10 @@ describe("DeviceService Interface Compliance", () => {
       };
 
       IOSCtrlProxyClient.resetInstances();
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        8765,
-        createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+        wsFactory: createSuccessWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       expect(client.isConnected()).toBe(false);
       void client.close();
@@ -238,12 +232,10 @@ describe("DeviceService Interface Compliance", () => {
       };
 
       IOSCtrlProxyClient.resetInstances();
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        8765,
-        createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+        wsFactory: createInstantFailureWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       const connected = await client.ensureConnected();
       expect(connected).toBe(false);

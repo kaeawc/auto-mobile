@@ -24,9 +24,7 @@ async function initializeResult(
   const server = createSdkMcpServer(
     { name: "AutoMobile", version: "0.0.0" },
     { tools: {} },
-    undefined,
-    undefined,
-    instructions,
+    { instructions },
   );
   const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   const answered = new Promise<Record<string, unknown>>((resolve) => {

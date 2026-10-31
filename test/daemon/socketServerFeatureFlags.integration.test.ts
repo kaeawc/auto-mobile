@@ -141,7 +141,8 @@ describe("UnixSocketServer feature flag handlers", () => {
         writes.push({ sessionUuid, toolName, enabled });
       },
     };
-    ToolRegistry.register("clipboard", "clipboard", z.object({}), async () => ({ content: [] }), {
+    ToolRegistry.register("clipboard", "clipboard", z.object({}), {
+      handler: async () => ({ content: [] }),
       defaultEnabled: false,
     });
     await server.close();

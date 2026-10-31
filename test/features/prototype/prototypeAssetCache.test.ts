@@ -13,22 +13,16 @@ const upload = (id = "photo", bytes = [1, 2]) => ({
 function harness(maxBytes = 64) {
   const files = new FakeMirrorFileSystem();
   let clock = 0;
-  const cache = new FilePrototypeAssetCache(
-    files,
-    () => "/cache",
-    () => ++clock,
+  const cache = new FilePrototypeAssetCache(files, {
+    rootDir: () => "/cache",
+    now: () => ++clock,
     maxBytes,
-  );
+  });
   return {
     files,
     cache,
     fresh: () =>
-      new FilePrototypeAssetCache(
-        files,
-        () => "/cache",
-        () => ++clock,
-        maxBytes,
-      ),
+      new FilePrototypeAssetCache(files, { rootDir: () => "/cache", now: () => ++clock, maxBytes }),
   };
 }
 let warning: ReturnType<typeof spyOn<typeof logger, "warn">>;
@@ -81,12 +75,11 @@ describe("persistent prototype asset cache", () => {
   });
   test("deduplicated size and tied recency evict in index order", async () => {
     const files = new FakeMirrorFileSystem();
-    const cache = new FilePrototypeAssetCache(
-      files,
-      () => "/cache",
-      () => 1,
-      2,
-    );
+    const cache = new FilePrototypeAssetCache(files, {
+      rootDir: () => "/cache",
+      now: () => 1,
+      maxBytes: 2,
+    });
     await cache.put("d", upload("a"));
     await cache.put("d", upload("b"));
     expect(await cache.ids("d")).toEqual(new Set(["a", "b"]));
@@ -95,12 +88,11 @@ describe("persistent prototype asset cache", () => {
   });
   test("ties between distinct blobs use index order", async () => {
     const files = new FakeMirrorFileSystem();
-    const cache = new FilePrototypeAssetCache(
-      files,
-      () => "/cache",
-      () => 1,
-      4,
-    );
+    const cache = new FilePrototypeAssetCache(files, {
+      rootDir: () => "/cache",
+      now: () => 1,
+      maxBytes: 4,
+    });
     await cache.put("d", upload("a", [1, 1]));
     await cache.put("d", upload("b", [2, 2]));
     await cache.put("d", upload("c", [3, 3]));
@@ -109,12 +101,11 @@ describe("persistent prototype asset cache", () => {
   test("just-put entry survives even when its clock is older", async () => {
     const files = new FakeMirrorFileSystem();
     let clock = 3;
-    const cache = new FilePrototypeAssetCache(
-      files,
-      () => "/cache",
-      () => --clock,
-      2,
-    );
+    const cache = new FilePrototypeAssetCache(files, {
+      rootDir: () => "/cache",
+      now: () => --clock,
+      maxBytes: 2,
+    });
     await cache.put("d", upload("a"));
     await cache.put("d", upload("b", [3, 4]));
     expect(await cache.ids("d")).toEqual(new Set(["b"]));
@@ -241,32 +232,29 @@ test("eviction preserves an older id sharing the newly put blob", async () => {
   const { cache, files } = harness(4);
   await cache.put("d", upload("shared"));
   await cache.put("d", upload("other", [3, 4]));
-  const bounded = new FilePrototypeAssetCache(
-    files,
-    () => "/cache",
-    () => 10,
-    2,
-  );
+  const bounded = new FilePrototypeAssetCache(files, {
+    rootDir: () => "/cache",
+    now: () => 10,
+    maxBytes: 2,
+  });
   await bounded.put("d", upload("alias"));
   expect(await cache.ids("d")).toEqual(new Set(["shared", "alias"]));
 });
 test("index staging names use injected unique ids across cache instances", async () => {
   const files = new FakeMirrorFileSystem();
   const ids = new FakeIdGenerator();
-  const first = new FilePrototypeAssetCache(
-    files,
-    () => "/cache",
-    () => 0,
-    64,
-    ids,
-  );
-  const second = new FilePrototypeAssetCache(
-    files,
-    () => "/cache",
-    () => 0,
-    64,
-    ids,
-  );
+  const first = new FilePrototypeAssetCache(files, {
+    rootDir: () => "/cache",
+    now: () => 0,
+    maxBytes: 64,
+    idGenerator: ids,
+  });
+  const second = new FilePrototypeAssetCache(files, {
+    rootDir: () => "/cache",
+    now: () => 0,
+    maxBytes: 64,
+    idGenerator: ids,
+  });
   const write = spyOn(files, "writeFile");
   try {
     await first.put("d", upload());

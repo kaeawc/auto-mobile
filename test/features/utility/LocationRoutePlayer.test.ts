@@ -535,11 +535,8 @@ for (const replaced of [true, false]) {
         commands.push("location fix");
       },
     );
-    release(
-      "owner",
-      "serial",
-      "explicit-release",
-      {
+    release("owner", "serial", "explicit-release", {
+      snapshot: {
         sessionId: "owner",
         deviceId: "serial",
         releaseReason: "explicit-release",
@@ -547,8 +544,8 @@ for (const replaced of [true, false]) {
         terminal: true,
         heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
       },
-      { deviceIdentityReplaced: replaced },
-    );
+      deviceIdentityReplaced: replaced,
+    });
     await Promise.all(pending);
     timer.advanceTime(3000);
     await flush();

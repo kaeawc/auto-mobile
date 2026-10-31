@@ -130,7 +130,7 @@ export async function releasePlanSessionAndDevice(
       error,
     );
   });
-  await releaseSessionAndDevice(manager, pool, cut.deviceId, cut.sessionId, {
+  await releaseSessionAndDevice({ manager, pool }, cut.deviceId, cut.sessionId, {
     reason: PLAN_AUTO_RELEASE,
   });
 }
@@ -178,10 +178,15 @@ export function lazySessionReleasePool(resolve: () => SessionReleasePool): Sessi
 /**
  * Return the device to the pool after session release has committed.
  * A custom release supplies its success device; deviceId is the failure fallback.
+ *
+ * @param owners.manager - Releases the session
+ * @param owners.pool - Frees the device
+ * @param deviceId - The session's device, freed when the release returns none
+ * @param sessionId - The released session
+ * @param options - Release reason, custom release and failure-fallback options
  */
 export async function releaseSessionAndDevice(
-  manager: SessionReleaseManager,
-  pool: SessionReleasePool,
+  { manager, pool }: { manager: SessionReleaseManager; pool: SessionReleasePool },
   deviceId: string | null,
   sessionId: string,
   options: SessionAndDeviceReleaseOptions = {},

@@ -40,7 +40,8 @@ async function observePollingInterval(value: string | undefined): Promise<number
     } as AdbClientFactory,
   });
   const controller = new AbortController();
-  const readiness = client.waitForEmulatorReady("Missing", 1_000, null, "emulator-5554", {
+  const readiness = client.waitForEmulatorReady("Missing", 1_000, null, {
+    targetDeviceId: "emulator-5554",
     signal: controller.signal,
   });
 

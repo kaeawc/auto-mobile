@@ -333,8 +333,7 @@ function revalidateTerminalMatch(
   context: PollFinalizationContext,
   freshnessState: PollFreshnessState,
   outcome: ObservePollOutcome,
-  original: ObserveResult,
-  capture: PollCapture,
+  { original, capture }: { original: ObserveResult; capture: PollCapture },
 ): PollFinalizationResult | undefined {
   if (!outcome.stopped) {
     return undefined;
@@ -373,17 +372,14 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
     generation?: number,
     cachedAt?: number,
   ): Promise<PollFinalizationResult> => {
-    const refreshed = await reconcileTerminalCapture(
-      observeScreen,
-      timer,
-      options,
-      outcome.observation,
-      nextPollMinTimestamp(
+    const refreshed = await reconcileTerminalCapture(observeScreen, timer, options, {
+      observation: outcome.observation,
+      minTimestamp: nextPollMinTimestamp(
         freshnessState.hasPostInvocationEvidence,
         freshnessState.deviceFloor,
         freshnessState.enteringReference,
       ),
-    );
+    });
     if (refreshed) {
       const original = outcome.observation;
       outcome.observation = refreshed.observation;
@@ -392,7 +388,10 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
       generation = refreshed.generation;
       cachedAt = refreshed.cachedAt;
       canProcessRecomposition = isCompleteFreshCapture(refreshed.observation);
-      const resume = revalidateTerminalMatch(context, freshnessState, outcome, original, refreshed);
+      const resume = revalidateTerminalMatch(context, freshnessState, outcome, {
+        original,
+        capture: refreshed,
+      });
       if (resume) {
         return resume;
       }
@@ -458,8 +457,7 @@ async function reconcileTerminalCapture(
   observeScreen: PollingObserveScreen,
   timer: Timer,
   options: ObservePollOptions,
-  observation: ObserveResult,
-  minTimestamp: number,
+  { observation, minTimestamp }: { observation: ObserveResult; minTimestamp: number },
 ): Promise<PollCapture | undefined> {
   if (options.readBackStackEachPoll || !observeScreen.collectDeferredBackStack) {
     return undefined;

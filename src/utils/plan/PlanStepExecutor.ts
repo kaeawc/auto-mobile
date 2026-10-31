@@ -43,12 +43,16 @@ export interface PlanStepTool {
 export interface PlanStepTools<TTool extends PlanStepTool> {
   getTool(name: string): TTool | undefined;
   getToolForPlan(name: string): TTool | undefined;
+  /** @param request.signal - Aborts the step; the remaining fields route the internal call. */
   callInternal(
     tool: TTool,
     params: Record<string, unknown>,
-    progress?: undefined,
-    signal?: AbortSignal,
-    options?: { forPlan?: boolean; sessionUuid?: string; targetDevice?: BootedDevice },
+    request?: {
+      signal?: AbortSignal;
+      forPlan?: boolean;
+      sessionUuid?: string;
+      targetDevice?: BootedDevice;
+    },
   ): Promise<unknown>;
 }
 
@@ -307,13 +311,10 @@ export class DefaultPlanStepExecutor<
     const deadline = new AbortController();
     const onPlanAbort = () => deadline.abort(signal?.reason);
     try {
-      const operation = this.tools.callInternal(
-        observeTool,
-        parsedParams,
-        undefined,
+      const operation = this.tools.callInternal(observeTool, parsedParams, {
         signal,
-        targetDevice ? { targetDevice } : undefined,
-      );
+        ...(targetDevice ? { targetDevice } : {}),
+      });
       signal?.addEventListener("abort", onPlanAbort, { once: true });
       timeoutHandle = this.timer.setTimeout(
         () => deadline.abort(new Error("failure observation timed out")),
@@ -455,8 +456,7 @@ export class DefaultPlanStepExecutor<
     tool: TTool,
     step: PlanStep,
     platform: string | undefined,
-    deviceId: string | undefined,
-    sessionUuid: string | undefined,
+    { deviceId, sessionUuid }: { deviceId?: string; sessionUuid?: string } = {},
   ): Record<string, unknown> {
     const enhancedParams: Record<string, unknown> = { ...step.params };
     for (const key of Object.keys(enhancedParams)) {
@@ -469,7 +469,7 @@ export class DefaultPlanStepExecutor<
       return enhancedParams;
     }
 
-    this.injectDeviceRoutingParams(enhancedParams, step.tool, platform, deviceId, sessionUuid);
+    this.injectDeviceRoutingParams(enhancedParams, step.tool, { platform, deviceId, sessionUuid });
 
     // Scope the shared CriticalSectionCoordinator by the plan's base session UUID
     // (identical across every device track of one plan, distinct across plans),
@@ -486,9 +486,11 @@ export class DefaultPlanStepExecutor<
   private injectDeviceRoutingParams(
     enhancedParams: Record<string, unknown>,
     toolName: string,
-    platform?: string,
-    deviceId?: string,
-    sessionUuid?: string,
+    {
+      platform,
+      deviceId,
+      sessionUuid,
+    }: { platform?: string; deviceId?: string; sessionUuid?: string } = {},
   ): void {
     if (platform && !enhancedParams.platform) {
       enhancedParams.platform = platform;
@@ -553,13 +555,10 @@ export class DefaultPlanStepExecutor<
     step: PlanStep,
     context: StepExecutionContext,
   ): Promise<unknown> {
-    const enhancedParams = this.buildEnhancedStepParams(
-      tool,
-      step,
-      context.platform,
-      context.deviceId,
-      context.sessionUuid,
-    );
+    const enhancedParams = this.buildEnhancedStepParams(tool, step, context.platform, {
+      deviceId: context.deviceId,
+      sessionUuid: context.sessionUuid,
+    });
 
     // Parse and validate parameters; strict schemas throw on unknown keys, which
     // are caught here and reported as a failed or skipped step.
@@ -592,7 +591,8 @@ export class DefaultPlanStepExecutor<
       logger.info(`${context.logPrefix} Calling ${step.tool} with params: ${paramsPreview}`);
     }
 
-    return this.tools.callInternal(tool, parsedParams, undefined, context.signal, {
+    return this.tools.callInternal(tool, parsedParams, {
+      signal: context.signal,
       forPlan: true,
       sessionUuid: context.sessionUuid,
       ...(context.targetDevice ? { targetDevice: context.targetDevice } : {}),

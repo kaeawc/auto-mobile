@@ -340,8 +340,7 @@ describe("sessionless identity quarantine", () => {
         async () => {
           ran = true;
         },
-        undefined,
-        () => "owner",
+        { requester: () => "owner" },
       );
       expect(ran).toBe(true);
     });

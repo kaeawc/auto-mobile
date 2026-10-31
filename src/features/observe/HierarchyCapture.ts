@@ -69,8 +69,12 @@ export function identifyObservedHierarchy(
   platform: "android" | "ios",
   source: ViewHierarchyResult,
   freshness: HierarchyCaptureRequest["freshness"],
-  timer: Timer = defaultTimer,
-  { ids = defaultIdGenerator, captureId, iosMultiPanel = false }: ObservedHierarchyIdentity = {},
+  {
+    timer = defaultTimer,
+    ids = defaultIdGenerator,
+    captureId,
+    iosMultiPanel = false,
+  }: ObservedHierarchyIdentity & { timer?: Timer } = {},
 ): HierarchySnapshot {
   const existing = getHierarchySnapshot(source);
   if (existing) {

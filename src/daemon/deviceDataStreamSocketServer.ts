@@ -166,6 +166,17 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   private readonly cadence: StreamCadence;
   private readonly buildContexts: BuildContextStream;
 
+  private readonly observerReleases: ObserverReleaseSource;
+  /** Device-session releases; same listener shape as observer releases (#11130). */
+  private readonly sessionReleases: ObserverReleaseSource;
+
+  /**
+   * @param socketPath - Unix socket path to listen on
+   * @param timer - Clock for socket timers and push cadence
+   * @param authenticator - Subscribe and request authenticator
+   * @param options.observerReleases - Observer-session release events
+   * @param options.sessionReleases - Device-session release events
+   */
   constructor(
     socketPath: string = getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
@@ -173,11 +184,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       "observationStream",
       { allowObserverSessions: true },
     ),
-    private readonly observerReleases: ObserverReleaseSource = ObserverReleaseBroadcaster,
-    /** Device-session releases; same listener shape as observer releases (#11130). */
-    private readonly sessionReleases: ObserverReleaseSource = SessionReleaseBroadcaster,
+    {
+      observerReleases = ObserverReleaseBroadcaster,
+      sessionReleases = SessionReleaseBroadcaster,
+    }: { observerReleases?: ObserverReleaseSource; sessionReleases?: ObserverReleaseSource } = {},
   ) {
     super(socketPath, timer, "DeviceDataStream");
+    this.observerReleases = observerReleases;
+    this.sessionReleases = sessionReleases;
     this.buildContexts = new BuildContextStream({
       timer,
       resolveUuid: (deviceId) => this.deviceSessionResolver.resolveUuid(deviceId),
@@ -475,13 +489,18 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   /**
    * Push a screenshot update to all subscribers interested in this device.
+   *
+   * @param deviceId - The device the frame belongs to
+   * @param screenshotBase64 - The encoded frame
+   * @param details.screenWidth - Frame width, when known
+   * @param details.screenHeight - Frame height, when known
+   * @param details.metadata - Capture metadata
+   * @param details.options - Per-push options
    */
   pushScreenshotUpdate(
     deviceId: string,
     screenshotBase64: string,
-    screenWidth: number | undefined,
-    screenHeight: number | undefined,
-    { metadata = {}, options = {} }: ScreenshotPushDetails = {},
+    { screenWidth, screenHeight, metadata = {}, options = {} }: ScreenshotPushDetails = {},
   ): boolean {
     if (!this.acceptObservationFramePush(deviceId, options.initialFrameSubscriber)) {
       return false;

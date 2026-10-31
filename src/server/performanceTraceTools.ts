@@ -146,8 +146,11 @@ export function registerPerformanceTraceTools(
     "Record a native performance trace (xctrace on iOS, Perfetto on Android): start with a " +
       "template, drive the flow, then stop for the artifact path and a bounded summary.",
     performanceTraceSchema,
-    createPerformanceTraceHandler(manager),
-    { defaultEnabled: false, outputSchema: performanceTraceResultSchema },
+    {
+      handler: createPerformanceTraceHandler(manager),
+      defaultEnabled: false,
+      outputSchema: performanceTraceResultSchema,
+    },
   );
   registerPerformanceTraceResources(manager);
   unsubscribeTraceCleanup?.();

@@ -170,19 +170,17 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       watchApps: (device) => new WatchAppManager(device, { simctl: watchSimctl, plist, dataWipe }),
     });
     const resumed: string[] = [];
-    ToolRegistry.register(
-      "setActiveDevice",
-      "Set active device",
-      setActiveDeviceSchema,
-      createSetActiveDeviceHandler({
+    ToolRegistry.register("setActiveDevice", "Set active device", setActiveDeviceSchema, {
+      handler: createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider(),
         resumeCtrlProxy: async (deviceId, platform) => {
           resumed.push(`${platform}:${deviceId}`);
         },
         legacyDeviceSelection: () => readiness,
       }),
-      { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
-    );
+      defaultEnabled: true,
+      ...SELECTS_ACTIVE_DEVICE,
+    });
     return { pool, sessions, readiness, watchSimctl, resumed, wiped };
   }
 

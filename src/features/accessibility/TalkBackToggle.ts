@@ -73,14 +73,19 @@ export class TalkBackToggle {
   private readonly adb: AdbExecutor;
   private readonly secureSettings: SecureSettingsRpc;
   private readonly dialogProbe: TalkBackDialogProbe;
+  private readonly timer: Timer;
 
   constructor(
     private readonly device: BootedDevice,
     adb: AdbExecutor | null = null,
     private readonly detector: AccessibilityDetector = accessibilityDetector,
-    private readonly timer: Timer = defaultTimer,
-    { secureSettings, dialogProbe }: TalkBackToggleCtrlProxy = {},
+    {
+      timer = defaultTimer,
+      secureSettings,
+      dialogProbe,
+    }: TalkBackToggleCtrlProxy & { timer?: Timer } = {},
   ) {
+    this.timer = timer;
     this.adb = adb ?? defaultAdbClientFactory.create(device);
     this.secureSettings = secureSettings ?? new CtrlProxySecureSettingsRpc(device);
     this.dialogProbe = dialogProbe ?? new CtrlProxyTalkBackDialogProbe(device);

@@ -35,9 +35,7 @@ function lookup(
       queryOptions?: { onSessionClock?: boolean; excludeReads?: boolean },
     ) =>
       latestSessionExecutionDeadlineMs(
-        tracker,
-        sessionManager,
-        devicePool,
+        { tracker, sessionManager, devicePool },
         sessionId,
         queryOptions,
       ),
@@ -101,9 +99,11 @@ describe("hasActiveSessionExecution recovery-only queries", () => {
       };
       expect(
         hasActiveSessionExecution(
-          tracker,
-          { getDeviceLabels: () => ({ tablet: DERIVED }) },
-          pool,
+          {
+            tracker,
+            sessionManager: { getDeviceLabels: () => ({ tablet: DERIVED }) },
+            devicePool: pool,
+          },
           DERIVED,
           { recoveryOnly: true },
         ),
@@ -111,10 +111,14 @@ describe("hasActiveSessionExecution recovery-only queries", () => {
       expect(recoveryQueries).toEqual([DERIVED]);
       expect(asked).toEqual([]);
       expect(
-        hasActiveSessionExecution(tracker, { getDeviceLabels: () => undefined }, pool, BASE, {
-          recoveryOnly: false,
-          excludeReads: true,
-        }),
+        hasActiveSessionExecution(
+          { tracker, sessionManager: { getDeviceLabels: () => undefined }, devicePool: pool },
+          BASE,
+          {
+            recoveryOnly: false,
+            excludeReads: true,
+          },
+        ),
       ).toBe(true);
       expect(asked).toEqual(recovering ? [] : [{ excludeReads: true }]);
     },

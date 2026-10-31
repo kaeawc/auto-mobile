@@ -10,7 +10,7 @@ export const pointerSchema = z
     toolType: z
       .enum(["stylus"])
       .describe(
-        "Inject a stylus instead of a finger. A plain tap or swipe needs Android 12+ (API 31); pressure other than 1, tilt, orientation, buttons and any dragPath need Android 13+ (stylus_input_v1)",
+        "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1",
       ),
     pressure: z
       .number()
@@ -18,27 +18,27 @@ export const pointerSchema = z
       .max(1)
       .optional()
       .describe(
-        "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 13+) and is refused before input without it",
+        "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) and is refused before input without it",
       ),
     tilt: z
       .number()
       .min(0)
       .max(Math.PI / 2)
       .optional()
-      .describe("Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 13+)"),
+      .describe("Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 12+)"),
     orientation: z
       .number()
       .min(-Math.PI)
       .max(Math.PI)
       .optional()
-      .describe("Stylus orientation in radians, -PI to PI (Android 13+)"),
+      .describe("Stylus orientation in radians, -PI to PI (Android 12+)"),
     buttons: z
       .array(z.enum(["primary", "secondary"]))
       .min(1)
       .max(2)
       .refine((buttons) => new Set(buttons).size === buttons.length, "buttons must not repeat")
       .optional()
-      .describe("Barrel buttons held for the gesture (Android 13+)"),
+      .describe("Barrel buttons held for the gesture (Android 12+)"),
   })
   .strict()
   .describe(

@@ -5,6 +5,9 @@ An original micro-blogging concept: For you and Following timelines, posts with 
 a thread view, notifications and a link screen with Follow. `today.json` is the slice that runs on
 today's vocabulary, with literal `data` standing in for the backend.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+Mark all read uses `done` (`checkmark.circle` on iOS).
+
 ## Capabilities used
 
 - `prototype_stack_v1`: home, compose, thread and link screens.

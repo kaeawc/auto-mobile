@@ -135,7 +135,9 @@ afterEach(() => {
 describe("rotate right after an unfold (#10103 x #10104 x #10105)", () => {
   test("reads the unfolded panel's natural orientation through the real transition tracker", async () => {
     const source = new InventorySource();
-    const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+    const provider = new CachingDisplayInventoryProvider(source, source, {
+      timer: new FakeTimer(),
+    });
     const tracker = new DisplayTransitionTracker(
       () => {},
       (deviceId) => provider.invalidate(deviceId),

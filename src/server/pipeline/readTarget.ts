@@ -204,8 +204,15 @@ export async function ensureReadTargetOrWatch(
   input: ExecutionTargetInput,
   platform: SomePlatform,
   providedDeviceId: string | undefined,
-  options: DeviceReadyOptions,
-  { read, readinessTarget }: { read: SessionlessDeviceRead; readinessTarget: string | undefined },
+  {
+    options,
+    read,
+    readinessTarget,
+  }: {
+    options: DeviceReadyOptions;
+    read: SessionlessDeviceRead;
+    readinessTarget: string | undefined;
+  },
 ): Promise<
   | { device: BootedDevice; watched?: undefined }
   | { watched: ExecutionTargetContext; device?: undefined }
@@ -333,8 +340,13 @@ export async function findRunningExplicitReadTarget(
   input: ExecutionTargetInput,
   read: SessionlessDeviceRead,
   platform: SomePlatform,
-  getConnectedPlatforms: (refresh?: boolean) => Promise<ConnectedPlatformScan>,
-  alreadyChecked: boolean,
+  {
+    getConnectedPlatforms,
+    alreadyChecked,
+  }: {
+    getConnectedPlatforms: (refresh?: boolean) => Promise<ConnectedPlatformScan>;
+    alreadyChecked: boolean;
+  },
 ): Promise<{ device: BootedDevice; fromListing: boolean } | undefined> {
   const scan = await getConnectedPlatforms();
   const exact = scan.devices.find(

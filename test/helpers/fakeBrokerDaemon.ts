@@ -23,7 +23,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
-import type { BindingProcessIdentity } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
+import type {
+  BindingPlatform,
+  BindingProcessIdentity,
+} from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "./fakeSessionBrokerDevicePort";
 
 /** Real durable broker semantics; all storage is :memory: and native I/O is fake. */
@@ -111,8 +114,7 @@ export async function createFakeBrokerDaemon(
     broker,
     scope.scope.scopeKey,
     { acquire: () => {}, release: () => {} },
-    timer,
-    { recordingGaps: new InMemoryMutationRecordingGaps() },
+    { timer, mutations: { recordingGaps: new InMemoryMutationRecordingGaps() } },
   );
   const state: DaemonStateAccess = {
     isInitialized: () => true,
@@ -180,7 +182,7 @@ export async function createFakeBrokerDaemon(
           inventory.push({
             name: assignment.deviceName,
             deviceId: assignment.stableDeviceId,
-            platform: assignment.platform,
+            platform: brokerProfilePlatform(assignment.platform),
           });
         }
       }
@@ -293,4 +295,12 @@ export async function createFakeBrokerDaemon(
       }
     },
   };
+}
+
+/** The broker serves Android and iOS session profiles only; a watch row is a defect here. */
+function brokerProfilePlatform(platform: BindingPlatform): "android" | "ios" {
+  if (platform === "watchos") {
+    throw new Error("The session broker never holds a watch binding");
+  }
+  return platform;
 }

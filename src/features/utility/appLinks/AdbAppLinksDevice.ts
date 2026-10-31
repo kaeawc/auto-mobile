@@ -40,8 +40,7 @@ export interface AppLinksDevice {
     packageName: string,
     userId: number,
     enabled: boolean,
-    domains: AppLinkDomainSelector,
-    options?: AppLinksCommandOptions,
+    selection: AppLinksCommandOptions & { domains: AppLinkDomainSelector },
   ): Promise<void>;
   /** `pm verify-app-links --re-verify <pkg>`: asks the verifier again; results arrive later. */
   reverify(packageName: string, options?: AppLinksCommandOptions): Promise<void>;
@@ -110,8 +109,7 @@ export class AdbAppLinksDevice implements AppLinksDevice {
     packageName: string,
     userId: number,
     enabled: boolean,
-    domains: AppLinkDomainSelector,
-    options: AppLinksCommandOptions = {},
+    { domains, ...options }: AppLinksCommandOptions & { domains: AppLinkDomainSelector },
   ): Promise<void> {
     await this.run(
       `shell pm set-app-links-user-selection --user ${userId} --package ${shellQuote(packageName)} ${enabled} ${domainArgs(domains)}`,

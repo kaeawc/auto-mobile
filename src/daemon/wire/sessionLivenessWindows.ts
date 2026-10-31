@@ -44,8 +44,7 @@ export function getSessionHeartbeatCheckIntervalMs(env: NodeJS.ProcessEnv = proc
   return readEnvPositiveInteger(
     ENV.SESSION_HEARTBEAT_CHECK_INTERVAL_MS.name,
     ENV.SESSION_HEARTBEAT_CHECK_INTERVAL_MS.legacyName,
-    { fallback: DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS },
-    env,
+    { fallback: DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS, env },
   );
 }
 
@@ -82,10 +81,8 @@ export const LEGACY_SESSION_IDLE_TIMEOUT_ENV = ENV.SESSION_IDLE_TIMEOUT_MS.legac
  * ignored in favour of the default, matching the other session timing knobs.
  */
 export function getSessionIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  return readEnvPositiveInteger(
-    SESSION_IDLE_TIMEOUT_ENV,
-    LEGACY_SESSION_IDLE_TIMEOUT_ENV,
-    { fallback: DEFAULT_SESSION_IDLE_TIMEOUT_MS },
+  return readEnvPositiveInteger(SESSION_IDLE_TIMEOUT_ENV, LEGACY_SESSION_IDLE_TIMEOUT_ENV, {
+    fallback: DEFAULT_SESSION_IDLE_TIMEOUT_MS,
     env,
-  );
+  });
 }

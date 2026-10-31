@@ -72,8 +72,7 @@ function retryBounded(
     s,
     "d1",
     t,
-    restoration,
-    restore,
+    { restoration, restore },
   ]);
 }
 

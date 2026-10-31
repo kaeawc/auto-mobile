@@ -222,11 +222,14 @@ export function preserveLateShutdownRetirement(
   context: ShutdownSessionOwnershipContext,
   error: unknown,
   release: Promise<string | null>,
-  observedReplacement: BootedDevice | undefined,
-  options: {
+  {
+    observedReplacement,
+    ...options
+  }: {
     terminalReleaseRetriesRemaining: number;
     skipAndroidNameEnrichment: boolean;
     disappearanceConfirmed: boolean;
+    observedReplacement?: BootedDevice;
   },
 ): void {
   const { device, requestAbortSignal, sessionManager, sessionId } = context;
@@ -256,12 +259,15 @@ export async function releaseShutdownSessionOwnership(
   context: ShutdownOwnershipContext,
   daemon: Pick<ShutdownDaemonView, "requireSessionManager">,
   observedReplacement: BootedDevice | undefined,
-  strictDeadline: boolean,
-  options: {
+  {
+    strictDeadline,
+    ...options
+  }: {
     timeoutMs: number;
     terminalReleaseRetriesRemaining: number;
     disappearanceConfirmed: boolean;
     skipAndroidNameEnrichment: boolean;
+    strictDeadline: boolean;
   },
 ): Promise<void> {
   const { device, expectedSession, timer, deadlineMs, requestAbortSignal } = context;
@@ -290,21 +296,20 @@ export async function releaseShutdownSessionOwnership(
       device,
       timer,
       shutdownRecheckDeadlineMs(timer, deadlineMs, strictDeadline),
-      "session ownership retirement did not complete",
       {
+        detail: "session ownership retirement did not complete",
         requestAbortSignal: requestAbortSignal,
         operation: async () => await release,
         timeoutMs: timeoutMs,
       },
     );
   } catch (error) {
-    preserveLateShutdownRetirement(
-      { ...context, sessionManager, sessionId },
-      error,
-      release,
+    preserveLateShutdownRetirement({ ...context, sessionManager, sessionId }, error, release, {
       observedReplacement,
-      { terminalReleaseRetriesRemaining, skipAndroidNameEnrichment, disappearanceConfirmed },
-    );
+      terminalReleaseRetriesRemaining,
+      skipAndroidNameEnrichment,
+      disappearanceConfirmed,
+    });
     throw error;
   }
 }
@@ -333,8 +338,8 @@ export async function retireShutdownOwnership(
     { ...context, expectedPooledDevice: capturedPooledDevice },
     daemon,
     observedReplacement,
-    strictDeadline,
     {
+      strictDeadline,
       timeoutMs,
       terminalReleaseRetriesRemaining,
       disappearanceConfirmed,
@@ -362,13 +367,10 @@ export async function retireShutdownOwnership(
     },
   );
   if (replacement) {
-    await rebuildSameIdReplacement(
-      device,
-      capturedPooledDevice,
-      replacement,
+    await rebuildSameIdReplacement(device, capturedPooledDevice, replacement, {
       devicePool,
       stopPerformanceMonitoring,
-    );
+    });
     return;
   }
   if (devicePool.getDevice(device.deviceId) !== capturedPooledDevice) {
@@ -393,8 +395,8 @@ export async function retireTeardownPooledOwnership(
     context.deadlineDevice,
     context.dependencies.timer,
     context.deadlineMs,
-    "stopped-device ownership reservation did not complete",
     {
+      detail: "stopped-device ownership reservation did not complete",
       requestAbortSignal: context.requestAbortSignal,
       operation: async (signal) =>
         await devicePool.reserveDeviceForShutdown(expectedPooledDevice.id, signal),

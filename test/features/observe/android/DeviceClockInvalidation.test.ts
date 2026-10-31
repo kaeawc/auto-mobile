@@ -49,13 +49,15 @@ test("backward clock jump clears the cached hierarchy and accepts a newly pushed
     expect(cache.currentGeneration(device.deviceId)).toBeGreaterThan(generation);
     // The first read after the jump must request fresh data, never return newer.
     const older = { hierarchy: {}, updatedAt: now - 3_600_000, packageName: "" };
-    const read = await client.getLatestHierarchy(false, 10, undefined, true, {
+    const read = await client.getLatestHierarchy(false, 10, undefined, {
+      skipWaitForFresh: true,
       minTimestamp: older.updatedAt,
     });
     expect(read.hierarchy).toBeNull();
     client.handleHierarchyUpdate(older);
     expect(client.hasCachedHierarchy()).toBe(true);
-    const next = await client.getLatestHierarchy(false, 100, undefined, false, {
+    const next = await client.getLatestHierarchy(false, 100, undefined, {
+      skipWaitForFresh: false,
       minTimestamp: older.updatedAt,
     });
     expect(next.hierarchy?.updatedAt).toBe(older.updatedAt);

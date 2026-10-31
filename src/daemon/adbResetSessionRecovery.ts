@@ -78,13 +78,10 @@ export class AdbResetSessionRecovery {
         allowActiveRelaunch: true,
         allowExistingRecoveryReservation: true,
       });
-      const result = await this.finishAdbResetRecoveryAfterReboot(
-        record,
-        recovered,
-        device,
+      const result = await this.finishAdbResetRecoveryAfterReboot(record, recovered, device, {
         session,
         incidentId,
-      );
+      });
       complete = true;
       return result;
     } catch (error) {
@@ -136,8 +133,7 @@ export class AdbResetSessionRecovery {
     record: AndroidRecoveryRecord,
     recovered: boolean,
     device: AndroidEmulatorRecoveryDevice,
-    session: Session,
-    incidentId: string | undefined,
+    { session, incidentId }: { session: Session; incidentId?: string },
   ): Promise<"recovered" | "released"> {
     if (await this.pool.finalizeReleasedRecoveryAfterAwait(record, incidentId)) {
       return "released";

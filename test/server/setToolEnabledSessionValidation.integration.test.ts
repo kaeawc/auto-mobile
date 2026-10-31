@@ -75,15 +75,20 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
       "clipboard",
       "clipboard",
       z.object({ sessionUuid: z.string().optional() }),
-      async () => ({ content: [{ type: "text" as const, text: "clipboard" }] }),
-      { defaultEnabled: false },
+      {
+        handler: async () => ({ content: [{ type: "text" as const, text: "clipboard" }] }),
+        defaultEnabled: false,
+      },
     );
     ToolRegistry.register(
       "hiddenTool",
       "hidden",
       z.object({ sessionUuid: z.string().optional() }),
-      async () => ({ content: [{ type: "text" as const, text: "hidden" }] }),
-      { defaultEnabled: false, hidden: true },
+      {
+        handler: async () => ({ content: [{ type: "text" as const, text: "hidden" }] }),
+        defaultEnabled: false,
+        hidden: true,
+      },
     );
     registerToolSelectionTools();
   });

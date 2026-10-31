@@ -28,10 +28,9 @@ export async function installBenchmarkNavigationManager(): Promise<BenchmarkNavi
   });
   await runMigrations(db as Kysely<unknown>);
   // Both repositories share the one connection (NavigationGraphManager's precondition).
-  const manager = NavigationGraphManager.createForTesting(
-    new NavigationRepository(db),
-    new TestCoverageRepository(db),
-  );
+  const manager = NavigationGraphManager.createForTesting(new NavigationRepository(db), {
+    testCoverageRepository: new TestCoverageRepository(db),
+  });
   NavigationGraphManager.setInstanceForTesting(manager);
 
   TelemetryRecorder.resetInstance();

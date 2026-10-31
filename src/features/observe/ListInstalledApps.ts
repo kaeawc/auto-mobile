@@ -422,8 +422,7 @@ export class ListInstalledApps {
     proxy: AndroidInstalledPackagesRequest,
     catalog: AndroidAppCatalog,
     packageNames: string[],
-    userId: number,
-    signal?: AbortSignal,
+    { userId, signal }: { userId: number; signal?: AbortSignal },
   ): Promise<void> {
     if (needsLauncherProbe(catalog, packageNames)) {
       this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, packageNames);
@@ -467,8 +466,7 @@ export class ListInstalledApps {
     systemAppsMap: Map<string, SystemInstalledApp>,
     packageName: string,
     userId: number,
-    isForeground: boolean,
-    entry: AndroidAppCatalogEntry | undefined,
+    { isForeground, entry }: { isForeground: boolean; entry?: AndroidAppCatalogEntry },
   ): void {
     const existing = systemAppsMap.get(packageName);
     if (existing) {
@@ -506,7 +504,7 @@ export class ListInstalledApps {
 
       const entry = catalogByUser.get(row.user_id)?.get(row.package_name);
       if (row.is_system) {
-        this.upsertSystemApp(systemAppsMap, row.package_name, row.user_id, isForeground, entry);
+        this.upsertSystemApp(systemAppsMap, row.package_name, row.user_id, { isForeground, entry });
       } else {
         installedApps.profiles[row.user_id] = installedApps.profiles[row.user_id] || [];
         installedApps.profiles[row.user_id].push({
@@ -767,13 +765,10 @@ export class ListInstalledApps {
     catalog: AndroidAppCatalog,
   ): void {
     for (const packageName of packageNames) {
-      this.upsertSystemApp(
-        accumulator.systemAppsMap,
-        packageName,
-        user.userId,
-        this.isForegroundFor(accumulator, packageName, user.userId),
-        catalog.get(packageName),
-      );
+      this.upsertSystemApp(accumulator.systemAppsMap, packageName, user.userId, {
+        isForeground: this.isForegroundFor(accumulator, packageName, user.userId),
+        entry: catalog.get(packageName),
+      });
       this.recordCacheEntry(accumulator, user, packageName, 1);
     }
   }
@@ -810,7 +805,7 @@ export class ListInstalledApps {
           : catalogFromPackageRecords(records);
         const listedPackages = [...userPackages, ...systemPackages];
         if (!options.namesOnly) {
-          await this.completeCtrlProxyCatalog(proxy, catalog, listedPackages, userId, signal);
+          await this.completeCtrlProxyCatalog(proxy, catalog, listedPackages, { userId, signal });
         }
         return { userPackages, systemPackages, catalog };
       }

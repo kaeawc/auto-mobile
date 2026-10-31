@@ -31,6 +31,8 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
     listOf("select", "clear_selection", "accessibility_focus", "clear_accessibility_focus")
   private val spansOnlyExtras =
     mapOf("androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY" to "[]")
+  private val compatBooleans =
+    "androidx.view.accessibility.AccessibilityNodeInfoCompat.BOOLEAN_PROPERTY_KEY"
 
   @Test
   fun `default and explicit off preserve baseline wrapper and empty leaf`() {
@@ -65,6 +67,48 @@ internal class ViewHierarchyExtractorBaselineWrapperPruningTest : ViewHierarchyE
         .optimizeHierarchy(UIElementInfo(actions = emptyList(), extras = emptyMap()))
         .isEmpty(),
     )
+  }
+
+  @Test
+  fun `enabled ignores an all-false compat boolean property bitmask`() {
+    val enabled = ViewHierarchyExtractor(pruneBaselineWrappers = true)
+    val label = UIElementInfo(text = "Label")
+    val wrapper =
+      baselineNode(children = listOf(label))
+        .copy(extras = spansOnlyExtras + (compatBooleans to "0"))
+
+    assertEquals(listOf(label), enabled.optimizeHierarchy(wrapper))
+    assertTrue(
+      enabled.optimizeHierarchy(UIElementInfo(extras = mapOf(compatBooleans to "0"))).isEmpty(),
+    )
+  }
+
+  @Test
+  fun `enabled keeps a node whose compat boolean bitmask is set, unreadable, or a lookalike key`() {
+    val enabled = ViewHierarchyExtractor(pruneBaselineWrappers = true)
+    val extras =
+      listOf(
+        compatBooleans to "1",
+        compatBooleans to "64",
+        compatBooleans to "",
+        compatBooleans to "00",
+        "custom.BOOLEAN_PROPERTY_KEY" to "0",
+      )
+    for ((key, value) in extras) {
+      val wrapper =
+        baselineNode(children = listOf(UIElementInfo(text = "Child")))
+          .copy(extras = mapOf(key to value))
+      assertEquals("$key=$value", listOf(wrapper), enabled.optimizeHierarchy(wrapper))
+    }
+  }
+
+  @Test
+  fun `default off keeps a node with an all-false compat boolean bitmask`() {
+    val wrapper =
+      baselineNode(children = listOf(UIElementInfo(text = "Label")))
+        .copy(extras = mapOf(compatBooleans to "0"))
+
+    assertEquals(listOf(wrapper), extractor.optimizeHierarchy(wrapper))
   }
 
   @Test

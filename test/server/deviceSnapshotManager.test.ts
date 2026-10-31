@@ -979,17 +979,16 @@ describe("deviceSnapshotManager", () => {
       const barrier = new FakeDbWriteBarrier();
       let invalidations = 0;
       let notifications = 0;
-      const listener = createInstalledAppsDeviceIncarnationListener(
-        apps,
-        new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
+      const listener = createInstalledAppsDeviceIncarnationListener(apps, {
+        coordinator: new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
         barrier,
-        () => {
+        invalidateCache: () => {
           invalidations++;
         },
-        async () => {
+        notifyResourcesUpdated: async () => {
           notifications++;
         },
-      );
+      });
       let release!: (device: BootedDevice) => void;
       let reject!: (error: Error) => void;
       const readiness = new Promise<BootedDevice>((resolve, fail) => {

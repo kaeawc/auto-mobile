@@ -18,21 +18,19 @@ export async function recordNodeProvenance(
   repository: NavigationRepository,
   appId: string,
   nodeId: number,
-  timestamp: number,
-  provenance: ResolvedProvenance,
+  { timestamp, provenance }: { timestamp: number; provenance: ResolvedProvenance },
 ): Promise<void> {
   const buildKey = await repository.getOrCreateBuildKey(
     appId,
     provenance.versionCode,
     provenance.contentHash,
   );
-  await repository.recordNodeObservation(
-    nodeId,
-    buildKey.id,
-    provenance.deviceId,
-    provenance.sessionUuid,
-    timestamp,
-  );
+  await repository.recordNodeObservation(nodeId, {
+    buildKeyId: buildKey.id,
+    deviceId: provenance.deviceId,
+    sessionUuid: provenance.sessionUuid,
+    seenAt: timestamp,
+  });
 }
 
 /**
@@ -43,21 +41,19 @@ export async function recordEdgeProvenance(
   repository: NavigationRepository,
   appId: string,
   edgeId: number,
-  timestamp: number,
-  provenance: ResolvedProvenance,
+  { timestamp, provenance }: { timestamp: number; provenance: ResolvedProvenance },
 ): Promise<void> {
   const buildKey = await repository.getOrCreateBuildKey(
     appId,
     provenance.versionCode,
     provenance.contentHash,
   );
-  await repository.recordEdgeObservation(
-    edgeId,
-    buildKey.id,
-    provenance.deviceId,
-    provenance.sessionUuid,
-    timestamp,
-  );
+  await repository.recordEdgeObservation(edgeId, {
+    buildKeyId: buildKey.id,
+    deviceId: provenance.deviceId,
+    sessionUuid: provenance.sessionUuid,
+    seenAt: timestamp,
+  });
 }
 
 /**
@@ -72,8 +68,7 @@ export async function storeUIElements(
   repository: NavigationRepository,
   appId: string | null,
   edgeId: number,
-  selectedElements: SelectedElement[],
-  timestamp: number,
+  { selectedElements, timestamp }: { selectedElements: SelectedElement[]; timestamp: number },
 ): Promise<void> {
   if (!appId || selectedElements.length === 0) {
     return;
@@ -108,8 +103,7 @@ export async function storeScrollPosition(
   repository: NavigationRepository,
   appId: string | null,
   edgeId: number,
-  scrollPosition: ScrollPosition,
-  timestamp: number,
+  { scrollPosition, timestamp }: { scrollPosition: ScrollPosition; timestamp: number },
 ): Promise<void> {
   if (!appId) {
     return;

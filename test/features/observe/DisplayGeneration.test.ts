@@ -121,8 +121,7 @@ function harness(platform: "android" | "ios" = "android", singlePanel = false) {
       // Explicit fake: no notifyutil/simulator operation, including the setPosture UDID test.
       iosLockStateProbe: { read: async () => ({ kind: "unknown", reason: "error" }) },
     },
-    timer,
-    ids,
+    { timer, idGenerator: ids },
   );
   return { device, timer, adb, adbFactory, hierarchy, ids, client, panel, screen, cache };
 }

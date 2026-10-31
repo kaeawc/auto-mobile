@@ -279,7 +279,7 @@ describe("SessionManager", () => {
         });
         const written: string[] = [];
         const persistence: DeviceSessionPersistence = persistenceServing(persisted, {
-          async markReleased(_sessionUuid, _status, _releasedAtMs, reason) {
+          async markReleased(_sessionUuid, _status, _releasedAtMs, { reason }) {
             written.push(reason);
           },
         });
@@ -342,7 +342,7 @@ describe("SessionManager", () => {
         async upsertActiveSession() {
           throw new Error("missing stable identity must not assign a sibling");
         },
-        async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+        async markReleased(_sessionUuid, status, releasedAtMs, { reason: releaseReason }) {
           releases.push(releaseReason);
           persisted.status = status;
           persisted.released_at_ms = releasedAtMs;
@@ -421,7 +421,7 @@ describe("SessionManager", () => {
           async upsertActiveSession() {
             throw new Error("transport address must not assign a sibling");
           },
-          async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+          async markReleased(_sessionUuid, status, releasedAtMs, { reason: releaseReason }) {
             releases.push(releaseReason);
             persisted.status = status;
             persisted.released_at_ms = releasedAtMs;
@@ -549,7 +549,7 @@ describe("SessionManager", () => {
           async upsertActiveSession() {
             throw new Error("a recovery conflict must not assign a sibling");
           },
-          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+          async markReleased(_sessionUuid, _status, _releasedAtMs, { reason: releaseReason }) {
             releases.push(releaseReason);
             persisted.release_reason = releaseReason;
           },
@@ -596,7 +596,7 @@ describe("SessionManager", () => {
           async upsertActiveSession() {
             throw new Error("a recovery conflict must not assign a sibling");
           },
-          async markReleased(_sessionUuid, status, releasedAtMs, releaseReason) {
+          async markReleased(_sessionUuid, status, releasedAtMs, { reason: releaseReason }) {
             persisted.status = status;
             persisted.released_at_ms = releasedAtMs;
             persisted.release_reason = releaseReason;

@@ -137,11 +137,11 @@ const runWaitForConditionDsl = async (
   observeScreen: ObserveScreen,
   waitFor: WaitForConditionDsl,
   signal: AbortSignal | undefined,
-  timer: Timer,
   {
+    timer,
     skipBackStack = false,
     platform,
-  }: { skipBackStack?: boolean; platform?: BootedDevice["platform"] } = {},
+  }: { skipBackStack?: boolean; platform?: BootedDevice["platform"] } & { timer: Timer },
 ): Promise<WaitForObservationOutcome> => {
   const startTime = timer.now();
   const timeoutMs =
@@ -283,8 +283,10 @@ function displayWaitTimeoutReason(
   waitKind: "posture" | "activeDisplay",
   requested: string,
   duration: number,
-  inventory: DisplayInventoryClassification,
-  evidence: DisplayWaitTimeoutEvidence,
+  {
+    inventory,
+    evidence,
+  }: { inventory: DisplayInventoryClassification; evidence: DisplayWaitTimeoutEvidence },
 ): string {
   let reason = evidence.lastObservedReason;
   if (!evidence.knownValueObserved) {
@@ -410,7 +412,8 @@ export const waitForObservation = async (
   // legacy element/textAny/activeWindow path below is unchanged (back-compat).
   if (isConditionDsl(waitFor)) {
     return complete(
-      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, {
+      await runWaitForConditionDsl(observeScreen, waitFor, signal, {
+        timer,
         skipBackStack,
         platform,
       }),
@@ -478,7 +481,8 @@ export const waitForObservation = async (
   const minTimestamp = waitTimestampFloor(needsHierarchyFreshness, baselineTimestamp);
   let polls = 1;
   const modes = new Map<string, MatchMode>();
-  let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform, {
+  let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, {
+    devicePlatform: platform,
     displayInventory,
     modes,
     iosMultiPanel,
@@ -683,16 +687,14 @@ function createWaitCompletion({
         "posture",
         waitFor.posture,
         outcome.awaitDuration,
-        displayInventory,
-        postureEvidence,
+        { inventory: displayInventory, evidence: postureEvidence },
       );
     } else if (outcome.timedOut && waitFor.activeDisplay !== undefined) {
       outcome.timeoutReason = displayWaitTimeoutReason(
         "activeDisplay",
         waitFor.activeDisplay,
         outcome.awaitDuration,
-        displayInventory,
-        activeDisplayEvidence,
+        { inventory: displayInventory, evidence: activeDisplayEvidence },
       );
     }
     const mode = resolveScreenshotMode(screenshot);
@@ -701,13 +703,12 @@ function createWaitCompletion({
       (mode === "async" &&
         (!shouldSkipObserveWaitForScreenshot() || serverConfig.isAccessibilityAuditEnabled()))
     ) {
-      await observeScreen.captureScreenshot?.(
-        createGlobalPerformanceTracker(),
+      await observeScreen.captureScreenshot?.(createGlobalPerformanceTracker(), {
         signal,
-        outcome.observation,
+        observation: outcome.observation,
         screenshot,
         screenshotOptions,
-      );
+      });
     } else {
       await observeScreen.runAccessibilityAudit?.(
         outcome.observation,
@@ -925,7 +926,8 @@ function evaluateFreshWaitObservation({
         awaitedElement: undefined,
         diagnostic: waitCaptureUnavailableReason(observation),
       }
-    : evaluateWaitForObservation(finder, waitFor, observation, platform, {
+    : evaluateWaitForObservation(finder, waitFor, observation, {
+        devicePlatform: platform,
         displayInventory,
         modes,
         iosMultiPanel,

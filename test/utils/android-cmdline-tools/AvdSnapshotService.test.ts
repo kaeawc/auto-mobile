@@ -152,13 +152,12 @@ describe("AvdSnapshotService (#6490)", () => {
       adbFactory: factory,
       consoleBusyRegistry: registry,
     });
-    const sut = new AvdSnapshotService(
-      new FakeDirectories({}, {}),
-      new FakeAvdDirectories(new Set()),
+    const sut = new AvdSnapshotService(new FakeDirectories({}, {}), {
+      avdDirectories: new FakeAvdDirectories(new Set()),
       emulator,
-      factory,
-      registry,
-    );
+      adbFactory: factory,
+      consoleBusyRegistry: registry,
+    });
     expect(await sut.deleteVmSnapshot("emulator-5556", "snap", 30_000, "am-api36")).toEqual({
       reclaimed: true,
     });
@@ -176,12 +175,11 @@ describe("AvdSnapshotService (#6490)", () => {
     adb = recordingAdbFactory(execResult("OK")),
     files: Record<string, string[]> = {},
   ) =>
-    new AvdSnapshotService(
-      new FakeDirectories(sizes, children, files),
-      new FakeAvdDirectories(new Set(known)),
-      stubEmulator(devices),
-      adb.factory,
-    );
+    new AvdSnapshotService(new FakeDirectories(sizes, children, files), {
+      avdDirectories: new FakeAvdDirectories(new Set(known)),
+      emulator: stubEmulator(devices),
+      adbFactory: adb.factory,
+    });
 
   test("broker baseline snapshots are excluded from listings and cannot be reclaimed", async () => {
     const adb = recordingAdbFactory(execResult("OK"));
@@ -249,12 +247,14 @@ describe("AvdSnapshotService (#6490)", () => {
         { [snapshotsRoot]: ["sweepSnap"] },
       ),
       {
-        getAvdHome: () => AVD_HOME,
-        resolveAvdDirectory: async (avdName: string) =>
-          avdName === "am-relocated" ? relocated : null,
+        avdDirectories: {
+          getAvdHome: () => AVD_HOME,
+          resolveAvdDirectory: async (avdName: string) =>
+            avdName === "am-relocated" ? relocated : null,
+        },
+        emulator: stubEmulator([]),
+        adbFactory: recordingAdbFactory(execResult("OK")).factory,
       },
-      stubEmulator([]),
-      recordingAdbFactory(execResult("OK")).factory,
     );
 
     expect(await sut.listAvdSnapshotDirectories("am-relocated")).toEqual([
@@ -321,13 +321,12 @@ describe("AvdSnapshotService (#6490)", () => {
     test(`deleteVmSnapshot returns a typed failure without dispatch for ${quotedName}`, async () => {
       const adb = recordingAdbFactory(execResult("OK"));
       const consoleBusyRegistry = new InMemoryEmulatorConsoleBusyRegistry();
-      const sut = new AvdSnapshotService(
-        new FakeDirectories({}, {}),
-        new FakeAvdDirectories(new Set()),
-        stubEmulator([]),
-        adb.factory,
+      const sut = new AvdSnapshotService(new FakeDirectories({}, {}), {
+        avdDirectories: new FakeAvdDirectories(new Set()),
+        emulator: stubEmulator([]),
+        adbFactory: adb.factory,
         consoleBusyRegistry,
-      );
+      });
 
       await expect(sut.deleteVmSnapshot("emulator-5556", name, 30000)).resolves.toEqual({
         reclaimed: false,
@@ -377,10 +376,9 @@ describe("AvdSnapshotService (#6490)", () => {
     const adb = recordingAdbFactory(execResult("OK"));
     const probes: Array<{ serial: string; timeoutMs: number; signal: AbortSignal | undefined }> =
       [];
-    const sut = new AvdSnapshotService(
-      new FakeDirectories({}, {}),
-      new FakeAvdDirectories(new Set()),
-      new (class extends AndroidEmulatorClient implements AndroidEmulator {
+    const sut = new AvdSnapshotService(new FakeDirectories({}, {}), {
+      avdDirectories: new FakeAvdDirectories(new Set()),
+      emulator: new (class extends AndroidEmulatorClient implements AndroidEmulator {
         override async getBootedDevices(): Promise<BootedDevice[]> {
           throw new Error("pre-delete identity confirmation must not discover every emulator");
         }
@@ -392,8 +390,8 @@ describe("AvdSnapshotService (#6490)", () => {
           return "am-api36";
         }
       })(),
-      adb.factory,
-    );
+      adbFactory: adb.factory,
+    });
 
     expect(await sut.deleteVmSnapshot("emulator-5556", "snap", 50, "am-api36")).toEqual({
       reclaimed: true,
@@ -432,16 +430,15 @@ describe("AvdSnapshotService (#6490)", () => {
       { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
     const adbFactory: AdbClientFactory = { create: () => client };
-    const sut = new AvdSnapshotService(
-      new FakeDirectories({}, {}),
-      new FakeAvdDirectories(new Set()),
-      {
+    const sut = new AvdSnapshotService(new FakeDirectories({}, {}), {
+      avdDirectories: new FakeAvdDirectories(new Set()),
+      emulator: {
         getBootedDevices: async () => liveDevices.current,
         resolveAvdNameForSerial: async (serial: string) =>
           liveDevices.current.find((device) => device.deviceId === serial)?.name,
       } as never,
       adbFactory,
-    );
+    });
 
     expect(await sut.deleteVmSnapshot("emulator-5556", "snap", 30000, "am-api36")).toEqual({
       reclaimed: false,

@@ -27,8 +27,6 @@
     <ID>LongMethod:PrototypeController.kt:PrototypeController$private suspend fun display: Surface</ID>
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer.Companion$internal fun correlationRequestId: String?</ID>
     <ID>LongParameterList:CtrlProxy.kt:CtrlProxy$private suspend fun broadcastActionResult</ID>
-    <ID>LongParameterList:CtrlProxy.kt:internal fun crashEventResponse: CrashEvent</ID>
-    <ID>LongParameterList:CtrlProxy.kt:internal fun handledExceptionEventResponse: HandledExceptionEvent</ID>
     <ID>LongParameterList:CtrlProxyActions.kt:CtrlProxyActions$suspend fun showPrototype</ID>
     <ID>LongParameterList:PrototypeController.kt:PrototypeController</ID>
     <ID>LongParameterList:PrototypeController.kt:PrototypeController$suspend fun show</ID>

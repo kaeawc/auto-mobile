@@ -55,20 +55,18 @@ export class SettledScreenshotCapture {
     observation: ObserveResult,
     perf: PerformanceTracker,
     signal: AbortSignal | undefined,
-    strict: boolean,
-    { displayId, screenshotOptions }: SettledScreenshotTarget = {},
+    { strict, displayId, screenshotOptions }: SettledScreenshotTarget & { strict: boolean },
   ): Promise<void> {
     try {
       if (!this.screenshotRecorder.captureSettled) {
         throw new ActionableError("Settled screenshot capture is unavailable");
       }
-      const path = await this.screenshotRecorder.captureSettled(
-        observation.observationId,
+      const path = await this.screenshotRecorder.captureSettled(observation.observationId, {
         perf,
         signal,
         displayId,
-        screenshotOptions,
-      );
+        options: screenshotOptions,
+      });
       const screenshotEvidence = await observationScreenshotEvidence(path, "fresh", undefined, {
         files: this.screenshotEvidenceFiles,
         timer: this.timer,

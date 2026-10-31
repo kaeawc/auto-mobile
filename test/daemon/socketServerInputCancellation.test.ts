@@ -57,7 +57,7 @@ class FencedInputServer extends UnixSocketServerHarness {
     timeoutMs: number,
     send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
   ): Promise<T> {
-    return this.dispatchFencedInput(gesture, signal, timeoutMs, send);
+    return this.dispatchFencedInput(gesture, signal, timeoutMs, { send });
   }
 }
 

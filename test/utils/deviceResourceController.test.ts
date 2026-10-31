@@ -30,9 +30,11 @@ describe("device resource control", () => {
     plist = new FakeWallpaperPlist();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
-    controller = new DefaultDeviceResourceController(simctl, plist, timer, (path) =>
-      plist.readDirectory(path),
-    );
+    controller = new DefaultDeviceResourceController(simctl, {
+      plist,
+      timer,
+      readDirectory: (path) => plist.readDirectory(path),
+    });
     request = {
       device: { platform: "ios", name: "Phone", deviceId: udid },
       resources: { wallpaperRendering: "disabled" },
@@ -41,13 +43,12 @@ describe("device resource control", () => {
   });
 
   test("refuses unsafe iOS combinations before any mutation", async () => {
-    controller = new DefaultDeviceResourceController(
-      simctl,
+    controller = new DefaultDeviceResourceController(simctl, {
       plist,
       timer,
-      (path) => plist.readDirectory(path),
-      { hazards },
-    );
+      readDirectory: (path) => plist.readDirectory(path),
+      extras: { hazards },
+    });
     request.resources = { calendarServices: "disabled", reminderServices: "disabled" };
     await expect(controller.setResources(request)).rejects.toBeInstanceOf(
       UnsafeDeviceResourceCombinationError,
@@ -453,13 +454,12 @@ describe("device resource control", () => {
   });
 
   test("resolves approved runtime filenames independently of service labels", async () => {
-    const aliasController = new DefaultDeviceResourceController(
-      simctl,
+    const aliasController = new DefaultDeviceResourceController(simctl, {
       plist,
       timer,
-      async (path) =>
+      readDirectory: async (path) =>
         path.endsWith("LaunchDaemons") ? ["com.apple.CloudSettingsSyncAgent.plist"] : [],
-    );
+    });
     plist.definition = { Label: "com.apple.cloudsettingssyncagent" };
     simctl.states.set("com.apple.syncdefaultsd", { disabled: false, loaded: false });
     simctl.states.set("com.apple.icloudsubscriptionoptimizerd", { disabled: false, loaded: false });
@@ -498,15 +498,21 @@ describe("device resource control", () => {
   });
 
   test("directory permissions and ambiguous definitions fail closed", async () => {
-    const denied = new DefaultDeviceResourceController(simctl, plist, timer, async () => {
-      throw Object.assign(new Error("denied"), { code: "EACCES" });
+    const denied = new DefaultDeviceResourceController(simctl, {
+      plist,
+      timer,
+      readDirectory: async () => {
+        throw Object.assign(new Error("denied"), { code: "EACCES" });
+      },
     });
     expect((await denied.setResources(request)).resources.wallpaperRendering?.state).toBe(
       "unknown",
     );
-    const duplicate = new DefaultDeviceResourceController(simctl, plist, timer, async () => [
-      `${label}.plist`,
-    ]);
+    const duplicate = new DefaultDeviceResourceController(simctl, {
+      plist,
+      timer,
+      readDirectory: async () => [`${label}.plist`],
+    });
     expect((await duplicate.setResources(request)).resources.wallpaperRendering?.state).toBe(
       "unknown",
     );

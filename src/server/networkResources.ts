@@ -278,12 +278,11 @@ async function handleTrafficQuery(
 
 function registerNetworkTrafficStreams(repository: NetworkResourceRepository): void {
   // Subscription resources (readable state when notified)
-  ResourceRegistry.register(
-    NETWORK_RESOURCE_URIS.LIVE,
-    "Live Network Traffic",
-    "Real-time captured network traffic. Subscribe to receive notifications on new requests.",
-    "application/json",
-    async () => {
+  ResourceRegistry.register(NETWORK_RESOURCE_URIS.LIVE, "Live Network Traffic", {
+    description:
+      "Real-time captured network traffic. Subscribe to receive notifications on new requests.",
+    mimeType: "application/json",
+    handler: async () => {
       const events = await repository.getNetworkEvents({ limit: 20 });
       return {
         uri: NETWORK_RESOURCE_URIS.LIVE,
@@ -291,14 +290,13 @@ function registerNetworkTrafficStreams(repository: NetworkResourceRepository): v
         text: JSON.stringify({ events: events.map(eventToSummary) }, null, 2),
       };
     },
-  );
+  });
 
-  ResourceRegistry.register(
-    NETWORK_RESOURCE_URIS.ERRORS,
-    "Network Errors",
-    "Recent network errors (recorded transport error, missing/zero status, or status >= 400). Subscribe to receive notifications on new errors.",
-    "application/json",
-    async () => {
+  ResourceRegistry.register(NETWORK_RESOURCE_URIS.ERRORS, "Network Errors", {
+    description:
+      "Recent network errors (recorded transport error, missing/zero status, or status >= 400). Subscribe to receive notifications on new errors.",
+    mimeType: "application/json",
+    handler: async () => {
       const errors = await repository.getNetworkEvents({ errorsOnly: true, limit: 20 });
       return {
         uri: NETWORK_RESOURCE_URIS.ERRORS,
@@ -306,14 +304,13 @@ function registerNetworkTrafficStreams(repository: NetworkResourceRepository): v
         text: JSON.stringify({ errors: errors.map(eventToSummary) }, null, 2),
       };
     },
-  );
+  });
 
-  ResourceRegistry.register(
-    NETWORK_RESOURCE_URIS.STATS,
-    "Network Stats",
-    "Aggregate network statistics with p50/p95 latency. Subscribe to receive notifications when error rate crosses threshold.",
-    "application/json",
-    async () => {
+  ResourceRegistry.register(NETWORK_RESOURCE_URIS.STATS, "Network Stats", {
+    description:
+      "Aggregate network statistics with p50/p95 latency. Subscribe to receive notifications when error rate crosses threshold.",
+    mimeType: "application/json",
+    handler: async () => {
       const events = await repository.getNetworkEvents({ limit: 200 });
       const totalRequests = events.length;
       const errorCount = events.filter(isFailedNetworkRequest).length;
@@ -339,20 +336,19 @@ function registerNetworkTrafficStreams(repository: NetworkResourceRepository): v
         ),
       };
     },
-  );
+  });
 }
 
 export function registerNetworkResources(
   repository: NetworkResourceRepository = defaultRepository,
 ): void {
   // Base traffic resource (no filters, returns latest 50)
-  ResourceRegistry.register(
-    NETWORK_RESOURCE_URIS.TRAFFIC,
-    "Network Traffic",
-    "Query captured network traffic. Use query parameters to filter by host, method, statusCode, since, limit, deviceId.",
-    "application/json",
-    () => handleTrafficQuery({}, repository),
-  );
+  ResourceRegistry.register(NETWORK_RESOURCE_URIS.TRAFFIC, "Network Traffic", {
+    description:
+      "Query captured network traffic. Use query parameters to filter by host, method, statusCode, since, limit, deviceId.",
+    mimeType: "application/json",
+    handler: () => handleTrafficQuery({}, repository),
+  });
 
   ResourceRegistry.registerTemplate(TRAFFIC_QUERY_TEMPLATE, "Network Traffic", {
     description: "Query captured network traffic with optional filters.",
@@ -403,12 +399,11 @@ export function registerNetworkResources(
   registerNetworkTrafficStreams(repository);
 
   // Slow requests resource
-  ResourceRegistry.register(
-    NETWORK_RESOURCE_URIS.SLOW,
-    "Slow Network Requests",
-    "Recent slow network requests (exceeding configured threshold). Subscribe to receive notifications on new slow requests.",
-    "application/json",
-    async () => {
+  ResourceRegistry.register(NETWORK_RESOURCE_URIS.SLOW, "Slow Network Requests", {
+    description:
+      "Recent slow network requests (exceeding configured threshold). Subscribe to receive notifications on new slow requests.",
+    mimeType: "application/json",
+    handler: async () => {
       const state = NetworkState.getInstance();
       const thresholdMs = state.slowThresholdMs;
       const events = await repository.getNetworkEvents({ limit: 200 });
@@ -427,15 +422,14 @@ export function registerNetworkResources(
         ),
       };
     },
-  );
+  });
 
   // Network state resource
-  ResourceRegistry.register(
-    NETWORK_RESOURCE_URIS.STATE,
-    "Network State",
-    "Current network capture and simulation state (capturing, error simulation, notification config).",
-    "application/json",
-    async () => {
+  ResourceRegistry.register(NETWORK_RESOURCE_URIS.STATE, "Network State", {
+    description:
+      "Current network capture and simulation state (capturing, error simulation, notification config).",
+    mimeType: "application/json",
+    handler: async () => {
       const state = NetworkState.getInstance();
       return {
         uri: NETWORK_RESOURCE_URIS.STATE,
@@ -443,15 +437,14 @@ export function registerNetworkResources(
         text: JSON.stringify(state.getSnapshot(), null, 2),
       };
     },
-  );
+  });
 
   // Active mocks resource
-  ResourceRegistry.register(
-    NETWORK_RESOURCE_URIS.MOCKS,
-    "Network Mocks",
-    "Currently active mock network response rules, each tagged with the device it applies to.",
-    "application/json",
-    async () => {
+  ResourceRegistry.register(NETWORK_RESOURCE_URIS.MOCKS, "Network Mocks", {
+    description:
+      "Currently active mock network response rules, each tagged with the device it applies to.",
+    mimeType: "application/json",
+    handler: async () => {
       const state = NetworkState.getInstance();
       const mocks = state.getAllMocks();
       return {
@@ -467,14 +460,13 @@ export function registerNetworkResources(
         ),
       };
     },
-  );
+  });
 
-  ResourceRegistry.register(
-    NETWORK_RESOURCE_URIS.CONNECTIVITY,
-    "Network Connectivity",
-    "Current device network connectivity state. Subscribe to receive notifications on connectivity changes.",
-    "application/json",
-    async () => {
+  ResourceRegistry.register(NETWORK_RESOURCE_URIS.CONNECTIVITY, "Network Connectivity", {
+    description:
+      "Current device network connectivity state. Subscribe to receive notifications on connectivity changes.",
+    mimeType: "application/json",
+    handler: async () => {
       return {
         uri: NETWORK_RESOURCE_URIS.CONNECTIVITY,
         mimeType: "application/json",
@@ -484,7 +476,7 @@ export function registerNetworkResources(
         }),
       };
     },
-  );
+  });
 
   logger.info("[NetworkResources] Registered network resources");
 }

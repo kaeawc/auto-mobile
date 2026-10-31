@@ -13,14 +13,19 @@ import {
   type WatchStartDeviceRequest,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { lifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
+import { bootAdmissionServices } from "../devices/bootAdmissionServices";
 import { ActionableError } from "../models";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
-import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import {
+  WatchSimulatorInventory,
+  type WatchSimulatorSimctl,
+} from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import {
   WatchSimulatorLifecycle,
   type ListedWatch,
+  type WatchLifecycleSimctl,
   type WatchBootResult,
 } from "../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import { createStructuredToolResponse } from "../utils/toolUtils";
@@ -59,35 +64,36 @@ export async function startWatchDevice(
     rawArgs,
     startedAtMs + (args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS),
     signal,
-    "startDevice",
-    async (deadlineMs, requestSignal, stage) =>
-      await runWithAbortSignal(requestSignal, async () => {
-        const lifecycle = (deps.watchSimulatorLifecycleFactory ?? defaultWatchLifecycle)();
-        stage.current = "resolving the Apple Watch simulator";
-        const watch = await lifecycle.findWatch(
-          { deviceId: args.deviceId, name: args.name },
-          requestSignal,
-        );
-        stage.current = "waiting for the device lifecycle lease";
-        const lease = await reserveWatchLifecycle(watch, deps, deadlineMs, requestSignal);
-        try {
-          stage.current = "booting the Apple Watch simulator";
-          const boot = await lifecycle.boot(watch, {
-            timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
-          });
-          stage.current = "binding the device session";
-          const sessionId = await bindWatchSession(
-            { watch, boot, rawArgs, operation: "startDevice" },
-            bindSession,
-            deps.timer,
-            deadlineMs,
+    {
+      operationName: "startDevice",
+      operation: async (deadlineMs, requestSignal, stage) =>
+        await runWithAbortSignal(requestSignal, async () => {
+          const lifecycle = (deps.watchSimulatorLifecycleFactory ?? defaultWatchLifecycle)();
+          stage.current = "resolving the Apple Watch simulator";
+          const watch = await lifecycle.findWatch(
+            { deviceId: args.deviceId, name: args.name },
             requestSignal,
           );
-          return watchStartResponse(watch, boot, sessionId, deps.timer.now() - startedAtMs);
-        } finally {
-          lease.release();
-        }
-      }),
+          stage.current = "waiting for the device lifecycle lease";
+          const lease = await reserveWatchLifecycle(watch, deps, deadlineMs, requestSignal);
+          try {
+            stage.current = "booting the Apple Watch simulator";
+            const boot = await lifecycle.boot(watch, {
+              timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
+            });
+            stage.current = "binding the device session";
+            const sessionId = await bindWatchSession(
+              { watch, boot, rawArgs, operation: "startDevice" },
+              bindSession,
+              deps.timer,
+              { deadlineMs, signal: requestSignal },
+            );
+            return watchStartResponse(watch, boot, sessionId, deps.timer.now() - startedAtMs);
+          } finally {
+            lease.release();
+          }
+        }),
+    },
   );
 }
 
@@ -105,28 +111,23 @@ export async function bindWatchSession(
   }: { watch: ListedWatch; boot: WatchBootResult; rawArgs: object; operation: string },
   bindSession: BindBootedSession,
   timer: DeviceToolsDependencies["timer"],
-  deadlineMs: number,
-  signal: AbortSignal,
+  { deadlineMs, signal }: { deadlineMs: number; signal: AbortSignal },
 ): Promise<string> {
-  return await runOperationWithinDeadline(
-    timer,
-    deadlineMs,
-    signal,
-    bindUndoneIfUndelivered(
+  return await runOperationWithinDeadline(timer, deadlineMs, signal, {
+    operation: bindUndoneIfUndelivered(
       async (receipt, bindSignal) =>
-        await bindSession(boot.device, sessionArgs(rawArgs), undefined, null, {
+        await bindSession(boot.device, sessionArgs(rawArgs), undefined, {
+          childProcess: null,
           achievedReadiness: "booted",
           receipt,
           signal: bindSignal,
         }),
     ),
-    {
-      timeoutError: () =>
-        new ActionableError(
-          `${operation} timed out while binding the device session; target=watchos:${watch.deviceId}`,
-        ),
-    },
-  );
+    timeoutError: () =>
+      new ActionableError(
+        `${operation} timed out while binding the device session; target=watchos:${watch.deviceId}`,
+      ),
+  });
 }
 
 async function reserveWatchLifecycle(
@@ -139,8 +140,12 @@ async function reserveWatchLifecycle(
     { platform: "watchos", stableId: watch.deviceId },
     { name: watch.name, platform: "watchos", deviceId: watch.deviceId },
     deps.timer,
-    deadlineMs,
-    { requestAbortSignal: signal, operation: "start", coordinator: deps.lifecycleCoordinator },
+    {
+      deadlineMs,
+      requestAbortSignal: signal,
+      operation: "start",
+      coordinator: deps.lifecycleCoordinator,
+    },
   );
 }
 
@@ -201,6 +206,14 @@ function parseWatchStartArgs(rawArgs: object): WatchStartDeviceArgs {
 }
 
 export function defaultWatchLifecycle(): WatchSimulatorLifecycle {
-  const simctl = new SimCtlClient();
-  return new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl));
+  return watchLifecycleOver(new SimCtlClient());
+}
+
+/** The watch lifecycle over `simctl`; a cold watch boot is admitted like an iPhone boot. */
+export function watchLifecycleOver(
+  simctl: WatchLifecycleSimctl & WatchSimulatorSimctl,
+): WatchSimulatorLifecycle {
+  return new WatchSimulatorLifecycle(simctl, new WatchSimulatorInventory(simctl), {
+    run: (request, boot) => bootAdmissionServices.iosBootInstrumentation().run(request, boot),
+  });
 }

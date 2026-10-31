@@ -7,6 +7,8 @@ import dev.jasonpearson.automobile.protocol.BroadcastEventResponse
 import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
 import dev.jasonpearson.automobile.protocol.LifecycleEventResponse
+import dev.jasonpearson.automobile.protocol.NavigationEventData
+import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
@@ -126,5 +128,19 @@ private fun anrEventResponse(event: SdkAnrEvent): AnrEvent =
             osVersion = event.deviceInfo?.osVersion ?: "unknown",
             sdkInt = event.deviceInfo?.sdkInt ?: 0,
           ),
+      ),
+  )
+
+internal fun navigationEventResponse(event: TimestampedNavigationEvent): NavigationEventResponse =
+  NavigationEventResponse(
+    timestamp = event.timestamp,
+    event =
+      NavigationEventData(
+        destination = event.destination,
+        source = event.source,
+        arguments = event.arguments.takeIf { it.isNotEmpty() },
+        metadata = event.metadata.takeIf { it.isNotEmpty() },
+        applicationId = event.applicationId,
+        sequenceNumber = event.sequenceNumber,
       ),
   )

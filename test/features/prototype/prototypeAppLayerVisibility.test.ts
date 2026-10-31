@@ -46,7 +46,7 @@ function fixture(
     requests,
     capture,
     timer,
-    run: () => confirmPrototypeAppLayerVisibility(capture, timer, 7, signal, hiddenReason),
+    run: () => confirmPrototypeAppLayerVisibility(capture, timer, 7, { signal, hiddenReason }),
   };
 }
 describe("app-layer visibility confirmation", () => {

@@ -141,7 +141,7 @@ describe("managed-execution session liveness", () => {
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await manager.createSession(SESSION, DEVICE, "android", {
       stableDeviceId: "Pixel_managed_execution",
@@ -295,7 +295,7 @@ describe("managed-execution session liveness", () => {
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     await manager.getOrCreateSession(SESSION, undefined, undefined, {
       execution: {
@@ -455,7 +455,9 @@ describe("managed-execution session liveness", () => {
         await manager.adoptManagedExecutionLivenessPolicy(SESSION);
       }
       manager.stopCleanupTimer();
-      await persistence.markReleased(SESSION, "released", timer.now(), "daemon-restart");
+      await persistence.markReleased(SESSION, "released", timer.now(), {
+        reason: "daemon-restart",
+      });
       timer.setCurrentTime(30 * MINUTE);
       manager = new SessionManager(timer, persistence);
       await manager.rehydratePersistedSessions({

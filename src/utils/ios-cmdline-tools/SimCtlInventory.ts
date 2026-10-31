@@ -11,6 +11,7 @@ import {
   isDeviceAvailable,
   SimulatorList,
   simulatorModel,
+  type SimctlExecAsync,
 } from "./SimCtlSupport";
 
 import { parseSimctlRuntimes } from "./simctlRuntimes";
@@ -49,13 +50,7 @@ import { SimctlUnavailableError } from "./SimctlUnavailableError";
 
 export interface SimCtlInventoryContext {
   resolveRuntimeIdentifier(requestedVersion?: string, signal?: AbortSignal): Promise<string>;
-  execAsync: (
-    file: string,
-    args: string[],
-    maxBuffer?: number,
-    signal?: AbortSignal,
-    env?: NodeJS.ProcessEnv,
-  ) => Promise<ExecResult>;
+  execAsync: SimctlExecAsync;
   executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
   timer: Timer;
   hostArchitecture: string;
@@ -346,12 +341,9 @@ export class SimCtlInventory {
       // Direct xcrun (not a `simctl` subcommand), so it bypasses the
       // executeCommandArgv funnel; give it its own ambient leaf (see PerfContext).
       const result = await trackAmbient("xcrun --show-sdk-version", () =>
-        this.context.execAsync(
-          "xcrun",
-          ["--sdk", "iphonesimulator", "--show-sdk-version"],
-          undefined,
+        this.context.execAsync("xcrun", ["--sdk", "iphonesimulator", "--show-sdk-version"], {
           signal,
-        ),
+        }),
       );
       return result.stdout.trim();
     } catch (error) {

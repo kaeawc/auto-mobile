@@ -626,8 +626,7 @@ export class BrokerDeviceAcquisition {
           cleanup,
           this.backOutSessionReleases,
           () => this.deps.sessions.releaseSession(cleanup.sessionUuid),
-          "session release",
-          deadlineMs,
+          { step: "session release", deadlineMs },
         );
         if (this.closed) {
           return false;
@@ -655,8 +654,7 @@ export class BrokerDeviceAcquisition {
     cleanup: BindingBackOutCleanup,
     inFlight: WeakMap<BindingBackOutCleanup, Promise<T>>,
     start: () => Promise<T>,
-    step: string,
-    deadlineMs: number,
+    { step, deadlineMs }: { step: string; deadlineMs: number },
   ): Promise<T> {
     const remainingMs = deadlineMs - this.deps.timer.now();
     if (remainingMs <= 0) {
@@ -696,8 +694,7 @@ export class BrokerDeviceAcquisition {
         cleanup,
         this.backOutOwnerClears,
         () => registry.releaseExecution(cleanup.key, cleanup.sessionUuid),
-        "owner clear",
-        deadlineMs,
+        { step: "owner clear", deadlineMs },
       );
     if (this.backOutOwnerClears.has(cleanup)) {
       await clear();
@@ -708,8 +705,7 @@ export class BrokerDeviceAcquisition {
         cleanup,
         this.backOutOwnerReads,
         () => registry.getAssignment(cleanup.key),
-        "ownership read",
-        deadlineMs,
+        { step: "ownership read", deadlineMs },
       );
     if (this.backOutOwnerReads.has(cleanup)) {
       // An abandoned read may describe an older owner; consume it without using its result.

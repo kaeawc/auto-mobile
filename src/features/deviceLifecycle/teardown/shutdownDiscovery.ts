@@ -50,38 +50,33 @@ export async function getShutdownDiscovery(
   skipAndroidNameEnrichment = false,
 ) {
   const { deviceManager, device, timer, deadlineMs, requestAbortSignal, timeoutMs } = context;
-  return await runWithinShutdownDeadline(
-    device,
-    timer,
-    deadlineMs,
-    "platform discovery did not complete",
-    {
-      requestAbortSignal: requestAbortSignal ?? getAbortSignal(),
-      operation: async () => {
-        const discovery = await deviceManager.getBootedDevicesDetailed(device.platform, {
-          bypassAndroidDeviceListCache: true,
-          ...(device.platform === "ios" ? { bypassIosDeviceListCache: true } : {}),
-          ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
-        });
-        // FUNNEL 1: the kill/teardown preflight decides whether the pooled AVD
-        // label may be acted on destructively, so the pool must see this
-        // observation before that decision (#6863 review).
-        await reconcileDiscoveryObservation(discovery.devices, "shutdown-preflight", {
-          // This kill IS the discovering execution. Entering the quarantine
-          // cancels the pooled session's in-flight work, and without this
-          // exemption that includes the kill awaiting this very observation: it
-          // would lose the `runWithinShutdownDeadline` signal race and report a
-          // device-loss failure instead of reaching confirm-or-refuse
-          // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-          excludeExecutionId: getShutdownInitiatingExecutionId(),
-          signal: getAbortSignal(),
-          namesResolved: !skipAndroidNameEnrichment,
-        });
-        return discovery;
-      },
-      timeoutMs: timeoutMs,
+  return await runWithinShutdownDeadline(device, timer, deadlineMs, {
+    detail: "platform discovery did not complete",
+    requestAbortSignal: requestAbortSignal ?? getAbortSignal(),
+    operation: async () => {
+      const discovery = await deviceManager.getBootedDevicesDetailed(device.platform, {
+        bypassAndroidDeviceListCache: true,
+        ...(device.platform === "ios" ? { bypassIosDeviceListCache: true } : {}),
+        ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
+      });
+      // FUNNEL 1: the kill/teardown preflight decides whether the pooled AVD
+      // label may be acted on destructively, so the pool must see this
+      // observation before that decision (#6863 review).
+      await reconcileDiscoveryObservation(discovery.devices, "shutdown-preflight", {
+        // This kill IS the discovering execution. Entering the quarantine
+        // cancels the pooled session's in-flight work, and without this
+        // exemption that includes the kill awaiting this very observation: it
+        // would lose the `runWithinShutdownDeadline` signal race and report a
+        // device-loss failure instead of reaching confirm-or-refuse
+        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+        excludeExecutionId: getShutdownInitiatingExecutionId(),
+        signal: getAbortSignal(),
+        namesResolved: !skipAndroidNameEnrichment,
+      });
+      return discovery;
     },
-  );
+    timeoutMs: timeoutMs,
+  });
 }
 
 export const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
@@ -103,18 +98,13 @@ export async function androidOfflineHoldDetail(
     return undefined;
   }
   try {
-    const offline = await runWithinShutdownDeadline(
-      device,
-      timer,
-      deadlineMs,
-      "adb device-state read did not complete",
-      {
-        requestAbortSignal: requestAbortSignal ?? getAbortSignal(),
-        operation: async (signal, remainingMs) =>
-          await probe([device.deviceId], { signal, timeoutMs: remainingMs }),
-        timeoutMs,
-      },
-    );
+    const offline = await runWithinShutdownDeadline(device, timer, deadlineMs, {
+      detail: "adb device-state read did not complete",
+      requestAbortSignal: requestAbortSignal ?? getAbortSignal(),
+      operation: async (signal, remainingMs) =>
+        await probe([device.deviceId], { signal, timeoutMs: remainingMs }),
+      timeoutMs,
+    });
     return offline.has(device.deviceId) ? "adb still lists the device as offline" : undefined;
   } catch (error) {
     if (isShutdownTimeoutError(error) || requestAbortSignal?.aborted) {

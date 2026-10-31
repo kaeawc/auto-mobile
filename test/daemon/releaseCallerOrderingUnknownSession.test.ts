@@ -81,8 +81,10 @@ function harness(
         },
         state,
         {
-          cancelDeviceSessionExecutions: async () => 0,
-          cancelDeviceExecutions: async () => 0,
+          executions: {
+            cancelDeviceSessionExecutions: async () => 0,
+            cancelDeviceExecutions: async () => 0,
+          },
         },
       ),
   };

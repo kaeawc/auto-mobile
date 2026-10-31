@@ -55,9 +55,7 @@ export class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver
     resourceId?: string,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestAction(action, resourceId, undefined, undefined, {
-      signal,
-    });
+    return this.accessibilityService.requestAction(action, resourceId, undefined, { signal });
   }
 
   async requestNodeAction(
@@ -65,13 +63,7 @@ export class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver
     selector: AccessibilityNodeSelector,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestNodeAction(
-      action,
-      selector,
-      undefined,
-      undefined,
-      signal,
-    );
+    return this.accessibilityService.requestNodeAction(action, selector, { signal });
   }
 
   async supportsNodeActionSelectors(): Promise<boolean> {

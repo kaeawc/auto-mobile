@@ -59,12 +59,10 @@ describe("prediction reads follow the device's bound session graph (#10197)", ()
   async function sessionManager(sessionId: string): Promise<NavigationGraphManager> {
     const db = await createTestDatabase();
     sessionDbs.push(db);
-    const manager = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
-      undefined,
-      sessionId,
-    );
+    const manager = NavigationGraphManager.createForTesting(new NavigationRepository(db), {
+      testCoverageRepository: new TestCoverageRepository(db),
+      sessionUuid: sessionId,
+    });
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, manager);
     return manager;
   }
@@ -178,12 +176,10 @@ describe("prediction outcomes are recorded on the graph that produced the predic
   beforeEach(async () => {
     harness = await installInMemoryNavManager();
     sessionDb = await createTestDatabase();
-    sessionGraph = NavigationGraphManager.createForTesting(
-      new NavigationRepository(sessionDb),
-      new TestCoverageRepository(sessionDb),
-      undefined,
-      "session-a",
-    );
+    sessionGraph = NavigationGraphManager.createForTesting(new NavigationRepository(sessionDb), {
+      testCoverageRepository: new TestCoverageRepository(sessionDb),
+      sessionUuid: "session-a",
+    });
     NavigationGraphManager.setInstanceForSessionForTesting("session-a", sessionGraph);
     boundSessions.clear();
     boundSessions.set(SESSION_A_DEVICE.deviceId, "session-a");

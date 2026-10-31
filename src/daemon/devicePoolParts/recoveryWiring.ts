@@ -262,13 +262,17 @@ export class DevicePoolRecoveryWiring {
           this.state.recoveryCoordinator.setAndroidRecoveryHandoffOwner(deviceId, owner),
         clearAndroidRecoveryHandoffOwnerIfCurrent: (deviceId, owner) =>
           this.state.recoveryCoordinator.clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId, owner),
-        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner, lateShutdown) =>
+        finishAndroidRecoveryAttempt: (
+          avdName,
+          deviceIds,
+          retainImage,
+          { replacementHandoffOwner: owner, lateShutdownSettled: lateShutdown },
+        ) =>
           this.state.recoveryCoordinator.finishAndroidRecoveryAttempt(
             avdName,
             deviceIds,
             retainImage,
-            owner,
-            lateShutdown,
+            { replacementHandoffOwner: owner, lateShutdownSettled: lateShutdown },
           ),
         stopAndroidEmulatorForRecovery: (
           ...[

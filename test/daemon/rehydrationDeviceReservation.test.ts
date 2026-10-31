@@ -49,7 +49,7 @@ async function seedRestartReleasedRow(
     heartbeatTimeoutMs: 10_000,
     hasReceivedHeartbeat: true,
   });
-  await persistence.markReleased(sessionUuid, "released", 0, "daemon-restart");
+  await persistence.markReleased(sessionUuid, "released", 0, { reason: "daemon-restart" });
 }
 
 describe("restart recovery device reservation: the pool (#11294)", () => {

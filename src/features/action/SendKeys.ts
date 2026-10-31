@@ -689,10 +689,10 @@ export class SendKeys {
       if (
         capture &&
         !deferTerminalScreenshot(observation, (chosen, requestSignal) =>
-          capture(undefined, requestSignal ?? signal, chosen),
+          capture(undefined, { signal: requestSignal ?? signal, observation: chosen }),
         )
       ) {
-        await capture(undefined, signal, observation);
+        await capture(undefined, { signal, observation });
       }
       return observation;
     };

@@ -31,8 +31,7 @@ export class CtrlProxyClipboard {
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    { signal, onDispatch }: DispatchOptions = {},
+    { perf, signal, onDispatch }: DispatchOptions & { perf?: PerformanceTracker } = {},
   ): Promise<CtrlProxyClipboardResult & { acknowledged: boolean }> {
     const params: Record<string, unknown> = { action };
     if (text !== undefined) {

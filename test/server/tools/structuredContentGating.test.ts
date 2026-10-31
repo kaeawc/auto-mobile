@@ -68,13 +68,10 @@ describe("structuredContent gating (issue #2759)", () => {
       z.object({}),
       async () => createStructuredToolResponse(bigPayload()),
     );
-    ToolRegistry.register(
-      SCHEMA_TOOL,
-      "throwaway tool with outputSchema",
-      z.object({}),
-      async () => createStructuredToolResponse({ success: true, value: "hello" }),
-      { outputSchema: schemaResult },
-    );
+    ToolRegistry.register(SCHEMA_TOOL, "throwaway tool with outputSchema", z.object({}), {
+      handler: async () => createStructuredToolResponse({ success: true, value: "hello" }),
+      outputSchema: schemaResult,
+    });
 
     fixture = new McpTestFixture();
     await fixture.setup();

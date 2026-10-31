@@ -483,7 +483,10 @@ describe("DatabaseInspector", () => {
         response,
       );
 
-      const data = await inspector.getTableData(appId, databasePath, "users", 10, 50);
+      const data = await inspector.getTableData(appId, databasePath, "users", {
+        limit: 10,
+        offset: 50,
+      });
 
       expect(data.rows).toHaveLength(3);
       expect(fakeAdb.wasCommandExecuted("limit:s:'10'")).toBe(true);

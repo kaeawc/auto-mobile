@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { readTouchNodeCapture } from "../../../helpers/touchNodeCaptures";
+import { parseInputNodes } from "../../../../src/features/record/android/InputNodeDiscovery";
 import { DualTrackRecorder } from "../../../../src/features/record/android/DualTrackRecorder";
 import { buildScaler } from "../../../../src/features/record/android/AxisRanges";
 import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
@@ -9,6 +11,8 @@ import type {
   GestureEmitter,
   GestureEvent,
 } from "../../../../src/features/record/android/types";
+import { pointerSchema } from "../../../../src/server/pointerSchema";
+import type { TiltAxes } from "../../../../src/features/record/android/TouchNodeDiscovery";
 import type { BootedDevice } from "../../../../src/models";
 import { defaultAdbClientFactory } from "../../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbProcess } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -65,7 +69,7 @@ describe("DualTrackRecorder reading a touch and a pen node", () => {
     spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
     const timer = new FakeTimer();
     timer.advanceTime(1000);
-    const recorder = new DualTrackRecorder(device, undefined, noA11y, timer);
+    const recorder = new DualTrackRecorder(device, undefined, noA11y, { timer });
     await recorder.start();
     await Promise.resolve();
     await Promise.resolve();
@@ -96,7 +100,7 @@ describe("DualTrackRecorder reading a touch and a pen node", () => {
   });
 });
 
-describe("pressure does not change recorded plan steps", () => {
+describe("pressure in recorded plan steps", () => {
   const FINGER = (pressure: boolean): string[] => [
     "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
     "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
@@ -141,11 +145,148 @@ describe("pressure does not change recorded plan steps", () => {
       },
       stop: () => {},
     };
-    const recorder = new DualTrackRecorder(device, emitter, noA11y, new FakeTimer());
+    const recorder = new DualTrackRecorder(device, emitter, noA11y, { timer: new FakeTimer() });
     await recorder.start();
     emit!(gesture);
     return (await recorder.stop()).steps;
   }
+
+  test("captured node with BTN_STYLUS remains a multitouch node", () => {
+    const nodes = parseInputNodes(readTouchNodeCapture("getevent-p-touch-node-emulator-5600.txt"));
+    expect(nodes.touch).toMatchObject({
+      path: "/dev/input/event1",
+      pressureMin: 0,
+      pressureMax: 1024,
+    });
+    expect(nodes.pen).toEqual([]);
+  });
+
+  test("captured probe pressure normalizes before stylus plan export", async () => {
+    const classifier = new GestureClassifier({ toScreenPoint: (x, y) => ({ x, y }) }, 1, {
+      min: 0,
+      max: 4095,
+    });
+    classifier.feedFrame({
+      arrivedAt: 0,
+      releasedSlots: [],
+      activeSlots: [
+        {
+          slotId: 0,
+          trackingId: 1,
+          x: 500,
+          y: 2050,
+          pressure: 4000,
+          toolType: "stylus",
+          buttons: ["stylusPrimary"],
+        },
+      ],
+    });
+    classifier.feedFrame({
+      arrivedAt: 20,
+      releasedSlots: [],
+      activeSlots: [
+        {
+          slotId: 0,
+          trackingId: 1,
+          x: 700,
+          y: 2050,
+          pressure: 4000,
+          toolType: "stylus",
+          buttons: [],
+        },
+      ],
+    });
+    const gesture = classifier.feedFrame({ arrivedAt: 50, releasedSlots: [0], activeSlots: [] });
+    expect(gesture?.pressure?.mean).toBe(0.9768);
+    expect((await stepsFor(gesture!))[0].params.pointer).toEqual({
+      toolType: "stylus",
+      pressure: 0.9768,
+      buttons: ["primary"],
+    });
+  });
+
+  // Arithmetic inputs, not a device capture: Android centers raw tilt on each axis midpoint.
+  test.each([
+    {
+      name: "90 degree endpoint",
+      min: -90,
+      max: 90,
+      raw: 90,
+      resolution: 0,
+      expected: Math.PI / 2,
+    },
+    { name: "unsigned midpoint", min: 0, max: 127, raw: 64, resolution: 0, expected: 0.0123 },
+    { name: "signed midpoint", min: -90, max: 90, raw: 0, resolution: 0, expected: 0 },
+    { name: "units per radian", min: 0, max: 200, raw: 150, resolution: 100, expected: 0.6917 },
+  ])(
+    "$name exports a pointer accepted by the replay schema",
+    async ({ min, max, raw, resolution, expected }) => {
+      const axis = { min, max, resolution };
+      const classifier = new GestureClassifier(
+        { toScreenPoint: (x, y) => ({ x, y }) },
+        1,
+        undefined,
+        { x: axis, y: axis },
+      );
+      classifier.feedFrame({
+        arrivedAt: 0,
+        releasedSlots: [],
+        activeSlots: [
+          {
+            slotId: 0,
+            trackingId: 1,
+            x: 100,
+            y: 200,
+            pressure: 0,
+            toolType: "stylus",
+            tiltX: raw,
+            tiltY: raw,
+          },
+        ],
+      });
+      const gesture = classifier.feedFrame({ arrivedAt: 50, releasedSlots: [0], activeSlots: [] });
+      const pointer = (await stepsFor(gesture!))[0].params.pointer;
+      expect(pointer).toEqual({ toolType: "stylus", tilt: expected });
+      expect(pointerSchema.parse(pointer)).toEqual(pointer);
+    },
+  );
+
+  test.each([
+    { name: "missing metadata", axes: undefined },
+    { name: "degenerate range", axes: { x: { min: 0, max: 0 }, y: { min: 0, max: 127 } } },
+    { name: "nonfinite range", axes: { x: { min: NaN, max: 127 }, y: { min: 0, max: 127 } } },
+  ] satisfies { name: string; axes: TiltAxes | undefined }[])(
+    "$name omits tilt from the exported pointer",
+    async ({ axes }) => {
+      const classifier = new GestureClassifier(
+        { toScreenPoint: (x, y) => ({ x, y }) },
+        1,
+        undefined,
+        axes,
+      );
+      classifier.feedFrame({
+        arrivedAt: 0,
+        releasedSlots: [],
+        activeSlots: [
+          {
+            slotId: 0,
+            trackingId: 1,
+            x: 100,
+            y: 200,
+            pressure: 0,
+            toolType: "stylus",
+            tiltX: 64,
+            tiltY: 64,
+          },
+        ],
+      });
+      const gesture = classifier.feedFrame({ arrivedAt: 50, releasedSlots: [0], activeSlots: [] });
+      expect(gesture?.tilt).toBeUndefined();
+      const pointer = (await stepsFor(gesture!))[0].params.pointer;
+      expect(pointer).toEqual({ toolType: "stylus" });
+      expect(pointerSchema.parse(pointer)).toEqual(pointer);
+    },
+  );
 
   test("a pressured finger tap records the same step as an unpressured one", async () => {
     const withPressure = classify(FINGER(true));

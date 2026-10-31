@@ -3057,8 +3057,11 @@ describe("deleteDevice handler", () => {
         request("android", target, target),
         deps,
         undefined,
-        getDeviceTeardownService(deps),
-        { lifecycleLease: lease, internal: { unlaunchedCreatedAvd: { stableId: target } } },
+        {
+          teardownService: getDeviceTeardownService(deps),
+          lifecycleLease: lease,
+          internal: { unlaunchedCreatedAvd: { stableId: target } },
+        },
       );
       expect(responseBody(response).state).toBe("destroyed");
       expect(manager.destroyRequests).toHaveLength(1);
@@ -3131,8 +3134,11 @@ describe("deleteDevice handler", () => {
           request("android", target, target),
           deps,
           undefined,
-          getDeviceTeardownService(deps),
-          { lifecycleLease: lease, internal: { unlaunchedCreatedAvd: { stableId: target } } },
+          {
+            teardownService: getDeviceTeardownService(deps),
+            lifecycleLease: lease,
+            internal: { unlaunchedCreatedAvd: { stableId: target } },
+          },
         );
         if (hasSibling) {
           expect(responseBody(response).failure).toMatchObject({ code: "runtime_stop_unproven" });
@@ -3161,8 +3167,11 @@ describe("deleteDevice handler", () => {
         request("android", target, target),
         deps,
         undefined,
-        getDeviceTeardownService(deps),
-        { lifecycleLease: lease, internal: { unlaunchedCreatedAvd: { stableId: target } } },
+        {
+          teardownService: getDeviceTeardownService(deps),
+          lifecycleLease: lease,
+          internal: { unlaunchedCreatedAvd: { stableId: target } },
+        },
       );
       expect(responseBody(response).failure).toMatchObject({ code: "runtime_stop_unproven" });
       expect(stopper.describeAvdCalls).toHaveLength(1);

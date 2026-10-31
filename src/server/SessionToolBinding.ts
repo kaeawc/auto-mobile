@@ -153,16 +153,14 @@ export class SessionToolBinding implements SessionToolBindingLocalState {
     }
     if (this.initialSessionUuid) {
       // A named foreign device may be deferred to the registry; a platform alone cannot.
-      assertBoundSessionMatches(
-        lookup(this.initialSessionUuid),
-        matches,
-        fallback,
-        deferForeignDevice && deviceId !== undefined,
-        { deviceId, platform },
-      );
+      assertBoundSessionMatches(lookup(this.initialSessionUuid), matches, fallback, {
+        deferForeignDevice: deferForeignDevice && deviceId !== undefined,
+        requested: { deviceId, platform },
+      });
       return fallback;
     }
-    return this.resolveAcquiredDeviceSession(mcpSessionId, lookup, matches, deviceId, {
+    return this.resolveAcquiredDeviceSession(mcpSessionId, lookup, matches, {
+      deviceId,
       rebindFallback: fallback,
       selectingActiveDevice,
     });
@@ -172,11 +170,11 @@ export class SessionToolBinding implements SessionToolBindingLocalState {
     mcpSessionId: string | undefined,
     lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
     matches: (device: { deviceId: string; platform: string }) => boolean,
-    deviceId: string | undefined,
     {
+      deviceId,
       rebindFallback,
       selectingActiveDevice = false,
-    }: { rebindFallback?: string; selectingActiveDevice?: boolean },
+    }: { deviceId?: string; rebindFallback?: string; selectingActiveDevice?: boolean },
   ): string | undefined {
     const candidates = [...this.acquiredSessionUuids(mcpSessionId)].flatMap((sessionUuid) => {
       const device = lookup(sessionUuid);
@@ -367,8 +365,10 @@ function assertBoundSessionMatches(
   device: { deviceId: string; platform: string } | undefined,
   matches: (device: { deviceId: string; platform: string }) => boolean,
   sessionUuid: string | undefined,
-  deferForeignDevice: boolean,
-  requested: { deviceId?: string; platform?: string },
+  {
+    deferForeignDevice,
+    requested,
+  }: { deferForeignDevice: boolean; requested: { deviceId?: string; platform?: string } },
 ): void {
   if (!device || matches(device) || deferForeignDevice) {
     return;

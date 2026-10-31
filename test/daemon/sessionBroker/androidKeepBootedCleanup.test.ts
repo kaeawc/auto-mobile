@@ -259,14 +259,16 @@ describe("Android unconditional keep-booted cleaning", () => {
         baseline,
         context,
         async (command) => (await adb.executeCommand(command)).stdout.trim(),
-        async (mutation) => {
-          reverted.push(mutation);
-          await port.revert(mutation, context);
-          if (verify && mutation.key.startsWith("display:")) {
-            reply("shell wm density", "Physical density: 420");
-            reply("shell wm size", "Physical size: 1080x1920");
-            reply("shell cmd uimode night", "Night mode: no");
-          }
+        {
+          revert: async (mutation) => {
+            reverted.push(mutation);
+            await port.revert(mutation, context);
+            if (verify && mutation.key.startsWith("display:")) {
+              reply("shell wm density", "Physical density: 420");
+              reply("shell wm size", "Physical size: 1080x1920");
+              reply("shell cmd uimode night", "Night mode: no");
+            }
+          },
         },
       );
     return { adb, reply, baseline, reverted, clean };

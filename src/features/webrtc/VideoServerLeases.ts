@@ -210,13 +210,21 @@ export class VideoServerLeases {
   private readonly teardownTimeoutMs: number;
   private readonly withTimeout: VideoServerLeaseTeardown["withTimeout"];
 
+  private readonly activeVideoSessionRegistry: ActiveVideoSessionRegistry;
+
   constructor(
     private readonly options: PersistentEncoderH264SourceOptions,
     private readonly adbFactory: VideoSourceAdbFactory,
     private readonly timer: Timer,
-    private readonly activeVideoSessionRegistry: ActiveVideoSessionRegistry,
-    teardown: VideoServerLeaseTeardown,
+    {
+      activeVideoSessionRegistry,
+      teardown,
+    }: {
+      activeVideoSessionRegistry: ActiveVideoSessionRegistry;
+      teardown: VideoServerLeaseTeardown;
+    },
   ) {
+    this.activeVideoSessionRegistry = activeVideoSessionRegistry;
     this.teardownTimeoutMs = teardown.timeoutMs;
     this.withTimeout = teardown.withTimeout;
   }

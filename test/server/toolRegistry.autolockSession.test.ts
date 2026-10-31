@@ -64,7 +64,10 @@ describe("ToolRegistry autolock session enforcement", () => {
   });
 
   function registerTool(name: string, options: { deviceReadOnly?: boolean } = {}) {
-    ToolRegistry.registerDeviceAware(name, name, schema, async () => ({ success: true }), options);
+    ToolRegistry.registerDeviceAware(name, name, schema, {
+      handler: async () => ({ success: true }),
+      ...options,
+    });
     const tool = ToolRegistry.getTool(name);
     expect(tool).toBeDefined();
     return tool!;

@@ -256,12 +256,9 @@ describe("DevicePoolRefresh", () => {
         recovery.coordinator.liftUnconfirmedRecoveringAndroidImages(discovery, generation),
       );
       recovery.coordinator.setRecoveringAndroidImage("Pixel", image);
-      recovery.coordinator.finishAndroidRecoveryAttempt(
-        "Pixel",
-        new Set([booted.deviceId]),
-        true,
-        Symbol("attempt"),
-      );
+      recovery.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set([booted.deviceId]), true, {
+        replacementHandoffOwner: Symbol("attempt"),
+      });
       return { ...h, recovery };
     };
     const fenceRejectedKill = (h: ReturnType<typeof wired>, device: BootedDevice) => {

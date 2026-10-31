@@ -126,7 +126,6 @@ describe("MultiPlatformDeviceManager", () => {
           getBootedSimulatorsChecked: async () => [iosDevice],
         }),
         createFakeAndroidEmulator({ getBootedDevicesChecked: androidDiscovery }),
-        undefined,
         {
           physicalIosDevices: {
             listConnectedDevices: async () => ({ devices: [], complete: true }),
@@ -239,7 +238,6 @@ describe("MultiPlatformDeviceManager", () => {
         new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
-        undefined,
         { physicalIosDevices: fakeLister },
       );
     }
@@ -266,7 +264,6 @@ describe("MultiPlatformDeviceManager", () => {
           new FakeAdbClient(),
           fakeSimctl,
           createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
-          undefined,
           { physicalIosDevices: hangingLister },
         ).withPhysicalIosScanBudget(3_000, timer);
 
@@ -547,7 +544,6 @@ describe("MultiPlatformDeviceManager", () => {
           new FakeAdbClient(),
           fakeSimctl,
           createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
-          undefined,
           {
             physicalIosDevices: {
               listConnectedDevices: async () => {
@@ -624,7 +620,6 @@ describe("MultiPlatformDeviceManager", () => {
         new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
-        undefined,
         {
           physicalIosDevices: {
             listConnectedDevices: async () => ({ devices: [], complete: true }),
@@ -685,7 +680,6 @@ describe("MultiPlatformDeviceManager", () => {
         new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
-        undefined,
         { physicalIosDevices: { listConnectedDevices: () => physicalDiscovery } },
       );
 
@@ -721,7 +715,6 @@ describe("MultiPlatformDeviceManager", () => {
         new FakeAdbClient(),
         fakeSimctl,
         createFakeAndroidEmulator({}),
-        undefined,
         {
           physicalIosDevices: {
             listConnectedDevices: async (options) => {
@@ -1828,8 +1821,7 @@ describe("MultiPlatformDeviceManager", () => {
       new FakeAdbClient(),
       fakeSimctl,
       createFakeAndroidEmulator({}),
-      lifecycleCoordinator,
-      { timer },
+      { lifecycleCoordinator, timer },
     );
 
     await manager.destroyDevice(
@@ -1905,7 +1897,6 @@ describe("discovery classifies tooling that is not installed apart from a failed
           getBootedSimulatorsChecked: async () => [sim],
         }),
       createFakeAndroidEmulator({ getBootedDevicesChecked: seams.adb ?? (async () => []) }),
-      undefined,
       {
         physicalIosDevices: seams.devicectl ?? {
           listConnectedDevices: async () => ({ devices: [], complete: true }),

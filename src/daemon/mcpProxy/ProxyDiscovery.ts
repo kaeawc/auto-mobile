@@ -545,8 +545,7 @@ export class ProxyDiscovery {
           ),
       this.port.sessionUuidFromArgs(forwardedParams),
       allowReleasedSession,
-      true,
-      { signal },
+      { fenceSessionNotFoundOnRetry: true, signal },
     );
     // Recovery is shared with siblings; abandon this wait without cancelling it.
     return await raceWithDeadline(forwarding, {

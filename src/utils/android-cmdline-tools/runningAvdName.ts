@@ -36,8 +36,7 @@ export async function resolveRunningAvdNameOnce(
   deps: RunningAvdNameDeps,
   device: BootedDevice,
   infoTimeoutMs: number,
-  signal?: AbortSignal,
-  consoleExclusiveOwner = false,
+  { signal, consoleExclusiveOwner }: { signal?: AbortSignal; consoleExclusiveOwner?: boolean } = {},
 ): Promise<RunningAvdNameResult> {
   const { consoleBusyRegistry, adbFactory, timer } = deps;
   const deviceId = device.deviceId;

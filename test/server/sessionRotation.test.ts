@@ -730,9 +730,7 @@ describe("session rotation restoration", () => {
       await rotateHandler(
         device,
         { orientation: "landscape", lockOrientation: true, sessionUuid: "rotation-session" },
-        undefined,
-        undefined,
-        interactionDeps,
+        { deps: interactionDeps },
       );
       expect(h.adb.auto).toBe(0);
       expect(h.manager.getRotation("rotation-session")).toEqual({

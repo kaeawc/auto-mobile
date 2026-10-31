@@ -116,12 +116,10 @@ describe("CtrlProxyVoiceOver", function () {
   describe("requestVoiceOverState", function () {
     test("returns enabled=true when VoiceOver is running", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.requestVoiceOverState();
@@ -154,12 +152,10 @@ describe("CtrlProxyVoiceOver", function () {
 
     test("returns enabled=false when VoiceOver is not running", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.requestVoiceOverState();
@@ -188,12 +184,10 @@ describe("CtrlProxyVoiceOver", function () {
     });
 
     test("returns success=false and enabled=false when not connected", async function () {
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: createInstantFailureWebSocketFactory(fakeTimer),
+        timer: fakeTimer,
+      });
 
       try {
         const result = await client.requestVoiceOverState();
@@ -218,12 +212,10 @@ describe("CtrlProxyVoiceOver", function () {
     // probe is never sent to the device (issue #6306 review, P1).
     test("never dispatches when the caller's signal is already aborted", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       const controller = new AbortController();
       controller.abort(new Error("outer deadline exceeded"));
 
@@ -254,12 +246,10 @@ describe("CtrlProxyVoiceOver", function () {
         async (failure) => {
           const timer = new FakeTimer();
           const { factory, getSocket } = createCapturingFactory(timer);
-          const client = IOSCtrlProxyClient.createForTesting(
-            testDevice,
-            serverPort,
-            factory,
+          const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+            wsFactory: factory,
             timer,
-          );
+          });
           const controller = new AbortController();
           try {
             const pending = runWithAbortSignal(controller.signal, () =>
@@ -354,12 +344,10 @@ describe("CtrlProxyVoiceOver", function () {
 
     test.each(["action_result", "error"])("%s runner refusal is acknowledged", async (type) => {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       try {
         const pending = client.requestVoiceOverActivate("Submit", "activate");
         const socket = await waitForSocket(getSocket);
@@ -482,12 +470,10 @@ describe("CtrlProxyVoiceOver", function () {
     // `request_voiceover_action` the runner rejected as "Unknown command type".
     test("sends request_action (not request_voiceover_action) and passes label + action", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.requestVoiceOverActivate("Submit", "activate");
@@ -522,25 +508,17 @@ describe("CtrlProxyVoiceOver", function () {
 
     test("maps long_press through the same request_action command", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const bounds = { left: 0, top: 50, right: 50, bottom: 90 };
-        const resultPromise = client.requestVoiceOverActivate(
-          "Row",
-          "long_press",
-          5000,
-          undefined,
-          {
-            bounds,
-            duration: 1750,
-          },
-        );
+        const resultPromise = client.requestVoiceOverActivate("Row", "long_press", 5000, {
+          bounds,
+          duration: 1750,
+        });
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -596,12 +574,10 @@ describe("CtrlProxyVoiceOver", function () {
     // presence specifically.
     test("resolves gracefully when the device does not support request_action", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await client.ensureConnected();
@@ -635,20 +611,17 @@ describe("CtrlProxyVoiceOver", function () {
   describe("requestAction", function () {
     test("sends long-press duration with the resource-id action", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.requestAction(
           "long_press",
           "com.test.app:id/submit_button",
           undefined,
-          5000,
-          { duration: 1750 },
+          { timeoutMs: 5000, duration: 1750 },
         );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
@@ -674,23 +647,18 @@ describe("CtrlProxyVoiceOver", function () {
 
     test("does not dispatch a cancelled system-alert action", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       const controller = new AbortController();
       controller.abort(new Error("openLink deadline exceeded"));
 
       try {
-        const result = await client.requestAction(
-          "system_alert_accept",
-          undefined,
-          undefined,
-          5000,
-          { abortSignal: controller.signal },
-        );
+        const result = await client.requestAction("system_alert_accept", undefined, undefined, {
+          timeoutMs: 5000,
+          abortSignal: controller.signal,
+        });
         const sentTypes = (getSocket()?.sentMessages ?? []).map(
           (raw) => (JSON.parse(raw) as { type?: string }).type,
         );
@@ -704,17 +672,16 @@ describe("CtrlProxyVoiceOver", function () {
 
     test("rejects a cancelled system-alert action before a late response can succeed", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
       const controller = new AbortController();
       const cancellation = new Error("openLink deadline exceeded");
 
       try {
-        const result = client.requestAction("system_alert_accept", undefined, undefined, 5000, {
+        const result = client.requestAction("system_alert_accept", undefined, undefined, {
+          timeoutMs: 5000,
           abortSignal: controller.signal,
         });
         const socket = await waitForSocket(getSocket);
@@ -745,7 +712,10 @@ describe("CtrlProxyVoiceOver", function () {
       async (mode) => {
         const timer = new FakeTimer();
         const { factory, getSocket } = createCapturingFactory(timer);
-        const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, timer);
+        const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+          wsFactory: factory,
+          timer,
+        });
         const controller = new AbortController();
         let dispatchCount = 0;
         try {
@@ -838,12 +808,10 @@ describe("CtrlProxyVoiceOver", function () {
       "Element not found: semantic link 'T' occurrence 0",
     ])("preserves the runner error reply verbatim: %s", async function (error) {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.requestActivateAccessibilityLink({
@@ -874,12 +842,10 @@ describe("CtrlProxyVoiceOver", function () {
 
     test("reports an old runner's unknown semantic-link command as unsupported", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.requestActivateAccessibilityLink({
@@ -916,12 +882,10 @@ describe("CtrlProxyVoiceOver", function () {
 
     test("preserves a successful action_result and semantic-link parameters", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.requestActivateAccessibilityLink({
@@ -962,12 +926,10 @@ describe("CtrlProxyVoiceOver", function () {
 
     test("reports a capability miss before dispatch as unsupported", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         await client.ensureConnected();
@@ -1001,12 +963,10 @@ describe("CtrlProxyVoiceOver", function () {
   describe("requestSetVoiceOverEnabled", function () {
     test("emits set_voiceover_state with the enabled param and resolves on success", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.requestSetVoiceOverEnabled(true);
@@ -1038,12 +998,10 @@ describe("CtrlProxyVoiceOver", function () {
 
     test("resolves a runner failure as a typed result (never a silent success)", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        fakeTimer,
-      );
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
 
       try {
         const resultPromise = client.requestSetVoiceOverEnabled(false);

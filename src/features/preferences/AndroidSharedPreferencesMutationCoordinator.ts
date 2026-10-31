@@ -10,8 +10,7 @@ export interface AndroidSharedPreferencesMutationCoordinator {
     deviceId: string,
     appId: string,
     fileName: string,
-    mutation: () => Promise<T>,
-    userId?: number,
+    options: { mutation: () => Promise<T>; userId?: number },
   ): Promise<T>;
 }
 
@@ -22,8 +21,7 @@ export class PerFileAndroidSharedPreferencesMutationCoordinator implements Andro
     deviceId: string,
     appId: string,
     fileName: string,
-    mutation: () => Promise<T>,
-    userId = 0,
+    { mutation, userId = 0 }: { mutation: () => Promise<T>; userId?: number },
   ): Promise<T> {
     const key = JSON.stringify(
       userId === 0 ? [deviceId, appId, fileName] : [deviceId, appId, fileName, userId],

@@ -53,7 +53,8 @@ async function rig(fallback?: AndroidResetStrategy, resetTimeoutMs?: number) {
     }
   };
   const capture = (sessionId: string, fresh = false) =>
-    baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, sessionId, {
+    baseline.capture("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, {
+      sessionId,
       stableDeviceId: "stable-avd",
       timer,
       timeoutMs: 60_000,
@@ -61,7 +62,7 @@ async function rig(fallback?: AndroidResetStrategy, resetTimeoutMs?: number) {
       fresh,
     });
   const reset = () =>
-    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, assertOwned);
+    baseline.reset("resource-a", ANDROID_RESET_DEVICE, ANDROID_RESET_PROFILE, { assertOwned });
   const scope = () => ({
     deviceId: ANDROID_RESET_DEVICE.deviceId,
     sessionUuid: "session-a",

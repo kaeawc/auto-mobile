@@ -50,8 +50,7 @@ describe("DeviceGestureRecordingSocketServer user-input capture contract (#11919
     undefined,
     timer,
     { authorize: () => {} },
-    { assertDeviceActionable: () => {} },
-    { bindingGate: async () => {} },
+    { admissionGate: { assertDeviceActionable: () => {} }, bindingGate: async () => {} },
   );
   let drainInFlightStop: (() => Promise<void>) | undefined;
 
@@ -80,15 +79,18 @@ describe("DeviceGestureRecordingSocketServer user-input capture contract (#11919
       { deviceId: "fake-recording", name: "Fake", platform: "android" },
       timer,
       new CountingIdGenerator(),
-      () => ({
-        start: async () => {},
-        stop: () => {
-          stopStarted.resolve();
-          return stopGate.promise;
-        },
-        stepCount: 0,
-      }),
-      { ownerSessionUuid: sessionUuid, baseSessionUuid: (uuid) => uuid.split(":")[0] },
+      {
+        recorderFactory: () => ({
+          start: async () => {},
+          stop: () => {
+            stopStarted.resolve();
+            return stopGate.promise;
+          },
+          stepCount: 0,
+        }),
+        ownerSessionUuid: sessionUuid,
+        baseSessionUuid: (uuid) => uuid.split(":")[0],
+      },
     );
     const request = { command: "stop", recordingId: active.recordingId, sessionUuid } as const;
     stops.push(server.invoke(request));
@@ -132,11 +134,13 @@ describe("DeviceGestureRecordingSocketServer user-input capture contract (#11919
         { deviceId: "fake-recording", name: "Fake", platform: "android" },
         timer,
         new CountingIdGenerator(),
-        () => ({
-          start: async () => {},
-          stop: async () => ({ steps: [], stepCount: 0 }),
-          stepCount: 0,
-        }),
+        {
+          recorderFactory: () => ({
+            start: async () => {},
+            stop: async () => ({ steps: [], stepCount: 0 }),
+            stepCount: 0,
+          }),
+        },
       );
       const response = await server.invoke({ command, recordingId: active.recordingId });
       if (command === "status") {
@@ -188,12 +192,9 @@ function quarantineGate(deviceId: string): DeviceAdmissionGate {
 describe("DeviceGestureRecordingSocketServer device admission (issue #6863)", () => {
   test("refuses a start on a quarantined serial before any device work", async () => {
     const calls: StreamAuthorizeInput[] = [];
-    const server = new TestableServer(
-      undefined,
-      undefined,
-      recordingAuthenticator(calls),
-      quarantineGate("emu-1"),
-    );
+    const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls), {
+      admissionGate: quarantineGate("emu-1"),
+    });
     await expect(
       server.invoke({
         command: "start",
@@ -231,7 +232,8 @@ describe("DeviceGestureRecordingSocketServer gates the resolved device before re
         throw new ActionableError(`Refusing ${purpose} on device '${candidate}'`);
       },
     };
-    const server = new TestableServer(undefined, undefined, recordingAuthenticator([]), gate, {
+    const server = new TestableServer(undefined, undefined, recordingAuthenticator([]), {
+      admissionGate: gate,
       deviceResolution: resolution,
     });
 
@@ -262,7 +264,8 @@ describe("DeviceGestureRecordingSocketServer gates the resolved device before re
         order.push(`gate:${candidate}`);
       },
     };
-    const server = new TestableServer(undefined, undefined, recordingAuthenticator([]), gate, {
+    const server = new TestableServer(undefined, undefined, recordingAuthenticator([]), {
+      admissionGate: gate,
       deviceResolution: resolution,
     });
 
@@ -299,9 +302,7 @@ describe("DeviceGestureRecordingSocketServer authorization (issue #4752)", () =>
       "device gesture recording",
       {} as NodeJS.ProcessEnv,
     );
-    const server = new TestableServer(undefined, undefined, auth, undefined, {
-      deviceResolution: resolution,
-    });
+    const server = new TestableServer(undefined, undefined, auth, { deviceResolution: resolution });
 
     await expect(server.invoke({ command: "start", sessionUuid: "live" })).rejects.toThrow(
       /different daemon session/,
@@ -444,7 +445,7 @@ test("recording stop cannot disguise another device as the caller's own", async 
     { deviceId: "other-device", platform: "android", name: "Fake" },
     timer,
     new CountingIdGenerator(),
-    () => recorder,
+    { recorderFactory: () => recorder },
   );
   const auth = new SessionScopedStreamAuthenticator(
     () => ({
@@ -492,7 +493,8 @@ describe("DeviceGestureRecordingSocketServer broker-binding exclusion (#11352)",
         throw new ActionableError("device_assigned_to_binding");
       }
     };
-    const server = new TestableServer(undefined, undefined, recordingAuthenticator([]), openGate, {
+    const server = new TestableServer(undefined, undefined, recordingAuthenticator([]), {
+      admissionGate: openGate,
       deviceResolution: resolution,
       bindingGate: slotGate,
     });
@@ -528,12 +530,9 @@ describe("DeviceGestureRecordingSocketServer broker-binding exclusion (#11352)",
       },
       stepCount: 1,
     };
-    const active = await startDeviceGestureRecording(
-      slotDevice,
-      timer,
-      new CountingIdGenerator(),
-      () => recorder,
-    );
+    const active = await startDeviceGestureRecording(slotDevice, timer, new CountingIdGenerator(), {
+      recorderFactory: () => recorder,
+    });
     const { order, server } = harness(true);
     try {
       await expect(server.invoke({ command: "stop", sessionUuid: "live" })).rejects.toThrow(
@@ -563,7 +562,7 @@ test("socket stop preserves a partial-plan warning in its existing error field",
     { deviceId: "fake-device", platform: "android", name: "Fake" },
     timer,
     new CountingIdGenerator(),
-    () => recorder,
+    { recorderFactory: () => recorder },
   );
   const server = new TestableServer(undefined, timer, recordingAuthenticator([]));
   try {

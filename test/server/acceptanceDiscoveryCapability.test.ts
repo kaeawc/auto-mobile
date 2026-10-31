@@ -61,13 +61,13 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
       TOOL,
       "reports whether the daemon accepted a trusted acceptance presentation order",
       z.object({}).strict(),
-      async (args: unknown) =>
-        createStructuredToolResponse({
-          success: true,
-          receivedOrder:
-            (args as Record<string, unknown>)[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM] ?? null,
-        }),
       {
+        handler: async (args: unknown) =>
+          createStructuredToolResponse({
+            success: true,
+            receivedOrder:
+              (args as Record<string, unknown>)[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM] ?? null,
+          }),
         outputSchema: z.object({
           success: z.boolean(),
           receivedOrder: z.enum(["forward", "reverse"]).nullable(),

@@ -325,7 +325,7 @@ describe("device acquisition wait deadlines", () => {
   for (const stage of ["upgrade", "uninstall"] as const) {
     arranged(`cancelled APK ${stage} invalidates the installed cache`, async () => {
       const adb = new FakeAdbExecutor();
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(android, adb, timer);
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(android, adb, { timer });
       const listing = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
       adb.setCommandResponse(
         listing,
@@ -386,7 +386,7 @@ describe("device acquisition wait deadlines", () => {
         const device = platform === "android" ? android : ios;
         await pool.addDevice(device);
         const adb = new FakeAdbExecutor();
-        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(android, adb, timer);
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(android, adb, { timer });
         let stageSignal: AbortSignal | undefined;
         const gate = Promise.withResolvers<void>();
         const execute = adb.executeCommand.bind(adb);

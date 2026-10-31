@@ -117,7 +117,7 @@ describe("iOS text transport safety", () => {
           ? text.requestSetText("a".repeat(1000), options)
           : operation === "clear"
             ? text.requestClearText(undefined, undefined, undefined, options)
-            : text.requestAppendText("a".repeat(1000), undefined, undefined, undefined, options);
+            : text.requestAppendText("a".repeat(1000), undefined, undefined, { ...options });
       await flush();
       expect(dispatches).toBe(1);
       h.advanceTime(2999);
@@ -136,7 +136,7 @@ describe("iOS text transport safety", () => {
         return ["request_append_text"];
       },
     });
-    const result = await text.requestAppendText("a", undefined, undefined, undefined, {
+    const result = await text.requestAppendText("a", undefined, undefined, {
       deadlineMs: h.timer.now() + 5,
     });
     expect(result).toEqual({
@@ -161,7 +161,7 @@ describe("iOS text transport safety", () => {
           ? text.requestSetText("hello", options)
           : operation === "clear"
             ? text.requestClearText(undefined, undefined, undefined, options)
-            : text.requestAppendText("hello", undefined, undefined, undefined, options);
+            : text.requestAppendText("hello", undefined, undefined, { ...options });
       await flush();
       controller.abort();
       expect(await pending).toMatchObject({ success: false, retryable: false });
@@ -237,12 +237,9 @@ describe("CtrlProxyText requestAppendText", () => {
 
   test("includes a frame context when supplied", async () => {
     const harness = createIosDelegateHarness({ supportedCommands: ["request_append_text"] });
-    const pending = new CtrlProxyText(harness.context).requestAppendText(
-      "a",
-      5000,
-      undefined,
-      "ios:7",
-    );
+    const pending = new CtrlProxyText(harness.context).requestAppendText("a", 5000, undefined, {
+      frameContext: "ios:7",
+    });
     await flush();
 
     expect(harness.sentMessages[0]).toMatchObject({

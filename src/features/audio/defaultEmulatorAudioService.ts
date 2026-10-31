@@ -77,7 +77,6 @@ export function createEmulatorAudioService(): EmulatorAudioService {
         }),
       discovery,
       defaultIdGenerator,
-      undefined,
       {
         resolveSetupUser: async (deviceId) => {
           const adb = defaultAdbClientFactory.create({

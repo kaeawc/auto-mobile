@@ -42,7 +42,8 @@ describe("device mutation tool coverage", () => {
 
   test("new hidden mutating tool fails the guard instead of silently gaining reset coverage", () => {
     const registry = new ToolRegistryClass();
-    registry.registerDeviceAware("newMutation", "x", z.object({}), async () => ({ content: [] }), {
+    registry.registerDeviceAware("newMutation", "x", z.object({}), {
+      handler: async () => ({ content: [] }),
       hidden: true,
     });
     expect(mutationToolCoverageViolations(registry.getEveryRegisteredTool())).toEqual([

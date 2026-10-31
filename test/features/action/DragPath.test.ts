@@ -52,7 +52,7 @@ function fakeClient(
         ? { success: false, totalTimeMs: 0, error: "lost" }
         : ok();
     },
-    requestGestureEnd: async (_id, x, y, cancel) => {
+    requestGestureEnd: async (_id, x, y, { cancel } = {}) => {
       frames.push({ kind: "end", at: timer.now(), x, y, cancel });
       return behavior.failEnd && !cancel ? { success: false, totalTimeMs: 0, error: "x" } : ok();
     },
@@ -282,7 +282,7 @@ describe("runDragPathStroke", () => {
         await timer.sleep(2000);
         throw new Error("Gesture start timed out");
       },
-      requestGestureEnd: async (_id, x, y, cancel) => {
+      requestGestureEnd: async (_id, x, y, { cancel } = {}) => {
         frames.push({ kind: "end", at: timer.now(), x, y, cancel });
         return ok();
       },

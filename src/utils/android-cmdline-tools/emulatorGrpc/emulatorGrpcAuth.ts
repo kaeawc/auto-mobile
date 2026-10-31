@@ -15,7 +15,8 @@ export interface GrpcAuthorizer {
   dispose(): Promise<void>;
 }
 
-const JWT_ISSUER = "AutoMobile";
+// The emulator's default allowlist only admits Studio-style issuers.
+const JWT_ISSUER = "android-studio";
 const JWT_LIFETIME_SECONDS = 15 * 60;
 const KEY_ACCEPT_POLLS = 10;
 const KEY_ACCEPT_POLL_MS = 100;
@@ -35,19 +36,27 @@ export class JwtGrpcAuthorizer implements GrpcAuthorizer {
   private registration: Promise<{ kid: string; privateKey: KeyObject }> | undefined;
   private keyFile: string | undefined;
 
+  private readonly ids: IdGenerator;
+  private readonly timer: Pick<Timer, "now" | "sleep">;
+
   constructor(
     private readonly jwksDir: string,
     private readonly activeJwksFile: string,
     private readonly fs: JwtKeyFs,
-    private readonly ids: IdGenerator = defaultIdGenerator,
-    private readonly timer: Pick<Timer, "now" | "sleep"> = defaultTimer,
-  ) {}
+    {
+      ids = defaultIdGenerator,
+      timer = defaultTimer,
+    }: { ids?: IdGenerator; timer?: Pick<Timer, "now" | "sleep"> } = {},
+  ) {
+    this.ids = ids;
+    this.timer = timer;
+  }
 
   async authorization(method: string): Promise<string> {
     this.registration ??= this.register();
     const { kid, privateKey } = await this.registration;
     const issuedAt = Math.floor(this.timer.now() / 1000);
-    const header = base64Url(JSON.stringify({ alg: "ES512", typ: "JWT", kid }));
+    const header = base64Url(JSON.stringify({ alg: "ES512", kid }));
     const payload = base64Url(
       JSON.stringify({
         iss: JWT_ISSUER,

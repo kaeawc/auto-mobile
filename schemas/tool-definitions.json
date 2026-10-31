@@ -5745,7 +5745,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Drag a finger (or, with pointer, a stylus on Android 13+) along a polyline with segment timing, an initial hold and a release hold.",
+    "description": "Drag a finger (or, with pointer, a stylus on Android 12+) along a polyline with segment timing, an initial hold and a release hold.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -5825,30 +5825,30 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger. A plain tap or swipe needs Android 12+ (API 31); pressure other than 1, tilt, orientation, buttons and any dragPath need Android 13+ (stylus_input_v1)",
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1",
               "type": "string",
               "enum": ["stylus"]
             },
             "pressure": {
-              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 13+) and is refused before input without it",
+              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) and is refused before input without it",
               "type": "number",
               "minimum": 0,
               "maximum": 1
             },
             "tilt": {
-              "description": "Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 13+)",
+              "description": "Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 12+)",
               "type": "number",
               "minimum": 0,
               "maximum": 1.5707963267948966
             },
             "orientation": {
-              "description": "Stylus orientation in radians, -PI to PI (Android 13+)",
+              "description": "Stylus orientation in radians, -PI to PI (Android 12+)",
               "type": "number",
               "minimum": -3.141592653589793,
               "maximum": 3.141592653589793
             },
             "buttons": {
-              "description": "Barrel buttons held for the gesture (Android 13+)",
+              "description": "Barrel buttons held for the gesture (Android 12+)",
               "minItems": 1,
               "maxItems": 2,
               "type": "array",
@@ -5892,7 +5892,7 @@
       },
       "required": ["points"],
       "additionalProperties": false,
-      "description": "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag. With pointer: { toolType: \"stylus\" } it draws with a stylus (Android 13+) with per-point pressure and tilt, and is refused instead of using a finger if the device cannot."
+      "description": "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag. With pointer: { toolType: \"stylus\" } it draws with a stylus (Android 12+) with per-point pressure and tilt, and is refused instead of using a finger if the device cannot."
     }
   },
   {
@@ -38639,14 +38639,18 @@
                 "type": "string"
               },
               "savedAt": {
-                "description": "Absent where the platform cannot report save time (iOS simulators).",
+                "description": "Absent for host-only entries or where the platform cannot report save time (iOS simulators).",
                 "type": "number"
               },
               "pinned": {
                 "type": "boolean"
+              },
+              "hostOnly": {
+                "description": "Present on the host mirror but missing on the device.",
+                "type": "boolean"
               }
             },
-            "required": ["id", "label", "slug", "pinned"],
+            "required": ["id", "label", "pinned"],
             "additionalProperties": false
           }
         },
@@ -58067,30 +58071,30 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger. A plain tap or swipe needs Android 12+ (API 31); pressure other than 1, tilt, orientation, buttons and any dragPath need Android 13+ (stylus_input_v1)",
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1",
               "type": "string",
               "enum": ["stylus"]
             },
             "pressure": {
-              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 13+) and is refused before input without it",
+              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) and is refused before input without it",
               "type": "number",
               "minimum": 0,
               "maximum": 1
             },
             "tilt": {
-              "description": "Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 13+)",
+              "description": "Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 12+)",
               "type": "number",
               "minimum": 0,
               "maximum": 1.5707963267948966
             },
             "orientation": {
-              "description": "Stylus orientation in radians, -PI to PI (Android 13+)",
+              "description": "Stylus orientation in radians, -PI to PI (Android 12+)",
               "type": "number",
               "minimum": -3.141592653589793,
               "maximum": 3.141592653589793
             },
             "buttons": {
-              "description": "Barrel buttons held for the gesture (Android 13+)",
+              "description": "Barrel buttons held for the gesture (Android 12+)",
               "minItems": 1,
               "maxItems": 2,
               "type": "array",
@@ -61313,30 +61317,30 @@
           "type": "object",
           "properties": {
             "toolType": {
-              "description": "Inject a stylus instead of a finger. A plain tap or swipe needs Android 12+ (API 31); pressure other than 1, tilt, orientation, buttons and any dragPath need Android 13+ (stylus_input_v1)",
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1",
               "type": "string",
               "enum": ["stylus"]
             },
             "pressure": {
-              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 13+) and is refused before input without it",
+              "description": "Stylus pressure 0-1. 1 or omitted uses the shell route; any other value needs stylus_input_v1 (Android 12+) and is refused before input without it",
               "type": "number",
               "minimum": 0,
               "maximum": 1
             },
             "tilt": {
-              "description": "Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 13+)",
+              "description": "Stylus tilt in radians from the surface normal, 0 to PI/2 (Android 12+)",
               "type": "number",
               "minimum": 0,
               "maximum": 1.5707963267948966
             },
             "orientation": {
-              "description": "Stylus orientation in radians, -PI to PI (Android 13+)",
+              "description": "Stylus orientation in radians, -PI to PI (Android 12+)",
               "type": "number",
               "minimum": -3.141592653589793,
               "maximum": 3.141592653589793
             },
             "buttons": {
-              "description": "Barrel buttons held for the gesture (Android 13+)",
+              "description": "Barrel buttons held for the gesture (Android 12+)",
               "minItems": 1,
               "maxItems": 2,
               "type": "array",

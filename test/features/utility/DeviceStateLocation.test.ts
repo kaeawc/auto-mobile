@@ -531,7 +531,7 @@ describe("setDeviceState location", () => {
       heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1000, ageMs: 0 },
     };
     for (const teardown of [
-      () => release!("session", ios.deviceId, "test", snapshot, {}),
+      () => release!("session", ios.deviceId, "test", { snapshot }),
       () => unbound!("session", ios.deviceId),
       () => stopLocationRouteForRemovedDevice(ios.deviceId, routeRegistry),
     ]) {

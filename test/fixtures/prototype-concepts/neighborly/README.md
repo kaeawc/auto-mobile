@@ -6,6 +6,9 @@ marketplace grid with a price filter and an item page, and a messenger thread wi
 neighbour. `today.json` is the slice that runs on today's vocabulary, with literal `data` and timers
 standing in for the backend and the other person.
 
+The slice uses mapped Material icon names so iOS can draw SF Symbols.
+Messages and the message action use `forum` (`bubble.left.and.bubble.right` on iOS).
+
 ## Capabilities used
 
 - `prototype_stack_v1`: home, group, listing and hashtag screens.

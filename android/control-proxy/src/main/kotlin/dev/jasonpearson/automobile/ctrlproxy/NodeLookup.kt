@@ -1,7 +1,11 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
+import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
+import dev.jasonpearson.automobile.protocol.NodeSelector
 
 /**
  * Run [find] over the active window first, then over the other windows the hierarchy extractor
@@ -70,4 +74,82 @@ internal fun selectPreviousFocusable(
   val previous = if (index > 0) nodes[index - 1] else null
   nodes.forEach { if (it !== previous) it.recycle() }
   return previous
+}
+
+/**
+ * Prefer the first resource-id match kept by the extractor's offscreen rule, falling back to the
+ * original depth-first first match. The caller owns the root and the returned node; children
+ * acquired during either pass are recycled unless returned.
+ */
+internal fun findNodeByResourceId(
+  root: AccessibilityNodeInfo?,
+  resourceId: String,
+  screenDimensions: ScreenDimensions?,
+): AccessibilityNodeInfo? {
+  fun findMatch(node: AccessibilityNodeInfo?, requireOnScreen: Boolean): AccessibilityNodeInfo? {
+    if (node == null) return null
+
+    val nodeResourceId = node.viewIdResourceName
+    if (
+      resourceIdMatches(nodeResourceId, resourceId) &&
+        (!requireOnScreen || nodeIsOnScreen(node, screenDimensions))
+    )
+      return node
+
+    for (i in 0 until node.childCount) {
+      val child = node.getChild(i) ?: continue
+      var found: AccessibilityNodeInfo? = null
+      try {
+        found = findMatch(child, requireOnScreen)
+        if (found != null) return found
+      } finally {
+        if (found !== child) child.recycle()
+      }
+    }
+    return null
+  }
+
+  // Invalid dimensions must retain the original first-match behavior without a bounds check.
+  if (screenDimensions?.isValid() == true) {
+    findMatch(root, requireOnScreen = true)?.let {
+      return it
+    }
+  }
+  return findMatch(root, requireOnScreen = false)
+}
+
+private fun resourceIdMatches(nodeResourceId: String?, resourceId: String): Boolean =
+  nodeResourceId != null &&
+    (nodeResourceId == resourceId || nodeResourceId.endsWith(":id/$resourceId"))
+
+private fun nodeIsOnScreen(
+  node: AccessibilityNodeInfo,
+  screenDimensions: ScreenDimensions?,
+): Boolean {
+  val bounds = Rect()
+  node.getBoundsInScreen(bounds)
+  return !ElementBounds(bounds).isCompletelyOffscreen(screenDimensions)
+}
+
+internal data class NodeSelectorFields(
+  val resourceId: String?,
+  val testTag: String?,
+  val uniqueId: String?,
+  val collectionRow: Int?,
+  val collectionColumn: Int?,
+)
+
+internal fun nodeSelectorMatches(selector: NodeSelector, fields: NodeSelectorFields): Boolean {
+  if (!selector.hasCriteria()) return false
+  val resourceId = selector.resourceId
+  if (resourceId != null && !resourceIdMatches(fields.resourceId, resourceId)) {
+    return false
+  }
+  if (selector.testTag != null && fields.testTag != selector.testTag) return false
+  if (selector.uniqueId != null && fields.uniqueId != selector.uniqueId) return false
+  if (selector.collectionRow != null && fields.collectionRow != selector.collectionRow) return false
+  if (selector.collectionColumn != null && fields.collectionColumn != selector.collectionColumn) {
+    return false
+  }
+  return true
 }

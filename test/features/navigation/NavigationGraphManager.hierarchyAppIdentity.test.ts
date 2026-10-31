@@ -32,11 +32,10 @@ describe("hierarchy app identity", () => {
     timer = new FakeTimer();
     timer.setCurrentTime(SDK_TIME);
     repository = new NavigationRepository(harness.db);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository(harness.db),
       timer,
-    );
+    });
   });
   afterAll(async () => {
     await harness.dispose();

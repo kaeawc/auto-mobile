@@ -29,7 +29,7 @@ export class ScreenshotUtils {
     threshold: number = 0.1,
     fastMode: boolean = false,
   ): Promise<ScreenshotComparisonResult> {
-    return ScreenshotComparator.compareImages(buffer1, buffer2, threshold, fastMode);
+    return ScreenshotComparator.compareImages(buffer1, buffer2, { threshold, fastMode });
   }
 
   /**

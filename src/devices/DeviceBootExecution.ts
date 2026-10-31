@@ -424,8 +424,10 @@ export class DeviceBootExecution {
       context.operationName,
       phase,
       this.timer.now() - context.startedAtMs,
-      Math.max(0, context.deadlineMs - context.startedAtMs),
-      context.deviceLabel ?? context.request.name ?? context.request.deviceId,
+      {
+        budgetMs: Math.max(0, context.deadlineMs - context.startedAtMs),
+        device: context.deviceLabel ?? context.request.name ?? context.request.deviceId,
+      },
     );
   }
 }

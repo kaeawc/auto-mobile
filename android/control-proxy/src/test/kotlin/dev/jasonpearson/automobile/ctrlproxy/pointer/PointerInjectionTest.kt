@@ -347,8 +347,10 @@ class PointerInjectionExecutorTest {
 class PointerInjectionSupportTest {
   @Test
   fun `advertised only where am instrument has --no-restart`() {
-    assertFalse(PointerInjectionSupport.advertised(32))
-    assertTrue(PointerInjectionSupport.advertised(33))
+    // Measured: API 30's `am` rejects `--no-restart`; API 31 and 32 inject and keep the service.
+    assertFalse(PointerInjectionSupport.advertised(30))
+    assertTrue(PointerInjectionSupport.advertised(31))
+    assertTrue(PointerInjectionSupport.advertised(32))
     assertTrue(PointerInjectionSupport.advertised(36))
   }
 }

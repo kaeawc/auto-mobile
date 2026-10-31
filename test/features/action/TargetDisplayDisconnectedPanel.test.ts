@@ -247,8 +247,7 @@ describe("Android disconnected action panel", () => {
       inner,
       "inner",
       [{ key: cover, role: "cover" }, { key: "unlisted" }],
-      false,
-      false,
+      { hasPostures: false, pinned: false },
     );
     expect(message).toContain(`Connected panels: ${cover} (cover), unlisted.`);
     expect(message).not.toContain("setPosture");
@@ -262,8 +261,7 @@ describe("Android disconnected action panel", () => {
         inner,
         "inner",
         [{ key: cover, role: "cover" }],
-        true,
-        false,
+        { hasPostures: true, pinned: false },
       ),
     ).toBe(foldedMessage);
     expect(
@@ -271,8 +269,7 @@ describe("Android disconnected action panel", () => {
         inner,
         "inner",
         [{ key: cover, role: "cover" }],
-        true,
-        true,
+        { hasPostures: true, pinned: true },
       ),
     ).toBe(foldedMessage + pinRemedy);
   });

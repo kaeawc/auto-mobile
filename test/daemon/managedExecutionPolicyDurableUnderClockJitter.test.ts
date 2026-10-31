@@ -49,7 +49,7 @@ test("managed policy survives a lower second conversion and daemon rehydration",
   });
   writer.stopCleanupTimer();
   // Startup tags the dead daemon's active rows for recovery before rehydrating them.
-  await repository.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+  await repository.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
   const reader = new SessionManager(timer, repository);
   managers.push(reader);
   const assigner: SessionDeviceAssigner = {

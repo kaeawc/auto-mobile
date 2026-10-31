@@ -17,7 +17,7 @@ export interface KeepScreenAwakeSettingsClient {
     namespace: "global" | "system",
     key: string,
     value: string | null,
-    valueType?: "string" | "int" | "long" | "float",
+    options?: { valueType?: "string" | "int" | "long" | "float" },
   ): Promise<{ success: boolean }>;
 }
 
@@ -447,7 +447,7 @@ export class KeepScreenAwakeManager {
   ): Promise<void> {
     try {
       const a11y = this.settingsClientProvider(this.device);
-      const a11yResult = await a11y.requestSettingsPut(scope, key, value, valueType);
+      const a11yResult = await a11y.requestSettingsPut(scope, key, value, { valueType });
       if (a11yResult.success) {
         return;
       }

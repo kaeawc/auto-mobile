@@ -891,7 +891,11 @@ export class PressButton extends BaseVisualChange {
           signal,
           timeoutMs,
           (fenced, dispatch) =>
-            client.requestPressHome(timeoutMs, undefined, frameContext, fenced, dispatch),
+            client.requestPressHome(timeoutMs, undefined, {
+              frameContext,
+              signal: fenced,
+              onDispatch: dispatch,
+            }),
           { onDispatch },
         );
         throwIfAborted(signal);
@@ -901,7 +905,11 @@ export class PressButton extends BaseVisualChange {
           signal,
           timeoutMs,
           (fenced, dispatch) =>
-            client.requestPressBack(timeoutMs, undefined, frameContext, fenced, dispatch),
+            client.requestPressBack(timeoutMs, undefined, {
+              frameContext,
+              signal: fenced,
+              onDispatch: dispatch,
+            }),
           { onDispatch },
         );
       case "recent":
@@ -909,7 +917,11 @@ export class PressButton extends BaseVisualChange {
           signal,
           timeoutMs,
           (fenced, dispatch) =>
-            client.requestRecentApps(timeoutMs, undefined, frameContext, fenced, dispatch),
+            client.requestRecentApps(timeoutMs, undefined, {
+              frameContext,
+              signal: fenced,
+              onDispatch: dispatch,
+            }),
           { onDispatch },
         );
       default:

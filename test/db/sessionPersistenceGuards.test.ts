@@ -29,7 +29,7 @@ class RacingRepository extends DeviceSessionRepository {
   override async markReleased(
     ...args: Parameters<DeviceSessionRepository["markReleased"]>
   ): Promise<void> {
-    if (args[3] === "expired") {
+    if (args[3].reason === "expired") {
       this.expiredReleases++;
       const peerWrite = this.beforeExpiredRelease;
       this.beforeExpiredRelease = undefined;
@@ -157,7 +157,7 @@ describe("session persistence guards live in the statement, not in a prior read"
   test("a peer naming a lapsed-looking device-restart row does not expire it once restart-recovery activity has extended it", async () => {
     await seedDaemonARow();
     const reason = deviceRestartReleaseReason(STABLE_DEVICE);
-    await peer.markReleased(SESSION, "released", 2_000, reason);
+    await peer.markReleased(SESSION, "released", 2_000, { reason });
     timer.setCurrentTime(6_000);
     // Daemon A credited a control call at 4 900 to the restart recovery (#10713/#11281); its
     // fire-and-forget row write lands after daemon B's read.
@@ -260,7 +260,7 @@ describe("session persistence guards live in the statement, not in a prior read"
         deviceId: string;
         expiryOrigin: string | undefined;
       }> = [];
-      manager.onSessionRelease((_sessionId, deviceId, reason, _snapshot, options) => {
+      manager.onSessionRelease((_sessionId, deviceId, reason, options) => {
         releases.push({ reason, deviceId, expiryOrigin: options.expiryOrigin });
       });
       await manager.createSession(SESSION, DEVICE, "android", {
@@ -268,7 +268,7 @@ describe("session persistence guards live in the statement, not in a prior read"
         stableDeviceId: STABLE_DEVICE,
       });
       expect(await peer.getSession(SESSION)).toMatchObject({ status: "active" });
-      await peer.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+      await peer.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
       timer.advanceTime(1_000);
       return { manager, releases };
     }
@@ -300,7 +300,7 @@ describe("session persistence guards live in the statement, not in a prior read"
       const { manager, releases } = await liveSessionWithHandedOffRow();
       // The peer's recovery of that row fails for good while daemon A's re-persist is under way.
       racing.beforeUpsert = async () => {
-        await peer.markReleased(SESSION, "released", timer.now(), TERMINAL_REASON);
+        await peer.markReleased(SESSION, "released", timer.now(), { reason: TERMINAL_REASON });
       };
 
       const outcome = await refresh(manager);
@@ -326,7 +326,7 @@ describe("session persistence guards live in the statement, not in a prior read"
 
     test("a row already terminal before the activity write ends the session the same way", async () => {
       const { manager, releases } = await liveSessionWithHandedOffRow();
-      await peer.markReleased(SESSION, "expired", timer.now(), "heartbeat-timeout");
+      await peer.markReleased(SESSION, "expired", timer.now(), { reason: "heartbeat-timeout" });
 
       expect(await refresh(manager)).toBe("TerminalSessionError");
 
@@ -366,7 +366,7 @@ describe("session persistence guards live in the statement, not in a prior read"
       manager.stopCleanupTimer();
       manager.attachDaemonSessionId("daemon-a");
       await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
-      await fake.markReleased(SESSION, "released", timer.now(), "explicit-release");
+      await fake.markReleased(SESSION, "released", timer.now(), { reason: "explicit-release" });
       timer.advanceTime(1_000);
 
       expect(await refresh(manager)).toBe("TerminalSessionError");

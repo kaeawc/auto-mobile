@@ -38,13 +38,15 @@ function setup(
     () => device,
     () => new FakeAdbClientFactory(adb),
     () => defaultDeviceTraits,
-    () => timer,
     {
-      clientFactory: () => new AdbPowerClient(adb),
-      registry,
-      target: async () => options.target ?? { isEmulator: true, sdk: 34 },
-      mutation,
-      settle: options.settle,
+      timer: () => timer,
+      seams: {
+        clientFactory: () => new AdbPowerClient(adb),
+        registry,
+        target: async () => options.target ?? { isEmulator: true, sdk: 34 },
+        mutation,
+        settle: options.settle,
+      },
     },
   );
   const mutating = (): string[] =>

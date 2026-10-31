@@ -92,6 +92,17 @@ describe("route support", () => {
     ).toBe(false);
   });
 
+  test("instrumentation blames the Android version only below API 31", () => {
+    const route = new InstrumentationRoute(noop);
+    const reason = (apiLevel: number) => {
+      const support = route.supports({ toolType: "stylus", hover: true }, env({ apiLevel }));
+      return support.supported ? "" : support.reason;
+    };
+    expect(reason(30)).toContain("this device runs Android API 30 and the route needs Android 12");
+    // API 31 has `am instrument --no-restart`, so a missing flag there is a runner problem.
+    expect(reason(31)).toBe("the connected runner does not advertise hover_input_v1");
+  });
+
   test("no route takes anything on iOS", () => {
     const ios = env({ platform: "ios", caps: ["stylus_input_v1", "hover_input_v1"] });
     for (const features of [
@@ -223,7 +234,7 @@ describe("refusals", () => {
         "stylus input cannot be injected on this device, and a finger touch is never substituted. " +
           "ctrlproxy-a11y: accessibility dispatchGesture only produces a finger touch, not stylus; " +
           "adb-input-source: adb input stylus needs Android API 31 or newer (this device reports API 29); " +
-          "instrumentation: the connected runner does not advertise stylus_input_v1: this device runs Android API 29 and the route needs Android 13 (API 33). " +
+          "instrumentation: the connected runner does not advertise stylus_input_v1: this device runs Android API 29 and the route needs Android 12 (API 31). " +
           "Use a device whose runner advertises stylus_input_v1.",
       );
     }

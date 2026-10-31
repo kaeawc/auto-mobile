@@ -23,17 +23,22 @@ import {
   listInstalledSystemImages,
 } from "../../../utils/android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import { WatchSimulatorInventory } from "../../../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import type { Timer } from "../../../utils/SystemTimer";
 import { runAsBindingReconciler } from "./exclusion";
 import { WorkflowBindingDeviceDeleter } from "./deviceDeleter";
 import { BrokerDeviceAcquisition, type BrokerDeviceAcquisitionSessions } from "./deviceAcquisition";
-import { DeviceManagerBindingInventory } from "./DeviceManagerBindingInventory";
+import {
+  DeviceManagerBindingInventory,
+  type WatchBindingInventorySource,
+} from "./DeviceManagerBindingInventory";
 import {
   GateBindingBootCapacity,
   type BindingBootCapacityAssertion,
 } from "./GateBindingBootCapacity";
 import { PoolBindingDeviceClaims, type BindingClaimPool } from "./PoolBindingDeviceClaims";
 import { ToolBindingProvisioner, type BindingToolInvoker } from "./reconcilerPorts";
+import type { WatchBindingCatalog } from "./watchBindingSpec";
 import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
@@ -83,6 +88,10 @@ export interface DaemonBindingTooling {
   androidImageCatalog?: ManagedAndroidImageCatalog;
   androidProfileCatalog?: ManagedAndroidProfileCatalog;
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
+  /** Apple Watch simulators, charged against the shared total-resource limit (#15882). */
+  watchInventory?: WatchBindingInventorySource;
+  /** The watch catalog a watch binding's spec is validated against before creation (#15882). */
+  watchCatalog?: WatchBindingCatalog;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: BindingBootCapacityAssertion;
   reserveBootCapacity?: typeof reserveBootCapacity;
@@ -106,6 +115,9 @@ const sdkAndroidProfileCatalog: ManagedAndroidProfileCatalog = {
 
 /** The injected tooling with the host's real tooling filled in. */
 function hostTooling(tooling: DaemonBindingTooling = {}, source?: ForeignAndroidSerialSource) {
+  // Simulators, Apple Watch ones included, exist only where simctl does.
+  const hostWatches =
+    process.platform === "darwin" ? new WatchSimulatorInventory(new SimCtlClient(null)) : undefined;
   return {
     deviceManager:
       tooling.deviceManager ??
@@ -119,6 +131,8 @@ function hostTooling(tooling: DaemonBindingTooling = {}, source?: ForeignAndroid
     iosRuntimeCatalog:
       tooling.iosRuntimeCatalog ??
       (process.platform === "darwin" ? new SimCtlClient(null) : undefined),
+    watchInventory: tooling.watchInventory ?? hostWatches,
+    watchCatalog: tooling.watchCatalog ?? hostWatches,
     checkBootCapacity: tooling.checkBootCapacity,
     reserveBootCapacity: tooling.reserveBootCapacity,
   };
@@ -130,7 +144,7 @@ function hostTooling(tooling: DaemonBindingTooling = {}, source?: ForeignAndroid
  * tool module. Exported so the real-handler integration test drives exactly this seam (#11266).
  */
 export const defaultBindingToolInvoker: BindingToolInvoker = async (name, args, signal) => {
-  return await daemonToolRegistry().callInternal(name, args, undefined, signal);
+  return await daemonToolRegistry().callInternal(name, args, { signal });
 };
 
 export interface DaemonBrokerDeviceAcquisitionHandle {
@@ -163,7 +177,7 @@ export function createDaemonBrokerDeviceAcquisition(
           : undefined,
       );
       const { deviceManager, androidConfigReader } = tooling;
-      const inventory = new DeviceManagerBindingInventory(deviceManager);
+      const inventory = new DeviceManagerBindingInventory(deviceManager, tooling.watchInventory);
       const claims = new PoolBindingDeviceClaims(options.pool, options.executions);
       const resourceBudget = options.resourceBudgetPolicy
         ? new RegistryBindingResourceBudget({
@@ -182,6 +196,7 @@ export function createDaemonBrokerDeviceAcquisition(
         resolver: new DefaultManagedSpecResolver(tooling.iosRuntimeCatalog, {
           androidImageCatalog: tooling.androidImageCatalog,
           androidProfileCatalog: tooling.androidProfileCatalog,
+          watchCatalog: tooling.watchCatalog,
         }),
         provisioner:
           options.tooling?.provisioner ??

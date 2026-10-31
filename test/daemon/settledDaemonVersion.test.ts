@@ -89,7 +89,8 @@ test("default client waits for refinement before opening a handshake connection"
     queueMicrotask(connected);
     return socket;
   });
-  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), ISOLATED_DAEMON_RECOVERY, {
+  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
     platformOverride: "win32",
   });
   try {
@@ -204,12 +205,9 @@ test("PID publication records the settled identity, not the import-time clean st
       written.push(data);
     },
   };
-  const identity = new DaemonIdentity(
-    host,
-    { stat: () => ({ dev: 0n, ino: 0n }) },
-    "linux",
-    () => "/fake/auto-mobile.db",
-  );
+  const identity = new DaemonIdentity(host, { stat: () => ({ dev: 0n, ino: 0n }) }, "linux", {
+    databasePath: () => "/fake/auto-mobile.db",
+  });
   try {
     await identity.writePidFile();
     expect(probe).toHaveBeenCalled();

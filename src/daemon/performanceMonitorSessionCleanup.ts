@@ -27,7 +27,7 @@ export function registerPerformanceMonitorSessionCleanup(
     (options.monitor?.() ?? getPerformanceMonitor()).stopMonitoring(deviceId);
   };
   // A terminal upgrade of a finished release would stop the device's next owner's sampling (#10825).
-  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+  manager.onSessionRelease((sessionId, deviceId, _reason, releaseOptions) => {
     if (!releaseOptions?.upgradeOnly) {
       cleanup(sessionId, deviceId);
     }

@@ -35,11 +35,13 @@ describe("PlanExecutor saved internal step params", () => {
             __lockNamespace: z.string().optional(),
           })
           .strict(),
-        async (args) => {
-          captured.push(args);
-          return createStructuredToolResponse({ success: true });
+        {
+          handler: async (args) => {
+            captured.push(args);
+            return createStructuredToolResponse({ success: true });
+          },
+          acceptsPlanLockNamespace: requiresDevice,
         },
-        { acceptsPlanLockNamespace: requiresDevice },
       );
       ToolRegistry.getTool(toolName)!.requiresDevice = requiresDevice;
       const params = {

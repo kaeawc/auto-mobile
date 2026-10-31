@@ -217,7 +217,9 @@ describe("SharedTextDelegate", () => {
       const { context, sent } = createFakeContext({ ensureConnected: () => connected });
       const delegate = new SharedTextDelegate(context);
 
-      const promise = delegate.requestImeAction("done", 5000, undefined, controller.signal);
+      const promise = delegate.requestImeAction("done", 5000, undefined, {
+        abortSignal: controller.signal,
+      });
 
       // Mirrors the real #6249 repro: the caller's own deadline (Promise.race
       // in ImeAction) already fired and gave up, but the underlying
@@ -241,7 +243,8 @@ describe("SharedTextDelegate", () => {
       const { sentMsg } = await callAndResolve(
         sent,
         context.requestManager,
-        () => delegate.requestImeAction("next", 5000, undefined, controller.signal),
+        () =>
+          delegate.requestImeAction("next", 5000, undefined, { abortSignal: controller.signal }),
         { success: true, action: "next", totalTimeMs: 1 },
       );
 
@@ -256,15 +259,11 @@ describe("shared and iOS IME result contract", () => {
     it(`${Delegate.name}: preserves plain timeout fields and forwards dispatch`, async () => {
       const h = createIosDelegateHarness();
       let dispatches = 0;
-      const pending = new Delegate(h.context).requestImeAction(
-        "done",
-        100,
-        undefined,
-        undefined,
-        () => {
+      const pending = new Delegate(h.context).requestImeAction("done", 100, undefined, {
+        onDispatch: () => {
           dispatches++;
         },
-      );
+      });
       await Promise.resolve();
       h.advanceTime(100);
       expect(await pending).toEqual({
@@ -291,12 +290,9 @@ describe("shared and iOS IME result contract", () => {
       const h = createIosDelegateHarness();
       const controller = new AbortController();
       controller.abort();
-      const result = await new Delegate(h.context).requestImeAction(
-        "done",
-        100,
-        undefined,
-        controller.signal,
-      );
+      const result = await new Delegate(h.context).requestImeAction("done", 100, undefined, {
+        abortSignal: controller.signal,
+      });
       expect(result).toEqual({
         success: false,
         action: "done",

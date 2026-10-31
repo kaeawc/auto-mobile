@@ -325,13 +325,10 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       logger.info(`VM snapshot restored successfully`);
       await onVmSnapshotLoaded?.();
 
-      await this.emulator.waitForEmulatorReady(
-        manifest.deviceName,
-        vmSnapshotTimeoutMs,
-        null,
-        this.device.deviceId,
-        { options: { skipWakeAndUnlock: true } },
-      );
+      await this.emulator.waitForEmulatorReady(manifest.deviceName, vmSnapshotTimeoutMs, null, {
+        targetDeviceId: this.device.deviceId,
+        options: { skipWakeAndUnlock: true },
+      });
 
       logger.info("VM snapshot restoration complete");
     } catch (error) {
@@ -464,7 +461,9 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     let applied = false;
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const a11yResult = await a11y.requestSettingsPut(settingsType, key, value, "string");
+      const a11yResult = await a11y.requestSettingsPut(settingsType, key, value, {
+        valueType: "string",
+      });
       if (a11yResult.success) {
         applied = true;
       }

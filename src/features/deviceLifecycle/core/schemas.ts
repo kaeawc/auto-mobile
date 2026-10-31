@@ -20,6 +20,7 @@ import {
   androidProvisionDeviceSpecFields,
   iosProvisionDeviceSpecSchema,
   refineAndroidSpec,
+  watchProvisionDeviceSpecSchema,
 } from "../../../utils/provisionDeviceSpecSchemas";
 import { NON_EMULATABLE_CAPABILITY_IDS, OEM_PERSONA_IDS } from "../../utility/OemPersonas";
 
@@ -426,12 +427,7 @@ const watchProvisionDevice = z
       .min(1)
       .optional()
       .describe("Exact watch simulator UDID; a UDID that names no watch is refused, not created"),
-    spec: z
-      .object({
-        runtime: z.string().min(1).describe("watchOS CoreSimulator runtime identifier"),
-        deviceType: z.string().min(1).describe("Apple Watch CoreSimulator device-type identifier"),
-      })
-      .strict(),
+    spec: watchProvisionDeviceSpecSchema,
   })
   .strict();
 

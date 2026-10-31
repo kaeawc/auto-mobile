@@ -632,12 +632,10 @@ describe("iOS app UserDefaults resolution", () => {
   for (const state of ["absent", "closed", "open"] as const) {
     test(`production ${state} lookup is lazy and never creates/connects a runner`, async () => {
       const timer = new FakeTimer();
-      const client = IOSCtrlProxyClient.createForTesting(
-        device,
-        8765,
-        createSuccessWebSocketFactory(timer),
+      const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+        wsFactory: createSuccessWebSocketFactory(timer),
         timer,
-      );
+      });
       const sdk = new FakeKeyValueClient();
       sdk.connected = state === "open";
       const adapter = spyOn(client, "getConnectedPreferenceClient").mockReturnValue(sdk);
@@ -683,12 +681,10 @@ describe("iOS app UserDefaults resolution", () => {
 
   test("connected-only production delegate never calls ensureConnected when a socket closes", async () => {
     const timer = new FakeTimer();
-    const client = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      createSuccessWebSocketFactory(timer),
+    const client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: createSuccessWebSocketFactory(timer),
       timer,
-    );
+    });
     // sendCommand now rejects the old silent drop when no socket is attached.
     // Model the open connection this test advertises before resolving its replies.
     const socket = createSuccessWebSocketFactory(timer)("ws://fake");

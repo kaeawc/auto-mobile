@@ -57,7 +57,7 @@ export function registerAppLinksSessionCleanup(
     });
   };
   // A terminal upgrade of a finished release must not touch the device's next owner (#10825).
-  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+  manager.onSessionRelease((sessionId, deviceId, _reason, releaseOptions) => {
     if (releaseOptions?.upgradeOnly) {
       return;
     }

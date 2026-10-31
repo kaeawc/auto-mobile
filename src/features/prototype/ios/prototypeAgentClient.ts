@@ -162,13 +162,10 @@ export async function connectPrototypeAgent(
       { cause: error },
     );
   }
-  const client = new SocketPrototypeAgentClient(
-    socket,
-    port,
-    options.timer ?? defaultTimer,
-    options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
-    options.maxFrameBytes ?? PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES,
-  );
+  const client = new SocketPrototypeAgentClient(socket, port, options.timer ?? defaultTimer, {
+    requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    maxFrameBytes: options.maxFrameBytes ?? PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES,
+  });
   await client.authenticate(
     options.token,
     options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS,

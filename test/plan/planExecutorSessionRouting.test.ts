@@ -277,8 +277,10 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       "testLockNamespaceTool",
       "Test tool that declares __lockNamespace",
       testToolSchema,
-      mockHandler,
-      { acceptsPlanLockNamespace: true },
+      {
+        handler: mockHandler,
+        acceptsPlanLockNamespace: true,
+      },
     );
     ToolRegistry.getTool("testLockNamespaceTool")!.requiresDevice = true;
 

@@ -91,8 +91,13 @@ export async function runWithAcquisitionDeadline<T>(
   rawArgs: unknown,
   requestedDeadlineMs: number,
   signal: AbortSignal | undefined,
-  operationName: string,
-  operation: (deadlineMs: number, signal: AbortSignal, stage: AcquisitionStage) => Promise<T>,
+  {
+    operationName,
+    operation,
+  }: {
+    operationName: string;
+    operation: (deadlineMs: number, signal: AbortSignal, stage: AcquisitionStage) => Promise<T>;
+  },
 ): Promise<T> {
   const live = resolveLiveTransportDeadlineGetter(rawArgs)?.() !== undefined;
   const timer = getDeviceToolsDependencies().timer;
@@ -206,8 +211,7 @@ async function reserveStartStableDeviceLifecycle(
   stableTarget: StableDeviceTarget | undefined,
   budgets: DevicePreparationBudgets,
   timer: Timer,
-  signal: AbortSignal | undefined,
-  coordinator: VirtualDeviceLifecycleCoordinator,
+  { signal, coordinator }: { signal?: AbortSignal; coordinator: VirtualDeviceLifecycleCoordinator },
 ): Promise<VirtualDeviceLifecycleLease | undefined> {
   if (!stableTarget) {
     return undefined;
@@ -220,8 +224,8 @@ async function reserveStartStableDeviceLifecycle(
       deviceId: stableTarget.stableId,
     },
     timer,
-    budgets.automationDeadlineMs,
     {
+      deadlineMs: budgets.automationDeadlineMs,
       requestAbortSignal: signal,
       timeoutError: (detail) =>
         acquisitionLifecycleTimeoutError(
@@ -268,8 +272,7 @@ async function resolveStartStableDeviceLifecycleTarget(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   { deviceUtils, deviceMatcher }: StableTargetDiscovery,
-  timer: Timer,
-  signal: AbortSignal | undefined,
+  { timer, signal }: { timer: Timer; signal?: AbortSignal },
 ): Promise<StableDeviceTarget | undefined> {
   if (budgets.stableTarget) {
     return budgets.stableTarget;
@@ -279,8 +282,7 @@ async function resolveStartStableDeviceLifecycleTarget(
       args.deviceId,
       budgets.automationDeadlineMs,
       deviceUtils,
-      timer,
-      signal,
+      { timer, signal },
     );
   }
   if (args.platform !== "ios" || !args.name || args.deviceId) {
@@ -290,8 +292,8 @@ async function resolveStartStableDeviceLifecycleTarget(
     { name: args.name, platform: "ios", deviceId: args.name },
     timer,
     budgets.automationDeadlineMs,
-    "iOS simulator identity discovery did not complete",
     {
+      detail: "iOS simulator identity discovery did not complete",
       requestAbortSignal: signal,
       operation: async () =>
         await deviceUtils.getDeviceImagesDetailed("ios", {
@@ -386,12 +388,17 @@ async function reserveStartDeviceLifecycleReservations(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   deps: DeviceToolsDependencies,
-  deviceUtils: PlatformDeviceManager,
   {
+    deviceUtils,
     deviceMatcher,
     bootDeadlineMs,
     signal,
-  }: { deviceMatcher: DeviceMatcher; bootDeadlineMs: number; signal: AbortSignal | undefined },
+  }: {
+    deviceUtils: PlatformDeviceManager;
+    deviceMatcher: DeviceMatcher;
+    bootDeadlineMs: number;
+    signal: AbortSignal | undefined;
+  },
 ): Promise<{
   releaseAndroidStartupLease: (() => Promise<void>) | undefined;
   lifecycleLease: VirtualDeviceLifecycleLease;
@@ -410,25 +417,20 @@ async function reserveStartDeviceLifecycleReservations(
       args,
       budgets,
       stableTargetDiscovery,
-      deps.timer,
-      signal,
+      { timer: deps.timer, signal },
     );
     await assertStartTargetNotManaged(stableTarget, budgets.operationName);
     lifecycleLease =
-      (await reserveStartStableDeviceLifecycle(
-        stableTarget,
-        budgets,
-        deps.timer,
+      (await reserveStartStableDeviceLifecycle(stableTarget, budgets, deps.timer, {
         signal,
-        deps.lifecycleCoordinator,
-      )) ?? (await reserveStartSelectorDeviceLifecycle(args, budgets, deps, signal));
+        coordinator: deps.lifecycleCoordinator,
+      })) ?? (await reserveStartSelectorDeviceLifecycle(args, budgets, deps, signal));
     if (stableTarget?.platform === "ios" && args.name && !args.deviceId) {
       const revalidatedTarget = await resolveStartStableDeviceLifecycleTarget(
         args,
         budgets,
         stableTargetDiscovery,
-        deps.timer,
-        signal,
+        { timer: deps.timer, signal },
       );
       if (
         revalidatedTarget?.platform !== "ios" ||
@@ -455,8 +457,7 @@ async function prepareDevice(
   bootAndPrepareDevice: AcquisitionHooks["bootAndPrepareDevice"],
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
+  { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
 ) {
   const perf = createPerformanceTracker(true);
   perf.serial(budgets.operationName);
@@ -496,7 +497,8 @@ async function prepareDevice(
     // → `simctl list` discovery) so its commands attribute into perfTiming,
     // matching the boot scope inside bootAndPrepareDevice (see PerfContext).
     lifecycleReservations = await runWithPerfTracker(ambientPerfFor(perf), () =>
-      reserveStartDeviceLifecycleReservations(args, budgets, deps, deviceUtils, {
+      reserveStartDeviceLifecycleReservations(args, budgets, deps, {
+        deviceUtils,
         deviceMatcher: deviceMatcher,
         bootDeadlineMs: bootDeadlineMs,
         signal: signal,
@@ -517,8 +519,8 @@ async function prepareDevice(
         budgets.requestedAndroidIdentifierPair,
         deviceUtils,
         bootDeadlineMs,
-        deps.timer,
         {
+          timer: deps.timer,
           signal: coordinatedSignal,
           collectPendingSettlement: (settlement) => {
             if (settlement) {
@@ -529,17 +531,20 @@ async function prepareDevice(
       ),
     );
     setAcquisitionStage(budgets, "booting the device");
-    return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, {
-      autolockEnabled,
-      deviceMatcher: deviceMatcher,
-      bootDeadlineMs: bootDeadlineMs,
-      requestedIdentity: requestedIdentity,
-      progress: progress,
-      signal: coordinatedSignal,
-      perf: perf,
-      releaseReadinessReservations: releaseReadinessReservations,
-      lifecycleLease: lifecycleReservations.lifecycleLease,
-      state: state,
+    return await bootAndPrepareDevice(args, budgets, deps, {
+      deviceUtils,
+      options: {
+        autolockEnabled,
+        deviceMatcher: deviceMatcher,
+        bootDeadlineMs: bootDeadlineMs,
+        requestedIdentity: requestedIdentity,
+        progress: progress,
+        signal: coordinatedSignal,
+        perf: perf,
+        releaseReadinessReservations: releaseReadinessReservations,
+        lifecycleLease: lifecycleReservations.lifecycleLease,
+        state: state,
+      },
     });
   } catch (error) {
     preparationFailed = true;
@@ -689,34 +694,36 @@ async function getAndroidHandler(
     rawArgs,
     startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
     signal,
-    "getAndroid",
-    (deadlineMs, requestSignal, stage) =>
-      prepareDevice(
-        target,
-        {
-          bootTimeoutMs,
-          automationReadyTimeoutMs,
-          automationDeadlineMs: deadlineMs,
-          stage,
-          operationName: "getAndroid",
-          ...(args.avdName
-            ? {
-                androidAvdName: args.avdName,
-                stableTarget: { platform: "android", stableId: args.avdName },
-                ...(args.deviceId
-                  ? {
-                      requestedAndroidIdentifierPair: {
-                        avdName: args.avdName,
-                        deviceId: args.deviceId,
-                      },
-                    }
-                  : {}),
-              }
-            : {}),
-        },
-        progress,
-        requestSignal,
-      ),
+    {
+      operationName: "getAndroid",
+      operation: (deadlineMs, requestSignal, stage) =>
+        prepareDevice(
+          target,
+          {
+            bootTimeoutMs,
+            automationReadyTimeoutMs,
+            automationDeadlineMs: deadlineMs,
+            stage,
+            operationName: "getAndroid",
+            ...(args.avdName
+              ? {
+                  androidAvdName: args.avdName,
+                  stableTarget: { platform: "android", stableId: args.avdName },
+                  ...(args.deviceId
+                    ? {
+                        requestedAndroidIdentifierPair: {
+                          avdName: args.avdName,
+                          deviceId: args.deviceId,
+                        },
+                      }
+                    : {}),
+                }
+              : {}),
+          },
+          progress,
+          requestSignal,
+        ),
+    },
   );
 }
 
@@ -740,30 +747,32 @@ async function getAppleHandler(
     rawArgs,
     startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
     signal,
-    "getApple",
-    (deadlineMs, requestSignal, stage) =>
-      prepareDevice(
-        {
-          platform: "ios",
-          deviceId: udid,
-          preferRunning: true,
-          ...(presentationOrder !== undefined ? { presentationOrder } : {}),
-          createIfMissing: false,
-          __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
-          __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-          ...oneShotCliMarker(rawArgs),
-        },
-        {
-          bootTimeoutMs,
-          automationReadyTimeoutMs,
-          automationDeadlineMs: deadlineMs,
-          stage,
-          operationName: "getApple",
-          stableTarget: { platform: "ios", stableId: udid },
-        },
-        progress,
-        requestSignal,
-      ),
+    {
+      operationName: "getApple",
+      operation: (deadlineMs, requestSignal, stage) =>
+        prepareDevice(
+          {
+            platform: "ios",
+            deviceId: udid,
+            preferRunning: true,
+            ...(presentationOrder !== undefined ? { presentationOrder } : {}),
+            createIfMissing: false,
+            __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
+            __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
+            ...oneShotCliMarker(rawArgs),
+          },
+          {
+            bootTimeoutMs,
+            automationReadyTimeoutMs,
+            automationDeadlineMs: deadlineMs,
+            stage,
+            operationName: "getApple",
+            stableTarget: { platform: "ios", stableId: udid },
+          },
+          progress,
+          requestSignal,
+        ),
+    },
   );
 }
 
@@ -778,7 +787,7 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
   const { bootAndPrepareDevice } = hooks;
   const prepare: PrepareDevice = (args, budgets, progress, signal) =>
     runWithAutolockPolicy(getDeviceToolsDependencies().env, () =>
-      prepareDevice(bootAndPrepareDevice, args, budgets, progress, signal),
+      prepareDevice(bootAndPrepareDevice, args, budgets, { progress, signal }),
     );
   return {
     prepareDevice: prepare,

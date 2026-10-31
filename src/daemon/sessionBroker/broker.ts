@@ -195,7 +195,7 @@ export class SessionBroker {
         return this.resultUnlessAborted(admission.request, signal);
       }
       admitted = true;
-      return await this.prepareAdmission(admission, input, config, livenessOwnerToken, signal);
+      return await this.prepareAdmission(admission, input, config, { livenessOwnerToken, signal });
     } catch (error) {
       if (error instanceof SessionExportIdentityMismatchError) {
         throw error;
@@ -213,7 +213,8 @@ export class SessionBroker {
         `Session request ${config.requestId} preparation failed: ${errorMessage(error)}`,
         error,
       );
-      return this.handlePreparationFailure(config, livenessOwnerToken, fingerprint, admitted, {
+      return this.handlePreparationFailure(config, livenessOwnerToken, fingerprint, {
+        admitted,
         error: preparationFailureError(error, signal),
         exportIdentity,
       });
@@ -226,8 +227,11 @@ export class SessionBroker {
     config: SessionConfig,
     livenessOwnerToken: string,
     fingerprint: string,
-    admitted: boolean,
-    { error, exportIdentity }: { error: unknown; exportIdentity?: BrokerExportIdentity },
+    {
+      admitted,
+      error,
+      exportIdentity,
+    }: { error: unknown; exportIdentity?: BrokerExportIdentity } & { admitted: boolean },
   ): Promise<SessionBrokerResult> {
     const failure = failureFor(error);
     if (admitted) {
@@ -271,8 +275,7 @@ export class SessionBroker {
       config.requestId,
       this.options.owner,
       failure.message,
-      failure.code,
-      failure.retryable,
+      { errorCode: failure.code, retryable: failure.retryable },
     );
     if (ticket) {
       await this.tryCleanup(ticket);
@@ -379,8 +382,7 @@ export class SessionBroker {
     initial: BrokerAdmission,
     input: BrokerAdmissionInput,
     config: SessionConfig,
-    livenessOwnerToken: string,
-    signal: AbortSignal,
+    { livenessOwnerToken, signal }: { livenessOwnerToken: string; signal: AbortSignal },
   ): Promise<SessionBrokerResult> {
     const waited = await this.resetReadiness.continueAfterWait(
       initial,
@@ -665,7 +667,7 @@ export class SessionBroker {
       request.requestId,
       this.options.owner,
       SESSION_OWNER_EXITED_MESSAGE,
-      SESSION_OWNER_EXITED_CODE,
+      { errorCode: SESSION_OWNER_EXITED_CODE },
     );
     logger.info(
       `Session ${sessionUuid} lost its execution owner; request ${request.requestId} is ` +

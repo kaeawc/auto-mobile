@@ -432,7 +432,7 @@ steps:
       async (sessionId) => {
         await sessionManager.releaseSession(sessionId);
       },
-      timer,
+      { timer },
     );
 
     devicePool.assignMultipleDevices = async (sessionIds) => {

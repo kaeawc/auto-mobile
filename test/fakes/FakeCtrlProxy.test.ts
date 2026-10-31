@@ -21,7 +21,9 @@ describe("FakeCtrlProxy node actions", () => {
     const proxy: AndroidCtrlProxy = fake;
     const perf = new NoOpPerformanceTracker();
     const signal = new AbortController().signal;
-    expect(await proxy.requestNodeAction("click", selector, 123, perf, signal)).toMatchObject({
+    expect(
+      await proxy.requestNodeAction("click", selector, { timeoutMs: 123, perf, signal }),
+    ).toMatchObject({
       success: true,
       action: "click",
     });

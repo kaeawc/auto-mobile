@@ -570,7 +570,6 @@ describe("DevicePool", () => {
             reservation.device,
             replacement,
             sourceImage,
-            undefined,
             { excludeExecutionId },
           );
         } finally {
@@ -673,11 +672,9 @@ describe("DevicePool", () => {
       await devicePool.initializeWithDevices([device]);
       await bindOwnerSession(device, sourceImage);
       const captured = requirePooledDevice(devicePool, device.deviceId);
-      const readinessRelease = await devicePool.reserveDeviceForReadiness(
-        device.deviceId,
-        device,
-        sourceImage.name,
-      );
+      const readinessRelease = await devicePool.reserveDeviceForReadiness(device.deviceId, device, {
+        stableRuntimeName: sourceImage.name,
+      });
       const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
@@ -695,7 +692,6 @@ describe("DevicePool", () => {
           shutdownReservation.device,
           replacement,
           sourceImage,
-          undefined,
           {
             beforeReplacementPublishes: () => {
               // Session work can discover the replacement inside addDevice, so
@@ -734,11 +730,9 @@ describe("DevicePool", () => {
       // Simulate an autolocked device so recovery must preserve exclusivity; an
       // unset autolockSessionId on the replacement would let any session drive it.
       captured.autolockSessionId = "owner-session";
-      const readinessRelease = await devicePool.reserveDeviceForReadiness(
-        device.deviceId,
-        device,
-        sourceImage.name,
-      );
+      const readinessRelease = await devicePool.reserveDeviceForReadiness(device.deviceId, device, {
+        stableRuntimeName: sourceImage.name,
+      });
       const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
@@ -975,7 +969,7 @@ describe("DevicePool", () => {
           shutdownReservation.device,
           replacement,
           sourceImage,
-          manager.childProcess,
+          { childProcess: manager.childProcess },
         );
         await persistence.waitForUpsert();
         manager.childProcess.emit("exit", 0, null);
@@ -1019,7 +1013,7 @@ describe("DevicePool", () => {
             shutdownReservation.device,
             replacement,
             sourceImage,
-            manager.childProcess,
+            { childProcess: manager.childProcess },
           ),
         ).rejects.toThrow("exited before process tracking completed");
 

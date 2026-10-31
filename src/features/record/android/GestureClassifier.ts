@@ -1,6 +1,7 @@
 import type { RawTouchFrame, GestureEvent, PointerToolType, StylusButton } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
 import type { CoordScaler, GestureScaler } from "./AxisRanges";
+import type { TiltAxes } from "./TouchNodeDiscovery";
 import type { Point } from "../../../models/Point";
 
 interface ContactInfo {
@@ -25,6 +26,8 @@ interface PenObservation {
   pressureSum: number;
   pressureMin: number;
   pressureMax: number;
+  tiltCount: number;
+  tiltSum: number;
 }
 
 /** Axis range of the pressure axis from `getevent -p`; absent means raw units are reported. */
@@ -78,6 +81,7 @@ export class GestureClassifier {
     private readonly scaler: GestureScaler,
     private readonly densityDp: number,
     private readonly pressureRange?: PressureRange,
+    private readonly tiltAxes?: TiltAxes,
   ) {}
 
   private scalerAt(time: number): CoordScaler {
@@ -159,10 +163,10 @@ export class GestureClassifier {
         existing.lastX = slot.x;
         existing.lastY = slot.y;
         existing.unknownAxes = mergeUnknownAxes(existing.unknownAxes, slot.unknownAxes);
-        observePen(existing.pen, slot);
+        observePen(existing.pen, slot, this.tiltAxes);
       } else {
         const pen = newPenObservation();
-        observePen(pen, slot);
+        observePen(pen, slot, this.tiltAxes);
         this.contacts.set(slot.slotId, {
           startX: slot.x,
           startY: slot.y,
@@ -186,7 +190,9 @@ export class GestureClassifier {
         this.contacts.get(b.slotId)?.unknownAxes,
       );
       const scaler = this.contacts.get(a.slotId)?.scaler ?? this.scalerAt(frame.arrivedAt);
-      const dist = unknownAxes?.length ? undefined : screenDist(scaler, a.x, a.y, b.x, b.y);
+      const dist = unknownAxes?.length
+        ? undefined
+        : screenDist(scaler, a.x, a.y, { rawX2: b.x, rawY2: b.y });
       if (!this.pinchState) {
         this.pinchState = { initialDist: dist, finalDist: dist, unknownAxes };
       } else {
@@ -219,13 +225,10 @@ export class GestureClassifier {
 
     const gesture =
       displacement < slopPx
-        ? this.evaluateTapOrLongPress(
-            downX,
-            downY,
-            durationMs,
-            frame.arrivedAt,
-            contact.pen.toolType,
-          )
+        ? this.evaluateTapOrLongPress(downX, downY, durationMs, {
+            arrivedAt: frame.arrivedAt,
+            toolType: contact.pen.toolType,
+          })
         : this.evaluateSwipe(
             { x: downX, y: downY },
             { x: upX, y: upY },
@@ -254,6 +257,12 @@ export class GestureClassifier {
         normalized: range !== undefined,
       };
     }
+    if (contact.pen.tiltCount > 0) {
+      fields.tilt = Math.min(
+        Math.PI / 2,
+        Math.round((contact.pen.tiltSum / contact.pen.tiltCount) * 1e4) / 1e4,
+      );
+    }
     if (buttons.size > 0) {
       fields.buttons = [...buttons];
     }
@@ -270,7 +279,7 @@ export class GestureClassifier {
     const firstY = Number.isFinite(contact.startY) ? contact.startY : 0;
     const lastX = Number.isFinite(contact.lastX) ? contact.lastX : firstX;
     const lastY = Number.isFinite(contact.lastY) ? contact.lastY : firstY;
-    const displacement = screenDist(contact.scaler, firstX, firstY, lastX, lastY);
+    const displacement = screenDist(contact.scaler, firstX, firstY, { rawX2: lastX, rawY2: lastY });
     const type =
       displacement >= GESTURE_THRESHOLDS.TOUCH_SLOP_DP * this.densityDp
         ? "swipe"
@@ -312,8 +321,7 @@ export class GestureClassifier {
     screenX: number,
     screenY: number,
     durationMs: number,
-    arrivedAt: number,
-    toolType: PointerToolType | undefined,
+    { arrivedAt, toolType }: { arrivedAt: number; toolType?: PointerToolType },
   ): GestureEvent {
     if (durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS) {
       return { type: "longPress", arrivedAt, screenX, screenY, durationMs };
@@ -372,8 +380,7 @@ function screenDist(
   scaler: CoordScaler,
   rawX1: number,
   rawY1: number,
-  rawX2: number,
-  rawY2: number,
+  { rawX2, rawY2 }: { rawX2: number; rawY2: number },
 ): number {
   const first = scaler.toScreenPoint(rawX1, rawY1);
   const second = scaler.toScreenPoint(rawX2, rawY2);
@@ -401,16 +408,26 @@ function newPenObservation(): PenObservation {
     pressureSum: 0,
     pressureMin: Infinity,
     pressureMax: -Infinity,
+    tiltCount: 0,
+    tiltSum: 0,
   };
 }
 
-function observePen(pen: PenObservation, slot: RawTouchFrame["activeSlots"][number]): void {
+function observePen(
+  pen: PenObservation,
+  slot: RawTouchFrame["activeSlots"][number],
+  tiltAxes?: TiltAxes,
+): void {
   if (slot.toolType) {
     pen.toolType = slot.toolType;
   }
   for (const button of slot.buttons ?? []) {
     pen.buttons.add(button);
   }
+  if (slot.toolType === "stylus" || slot.toolType === "eraser") {
+    observeTilt(pen, slot, tiltAxes);
+  }
+
   // A zero pressure sample means "not reported" for fingers and "no force" for a pen; neither
   // is a measurement worth averaging.
   if (slot.pressure > 0) {
@@ -419,6 +436,44 @@ function observePen(pen: PenObservation, slot: RawTouchFrame["activeSlots"][numb
     pen.pressureMin = Math.min(pen.pressureMin, slot.pressure);
     pen.pressureMax = Math.max(pen.pressureMax, slot.pressure);
   }
+}
+
+function observeTilt(
+  pen: PenObservation,
+  slot: RawTouchFrame["activeSlots"][number],
+  tiltAxes?: TiltAxes,
+): void {
+  if (
+    tiltAxes &&
+    validTiltAxis(tiltAxes.x) &&
+    validTiltAxis(tiltAxes.y) &&
+    slot.tiltX !== undefined &&
+    slot.tiltY !== undefined &&
+    Number.isFinite(slot.tiltX) &&
+    Number.isFinite(slot.tiltY)
+  ) {
+    // TouchInputMapper centers each range and uses units/radian resolution when reported;
+    // zero or absent resolution means the legacy degree axis (PI/180).
+    const x = tiltAngle(slot.tiltX, tiltAxes.x);
+    const y = tiltAngle(slot.tiltY, tiltAxes.y);
+    const cosine = Math.cos(x) * Math.cos(y);
+    pen.tiltCount += 1;
+    pen.tiltSum += Math.acos(clamp01(cosine));
+  }
+}
+
+function tiltAngle(raw: number, axis: TiltAxes["x"]): number {
+  const scale = axis.resolution ? 1 / axis.resolution : Math.PI / 180;
+  return (raw - (axis.min + axis.max) / 2) * scale;
+}
+
+function validTiltAxis(axis: TiltAxes["x"]): boolean {
+  return (
+    Number.isFinite(axis.min) &&
+    Number.isFinite(axis.max) &&
+    axis.max > axis.min &&
+    (axis.resolution === undefined || (Number.isFinite(axis.resolution) && axis.resolution >= 0))
+  );
 }
 
 function clamp01(value: number): number {

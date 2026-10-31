@@ -495,8 +495,7 @@ export async function validateNavigation(
   expectedEdge: NavigationEdge,
   state: GraphTraversalState,
   navigationManager: Pick<NavigationGraphService, "getCurrentScreen">,
-  timer: Timer,
-  { elementConfidence, setStopReason }: ValidateNavigationOptions,
+  { timer, elementConfidence, setStopReason }: ValidateNavigationOptions & { timer: Timer },
 ): Promise<boolean> {
   // Wait a bit for navigation to complete
   await timer.sleep(EXPLORE_VALIDATION_SETTLE_MS);

@@ -202,16 +202,14 @@ describe("recording an app lifecycle sequence", () => {
     });
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, scope),
-      new FamilyMutationPriorReader([]),
-      { appId: async () => "a.b" },
+      { reader: new FamilyMutationPriorReader([]), artifactReader: { appId: async () => "a.b" } },
     );
-    await recording.beforeToolCall("installApp", { appId: "a.b" }, device, "session");
-    await recording.beforeToolCall(
-      "launchApp",
-      { appId: "a.b", clearAppData: true },
-      device,
-      "session",
-    );
+    await recording.beforeToolCall("installApp", { appId: "a.b" }, device, {
+      sessionUuid: "session",
+    });
+    await recording.beforeToolCall("launchApp", { appId: "a.b", clearAppData: true }, device, {
+      sessionUuid: "session",
+    });
     return (await journal.list(scope)).map((entry) => [
       entry.kind,
       entry.toolName,

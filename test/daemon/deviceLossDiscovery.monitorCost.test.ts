@@ -147,7 +147,6 @@ function managerWithPhysicalCounter() {
       getBootedSimulatorsChecked: async () => [SIM],
     }),
     createFakeAndroidEmulator({ getBootedDevicesChecked: async () => [] }),
-    undefined,
     {
       physicalIosDevices: {
         listConnectedDevices: async () => {

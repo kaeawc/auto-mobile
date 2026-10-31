@@ -345,7 +345,7 @@ describe("single-device allocation on a shared host", () => {
     expect(ownership.claims).toEqual(["d1"]);
     expect(ownership.releases).toEqual([]);
 
-    await releaseSessionAndDevice(sessions, pool, "d1", "s1", {
+    await releaseSessionAndDevice({ manager: sessions, pool }, "d1", "s1", {
       reason: "explicit-release",
     });
 

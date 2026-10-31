@@ -36,11 +36,13 @@ class RequestOnlyAppearanceServer extends AppearanceSocketServer {
         isAuthenticationEnforced: () => false,
       },
       {
-        getPooledDevices: () => [device],
-        getSessionDevice: () => undefined,
-        getSessionForDevice: () => null,
+        deviceSource: {
+          getPooledDevices: () => [device],
+          getSessionDevice: () => undefined,
+          getSessionForDevice: () => null,
+        },
+        dependencies,
       },
-      dependencies,
     );
   }
 

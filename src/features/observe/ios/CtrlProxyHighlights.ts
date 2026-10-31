@@ -19,8 +19,7 @@ export class CtrlProxyHighlights {
     id: string,
     shape: HighlightShape,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    options: SdkCapabilityQueryOptions = {},
+    { perf, ...options }: SdkCapabilityQueryOptions & { perf?: PerformanceTracker } = {},
   ): Promise<HighlightOperationResult> {
     return sendCommand<HighlightOperationResult>(this.context, {
       idPrefix: "highlight",

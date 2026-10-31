@@ -13,13 +13,10 @@ describe("tool → MCP App UI association via _meta.ui.resourceUri", () => {
   });
 
   test("getToolDefinitions emits _meta.ui.resourceUri when appUiResourceUri is set", () => {
-    ToolRegistry.registerDeviceAware(
-      "dummyApp",
-      "desc",
-      z.object({}),
-      async () => ({ content: [] }),
-      { appUiResourceUri: OBSERVE_APP_RESOURCE_URI },
-    );
+    ToolRegistry.registerDeviceAware("dummyApp", "desc", z.object({}), {
+      handler: async () => ({ content: [] }),
+      appUiResourceUri: OBSERVE_APP_RESOURCE_URI,
+    });
     const def = ToolRegistry.getToolDefinitions().find((d) => d.name === "dummyApp");
     expect((def as { _meta?: { ui?: { resourceUri?: string } } })?._meta?.ui?.resourceUri).toBe(
       OBSERVE_APP_RESOURCE_URI,

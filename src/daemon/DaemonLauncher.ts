@@ -87,8 +87,7 @@ function isSiblingJjWorkspaceEntryScript(
   normalizedEntryScript: string,
   normalizedActiveEntryScript: string | undefined,
   entryScript: string,
-  activeEntryScript: string | undefined,
-  probe: CheckoutProvenanceProbe,
+  { activeEntryScript, probe }: { activeEntryScript?: string; probe: CheckoutProvenanceProbe },
 ): boolean {
   const distributionSuffix = "/dist/src/index.js";
   if (
@@ -167,13 +166,10 @@ export function isDaemonEntryScriptPath(
   // segment; with --daemon-mode checked by the caller, this is safe for #7242.
   return (
     (isDistributionEntryScript && normalized === normalizedActiveEntryScript) ||
-    isSiblingJjWorkspaceEntryScript(
-      normalized,
-      normalizedActiveEntryScript,
-      entryScript,
+    isSiblingJjWorkspaceEntryScript(normalized, normalizedActiveEntryScript, entryScript, {
       activeEntryScript,
       probe,
-    ) ||
+    }) ||
     (isDistributionEntryScript && /\/auto-mobile\/.*\/dist\/src\/index\.js$/.test(normalized)) ||
     /\/(?:@kaeawc\/)?auto-mobile\/dist\/src\/index\.js$/.test(normalized) ||
     /\/auto-mobile\/(?:[^/]+\/)?libexec\/dist\/src\/index\.js$/.test(normalized)

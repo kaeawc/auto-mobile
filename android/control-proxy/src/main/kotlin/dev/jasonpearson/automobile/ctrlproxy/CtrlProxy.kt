@@ -34,7 +34,6 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
-import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
@@ -92,14 +91,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ActionResult
-import dev.jasonpearson.automobile.protocol.CrashData
-import dev.jasonpearson.automobile.protocol.CrashEvent
-import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
-import dev.jasonpearson.automobile.protocol.HandledExceptionData
-import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
-import dev.jasonpearson.automobile.protocol.NavigationEventData
-import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PermissionResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
@@ -158,61 +150,6 @@ private const val SPEECH_STATE_CHANGE_EVENT = 0x02000000 // TYPE_SPEECH_STATE_CH
 private const val VIEW_TARGETED_BY_SCROLL_EVENT =
   0x04000000 // TYPE_VIEW_TARGETED_BY_SCROLL, API 34.
 
-/**
- * Prefer the first resource-id match kept by the extractor's offscreen rule, falling back to the
- * original depth-first first match. The caller owns the root and the returned node; children
- * acquired during either pass are recycled unless returned.
- */
-internal fun findNodeByResourceId(
-  root: AccessibilityNodeInfo?,
-  resourceId: String,
-  screenDimensions: ScreenDimensions?,
-): AccessibilityNodeInfo? {
-  fun findMatch(node: AccessibilityNodeInfo?, requireOnScreen: Boolean): AccessibilityNodeInfo? {
-    if (node == null) return null
-
-    val nodeResourceId = node.viewIdResourceName
-    if (
-      resourceIdMatches(nodeResourceId, resourceId) &&
-        (!requireOnScreen || nodeIsOnScreen(node, screenDimensions))
-    )
-      return node
-
-    for (i in 0 until node.childCount) {
-      val child = node.getChild(i) ?: continue
-      var found: AccessibilityNodeInfo? = null
-      try {
-        found = findMatch(child, requireOnScreen)
-        if (found != null) return found
-      } finally {
-        if (found !== child) child.recycle()
-      }
-    }
-    return null
-  }
-
-  // Invalid dimensions must retain the original first-match behavior without a bounds check.
-  if (screenDimensions?.isValid() == true) {
-    findMatch(root, requireOnScreen = true)?.let {
-      return it
-    }
-  }
-  return findMatch(root, requireOnScreen = false)
-}
-
-private fun resourceIdMatches(nodeResourceId: String?, resourceId: String): Boolean =
-  nodeResourceId != null &&
-    (nodeResourceId == resourceId || nodeResourceId.endsWith(":id/$resourceId"))
-
-private fun nodeIsOnScreen(
-  node: AccessibilityNodeInfo,
-  screenDimensions: ScreenDimensions?,
-): Boolean {
-  val bounds = Rect()
-  node.getBoundsInScreen(bounds)
-  return !ElementBounds(bounds).isCompletelyOffscreen(screenDimensions)
-}
-
 /** Resolve dimensions from the lookup root without querying or selecting other windows. */
 internal fun findNodeByResourceIdOnRootDisplay(
   root: AccessibilityNodeInfo?,
@@ -241,552 +178,6 @@ internal fun findNodeByResourceIdOnRootDisplay(
       null
     }
   return findNodeByResourceId(root, resourceId, dimensions)
-}
-
-internal data class NodeSelectorFields(
-  val resourceId: String?,
-  val testTag: String?,
-  val uniqueId: String?,
-  val collectionRow: Int?,
-  val collectionColumn: Int?,
-)
-
-internal fun nodeSelectorMatches(selector: NodeSelector, fields: NodeSelectorFields): Boolean {
-  if (!selector.hasCriteria()) return false
-  val resourceId = selector.resourceId
-  if (resourceId != null && !resourceIdMatches(fields.resourceId, resourceId)) {
-    return false
-  }
-  if (selector.testTag != null && fields.testTag != selector.testTag) return false
-  if (selector.uniqueId != null && fields.uniqueId != selector.uniqueId) return false
-  if (selector.collectionRow != null && fields.collectionRow != selector.collectionRow) return false
-  if (selector.collectionColumn != null && fields.collectionColumn != selector.collectionColumn) {
-    return false
-  }
-  return true
-}
-
-internal suspend fun startEventIngestionWhenReady(
-  isRunning: () -> Boolean,
-  pause: suspend () -> Unit,
-  start: () -> Unit,
-) {
-  while (!isRunning()) pause()
-  start()
-}
-
-/** Action names that change no visible state, so no settled hierarchy is published after them. */
-internal val NON_VISUAL_NODE_ACTIONS = setOf("focus", "clear_focus")
-
-/** App-defined accessibility action matched by its label (#14077). */
-internal const val CUSTOM_NODE_ACTION = "custom"
-
-/** ACTION_SET_PROGRESS with [NodeActionArguments.progress] (#14077). */
-internal const val SET_PROGRESS_NODE_ACTION = "set_progress"
-
-/** Arguments a node action may carry beyond its name (#14077). */
-data class NodeActionArguments(
-  /** For [CUSTOM_NODE_ACTION]: the label of the app-defined action to perform. */
-  val customAction: String? = null,
-  /** For [SET_PROGRESS_NODE_ACTION]: the value for ACTION_ARGUMENT_PROGRESS_VALUE. */
-  val progress: Float? = null,
-)
-
-/** What the target node reports about itself, for [decideNodeAction]. */
-internal data class NodeActionState(
-  val isAccessibilityFocused: Boolean,
-  /** The ids of the actions the node offers, or null when its action list is unknown. */
-  val availableActionIds: Collection<Int>?,
-  /** Labels of the node's actions by id, which name its app-defined (custom) actions. */
-  val actionLabels: Map<Int, String> = emptyMap(),
-)
-
-private data class StandardNodeAction(val id: Int, val minSdk: Int = 0)
-
-/**
- * Every standard node action the host can request by name, in the order refusals list them. Each
- * entry is gated at runtime against the device's SDK level by [StandardNodeAction.minSdk]; the
- * module's minSdk (24) already covers every entry without one.
- */
-@SuppressLint("InlinedApi")
-private val STANDARD_NODE_ACTIONS: Map<String, StandardNodeAction> =
-  linkedMapOf(
-    "click" to StandardNodeAction(AccessibilityNodeInfo.ACTION_CLICK),
-    "long_click" to StandardNodeAction(AccessibilityNodeInfo.ACTION_LONG_CLICK),
-    "focus" to StandardNodeAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS),
-    "clear_focus" to StandardNodeAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS),
-    "scroll_forward" to StandardNodeAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD),
-    "scroll_backward" to StandardNodeAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD),
-    "expand" to StandardNodeAction(AccessibilityNodeInfo.ACTION_EXPAND),
-    "collapse" to StandardNodeAction(AccessibilityNodeInfo.ACTION_COLLAPSE),
-    "dismiss" to StandardNodeAction(AccessibilityNodeInfo.ACTION_DISMISS),
-    "select" to StandardNodeAction(AccessibilityNodeInfo.ACTION_SELECT),
-    "clear_selection" to StandardNodeAction(AccessibilityNodeInfo.ACTION_CLEAR_SELECTION),
-    "show_on_screen" to StandardNodeAction(android.R.id.accessibilityActionShowOnScreen),
-    "scroll_up" to StandardNodeAction(android.R.id.accessibilityActionScrollUp),
-    "scroll_down" to StandardNodeAction(android.R.id.accessibilityActionScrollDown),
-    "scroll_left" to StandardNodeAction(android.R.id.accessibilityActionScrollLeft),
-    "scroll_right" to StandardNodeAction(android.R.id.accessibilityActionScrollRight),
-    "page_up" to StandardNodeAction(android.R.id.accessibilityActionPageUp, minSdk = 29),
-    "page_down" to StandardNodeAction(android.R.id.accessibilityActionPageDown, minSdk = 29),
-    "page_left" to StandardNodeAction(android.R.id.accessibilityActionPageLeft, minSdk = 29),
-    "page_right" to StandardNodeAction(android.R.id.accessibilityActionPageRight, minSdk = 29),
-    "press_and_hold" to
-      StandardNodeAction(android.R.id.accessibilityActionPressAndHold, minSdk = 30),
-    SET_PROGRESS_NODE_ACTION to StandardNodeAction(android.R.id.accessibilityActionSetProgress),
-  )
-
-/**
- * Why [action] cannot be sent to a node offering [availableActionIds], or null when it can.
- * [actionLabels] (id to label) lets a refusal name the app-defined actions the node does offer.
- */
-internal fun nodeActionFailure(
-  action: String,
-  availableActionIds: Collection<Int>?,
-  sdkInt: Int = Build.VERSION.SDK_INT,
-  actionLabels: Map<Int, String> = emptyMap(),
-): String? {
-  val standard = STANDARD_NODE_ACTIONS[action] ?: return "Unsupported accessibility action: $action"
-  if (sdkInt < standard.minSdk) {
-    return "Accessibility action $action needs Android API ${standard.minSdk} (device is API $sdkInt)"
-  }
-  if (availableActionIds != null && standard.id !in availableActionIds) {
-    return "Accessibility action is unavailable: $action" +
-      availableActionsSuffix(availableActionIds, actionLabels)
-  }
-  return null
-}
-
-/**
- * The actions a node offers, by the names a host can request: standard names, then `custom:label`.
- */
-internal fun availableNodeActionNames(
-  availableActionIds: Collection<Int>,
-  actionLabels: Map<Int, String>,
-): List<String> =
-  availableActionIds
-    .mapNotNull { id ->
-      STANDARD_NODE_ACTIONS.entries.firstOrNull { it.value.id == id }?.key
-        ?: actionLabels[id]?.let { "$CUSTOM_NODE_ACTION:$it" }
-    }
-    .distinct()
-
-private fun availableActionsSuffix(
-  availableActionIds: Collection<Int>,
-  actionLabels: Map<Int, String>,
-): String {
-  val names = availableNodeActionNames(availableActionIds, actionLabels)
-  return if (names.isEmpty()) "" else " (available: ${names.joinToString(", ")})"
-}
-
-/** What to do with a node action request given the node's current state (issue #10148). */
-internal sealed interface NodeActionDecision {
-  /** Send [actionId] to the node, with ACTION_ARGUMENT_PROGRESS_VALUE when [progress] is set. */
-  data class Perform(val actionId: Int, val progress: Float? = null) : NodeActionDecision
-
-  /** The node is already in the requested state; no action is sent and the request succeeds. */
-  data object AlreadySatisfied : NodeActionDecision
-
-  /** The request cannot be honored; [message] is the failure reported to the host. */
-  data class Refused(val message: String) : NodeActionDecision
-}
-
-/**
- * Accessibility focus is state, not a one-shot action: a node holding accessibility focus
- * advertises only ACTION_CLEAR_ACCESSIBILITY_FOCUS and an unfocused node only
- * ACTION_ACCESSIBILITY_FOCUS. So `focus` on an already-focused node and `clear_focus` on an
- * unfocused node are satisfied as-is, rather than refused as "unavailable". Every other case keeps
- * the availability check.
- */
-internal fun decideNodeAction(
-  action: String,
-  state: NodeActionState,
-  sdkInt: Int = Build.VERSION.SDK_INT,
-  arguments: NodeActionArguments = NodeActionArguments(),
-): NodeActionDecision {
-  val (isAccessibilityFocused, availableActionIds, actionLabels) = state
-  if (action == "focus" && isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
-  if (action == "clear_focus" && !isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
-  if (action == CUSTOM_NODE_ACTION) {
-    return decideCustomNodeAction(arguments.customAction, availableActionIds, actionLabels)
-  }
-  nodeActionFailure(action, availableActionIds, sdkInt, actionLabels)?.let {
-    return NodeActionDecision.Refused(it)
-  }
-  val actionId =
-    nodeActionId(action, sdkInt)
-      ?: return NodeActionDecision.Refused("Unsupported accessibility action: $action")
-  if (action != SET_PROGRESS_NODE_ACTION) return NodeActionDecision.Perform(actionId)
-  val progress = arguments.progress
-  return if (progress == null || !progress.isFinite()) {
-    NodeActionDecision.Refused("set_progress requires a finite progress value")
-  } else {
-    NodeActionDecision.Perform(actionId, progress)
-  }
-}
-
-/**
- * An app-defined action is matched by its label, exactly first and then ignoring case. A node whose
- * action list is unknown cannot be matched.
- */
-private fun decideCustomNodeAction(
-  label: String?,
-  availableActionIds: Collection<Int>?,
-  actionLabels: Map<Int, String>,
-): NodeActionDecision {
-  if (label.isNullOrBlank()) {
-    return NodeActionDecision.Refused("custom requires the label of the action to perform")
-  }
-  val labeled = availableActionIds.orEmpty().mapNotNull { id -> actionLabels[id]?.let { id to it } }
-  val match =
-    labeled.firstOrNull { it.second == label }
-      ?: labeled.firstOrNull { it.second.equals(label, ignoreCase = true) }
-  return match?.let { NodeActionDecision.Perform(it.first) }
-    ?: NodeActionDecision.Refused(
-      "Custom accessibility action is unavailable: $label" +
-        availableActionsSuffix(availableActionIds.orEmpty(), actionLabels),
-    )
-}
-
-internal fun nodeActionId(action: String, sdkInt: Int = Build.VERSION.SDK_INT): Int? =
-  STANDARD_NODE_ACTIONS[action]?.takeIf { sdkInt >= it.minSdk }?.id
-
-/**
- * The interaction [CtrlProxy.onAccessibilityEvent] records for an accessibility event type. This is
- * the single classification primitive shared by the handler's `when` and by the derivation of the
- * subscribed event-type mask (issue #5467), so the "handled set" and the "subscribed set" cannot
- * drift — a new dispatch branch here automatically flows into [CtrlProxy.HANDLED_EVENT_TYPES].
- */
-internal enum class InteractionDispatch {
-  TAP,
-  LONG_PRESS,
-  CONTENT_CHANGED,
-  NAVIGATE,
-  SELECT,
-  INPUT_TEXT,
-  SCROLL,
-}
-
-/**
- * The interaction the handler's `when` performs for [eventType], or null if it ignores the type.
- */
-internal fun interactionDispatchFor(eventType: Int): InteractionDispatch? =
-  when (eventType) {
-    AccessibilityEvent.TYPE_VIEW_CLICKED -> InteractionDispatch.TAP
-    AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> InteractionDispatch.LONG_PRESS
-    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> InteractionDispatch.CONTENT_CHANGED
-    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> InteractionDispatch.NAVIGATE
-    AccessibilityEvent.TYPE_VIEW_SELECTED -> InteractionDispatch.SELECT
-    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> InteractionDispatch.INPUT_TEXT
-    AccessibilityEvent.TYPE_VIEW_SCROLLED -> InteractionDispatch.SCROLL
-    else -> null
-  }
-
-/** True when the handler feeds [eventType] to the hierarchy debouncer for a fresh capture. */
-internal fun triggersHierarchyRefresh(eventType: Int): Boolean =
-  when (eventType) {
-    AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-    AccessibilityEvent.TYPE_WINDOWS_CHANGED,
-    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> true
-    else -> false
-  }
-
-/**
- * True when [CtrlProxy.onAccessibilityEvent] acts on [eventType] at all (interaction or refresh).
- */
-internal fun isHandledEventType(eventType: Int): Boolean =
-  interactionDispatchFor(eventType) != null || triggersHierarchyRefresh(eventType)
-
-/**
- * The per-event push work [CtrlProxy.onAccessibilityEvent] should perform: which interaction (if
- * any) to record, and whether to schedule a debounced hierarchy refresh (extraction + structural
- * hash). Both are pure over the classification helpers plus the observer count.
- */
-internal data class AccessibilityEventWork(
-  val interaction: InteractionDispatch?,
-  val refreshesHierarchy: Boolean,
-) {
-  companion object {
-    /** Nothing to do — no interaction recording and no hierarchy refresh (the expensive work). */
-    val NONE = AccessibilityEventWork(interaction = null, refreshesHierarchy = false)
-  }
-}
-
-/**
- * True only for an event from CtrlProxy's own window: an accessibility-overlay window (the
- * highlight overlay or the prototype) or, while an application-layer prototype is up
- * ([appLayerShowing]), a `TYPE_SYSTEM` window, which is how the system reports that layer.
- * CtrlProxy's package also owns the CtrlProxy keyboard (`TYPE_INPUT_METHOD`) and `MainActivity`
- * (`TYPE_APPLICATION`), whose events must still advance `frameContext` and refresh the hierarchy,
- * so they are never skipped. Fails open: an unknown window type ([windowType] null) is processed,
- * because handling one extra event is safe while dropping a keyboard event leaves stale key
- * coordinates passing the staleness check.
- */
-internal fun shouldSkipOwnWindowEvent(
-  eventPackage: String?,
-  ownPackage: String,
-  windowType: Int?,
-  appLayerShowing: Boolean = false,
-): Boolean =
-  eventPackage == ownPackage &&
-    (windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY ||
-      (appLayerShowing && windowType == AccessibilityWindowInfo.TYPE_SYSTEM))
-
-/**
- * Window type of the window [event] came from, or null when it cannot be determined (no source
- * node, window not retrievable, or the node call throws). This binder-cost resolver is invoked only
- * on a window-type memo miss. Reads the source node's window rather than enumerating `windows`.
- */
-private fun ownEventWindowType(event: AccessibilityEvent): Int? {
-  val source =
-    try {
-      event.source
-    } catch (_: Exception) {
-      // Fail open: a source that cannot be read leaves the type unknown, so the event is processed.
-      return null
-    }
-  if (source == null) return null
-  return try {
-    val window = source.window
-    try {
-      window?.type
-    } finally {
-      window?.recycle()
-    }
-  } catch (_: Exception) {
-    // Fail open: a window that cannot be read leaves the type unknown, so the event is processed.
-    null
-  } finally {
-    try {
-      source.recycle()
-    } catch (_: Exception) {
-      /* already recycled */
-    }
-  }
-}
-
-/**
- * True when [eventType] changes the UI enough to advance the `frameContext` staleness token. This
- * is DELIBERATELY independent of the observer count (issue #5470 review): the token must keep
- * advancing even while nobody is connected, otherwise a token minted before the last client
- * disconnected could still pass the daemon/runner frame-context staleness check after a reconnect
- * even though the screen changed during the gap — aiming an input action at the wrong UI state. The
- * set is exactly the original bump sites: the hierarchy-refresh types plus a scroll. Advancing the
- * token is a cheap atomic increment; only the EXPENSIVE extraction/recording/broadcast is gated on
- * an observer.
- */
-internal fun advancesFrameContext(eventType: Int): Boolean =
-  triggersHierarchyRefresh(eventType) ||
-    interactionDispatchFor(eventType) == InteractionDispatch.SCROLL
-
-/**
- * Pure "is anyone observing" gate (issue #5470). The two biggest continuous-work paths in
- * [CtrlProxy.onAccessibilityEvent] — per-interaction accessibility-node recording and the debounced
- * full-hierarchy extraction + structural hash — are background PUSH work that only a connected
- * client ever consumes, so with zero observers they are skipped entirely. The `frameContext`
- * staleness token is NOT gated here (see [advancesFrameContext]); it keeps advancing regardless.
- *
- * This does NOT govern the on-demand PULL path (`request_hierarchy` → `extractImmediately`): that
- * extracts the live accessibility tree directly and reads none of the push-path side effects
- * (frameContext counter, debouncer hash/cache), so it stays fully correct with zero prior push
- * activity and zero observers. Gating is race-tolerant by design — the count may change between
- * this check and use, costing at most one extra or one skipped frame around a connect/disconnect
- * edge.
- */
-internal fun accessibilityEventWorkFor(
-  eventType: Int,
-  connectionCount: Int,
-): AccessibilityEventWork =
-  if (connectionCount > 0) {
-    AccessibilityEventWork(
-      interaction = interactionDispatchFor(eventType),
-      refreshesHierarchy = triggersHierarchyRefresh(eventType),
-    )
-  } else {
-    AccessibilityEventWork.NONE
-  }
-
-/**
- * Debounced-scroll accumulation (pending scroll X / Y / package name in
- * [InteractionEventController]) tagged with the [WebSocketServer.observerSessionGeneration] it was
- * accumulated under, modeled as an immutable value so the cross-session discard is unit-testable.
- */
-internal data class PendingScroll(
-  val deltaX: Int,
-  val deltaY: Int,
-  val packageName: String?,
-  val sessionGeneration: Int,
-) {
-  companion object {
-    /** No accumulation yet, under no session. */
-    val NONE = PendingScroll(deltaX = 0, deltaY = 0, packageName = null, sessionGeneration = 0)
-  }
-}
-
-/**
- * Fold one scroll sample into the pending accumulation, FIRST discarding any accumulation that
- * belongs to a prior observer session (issue #5470 review — the event-free-gap hole in the earlier
- * fix). Scroll deltas accumulate across the ~300ms scroll debounce; if a client disconnects and a
- * new one connects before the next scroll — even with no accessibility event in between — the
- * previous session's deltas must NOT combine with the new session's first scroll and broadcast a
- * bogus combined value.
- *
- * [currentGeneration] is [WebSocketServer.observerSessionGeneration], which advances only on the
- * empty→non-empty edge. When it differs from the accumulation's tagged
- * [PendingScroll.sessionGeneration] the observer set emptied and a new session began since the last
- * sample, so we start from [PendingScroll.NONE] before adding this sample; when it matches — a
- * client stayed continuously connected, including when a concurrent client merely joined — the
- * in-flight accumulation is preserved and nothing is dropped. The check runs at sample time, so it
- * is correct regardless of whether any event fired during the gap.
- */
-internal fun accumulatePendingScroll(
-  current: PendingScroll,
-  deltaX: Int,
-  deltaY: Int,
-  packageName: String?,
-  currentGeneration: Int,
-): PendingScroll {
-  val base = if (current.sessionGeneration == currentGeneration) current else PendingScroll.NONE
-  return PendingScroll(
-    deltaX = base.deltaX + deltaX,
-    deltaY = base.deltaY + deltaY,
-    packageName = packageName,
-    sessionGeneration = currentGeneration,
-  )
-}
-
-internal fun navigationEventResponse(event: TimestampedNavigationEvent): NavigationEventResponse =
-  NavigationEventResponse(
-    timestamp = event.timestamp,
-    event =
-      NavigationEventData(
-        destination = event.destination,
-        source = event.source,
-        arguments = event.arguments.takeIf { it.isNotEmpty() },
-        metadata = event.metadata.takeIf { it.isNotEmpty() },
-        applicationId = event.applicationId,
-        sequenceNumber = event.sequenceNumber,
-      ),
-  )
-
-/** Android multi-user range: a package uid is `userId * PER_USER_RANGE + appId`. */
-internal const val PACKAGE_EVENT_USER_ID_RANGE = 100_000
-
-/**
- * The Android user id for a package broadcast's `Intent.EXTRA_UID` (#10067). The extra is the
- * package's kernel uid (e.g. 10234 for user 0, 1010234 for user 10), not a user id; an absent extra
- * (`-1`) means the primary user.
- */
-internal fun packageEventUserId(uid: Int): Int =
-  if (uid >= 0) uid / PACKAGE_EVENT_USER_ID_RANGE else 0
-
-internal fun crashEventTimestamp(reportedMs: Long, nowMs: Long): Long =
-  if (reportedMs > 0) reportedMs else nowMs
-
-internal fun crashEventResponse(
-  timestamp: Long,
-  exceptionClass: String,
-  exceptionMessage: String?,
-  stackTrace: String,
-  threadName: String,
-  currentScreen: String?,
-  packageName: String,
-  appVersion: String?,
-  deviceModel: String,
-  deviceManufacturer: String,
-  osVersion: String,
-  sdkInt: Int,
-): CrashEvent =
-  CrashEvent(
-    timestamp = timestamp,
-    event =
-      CrashData(
-        exceptionClass = exceptionClass,
-        message = exceptionMessage,
-        stackTrace = stackTrace,
-        threadName = threadName,
-        currentScreen = currentScreen,
-        packageName = packageName,
-        appVersion = appVersion,
-        deviceInfo =
-          DeviceInfo(
-            model = deviceModel,
-            manufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          ),
-      ),
-  )
-
-internal fun handledExceptionEventResponse(
-  timestamp: Long,
-  exceptionClass: String,
-  exceptionMessage: String?,
-  stackTrace: String,
-  customMessage: String?,
-  currentScreen: String?,
-  packageName: String,
-  appVersion: String?,
-  deviceModel: String,
-  deviceManufacturer: String,
-  osVersion: String,
-  sdkInt: Int,
-): HandledExceptionEvent =
-  HandledExceptionEvent(
-    timestamp = timestamp,
-    event =
-      HandledExceptionData(
-        exceptionClass = exceptionClass,
-        message = exceptionMessage,
-        stackTrace = stackTrace,
-        customMessage = customMessage,
-        currentScreen = currentScreen,
-        packageName = packageName,
-        appVersion = appVersion,
-        deviceInfo =
-          DeviceInfo(
-            model = deviceModel,
-            manufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          ),
-      ),
-  )
-
-/**
- * Owns the "serialize once → write file → broadcast → always release the frame-context entry"
- * sequence for a single hierarchy delivery (issue #5469 follow-up).
- *
- * Serialization was hoisted out of the writer/broadcaster's own try/catch so a change is serialized
- * at most once (the one [serialize] result is reused for both [write] and [broadcast]). That move
- * exposed a leak: [HierarchyController.extractedHierarchyFrameContexts] is a strong-keyed identity
- * map that only the broadcaster removed from, so an encode failure (e.g. a NaN/Infinity
- * `textSizeInPx`) before the broadcast would retain a full hierarchy forever. Centralizing the
- * sequence guarantees [releaseFrameContext] runs in a `finally` even when [serialize] throws, so no
- * call site can serialize-then-leak.
- *
- * A failure in [serialize] (or [write]/[broadcast]) skips the remaining steps and rethrows so the
- * caller drops just that one frame; the frame-context entry is released regardless. This function
- * is pure over its injected seams — no Android or service state — so it is unit-testable with a
- * counting serializer and fake writer/broadcaster.
- */
-internal suspend fun deliverHierarchyFrame(
-  serialize: () -> String,
-  write: (String) -> Unit,
-  broadcast: suspend (String) -> Unit,
-  releaseFrameContext: () -> Unit,
-) {
-  try {
-    val serialized = serialize()
-    write(serialized)
-    broadcast(serialized)
-  } finally {
-    // Runs on every path: on success the broadcaster already removed the entry (this is a no-op
-    // safety net); on a serialize/write/broadcast failure this is the only removal, closing the
-    // leak. remove() is idempotent, so the redundant success-path call is harmless.
-    releaseFrameContext()
-  }
 }
 
 /**
@@ -1329,6 +720,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  private val deviceInfoController by lazy {
+    DeviceInfoController(
+      context = this,
+      serviceInfo = { serviceInfo },
+      displayController = displayController,
+      asyncActionRunner = asyncActionRunner,
+      broadcast = { webSocketServer.broadcast(it) },
+    )
+  }
   internal val hierarchyController by lazy {
     HierarchyController(
       host =
@@ -1346,14 +746,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun occlusionEnabled() = this@CtrlProxy.occlusionEnabled
 
-          override fun wakefulness() = getWakefulness()
+          override fun wakefulness() = deviceInfoController.getWakefulness()
 
           override fun foregroundActivity(rootPackage: String?, windowClass: String?) =
-            getForegroundActivity(rootPackage, windowClass)
+            deviceInfoController.getForegroundActivity(rootPackage, windowClass)
 
-          override fun isEmulator() = getIsEmulator()
+          override fun isEmulator() = deviceInfoController.getIsEmulator()
 
-          override fun accessibilityTool() = getAccessibilityTool()
+          override fun accessibilityTool() = deviceInfoController.getAccessibilityTool()
 
           override fun isServerRunning() =
             ::webSocketServer.isInitialized && webSocketServer.isRunning()
@@ -2863,7 +2263,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override suspend fun requestDeviceInfo(requestId: String?) = performDeviceInfoRequest(requestId)
+  override suspend fun requestDeviceInfo(requestId: String?) =
+    deviceInfoController.performDeviceInfoRequest(requestId)
 
   override suspend fun getDeviceOwnerStatus(requestId: String?) =
     caCertificateController.performGetDeviceOwnerStatus(requestId)
@@ -3376,91 +2777,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId
 
-  /** Get device wakefulness state: "Awake", "Asleep", or "Dozing". */
-  private fun getWakefulness(): String {
-    return try {
-      val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
-      if (powerManager == null) {
-        "Awake"
-      } else if (powerManager.isDeviceIdleMode) {
-        "Dozing"
-      } else if (powerManager.isInteractive) {
-        "Awake"
-      } else {
-        "Asleep"
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get wakefulness", e)
-      "Awake"
-    }
-  }
-
-  /**
-   * Get the foreground activity component name using accessibility service state. Uses
-   * rootInActiveWindow (reliable on all API levels) + lastWindowClassName from
-   * TYPE_WINDOW_STATE_CHANGED events, avoiding the restricted ActivityManager.getRunningTasks()
-   * API.
-   */
-  private fun getForegroundActivity(
-    rootPackage: String? = null,
-    windowClass: String? = null,
-  ): String? {
-    return try {
-      val pkg = rootPackage
-      val className = windowClass
-      if (pkg != null && className != null) {
-        if (isFrameworkViewClass(className)) {
-          // Accessibility reports the root View class for many app windows,
-          // which is not the resumed Activity and must not shadow the ADB
-          // fallback on the host.
-          return null
-        }
-        // Use short class name format if it starts with the package
-        val shortName =
-          if (className.startsWith(pkg)) {
-            className.removePrefix(pkg)
-          } else {
-            className
-          }
-        "$pkg/$shortName"
-      } else {
-        // Don't return package-only value — it produces an empty activityName
-        // in ObserveScreen and prevents the ADB fallback from filling the real one
-        null
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get foreground activity", e)
-      null
-    }
-  }
-
-  private fun isFrameworkViewClass(className: String): Boolean =
-    className.startsWith("android.widget.") ||
-      className.startsWith("android.view.") ||
-      className.endsWith("DecorView")
-
-  /** Check if running on an emulator. */
-  /**
-   * Runtime `AccessibilityServiceInfo.isAccessibilityTool` of this bound service (#6233). The
-   * getter exists from API 31; below that (or without serviceInfo) the value is unknown (null).
-   */
-  private fun getAccessibilityTool(): Boolean? =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) serviceInfo?.isAccessibilityTool else null
-
-  private fun getIsEmulator(): Boolean {
-    return (Build.FINGERPRINT.startsWith("generic") ||
-      Build.FINGERPRINT.startsWith("unknown") ||
-      Build.MODEL.contains("google_sdk") ||
-      Build.MODEL.contains("Emulator") ||
-      Build.MODEL.contains("Android SDK built for x86") ||
-      Build.MANUFACTURER.contains("Genymotion") ||
-      Build.HARDWARE.contains("goldfish") ||
-      Build.HARDWARE.contains("ranchu") ||
-      Build.PRODUCT.contains("sdk_gphone") ||
-      Build.PRODUCT.contains("emulator") ||
-      Build.PRODUCT.contains("simulator"))
-  }
-
   /**
    * Execute a global action (back, home, recents, etc.) via the accessibility service. Returns true
    * if the action was dispatched successfully.
@@ -3491,33 +2807,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             } else {
               null
             },
-        ),
-      )
-    }
-  }
-
-  /** Handle a request_device_info WebSocket message. */
-  private fun performDeviceInfoRequest(requestId: String?) {
-    val startTime = System.currentTimeMillis()
-    val screenDimensions = displayController.getScreenDimensions()
-    val foreground = getForegroundActivity()
-    val totalTimeMs = System.currentTimeMillis() - startTime
-    asyncActionRunner.launch(requestId, "request_device_info") {
-      webSocketServer.broadcast(
-        dev.jasonpearson.automobile.protocol.DeviceInfoResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = requestId,
-          success = true,
-          screenWidth = screenDimensions?.width,
-          screenHeight = screenDimensions?.height,
-          density = displayController.getDensity(),
-          rotation = displayController.getRotation(),
-          sdkInt = Build.VERSION.SDK_INT,
-          deviceModel = Build.MODEL,
-          isEmulator = getIsEmulator(),
-          wakefulness = getWakefulness(),
-          foregroundActivity = foreground,
-          totalTimeMs = totalTimeMs,
         ),
       )
     }
@@ -3832,22 +3121,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       try {
-        // Fall back to now because the legacy intent timestamp extra defaults to 0.
         val response =
-          handledExceptionEventResponse(
-            timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
-            exceptionClass = exceptionClass,
-            exceptionMessage = exceptionMessage,
-            stackTrace = stackTrace,
-            customMessage = customMessage,
-            currentScreen = currentScreen,
-            packageName = packageName,
-            appVersion = appVersion,
-            deviceModel = deviceModel,
-            deviceManufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          )
+          handledExceptionEventResponse(report, nowMs = timeProvider.currentTimeMillis())
 
         webSocketServer.broadcast(response)
         Log.d(
@@ -3872,22 +3147,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       try {
-        // Fall back to now because the legacy intent timestamp extra defaults to 0.
-        val response =
-          crashEventResponse(
-            timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
-            exceptionClass = exceptionClass,
-            exceptionMessage = exceptionMessage,
-            stackTrace = stackTrace,
-            threadName = threadName,
-            currentScreen = currentScreen,
-            packageName = packageName,
-            appVersion = appVersion,
-            deviceModel = deviceModel,
-            deviceManufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          )
+        val response = crashEventResponse(report, nowMs = timeProvider.currentTimeMillis())
 
         webSocketServer.broadcast(response)
         Log.i(

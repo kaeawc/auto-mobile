@@ -1043,6 +1043,9 @@ The wire protocol has no host opt-in channel. The existing host gate `AUTOMOBILE
 
 ### Device media items (#14192, contract only)
 
+Which camera, media-library, scanner and microphone routes work on each emulator, simulator and
+device, and how to seed them, is in the [camera and media guide](../../prototype-camera-media.md).
+
 Camera, picker and recorder producers write a media item (or an array of them) to an `into`
 pointer in `/data`, under the rules of `applyPrototypeDataWrite` and with no nulls. The device
 mints its ids with the reserved `media:` prefix and keeps the bytes in its own store, so an `image`

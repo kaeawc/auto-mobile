@@ -97,16 +97,23 @@ export class AvdSnapshotService implements AvdSnapshotOperations {
   private readonly emulator: Pick<AndroidEmulator, "getBootedDevices" | "resolveAvdNameForSerial">;
   private readonly adbFactory: AdbClientFactory;
 
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
+
   constructor(
     directories: SnapshotDirectoryMeasurer = new DeviceSnapshotStore(),
-    avdDirectories: AvdDirectoryResolver = new FileAvdConfigReader(),
-    emulator: Pick<
-      AndroidEmulator,
-      "getBootedDevices" | "resolveAvdNameForSerial"
-    > = new AndroidEmulatorClient(),
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
+    {
+      avdDirectories = new FileAvdConfigReader(),
+      emulator = new AndroidEmulatorClient(),
+      adbFactory = defaultAdbClientFactory,
+      consoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
+    }: {
+      avdDirectories?: AvdDirectoryResolver;
+      emulator?: Pick<AndroidEmulator, "getBootedDevices" | "resolveAvdNameForSerial">;
+      adbFactory?: AdbClientFactory;
+      consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+    } = {},
   ) {
+    this.consoleBusyRegistry = consoleBusyRegistry;
     this.directories = directories;
     this.avdDirectories = avdDirectories;
     this.emulator = emulator;

@@ -47,7 +47,7 @@ const recordDeviceGesturesTool = async (
   try {
     // The owning session is recorded so releasing it stops the recording instead of leaving it
     // to capture the device's next owner.
-    const result = await startDeviceGestureRecording(device, undefined, undefined, undefined, {
+    const result = await startDeviceGestureRecording(device, undefined, undefined, {
       ownerSessionUuid: params?.sessionUuid,
     });
 
@@ -131,12 +131,9 @@ async function activeRecordingForExport(
   } catch (error) {
     if (error instanceof InputDeviceOwnedError) {
       // Same typed refusal, without the lifecycle remedy's offer of `force`.
-      throw new InputDeviceOwnedError(
-        "exportPlan",
-        error.deviceId,
-        holder.sessionUuid,
-        EXPORT_PLAN_REMEDY,
-      );
+      throw new InputDeviceOwnedError("exportPlan", error.deviceId, holder.sessionUuid, {
+        remedy: EXPORT_PLAN_REMEDY,
+      });
     }
     throw error;
   }
@@ -253,8 +250,8 @@ export const registerDeviceGestureRecordingTools = () => {
     "recordDeviceGestures",
     "Start recording on-device user input (not tool calls) for exportPlan.",
     recordDeviceGesturesSchema,
-    recordDeviceGesturesTool,
     {
+      handler: recordDeviceGesturesTool,
       defaultEnabled: false,
       outputSchema: recordDeviceGesturesResultSchema,
       assertHeldDeviceStart: assertDeviceGestureRecordingStartHeldDevice,
@@ -265,7 +262,10 @@ export const registerDeviceGestureRecordingTools = () => {
     "exportPlan",
     "Stop active recording and export a YAML plan.",
     exportPlanSchema,
-    exportPlanTool,
-    { defaultEnabled: false, outputSchema: exportPlanResultSchema },
+    {
+      handler: exportPlanTool,
+      defaultEnabled: false,
+      outputSchema: exportPlanResultSchema,
+    },
   );
 };

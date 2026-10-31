@@ -55,6 +55,20 @@ test("restores missing entries sequentially with assets before save, skips exist
   });
   expect(calls).toEqual(["asset:photo", "save:one", "asset:photo", "save:two"]);
 });
+test("host-only entries are restored rather than counted as present on the device", async () => {
+  const { mirror, device, calls } = harness();
+  await mirror.record("serial", entry);
+  device.list = async () => ({
+    success: true,
+    savedPrototypes: [{ id: "one", label: "One", pinned: false, hostOnly: true }],
+  });
+  expect(await restoreSavedPrototypes("serial", mirror, device)).toEqual({
+    restored: ["one"],
+    skipped: [],
+    failed: [],
+  });
+  expect(calls).toEqual(["asset:photo", "save:one"]);
+});
 test("entry failures surface device codes and do not stop other entries or remove the mirror", async () => {
   const { mirror, device } = harness();
   await mirror.record("serial", entry);

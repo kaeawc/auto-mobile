@@ -452,7 +452,7 @@ describe("a derived label session is judged and recorded as its base", () => {
   test("the owner's disconnect releases the base, then each label once, and frees both devices", async () => {
     const w = await world(OWNER);
     const releases: Array<[string, string]> = [];
-    w.manager.onSessionRelease((sessionId, _deviceId, reason, _snapshot, options) => {
+    w.manager.onSessionRelease((sessionId, _deviceId, reason, options) => {
       releases.push([sessionId, options?.upgradeOnly ? `${reason} (upgrade)` : reason]);
     });
     const cascade = registerDerivedLabelSessionReleaseCascade(w.manager, w.pool);

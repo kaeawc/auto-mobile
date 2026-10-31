@@ -55,16 +55,21 @@ describe("observation read listing scope", () => {
       watchos: { devices: [WATCH], scanned: { android: false, ios: false, watchos: true } },
     });
 
-    expect(await resolveDeviceForObservationRead(WATCH.deviceId, undefined, read, "watchos")).toBe(
-      WATCH,
-    );
+    expect(
+      await resolveDeviceForObservationRead(WATCH.deviceId, undefined, {
+        access: read,
+        platform: "watchos",
+      }),
+    ).toBe(WATCH);
     expect(scopes).toEqual(["watchos"]);
   });
 
   test("an Android or iOS read that misses is not found, never a watch discovery gap", async () => {
     const { read, scopes } = access({ either: either([IPHONE]), watchos: either([]) });
 
-    const error = await failure(resolveDeviceForObservationRead("missing-device", undefined, read));
+    const error = await failure(
+      resolveDeviceForObservationRead("missing-device", undefined, { access: read }),
+    );
 
     expect(error).not.toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
     expect(String(error)).toContain("missing-device");
@@ -82,7 +87,10 @@ describe("observation read listing scope", () => {
     });
 
     const error = await failure(
-      resolveDeviceForObservationRead(WATCH.deviceId, undefined, read, "watchos"),
+      resolveDeviceForObservationRead(WATCH.deviceId, undefined, {
+        access: read,
+        platform: "watchos",
+      }),
     );
 
     expect(error).toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);

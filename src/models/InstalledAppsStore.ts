@@ -26,8 +26,7 @@ export interface InstalledAppsStore {
     deviceId: string,
     userId: number,
     packageName: string,
-    isSystem: boolean,
-    timestampMs: number,
+    options: { isSystem: boolean; timestampMs: number },
   ): Promise<void>;
   removeInstalledApp(deviceId: string, userId: number, packageName: string): Promise<void>;
   removeInstalledAppForDevice(deviceId: string, packageName: string): Promise<void>;

@@ -35,25 +35,23 @@ describe("VoiceOverToggle", () => {
   const fakeSimulatorClientProvider = () => new FakeIOSCtrlProxy();
 
   const makeSimulatorToggle = (timer?: FakeTimer) =>
-    new VoiceOverToggle(
-      SIMULATOR_DEVICE,
-      fakeDetector,
-      fakeExec,
+    new VoiceOverToggle(SIMULATOR_DEVICE, {
+      detector: fakeDetector,
+      processExecutor: fakeExec,
       timer,
-      fakeSimulatorClientProvider,
-    );
+      clientProvider: fakeSimulatorClientProvider,
+    });
 
   describe("physical device (Settings-driven via CtrlProxy)", () => {
     let fakeClient: FakeIOSCtrlProxy;
 
     const makeToggle = () =>
-      new VoiceOverToggle(
-        PHYSICAL_DEVICE,
-        fakeDetector,
-        fakeExec,
-        defaultPhysicalTimer(),
-        () => fakeClient,
-      );
+      new VoiceOverToggle(PHYSICAL_DEVICE, {
+        detector: fakeDetector,
+        processExecutor: fakeExec,
+        timer: defaultPhysicalTimer(),
+        clientProvider: () => fakeClient,
+      });
 
     const defaultPhysicalTimer = () => {
       const t = new FakeTimer();
@@ -234,13 +232,12 @@ describe("VoiceOverToggle", () => {
       const fakeClient = new FakeIOSCtrlProxy();
       fakeClient.setFailureMode("voiceOverState", new Error("CtrlProxy timeout"));
 
-      const toggle = new VoiceOverToggle(
-        SIMULATOR_DEVICE,
-        realDetector,
-        fakeExec,
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, {
+        detector: realDetector,
+        processExecutor: fakeExec,
         timer,
-        () => fakeClient,
-      );
+        clientProvider: () => fakeClient,
+      });
       const result = await toggle.toggle(true);
 
       expect(result.supported).toBe(true);
@@ -301,13 +298,12 @@ describe("VoiceOverToggle", () => {
       const fakeClient = new FakeIOSCtrlProxy();
       fakeClient.setVoiceOverState(false);
 
-      const toggle = new VoiceOverToggle(
-        SIMULATOR_DEVICE,
-        realDetector,
-        fakeExec,
+      const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, {
+        detector: realDetector,
+        processExecutor: fakeExec,
         timer,
-        () => fakeClient,
-      );
+        clientProvider: () => fakeClient,
+      });
       const result = await toggle.toggle(false);
 
       expect(result.supported).toBe(true);
@@ -398,13 +394,12 @@ describe("VoiceOverToggle", () => {
       fakeDetector.enqueueResolvedStateResults(true);
       const previous: boolean[] = [];
 
-      await new VoiceOverToggle(
-        PHYSICAL_DEVICE,
-        fakeDetector,
-        fakeExec,
+      await new VoiceOverToggle(PHYSICAL_DEVICE, {
+        detector: fakeDetector,
+        processExecutor: fakeExec,
         timer,
-        () => fakeClient,
-      ).toggle(false, {
+        clientProvider: () => fakeClient,
+      }).toggle(false, {
         beforeChange: (value) => {
           previous.push(value);
           expect(fakeClient.getSetVoiceOverEnabledHistory()).toEqual([]);
@@ -467,13 +462,12 @@ describe("VoiceOverToggle", () => {
       const fakeClient = new FakeIOSCtrlProxy();
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
-      const toggle = new VoiceOverToggle(
-        PHYSICAL_DEVICE,
-        fakeDetector,
-        fakeExec,
-        fakeTimer,
-        () => fakeClient,
-      );
+      const toggle = new VoiceOverToggle(PHYSICAL_DEVICE, {
+        detector: fakeDetector,
+        processExecutor: fakeExec,
+        timer: fakeTimer,
+        clientProvider: () => fakeClient,
+      });
       await toggle.toggle(true);
 
       expect(fakeDetector.getInvalidatedDevices()).toContain(PHYSICAL_DEVICE.deviceId);
@@ -502,13 +496,12 @@ describe("custom simulator device set argv", () => {
           detector.setVoiceOverEnabled(true);
           const timer = new FakeTimer();
           timer.enableAutoAdvance();
-          const toggle = new VoiceOverToggle(
-            SIMULATOR_DEVICE,
+          const toggle = new VoiceOverToggle(SIMULATOR_DEVICE, {
             detector,
-            exec,
+            processExecutor: exec,
             timer,
-            () => new FakeIOSCtrlProxy(),
-          );
+            clientProvider: () => new FakeIOSCtrlProxy(),
+          });
           expect((await toggle.toggle(true)).applied).toBe(true);
           expect(capture.mock.calls.map(([file, args]) => [file, args])).toEqual([
             [

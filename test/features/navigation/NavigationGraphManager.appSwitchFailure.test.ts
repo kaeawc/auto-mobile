@@ -44,11 +44,10 @@ describe("NavigationGraphManager app switch when the app-row insert rejects (#99
   beforeEach(async () => {
     harness = await installInMemoryNavManager();
     repository = new FlakyAppInsertRepository(harness.db);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
-      new FakeTimer(),
-    );
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository(harness.db),
+      timer: new FakeTimer(),
+    });
   });
 
   afterEach(async () => {

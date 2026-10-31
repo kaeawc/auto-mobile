@@ -86,20 +86,19 @@ export async function reserveRecoveredDeviceForReadiness(
   devicePool: Pick<DevicePool, "reserveDeviceForReadiness"> | undefined,
   boot: DeviceBootResult,
   args: StartDeviceArgs,
-  requestedIdentity: string,
-  releaseReadinessReservations: DeviceReadinessReservation[],
+  {
+    requestedIdentity,
+    releaseReadinessReservations,
+  }: { requestedIdentity: string; releaseReadinessReservations: DeviceReadinessReservation[] },
 ): Promise<void> {
   validateBootIdentity(args, boot.device, boot.source, boot.sourceImage);
   await validatePooledDeviceMapping(boot.device, requestedIdentity);
   if (devicePool) {
     releaseReadinessReservations.push(
-      await devicePool.reserveDeviceForReadiness(
-        boot.device.deviceId,
-        boot.device,
-        boot.sourceImage?.name ?? boot.device.name,
-        undefined,
-        { enforceAndroidRecoveryExclusion: boot.device.platform === "android" },
-      ),
+      await devicePool.reserveDeviceForReadiness(boot.device.deviceId, boot.device, {
+        stableRuntimeName: boot.sourceImage?.name ?? boot.device.name,
+        enforceAndroidRecoveryExclusion: boot.device.platform === "android",
+      }),
     );
   }
   clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
@@ -116,24 +115,18 @@ export async function reserveInitialDeviceForReadiness(
   daemonState: DaemonStateLike,
   boot: DeviceBootResult,
   releaseReadinessReservations: DeviceReadinessReservation[],
-  mcpSessionId: string | undefined,
-  oneShotCli = false,
+  { mcpSessionId, oneShotCli = false }: { mcpSessionId?: string; oneShotCli?: boolean } = {},
 ): Promise<void> {
   const devicePool = getStartDevicePool(daemonState);
   if (!devicePool) {
     return;
   }
   releaseReadinessReservations.push(
-    await devicePool.reserveDeviceForReadiness(
-      boot.device.deviceId,
-      boot.device,
-      boot.sourceImage?.name ?? boot.device.name,
-      undefined,
-      {
-        autolockClient: oneShotCli ? { oneShotCli } : mcpSessionId ? { mcpSessionId } : undefined,
-        enforceAndroidRecoveryExclusion: true,
-      },
-    ),
+    await devicePool.reserveDeviceForReadiness(boot.device.deviceId, boot.device, {
+      stableRuntimeName: boot.sourceImage?.name ?? boot.device.name,
+      autolockClient: oneShotCli ? { oneShotCli } : mcpSessionId ? { mcpSessionId } : undefined,
+      enforceAndroidRecoveryExclusion: true,
+    }),
   );
 }
 
@@ -236,8 +229,7 @@ export function createSystemUiAnrRebooter(
           devicePool,
           candidate.device.deviceId,
           liveHolderOtherThanThisRequest(candidate.device.deviceId),
-          entitlement.requesterSessionUuid,
-          "another",
+          { requesterSessionUuid: entitlement.requesterSessionUuid, wording: "another" },
         );
       }
     };
@@ -270,7 +262,7 @@ export function createSystemUiAnrRebooter(
           return;
         }
         if (session) {
-          await releaseSessionAndDevice(manager, devicePool, replacement.id, sessionId, {
+          await releaseSessionAndDevice({ manager, pool: devicePool }, replacement.id, sessionId, {
             reason: utilDeviceLossCancellationReason(replacement.id),
             release: async () =>
               await manager.releaseSession(
@@ -303,13 +295,10 @@ export async function prepareRecoveredDeviceForRunnerReadiness(
   if (recovery.releaseReadinessReservation) {
     input.releaseReadinessReservations.push(recovery.releaseReadinessReservation);
   }
-  await reserveRecoveredDeviceForReadiness(
-    devicePool,
-    recovery.boot,
-    input.args,
-    input.requestedIdentity,
-    input.releaseReadinessReservations,
-  );
+  await reserveRecoveredDeviceForReadiness(devicePool, recovery.boot, input.args, {
+    requestedIdentity: input.requestedIdentity,
+    releaseReadinessReservations: input.releaseReadinessReservations,
+  });
 }
 
 export async function prepareStartDeviceRunnerReadiness(

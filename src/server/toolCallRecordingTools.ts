@@ -124,8 +124,8 @@ export const registerToolCallRecordingTools = () => {
     "recordToolCalls",
     "Record MCP tool calls to YAML. begin/end require tool-call-recording; status always works.",
     recordToolCallsSchema,
-    recordToolCallsTool,
     {
+      handler: recordToolCallsTool,
       defaultEnabled: false,
       outputSchema: recordToolCallsResultSchema,
       // `status` only reports the recording; begin/end change it (#11107).

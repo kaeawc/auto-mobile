@@ -3952,7 +3952,12 @@ describe("LaunchApp", () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const debug = spyOn(logger, "debug").mockImplementation(() => {});
       let receivedSignal: AbortSignal | undefined;
-      fakeCtrlProxy.requestLaunchApp = async (_bundleId, _timeoutMs, _perf, _coldBoot, signal) => {
+      fakeCtrlProxy.requestLaunchApp = async (
+        _bundleId,
+        _timeoutMs,
+        _perf,
+        { coldBoot: _coldBoot, signal } = {},
+      ) => {
         receivedSignal = signal;
         return await lateReply.promise;
       };
@@ -4007,7 +4012,12 @@ describe("LaunchApp", () => {
       });
       let receivedSignal: AbortSignal | undefined;
       let hierarchyWaits = 0;
-      fakeCtrlProxy.requestLaunchApp = async (_bundleId, _timeoutMs, _perf, _coldBoot, signal) => {
+      fakeCtrlProxy.requestLaunchApp = async (
+        _bundleId,
+        _timeoutMs,
+        _perf,
+        { coldBoot: _coldBoot, signal } = {},
+      ) => {
         receivedSignal = signal;
         return await new Promise((resolve, reject) => {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });

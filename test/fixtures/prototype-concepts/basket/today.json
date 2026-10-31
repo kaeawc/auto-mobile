@@ -150,7 +150,8 @@
     "start": "shop",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "shop": {
@@ -997,7 +998,7 @@
             "children": [
               {
                 "type": "icon",
-                "name": "remove_shopping_cart",
+                "name": "shopping_cart",
                 "contentDescription": "Empty cart"
               },
               {

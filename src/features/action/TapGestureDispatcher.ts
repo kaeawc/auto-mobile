@@ -240,8 +240,7 @@ export class TapGestureDispatcher {
                 { x, y },
                 action as "doubleTap" | "longPress",
                 durationMs,
-                driver,
-                { displayFence: fence },
+                { driver, fenceOptions: { displayFence: fence } },
               );
       if (result.success) {
         this.host.reportTalkBackActivationWarning(result, context, action);
@@ -353,7 +352,7 @@ export class TapGestureDispatcher {
       throwIfAborted(signal);
       const result = await this.host
         .accessibilityService()
-        .requestNodeAction("click", selector, undefined, undefined, signal);
+        .requestNodeAction("click", selector, { signal });
       throwIfAborted(signal);
       return result.success;
     } catch (error) {
@@ -678,9 +677,12 @@ export class TapGestureDispatcher {
       // Long press: try ACTION_LONG_CLICK first, then coordinate gesture fallback
       const longPressResult = await this.host
         .talkBackStrategy()
-        .executeLongPress({ x, y }, durationMs, element, driver, {
-          displayFence: fence,
-          ...targetContext,
+        .executeLongPress({ x, y }, durationMs, element, {
+          driver,
+          fenceOptions: {
+            displayFence: fence,
+            ...targetContext,
+          },
         });
 
       if (!longPressResult.success) {
@@ -716,7 +718,7 @@ export class TapGestureDispatcher {
       // throws; only a failure before anything was dispatched returns here and may fall back.
       const result = await this.host
         .talkBackStrategy()
-        .executeTap(this.host.device().deviceId, element, driver, fence, signal);
+        .executeTap(this.host.device().deviceId, element, driver, { fence, signal });
 
       if (result.success) {
         // A focus-navigation gesture is acknowledged, not confirmed as an activation.
@@ -770,8 +772,11 @@ export class TapGestureDispatcher {
         ? await this.host.talkBackStrategy().executePreciseTap(x, y, driver, fence)
         : await this.host
             .talkBackStrategy()
-            .executeCoordinateFallback({ x, y }, fallbackAction, durationMs, driver, {
-              displayFence: fence,
+            .executeCoordinateFallback({ x, y }, fallbackAction, durationMs, {
+              driver,
+              fenceOptions: {
+                displayFence: fence,
+              },
             });
 
     if (!fallbackResult.success) {

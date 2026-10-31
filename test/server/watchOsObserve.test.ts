@@ -146,17 +146,15 @@ describe("observe on an Apple Watch simulator through the registry", () => {
         cacheDir: () => "/cache/screenshots",
       },
     });
-    ToolRegistry.register(
-      "setActiveDevice",
-      "Set active device",
-      setActiveDeviceSchema,
-      createSetActiveDeviceHandler({
+    ToolRegistry.register("setActiveDevice", "Set active device", setActiveDeviceSchema, {
+      handler: createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider(),
         resumeCtrlProxy: async () => {},
         legacyDeviceSelection: () => readiness,
       }),
-      { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
-    );
+      defaultEnabled: true,
+      ...SELECTS_ACTIVE_DEVICE,
+    });
     return { screenshots, writer, iosScreens };
   }
 

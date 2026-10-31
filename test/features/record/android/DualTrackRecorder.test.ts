@@ -122,7 +122,7 @@ describe("DualTrackRecorder", () => {
     fakeGestures = new FakeGestureEmitter();
     fakeA11y = new FakeA11ySource();
     fakeTimer = new FakeTimer();
-    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, { timer: fakeTimer });
   });
 
   describe("tool-driven input is not recorded by design (#11919)", () => {
@@ -1534,7 +1534,7 @@ describe("DualTrackRecorder", () => {
 
   test("classifier double tap replaces an already matched tap with one CtrlProxy click", async () => {
     fakeTimer = new FakeTimer();
-    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, { timer: fakeTimer });
     const classifier = new GestureClassifier({ toScreenPoint: (x, y) => ({ x, y }) }, 1);
     const emitFrame = (frame: RawTouchFrame) => {
       const gesture = classifier.feedFrame(frame);
@@ -1573,7 +1573,7 @@ describe("DualTrackRecorder", () => {
 
   test("doubleTap can use the pair's delayed only click while the first tap is pending", async () => {
     fakeTimer = new FakeTimer();
-    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, { timer: fakeTimer });
     await recorder.start();
 
     fakeGestures.emit({ type: "tap", arrivedAt: 50, screenX: 500, screenY: 500 });
@@ -1940,12 +1940,9 @@ describe("resolveSwipeDirection (scroll-delta axis mapping)", () => {
 
 test("coordinate fallback without geometry records a legacy tap and warns", async () => {
   const emitter = new FakeGestureEmitter();
-  const recorder = new DualTrackRecorder(
-    fakeDevice,
-    emitter,
-    new FakeA11ySource(),
-    new FakeTimer(),
-  );
+  const recorder = new DualTrackRecorder(fakeDevice, emitter, new FakeA11ySource(), {
+    timer: new FakeTimer(),
+  });
   const warning = spyOn(logger, "warn");
   try {
     await recorder.start();
@@ -1962,7 +1959,7 @@ test("coordinate fallback without geometry records a legacy tap and warns", asyn
 test("coordinate fallback carries the same native provenance as tool call recording", async () => {
   const emitter = new FakeGestureEmitter();
   const timer = new FakeTimer();
-  const recorder = new DualTrackRecorder(fakeDevice, emitter, new FakeA11ySource(), timer);
+  const recorder = new DualTrackRecorder(fakeDevice, emitter, new FakeA11ySource(), { timer });
   await recorder.start();
   emitter.emit({
     type: "tap",
@@ -2002,7 +1999,7 @@ describe("exported steps after a mid-recording rotation (#12880)", () => {
       fakeDevice,
       withTimelineGeometry(emitter, timeline, timer),
       new FakeA11ySource(),
-      timer,
+      { timer },
     );
     await recorder.start();
     timer.advanceTime(1000);

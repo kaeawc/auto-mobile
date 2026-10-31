@@ -269,7 +269,8 @@ export class HomeScreen extends BaseVisualChange {
       return false;
     }
     if (
-      !(await isForegroundLauncher(launcherPackage, this.adb, this.device.deviceId, this.timer, {
+      !(await isForegroundLauncher(launcherPackage, this.adb, this.device.deviceId, {
+        timer: this.timer,
         formFactor: this.device.formFactor,
         incarnationToken: deviceIncarnationToken(this.device.deviceId),
         signal,
@@ -506,13 +507,11 @@ export class HomeScreen extends BaseVisualChange {
   ): Promise<string | undefined> {
     const { perf, frameContext } = options;
     try {
-      const result = await client.requestPressHome(
-        timeoutMs,
-        perf,
+      const result = await client.requestPressHome(timeoutMs, perf, {
         frameContext,
-        options.signal,
-        options.onDispatch,
-      );
+        signal: options.signal,
+        onDispatch: options.onDispatch,
+      });
       if (frameContext && result.error?.includes("Stale frame context")) {
         throw new ActionableError(result.error);
       }
@@ -629,7 +628,7 @@ export class HomeScreen extends BaseVisualChange {
       // earlier hierarchy cannot establish the Home postcondition.
       throwIfAborted(signal);
       const response = await awaitWhileRequestIsLive(
-        client.requestHierarchySync(perf, true, undefined, remainingMs),
+        client.requestHierarchySync(perf, true, undefined, { timeoutMs: remainingMs }),
         signal,
       );
       return response?.hierarchy;

@@ -184,7 +184,8 @@
     "start": "home",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "home": {
@@ -1548,7 +1549,7 @@
               },
               {
                 "label": "Reels",
-                "icon": "movie"
+                "icon": "local_movies"
               },
               {
                 "label": "Profile",

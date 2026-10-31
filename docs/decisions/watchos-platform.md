@@ -70,6 +70,28 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
   `deleteDevice` name, stops a running watch through killDevice before taking its teardown lease
   (killDevice's own lease would otherwise wait on it), then runs `simctl delete` and requires a
   fresh watch listing that no longer shows it.
+- **Shared limits.** A watch is charged wherever a host limit counts devices: the broker's
+  managed-device limit (`totalDeviceCap`) counts `watchos` bindings and running daemon-named
+  watches in one total with Android and iOS devices, and a cold watch boot is admitted through the
+  simulator boot gate.
+- **Broker watch bindings.** A `watchos` binding holds one unpaired watch (never `simctl pair`, no
+  companion iPhone). Its requested spec is provisionDevice's watch spec: exact `runtime` and
+  `deviceType`, nothing else. The resolver checks it against the watch catalog before any native
+  work (an unlisted runtime or device type is `spec_unsupported` naming the listed ones; a listed
+  but unavailable runtime is `runtime_incompatible`; a host without simctl refuses it). The
+  matcher compares runtime and device type only, never an AVD config or iOS form-factor inference.
+  The reconciler creates an `ambroker-` watch through provisionDevice's watch path (fresh
+  `simctl create`, never cloned), boots it through the simulator gate (a replacement reserves its
+  slot against the old watch's UDID), and publishes it at readiness `booted` (provisionDevice's
+  `none` / `device_ready`): the automation-readiness gate accepts that for `watchos` only. Between
+  executions a watch follows the iOS binding policy: the release keeps it assigned and booted, and
+  the next execution ends any leftover session and reuses it with a fresh one. The session
+  broker's per-release iOS resets (erase, keep-booted, minimal) do not apply: session-broker
+  requests resolve only Android and iOS profiles. A spec change replaces the watch; replacement,
+  eviction and abandoned-binding cleanup delete it through the daemon's deleteDevice watch path
+  (stop, `simctl delete`, then a fresh watch listing must not show it), and a failed delete
+  leaves the binding `cleanup_pending`. Legacy slot rows never held watches, so legacy slot
+  retirement refuses a watch target.
 - **`"either"` keeps meaning Android or iOS.** Listing `scanned` flags carry a `watchos` entry;
   until watch inventory exists it is `false`, so a watch is never treated as a freshly listed
   device.

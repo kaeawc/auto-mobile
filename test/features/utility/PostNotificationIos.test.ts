@@ -18,7 +18,12 @@ describe("PostNotification - iOS Simulator", () => {
   const makeDevice = (deviceId: string): BootedDevice =>
     ({ deviceId, platform: "ios" }) as BootedDevice;
 
-  const make = (deviceId: string) => new PostNotification(makeDevice(deviceId), null, null, simctl);
+  const make = (deviceId: string) =>
+    new PostNotification(makeDevice(deviceId), {
+      adbFactoryOrExecutor: null,
+      window: null,
+      simctl,
+    });
 
   const pushCalls = () => simctl.getMethodCalls("pushNotification");
 
@@ -31,7 +36,11 @@ describe("PostNotification - iOS Simulator", () => {
     const error = new Error("simctl rejected");
     const push = spyOn(simctl, "pushNotification").mockRejectedValue(error);
     try {
-      const result = await new PostNotification(makeDevice(SIM_UDID), null, null, simctl).execute({
+      const result = await new PostNotification(makeDevice(SIM_UDID), {
+        adbFactoryOrExecutor: null,
+        window: null,
+        simctl,
+      }).execute({
         title: "Hello",
         body: "World",
         appId: "com.example.App",

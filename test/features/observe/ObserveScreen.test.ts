@@ -70,7 +70,7 @@ describe("ObserveScreen", function () {
         mockDevice,
         new FakeAdbClientFactory(fakeAdb),
         undefined,
-        timer,
+        { timer },
       );
 
       const result = pinnedObserveScreen.createBaseResult();
@@ -84,8 +84,7 @@ describe("ObserveScreen", function () {
         mockDevice,
         new FakeAdbClientFactory(fakeAdb),
         undefined,
-        defaultTimer,
-        idGenerator,
+        { timer: defaultTimer, idGenerator },
       );
 
       expect(screen.createBaseResult().observationId).toBe("observation-1");
@@ -425,7 +424,7 @@ describe("ObserveScreen", function () {
             viewHierarchy,
             ...noopObserveAudits(),
           },
-          timer,
+          { timer },
         );
 
         await screen.execute({
@@ -460,7 +459,7 @@ describe("ObserveScreen", function () {
           {
             cacheStore,
           },
-          timer,
+          { timer },
         );
         const result = {
           ...screen.createBaseResult(),
@@ -1305,13 +1304,13 @@ describe("ObserveScreen", function () {
         deviceA,
         new FakeAdbClientFactory(new FakeAdbExecutor()),
         undefined,
-        timerA,
+        { timer: timerA },
       );
       const screenB = new RealObserveScreen(
         deviceB,
         new FakeAdbClientFactory(new FakeAdbExecutor()),
         undefined,
-        timerB,
+        { timer: timerB },
       );
 
       await screenA.cacheObserveResult({
@@ -1452,9 +1451,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
       readonly ids: Array<number | undefined> = [];
       override async captureFresh(
         _id?: string,
-        _perf?: PerformanceTracker,
-        _signal?: AbortSignal,
-        displayId?: number,
+        { displayId }: { perf?: PerformanceTracker; signal?: AbortSignal; displayId?: number } = {},
       ): Promise<void> {
         this.ids.push(displayId);
       }
@@ -1467,7 +1464,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
         display: scenario.display,
         screenshotRecorder: recorder,
       },
-      timer,
+      { timer },
     );
     const observation = scenario.key === undefined ? undefined : observe.createBaseResult();
     if (observation && scenario.key) {
@@ -1475,7 +1472,7 @@ describe("ObserveScreen terminal screenshot display selection", () => {
     }
     const debug = spyOn(logger, "debug");
     try {
-      await observe.captureScreenshot(undefined, undefined, observation, "async");
+      await observe.captureScreenshot(undefined, { observation, screenshot: "async" });
       expect(recorder.ids).toEqual([scenario.expected]);
       if (scenario.fallback) {
         expect(debug.mock.calls).toContainEqual([
@@ -1498,11 +1495,11 @@ describe("ObserveScreen terminal screenshot display selection", () => {
       { deviceId: "terminal-all", name: "Android", platform: "android" },
       new FakeAdbClientFactory(new FakeAdbExecutor()),
       { display: "all", screenshotRecorder: recorder },
-      new FakeTimer(),
+      { timer: new FakeTimer() },
     );
     const observation = observe.createBaseResult();
     await expect(
-      observe.captureScreenshot(undefined, undefined, observation, "async"),
+      observe.captureScreenshot(undefined, { observation, screenshot: "async" }),
     ).rejects.toThrow('display: "all" is not supported for single-panel targeting');
     expect(recorder.captureFreshCalls).toBe(0);
   });

@@ -25,7 +25,7 @@ test("selected-display owner null reports no answer rather than service reachabi
     {
       timer: new FakeTimer(),
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, _signal, timeout, options) => {
+        requestHierarchySync: async (_perf, _raw, _signal, { timeoutMs: timeout, ...options }) => {
           ownerReads++;
           expect(timeout).toBe(15000);
           expect(options?.displayId).toBe(2);
@@ -58,7 +58,7 @@ test.each([
     {
       timer: new FakeTimer(),
       syncClientFactory: () => ({
-        requestHierarchySync: async (_perf, _raw, _signal, timeout, options) => {
+        requestHierarchySync: async (_perf, _raw, _signal, { timeoutMs: timeout, ...options }) => {
           expect(timeout).toBe(250);
           if (options?.diagnostics) {
             Object.assign(options.diagnostics, failure);
@@ -117,8 +117,9 @@ function fixture(elapsed: number, incomplete = true, updatedAt?: number, autoAdv
   };
   const syncClient: HierarchySyncClient = {
     requestHierarchySync: read,
-    requestHierarchySyncForObserver: (perf, filtering, signal, timeout, display) =>
-      read(perf, filtering, signal, timeout, {
+    requestHierarchySyncForObserver: (perf, filtering, signal, { timeoutMs: timeout, display }) =>
+      read(perf, filtering, signal, {
+        timeoutMs: timeout,
         displayId: typeof display === "number" ? display : display?.displayId,
       }),
     convertToViewHierarchyResult: () => ({ ...converted, updatedAt: undefined }),
@@ -168,7 +169,7 @@ test("incomplete hierarchy retry returns the complete accessibility reply withou
     signal,
   });
   expect(reads).toHaveLength(2);
-  expect(reads.map((args) => [args[1], args[2], args[3], args[4]?.displayId])).toEqual([
+  expect(reads.map((args) => [args[1], args[2], args[3].timeoutMs, args[3].displayId])).toEqual([
     [true, signal, 1000, 2],
     [true, signal, 900, 2],
   ]);

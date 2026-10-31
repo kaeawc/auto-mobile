@@ -70,7 +70,7 @@ function setup(hierarchy: ViewHierarchyResult, platform: "ios" | "android" = "io
       cacheStore,
       screenshotStateStore: new FakeScreenshotStateStore(timer),
     },
-    timer,
+    { timer },
   );
   spyOn(screen["performanceAuditor"], "run").mockResolvedValue(undefined);
   spyOn(screen["accessibilityAuditor"], "run").mockResolvedValue(undefined);
@@ -227,7 +227,7 @@ test("snapshotOf crop input retains absent runner rotation rather than guessing 
         rotation: result.viewHierarchy?.rotation,
         nativeScale: result.viewHierarchy?.nativeScale,
       },
-      image,
+      { backend: image },
     ),
   ).rejects.toThrow("incompatible aspect ratios");
   expect(result.viewHierarchy?.rotation).toBeUndefined();

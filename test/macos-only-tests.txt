@@ -72,6 +72,7 @@ portable test/server/toolRegistry.iosSessionContext.test.ts              # share
 portable test/server/inventoryIdeIosPhysicalSource.test.ts               # discovery_incomplete rule shared with Android
 portable test/devices/watchOsSimctlListingExclusion.test.ts             # keeps watchOS rows out of the iOS listing; pure fakes
 portable test/devices/watchOsInventory.test.ts                          # watchOS listing and catalog filters over a fake simctl
+portable test/devices/appleTvInventory.test.ts                          # tvOS listing and catalog filters over a fake simctl
 portable test/devices/watchOsProvision.test.ts                          # watch adopt/create/delete over a fake simctl
 portable test/devices/nonIosSimctlListingExclusion.test.ts             # keeps tvOS/xrOS rows out of the iOS listing; pure fakes
 portable test/server/resources/nonIosDeviceImageCatalog.test.ts         # iOS catalog family filter over a fake simctl and captures

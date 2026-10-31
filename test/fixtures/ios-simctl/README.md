@@ -32,3 +32,6 @@ Captured verbatim from real `xcrun simctl` runs. Nothing here is hand-written.
   timestamp and message joined by one space (the parser strips the column padding). The
   120 s / 300 s windows of the same app emitted 3.9 MB / 4.8 MB (26k lines) of this shape,
   which overflowed the buffered `execFile` stdout; tests replay these lines to that volume.
+- `list-all-appletv-26-5.json`: verbatim `xcrun simctl list -j` on this host,
+  captured 2026-10-31, containing the tvOS 26.5 runtime with Apple TV simulators,
+  plus iOS, watchOS and visionOS rows used as test negatives.

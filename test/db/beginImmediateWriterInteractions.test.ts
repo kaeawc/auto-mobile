@@ -88,8 +88,8 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
   });
 
   test("storage insert, device-lock forget, installed-apps patch and replace all complete together", async () => {
-    const apps = new InstalledAppsRepository(db);
-    const locks = new DeviceLockRepository(db);
+    const apps = new InstalledAppsRepository({ db });
+    const locks = new DeviceLockRepository({ db });
     const listener = createDeviceLockIdentityListener(locks);
     await locks.rememberLock("emulator-5554", "pin", "1234", "avd-a");
     await apps.replaceInstalledApps("dev-1", []);
@@ -125,7 +125,7 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
   });
 
   test("a patch against a device with no snapshot writes nothing, even beside a transaction", async () => {
-    const apps = new InstalledAppsRepository(db);
+    const apps = new InstalledAppsRepository({ db });
     await Promise.all([
       apps.upsertInstalledApp("dev-2", 0, "com.x", { isSystem: false, timestampMs: 1 }),
       recordStorageEvent(storageEvent("a", 1), db),

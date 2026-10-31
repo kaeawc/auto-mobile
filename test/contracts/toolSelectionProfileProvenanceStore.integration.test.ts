@@ -14,7 +14,7 @@ runToolSelectionProfileProvenanceStoreContract(
   async () => {
     const db = await createTestDatabase();
     return {
-      store: new ToolSelectionProfileProvenanceRepository(db),
+      store: new ToolSelectionProfileProvenanceRepository({ db }),
       dispose: () => db.destroy(),
     };
   },

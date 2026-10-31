@@ -55,7 +55,7 @@ describe("Daemon session-release signal wiring", () => {
     // file DB (CLAUDE.md unit-test guard, issue #3067). The Daemon threads this
     // repository straight into its SessionManager (daemon.ts).
     const db = await createTestDatabase();
-    const daemon = new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository(db) });
+    const daemon = new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository({ db }) });
     const sessionManager = daemon.getSessionManager();
 
     const emitted: Array<{ sessionId: string; reason?: string }> = [];
@@ -80,7 +80,7 @@ describe("Daemon session-release signal wiring", () => {
     const leaseMs = 1_000;
     const db = await createTestDatabase();
     const timer = new FakeTimer();
-    const repository = new DeviceSessionRepository(db);
+    const repository = new DeviceSessionRepository({ db });
     const daemon = new DaemonLifecycleHarness({}, { timer, deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
     const emitted: Array<{ sessionId: string; reason?: string }> = [];
@@ -123,7 +123,7 @@ describe("Daemon session-release signal wiring", () => {
 
   test("does not publish a terminal release before persistence succeeds", async () => {
     const db = await createTestDatabase();
-    const repository = new DeviceSessionRepository(db);
+    const repository = new DeviceSessionRepository({ db });
     const daemon = new Daemon({}, { deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
@@ -242,12 +242,12 @@ describe("Daemon session-release signal wiring", () => {
     const db = await createTestDatabase();
     NavigationGraphManager.setInstanceForSessionForTesting(
       "session-rebind-navigation",
-      NavigationGraphManager.createForTesting(new NavigationRepository(db), {
-        testCoverageRepository: new TestCoverageRepository(db),
+      NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+        testCoverageRepository: new TestCoverageRepository({ db }),
         sessionUuid: "session-rebind-navigation",
       }),
     );
-    const daemon = new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository(db) });
+    const daemon = new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository({ db }) });
     const sessionManager = daemon.getSessionManager();
 
     try {

@@ -54,7 +54,7 @@ describe("liveness handoff through the real repository without a schema change",
   beforeEach(async () => {
     timer = new FakeTimer();
     db = await createTestDatabase();
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
     manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });
     await manager.createSession("handoff", "emulator-5554", "android", {
       timeoutMs: 60_000,

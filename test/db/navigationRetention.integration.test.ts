@@ -144,7 +144,7 @@ describe("NavigationRetention prune", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase({ foreignKeys: true });
-    repo = new NavigationRepository(db);
+    repo = new NavigationRepository({ db });
     removed = [];
   });
   afterEach(async () => {
@@ -1236,7 +1236,7 @@ describe("eviction active-row exclusion is relational (bounded bind params)", ()
   });
 
   test("never evicts active rows even when MANY tie at the build key's max last_seen", async () => {
-    const repo = new NavigationRepository(db);
+    const repo = new NavigationRepository({ db });
     await repo.getOrCreateApp(APP);
     const node = await repo.getOrCreateNode(APP, "Home", 1);
     const bk = await repo.getOrCreateBuildKey(APP, 1, "h"); // only build key -> protected
@@ -1290,7 +1290,7 @@ describe("prune releases the connection between chunks (issue #6650)", () => {
   beforeEach(async () => {
     pending = [];
     db = await createTestDatabase({ foreignKeys: true });
-    repo = new NavigationRepository(db);
+    repo = new NavigationRepository({ db });
   });
   afterEach(async () => {
     // A failed assertion or test timeout must not close a still-running pass's DB.

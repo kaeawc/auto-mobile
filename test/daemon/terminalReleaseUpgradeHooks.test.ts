@@ -160,7 +160,10 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+        deviceSessionRepository: new DeviceSessionRepository({
+          db: await createTestDatabase(),
+          timer,
+        }),
       },
     );
   });

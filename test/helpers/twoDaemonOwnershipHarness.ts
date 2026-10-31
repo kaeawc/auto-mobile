@@ -1500,7 +1500,7 @@ export async function runTwoDaemonSteps(
   const db = await createTestDatabase();
   const timer = new FakeTimer();
   const world = new TwoDaemonWorld(
-    new DeviceSessionRepository(db, timer),
+    new DeviceSessionRepository({ db, timer }),
     () =>
       db
         .selectFrom("device_sessions")

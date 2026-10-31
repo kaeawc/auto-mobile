@@ -26,7 +26,10 @@ describe("Daemon expiry-release cancel wiring", () => {
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+        deviceSessionRepository: new DeviceSessionRepository({
+          db: await createTestDatabase(),
+          timer,
+        }),
       },
     );
     const sessionManager = daemon.getSessionManager();

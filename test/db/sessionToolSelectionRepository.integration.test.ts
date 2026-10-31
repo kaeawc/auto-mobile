@@ -18,7 +18,7 @@ describe("SqliteSessionToolSelectionRepository.setMany", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repository = new SqliteSessionToolSelectionRepository(() => db);
+    repository = new SqliteSessionToolSelectionRepository({ resolveDatabase: () => db });
   });
 
   afterEach(async () => {

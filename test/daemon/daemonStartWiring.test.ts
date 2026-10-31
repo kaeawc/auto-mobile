@@ -71,7 +71,7 @@ async function makeDaemon(
     httpTokenStore: tokenStore,
     httpServerFactory: httpServer ? () => httpServer : undefined,
     timer,
-    deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+    deviceSessionRepository: new DeviceSessionRepository({ db: await createTestDatabase(), timer }),
     idGenerator: new FakeIdGenerator(),
     processBirthTime: () => 0,
     processGenerationToken: () => "memory-generation",
@@ -160,8 +160,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
   test("redrive wiring includes this daemon's rehydrated owner and excludes live peer owners", async () => {
     const { daemon, internals, timer } = await makeDaemon({ port: 3161, debug: true });
     const db = await createTestDatabase();
-    const repository = new VideoRecordingRepository(db);
-    const sessions = new DeviceSessionRepository(db, timer);
+    const repository = new VideoRecordingRepository({ db });
+    const sessions = new DeviceSessionRepository({ db, timer });
     const actualOwnId = internals.testHooks.daemonSessionId();
     const host = internals.testHooks.processStartHost();
     const live = new Set([actualOwnId, "peer-daemon"]);

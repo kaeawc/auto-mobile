@@ -43,6 +43,7 @@ export {
   type RecoverableRowIncarnation,
   type UpsertActiveSessionOptions,
 } from "./deviceSessionPersistence";
+import type { RepositoryDeps } from "./repositoryDeps";
 export { DeviceSessionRowChangedError } from "./DeviceSessionRowChangedError";
 export { DeviceSessionRowNotReleasableError } from "./DeviceSessionRowNotReleasableError";
 export { DeviceSessionRowNotRewritableError } from "./DeviceSessionRowNotRewritableError";
@@ -356,10 +357,10 @@ function newActiveSessionRow(record: DeviceSessionRecord, nowIso: string): NewDe
 export class DeviceSessionRepository implements DeviceSessionPersistence {
   private db: Kysely<Database> | null;
 
-  constructor(
-    db?: Kysely<Database>,
-    private readonly timer: Timer = defaultTimer,
-  ) {
+  private readonly timer: Timer;
+
+  constructor({ db, timer = defaultTimer }: Pick<RepositoryDeps, "db" | "timer"> = {}) {
+    this.timer = timer;
     this.db = db ?? null;
   }
 

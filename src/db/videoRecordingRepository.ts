@@ -16,6 +16,7 @@ import type {
   VideoRecording as DbVideoRecording,
 } from "./types";
 import { logger } from "../utils/logger";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /**
  * `incomplete`: a release-time stop exceeded its finalize cap (#10957), so the capture was
@@ -427,7 +428,7 @@ function applyRecordingAudioStateUpdate(
 export class VideoRecordingRepository {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
     this.db = db ?? null;
   }
 

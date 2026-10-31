@@ -109,7 +109,7 @@ describe("FeatureFlagService", () => {
     });
     const applier = new FakeFeatureFlagApplier();
     const service = new FeatureFlagService(
-      new SqliteFeatureFlagRepository(database),
+      new SqliteFeatureFlagRepository({ db: database }),
       applier,
       TEST_DEFINITIONS,
     );

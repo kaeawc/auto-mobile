@@ -34,9 +34,9 @@ describe("video recording daemon ownership", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    recordings = new VideoRecordingRepository(db);
+    recordings = new VideoRecordingRepository({ db });
     timer = new FakeTimer();
-    sessions = new DeviceSessionRepository(db, timer);
+    sessions = new DeviceSessionRepository({ db, timer });
     backend = new FakeVideoCaptureBackend();
     backend.setNowProvider(() => new Date(timer.now()));
   });

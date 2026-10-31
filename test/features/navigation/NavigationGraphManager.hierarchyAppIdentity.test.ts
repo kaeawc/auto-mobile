@@ -27,13 +27,13 @@ describe("hierarchy app identity", () => {
       .deleteFrom("navigation_node_fingerprints")
       .where("app_id", "in", [APP_A, APP_B])
       .execute();
-    await new NavigationRepository(harness.db).clearAppGraph(APP_A);
-    await new NavigationRepository(harness.db).clearAppGraph(APP_B);
+    await new NavigationRepository({ db: harness.db }).clearAppGraph(APP_A);
+    await new NavigationRepository({ db: harness.db }).clearAppGraph(APP_B);
     timer = new FakeTimer();
     timer.setCurrentTime(SDK_TIME);
-    repository = new NavigationRepository(harness.db);
+    repository = new NavigationRepository({ db: harness.db });
     manager = NavigationGraphManager.createForTesting(repository, {
-      testCoverageRepository: new TestCoverageRepository(harness.db),
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
     });
   });

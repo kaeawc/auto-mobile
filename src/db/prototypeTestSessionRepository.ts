@@ -5,6 +5,7 @@ import type {
   PrototypeTestSessionsTable,
   PrototypeTestSessionEventsTable,
 } from "./types";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /** The device (and optional routing session) a test session is looked up for. */
 export interface PrototypeTestSessionScope {
@@ -28,7 +29,11 @@ export interface PrototypeTestSessionStore {
   pruneEnded(keep?: number): Promise<void>;
 }
 export class PrototypeTestSessionRepository implements PrototypeTestSessionStore {
-  constructor(private readonly db?: Kysely<Database>) {}
+  private readonly db?: Kysely<Database>;
+
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
+    this.db = db;
+  }
   private getDb(): Kysely<Database> {
     return this.db ?? getDatabase();
   }

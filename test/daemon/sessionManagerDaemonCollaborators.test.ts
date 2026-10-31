@@ -6,7 +6,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 async function createManager(): Promise<SessionManager> {
   const timer = new FakeTimer();
-  return new SessionManager(timer, new DeviceSessionRepository(await createTestDatabase(), timer));
+  return new SessionManager(
+    timer,
+    new DeviceSessionRepository({ db: await createTestDatabase(), timer }),
+  );
 }
 
 describe("SessionManager daemon collaborator assertion", () => {

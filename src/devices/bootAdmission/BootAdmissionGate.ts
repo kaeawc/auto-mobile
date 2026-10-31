@@ -68,6 +68,23 @@ export interface BootAdmissionResult<D> {
   releaseAdmission?: (outcome?: { bootFailed?: boolean }) => void;
 }
 
+/** Ownership context shared by gate and broker capacity refusals, including leading spaces. */
+export function bootCapacityOwnershipNote(describe: {
+  externalDevices?: readonly string[];
+  heldDevices?: readonly string[];
+  ownershipUnknown?: boolean;
+}): string {
+  const external = describe.externalDevices ?? [];
+  const held = describe.heldDevices ?? [];
+  const heldNote =
+    held.length > 0 ? ` ${held.length} of them are held by AutoMobile: ${held.join(", ")}.` : "";
+  const externalNote =
+    external.length > 0
+      ? ` ${external.length} of them ${describe.ownershipUnknown ? "have unconfirmed AutoMobile ownership" : describe.heldDevices ? "have no AutoMobile owner" : "were not started by AutoMobile"} but still count toward the limit: ${external.join(", ")}.`
+      : "";
+  return `${externalNote}${heldNote}`;
+}
+
 /** The at-capacity refusal, or undefined when one more boot fits. */
 export function atCapacityDecision(
   bootedCount: number,
@@ -87,12 +104,6 @@ export function atCapacityDecision(
   }
   const external = describe.externalDevices ?? [];
   const held = describe.heldDevices ?? [];
-  const heldNote =
-    held.length > 0 ? ` ${held.length} of them are held by AutoMobile: ${held.join(", ")}.` : "";
-  const externalNote =
-    external.length > 0
-      ? ` ${external.length} of them ${describe.ownershipUnknown ? "have unconfirmed AutoMobile ownership" : describe.heldDevices ? "have no AutoMobile owner" : "were not started by AutoMobile"} but still count toward the limit: ${external.join(", ")}.`
-      : "";
   const optOut = external.length > 0 ? ` or disable the gate with ${BOOT_CAPACITY_GATE_ENV}=0` : "";
   return {
     outcome: "refuse",
@@ -102,7 +113,7 @@ export function atCapacityDecision(
     retryAfterMs,
     ...(external.length > 0 ? { externalDevices: [...external] } : {}),
     ...(held.length > 0 ? { heldDevices: [...held] } : {}),
-    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${externalNote}${heldNote} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
+    message: `${bootedCount} ${describe.noun}(s) booted; limit is ${limits.maxBooted} (${limits.source}).${bootCapacityOwnershipNote(describe)} Shut one down, raise the limit with ${describe.envName}${optOut}.`,
   };
 }
 

@@ -97,6 +97,7 @@ describe("registry busy bound (real SQLite)", () => {
         "2026_10_26_014_device_claims",
         "2026_10_27_015_device_claims_metadata",
         "2026_10_30_016_watchos_binding_platform",
+        "2026_10_31_017_binding_registry_writers",
       ]);
       peer.exec("COMMIT");
       locked = false;

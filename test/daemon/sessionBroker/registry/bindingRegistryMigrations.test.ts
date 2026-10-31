@@ -89,10 +89,10 @@ describe("binding registry migrations", () => {
         db,
         provider: bindingRegistryMigrationProvider,
       }).getMigrations();
-      expect(migrations).toHaveLength(17);
+      expect(migrations).toHaveLength(Object.keys(BINDING_REGISTRY_MIGRATIONS).length);
       expect(migrations.every((migration) => migration.executedAt === undefined)).toBe(true);
       expect(await db.introspection.getTables({ withInternalKyselyTables: true })).toEqual([]);
-      await migrateBindingRegistry(db, ":memory:");
+      await migrateBindingRegistry(db, ":memory:", undefined, { writerVersion: "test-writer" });
       const migrated = await new Migrator({
         db,
         provider: bindingRegistryMigrationProvider,
@@ -107,7 +107,7 @@ describe("binding registry migrations", () => {
       dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),
     });
     try {
-      await migrateBindingRegistry(db, ":memory:");
+      await migrateBindingRegistry(db, ":memory:", undefined, { writerVersion: "test-writer" });
       const columns = await sql<{
         name: string;
       }>`SELECT name FROM pragma_table_info('session_broker_exports')`.execute(db);
@@ -176,7 +176,7 @@ describe("binding registry migrations", () => {
         VALUES ('legacy', 'fingerprint', '{}', '{"daemonId":"d","pid":1}', 'failed', 'native failure', 'timeout')`.execute(
         db,
       );
-      await migrateBindingRegistry(db, ":memory:");
+      await migrateBindingRegistry(db, ":memory:", undefined, { writerVersion: "test-writer" });
       expect(
         (await db.selectFrom("session_broker_requests").selectAll().executeTakeFirstOrThrow())
           .retryable,

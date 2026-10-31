@@ -98,6 +98,7 @@ export type DaemonStateWrites = Pick<
   | "retireForeignAndroidSerialSource"
   | "isInitialized"
   | "setSessionBrokerMode"
+  | "setBindingRegistrySchemaProbe"
   | "setBrokerExecutionReowner"
   | "setSessionBrokerService"
   | "getSessionBrokerService"
@@ -186,6 +187,7 @@ export const defaultDaemonStateWrites: DaemonStateWrites = {
     currentDaemon().retireForeignAndroidSerialSource(pool),
   isInitialized: () => currentDaemon().isInitialized(),
   setSessionBrokerMode: (enabled) => currentDaemon().setSessionBrokerMode(enabled),
+  setBindingRegistrySchemaProbe: (probe) => currentDaemon().setBindingRegistrySchemaProbe(probe),
   setBrokerExecutionReowner: (reowner) => currentDaemon().setBrokerExecutionReowner(reowner),
   setSessionBrokerService: (service) => currentDaemon().setSessionBrokerService(service),
   getSessionBrokerService: () => currentDaemon().getSessionBrokerService(),

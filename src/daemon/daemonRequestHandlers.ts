@@ -1,3 +1,8 @@
+import { BindingRegistrySchemaUnsupportedError } from "./sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
+import {
+  KNOWN_BINDING_REGISTRY_SCHEMA_VERSION,
+  type BindingRegistrySchemaDescription,
+} from "./sessionBroker/registry/bindingRegistryMigrations";
 import { sessionDeviceInfo } from "./sessionDeviceBinding";
 import { releaseCleanupStatus } from "./releaseCleanupStatus";
 import { holderOf } from "./deviceBinding";
@@ -119,23 +124,7 @@ export async function handleDaemonRequest(
   // This is daemon self-description, not a pool operation. Keep it available while startup is
   // still settling so a client can decide whether to issue an optional request before forwarding.
   if (request.method === DAEMON_CAPABILITIES_METHOD) {
-    return {
-      success: true,
-      result: {
-        capabilities: [
-          INPUT_TYPE_TEXT_APPEND_CAPABILITY,
-          INPUT_GESTURE_STREAM_CAPABILITY,
-          DAEMON_REGISTER_SESSION_METHOD,
-          ...(state.isSessionBrokerMode?.()
-            ? [SESSION_BROKER_CAPABILITY, SESSION_BROKER_EXPORT_CAPABILITY]
-            : []),
-          ...(state.isSessionBrokerMode?.() &&
-          state.getSessionBrokerService?.()?.broker.supportsIosDuo()
-            ? [SESSION_BROKER_IOS_DUO_CAPABILITY]
-            : []),
-        ],
-      },
-    };
+    return handleDaemonCapabilities(state);
   }
 
   if (!state.isInitialized()) {
@@ -146,6 +135,51 @@ export async function handleDaemonRequest(
   }
 
   return handleInitializedDaemonRequest(request, state, options);
+}
+
+async function handleDaemonCapabilities(state: DaemonStateAccess): Promise<DaemonMethodResult> {
+  const bindingRegistry = await describeOpenBindingRegistry(state);
+  return {
+    success: true,
+    result: {
+      ...(bindingRegistry ? { bindingRegistry } : {}),
+      capabilities: [
+        INPUT_TYPE_TEXT_APPEND_CAPABILITY,
+        INPUT_GESTURE_STREAM_CAPABILITY,
+        DAEMON_REGISTER_SESSION_METHOD,
+        ...(state.isSessionBrokerMode?.()
+          ? [SESSION_BROKER_CAPABILITY, SESSION_BROKER_EXPORT_CAPABILITY]
+          : []),
+        ...(state.isSessionBrokerMode?.() &&
+        state.getSessionBrokerService?.()?.broker.supportsIosDuo()
+          ? [SESSION_BROKER_IOS_DUO_CAPABILITY]
+          : []),
+      ],
+    },
+  };
+}
+
+async function describeOpenBindingRegistry(
+  state: DaemonStateAccess,
+): Promise<BindingRegistrySchemaDescription | undefined> {
+  if (!state.isSessionBrokerMode?.()) {
+    return undefined;
+  }
+  try {
+    const probe = state.getBindingRegistrySchemaProbe?.();
+    return await probe?.describeSchema();
+  } catch (error) {
+    logger.warn("[Bindings] Cannot describe the open registry schema", error);
+    if (error instanceof BindingRegistrySchemaUnsupportedError) {
+      return {
+        schemaVersion: null,
+        knownSchemaVersion: KNOWN_BINDING_REGISTRY_SCHEMA_VERSION,
+        supported: false,
+        writerVersion: null,
+      };
+    }
+    return undefined;
+  }
 }
 
 /** Socket daemon methods served once the daemon is initialized, by method name. */

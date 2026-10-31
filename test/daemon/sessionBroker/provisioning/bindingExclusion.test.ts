@@ -140,10 +140,11 @@ describe("RegistryBindingExclusion", () => {
   });
 
   test("unknown migrations use files only, warn once per path, and stay degraded until restart", async () => {
-    const error = new BindingRegistrySchemaUnsupportedError("/fake/files-only.sqlite", [
-      "2026_10_26_014_device_claims",
-      "2026_10_27_015_device_claims_metadata",
-    ]);
+    const error = new BindingRegistrySchemaUnsupportedError(
+      "/fake/files-only.sqlite",
+      ["2026_10_26_014_device_claims", "2026_10_27_015_device_claims_metadata"],
+      { "2026_10_27_015_device_claims_metadata": "2.0.0" },
+    );
     const open = async (): Promise<BindingRegistry> => {
       opens++;
       throw error;
@@ -159,6 +160,7 @@ describe("RegistryBindingExclusion", () => {
       expect(warn.mock.calls[0]?.[0]).toContain(error.unknownMigrations.join(", "));
       expect(warn.mock.calls[0]?.[0]).toContain("allocation claim files decide ownership");
       expect(warn.mock.calls[0]?.[0]).toContain(error.remedy);
+      expect(warn.mock.calls[0]?.[0]).toContain("2.0.0");
       expect(exclusion.lastReadFailed()).toBe(false);
       expect(exclusion.holderOf({ platform: "ios", stableIds: ["BROKER"] })).toBeUndefined();
       expect([...exclusion.stableIdsFor("ios")]).toEqual([]);
@@ -168,6 +170,7 @@ describe("RegistryBindingExclusion", () => {
         mode: "files_only",
         dbPath: error.dbPath,
         unknownMigrations: error.unknownMigrations,
+        writerVersions: error.writerVersions,
         remedy: error.remedy,
       });
       for (const options of [

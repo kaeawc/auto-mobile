@@ -67,10 +67,10 @@ import {
   type UpdateBindingStateResult,
 } from "./bindingRegistry";
 import {
-  assertBindingRegistryCurrent,
   assertSupportedRegistrySchema,
-  migrateBindingRegistry,
+  describeBindingRegistrySchema,
 } from "./bindingRegistryMigrations";
+import { initializeBindingRegistrySchema } from "./bindingRegistryInitialization";
 import {
   assertOpenPhase,
   AssignmentRow,
@@ -90,7 +90,6 @@ import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import { createRegistryDatabase } from "./RegistryDatabase";
 import { RegistrySqliteDialect } from "./RegistrySqliteDialect";
 import { createRegistryWriteGuard } from "./registryWriteGuard";
-import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
 export { type BindingRegistryDatabase, parseJournalTarget } from "./bindingRegistryRows";
 
 export { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
@@ -148,6 +147,8 @@ export interface OpenSqliteBindingRegistryOptions extends SqliteBindingRegistryO
   legacyDeviceRetirement?: Pick<LegacySlotDeviceRetirement, "retire">;
   /** Readers only observe a current schema; they must never run migrations. */
   migrate?: boolean;
+  /** Runtime build identity; inject a fixed value in tests. */
+  writerVersion?: string;
 }
 
 /**
@@ -210,17 +211,7 @@ export async function openSqliteBindingRegistry(
     }),
   });
   try {
-    if (options.migrate === false) {
-      await assertBindingRegistryCurrent(db, dbPath);
-    } else {
-      await migrateBindingRegistry(
-        db,
-        dbPath,
-        () =>
-          options.legacyDeviceRetirement?.retire(new SqliteLegacySlotRetirementStore(db)) ??
-          Promise.resolve(),
-      );
-    }
+    await initializeBindingRegistrySchema(db, dbPath, options);
   } catch (error) {
     await db.destroy();
     if (classifySqliteError(error) === "retryable") {
@@ -251,6 +242,10 @@ export class SqliteBindingRegistry implements BindingRegistry {
 
   assertSupportedSchema(): Promise<void> {
     return assertSupportedRegistrySchema(this.db, this.dbPath);
+  }
+
+  describeSchema() {
+    return describeBindingRegistrySchema(this.db);
   }
 
   /** Shares this connection, transaction lock and physical authority; never opens another DB. */

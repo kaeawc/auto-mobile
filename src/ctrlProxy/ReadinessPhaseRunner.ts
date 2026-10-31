@@ -1,4 +1,5 @@
 import { ActionableError, toActionableError } from "../models";
+import { isAdbDeviceAuthorizingError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import type { AdjustableDeadline } from "../utils/AdjustableDeadline";
@@ -275,7 +276,9 @@ export class ReadinessPhaseRunner {
         retryableAndroidFrameworkFailure:
           device.platform === "android" &&
           ReadinessPhaseRunner.isSetupPhase(phase) &&
-          (isAndroidFrameworkUnavailable(detail) || isForegroundUserPending(detail)),
+          (isAndroidFrameworkUnavailable(detail) ||
+            isForegroundUserPending(detail) ||
+            isAdbDeviceAuthorizingError(detail)),
         deadlineExhausted: options.deadlineExhausted ?? false,
         phase,
         attempts,

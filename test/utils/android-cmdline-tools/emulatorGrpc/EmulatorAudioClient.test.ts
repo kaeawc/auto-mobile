@@ -1,10 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   EmulatorAudioClient,
   INJECT_AUDIO_METHOD,
   type InjectAudioOptions,
   prepareForInjection,
-  START_REFUSAL_WINDOW_MS,
   STREAM_AUDIO_METHOD,
 } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioClient";
 import { EmulatorAudioError } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
@@ -19,6 +18,11 @@ import { analyzeLevels, sineTone, type PcmAudio } from "../../../../src/utils/au
 import { SilenceFiller } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/SilenceFiller";
 import { FakeGrpcTransport } from "../../../fakes/FakeGrpcTransport";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import {
+  drainUntil,
+  drainMicrotasks,
+  settleByFakeEvents,
+} from "../../../helpers/fakeTimerStepping";
 
 function tokenAuthorizer(): GrpcAuthorizer & { disposed: number } {
   const authorizer = {
@@ -31,52 +35,175 @@ function tokenAuthorizer(): GrpcAuthorizer & { disposed: number } {
   return authorizer;
 }
 
-function setup() {
+function setup(manualAcceptance = false) {
   const transport = new FakeGrpcTransport();
   const timer = new FakeTimer();
   const authorizer = tokenAuthorizer();
-  return {
-    transport,
-    timer,
-    authorizer,
-    client: new EmulatorAudioClient(transport, authorizer, timer),
-  };
+  const client = new EmulatorAudioClient(transport, authorizer, timer);
+  if (!manualAcceptance) {
+    const inject = client.injectAudio.bind(client);
+    // Drive only startup waits; streaming deadlines remain under each test's control.
+    client.injectAudio = (source, options) =>
+      settleByFakeEvents(timer, inject(source, options), { description: "injection startup" });
+  }
+  return { transport, timer, authorizer, client };
 }
 
 /** 100ms of 16kHz mono tone = 1600 frames = 5 packets of 20ms. */
 const CLIP = sineTone({ durationMs: 100, sampleRate: 16_000 });
-
-/** Lets the start's refusal window lapse with no refusal, as for a stream the emulator accepted. */
-async function lapseRefusalWindow(timer: FakeTimer): Promise<void> {
-  // Bounded, so a start that never opens the window fails here instead of spinning on microtasks.
-  for (let turn = 0; !timer.getPendingTimeouts().includes(START_REFUSAL_WINDOW_MS); turn++) {
-    if (turn > 1_000) {
-      throw new Error("injectAudio never opened its refusal window");
-    }
-    await Promise.resolve();
-  }
-  // The window is the newest timer: any start delay or max-duration deadline is registered first.
-  timer.fireNewestPendingTimeout();
-}
-
-/** The emulator's refusal of a token with a `typ` header, as captured on emulator 37.1.11. */
-const INVALID_JWT = {
-  code: GrpcStatus.INVALID_ARGUMENT,
-  message: "invalid JWT; token has type header set, but validator not",
-};
-/** The emulator's refusal of an issuer that is not on its default allowlist. */
-const NOT_ALLOWLISTED = {
-  code: GrpcStatus.PERMISSION_DENIED,
-  message:
-    "The endpoint: /android.emulation.control.EmulatorController/streamAudio is not on the " +
-    "allowlist loaded from: emulator/lib/emulator_access.json",
-};
 
 function sentFrames(written: Uint8Array[]): number {
   return written.reduce((sum, message) => sum + decodeAudioPacket(message).audio.byteLength / 2, 0);
 }
 
 describe("EmulatorAudioClient.injectAudio", () => {
+  test.each([
+    // As captured on emulator 37.1.11 (#16026).
+    [
+      GrpcStatus.INVALID_ARGUMENT,
+      "invalid JWT; token has type header set, but validator not",
+      "audio_grpc_auth_rejected",
+    ],
+    [
+      GrpcStatus.PERMISSION_DENIED,
+      "The endpoint: /android.emulation.control.EmulatorController/injectAudio is not on the " +
+        "allowlist loaded from: emulator/lib/emulator_access.json",
+      "audio_grpc_auth_rejected",
+    ],
+    [GrpcStatus.UNAUTHENTICATED, "no token", "audio_grpc_auth_rejected"],
+    [GrpcStatus.INVALID_ARGUMENT, "sampling rate too high", "audio_grpc_failed"],
+  ])(
+    "rejects headers status %i (%s) at call time as %s without waiting for close",
+    async (code, message, expectedCode) => {
+      const { client, transport, timer } = setup();
+      const status = { code, message };
+      transport.onOpen = (call) => call.respondHeaders(status);
+      const error = await client.injectAudio(CLIP).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(EmulatorAudioError);
+      expect(error).toMatchObject({ code: expectedCode, grpcStatus: status });
+      expect((error as EmulatorAudioError).message).toContain(message);
+      if (expectedCode === "audio_grpc_auth_rejected") {
+        expect((error as EmulatorAudioError).remedy).toContain("-grpc-use-token");
+      }
+      expect(transport.calls[0].written).toHaveLength(0);
+      expect(transport.calls[0].ended).toBe(false);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(timer.now()).toBe(0);
+    },
+  );
+
+  test.each([undefined, GrpcStatus.OK, GrpcStatus.CANCELLED])(
+    "accepts headers status %s before the window and preserves the close status",
+    async (code) => {
+      const { client, transport, timer } = setup();
+      const armTimeout = spyOn(timer, "setTimeout");
+      transport.onOpen = (call) => {
+        call.statusOnEnd = undefined;
+        call.respondHeaders(code === undefined ? undefined : { code, message: "" });
+      };
+      const injection = await client.injectAudio(CLIP);
+      expect(armTimeout).toHaveBeenCalledWith(expect.any(Function), 200);
+      expect(timer.now()).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      const call = transport.calls[0];
+      let closed = false;
+      const status = call.status().then((result) => {
+        closed = true;
+        return result;
+      });
+      await drainMicrotasks(20);
+      expect(call.ended).toBe(true);
+      expect(closed).toBe(false);
+      const finalStatus = { code: GrpcStatus.OK, message: "completed" };
+      call.finish(finalStatus);
+      expect(await status).toEqual(finalStatus);
+      expect(await injection.done).toMatchObject({ framesQueued: 1600, reason: "completed" });
+      armTimeout.mockRestore();
+    },
+  );
+
+  test.each([
+    [GrpcStatus.UNIMPLEMENTED, "audio_injection_unsupported"],
+    [GrpcStatus.FAILED_PRECONDITION, "audio_injection_busy"],
+    [GrpcStatus.UNAVAILABLE, "audio_injection_unsupported"],
+  ])("rejects status %i at call time before any write or start delay", async (code, errorCode) => {
+    const { client, transport, timer } = setup(true);
+    transport.onOpen = (call) => call.finish({ code, message: "refused" });
+    const error = await client
+      .injectAudio(CLIP, { startDelayMs: 60_000 })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(EmulatorAudioError);
+    expect(error).toMatchObject({ code: errorCode });
+    expect(transport.calls[0].written).toHaveLength(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getSleepCallCount()).toBe(0);
+    expect(timer.now()).toBe(0);
+  });
+
+  test("a rejection arriving during the window clears its timer without sending packets", async () => {
+    const { client, transport, timer } = setup(true);
+    const starting = client.injectAudio(CLIP).catch((caught: unknown) => caught);
+    await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+      description: "acceptance timer",
+    });
+    timer.advanceTime(199);
+    transport.calls[0].respondHeaders({ code: GrpcStatus.FAILED_PRECONDITION, message: "busy" });
+    expect(await starting).toMatchObject({ code: "audio_injection_busy" });
+    expect(transport.calls[0].written).toHaveLength(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getSleepCallCount()).toBe(0);
+    expect(timer.now()).toBe(199);
+  });
+
+  test("waits for the acceptance window before streaming an open call", async () => {
+    const { client, transport, timer } = setup(true);
+    const armTimeout = spyOn(timer, "setTimeout");
+    let resolved = false;
+    const starting = client.injectAudio(CLIP).then((injection) => {
+      resolved = true;
+      return injection;
+    });
+    await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+      description: "acceptance timer",
+    });
+    expect(armTimeout).toHaveBeenCalledWith(expect.any(Function), 200);
+    expect(timer.getMsUntilNextDueEvent()).toBe(200);
+    timer.advanceTime(199);
+    await drainMicrotasks(20);
+    expect(resolved).toBe(false);
+    expect(transport.calls[0].written).toHaveLength(0);
+    timer.advanceTime(1);
+    const injection = await starting;
+    expect(await injection.done).toEqual({
+      framesQueued: 1600,
+      framesPlayed: 0,
+      reason: "completed",
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getSleepCallCount()).toBe(0);
+    expect(
+      await Promise.race([transport.calls[0].responseHeaders(), Promise.resolve("pending")]),
+    ).toBe("pending");
+    armTimeout.mockRestore();
+  });
+
+  test.each([GrpcStatus.OK, GrpcStatus.CANCELLED])(
+    "allows early status %i and clears the window timer",
+    async (code) => {
+      const { client, transport, timer } = setup(true);
+      transport.onOpen = (call) => call.finish({ code, message: "" });
+      const injection = await client.injectAudio(CLIP);
+      expect(await injection.done).toEqual({
+        framesQueued: 0,
+        framesPlayed: 0,
+        reason: "completed",
+      });
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(timer.now()).toBe(0);
+      expect(timer.getSleepCallCount()).toBe(0);
+    },
+  );
+
   test("runs the stream guard after authorization and preserves its refusal without opening transport", async () => {
     const { client, transport, authorizer } = setup();
     const authorized = Promise.withResolvers<string>();
@@ -137,7 +264,7 @@ describe("EmulatorAudioClient.injectAudio", () => {
     expect(prepared.samples.length).toBe(2_400);
   });
 
-  test("maps FAILED_PRECONDITION to audio_injection_busy at start", async () => {
+  test("maps FAILED_PRECONDITION to audio_injection_busy", async () => {
     const { client, transport } = setup();
     transport.onOpen = (call) => {
       call.onWrite = () => {
@@ -148,7 +275,8 @@ describe("EmulatorAudioClient.injectAudio", () => {
         throw new Error("stream closed");
       };
     };
-    const error = await client.injectAudio(CLIP).catch((caught: unknown) => caught);
+    const injection = await client.injectAudio(CLIP);
+    const error = await injection.done.catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(EmulatorAudioError);
     expect((error as EmulatorAudioError).code).toBe("audio_injection_busy");
   });
@@ -159,63 +287,13 @@ describe("EmulatorAudioClient.injectAudio", () => {
       transport.onOpen = (call) => {
         call.statusOnEnd = { code, message: "nope" };
       };
-      await expect(client.injectAudio(CLIP)).rejects.toMatchObject({
-        code: "audio_injection_unsupported",
-      });
+      const injection = await client.injectAudio(CLIP);
+      await expect(injection.done).rejects.toMatchObject({ code: "audio_injection_unsupported" });
     }
   });
 
-  test.each([
-    ["an invalid JWT", INVALID_JWT],
-    ["an issuer off the allowlist", NOT_ALLOWLISTED],
-    ["a missing token", { code: GrpcStatus.UNAUTHENTICATED, message: "no token" }],
-  ])(
-    "%s refused as the stream opens fails the start as audio_grpc_auth_rejected",
-    async (_, status) => {
-      const { client, transport } = setup();
-      // The emulator answers trailers-only before any audio, even while the start delay runs.
-      transport.onOpen = (call) => call.finish(status);
-      const error = await client
-        .injectAudio(CLIP, { startDelayMs: 60_000 })
-        .catch((caught: unknown) => caught);
-      expect(error).toBeInstanceOf(EmulatorAudioError);
-      expect(error).toMatchObject({ code: "audio_grpc_auth_rejected", grpcStatus: status });
-      expect((error as EmulatorAudioError).message).toContain(status.message);
-      expect((error as EmulatorAudioError).remedy).toContain("-grpc-use-token");
-    },
-  );
-
-  test("a refused start ends the injection, leaving no delay or deadline timer behind", async () => {
-    const { client, transport, timer } = setup();
-    transport.onOpen = (call) => call.finish(NOT_ALLOWLISTED);
-    await expect(
-      client.injectAudio(CLIP, { startDelayMs: 60_000, maxDurationMs: 600_000 }),
-    ).rejects.toMatchObject({ code: "audio_grpc_auth_rejected" });
-    expect(transport.calls[0].cancelled).toBe(true);
-    expect(transport.calls[0].written).toHaveLength(0);
-    expect(timer.getMsUntilNextDueEvent()).toBeUndefined();
-  });
-
-  test("an INVALID_ARGUMENT that is not about the token stays audio_grpc_failed", async () => {
-    const { client, transport } = setup();
-    transport.onOpen = (call) =>
-      call.finish({ code: GrpcStatus.INVALID_ARGUMENT, message: "sampling rate too high" });
-    await expect(client.injectAudio(CLIP)).rejects.toMatchObject({ code: "audio_grpc_failed" });
-  });
-
-  test("a failure after the refusal window still surfaces through done", async () => {
-    const { client, transport, timer } = setup();
-    const started = client.injectAudio(CLIP, { startDelayMs: 60_000 });
-    await lapseRefusalWindow(timer);
-    const injection = await started;
-    transport.calls[0].finish({ code: GrpcStatus.UNKNOWN, message: "emulator went away" });
-    timer.advanceTime(60_000);
-    await expect(injection.done).rejects.toMatchObject({ code: "audio_grpc_failed" });
-    expect(timer.getMsUntilNextDueEvent()).toBeUndefined();
-  });
-
   test("stop cancels a write parked on back-pressure and is idempotent", async () => {
-    const { client, transport, timer } = setup();
+    const { client, transport } = setup();
     let release: (() => void) | undefined;
     transport.onOpen = (call) => {
       call.onWrite = (index) =>
@@ -225,16 +303,13 @@ describe("EmulatorAudioClient.injectAudio", () => {
             })
           : undefined;
     };
-    const started = client.injectAudio(CLIP);
-    await lapseRefusalWindow(timer);
-    const injection = await started;
+    const injection = await client.injectAudio(CLIP);
     while (!release) {
       await Promise.resolve();
     }
     const first = await injection.stop();
     const second = await injection.stop();
-    // The 500ms window is longer than the 40ms queued, so all of it has played.
-    expect(first).toEqual({ framesQueued: 640, framesPlayed: 640, reason: "stopped" });
+    expect(first).toEqual({ framesQueued: 640, framesPlayed: 0, reason: "stopped" });
     expect(second).toBe(first);
     expect(transport.calls[0].cancelled).toBe(true);
   });
@@ -255,19 +330,16 @@ describe("EmulatorAudioClient.injectAudio", () => {
 
   test("startDelayMs waits before the first packet", async () => {
     const { client, transport, timer } = setup();
-    const started = client.injectAudio(CLIP, { startDelayMs: 1_000 });
-    await lapseRefusalWindow(timer);
-    const injection = await started;
+    const injection = await client.injectAudio(CLIP, { startDelayMs: 500 });
+    await Promise.resolve();
     expect(transport.calls[0].written).toHaveLength(0);
-    timer.advanceTime(1_000 - START_REFUSAL_WINDOW_MS);
+    timer.advanceTime(500);
     expect((await injection.done).framesQueued).toBe(1600);
   });
 
   test("stop during the start delay settles at once without sending audio", async () => {
     const { client, transport, timer } = setup();
-    const started = client.injectAudio(CLIP, { startDelayMs: 60_000 });
-    await lapseRefusalWindow(timer);
-    const injection = await started;
+    const injection = await client.injectAudio(CLIP, { startDelayMs: 60_000 });
     expect(await injection.stop()).toEqual({ framesQueued: 0, framesPlayed: 0, reason: "stopped" });
     expect(transport.calls[0].written).toHaveLength(0);
     expect(transport.calls[0].cancelled).toBe(true);
@@ -280,13 +352,11 @@ describe("EmulatorAudioClient.injectAudio", () => {
       // The emulator stops pulling audio after the first packet.
       call.onWrite = (index) => (index === 1 ? new Promise<void>(() => {}) : undefined);
     };
-    const started = client.injectAudio(CLIP, { loop: true, maxDurationMs: 1_000 });
-    await lapseRefusalWindow(timer);
-    const injection = await started;
+    const injection = await client.injectAudio(CLIP, { loop: true, maxDurationMs: 1_000 });
     while (transport.calls[0].written.length < 2) {
       await Promise.resolve();
     }
-    timer.advanceTime(1_000 - START_REFUSAL_WINDOW_MS);
+    timer.advanceTime(1_000);
     expect(await injection.done).toEqual({
       framesQueued: 320,
       framesPlayed: 320,
@@ -300,19 +370,17 @@ describe("EmulatorAudioClient.injectAudio", () => {
     transport.onOpen = (call) => {
       call.onWrite = (index) => {
         timer.advanceTime(10);
-        return index === 99 ? new Promise<void>(() => {}) : undefined;
+        return index === 2 ? new Promise<void>(() => {}) : undefined;
       };
     };
-    // The writes' own clock steps carry the start past its refusal window.
-    const injection = await client.injectAudio(CLIP, { loop: true });
-    while (transport.calls[0].written.length < 100) {
+    const injection = await client.injectAudio(CLIP);
+    while (transport.calls[0].written.length < 3) {
       await Promise.resolve();
     }
-    // A hundred 10ms steps elapsed: 16000 frames at 16 kHz, of the 31680 frames queued (the
-    // hundredth write is still parked).
+    // Three 10ms steps elapsed: 480 frames at 16 kHz, of the 640 frames queued.
     expect(await injection.stop()).toEqual({
-      framesQueued: 31_680,
-      framesPlayed: 16_000,
+      framesQueued: 640,
+      framesPlayed: 480,
       reason: "stopped",
     });
   });
@@ -324,17 +392,17 @@ describe("EmulatorAudioClient.injectAudio", () => {
     transport.onOpen = (call) => {
       call.onWrite = (index) => {
         timer.advanceTime(10);
-        return index === 99 ? new Promise<void>(() => {}) : undefined;
+        return index === 2 ? new Promise<void>(() => {}) : undefined;
       };
     };
-    const injection = await client.injectAudio(CLIP, { loop: true });
-    while (transport.calls[0].written.length < 100) {
+    const injection = await client.injectAudio(CLIP);
+    while (transport.calls[0].written.length < 3) {
       await Promise.resolve();
     }
     timer.stepWallClock(stepMs);
     expect(await injection.stop()).toEqual({
-      framesQueued: 31_680,
-      framesPlayed: 16_000,
+      framesQueued: 640,
+      framesPlayed: 480,
       reason: "stopped",
     });
   });
@@ -396,6 +464,19 @@ describe("EmulatorAudioClient.captureAudio", () => {
     expect(result.timedOut).toBe(true);
     expect(result.pcm.samples.length).toBe(0);
     expect(analyzeLevels(result.pcm).silent).toBe(true);
+  });
+
+  test("a capture refused for its issuer is audio_grpc_auth_rejected", async () => {
+    const { client, transport } = setup();
+    transport.onOpen = (call) => {
+      call.statusOnEnd = {
+        code: GrpcStatus.PERMISSION_DENIED,
+        message: "The endpoint: .../streamAudio is not on the allowlist",
+      };
+    };
+    await expect(client.captureAudio({ durationMs: 100 })).rejects.toMatchObject({
+      code: "audio_grpc_auth_rejected",
+    });
   });
 
   test("an UNIMPLEMENTED stream with no audio is audio_capture_unsupported", async () => {
@@ -481,14 +562,6 @@ describe("EmulatorAudioClient.streamCapture", () => {
     };
     const stream = await client.streamCapture(() => {});
     await expect(stream.stop()).rejects.toMatchObject({ code: "audio_capture_unsupported" });
-  });
-
-  test("a capture refused for its issuer is audio_grpc_auth_rejected", async () => {
-    const { client, transport } = setup();
-    transport.onOpen = (call) => call.finish(NOT_ALLOWLISTED);
-    await expect(client.captureAudio({ durationMs: 100 })).rejects.toMatchObject({
-      code: "audio_grpc_auth_rejected",
-    });
   });
 
   test("a stream that fails after some audio still fails at stop", async () => {

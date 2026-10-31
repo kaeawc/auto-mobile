@@ -95,10 +95,10 @@ cannot reach the gRPC port.
 - `MODE_UNSPECIFIED` lets the emulator pull audio as the guest consumes it (about a 300 ms
   buffer), so HTTP/2 flow control paces the writer. The client never sleeps between packets.
 - The emulator refuses a stream as soon as it opens (bad credentials, an issuer off its allowlist,
-  a busy microphone), before any audio plays, with a trailers-only response. `injectAudio` streams
-  at once but resolves only after a 500 ms window in which that status would arrive, so such a
-  refusal fails the start instead of reporting success and surfacing only at stop. A failure after
-  the window still surfaces through the injection's result.
+  a busy microphone) with a trailers-only response, whose `grpc-status` is in the initial
+  headers. The request side stays open, so the call status does not settle; `injectAudio` races
+  those headers, the call status and a 200 ms window before streaming, so a refusal fails the start
+  instead of surfacing only at stop. A stream with no headers inside the window counts as accepted.
 - `loop`, `startDelayMs` and `maxDurationMs` are client-side. `stop()` cancels the stream
   (RST_STREAM CANCEL) rather than half-closing it, because a write can be blocked on
   back-pressure. It is idempotent and resolves with the frames sent.

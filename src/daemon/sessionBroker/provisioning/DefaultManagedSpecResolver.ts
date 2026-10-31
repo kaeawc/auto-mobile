@@ -25,11 +25,9 @@ import { parseAndroidSystemImageRuntime } from "../../../utils/android-cmdline-t
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { stableStringify } from "../../../utils/stableStringify";
-import {
-  type BindingPlatform,
-  WATCH_BINDING_UNSUPPORTED_MESSAGE,
-} from "../registry/bindingRegistry";
+import type { BindingPlatform } from "../registry/bindingRegistry";
 import { type BindingRequestedSpec } from "./DefaultManagedSpecMatcher";
+import { resolveWatchBindingSpec, type WatchBindingCatalog } from "./watchBindingSpec";
 
 /**
  * Declarative spec reconciler for one managed device binding (#11175, epic #11172).
@@ -130,18 +128,6 @@ export function computeManagedSpecFingerprint(
   return { version: BINDING_SPEC_FINGERPRINT_VERSION, hash };
 }
 
-function watchBindingUnsupported(): {
-  kind: "unsupported";
-  code: "spec_unsupported";
-  message: string;
-} {
-  return {
-    kind: "unsupported",
-    code: "spec_unsupported",
-    message: WATCH_BINDING_UNSUPPORTED_MESSAGE,
-  };
-}
-
 /** Request-only constraints must not enter provisionDevice or configuration fingerprints. */
 export function provisionableSpec(spec: BindingRequestedSpec): BindingRequestedSpec {
   const configuration = { ...spec };
@@ -224,6 +210,11 @@ export interface DefaultManagedSpecResolverOptions {
    */
   androidImageCatalog?: ManagedAndroidImageCatalog;
   androidProfileCatalog?: ManagedAndroidProfileCatalog;
+  /**
+   * The host's Apple Watch catalog (macOS only). A watch spec is validated against it; without
+   * one, a watch binding is refused as `spec_unsupported`.
+   */
+  watchCatalog?: WatchBindingCatalog;
 }
 
 /**
@@ -245,6 +236,7 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
   private readonly androidDefaultDeviceTypesByFamily: Record<BindingDeviceFamily, string>;
   private readonly androidImageCatalog?: ManagedAndroidImageCatalog;
   private readonly androidProfileCatalog?: ManagedAndroidProfileCatalog;
+  private readonly watchCatalog?: WatchBindingCatalog;
 
   constructor(
     private readonly iosRuntimeCatalog?: ExactIosRuntimeCatalog,
@@ -259,6 +251,7 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     };
     this.androidImageCatalog = options.androidImageCatalog;
     this.androidProfileCatalog = options.androidProfileCatalog;
+    this.watchCatalog = options.watchCatalog;
   }
 
   async checkCreatable(
@@ -266,10 +259,7 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     resolvedSpec: ResolvedExactDeviceSpecification,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecCreatability> {
-    if (platform === "watchos") {
-      return watchBindingUnsupported();
-    }
-    if (platform === "ios") {
+    if (platform === "ios" || platform === "watchos") {
       const resolution = await this.resolve(
         platform,
         { runtime: resolvedSpec.runtime, deviceType: resolvedSpec.deviceType },
@@ -306,8 +296,11 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution> {
     if (platform === "watchos") {
-      // Never resolved as an iOS spec: watch bindings are not managed yet (#15882 part 1).
-      return watchBindingUnsupported();
+      // Never resolved as an iOS spec: a watch is its exact runtime and Apple Watch device type.
+      const watch = await resolveWatchBindingSpec(this.watchCatalog, spec, options.signal);
+      return watch.kind === "resolved"
+        ? { ...watch, fingerprint: computeManagedSpecFingerprint(platform, watch.resolvedSpec) }
+        : watch;
     }
     const readCatalog = this.catalogRead(options.signal);
     const unsupported = await this.findUnsupportedSpec(platform, spec, options.signal, readCatalog);

@@ -15,12 +15,8 @@ export interface GrpcAuthorizer {
   dispose(): Promise<void>;
 }
 
-/**
- * The emulator's default allowlist (`lib/emulator_access.json`) only admits the issuers
- * `android-studio`, `icebox` and `gradle-utp-emulator-control`, and only `android-studio` may call
- * the audio RPCs. Any other issuer is refused with PERMISSION_DENIED even with a valid signature.
- */
-export const JWT_ISSUER = "android-studio";
+// The emulator's default allowlist only admits Studio-style issuers.
+const JWT_ISSUER = "android-studio";
 const JWT_LIFETIME_SECONDS = 15 * 60;
 const KEY_ACCEPT_POLLS = 10;
 const KEY_ACCEPT_POLL_MS = 100;
@@ -60,7 +56,6 @@ export class JwtGrpcAuthorizer implements GrpcAuthorizer {
     this.registration ??= this.register();
     const { kid, privateKey } = await this.registration;
     const issuedAt = Math.floor(this.timer.now() / 1000);
-    // No `typ`: the emulator's validator refuses any token that sets it (INVALID_ARGUMENT).
     const header = base64Url(JSON.stringify({ alg: "ES512", kid }));
     const payload = base64Url(
       JSON.stringify({

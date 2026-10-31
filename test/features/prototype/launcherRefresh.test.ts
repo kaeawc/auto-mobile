@@ -157,6 +157,20 @@ describe("refreshLauncherForShortcut", () => {
     expect(d.swipes()).toBe(2);
   });
 
+  for (const afterSwipe of [false, true]) {
+    test(`reports the restart when foreground leaves home ${afterSwipe ? "after a swipe" : "immediately"}`, async () => {
+      const editor = { ...api37, packageName: "com.example.editor" };
+      const d = driver({ afterRestart: afterSwipe ? [api34, editor] : [editor] });
+      const outcome = await refreshLauncherForShortcut(d.value, { label: "Missing" });
+      expect(outcome).toMatchObject({ launcherRestarted: true, shortcutVisible: false });
+      expect(outcome.message).toContain(`Restarted ${PIXEL}`);
+      expect(outcome.message).toContain("foreground app is not the home screen");
+      expect(d.restarts).toEqual([PIXEL]);
+      expect(d.swipes()).toBe(afterSwipe ? 2 : 1);
+      expect(d.gate.releases).toEqual(["android:test"]);
+    });
+  }
+
   test("missing label restarts once and reports the all-pages scan", async () => {
     const d = driver({ pages: [api34, api37] });
     const outcome = await refreshLauncherForShortcut(d.value, { label: "Missing" });
@@ -208,7 +222,7 @@ describe("refreshLauncherForShortcut", () => {
     });
   }
 
-  test("concurrent refresh scans but refuses restart, then ownership is released", async () => {
+  test("concurrent refresh only captures, then ownership is released", async () => {
     const gate = new FakeLauncherRefreshGate();
     const entered = Promise.withResolvers<void>();
     const finish = Promise.withResolvers<void>();
@@ -225,8 +239,10 @@ describe("refreshLauncherForShortcut", () => {
     const outcome = await refreshLauncherForShortcut(second.value, { label: "Missing" });
     expect(outcome).toMatchObject({ launcherRestarted: false, shortcutVisible: false });
     expect(outcome.message).toContain("another prototype save");
-    expect(second.swipes()).toBe(1);
+    expect(second.swipes()).toBe(0);
     expect(second.restarts).toEqual([]);
+    expect(second.capture.requests).toEqual([{ freshness: "fresh", signal: undefined }]);
+    expect(second.timer.getSleepHistory()).toEqual([]);
     const other = driver({ gate, deviceKey: "android:other" });
     expect(
       (await refreshLauncherForShortcut(other.value, { label: "Missing" })).launcherRestarted,
@@ -236,6 +252,82 @@ describe("refreshLauncherForShortcut", () => {
     expect(
       (await refreshLauncherForShortcut(second.value, { label: "Missing" })).launcherRestarted,
     ).toBe(true);
+  });
+
+  test("concurrent saves leave the three-page workspace scan to its owner", async () => {
+    const d = driver({ pages: [api34, api37, api34] });
+    const capture = d.value.capture;
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    let reads = 0;
+    d.value.capture = {
+      capture: async (request) => {
+        const firstRead = reads++ === 0;
+        const snapshot = await capture.capture(request);
+        const current = {
+          ...snapshot,
+          nodes: snapshot.nodes.filter(
+            (node) =>
+              d.swipes() >= 2 ||
+              (node.properties.text !== LABEL && node.properties["content-desc"] !== LABEL),
+          ),
+        };
+        if (firstRead) {
+          entered.resolve();
+          await finish.promise;
+        }
+        return current;
+      },
+    };
+    let secondSwipes = 0;
+    let secondRestarts = 0;
+    const second: LauncherRefreshDriver = {
+      ...d.value,
+      swipeWorkspaceToNextPage: async (bounds) => {
+        secondSwipes++;
+        await d.value.swipeWorkspaceToNextPage(bounds);
+      },
+      restartLauncher: async (launcher) => {
+        secondRestarts++;
+        await d.value.restartLauncher(launcher);
+      },
+    };
+    const running = refreshLauncherForShortcut(d.value, { label: LABEL });
+    await entered.promise;
+    const outcome = await refreshLauncherForShortcut(second, { label: LABEL });
+    finish.resolve();
+    const ownerOutcome = await running;
+    expect(outcome).toMatchObject({ launcherRestarted: false, shortcutVisible: false });
+    expect(outcome.message).toContain("another prototype save");
+    expect(secondSwipes).toBe(0);
+    expect(secondRestarts).toBe(0);
+    expect(ownerOutcome).toEqual({ launcherRestarted: false, shortcutVisible: true });
+    expect(d.swipes()).toBe(2);
+    expect(d.restarts).toEqual([]);
+    expect(d.gate.releases).toEqual(["android:test"]);
+    expect(await refreshLauncherForShortcut(d.value, { label: LABEL })).toEqual({
+      launcherRestarted: false,
+      shortcutVisible: true,
+    });
+    expect(d.gate.releases).toEqual(["android:test", "android:test"]);
+    expect(d.timer.getSleepHistory()).toEqual([250, 250, 250, 250]);
+  });
+
+  test("a non-owner confirms a shortcut on the current page without gestures", async () => {
+    const d = driver();
+    const release = d.gate.tryAcquire(d.value.deviceKey);
+    try {
+      expect(await refreshLauncherForShortcut(d.value, { label: LABEL })).toEqual({
+        launcherRestarted: false,
+        shortcutVisible: true,
+      });
+      expect(d.capture.requests).toHaveLength(1);
+      expect(d.swipes()).toBe(0);
+      expect(d.restarts).toEqual([]);
+      expect(d.timer.getSleepHistory()).toEqual([]);
+    } finally {
+      release?.();
+    }
   });
 
   test("capture failure releases ownership", async () => {

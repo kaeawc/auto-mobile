@@ -17,6 +17,7 @@ import {
   type BindingProvisionedDevice,
   type BindingResolvedSpec,
 } from "./reconciler";
+import { readExistingWatchSpec, watchProvisionToolArgs } from "./watchBindingProvision";
 
 /** Invokes a registered tool handler in-process and returns its raw MCP tool response. */
 export type BindingToolInvoker = (
@@ -195,6 +196,9 @@ export class ToolBindingProvisioner implements BindingDeviceProvisioner {
   constructor(private readonly deps: BindingProvisionPortDependencies) {}
 
   async readExistingSpec(device: DeviceInfo): Promise<BindingResolvedSpec | null> {
+    if (device.platform === "watchos") {
+      return readExistingWatchSpec(device);
+    }
     if (device.platform === "ios") {
       if (device.isAvailable === false || !device.runtime || !device.deviceType) {
         return null;
@@ -240,11 +244,33 @@ export class ToolBindingProvisioner implements BindingDeviceProvisioner {
   }
 
   async provision(request: BindingProvisionRequest): Promise<BindingProvisionedDevice> {
+    const timeoutMs = clampTimeoutMs(
+      request.deadlineMs - this.deps.timer.now(),
+      MAX_PROVISION_DEVICE_TIMEOUT_MS,
+    );
+    const platform = request.platform;
+    const args =
+      platform === "watchos"
+        ? watchProvisionToolArgs(request, timeoutMs)
+        : { ...(await this.exactProvisionArgs({ ...request, platform }, timeoutMs)) };
+    const response = await this.deps.invokeTool("provisionDevice", args, request.signal);
+    const { isError, payload } = readToolPayload(response);
+    if (isError) {
+      throw provisionErrorFromPayload(payload, `provisionDevice '${request.name}' failed`);
+    }
+    return provisionedDeviceFromPayload(payload, request.name);
+  }
+
+  /** Android and iOS: the exact spec, booted to automation readiness. */
+  private async exactProvisionArgs(
+    request: BindingProvisionRequest & { platform: "android" | "ios" },
+    timeoutMs: number,
+  ): Promise<InternalProvisionDeviceArgs> {
     const spec = {
       ...request.spec,
       deviceType: request.spec.deviceType ?? (await this.existingModel(request)),
     };
-    const args: InternalProvisionDeviceArgs = {
+    return {
       device: {
         platform: request.platform,
         name: request.name,
@@ -259,17 +285,8 @@ export class ToolBindingProvisioner implements BindingDeviceProvisioner {
       ...(request.platform === "ios" && request.mode === "create"
         ? { rollbackOnRetryableReadiness: false }
         : {}),
-      timeoutMs: clampTimeoutMs(
-        request.deadlineMs - this.deps.timer.now(),
-        MAX_PROVISION_DEVICE_TIMEOUT_MS,
-      ),
+      timeoutMs,
     };
-    const response = await this.deps.invokeTool("provisionDevice", { ...args }, request.signal);
-    const { isError, payload } = readToolPayload(response);
-    if (isError) {
-      throw provisionErrorFromPayload(payload, `provisionDevice '${request.name}' failed`);
-    }
-    return provisionedDeviceFromPayload(payload, request.name);
   }
 
   releaseSession(sessionUuid: string): Promise<void> {

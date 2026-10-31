@@ -105,7 +105,7 @@ export interface BindingDeviceEvidence {
 export interface BindingResultEntry {
   bindingIndex: number;
   role: string;
-  platform: "android" | "ios";
+  platform: BindingPlatform;
   /** The binding's assignment generation after this acquisition (null when the binding was never read). */
   assignmentGeneration: number | null;
   device: BindingDeviceEvidence | null;

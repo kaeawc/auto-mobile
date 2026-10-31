@@ -195,9 +195,9 @@ class AsyncActionRunnerWiringTest {
   // Source location
   // ---------------------------------------------------------------------------
 
-  // The storage handlers moved into StorageController; the dispatch contract spans both files.
+  // Extracted handlers keep their dispatch contract across the service and controllers.
   private fun readCtrlProxySource(): String =
-    listOf("CtrlProxy.kt", "StorageController.kt").joinToString("\n") {
+    listOf("CtrlProxy.kt", "StorageController.kt", "DeviceInfoController.kt").joinToString("\n") {
       locateCtrlProxySource(it).readText()
     }
 

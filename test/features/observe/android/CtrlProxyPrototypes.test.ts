@@ -122,6 +122,7 @@ describe("saved prototype host recorder", () => {
         PROTOTYPE_SAVED_CAPABILITY,
         "save_prototype",
         "delete_saved_prototype",
+        "list_saved_prototypes",
         "put_prototype_asset",
         "remove_prototype_asset",
       ],
@@ -138,6 +139,9 @@ describe("saved prototype host recorder", () => {
       delegate,
       send,
       client,
+      setReply: (value: PrototypeResult) => {
+        reply = value;
+      },
       reply: (success: boolean, savedId?: string) => {
         reply = {
           success,
@@ -394,6 +398,60 @@ describe("saved prototype host recorder", () => {
       ]);
       await delegate.requestDeleteSavedPrototype("panel");
       expect(await mirror.list("prototype-test")).toEqual([]);
+    } finally {
+      send.mockRestore();
+    }
+  });
+  test("listSaved appends host-only entries and preserves device entries", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, setReply } = await recorder(mirror);
+    const deviceEntry = {
+      id: "present",
+      label: "Device label",
+      slug: "present-slug",
+      savedAt: 42,
+      pinned: true,
+    };
+    const deviceReply: PrototypeResult = { success: true, savedPrototypes: [deviceEntry] };
+    try {
+      await mirror.record("prototype-test", { id: "panel", spec, label: "Panel", assets: [] });
+      await mirror.record("prototype-test", {
+        id: "present",
+        spec: { ...spec, id: "present" },
+        label: "Old label",
+        assets: [],
+      });
+      await mirror.record("other-serial", {
+        id: "other",
+        spec: { ...spec, id: "other" },
+        label: "Other",
+        assets: [],
+      });
+      setReply(deviceReply);
+      expect(await delegate.requestListSavedPrototypes()).toEqual({
+        success: true,
+        savedPrototypes: [
+          deviceEntry,
+          { id: "panel", label: "Panel", pinned: false, hostOnly: true },
+        ],
+      });
+      expect(deviceReply.savedPrototypes).toEqual([deviceEntry]);
+    } finally {
+      send.mockRestore();
+    }
+  });
+  test("delete not_found removes only the matching mirror entry", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, setReply } = await recorder(mirror);
+    try {
+      for (const serial of ["prototype-test", "other-serial"]) {
+        await mirror.record(serial, { id: "panel", spec, label: "Panel", assets: [] });
+      }
+      const reply: PrototypeResult = { success: false, error: "Missing", errorCode: "not_found" };
+      setReply(reply);
+      expect(await delegate.requestDeleteSavedPrototype("panel")).toEqual(reply);
+      expect(await mirror.list("prototype-test")).toEqual([]);
+      expect(await mirror.list("other-serial")).toHaveLength(1);
     } finally {
       send.mockRestore();
     }

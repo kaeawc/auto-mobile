@@ -1,4 +1,6 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { withHostOnlySavedPrototypes } from "../../src/features/prototype/savedPrototypeMirror";
+import { FakeSavedPrototypeMirror } from "../fakes/FakeSavedPrototypeMirror";
 import {
   PROTOTYPE_SAVED_CAPABILITY,
   SAVED_PROTOTYPE_ERROR_CODES,
@@ -467,12 +469,23 @@ describe("prototype saved actions", () => {
     expect(output.warning).toContain("Other saved prototypes remain");
     expect(adb.getExecutedCommands()).toEqual([]);
   });
-  test("removeIcon never clears when the saved list is absent", async () => {
+  test("removeIcon never clears when the saved list is absent through an empty host mirror", async () => {
     proxy.setListSavedResult({ success: true });
-    const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
-    expect(output).toMatchObject({ success: true });
-    expect(output.warning).toContain("Could not confirm");
-    expect(adb.getExecutedCommands()).toEqual([]);
+    const listSaved = proxy.requestListSavedPrototypes.bind(proxy);
+    const mirror = new FakeSavedPrototypeMirror();
+    const list = spyOn(proxy, "requestListSavedPrototypes").mockImplementation(async () =>
+      withHostOnlySavedPrototypes(await listSaved(), { serial: android.deviceId, mirror }),
+    );
+    try {
+      const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
+      expect(output).toMatchObject({ success: true });
+      expect(output.warning).toContain("Could not confirm");
+      expect(proxy.deleteRequests).toEqual(["demo"]);
+      expect(list).toHaveBeenCalledTimes(1);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    } finally {
+      list.mockRestore();
+    }
   });
   test("removeIcon keeps delete success when the list probe throws", async () => {
     proxy.setFailureMode("requestListSavedPrototypes", new Error("probe timed out"));

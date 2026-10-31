@@ -22,11 +22,8 @@ export const STREAM_AUDIO_METHOD = `${SERVICE}/streamAudio`;
 
 /** Packet length for injection. The emulator buffers ~300ms and rejects oversized packets. */
 const INJECT_PACKET_MS = 20;
-/**
- * How long `injectAudio` waits for the emulator to refuse a new stream before reporting it started.
- * An auth, allowlist or busy refusal arrives as soon as the stream opens, before any audio plays.
- */
-export const START_REFUSAL_WINDOW_MS = 500;
+// Bound the wait for response headers; a server that stays silent counts as accepted.
+const INJECT_ACCEPTANCE_WINDOW_MS = 200;
 /** How long capture waits past the requested duration before reporting what it has. */
 const CAPTURE_GRACE_MS = 2_000;
 /** Mono 16-bit PCM at a rate the emulator accepts, the one format injection sends. */
@@ -53,16 +50,6 @@ function samplesFromBytes(bytes: Uint8Array): Int16Array {
     samples[index] = view.getInt16(index * 2, true);
   }
   return samples;
-}
-
-/** Sends a capture request. A refusal can close the stream first; its status then says why. */
-async function writeRequest(call: GrpcCall, message: Uint8Array): Promise<void> {
-  try {
-    await call.write(message);
-  } catch (error) {
-    // Safe to swallow: the call status, read after the stream ends, carries the refusal.
-    logger.debug(`audio capture request not sent: ${errorMessage(error)}`);
-  }
 }
 
 export interface InjectAudioOptions {
@@ -182,21 +169,30 @@ export class EmulatorAudioClient {
   async injectAudio(source: PcmAudio, options: InjectAudioOptions = {}): Promise<AudioInjection> {
     const pcm = prepareForInjection(source);
     const call = await this.open(INJECT_AUDIO_METHOD, options.beforeStreamOpen);
+    let acceptanceTimer!: NodeJS.Timeout;
+    const acceptanceWindow = new Promise<undefined>((resolve) => {
+      acceptanceTimer = this.timer.setTimeout(
+        () => resolve(undefined),
+        INJECT_ACCEPTANCE_WINDOW_MS,
+      );
+    });
+    try {
+      const status = await raceWithDeadline<GrpcStatusResult | undefined>(
+        [call.status(), call.responseHeaders(), acceptanceWindow],
+        { timer: this.timer, label: "Audio injection acceptance" },
+      );
+      if (status && status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
+        throw injectionError(status);
+      }
+    } finally {
+      this.timer.clearTimeout(acceptanceTimer);
+    }
     const control = createInjectionControl(call);
     const done = this.streamInjection(call, pcm, options, control);
     // Keep an unobserved failure from becoming an unhandled rejection; callers read it via done/stop.
     done.catch((error: unknown) =>
       logger.debug(`audio injection ended with ${errorMessage(error)}`),
     );
-    try {
-      await this.throwStartRefusal(call);
-    } catch (error) {
-      // The caller gets no handle to stop it, so end it here: this clears the start delay and
-      // max-duration timers and lets the stream settle before the refusal propagates.
-      control.end("stopped");
-      await done.catch(() => undefined);
-      throw error;
-    }
     return {
       durationMs: durationMs(pcm),
       sampleRate: pcm.sampleRate,
@@ -219,7 +215,7 @@ export class EmulatorAudioClient {
       format: "s16",
     };
     const call = await this.open(STREAM_AUDIO_METHOD);
-    await writeRequest(call, encodeAudioFormat(format));
+    await call.write(encodeAudioFormat(format));
     call.end();
     const wanted = Math.round((options.durationMs / 1000) * sampleRate);
     // streamAudio can block forever on a silent guest, so the deadline cancels the call.
@@ -273,8 +269,7 @@ export class EmulatorAudioClient {
       EMULATOR_MAX_SAMPLING_RATE,
     );
     const call = await this.open(STREAM_AUDIO_METHOD);
-    await writeRequest(
-      call,
+    await call.write(
       encodeAudioFormat({ samplingRate: sampleRate, channels: "mono", format: "s16" }),
     );
     call.end();
@@ -318,33 +313,6 @@ export class EmulatorAudioClient {
   async close(): Promise<void> {
     this.transport.close();
     await this.authorizer.dispose();
-  }
-
-  /**
-   * Throws when the call fails within the refusal window, so a refused injection fails its start
-   * instead of reporting success and failing only at stop. Waits on the call status rather than on
-   * the stream, which may still be in its start delay.
-   */
-  private async throwStartRefusal(call: GrpcCall): Promise<void> {
-    const windowLapsed = Symbol("window lapsed");
-    let status: GrpcStatusResult;
-    try {
-      status = await raceWithDeadline(call.status(), {
-        timer: this.timer,
-        timeoutMs: START_REFUSAL_WINDOW_MS,
-        label: "audio injection refusal window",
-        timeoutError: () => windowLapsed,
-      });
-    } catch (error) {
-      if (error === windowLapsed) {
-        // No refusal arrived: the emulator accepted the stream.
-        return;
-      }
-      throw error;
-    }
-    if (status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
-      throw injectionError(status);
-    }
   }
 
   private async open(method: string, beforeStreamOpen?: () => void): Promise<GrpcCall> {

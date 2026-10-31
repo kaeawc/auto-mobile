@@ -1,8 +1,10 @@
+import { FakeSavedPrototypeMirror } from "../../fakes/FakeSavedPrototypeMirror";
 import { describe, expect, test, spyOn } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   FileSavedPrototypeMirror,
   missingOnDevice,
+  withHostOnlySavedPrototypes,
   type MirroredSavedPrototype,
 } from "../../../src/features/prototype/savedPrototypeMirror";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
@@ -176,4 +178,55 @@ describe("saved prototype mirror", () => {
     const other = { ...entry, id: "other" };
     expect(missingOnDevice([entry, other], [{ id: entry.id }])).toEqual([other]);
   });
+});
+
+test("host-only listing preserves unsuccessful or absent-mirror replies", async () => {
+  const mirror = new FakeSavedPrototypeMirror();
+  await mirror.record("serial", entry);
+  for (const reply of [{ success: false }, { success: true, error: "refused" }]) {
+    expect(await withHostOnlySavedPrototypes(reply, { serial: "serial", mirror })).toBe(reply);
+  }
+  const reply = { success: true };
+  expect(await withHostOnlySavedPrototypes(reply)).toBe(reply);
+});
+test.each([false, true])(
+  "host-only listing preserves an absent device list with populated mirror=%s",
+  async (populated) => {
+    const mirror = new FakeSavedPrototypeMirror();
+    if (populated) {
+      await mirror.record("serial", entry);
+    }
+    const reply = { success: true };
+    const result = await withHostOnlySavedPrototypes(reply, { serial: "serial", mirror });
+    expect(result).toBe(reply);
+    expect(result).not.toHaveProperty("savedPrototypes");
+  },
+);
+test("host-only listing merges mirror entries into an explicit empty device list", async () => {
+  const mirror = new FakeSavedPrototypeMirror();
+  await mirror.record("serial", entry);
+  expect(
+    await withHostOnlySavedPrototypes(
+      { success: true, savedPrototypes: [] },
+      { serial: "serial", mirror },
+    ),
+  ).toEqual({
+    success: true,
+    savedPrototypes: [{ id: entry.id, label: entry.label, pinned: false, hostOnly: true }],
+  });
+});
+test("host-only listing warns and preserves device reply when the mirror fails", async () => {
+  const mirror = new FakeSavedPrototypeMirror();
+  mirror.error = new Error("mirror unavailable");
+  const reply = { success: true, savedPrototypes: [] };
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(await withHostOnlySavedPrototypes(reply, { serial: "serial", mirror })).toBe(reply);
+    expect(warn).toHaveBeenCalledWith(
+      "[CTRL_PROXY] Failed to list saved prototype mirror",
+      mirror.error,
+    );
+  } finally {
+    warn.mockRestore();
+  }
 });

@@ -21,6 +21,7 @@ import {
   type InFlightBindingReservations,
 } from "../registry/ownerLiveness";
 import { BindingDeviceCreation } from "./BindingDeviceCreation";
+import { bindingReadinessLabel, isBindingReady } from "./bindingReadiness";
 import { provisionableSpec } from "./DefaultManagedSpecResolver";
 import { ReconcileAbort, type BindingReconcileFailure } from "./ReconcileAbort";
 import {
@@ -42,7 +43,6 @@ import {
   encodeManagedSpecFingerprint,
   expectationOf,
   failure,
-  managedRequestOrAbort,
   provisionFailure,
   withCreateDeadline,
   type ReadyResult,
@@ -122,7 +122,7 @@ export class BindingReconciler {
       },
       {
         checkBudget: (request) => this.checkBudget(request),
-        isAutomationReady: (provisioned) => this.isAutomationReady(provisioned),
+        isBindingReady: isBindingReady,
         releaseSession: (sessionUuid) => this.releaseSession(sessionUuid),
         readyOrReleaseOnBusy: (provisioned, publish) =>
           this.readyOrReleaseOnBusy(provisioned, publish),
@@ -255,12 +255,11 @@ export class BindingReconciler {
   }
 
   private async reconcileSteps(
-    requested: BindingReconcileRequest,
+    request: BindingReconcileRequest,
     evidence: BindingReconcileEvidence,
   ): Promise<BindingReconcileResult> {
     const { registry } = this.deps;
-    this.checkBudget(requested);
-    const request = managedRequestOrAbort(requested);
+    this.checkBudget(request);
     // Resolve first: an unsupported spec fails before any registry or device mutation.
     const resolution = await this.deps.resolver.resolve(request.platform, request.requestedSpec, {
       signal: request.signal,
@@ -826,7 +825,8 @@ export class BindingReconciler {
       provisioned = await this.deps.provisioner.provision({
         platform: request.platform,
         name: device.name,
-        ...(request.platform === "ios" && device.deviceId ? { deviceId: device.deviceId } : {}),
+        // A simulator (iPhone or Apple Watch) is reused by its UDID; an AVD by its name.
+        ...(request.platform !== "android" && device.deviceId ? { deviceId: device.deviceId } : {}),
         spec: provisionableSpec(request.requestedSpec),
         mode: "adopt",
         deadlineMs: request.deadlineMs,
@@ -845,24 +845,16 @@ export class BindingReconciler {
         ),
       );
     }
-    if (!this.isAutomationReady(provisioned)) {
+    if (!isBindingReady(request.platform, provisioned)) {
       await this.releaseSession(provisioned.sessionUuid);
       throw new ReconcileAbort(
         failure(
           "readiness_incomplete",
-          `Device '${device.name}' did not reach automation readiness.`,
+          `Device '${device.name}' did not reach ${bindingReadinessLabel(request.platform)}.`,
         ),
       );
     }
     return provisioned;
-  }
-
-  private isAutomationReady(provisioned: BindingProvisionedDevice): boolean {
-    return (
-      provisioned.sessionUuid.length > 0 &&
-      provisioned.readiness.mode === "automation" &&
-      provisioned.readiness.status === "automation_ready"
-    );
   }
 
   private async releaseSession(sessionUuid: string): Promise<void> {

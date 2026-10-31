@@ -86,12 +86,14 @@ public func withCancellableCheckedContinuation<Value: Sendable>(
 
 /// Races an operation against an injectable sleep. The body must cooperate with cancellation,
 /// including any callback-based waits, so the task group can drain after the timeout wins.
+/// An injected sleep must honour cancellation so the group can drain after cancelling its children.
 public func withSdkTimeout<Value: Sendable>(
     seconds: UInt64,
     timeoutError: Error,
     _ body: @escaping @Sendable () async throws -> Value,
     sleep: @escaping @Sendable (UInt64) async throws -> Void = {
-        try await Task.sleep(nanoseconds: $0 * 1_000_000_000)
+        // Clamp seconds to prevent an overflow trap for huge timeouts.
+        try await Task.sleep(nanoseconds: min($0, UInt64.max / 1_000_000_000) * 1_000_000_000)
     }
 )
     async throws -> Value

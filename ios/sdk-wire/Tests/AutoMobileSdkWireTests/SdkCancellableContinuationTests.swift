@@ -108,7 +108,9 @@ final class SdkCancellableContinuationTests: XCTestCase, @unchecked Sendable {
             finished.fulfill()
             return result
         }
-        let wait = await XCTWaiter.fulfillment(of: [finished], timeout: 0.05)
+        // Operations use fake sleeps, so the watchdog only bounds stalls and adds no
+        // wall-clock cost on the passing path.
+        let wait = await XCTWaiter.fulfillment(of: [finished], timeout: 5)
         guard wait == .completed else {
             XCTFail("Operation stalled past the watchdog")
             network.releaseIfStalled()

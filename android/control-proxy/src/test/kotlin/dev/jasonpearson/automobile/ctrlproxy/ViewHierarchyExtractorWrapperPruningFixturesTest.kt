@@ -74,8 +74,8 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
    * Replays pruning over the API 30-36 captures taken with pruning forced off. The count is window
    * root nodes only; the device-on count is the same screen captured with the API default (on). API
    * 34-36 replay to exactly the device-on count, which pins the replay to device behaviour. On API
-   * 30-33 androidx writes an all-false `BOOLEAN_PROPERTY_KEY` bitmask on every node, which the
-   * device build treated as meaningful, so the replay must now prune past the device-on count.
+   * 30-33 androidx writes an all-false `BOOLEAN_PROPERTY_KEY` bitmask on every Compose node, which
+   * the device build treated as meaningful, so the replay must now prune past the device-on count.
    */
   @Test
   fun `API 30-36 off captures replay to the pinned pruned counts without losing a selector`() {
@@ -104,13 +104,13 @@ internal class ViewHierarchyExtractorWrapperPruningFixturesTest {
   /** API level to (device-on window-root nodes, replayed window-root nodes). */
   private val apiLevelCounts =
     mapOf(
-      30 to (55 to 0),
-      31 to (57 to 0),
-      32 to (40 to 0),
-      33 to (41 to 0),
-      34 to (33 to 0),
-      35 to (34 to 0),
-      36 to (34 to 0),
+      30 to (55 to 44),
+      31 to (57 to 46),
+      32 to (40 to 29),
+      33 to (41 to 30),
+      34 to (33 to 33),
+      35 to (34 to 34),
+      36 to (34 to 34),
     )
 
   /**

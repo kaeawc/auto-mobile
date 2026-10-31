@@ -6,7 +6,9 @@ import {
   androidAvdConfigurationKeys,
   type AndroidAvdConfiguration,
 } from "../../models/AndroidAvdConfiguration";
-import { dirname, join } from "node:path";
+import { dirname, join, isAbsolute } from "node:path";
+import { resolveAndroidSdkRoot } from "./androidSdkRoot";
+import { errorMessage } from "../describeUnknownError";
 import { buildAndroidAvdCapabilityInventory } from "../virtualDeviceCapabilities";
 import { hostAudioSnapshot } from "../audio/defaultHostAudioProbe";
 import type { VirtualDeviceCapabilityInventory } from "../../models/virtualDeviceCapabilities";
@@ -214,6 +216,7 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     readFileFn?: (path: string, encoding: string) => Promise<string>,
     existsFn?: (path: string) => boolean,
     avdHome?: string,
+    private readonly sdkRoot = resolveAndroidSdkRoot(process.env),
   ) {
     const fs = require("fs");
     this.readFileFn = readFileFn ?? ((p: string, e: string) => fs.promises.readFile(p, e));
@@ -285,13 +288,41 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
 
     try {
       const content = await this.readFileFn(configPath, "utf-8");
+      const config = parseAvdConfig(content);
       return {
-        ...parseAvdConfig(content),
+        ...config,
+        ...(await this.readImageVersion(config.systemImagePath)),
         ...(await this.readEffectiveHardware(avdName, dirname(configPath))),
       };
     } catch (error) {
       logger.warn(`Failed to read AVD config for ${avdName}: ${error}`);
       return null;
+    }
+  }
+
+  /** Optional installed-image facts; config.ini remains usable when the image is unavailable. */
+  private async readImageVersion(
+    imagePath: string | undefined,
+  ): Promise<Pick<AvdConfig, "apiLevel" | "osVersion">> {
+    if (!imagePath || (!isAbsolute(imagePath) && !this.sdkRoot)) {
+      return {};
+    }
+    const propertiesPath = join(
+      isAbsolute(imagePath) ? imagePath : join(this.sdkRoot!, imagePath),
+      "source.properties",
+    );
+    if (!this.existsFn(propertiesPath)) {
+      return {};
+    }
+    try {
+      const props = parseKeyValueProperties(await this.readFileFn(propertiesPath, "utf-8"));
+      const apiLevel = Number(props.get("AndroidVersion.ApiLevel"));
+      return Number.isSafeInteger(apiLevel) && apiLevel > 0
+        ? { apiLevel, osVersion: apiLevelToVersion(apiLevel) ?? String(apiLevel) }
+        : {};
+    } catch (error) {
+      logger.warn(`Failed to read Android image properties: ${errorMessage(error)}`, error);
+      return {};
     }
   }
 

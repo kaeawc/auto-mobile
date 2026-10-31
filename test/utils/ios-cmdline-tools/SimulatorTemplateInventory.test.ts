@@ -9,7 +9,7 @@ function rig(output = "clone-udid", fail = false) {
   const calls: string[][] = [];
   const listing = {
     devices: {
-      ios: [
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
         {
           udid: "template",
           name: "automobile-template-12345678",
@@ -46,7 +46,9 @@ function rig(output = "clone-udid", fail = false) {
 }
 test("templates remain raw but disappear from DeviceInfo and autostart", async () => {
   const { client } = rig();
-  expect((await client.listSimulators()).devices.ios).toHaveLength(3);
+  expect(
+    (await client.listSimulators()).devices["com.apple.CoreSimulator.SimRuntime.iOS-26-0"],
+  ).toHaveLength(3);
   const infos = await client.listSimulatorImages(undefined, { bypassCache: true });
   expect(infos.map((image) => image.deviceId)).toEqual(["user", "work"]);
   expect(

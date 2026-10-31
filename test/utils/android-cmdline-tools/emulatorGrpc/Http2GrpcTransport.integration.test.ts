@@ -148,8 +148,9 @@ describe("Http2GrpcTransport against a loopback emulator", () => {
   test("a busy microphone surfaces as audio_injection_busy", async () => {
     const { emulator, client } = await connect();
     emulator.micBusy = true;
-    const injection = await client.injectAudio(sineTone({ durationMs: 100 }));
-    await expect(injection.done).rejects.toMatchObject({ code: "audio_injection_busy" });
+    await expect(client.injectAudio(sineTone({ durationMs: 100 }))).rejects.toMatchObject({
+      code: "audio_injection_busy",
+    });
   });
 
   test("captureAudio collects the requested duration and cancels the open stream", async () => {
@@ -162,8 +163,9 @@ describe("Http2GrpcTransport against a loopback emulator", () => {
 
   test("a rejected token is a typed gRPC failure, not a hang", async () => {
     const { client } = await connect("wrong");
-    const injection = await client.injectAudio(sineTone({ durationMs: 40 }));
-    await expect(injection.done).rejects.toMatchObject({ code: "audio_grpc_failed" });
+    await expect(client.injectAudio(sineTone({ durationMs: 40 }))).rejects.toMatchObject({
+      code: "audio_grpc_failed",
+    });
   });
 
   test("an unreachable endpoint is audio_injection_unsupported", async () => {
@@ -175,7 +177,8 @@ describe("Http2GrpcTransport against a loopback emulator", () => {
       createGrpcAuthorizer({ kind: "token", token: TOKEN }, noFs),
     );
     cleanups.push(() => client.close());
-    const injection = await client.injectAudio(sineTone({ durationMs: 40 }));
-    await expect(injection.done).rejects.toMatchObject({ code: "audio_injection_unsupported" });
+    await expect(client.injectAudio(sineTone({ durationMs: 40 }))).rejects.toMatchObject({
+      code: "audio_injection_unsupported",
+    });
   });
 });

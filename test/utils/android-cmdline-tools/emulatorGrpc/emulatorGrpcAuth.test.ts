@@ -68,9 +68,9 @@ describe("JwtGrpcAuthorizer", () => {
     expect(jwk.d).toBeUndefined();
 
     const [headerPart, payloadPart, signature] = header.replace(/^Bearer /, "").split(".");
-    expect(decodeSegment(headerPart)).toEqual({ alg: "ES512", typ: "JWT", kid: "key-1" });
+    expect(decodeSegment(headerPart)).toEqual({ alg: "ES512", kid: "key-1" });
     expect(decodeSegment(payloadPart)).toEqual({
-      iss: "AutoMobile",
+      iss: "android-studio",
       aud: ["/android.emulation.control.EmulatorController/injectAudio"],
       iat: 1_700_000_000,
       exp: 1_700_000_900,

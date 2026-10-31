@@ -23,8 +23,9 @@ undone inside a process.
 
 ## Manifest
 
-Playground always writes `Documents/sdk-contract/<runId>.json`, even when the scenario fails, so
-a missing manifest means the host never ran. It records:
+Playground attempts to write `Documents/sdk-contract/<runId>.json`, even when the scenario fails.
+A missing manifest means the host never reached the write or the write failed; a write failure
+is logged only as `manifest_write_failed` in the app log. It records:
 
 - `status`: `complete` when the scenario ran to the end, `failed` with `failure` otherwise;
 - one expected record per case, with the values the scenario gave the SDK adapter (absent fields

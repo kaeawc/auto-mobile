@@ -5,7 +5,7 @@ import {
 } from "../../../src/features/utility/OemIdentityDescriptor";
 
 const samsung = {
-  personaId: "samsung-oneui",
+  personaId: "samsung-oneui" as const,
   version: 1,
   props: {
     "ro.product.manufacturer": "samsung",
@@ -14,7 +14,7 @@ const samsung = {
     "ro.product.vendor.manufacturer": "samsung",
   },
   features: ["com.samsung.feature.samsung_experience_mobile"],
-  evidence: { status: "vendor_documented", note: "Build fields of a Galaxy S24." },
+  evidence: { status: "vendor_documented" as const, note: "Build fields of a Galaxy S24." },
 };
 
 function issues(input: unknown): string[] {

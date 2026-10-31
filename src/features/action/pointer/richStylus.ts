@@ -103,7 +103,8 @@ export async function dispatchRichStylus(
   options: RichStylusOptions = {},
 ): Promise<void> {
   const environment = await (
-    options.readEnvironment ?? ((signal) => readPointerEnvironment(device, adb, signal))
+    options.readEnvironment ??
+    ((signal) => readPointerEnvironment(device, adb, signal, request.features.toolType))
   )(options.signal);
   const injectors =
     options.injectors ??

@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
+import { UinputRoute } from "../../../../src/features/action/pointer/UinputRoute";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import {
   pointerNeedsInstrumentation,
@@ -211,5 +213,32 @@ describe("dispatchRichStylus", () => {
       readEnvironment: async () => environment(["stylus_input_v1"]),
     });
     expect(adb.getExecutedCommands()[0]).toContain("am instrument -w -r --no-restart -e request");
+  });
+});
+
+describe("dispatchRichStylus eraser root probe (#13105)", () => {
+  test("reads the root shell for an eraser even when the runner advertises every capability", async () => {
+    // A runner with both pointer capabilities never needs uinput for a stylus, but it cannot inject
+    // an eraser, so the uid read must still happen.
+    const runner: AndroidCtrlProxyClient = Object.create(AndroidCtrlProxyClient.prototype);
+    runner.supportsCommand = async () => true;
+    const lookup = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(runner);
+    try {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(34);
+      adb.setCommandResponse("shell id -u", createExecResult("0\n", ""));
+      const sent: unknown[] = [];
+      const eraser = strokeRequest(
+        { toolType: "eraser" },
+        tapStrokePoints({ x: 1, y: 1 }, undefined),
+      );
+      await dispatchRichStylus(device, adb, eraser, {
+        injectors: [new UinputRoute(async (request) => void sent.push(request))],
+      });
+      expect(sent).toEqual([eraser]);
+      expect(adb.getExecutedCommands()).toContain("shell id -u");
+    } finally {
+      lookup.mockRestore();
+    }
   });
 });

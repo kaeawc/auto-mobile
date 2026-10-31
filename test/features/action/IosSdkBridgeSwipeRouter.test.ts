@@ -1,3 +1,4 @@
+import { MAX_SETTIMEOUT_DELAY_MS } from "../../../src/utils/SystemTimer";
 import { describe, expect, test } from "bun:test";
 import {
   IosSdkBridgeSwipeRunner,
@@ -260,5 +261,6 @@ describe("IosSdkBridgeSwipeRunner (#5159)", () => {
   test("the bridge budget covers the gesture plus headroom", () => {
     expect(iosSdkBridgeSwipeTimeoutMs(300)).toBe(5000);
     expect(iosSdkBridgeSwipeTimeoutMs(10000)).toBe(13000);
+    expect(iosSdkBridgeSwipeTimeoutMs(MAX_SETTIMEOUT_DELAY_MS)).toBe(MAX_SETTIMEOUT_DELAY_MS);
   });
 });

@@ -10,6 +10,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     private let endpointResolver: SdkEndpointResolver?
     private let transport: any HTTPRequesting
     private let healthTransport: any HTTPRequesting
+    private let actionTransport: @Sendable (URLSessionConfiguration) -> any HTTPRequesting
 
     public convenience init(port: UInt16 = 8766) {
         self.init(port: port, endpointResolver: .production(legacyPort: port))
@@ -18,10 +19,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     convenience init(port: UInt16 = 8766, endpointResolver: SdkEndpointResolver) {
         let baseURL = loopbackBaseURL(port: port)
 
-        let dataConfig = URLSessionConfiguration.default
-        dataConfig.timeoutIntervalForRequest = 2
-        dataConfig.timeoutIntervalForResource = 5
-        dataConfig.waitsForConnectivity = false
+        let dataConfig = Self.dataConfiguration()
 
         let healthConfig = URLSessionConfiguration.default
         healthConfig.timeoutIntervalForRequest = 0.5
@@ -40,12 +38,16 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         baseURL: URL,
         transport: any HTTPRequesting,
         healthTransport: any HTTPRequesting,
-        endpointResolver: SdkEndpointResolver? = nil
+        endpointResolver: SdkEndpointResolver? = nil,
+        actionTransport: @escaping @Sendable (URLSessionConfiguration) -> any HTTPRequesting = {
+            URLSessionHTTPTransport(session: URLSession(configuration: $0), invalidateAfterRequest: true)
+        }
     ) {
         self.baseURL = baseURL
         self.endpointResolver = endpointResolver
         self.transport = transport
         self.healthTransport = healthTransport
+        self.actionTransport = actionTransport
     }
 
     public func foregroundBundleDidChange(_ bundleId: String?) async {
@@ -179,10 +181,23 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
 
     /// POST to an observation-bridge route (#5159). Any HTTP reply is returned with its body;
     /// nil means the SDK was unreachable.
-    public func sendObservationRequest(_ route: SdkRoute, body: Data) async -> SdkBridgeReply? {
+    public func sendObservationRequest(
+        _ route: SdkRoute,
+        body: Data,
+        timeoutMs: Double? = nil
+    )
+        async -> SdkBridgeReply?
+    {
+        var request = jsonPost(path: route.path, body: body)
+        var requestTransport = transport
+        if let timeoutMs, timeoutMs.isFinite, timeoutMs > 0 {
+            let configuration = Self.dataConfiguration(timeoutMs: timeoutMs)
+            request.timeoutInterval = configuration.timeoutIntervalForRequest
+            requestTransport = actionTransport(configuration)
+        }
         do {
             let (data, response) = try await SdkEndpointResolver.requestData(
-                for: jsonPost(path: route.path, body: body), transport: transport, resolver: endpointResolver
+                for: request, transport: requestTransport, resolver: endpointResolver
             )
             guard let http = response as? HTTPURLResponse else { return nil }
             return SdkBridgeReply(statusCode: http.statusCode, body: data)
@@ -197,6 +212,16 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     }
 
     // MARK: - Private
+
+    /// Action sessions must cover execution plus post-action capture; other reads retain their defaults.
+    static func dataConfiguration(timeoutMs: Double? = nil) -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.default
+        let seconds = timeoutMs.flatMap { $0.isFinite && $0 > 0 ? $0 / 1000 : nil }
+        configuration.timeoutIntervalForRequest = seconds ?? 2
+        configuration.timeoutIntervalForResource = seconds ?? 5
+        configuration.waitsForConnectivity = false
+        return configuration
+    }
 
     private func optionalHierarchy(path: String) async -> SdkViewHierarchy? {
         switch await fetchDecoded(path: path) {

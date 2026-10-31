@@ -78,6 +78,24 @@ describe("SDK observation bridge commands (#5159)", () => {
     });
   });
 
+  test.each([undefined, 12000, 13000])(
+    "action budget %s is forwarded on the wire",
+    async (timeoutMs) => {
+      const harness = createIosDelegateHarness();
+      const pending = requestSdkAction(
+        harness.context,
+        {
+          longPress: { observationIdentity: 41, elementId: "submit", durationMs: 10000 },
+        },
+        { timeoutMs },
+      );
+      await flush();
+      expect(harness.sentMessages[0].timeoutMs).toBe(timeoutMs);
+      harness.resolveLast({ success: true, available: true, totalTimeMs: 0 });
+      await pending;
+    },
+  );
+
   test("a bridge rejection decodes as a result, not a failure", () => {
     const decoded = decodeCtrlProxyMessage({
       type: "sdk_action_result",

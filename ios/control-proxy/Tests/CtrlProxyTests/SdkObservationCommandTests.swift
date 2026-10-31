@@ -27,7 +27,9 @@ final class SdkObservationCommandTests: XCTestCase {
         info: SdkHierarchyServerInfo?,
         reply: SdkBridgeReply?,
         as _: T.Type
-    ) async throws -> (T, ObservationSdkFake) {
+    )
+        async throws -> (T, ObservationSdkFake)
+    {
         let sdk = ObservationSdkFake(info: info, reply: reply)
         let locator = FakeElementLocator()
         locator.foregroundBundleId = "com.example.app"
@@ -118,6 +120,23 @@ final class SdkObservationCommandTests: XCTestCase {
         XCTAssertEqual(routes, [.observationAction])
     }
 
+    func testActionForwardsOptionalWireBudget() async throws {
+        for budget in [nil, 12000.0, 13000.0] as [Double?] {
+            let fields: [String: Any] = [
+                "type": "request_sdk_action", "requestId": "act-budget",
+                "actionJson": #"{"longPress":{"observationIdentity":41,"elementId":"submit","durationMs":10000}}"#,
+            ]
+            var message = fields
+            message["timeoutMs"] = budget
+            let json = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: message), encoding: .utf8))
+            let (_, sdk) = try await handle(
+                json, info: Self.registered, reply: nil, as: SdkActionResponse.self
+            )
+            let timeouts = await sdk.timeouts
+            XCTAssertEqual(timeouts, [budget])
+        }
+    }
+
     func testBridgeRejectionIsAResultNotAFailure() async throws {
         let body = try JSONEncoder().encode(AutoMobileActionResult(status: .rejected, reason: "stale_observation"))
         let (response, _) = try await handle(
@@ -149,14 +168,16 @@ private actor ObservationSdkFake: SdkHierarchyFetching {
     let info: SdkHierarchyServerInfo?
     let reply: SdkBridgeReply?
     var routes: [SdkRoute] = []
+    var timeouts: [Double?] = []
 
     init(info: SdkHierarchyServerInfo?, reply: SdkBridgeReply?) {
         self.info = info
         self.reply = reply
     }
 
-    func sendObservationRequest(_ route: SdkRoute, body _: Data) async -> SdkBridgeReply? {
+    func sendObservationRequest(_ route: SdkRoute, body _: Data, timeoutMs: Double?) async -> SdkBridgeReply? {
         routes.append(route)
+        timeouts.append(timeoutMs)
         return reply
     }
 

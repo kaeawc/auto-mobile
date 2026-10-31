@@ -187,6 +187,8 @@ nav:
       - "Native prototype embedding": design-docs/prototype-embedding.md
       - "Prototype platform security": design-docs/prototype-platform-security.md
       - "Prototype user-test sessions": design-docs/prototype-user-test-sessions.md
+      - "Prototype SDK support matrix": design-docs/prototype-sdk-matrix.md
+      - "Prototype camera and media guide": design-docs/prototype-camera-media.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "Workflow de-duplication": design-docs/ci/workflow-deduplication.md

@@ -13,6 +13,7 @@ async function flush(): Promise<void> {
 }
 
 const observation = {
+  bundleId: "com.example.app",
   captureIdentity: 41,
   orientation: "portrait",
   coordinateSpace: "screen",

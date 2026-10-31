@@ -38,7 +38,8 @@ Measured from 100 PR runs (2026-10-08/09, ~4.4 h) and 15 nightly runs:
   hosted macOS minutes per 100 PR runs (≈ 102,000 credits, 3.4 months of allowance). It now runs
   nightly, on `run-ios-sim` PRs (#10895) and on PRs that touch an iOS SDK contract input, and is
   not mirrored on CircleCI. The remaining PR lanes (device capture ~10, Swift Packages ~5, Xcode builds ~3.3, root SPM ~1.3 min/run) are
-  ≈ 78 min per 100 PR runs ≈ 15,600 credits.
+  ≈ 78 min per 100 PR runs ≈ 15,600 credits; this capacity estimate excludes PR runs triggered
+  by contract-input changes.
 - **Nightly load:** ≈ 34 min/night plus ~1.5 min VM start per job ≈ 49 min ≈ 9,800 credits/night
   ≈ 294,000 credits/month, 10× the allowance (≈ $176/month at overage price).
 - **Concurrency:** with XCTestRunner off the PR path, the mirrored lanes need 1–2 concurrent

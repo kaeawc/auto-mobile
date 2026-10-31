@@ -26,7 +26,7 @@ import { defaultIdGenerator } from "../../../src/utils/IdGenerator";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { NetworkState } from "../../../src/utils/NetworkState";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
-import { formatFindings, type ContractFinding } from "./boundaries";
+import { formatFindings, type ContractBoundary, type ContractFinding } from "./boundaries";
 import { CAPABILITY_SLICE, judgeCapabilities } from "./capabilitySlice";
 import { setFaultRulesThroughCtrlProxy } from "./ctrlProxyFaultRules";
 import {
@@ -42,6 +42,8 @@ import {
 } from "./manifest";
 import {
   NETWORK_SLICE,
+  PLAYGROUND_BUNDLE_ID,
+  FORBIDDEN_SUBSTRINGS,
   judgeManifest,
   judgeNetworkCase,
   matchSdkPayload,
@@ -70,9 +72,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-export const PLAYGROUND_BUNDLE_ID = "dev.jasonpearson.automobile.Playground";
-/** The scenario's Authorization value; it must never appear unredacted on any surface. */
-const FORBIDDEN_SUBSTRINGS = ["contract-secret"];
+export { PLAYGROUND_BUNDLE_ID } from "./networkSlice";
 const MANIFEST_WAIT_MS = 90_000;
 const LIVE_WAIT_MS = 60_000;
 const POLL_INTERVAL_MS = 2_000;
@@ -195,8 +195,8 @@ async function collectLiveDetails(
   while (defaultTimer.now() < deadline) {
     // observe keeps the session's CtrlProxy client draining /sdk-events.
     await callTool("observe", { platform: "ios" }, context.sessionUuid);
-    const traffic = parseResourceJson(
-      await context.readResource(`automobile:network/traffic?${query}`),
+    const traffic = await atBoundary("mcp-surface", async () =>
+      parseResourceJson(await context.readResource(`automobile:network/traffic?${query}`)),
     );
     ids = trafficIdsByKey(traffic);
     if (keys.every((key) => ids.has(key))) {
@@ -210,7 +210,9 @@ async function collectLiveDetails(
     if (id !== undefined) {
       details.set(
         key,
-        parseResourceJson(await context.readResource(`automobile:network/request/${id}`)),
+        await atBoundary("mcp-surface", async () =>
+          parseResourceJson(await context.readResource(`automobile:network/request/${id}`)),
+        ),
       );
     }
   }
@@ -218,13 +220,19 @@ async function collectLiveDetails(
 }
 
 /** Drains CtrlProxy's queue (destructive) to tell an undrained event from an undelivered one. */
-async function probeCtrlProxyQueue(port: number): Promise<Set<string>> {
+export async function probeCtrlProxyQueue(
+  port: number,
+  fetchQueue: (url: string) => Promise<Pick<Response, "ok" | "status" | "text">> = fetch,
+): Promise<Set<string> | undefined> {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/sdk-events`);
+    const response = await fetchQueue(`http://127.0.0.1:${port}/sdk-events`);
+    if (!response.ok) {
+      throw new Error(`CtrlProxy queue probe returned HTTP ${response.status}`);
+    }
     return queuedRecordKeys(await response.text(), () => defaultTimer.now());
   } catch (error) {
     console.warn(`warning: CtrlProxy queue probe failed: ${String(error)}`);
-    return new Set();
+    return undefined;
   }
 }
 
@@ -265,13 +273,51 @@ async function judgeNetworkRecords(
           detail: replayed.detail,
         },
         live: key === undefined ? undefined : live.get(key),
-        queuedInCtrlProxy: key !== undefined && queued.has(key),
+        queuedInCtrlProxy: key === undefined ? false : queued?.has(key),
         slice,
       },
       FORBIDDEN_SUBSTRINGS,
     );
     return result ? [result] : [];
   });
+}
+
+/** Preserves the operation's boundary when an exception crosses the scenario runner. */
+class ScenarioError extends Error {
+  constructor(
+    readonly boundary: ContractBoundary,
+    cause: unknown,
+  ) {
+    super(String(cause), { cause });
+  }
+}
+
+async function atBoundary<T>(boundary: ContractBoundary, operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw error instanceof ScenarioError ? error : new ScenarioError(boundary, error);
+  }
+}
+
+export async function collectScenarioFindings<T extends string>(
+  scenarios: readonly T[],
+  run: (scenario: T) => Promise<ContractFinding[]>,
+): Promise<ContractFinding[]> {
+  const findings: ContractFinding[] = [];
+  for (const scenario of scenarios) {
+    try {
+      findings.push(...(await run(scenario)));
+    } catch (error) {
+      findings.push({
+        slice: scenario,
+        caseName: "run",
+        boundary: error instanceof ScenarioError ? error.boundary : "ios-client",
+        message: String(error),
+      });
+    }
+  }
+  return findings;
 }
 
 interface ScenarioContext {
@@ -305,7 +351,9 @@ async function installFaultRules(
   context: ScenarioContext,
   runId: string,
 ): Promise<ContractFinding | undefined> {
-  const delivery = await setFaultRulesThroughCtrlProxy(context.ctrlProxyPort, faultRules(runId));
+  const delivery = await atBoundary("ctrlproxy-command", () =>
+    setFaultRulesThroughCtrlProxy(context.ctrlProxyPort, faultRules(runId)),
+  );
   if (!delivery.success) {
     return {
       slice: FAULT_SLICE,
@@ -349,13 +397,18 @@ async function driveObservationSteps(
 }
 
 /** The storage capability resource for Playground, as an MCP client reads it. */
-async function readStorageCapabilities(deviceId: string): Promise<JsonRecord> {
-  const client = await connectMcpClient();
+export async function readStorageCapabilities(
+  deviceId: string,
+  connect: () => Promise<Pick<Client, "readResource" | "close">> = connectMcpClient,
+): Promise<JsonRecord> {
+  const client = await atBoundary("mcp-surface", connect);
   try {
     const uri = `automobile:devices/${deviceId}/storage/capabilities?appId=${PLAYGROUND_BUNDLE_ID}`;
-    return parseResourceJson(await client.readResource({ uri }, { timeout: TOOL_TIMEOUT_MS }));
+    return await atBoundary("mcp-surface", async () =>
+      parseResourceJson(await client.readResource({ uri }, { timeout: TOOL_TIMEOUT_MS })),
+    );
   } finally {
-    await client.close();
+    await atBoundary("mcp-surface", () => client.close());
   }
 }
 
@@ -398,15 +451,16 @@ async function judgeScenario(
   const expected =
     scenario === FAULT_SLICE ? expectedFaultRecords(manifest, manifest.runId) : manifest.network;
   const clientFindings = scenario === FAULT_SLICE ? judgeFaultClientOutcomes(manifest) : [];
-  const client = await connectMcpClient();
+  const client = await atBoundary("mcp-surface", connectMcpClient);
   try {
     const recordFindings = await judgeNetworkRecords(manifest, expected, scenario, {
       ...live,
-      readResource: (uri) => client.readResource({ uri }, { timeout: TOOL_TIMEOUT_MS }),
+      readResource: (uri) =>
+        atBoundary("mcp-surface", () => client.readResource({ uri }, { timeout: TOOL_TIMEOUT_MS })),
     });
     return [...clientFindings, ...recordFindings];
   } finally {
-    await client.close();
+    await atBoundary("mcp-surface", () => client.close());
   }
 }
 
@@ -414,60 +468,70 @@ async function runScenario(
   context: ScenarioContext,
   scenario: Scenario,
 ): Promise<ContractFinding[]> {
-  const simctl = new SimCtlClient();
-  const { deviceId } = context.options;
-  const runId = `c${defaultIdGenerator.next().replaceAll("-", "").slice(0, 20)}`;
-  // A fresh process per scenario: host registration cannot be undone in-process.
-  await simctl.terminateApp(PLAYGROUND_BUNDLE_ID, deviceId).catch(() => undefined);
-  const launchedAt = defaultTimer.now();
-  const launch = await simctl.launchApp(
-    PLAYGROUND_BUNDLE_ID,
-    {
-      environment: {
-        SIMCTL_CHILD_PLAYGROUND_SDK_CONTRACT: scenario,
-        SIMCTL_CHILD_PLAYGROUND_SDK_CONTRACT_RUN_ID: runId,
+  let boundary: ContractBoundary = "fixture-host";
+  try {
+    const simctl = new SimCtlClient();
+    const { deviceId } = context.options;
+    const runId = `c${defaultIdGenerator.next().replaceAll("-", "").slice(0, 20)}`;
+    // A fresh process per scenario: host registration cannot be undone in-process.
+    await simctl.terminateApp(PLAYGROUND_BUNDLE_ID, deviceId).catch(() => undefined);
+    const launchedAt = defaultTimer.now();
+    const launch = await simctl.launchApp(
+      PLAYGROUND_BUNDLE_ID,
+      {
+        environment: {
+          SIMCTL_CHILD_PLAYGROUND_SDK_CONTRACT: scenario,
+          SIMCTL_CHILD_PLAYGROUND_SDK_CONTRACT_RUN_ID: runId,
+        },
       },
-    },
-    deviceId,
-  );
-  if (!launch.success) {
-    return [
-      fixtureFailure(scenario, `Playground did not launch: ${launch.error ?? "unknown error"}`),
-    ];
-  }
-  // Binds this session's CtrlProxy client so it drains the SDK events into this daemon, and
-  // makes Playground CtrlProxy's tracked foreground app for the fault-rule command.
-  await callTool("observe", { platform: "ios" }, context.sessionUuid);
-  if (scenario === FAULT_SLICE) {
-    const failure = await installFaultRules(context, runId);
-    if (failure) {
-      return [failure];
+      deviceId,
+    );
+    if (!launch.success) {
+      return [
+        fixtureFailure(scenario, `Playground did not launch: ${launch.error ?? "unknown error"}`),
+      ];
     }
+    // Binds this session's CtrlProxy client so it drains the SDK events into this daemon, and
+    // makes Playground CtrlProxy's tracked foreground app for the fault-rule command.
+    boundary = "ios-client";
+    await callTool("observe", { platform: "ios" }, context.sessionUuid);
+    boundary = "fixture-host";
+    if (scenario === FAULT_SLICE) {
+      const failure = await installFaultRules(context, runId);
+      if (failure) {
+        return [failure];
+      }
+    }
+    const observationOutcomes =
+      scenario === OBSERVATION_SLICE ? await driveObservationSteps(context, runId) : undefined;
+    const manifestText = await waitForManifest(
+      join(contractDirectory(context.container), `${runId}.json`),
+    );
+    if (manifestText === undefined) {
+      return [
+        fixtureFailure(scenario, `no manifest for run ${runId} after ${MANIFEST_WAIT_MS} ms`),
+      ];
+    }
+    const parsed = parseSdkContractManifest(manifestText);
+    if (!parsed.success) {
+      return [fixtureFailure(scenario, parsed.error)];
+    }
+    const manifestFindings = judgeManifest(parsed.manifest, scenario);
+    if (parsed.manifest.status === "failed") {
+      return manifestFindings;
+    }
+    boundary = "ios-client";
+    const caseFindings = await judgeScenario(scenario, parsed.manifest, {
+      deviceId,
+      sessionUuid: context.sessionUuid,
+      ctrlProxyPort: context.ctrlProxyPort,
+      sinceMs: launchedAt - CLOCK_SKEW_MS,
+      observationOutcomes,
+    });
+    return [...manifestFindings, ...caseFindings];
+  } catch (error) {
+    throw error instanceof ScenarioError ? error : new ScenarioError(boundary, error);
   }
-  const observationOutcomes =
-    scenario === OBSERVATION_SLICE ? await driveObservationSteps(context, runId) : undefined;
-  const manifestText = await waitForManifest(
-    join(contractDirectory(context.container), `${runId}.json`),
-  );
-  if (manifestText === undefined) {
-    return [fixtureFailure(scenario, `no manifest for run ${runId} after ${MANIFEST_WAIT_MS} ms`)];
-  }
-  const parsed = parseSdkContractManifest(manifestText);
-  if (!parsed.success) {
-    return [fixtureFailure(scenario, parsed.error)];
-  }
-  const manifestFindings = judgeManifest(parsed.manifest, scenario);
-  if (parsed.manifest.status === "failed") {
-    return manifestFindings;
-  }
-  const caseFindings = await judgeScenario(scenario, parsed.manifest, {
-    deviceId,
-    sessionUuid: context.sessionUuid,
-    ctrlProxyPort: context.ctrlProxyPort,
-    sinceMs: launchedAt - CLOCK_SKEW_MS,
-    observationOutcomes,
-  });
-  return [...manifestFindings, ...caseFindings];
 }
 
 async function runScenarios(
@@ -477,21 +541,21 @@ async function runScenarios(
 ): Promise<ContractFinding[]> {
   const simctl = new SimCtlClient();
   await callTool("network", { capture: true, platform: "ios" }, sessionUuid);
-  await simctl.installApp(options.appPath, options.deviceId, { timeoutMs: 120_000 });
+  await atBoundary("fixture-host", () =>
+    simctl.installApp(options.appPath, options.deviceId, { timeoutMs: 120_000 }),
+  );
   const container = (
-    await simctl.executeCommandArgs([
-      "get_app_container",
-      options.deviceId,
-      PLAYGROUND_BUNDLE_ID,
-      "data",
-    ])
+    await atBoundary("fixture-host", () =>
+      simctl.executeCommandArgs([
+        "get_app_container",
+        options.deviceId,
+        PLAYGROUND_BUNDLE_ID,
+        "data",
+      ]),
+    )
   ).stdout.trim();
   const context: ScenarioContext = { options, sessionUuid, ctrlProxyPort, container };
-  const findings: ContractFinding[] = [];
-  for (const scenario of SCENARIOS) {
-    findings.push(...(await runScenario(context, scenario)));
-  }
-  return findings;
+  return collectScenarioFindings(SCENARIOS, (scenario) => runScenario(context, scenario));
 }
 
 /**
@@ -520,23 +584,53 @@ function fixtureFailure(slice: string, message: string): ContractFinding {
   return { slice, caseName: "run", boundary: "fixture-host", message };
 }
 
-async function main(argv: readonly string[]): Promise<number> {
-  const options = parseOptions(argv);
-  const { sessionUuid, ctrlProxyPort } = readAcquisition(
-    await callTool("getApple", { deviceId: options.deviceId }),
-  );
-  let findings: ContractFinding[];
-  try {
-    findings = await runScenarios(options, sessionUuid, ctrlProxyPort);
-  } finally {
+interface HarnessRuntime {
+  acquire: (deviceId: string) => Promise<{ sessionUuid: string; ctrlProxyPort: number }>;
+  run: typeof runScenarios;
+  cleanup: (deviceId: string, sessionUuid: string) => Promise<void>;
+  writeReport: (path: string, contents: string) => Promise<void>;
+  output: (text: string) => void;
+}
+
+const defaultRuntime: HarnessRuntime = {
+  acquire: async (deviceId) => readAcquisition(await callTool("getApple", { deviceId })),
+  run: runScenarios,
+  cleanup: async (deviceId, sessionUuid) => {
     await new SimCtlClient()
-      .terminateApp(PLAYGROUND_BUNDLE_ID, options.deviceId)
+      .terminateApp(PLAYGROUND_BUNDLE_ID, deviceId)
       .catch((error: unknown) => console.warn(`warning: terminate failed: ${String(error)}`));
     await releaseSession(sessionUuid);
+  },
+  writeReport: async (path, contents) => {
+    await writeFile(path, contents);
+  },
+  output: (text) => console.log(text),
+};
+
+export async function main(
+  argv: readonly string[],
+  runtime: HarnessRuntime = defaultRuntime,
+): Promise<number> {
+  const options = parseOptions(argv);
+  const { sessionUuid, ctrlProxyPort } = await runtime.acquire(options.deviceId);
+  let findings: ContractFinding[];
+  try {
+    findings = await runtime.run(options, sessionUuid, ctrlProxyPort);
+  } catch (error) {
+    findings = [
+      {
+        slice: "harness",
+        caseName: "run",
+        boundary: error instanceof ScenarioError ? error.boundary : "ios-client",
+        message: String(error),
+      },
+    ];
+  } finally {
+    await runtime.cleanup(options.deviceId, sessionUuid);
   }
-  console.log(formatFindings(findings));
+  runtime.output(formatFindings(findings));
   if (options.reportPath) {
-    await writeFile(options.reportPath, `${JSON.stringify({ findings }, null, 2)}\n`);
+    await runtime.writeReport(options.reportPath, `${JSON.stringify({ findings }, null, 2)}\n`);
   }
   return findings.length === 0 ? 0 : 1;
 }

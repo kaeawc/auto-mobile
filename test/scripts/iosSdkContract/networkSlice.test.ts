@@ -109,6 +109,12 @@ describe("judgeNetworkCase", () => {
     expect(result?.boundary).toBe("sdk-endpoint");
   });
 
+  test("an unknown queue probe makes a missing live record inconclusive", () => {
+    const result = judgeNetworkCase(observation({ live: undefined }));
+    expect(result).toMatchObject({ boundary: "sdk-endpoint", verdict: "inconclusive" });
+    expect(formatFindings(result ? [result] : [])).toContain("INCONCLUSIVE");
+  });
+
   test("blames CtrlProxy when live differs from the replay of the same SDK bytes", () => {
     const result = judgeNetworkCase(
       observation({ live: { ...surface, id: 99, sequenceNumber: 4 } }),
@@ -212,14 +218,47 @@ describe("field helpers", () => {
 describe("judgeManifest", () => {
   const manifest: SdkContractManifest = {
     schemaVersion: 3,
+    bundleId: "dev.jasonpearson.automobile.Playground",
     runId: "run-1",
     scenario: "network",
     status: "complete",
-    network: [expected],
+    network: [
+      expected,
+      ...["websocket-sent", "websocket-received", "nwconnection"].map((caseName) => ({
+        ...expected,
+        caseName,
+      })),
+    ],
     faults: [],
     events: [],
     undecodableBatches: 0,
   };
+
+  test("requires every registered transport case", () => {
+    const findings = judgeManifest({ ...manifest, network: [expected] });
+    expect(findings).toHaveLength(3);
+    for (const caseName of ["websocket-sent", "websocket-received", "nwconnection"]) {
+      expect(findings).toContainEqual(
+        expect.objectContaining({
+          slice: "network",
+          caseName: "run",
+          boundary: "fixture-host",
+          message: expect.stringContaining(caseName),
+        }),
+      );
+    }
+  });
+
+  test("checks secrets in unmatched SDK payloads too", () => {
+    const events = [payload, { requestId: "unmatched", error: "contract-secret" }].map((value) => ({
+      eventType: "network_request",
+      payload: Buffer.from(JSON.stringify(value)).toString("base64"),
+    }));
+    expect(judgeManifest({ ...manifest, events })).toEqual([
+      expect.objectContaining({ caseName: "run", boundary: "sdk-serialization" }),
+    ]);
+    expect(judgeManifest({ ...manifest, events: events.slice(0, 1) })).toEqual([]);
+  });
 
   test("reports nothing for a completed run", () => {
     expect(judgeManifest(manifest)).toEqual([]);
@@ -268,6 +307,64 @@ describe("judgeManifest", () => {
       capabilities: { beforeRegistration: [], afterRegistration: [] },
     };
     expect(judgeManifest(withCapabilities, "capabilities")).toEqual([]);
+  });
+
+  test("a complete manifest must identify Playground", () => {
+    expect(judgeManifest({ ...manifest, bundleId: "wrong.app" })).toContainEqual(
+      expect.objectContaining({
+        caseName: "run",
+        boundary: "fixture-host",
+        message: expect.stringContaining("bundleId"),
+      }),
+    );
+  });
+
+  test("rejects an explicit bundleId mismatch on a non-network slice", () => {
+    expect(
+      judgeManifest(
+        {
+          ...manifest,
+          scenario: "capabilities",
+          bundleId: "wrong.app",
+          network: [],
+          capabilities: { beforeRegistration: [], afterRegistration: [] },
+        },
+        "capabilities",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        slice: "capabilities",
+        caseName: "run",
+        boundary: "fixture-host",
+        message: "expected manifest bundleId dev.jasonpearson.automobile.Playground, got wrong.app",
+      }),
+    ]);
+  });
+
+  test("accepts a completed capabilities scenario without a bundleId or network events", () => {
+    expect(
+      judgeManifest(
+        {
+          ...manifest,
+          scenario: "capabilities",
+          bundleId: undefined,
+          network: [],
+          capabilities: { beforeRegistration: [], afterRegistration: [] },
+        },
+        "capabilities",
+      ),
+    ).toEqual([]);
+  });
+
+  test("requires a bundleId for a completed network scenario", () => {
+    expect(judgeManifest({ ...manifest, bundleId: undefined })).toEqual([
+      expect.objectContaining({
+        slice: "network",
+        caseName: "run",
+        boundary: "fixture-host",
+        message: expect.stringContaining("bundleId"),
+      }),
+    ]);
   });
 
   test("blames SDK serialization for batches the public type cannot decode", () => {

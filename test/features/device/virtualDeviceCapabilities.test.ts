@@ -10,7 +10,13 @@ describe("virtual device capability inventories", () => {
       { "hw.audioInput": "yes", "hw.audioOutput": "yes", "hw.gps": "yes" },
       {
         launchWithoutAudio: false,
-        hostAudio: { probed: false, input: null, output: null, outputCaptureable: false },
+        hostAudio: {
+          platform: "linux",
+          probed: false,
+          input: null,
+          output: null,
+          outputCaptureable: false,
+        },
         grpc: { state: "unreachable", reason: "Connection refused." },
       },
     );

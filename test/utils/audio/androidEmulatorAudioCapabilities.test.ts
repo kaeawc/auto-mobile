@@ -7,7 +7,7 @@ import {
 const inputs: AndroidAudioInputs = {
   config: {},
   launchWithoutAudio: false,
-  host: { probed: false, input: null, output: null, outputCaptureable: false },
+  host: { platform: "linux", probed: false, input: null, output: null, outputCaptureable: false },
 };
 const grpcIds = ["android.emulator.audioInputInjection", "android.emulator.audioOutputCapture"];
 
@@ -89,11 +89,11 @@ describe("Android emulator gRPC audio capabilities", () => {
     expect(entries).toEqual([
       ...["android.emulator.audioInput", "android.emulator.audioOutput"].map((id) => ({
         id,
-        state: "unsupported",
-        source: "platform",
+        state: "unsupported" as const,
+        source: "platform" as const,
         reason: "The emulator is launched with -no-audio (AUTOMOBILE_EMULATOR_AUDIO=false).",
       })),
-      ...grpcIds.map((id) => ({ id, state: "available", source: "platform" })),
+      ...grpcIds.map((id) => ({ id, state: "available" as const, source: "platform" as const })),
     ]);
     for (const entry of entries.filter((entry) => entry.state === "unsupported")) {
       expect(entry.reason?.trim().length).toBeGreaterThan(0);

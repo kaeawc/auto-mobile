@@ -22,7 +22,9 @@ function fakeRegistrar(): { registrar: ToolRegistrar; registrations: Registratio
         typeof registration === "function" ? { handler: registration } : registration;
       registrations.push({ kind: "plain", name, description, schema, handler, options });
     },
-    registerDeviceAware: (name, description, schema, handler, options) => {
+    registerDeviceAware: (name, description, schema, registration) => {
+      const { handler, ...options } =
+        typeof registration === "function" ? { handler: registration } : registration;
       registrations.push({ kind: "deviceAware", name, description, schema, handler, options });
     },
   } as ToolRegistrar;

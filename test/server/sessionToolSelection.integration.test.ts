@@ -58,13 +58,10 @@ describe("per-session exact-tool selection", () => {
 
   test("reports a device-aware tool enabled by any independent label route", async () => {
     ToolRegistry.clearTools();
-    ToolRegistry.registerDeviceAware(
-      "labelAwareTool",
-      "label-aware test tool",
-      z.object({}),
-      async () => ({ content: [] }),
-      { defaultEnabled: true },
-    );
+    ToolRegistry.registerDeviceAware("labelAwareTool", "label-aware test tool", z.object({}), {
+      handler: async () => ({ content: [] }),
+      defaultEnabled: true,
+    });
     const overrides = new Map<string, boolean>([["base:A", false]]);
     const service: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
       isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
@@ -80,13 +77,10 @@ describe("per-session exact-tool selection", () => {
 
   test("reports a device-aware tool enabled by a sibling label when bound to a disabled derived route", async () => {
     ToolRegistry.clearTools();
-    ToolRegistry.registerDeviceAware(
-      "labelAwareTool",
-      "label-aware test tool",
-      z.object({}),
-      async () => ({ content: [] }),
-      { defaultEnabled: true },
-    );
+    ToolRegistry.registerDeviceAware("labelAwareTool", "label-aware test tool", z.object({}), {
+      handler: async () => ({ content: [] }),
+      defaultEnabled: true,
+    });
     const overrides = new Map<string, boolean>([["base:A", false]]);
     const service: Pick<SessionToolSelectionService, "isEnabled" | "getOverride"> = {
       isEnabled: async (_sessionUuid, _toolName, declaredDefault) => declaredDefault,
@@ -815,20 +809,14 @@ describe("per-session exact-tool selection", () => {
       }),
       defaultEnabled: true,
     });
-    ToolRegistry.registerDeviceAware(
-      "observe",
-      "observe",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
-    ToolRegistry.registerDeviceAware(
-      "foreignObserve",
-      "foreign observe",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.registerDeviceAware("observe", "observe", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
+    ToolRegistry.registerDeviceAware("foreignObserve", "foreign observe", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
     ToolRegistry.register("clipboard", "clipboard", z.object({}), {
       handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
       defaultEnabled: false,
@@ -923,13 +911,10 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.registerDeviceAware(
-      "observe",
-      "observe",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.registerDeviceAware("observe", "observe", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
     ToolRegistry.register("clipboard", "clipboard", z.object({}), {
       handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
       defaultEnabled: false,
@@ -1004,13 +989,10 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.registerDeviceAware(
-      "observe",
-      "observe",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.registerDeviceAware("observe", "observe", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
     ToolRegistry.register("clipboard", "clipboard", z.object({}), {
       handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
       defaultEnabled: false,
@@ -1049,13 +1031,10 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.registerDeviceAware(
-      "observe",
-      "observe",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.registerDeviceAware("observe", "observe", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
     ToolRegistry.register("clipboard", "clipboard", z.object({}), {
       handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
       defaultEnabled: false,
@@ -1101,13 +1080,10 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.registerDeviceAware(
-      "observe",
-      "observe",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      { defaultEnabled: false },
-    );
+    ToolRegistry.registerDeviceAware("observe", "observe", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: false,
+    });
     ToolRegistry.register("clipboard", "clipboard", z.object({}), {
       handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
       defaultEnabled: false,
@@ -1143,17 +1119,12 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.registerDeviceAware(
-      "observe",
-      "observe",
-      z.object({}),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
-      {
-        defaultEnabled: true,
-        shouldEnsureDevice: () => false,
-        nonDeviceHandler: async () => ({ content: [{ type: "text", text: "ran" }] }),
-      },
-    );
+    ToolRegistry.registerDeviceAware("observe", "observe", z.object({}), {
+      handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+      defaultEnabled: true,
+      shouldEnsureDevice: () => false,
+      nonDeviceHandler: async () => ({ content: [{ type: "text", text: "ran" }] }),
+    });
 
     expect((await fixture.client.listTools()).tools.map((tool) => tool.name)).toContain("observe");
     const enabledRouteResult = await fixture.client.request(
@@ -1210,8 +1181,8 @@ describe("per-session exact-tool selection", () => {
       "observe",
       "observe",
       z.object({ device: z.string().optional() }),
-      async () => ({ content: [{ type: "text", text: "device" }] }),
       {
+        handler: async () => ({ content: [{ type: "text", text: "device" }] }),
         defaultEnabled: true,
         nonDeviceHandler: async () => ({ content: [{ type: "text", text: "ran" }] }),
       },
@@ -1254,8 +1225,8 @@ describe("per-session exact-tool selection", () => {
       "observe",
       "observe",
       z.object({ device: z.string().optional() }),
-      async () => ({ content: [{ type: "text", text: "ran" }] }),
       {
+        handler: async () => ({ content: [{ type: "text", text: "ran" }] }),
         defaultEnabled: false,
         shouldEnsureDevice: () => false,
         nonDeviceHandler: async () => ({ content: [{ type: "text", text: "ran" }] }),
@@ -1282,13 +1253,12 @@ describe("per-session exact-tool selection", () => {
     await fixture.setup();
 
     ToolRegistry.clearTools();
-    ToolRegistry.registerDeviceAware(
-      "barrier",
-      "barrier",
-      z.object({}),
-      async () => ({ content: [] }),
-      { defaultEnabled: true, planOnly: true, planExecutable: true },
-    );
+    ToolRegistry.registerDeviceAware("barrier", "barrier", z.object({}), {
+      handler: async () => ({ content: [] }),
+      defaultEnabled: true,
+      planOnly: true,
+      planExecutable: true,
+    });
     registerToolSelectionTools();
 
     for (const toolName of ["missing", "barrier"]) {

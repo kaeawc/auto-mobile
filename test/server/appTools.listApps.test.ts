@@ -248,11 +248,15 @@ test("listApps only requires booted-device readiness, not full CtrlProxy automat
     name: string,
     _description: string,
     _schema: unknown,
-    _handler: unknown,
-    options: any,
+    registration: unknown,
   ) => {
     if (name === "listApps") {
-      capturedReadiness = options?.deviceReadiness;
+      capturedReadiness =
+        typeof registration === "object" &&
+        registration !== null &&
+        "deviceReadiness" in registration
+          ? registration.deviceReadiness
+          : undefined;
     }
   };
 

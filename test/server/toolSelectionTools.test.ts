@@ -41,7 +41,10 @@ describe("applyToolSelection", () => {
     ["setUIState", { debugOnly: true }, "--debug"],
     ["sdkTool", { embeddedSdkOnly: true }, "embedded SDK"],
   ] as const)("rejects unavailable %s before any batch write", async (name, options, reason) => {
-    ToolRegistry.registerDeviceAware(name, name, z.object({}), async () => ({}), options);
+    ToolRegistry.registerDeviceAware(name, name, z.object({}), {
+      handler: async () => ({}),
+      ...options,
+    });
     const writes: string[] = [];
     const service = {
       isEnabled: async () => false,

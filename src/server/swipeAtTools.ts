@@ -224,8 +224,8 @@ export function registerSwipeAtTools() {
     "swipeAt",
     "Swipe from one screen point to another, including diagonals, in native, normalized, or percent units.",
     swipeAtSchema,
-    swipeAtHandler,
     {
+      handler: swipeAtHandler,
       defaultEnabled: false,
       supportsProgress: true,
       ...ANSWERS_SYSTEM_ALERTS,

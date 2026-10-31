@@ -1,4 +1,5 @@
 import type { ResolvedDeviceIdentity } from "../../src/daemon/readiness/DeviceReadiness";
+import { splitRegistration } from "../../src/server/toolRegistryErasure";
 import { z } from "zod/v4";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -347,12 +348,10 @@ beforeAll(async () => {
   // Preserve production options and their classification closures; replace only device I/O.
   const register = ToolRegistry.registerDeviceAware.bind(ToolRegistry);
   const stub = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation(
-    (name, description, schema, _handler, options) => {
-      register(
-        name,
-        description,
-        schema,
-        async (device, args) => {
+    (name, description, schema, registration) => {
+      const { options } = splitRegistration(registration);
+      register(name, description, schema, {
+        handler: async (device, args) => {
           h!.handledDevices.push(device);
           h!.handlerSignals.push(getAbortSignal());
           h!.runs.push({
@@ -362,13 +361,11 @@ beforeAll(async () => {
           });
           return { success: true };
         },
-        {
-          ...options,
-          ...(options?.sessionlessDeviceRead
-            ? { sessionlessDeviceRead: sessionlessDeviceReadFor(access, { timer: retryTimer }) }
-            : {}),
-        },
-      );
+        ...options,
+        ...("sessionlessDeviceRead" in options && options.sessionlessDeviceRead
+          ? { sessionlessDeviceRead: sessionlessDeviceReadFor(access, { timer: retryTimer }) }
+          : {}),
+      });
     },
   );
   try {

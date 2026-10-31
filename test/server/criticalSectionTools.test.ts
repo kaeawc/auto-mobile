@@ -938,11 +938,14 @@ describe("criticalSection tool", () => {
         device: z.string(),
         value: z.string(),
       }),
-      async (_device, params: { device: string; value: string }) => {
-        executionLog.push(`${params.device}:${params.value}`);
-        return { success: true };
+      {
+        handler: async (_device, params: { device: string; value: string }) => {
+          executionLog.push(`${params.device}:${params.value}`);
+          return { success: true };
+        },
+        debugOnly: true,
+        planExecutable: true,
       },
-      { debugOnly: true, planExecutable: true },
     );
 
     expect(ToolRegistry.getTool("mockPlanExecutableHiddenStep")).toBeUndefined();
@@ -988,8 +991,7 @@ describe("criticalSection tool", () => {
       "mockDebugOnlyHiddenStep",
       "Mock debug-only hidden step",
       z.object({ device: z.string() }),
-      async () => ({ success: true }),
-      { debugOnly: true },
+      { handler: async () => ({ success: true }), debugOnly: true },
     );
 
     expect(ToolRegistry.getTool("mockDebugOnlyHiddenStep")).toBeUndefined();
@@ -1030,11 +1032,14 @@ describe("criticalSection tool", () => {
         device: z.string(),
         value: z.string(),
       }),
-      async (_device, params: { device: string; value: string }) => {
-        executionLog.push(`${params.device}:${params.value}`);
-        return { success: true };
+      {
+        handler: async (_device, params: { device: string; value: string }) => {
+          executionLog.push(`${params.device}:${params.value}`);
+          return { success: true };
+        },
+        embeddedSdkOnly: true,
+        planExecutable: true,
       },
-      { embeddedSdkOnly: true, planExecutable: true },
     );
 
     expect(ToolRegistry.getTool("mockEmbeddedPlanExecutableStep")).toBeUndefined();

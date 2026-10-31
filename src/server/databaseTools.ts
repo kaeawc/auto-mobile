@@ -143,8 +143,8 @@ export function registerDatabaseTools(
     "sqlQuery",
     "Execute SQL on app SQLite database.",
     sqlQuerySchema,
-    sqlQueryHandler,
     {
+      handler: sqlQueryHandler,
       defaultEnabled: false,
       embeddedSdkOnly: true,
       outputSchema: sqlQueryResultSchema,

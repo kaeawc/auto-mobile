@@ -36,13 +36,12 @@ object PrototypeDisplayRouting {
 }
 
 /**
- * Displays hot-plugged after the accessibility service connected get a null overlay token on
- * Android 12L and 13, so adding a window there throws BadTokenException although the capability is
- * advertised (#15318: API 32 displays 3-5 and API 33 displays 3-6 failed 7 of 7 while displays
- * present at bind succeeded). API 34 and newer are unverified and left unchanged.
+ * Displays hot-plugged after the accessibility service connected are refused on API 35 and older
+ * because a null overlay token can cause BadTokenException when adding a window. Displays present
+ * at bind are allowed. API 36 and newer are the verified fixed level for hot-plugged displays.
  */
 object PrototypeDisplayHotPlug {
-  const val FIXED_API = 34
+  const val FIXED_API = 36
 
   fun error(displayId: Int, sdkInt: Int, boundDisplayIds: Set<Int>): String? =
     if (displayId != Display.DEFAULT_DISPLAY && sdkInt < FIXED_API && displayId !in boundDisplayIds)

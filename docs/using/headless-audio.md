@@ -10,13 +10,19 @@ it, and the known limits. The audio tools themselves are described in
 Each device in `listDevices` carries a `capabilityInventory`. Its audio entries say whether audio
 works on that device and, when it does not, why:
 
-| Entry                              | Available when                                                                      |
-| ---------------------------------- | ----------------------------------------------------------------------------------- |
-| `ios.simulator.audioInput`         | The Mac has a default input device.                                                 |
-| `ios.simulator.audioOutput`        | The Mac has a default output device.                                                |
-| `ios.simulator.audioOutputCapture` | The Mac's default output is a loopback device, so its signal can be read back.      |
-| `android.emulator.audioInput`      | The AVD has `hw.audioInput=yes` and the emulator is not launched with `-no-audio`.  |
-| `android.emulator.audioOutput`     | The AVD has `hw.audioOutput=yes` and the emulator is not launched with `-no-audio`. |
+| Entry                                  | Available when                                                                      |
+| -------------------------------------- | ----------------------------------------------------------------------------------- |
+| `ios.simulator.audioInput`             | The Mac has a default input device.                                                 |
+| `ios.simulator.audioOutput`            | The Mac has a default output device.                                                |
+| `ios.simulator.audioOutputCapture`     | The Mac's default output is a loopback device, so its signal can be read back.      |
+| `android.emulator.audioInput`          | The AVD has `hw.audioInput=yes` and the emulator is not launched with `-no-audio`.  |
+| `android.emulator.audioOutput`         | The AVD has `hw.audioOutput=yes` and the emulator is not launched with `-no-audio`. |
+| `android.emulator.audioInputInjection` | The emulator's gRPC endpoint is reachable.                                          |
+| `android.emulator.audioOutputCapture`  | The emulator's gRPC endpoint is reachable.                                          |
+
+The two Android gRPC entries appear only when a probe result is supplied. They are `available`
+when reachable, `unavailable` when unreachable, and `unsupported` when no emulator gRPC port is
+configured. Non-available entries include a reason. `-no-audio` does not affect these two entries.
 
 When a device cannot record, observations and `setAppPermissions` report `audio_input_unavailable`:
 recordings on that device will contain no audio, and retrying will not change that.
@@ -83,19 +89,18 @@ simulator on the Mac, so run audio tests on one simulator at a time.
 They need no sound server, microphone or speaker on the host, and they work the same in a
 container.
 
-- Keep emulator audio on: do not set `AUTOMOBILE_EMULATOR_AUDIO=false`, which launches the
-  emulator with `-no-audio`.
+- `-no-audio` (`AUTOMOBILE_EMULATOR_AUDIO=false`) does not prevent gRPC injection or capture.
 - Keep `hw.audioInput=yes` and `hw.audioOutput=yes` in the AVD's `config.ini`.
 - Run the emulator on the same host as AutoMobile, so its gRPC endpoint can be found.
 
 ## Troubleshooting
 
-| Symptom                                                                 | Cause and fix                                                                                                           |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `audio_input_unavailable` in an observation                             | The device has no audio input: on a Mac, no default input device; on an emulator, `-no-audio` or `hw.audioInput=no`.    |
-| `audio_injection_unsupported` on a simulator                            | The Mac's default input is not a loopback device, or no helper is configured. Follow the macOS steps above.             |
-| `audio_capture_unsupported` on a simulator                              | The Mac's default output is not a loopback device. Make a loopback device the default output.                           |
-| `audio_injection_unsupported` or `audio_capture_unsupported` on Android | The emulator is not local or does not advertise gRPC audio. Use a recent emulator on the same host.                     |
-| `audio_injection_busy`                                                  | Another injection holds the microphone; on a Mac, any simulator's injection. Stop it with `stopAudioInput`.             |
-| `audio_loopback_failed`                                                 | The Mac's audio system refused the device, often for lack of Microphone permission. The message carries the detail.     |
-| `captureAudio` returns `silent: true` while the app plays sound         | On a Mac, the default output is not the device being read back; on an emulator, check `hw.audioOutput` and `-no-audio`. |
+| Symptom                                                                 | Cause and fix                                                                                                        |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `audio_input_unavailable` in an observation                             | The device has no audio input: on a Mac, no default input device; on an emulator, `-no-audio` or `hw.audioInput=no`. |
+| `audio_injection_unsupported` on a simulator                            | The Mac's default input is not a loopback device, or no helper is configured. Follow the macOS steps above.          |
+| `audio_capture_unsupported` on a simulator                              | The Mac's default output is not a loopback device. Make a loopback device the default output.                        |
+| `audio_injection_unsupported` or `audio_capture_unsupported` on Android | The emulator is not local or does not advertise gRPC audio. Use a recent emulator on the same host.                  |
+| `audio_injection_busy`                                                  | Another injection holds the microphone; on a Mac, any simulator's injection. Stop it with `stopAudioInput`.          |
+| `audio_loopback_failed`                                                 | The Mac's audio system refused the device, often for lack of Microphone permission. The message carries the detail.  |
+| `captureAudio` returns `silent: true` while the app plays sound         | On a Mac, the default output is not the device being read back; on an emulator, check `hw.audioOutput`.              |

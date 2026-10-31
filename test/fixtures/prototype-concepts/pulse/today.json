@@ -244,7 +244,8 @@
     "start": "pair",
     "style": {
       "width": "fill",
-      "height": "fill"
+      "height": "fill",
+      "background": "surface"
     },
     "screens": {
       "pair": {
@@ -269,7 +270,7 @@
             "children": [
               {
                 "type": "icon",
-                "name": "bluetooth_searching",
+                "name": "sensors",
                 "contentDescription": "Bluetooth"
               },
               {
@@ -283,7 +284,7 @@
                 "type": "button",
                 "testTag": "scan_button",
                 "label": "Scan for bands",
-                "icon": "bluetooth",
+                "icon": "sensors",
                 "enabledWhen": {
                   "key": "scanning",
                   "equals": false
@@ -363,7 +364,7 @@
                     "testTag": "band_result",
                     "headline": "{band.name}",
                     "supporting": "Battery {band.battery}% · Signal {band.signal}",
-                    "leadingIcon": "watch",
+                    "leadingIcon": "fitness_center",
                     "onTap": [
                       {
                         "type": "setState",
@@ -419,7 +420,7 @@
                     "title": "Today",
                     "actions": [
                       {
-                        "icon": "watch",
+                        "icon": "fitness_center",
                         "label": "Band settings",
                         "onTap": [
                           {
@@ -458,7 +459,7 @@
                           "children": [
                             {
                               "type": "icon",
-                              "name": "bluetooth_connected",
+                              "name": "link",
                               "contentDescription": "Connected"
                             },
                             {
@@ -534,7 +535,7 @@
                     "title": "Workout",
                     "actions": [
                       {
-                        "icon": "watch",
+                        "icon": "fitness_center",
                         "label": "Band settings",
                         "onTap": [
                           {
@@ -879,7 +880,7 @@
                     "title": "History",
                     "actions": [
                       {
-                        "icon": "watch",
+                        "icon": "fitness_center",
                         "label": "Band settings",
                         "onTap": [
                           {
@@ -1062,7 +1063,7 @@
                 "testTag": "band_battery",
                 "headline": "Battery",
                 "supporting": "{bandBattery}%",
-                "leadingIcon": "battery_5_bar"
+                "leadingIcon": "battery_std"
               },
               {
                 "type": "listItem",
@@ -1078,7 +1079,7 @@
                 "type": "button",
                 "testTag": "unpair_button",
                 "label": "Unpair band",
-                "icon": "link_off",
+                "icon": "close",
                 "variant": "outlined",
                 "onTap": [
                   {

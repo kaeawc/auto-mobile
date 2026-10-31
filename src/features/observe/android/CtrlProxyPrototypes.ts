@@ -1,3 +1,7 @@
+import {
+  withHostOnlySavedPrototypes,
+  removeDeletedSavedPrototypeMirror,
+} from "../../prototype/savedPrototypeMirror";
 import { requirePrototypeTimersSupport } from "../../prototype/prototypeTimers";
 import { collectPrototypeStrings } from "../../prototype/prototypeAssetReferences";
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
@@ -429,11 +433,16 @@ export class CtrlProxyPrototypes {
     );
   }
 
-  requestListSavedPrototypes(
+  async requestListSavedPrototypes(
     timeoutMs = 5000,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult> {
-    return this.request(ctrlProxyRequests.listSavedPrototypes({ requestId: "" }), timeoutMs, perf);
+    const reply = await this.request(
+      ctrlProxyRequests.listSavedPrototypes({ requestId: "" }),
+      timeoutMs,
+      perf,
+    );
+    return withHostOnlySavedPrototypes(reply, this.context.savedPrototypeMirror);
   }
   async requestAdvancePrototypeClock(
     id: string,
@@ -483,14 +492,7 @@ export class CtrlProxyPrototypes {
       timeoutMs,
       perf,
     );
-    const recorder = this.context.savedPrototypeMirror;
-    if (reply.success && !reply.error && recorder) {
-      try {
-        await recorder.mirror.remove(recorder.serial, id);
-      } catch (error) {
-        logger.warn(`[CTRL_PROXY] Failed to remove saved prototype mirror ${id}`, error);
-      }
-    }
+    await removeDeletedSavedPrototypeMirror(reply, this.context.savedPrototypeMirror, id);
     return reply;
   }
 

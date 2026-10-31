@@ -66,7 +66,7 @@ export interface PrototypeSavedOutput {
   error?: string;
   errorCode?: PrototypeSavedErrorCode;
   saved?: SavedPrototypeInfo;
-  savedPrototypes?: (Omit<SavedPrototypeEntry, "savedAt"> & { savedAt?: number })[];
+  savedPrototypes?: SavedPrototypeEntry[];
   pinned?: "pinned" | "pending" | "unsupported";
   /** Whether the default launcher was restarted so a new or updated shortcut shows (#14887). */
   launcherRestarted?: boolean;

@@ -1,3 +1,4 @@
+import type { PrototypeResult } from "../observe/android/ctrlProxyProtocol/prototypeMessages";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
@@ -246,4 +247,41 @@ export function missingOnDevice(
 ): MirroredSavedPrototype[] {
   const present = new Set(deviceEntries.map((entry) => entry.id));
   return mirrored.filter((entry) => !present.has(entry.id));
+}
+
+export async function withHostOnlySavedPrototypes(
+  reply: PrototypeResult,
+  recorder?: { serial: string; mirror: SavedPrototypeMirror },
+): Promise<PrototypeResult> {
+  if (!reply.success || reply.error || !recorder) {
+    return reply;
+  }
+  try {
+    const deviceEntries = reply.savedPrototypes ?? [];
+    const missing = missingOnDevice(await recorder.mirror.list(recorder.serial), deviceEntries);
+    return {
+      ...reply,
+      savedPrototypes: [
+        ...deviceEntries,
+        ...missing.map(({ id, label }) => ({ id, label, pinned: false, hostOnly: true })),
+      ],
+    };
+  } catch (error) {
+    logger.warn("[CTRL_PROXY] Failed to list saved prototype mirror", error);
+    return reply;
+  }
+}
+
+export async function removeDeletedSavedPrototypeMirror(
+  reply: PrototypeResult,
+  recorder: { serial: string; mirror: SavedPrototypeMirror } | undefined,
+  id: string,
+): Promise<void> {
+  if (recorder && ((reply.success && !reply.error) || reply.errorCode === "not_found")) {
+    try {
+      await recorder.mirror.remove(recorder.serial, id);
+    } catch (error) {
+      logger.warn(`[CTRL_PROXY] Failed to remove saved prototype mirror ${id}`, error);
+    }
+  }
 }

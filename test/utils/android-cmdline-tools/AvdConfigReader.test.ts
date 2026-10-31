@@ -1,6 +1,6 @@
 import { TV_CONFIG, TV_SOURCE_PROPERTIES, tvConfigReader } from "../../fixtures/android-tv-avd";
 import { afterEach, describe, it, expect } from "bun:test";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   parseAvdConfig,
   apiLevelToVersion,
@@ -314,7 +314,8 @@ describe("FileAvdConfigReader", () => {
   });
 
   it("reads config from correct path", async () => {
-    const matchesConfigPath = (p: string) => p.includes("TestAvd.avd") && p.endsWith("config.ini");
+    const matchesConfigPath = (p: string) =>
+      p.includes("TestAvd.avd") && basename(p) === "config.ini";
     const readFileFn = async (path: string, _encoding: string) => {
       if (matchesConfigPath(path)) {
         return "hw.lcd.width=1080\nimage.sysdir.1=system-images/android-34/google_apis/arm64-v8a/";
@@ -797,26 +798,58 @@ describe("installed system image version metadata", () => {
       screenDensity: 320,
     });
     expect(reads).toEqual([
-      "/fixture/avd/tv.avd/config.ini",
-      "/fixture/sdk/system-images/android-36/android-tv/arm64-v8a/source.properties",
+      join("/fixture/avd", "tv.avd", "config.ini"),
+      join(
+        "/fixture/sdk",
+        "system-images",
+        "android-36",
+        "android-tv",
+        "arm64-v8a",
+        "source.properties",
+      ),
     ]);
   });
-  it("prefers the installed image release string over the major API lookup", async () => {
+  it.each([
+    [36, "16"],
+    [35, "15"],
+    [99, "99"],
+  ])("derives release %s as %s from the installed image API level", async (apiLevel, osVersion) => {
     const reader = new FileAvdConfigReader(
       async (path) =>
-        path.endsWith("source.properties")
-          ? TV_SOURCE_PROPERTIES.replace("Platform.Version=16", "Platform.Version=16.0")
+        basename(path) === "source.properties"
+          ? TV_SOURCE_PROPERTIES.replace(
+              "AndroidVersion.ApiLevel=36",
+              `AndroidVersion.ApiLevel=${apiLevel}`,
+            )
           : TV_CONFIG,
-      (path) => path.endsWith("config.ini") || path.endsWith("source.properties"),
+      (path) => basename(path) === "config.ini" || basename(path) === "source.properties",
       "/fixture/avd",
       "/fixture/sdk",
     );
-    expect((await reader.readConfig("tv"))?.osVersion).toBe("16.0");
+    expect(await reader.readConfig("tv")).toMatchObject({ apiLevel, osVersion });
   });
+  it.each(["", "0", "-1", "35.5", "invalid", "9007199254740992"])(
+    "keeps configured version metadata when the installed image API level is invalid: %s",
+    async (apiLevel) => {
+      const reader = new FileAvdConfigReader(
+        async (path) =>
+          basename(path) === "source.properties"
+            ? TV_SOURCE_PROPERTIES.replace(
+                "AndroidVersion.ApiLevel=36",
+                `AndroidVersion.ApiLevel=${apiLevel}`,
+              )
+            : TV_CONFIG,
+        (path) => basename(path) === "config.ini" || basename(path) === "source.properties",
+        "/fixture/avd",
+        "/fixture/sdk",
+      );
+      expect(await reader.readConfig("tv")).toMatchObject({ apiLevel: 36, osVersion: "16" });
+    },
+  );
   it("keeps configured facts when optional source.properties is absent", async () => {
     const reader = new FileAvdConfigReader(
       async () => TV_CONFIG,
-      (path) => path.endsWith("config.ini"),
+      (path) => basename(path) === "config.ini",
       "/fixture/avd",
       "/fixture/sdk",
     );
@@ -830,12 +863,12 @@ describe("installed system image version metadata", () => {
   it("keeps configured facts when optional source.properties cannot be read", async () => {
     const reader = new FileAvdConfigReader(
       async (path) => {
-        if (path.endsWith("source.properties")) {
+        if (basename(path) === "source.properties") {
           throw new Error("image unavailable");
         }
         return TV_CONFIG;
       },
-      (path) => path.endsWith("config.ini") || path.endsWith("source.properties"),
+      (path) => basename(path) === "config.ini" || basename(path) === "source.properties",
       "/fixture/avd",
       "/fixture/sdk",
     );

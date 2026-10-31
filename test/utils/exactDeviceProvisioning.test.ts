@@ -1202,6 +1202,13 @@ test("exact Android creation returns configured metadata without booting", async
     isRunning: false,
   });
   expect(reads).toContain(
-    "/fixture/sdk/system-images/android-36/android-tv/arm64-v8a/source.properties",
+    join(
+      "/fixture/sdk",
+      "system-images",
+      "android-36",
+      "android-tv",
+      "arm64-v8a",
+      "source.properties",
+    ),
   );
 });

@@ -1,8 +1,9 @@
+import { basename } from "node:path";
 import { FileAvdConfigReader } from "../../src/utils/android-cmdline-tools/AvdConfigReader";
 
-// config.ini fields captured in #15881; source.properties uses the SDK image schema.
-export const TV_CONFIG = `AvdId=AutoMobile-android-tv-36-c71f3a3d
-abi.type=arm64-v8a
+// config.ini lines captured in #15881 from a real AVD config;
+// the source.properties block is the verbatim real file.
+export const TV_CONFIG = `abi.type=arm64-v8a
 hw.device.name=tv_1080p
 hw.dPad=yes
 hw.keyboard=no
@@ -15,11 +16,15 @@ tag.ids=android-tv
 target=android-36
 image.sysdir.1=system-images/android-36/android-tv/arm64-v8a/
 `;
-export const TV_SOURCE_PROPERTIES = `Pkg.Desc=Android TV ARM 64 v8a System Image
-Pkg.Revision=1
+export const TV_SOURCE_PROPERTIES = `Pkg.Desc=Android SDK Platform 16
+Pkg.UserSrc=false
+Pkg.Revision=4
+Pkg.Dependencies=emulator#35.2.10
 AndroidVersion.ApiLevel=36
-Platform.Version=16
+AndroidVersion.ExtensionLevel=17
+AndroidVersion.IsBaseSdk=true
 SystemImage.Abi=arm64-v8a
+SystemImage.GpuSupport=true
 SystemImage.TagId=android-tv
 SystemImage.TagDisplay=Android TV
 `;
@@ -29,9 +34,9 @@ export function tvConfigReader() {
   const reader = new FileAvdConfigReader(
     async (path) => {
       reads.push(path);
-      return path.endsWith("source.properties") ? TV_SOURCE_PROPERTIES : TV_CONFIG;
+      return basename(path) === "source.properties" ? TV_SOURCE_PROPERTIES : TV_CONFIG;
     },
-    (path) => path.endsWith("/config.ini") || path.endsWith("/source.properties"),
+    (path) => basename(path) === "config.ini" || basename(path) === "source.properties",
     "/fixture/avd",
     "/fixture/sdk",
   );

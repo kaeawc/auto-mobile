@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { tvConfigReader } from "../fixtures/android-tv-avd";
 import { createdImageFor } from "../../src/devices/deviceBootSelection";
 import { readFileSync } from "node:fs";
@@ -1579,6 +1580,13 @@ it("returns configured TV metadata on the automatic create path before boot", as
     isRunning: false,
   });
   expect(reads).toContain(
-    "/fixture/sdk/system-images/android-36/android-tv/arm64-v8a/source.properties",
+    join(
+      "/fixture/sdk",
+      "system-images",
+      "android-36",
+      "android-tv",
+      "arm64-v8a",
+      "source.properties",
+    ),
   );
 });

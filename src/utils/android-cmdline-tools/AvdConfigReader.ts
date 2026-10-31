@@ -317,11 +317,9 @@ export class FileAvdConfigReader implements AvdConfigReader, AvdDirectoryResolve
     try {
       const props = parseKeyValueProperties(await this.readFileFn(propertiesPath, "utf-8"));
       const apiLevel = Number(props.get("AndroidVersion.ApiLevel"));
-      const osVersion = props.get("Platform.Version");
-      return {
-        ...(Number.isSafeInteger(apiLevel) && apiLevel > 0 ? { apiLevel } : {}),
-        ...(osVersion ? { osVersion } : {}),
-      };
+      return Number.isSafeInteger(apiLevel) && apiLevel > 0
+        ? { apiLevel, osVersion: apiLevelToVersion(apiLevel) ?? String(apiLevel) }
+        : {};
     } catch (error) {
       logger.warn(`Failed to read Android image properties: ${errorMessage(error)}`, error);
       return {};

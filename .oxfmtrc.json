@@ -28,6 +28,8 @@
     "test/fixtures/ios-devicectl/list-devices-*.json",
     "test/fixtures/ios-devicectl/info-*.json",
     "test/fixtures/ios-simctl/*.json",
+    "test/fixtures/tvos-xcuitest/*.json",
+    "test/fixtures/watchos-xcuitest/*.json",
     "test/fixtures/ios-devicetype-order/*.json",
     "test/fixtures/ios-devicectl/motion-*.json",
     "test/fixtures/ios-contract/**",

@@ -253,6 +253,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
     return new SqliteSessionBrokerStore(this.db, scopeKey, this.isExecOwnerLive, {
       ids,
       clock: this.timer,
+      write: (write) => this.writeTransaction(write),
     });
   }
 

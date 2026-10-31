@@ -137,6 +137,8 @@ export class DualTrackRecorder {
     return [...this.exportWarnings];
   }
 
+  private readonly timer: Timer;
+
   constructor(
     private readonly device: BootedDevice,
     /** Optional override for testing — defaults to a real GetEventReader */
@@ -144,9 +146,9 @@ export class DualTrackRecorder {
     /** Optional override for testing — defaults to AndroidCtrlProxyClient */
     private readonly a11ySource?: A11ySource,
     /** Optional override for testing — defaults to the system timer */
-    private readonly timer: Timer = defaultTimer,
-    overrides: DualTrackDisplayOverrides = {},
+    { timer = defaultTimer, ...overrides }: DualTrackDisplayOverrides & { timer?: Timer } = {},
   ) {
+    this.timer = timer;
     this.geometry = overrides.geometry;
     this.displaySource = overrides.displaySource;
   }
@@ -691,8 +693,7 @@ export class DualTrackRecorder {
       timeline,
       penNodes,
       { rotation, display },
-      this.timer.now(),
-      caveats,
+      { startedAt: this.timer.now(), caveats },
     );
 
     const reader = new GetEventReader({
@@ -716,8 +717,7 @@ function followWithPenTimelines(
   primary: ScreenGeometryTimeline,
   penNodes: ReadonlyArray<TouchInputNode>,
   initial: { rotation: number; display: { width: number; height: number } },
-  startedAt: number,
-  caveats: readonly string[],
+  { startedAt, caveats }: { startedAt: number; caveats: readonly string[] },
 ): Array<{ node: TouchInputNode; scaler: ScreenGeometryTimeline }> {
   return penNodes.map((node) => {
     const penTimeline = new ScreenGeometryTimeline(

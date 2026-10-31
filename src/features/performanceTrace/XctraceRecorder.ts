@@ -103,7 +103,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
         { cause: error },
       );
     }
-    return this.recording(child, exited, artifactPath, request.template, warnings);
+    return this.recording(child, exited, artifactPath, { template: request.template, warnings });
   }
 
   private async resolveTarget(
@@ -137,8 +137,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
     child: HostChildProcess,
     exited: Promise<void>,
     artifactPath: string,
-    template: PerformanceTraceTemplate,
-    warnings: string[],
+    { template, warnings }: { template: PerformanceTraceTemplate; warnings: string[] },
   ): RecordingPerformanceTrace {
     const { timer, host } = this.deps;
     const stopTimeoutMs = this.deps.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;

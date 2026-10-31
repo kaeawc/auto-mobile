@@ -73,7 +73,7 @@ export function createDefaultOnDemandAuditEngines(device: BootedDevice): OnDeman
     },
     memory(appId) {
       // A snapshot of the app as it is now: no action runs between the two samples.
-      return new MemoryAudit(device).runAudit(appId, "audit", {}, async () => {});
+      return new MemoryAudit(device).runAudit(appId, "audit", {}, { action: async () => {} });
     },
     elements(result) {
       return result.viewHierarchy ? projectAuditElements(result.viewHierarchy).elements : [];

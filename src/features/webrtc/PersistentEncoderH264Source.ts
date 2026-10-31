@@ -151,16 +151,13 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.maxServerRelaunchAttempts = relaunchPolicy.maxAttempts;
     this.serverRelaunchBackoff = relaunchPolicy.backoff;
     this.serverRelaunchHealthyWindowMs = relaunchPolicy.healthyWindowMs;
-    this.leases = new VideoServerLeases(
-      options,
-      this.adbFactory,
-      this.timer,
-      this.activeVideoSessionRegistry,
-      {
+    this.leases = new VideoServerLeases(options, this.adbFactory, this.timer, {
+      activeVideoSessionRegistry: this.activeVideoSessionRegistry,
+      teardown: {
         timeoutMs: this.teardownTimeoutMs,
         withTimeout: (operation, ms, label) => this.withTimeout(operation, ms, label),
       },
-    );
+    });
     this.startup = new VideoServerStartup(
       options,
       this.timer,

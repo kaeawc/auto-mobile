@@ -186,7 +186,9 @@ export class GestureClassifier {
         this.contacts.get(b.slotId)?.unknownAxes,
       );
       const scaler = this.contacts.get(a.slotId)?.scaler ?? this.scalerAt(frame.arrivedAt);
-      const dist = unknownAxes?.length ? undefined : screenDist(scaler, a.x, a.y, b.x, b.y);
+      const dist = unknownAxes?.length
+        ? undefined
+        : screenDist(scaler, a.x, a.y, { rawX2: b.x, rawY2: b.y });
       if (!this.pinchState) {
         this.pinchState = { initialDist: dist, finalDist: dist, unknownAxes };
       } else {
@@ -219,13 +221,10 @@ export class GestureClassifier {
 
     const gesture =
       displacement < slopPx
-        ? this.evaluateTapOrLongPress(
-            downX,
-            downY,
-            durationMs,
-            frame.arrivedAt,
-            contact.pen.toolType,
-          )
+        ? this.evaluateTapOrLongPress(downX, downY, durationMs, {
+            arrivedAt: frame.arrivedAt,
+            toolType: contact.pen.toolType,
+          })
         : this.evaluateSwipe(
             { x: downX, y: downY },
             { x: upX, y: upY },
@@ -270,7 +269,7 @@ export class GestureClassifier {
     const firstY = Number.isFinite(contact.startY) ? contact.startY : 0;
     const lastX = Number.isFinite(contact.lastX) ? contact.lastX : firstX;
     const lastY = Number.isFinite(contact.lastY) ? contact.lastY : firstY;
-    const displacement = screenDist(contact.scaler, firstX, firstY, lastX, lastY);
+    const displacement = screenDist(contact.scaler, firstX, firstY, { rawX2: lastX, rawY2: lastY });
     const type =
       displacement >= GESTURE_THRESHOLDS.TOUCH_SLOP_DP * this.densityDp
         ? "swipe"
@@ -312,8 +311,7 @@ export class GestureClassifier {
     screenX: number,
     screenY: number,
     durationMs: number,
-    arrivedAt: number,
-    toolType: PointerToolType | undefined,
+    { arrivedAt, toolType }: { arrivedAt: number; toolType?: PointerToolType },
   ): GestureEvent {
     if (durationMs >= GESTURE_THRESHOLDS.LONG_PRESS_MS) {
       return { type: "longPress", arrivedAt, screenX, screenY, durationMs };
@@ -372,8 +370,7 @@ function screenDist(
   scaler: CoordScaler,
   rawX1: number,
   rawY1: number,
-  rawX2: number,
-  rawY2: number,
+  { rawX2, rawY2 }: { rawX2: number; rawY2: number },
 ): number {
   const first = scaler.toScreenPoint(rawX1, rawY1);
   const second = scaler.toScreenPoint(rawX2, rawY2);

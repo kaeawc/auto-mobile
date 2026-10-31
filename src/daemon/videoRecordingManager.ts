@@ -233,12 +233,10 @@ async function defaultResolveAndroidDisplay(
   request?: string,
   signal?: AbortSignal,
 ): Promise<AndroidRecordingDisplay | undefined> {
-  return resolveAndroidRecordingDisplay(
-    device,
-    defaultAdbClientFactory.create(device),
+  return resolveAndroidRecordingDisplay(device, defaultAdbClientFactory.create(device), {
     request,
     signal,
-  );
+  });
 }
 
 interface RecordedHighlightEntry {

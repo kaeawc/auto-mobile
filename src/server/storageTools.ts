@@ -360,8 +360,7 @@ function withSharedPreferencesInspectionFallback(
     appId,
     fileName,
     () => deps.adbClientFactory.create(device),
-    viaSdk,
-    viaDirectFile,
+    { viaSdk, viaDirectFile },
   );
 }
 
@@ -530,13 +529,10 @@ async function clearKeyValueFileHandler(
         () => client.clearPreferenceStore(args.appId, storageName),
         {
           viaDirectFile: (adb) =>
-            clearAndroidKeyValueFileDirect(
-              adb,
-              device.deviceId,
-              args.appId,
-              storageName,
-              args.userId,
-            ),
+            clearAndroidKeyValueFileDirect(adb, device.deviceId, args.appId, {
+              fileName: storageName,
+              userId: args.userId,
+            }),
           deps,
         },
       ));

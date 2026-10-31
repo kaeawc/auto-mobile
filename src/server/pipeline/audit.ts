@@ -50,15 +50,12 @@ export class DefaultAuditRunner implements AuditRunner {
     const perf = createGlobalPerformanceTracker();
     let response: any | undefined;
 
-    const auditResult = await memoryAudit.runAudit(
-      packageName,
-      name,
-      args,
-      async () => {
+    const auditResult = await memoryAudit.runAudit(packageName, name, args, {
+      action: async () => {
         response = await handler(device, args, progress, signal);
       },
       perf,
-    );
+    });
 
     if (!auditResult.passed) {
       const errorMsg = `Memory audit FAILED for ${packageName} during ${name}\n\n${auditResult.diagnostics}`;

@@ -1071,20 +1071,19 @@ describe("display fence options preserve public call shapes", () => {
                     { x: 50, y: 70 },
                     "longPress",
                     500,
-                    driver,
+                    { driver },
                     [],
                   ])
               : shape === "legacy"
                 ? () =>
-                    strategy.executeCoordinateFallback({ x: 50, y: 70 }, "longPress", 500, driver)
-                : () =>
-                    strategy.executeCoordinateFallback(
-                      { x: 50, y: 70 },
-                      "longPress",
-                      500,
+                    strategy.executeCoordinateFallback({ x: 50, y: 70 }, "longPress", 500, {
                       driver,
-                      options,
-                    );
+                    })
+                : () =>
+                    strategy.executeCoordinateFallback({ x: 50, y: 70 }, "longPress", 500, {
+                      driver,
+                      fenceOptions: options,
+                    });
           break;
         case "longPress":
           invoke =
@@ -1094,12 +1093,16 @@ describe("display fence options preserve public call shapes", () => {
                     { x: 50, y: 70 },
                     500,
                     element,
-                    driver,
+                    { driver },
                     [],
                   ])
               : shape === "legacy"
-                ? () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, driver)
-                : () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, driver, options);
+                ? () => strategy.executeLongPress({ x: 50, y: 70 }, 500, element, { driver })
+                : () =>
+                    strategy.executeLongPress({ x: 50, y: 70 }, 500, element, {
+                      driver,
+                      fenceOptions: options,
+                    });
           break;
       }
       if (shape === "stale") {

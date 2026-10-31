@@ -92,7 +92,7 @@ describe("TalkBackTapStrategy focus-navigation activation and cancellation", () 
       driver.onFocusAction = () => controller.abort();
 
       await expect(
-        strategy.executeTap(device.deviceId, rows[10], driver, undefined, controller.signal),
+        strategy.executeTap(device.deviceId, rows[10], driver, { signal: controller.signal }),
       ).rejects.toThrow(
         "Focus navigation partially applied: 1 accessibility-focus request already moved",
       );
@@ -112,7 +112,7 @@ describe("TalkBackTapStrategy focus-navigation activation and cancellation", () 
       });
 
       await expect(
-        strategy.executeTap(device.deviceId, rows[10], driver, undefined, controller.signal),
+        strategy.executeTap(device.deviceId, rows[10], driver, { signal: controller.signal }),
       ).rejects.toThrow(
         "partially applied: 1 accessibility-focus request already moved the TalkBack cursor",
       );
@@ -132,7 +132,7 @@ describe("TalkBackTapStrategy focus-navigation activation and cancellation", () 
       });
 
       await expect(
-        strategy.executeTap(device.deviceId, rows[0], driver, undefined, controller.signal),
+        strategy.executeTap(device.deviceId, rows[0], driver, { signal: controller.signal }),
       ).rejects.toThrow("Operation cancelled");
 
       expect(driver.doubleTapHistory).toEqual([]);
@@ -154,13 +154,9 @@ describe("TalkBackTapStrategy focus-navigation activation and cancellation", () 
     });
 
     test("a request with no cancellation still navigates and activates", async () => {
-      const result = await strategy.executeTap(
-        device.deviceId,
-        rows[10],
-        driver,
-        undefined,
-        new AbortController().signal,
-      );
+      const result = await strategy.executeTap(device.deviceId, rows[10], driver, {
+        signal: new AbortController().signal,
+      });
 
       expect(result).toMatchObject({ success: true, method: "focus-navigation" });
       expect(driver.getFocusRequestCount()).toBe(1);

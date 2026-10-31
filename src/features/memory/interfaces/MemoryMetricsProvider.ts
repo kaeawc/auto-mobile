@@ -30,8 +30,8 @@ export interface MemoryMetricsProvider {
    * @param packageName - Target app package name (resolved to a PID to scope logcat)
    * @param startTimestamp - Start of capture window
    * @param endTimestamp - End of capture window
-   * @param perf - Optional performance tracker
-   * @param pid - Optional pre-resolved PID (e.g. resolved before an audited action that may
+   * @param options.perf - Optional performance tracker
+   * @param options.pid - Optional pre-resolved PID (e.g. resolved before an audited action that may
    *   restart the process); when omitted, the PID is resolved fresh from `packageName`.
    * @returns Promise with array of GC events
    */
@@ -39,8 +39,7 @@ export interface MemoryMetricsProvider {
     packageName: string,
     startTimestamp: number,
     endTimestamp: number,
-    perf?: PerformanceTracker,
-    pid?: string,
+    options?: { perf?: PerformanceTracker; pid?: string },
   ): Promise<GCEvent[]>;
 
   /**

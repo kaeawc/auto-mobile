@@ -65,7 +65,7 @@ describe("DualTrackRecorder reading a touch and a pen node", () => {
     spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
     const timer = new FakeTimer();
     timer.advanceTime(1000);
-    const recorder = new DualTrackRecorder(device, undefined, noA11y, timer);
+    const recorder = new DualTrackRecorder(device, undefined, noA11y, { timer });
     await recorder.start();
     await Promise.resolve();
     await Promise.resolve();
@@ -141,7 +141,7 @@ describe("pressure does not change recorded plan steps", () => {
       },
       stop: () => {},
     };
-    const recorder = new DualTrackRecorder(device, emitter, noA11y, new FakeTimer());
+    const recorder = new DualTrackRecorder(device, emitter, noA11y, { timer: new FakeTimer() });
     await recorder.start();
     emit!(gesture);
     return (await recorder.stop()).steps;

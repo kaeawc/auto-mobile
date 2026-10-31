@@ -1,4 +1,4 @@
-import { AvdSnapshotCleanupFence } from "./avdSnapshotCleanupFence";
+import { AvdSnapshotCleanupFence, trackPoolOperation } from "./avdSnapshotCleanupFence";
 import type { AvdSnapshotCleanupReport } from "./AvdSnapshotCleanup";
 import { SessionBrokerMaintenanceError } from "./SessionBrokerMaintenanceError";
 import { brokerAdmissionInput } from "./brokerAdmission";
@@ -80,9 +80,11 @@ export class SessionBroker {
     { controller: AbortController; requestId: string }
   >();
   private stopping = false;
+  private readonly poolOperations = new Set<Promise<unknown>>();
   private readonly snapshotCleanup = new AvdSnapshotCleanupFence({
     isStopping: () => this.stopping,
     preparations: () => this.preparationOwners.keys(),
+    poolOperations: () => this.poolOperations,
   });
 
   private readonly cleanup: RecoveryCleanup;
@@ -134,10 +136,13 @@ export class SessionBroker {
     if (this.stopping) {
       throw new SessionBrokerStoppingError();
     }
-    return this.destructions.drainIdlePool();
+    if (this.snapshotCleanup.inProgress) {
+      throw new SessionBrokerMaintenanceError();
+    }
+    return trackPoolOperation(this.poolOperations, () => this.destructions.drainIdlePool());
   }
 
-  /** Fence discovery/deletion behind all admitted preparations, with no timeout escape. */
+  /** Fence discovery/deletion behind admitted preparations and pool work, with no timeout escape. */
   async cleanupAvdSnapshots(
     operation: () => Promise<AvdSnapshotCleanupReport[]>,
   ): Promise<AvdSnapshotCleanupReport[]> {
@@ -146,10 +151,10 @@ export class SessionBroker {
 
   /** Idle-expiry pass (#14364); a stopping broker expires nothing and its successor restarts clocks. */
   async expireIdlePool(): Promise<SessionBrokerPoolDrainResult> {
-    if (this.stopping) {
+    if (this.stopping || this.snapshotCleanup.inProgress) {
       return { resources: [] };
     }
-    return this.idleExpiry.sweep();
+    return trackPoolOperation(this.poolOperations, () => this.idleExpiry.sweep());
   }
 
   prepare(

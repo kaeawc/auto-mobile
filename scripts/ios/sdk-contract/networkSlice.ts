@@ -274,7 +274,10 @@ export function judgeManifest(
     });
   }
   if (manifest.status === "complete") {
-    if (manifest.bundleId !== PLAYGROUND_BUNDLE_ID) {
+    if (
+      (slice === NETWORK_SLICE || manifest.bundleId !== undefined) &&
+      manifest.bundleId !== PLAYGROUND_BUNDLE_ID
+    ) {
       findings.push({
         ...runCase,
         boundary: "fixture-host",

@@ -319,6 +319,54 @@ describe("judgeManifest", () => {
     );
   });
 
+  test("rejects an explicit bundleId mismatch on a non-network slice", () => {
+    expect(
+      judgeManifest(
+        {
+          ...manifest,
+          scenario: "capabilities",
+          bundleId: "wrong.app",
+          network: [],
+          capabilities: { beforeRegistration: [], afterRegistration: [] },
+        },
+        "capabilities",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        slice: "capabilities",
+        caseName: "run",
+        boundary: "fixture-host",
+        message: "expected manifest bundleId dev.jasonpearson.automobile.Playground, got wrong.app",
+      }),
+    ]);
+  });
+
+  test("accepts a completed capabilities scenario without a bundleId or network events", () => {
+    expect(
+      judgeManifest(
+        {
+          ...manifest,
+          scenario: "capabilities",
+          bundleId: undefined,
+          network: [],
+          capabilities: { beforeRegistration: [], afterRegistration: [] },
+        },
+        "capabilities",
+      ),
+    ).toEqual([]);
+  });
+
+  test("requires a bundleId for a completed network scenario", () => {
+    expect(judgeManifest({ ...manifest, bundleId: undefined })).toEqual([
+      expect.objectContaining({
+        slice: "network",
+        caseName: "run",
+        boundary: "fixture-host",
+        message: expect.stringContaining("bundleId"),
+      }),
+    ]);
+  });
+
   test("blames SDK serialization for batches the public type cannot decode", () => {
     expect(judgeManifest({ ...manifest, undecodableBatches: 2 })[0].boundary).toBe(
       "sdk-serialization",

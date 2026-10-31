@@ -1,3 +1,9 @@
+import {
+  internalLiveDeadlineKey,
+  internalMcpRequestDeadlineMs,
+  internalMcpSessionId,
+  internalOneShotCli,
+} from "../../../daemon/wire/internalToolParams";
 import { UnsafeDeviceResourceCombinationError } from "../../../models/UnsafeDeviceResourceCombinationError";
 import { ProvisionDeviceError } from "../../../devices/exactDeviceProvisioning";
 import {
@@ -185,11 +191,10 @@ export function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
 export function parseProvisionDeviceArgs(
   input: Partial<InternalProvisionDeviceArgs>,
 ): InternalProvisionDeviceArgs {
-  const __mcpSessionId = input.__mcpSessionId;
-  const __oneShotCli = input.__oneShotCli === true;
-  const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
-  const __mcpLiveDeadlineKey =
-    typeof input.__mcpLiveDeadlineKey === "string" ? input.__mcpLiveDeadlineKey : undefined;
+  const __mcpSessionId = internalMcpSessionId(input);
+  const __oneShotCli = internalOneShotCli(input);
+  const __mcpRequestDeadlineMs = internalMcpRequestDeadlineMs(input);
+  const __mcpLiveDeadlineKey = internalLiveDeadlineKey(input);
   const publicInput: Record<string, unknown> = { ...input };
   // `provisionDeviceSchema` is `.strict()`, so EVERY internal param the daemon
   // may inject has to go before re-parsing -- hence the canonical shared list
@@ -224,12 +229,13 @@ export function provisionDeviceDeadlineMs(
   reserveRollbackTime: boolean,
 ): number {
   const requestedDeadlineMs = timer.now() + (args.timeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
-  if (!reserveRollbackTime || args.__mcpRequestDeadlineMs === undefined) {
+  const mcpRequestDeadlineMs = internalMcpRequestDeadlineMs(args);
+  if (!reserveRollbackTime || mcpRequestDeadlineMs === undefined) {
     return requestedDeadlineMs;
   }
   return Math.min(
     requestedDeadlineMs,
-    args.__mcpRequestDeadlineMs -
+    mcpRequestDeadlineMs -
       DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS -
       START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
   );

@@ -2,11 +2,24 @@
 # bats file_tags=parallel-within-file
 
 setup() {
+  REAL_BASH="$(type -P bash)"
+  export REAL_BASH
   repo_root="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
   mock_bin="${BATS_TEST_TMPDIR}/bin"
   command_log="${BATS_TEST_TMPDIR}/commands.log"
   mkdir -p "${mock_bin}"
   export PREPUSH_IOS_MOCK_REPO_ROOT="${repo_root}"
+
+  # Avoid repeated real API dumps; test/bats/ios-api-dump.bats covers that script.
+  cat > "${mock_bin}/bash" <<'MOCK'
+#!/bin/bash
+if [[ ${1:-} == */scripts/ios/api-dump.sh ]]; then
+  echo "iOS API surface is up to date."
+  exit 0
+fi
+exec "${REAL_BASH}" "$@"
+MOCK
+  chmod +x "${mock_bin}/bash"
 
   for tool in swiftformat swiftlint swift git bun; do
     cat > "${mock_bin}/${tool}" <<'MOCK'

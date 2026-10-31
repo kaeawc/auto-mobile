@@ -96,7 +96,7 @@ export async function restoreSavedPrototypes(
     try {
       const reply = await device.list();
       if (!failedReply(reply)) {
-        present = reply.savedPrototypes ?? [];
+        present = (reply.savedPrototypes ?? []).filter((entry) => !entry.hostOnly);
       } else {
         logger.warn(`[PROTOTYPE] Device saved prototype list failed for ${serial}`, reply);
       }

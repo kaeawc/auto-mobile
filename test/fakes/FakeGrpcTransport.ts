@@ -26,6 +26,7 @@ export class FakeGrpcCall implements GrpcCall {
   private readonly finalStatus = new Promise<GrpcStatusResult>((resolve) => {
     this.resolveStatus = resolve;
   });
+  private readonly headersReceived = Promise.withResolvers<GrpcStatusResult | undefined>();
   private readonly pendingWrites = new Set<(error: Error) => void>();
 
   constructor(
@@ -73,6 +74,10 @@ export class FakeGrpcCall implements GrpcCall {
     return this.finalStatus;
   }
 
+  responseHeaders(): Promise<GrpcStatusResult | undefined> {
+    return this.headersReceived.promise;
+  }
+
   cancel(): void {
     this.cancelled = true;
     for (const reject of this.pendingWrites) {
@@ -84,6 +89,10 @@ export class FakeGrpcCall implements GrpcCall {
   respond(message: Uint8Array): void {
     this.responses.push(message);
     this.notify();
+  }
+
+  respondHeaders(status?: GrpcStatusResult): void {
+    this.headersReceived.resolve(status);
   }
 
   finish(status: GrpcStatusResult): void {

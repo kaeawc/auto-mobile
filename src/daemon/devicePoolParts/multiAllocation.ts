@@ -189,7 +189,8 @@ export class DevicePoolMultiAllocation {
       if (shortfall.refresh) {
         refreshFailure = shortfall.refresh.failure;
       }
-      assertPoolCapacity(this.state.criteriaMatcher, shortfall.stats, requiredCount, platform, {
+      assertPoolCapacity(this.state.criteriaMatcher, shortfall.stats, requiredCount, {
+        platform,
         recoveringAndroidImages: this.state.recoveryCoordinator.recoveringAndroidImages.size,
         refreshContext: refreshFailureContext(refreshFailure),
       });

@@ -927,7 +927,9 @@ export class ExplicitDeviceBind {
       existingSessionId !== requestedSessionId &&
       !isAnonymousAcquisitionSession(existingSession)
     ) {
-      throw heldDeviceBindRefusal(this.port, deviceId, existingSessionId, requestedSessionId);
+      throw heldDeviceBindRefusal(this.port, deviceId, existingSessionId, {
+        requesterSessionUuid: requestedSessionId,
+      });
     }
     // The reusing call may already be tracked under the holder (autolock); naming it keeps its
     // own admission from being judged as earlier work still in flight (#11400).

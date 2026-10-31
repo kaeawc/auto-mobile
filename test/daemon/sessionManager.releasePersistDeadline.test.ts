@@ -115,9 +115,14 @@ type Harness = Awaited<ReturnType<typeof harness>>;
 /** The heartbeat monitor's reap: a terminal release followed by the pool release. */
 function reap(h: Harness): { done: Promise<void>; settled: () => boolean } {
   let settled = false;
-  const done = releaseSessionAndDevice(h.manager, h.pool, device.deviceId, "old", {
-    reason: "heartbeat-timeout",
-  }).finally(() => {
+  const done = releaseSessionAndDevice(
+    { manager: h.manager, pool: h.pool },
+    device.deviceId,
+    "old",
+    {
+      reason: "heartbeat-timeout",
+    },
+  ).finally(() => {
     settled = true;
   });
   return { done, settled: () => settled };
@@ -256,7 +261,7 @@ describe("a release whose DB write never settles is bounded by a deadline (#1083
       gate.resolve();
       await flush();
       h.persistence.park = undefined;
-      await releaseSessionAndDevice(h.manager, h.pool, device.deviceId, "old", {
+      await releaseSessionAndDevice({ manager: h.manager, pool: h.pool }, device.deviceId, "old", {
         reason: "heartbeat-timeout",
       });
       await flush();

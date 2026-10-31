@@ -282,7 +282,9 @@ function assertDeviceOwner(input: {
     holderOf(device) !== sessionUuid &&
     sessions.getSession(holderOf(device)!)
   ) {
-    throw heldDeviceBindRefusal(pool, device.id, holderOf(device)!, sessionUuid);
+    throw heldDeviceBindRefusal(pool, device.id, holderOf(device)!, {
+      requesterSessionUuid: sessionUuid,
+    });
   }
 }
 
@@ -334,7 +336,9 @@ async function bindRequestedDevice(input: {
     refusePreparedForOtherRequest: true,
   });
   if (boundSession !== args.sessionUuid) {
-    throw heldDeviceBindRefusal(pool, args.deviceId, boundSession, args.sessionUuid);
+    throw heldDeviceBindRefusal(pool, args.deviceId, boundSession, {
+      requesterSessionUuid: args.sessionUuid,
+    });
   }
   sessions.setDeviceReadiness(args.sessionUuid, "booted");
 }
@@ -443,7 +447,7 @@ function admitSessionlessSelection(args: HandlerArgs): void {
       // A display pin needs a session regardless of who holds the device.
       throw new DisplayPinNeedsSessionError();
     }
-    throw heldDeviceBindRefusal(pool, args.deviceId, liveHolder, undefined);
+    throw heldDeviceBindRefusal(pool, args.deviceId, liveHolder);
   }
   // No session holds it yet, but another request is preparing it and will bind it (#11651).
   pool.assertNotPreparedForOtherRequest(args.deviceId);

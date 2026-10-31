@@ -225,8 +225,7 @@ export class DevicePoolLifecycleWiring {
         options.deviceReleaseManaged = true;
         let releasedDeviceId: string | null = null;
         return releaseSessionAndDevice(
-          this.state.sessionManager,
-          this.callbacks,
+          { manager: this.state.sessionManager, pool: this.callbacks },
           terminalRelease.deviceId,
           sessionId,
           {

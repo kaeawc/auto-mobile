@@ -529,13 +529,11 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
   context.assertHolder();
   const sourceImage = await resolveSystemUiRecoveryImage(context);
   const releaseReadinessReservation = devicePool
-    ? await devicePool.reserveDeviceForReadiness(
-        boot.device.deviceId,
-        boot.device,
-        sourceImage.name,
-        sourceImage.name,
-        { autolockClient: recoveryAutolockClient },
-      )
+    ? await devicePool.reserveDeviceForReadiness(boot.device.deviceId, boot.device, {
+        stableRuntimeName: sourceImage.name,
+        verifiedAndroidAvdName: sourceImage.name,
+        autolockClient: recoveryAutolockClient,
+      })
     : undefined;
   const state: SystemUiAnrRestartState = {
     sourceImage,

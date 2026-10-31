@@ -84,7 +84,11 @@ export function createDirectFrameRig(
   const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
   const sessionManager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
   sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-    hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
+    hasActiveSessionExecution(
+      { tracker: executionTracker, sessionManager, devicePool: pool },
+      sessionId,
+      query,
+    ),
   );
   const unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
 

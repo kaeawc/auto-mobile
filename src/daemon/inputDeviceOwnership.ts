@@ -57,13 +57,23 @@ function readsHolderRelease(pool: object): pool is HolderReleaseQuery {
   return typeof Reflect.get(pool, "holderReleaseRemainingMs") === "function";
 }
 
-/** Preserve each bind/select refusal's wording, adding a hint only for a hold ending by itself. */
+/**
+ * Preserve each bind/select refusal's wording, adding a hint only for a hold ending by itself.
+ *
+ * @param pool - Pool consulted for the holder's remaining release time
+ * @param deviceId - The refused device
+ * @param holderSessionUuid - The device's holder
+ * @param options.requesterSessionUuid - The refused requester
+ * @param options.wording - Which refusal wording to keep
+ */
 export function heldDeviceBindRefusal(
   pool: object | undefined,
   deviceId: string,
   holderSessionUuid: string | undefined,
-  requesterSessionUuid?: string,
-  wording: "assigned" | "another" = "assigned",
+  {
+    requesterSessionUuid,
+    wording = "assigned",
+  }: { requesterSessionUuid?: string; wording?: "assigned" | "another" } = {},
 ): InputDeviceOwnedError {
   const original =
     wording === "another"

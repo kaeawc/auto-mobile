@@ -337,8 +337,10 @@ export async function handleSessionInfo(
         session,
         executions.getActiveDeviceSessionExecutionCount(sessionId),
         manager.getIdleReleaseExecutionVeto?.(sessionId),
-        (ms) => reportedWallClock(manager, ms),
-        manager.getSessionLeaseState?.(sessionId)?.phase,
+        {
+          toWall: (ms) => reportedWallClock(manager, ms),
+          leasePhase: manager.getSessionLeaseState?.(sessionId)?.phase,
+        },
       ),
       ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
@@ -388,8 +390,10 @@ export async function handleActiveSessions(
                 session,
                 executions.getActiveDeviceSessionExecutionCount(session.sessionId),
                 manager.getIdleReleaseExecutionVeto?.(session.sessionId),
-                (ms) => reportedWallClock(manager, ms),
-                manager.getSessionLeaseState?.(session.sessionId)?.phase,
+                {
+                  toWall: (ms) => reportedWallClock(manager, ms),
+                  leasePhase: manager.getSessionLeaseState?.(session.sessionId)?.phase,
+                },
               ),
               ...(isSessionReleasing(manager, session.sessionId, session)
                 ? { releasing: true }
@@ -648,7 +652,7 @@ async function releaseBoundSession(
       error,
     );
   });
-  await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+  await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
     release: async () => {
       deviceId = await manager.releaseSession(sessionId);
       return deviceId;

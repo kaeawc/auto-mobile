@@ -464,7 +464,7 @@ class OwnershipWorld {
       () => false,
       async (sessionId, reason) => {
         const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, {
+        await releaseSessionAndDevice({ manager, pool }, deviceId, sessionId, {
           reason,
         });
       },
@@ -1313,12 +1313,20 @@ class OwnershipWorld {
         this.log(`  disconnect ${device.deviceId}: stale target, session moved on`);
         return;
       } else if (liveSession) {
-        await releaseSessionAndDevice(this.manager, this.pool, device.deviceId, liveSession, {
-          // cancelAndReleaseSession frees the device the release returns, which is the session's
-          // assigned device, not necessarily the one that disconnected (a rebind may be in flight).
-          release: () =>
-            this.manager.releaseSession(liveSession, deviceLossCancellationReason(device.deviceId)),
-        });
+        await releaseSessionAndDevice(
+          { manager: this.manager, pool: this.pool },
+          device.deviceId,
+          liveSession,
+          {
+            // cancelAndReleaseSession frees the device the release returns, which is the session's
+            // assigned device, not necessarily the one that disconnected (a rebind may be in flight).
+            release: () =>
+              this.manager.releaseSession(
+                liveSession,
+                deviceLossCancellationReason(device.deviceId),
+              ),
+          },
+        );
       }
       await this.pool.removeDisconnectedDevice(
         device.deviceId,
@@ -1579,9 +1587,14 @@ class OwnershipWorld {
         if (!session) {
           return;
         }
-        await releaseSessionAndDevice(this.manager, this.pool, session.assignedDevice, sessionId, {
-          reason: PLAN_AUTO_RELEASE_REASON,
-        });
+        await releaseSessionAndDevice(
+          { manager: this.manager, pool: this.pool },
+          session.assignedDevice,
+          sessionId,
+          {
+            reason: PLAN_AUTO_RELEASE_REASON,
+          },
+        );
       });
     }
   }

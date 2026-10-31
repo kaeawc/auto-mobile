@@ -72,13 +72,21 @@ const longPlanOnItsLabel = (body: (plan: LongPlan) => Promise<void>) => async ()
     const { sessionManager, pool } = hunt.daemon();
     // daemon.ts: a call in flight vetoes its session's idle release until its request deadline.
     sessionManager.setActiveSessionExecutionChecker((id, query) =>
-      hasActiveSessionExecution(executionTracker, sessionManager, pool, id, query),
+      hasActiveSessionExecution(
+        { tracker: executionTracker, sessionManager, devicePool: pool },
+        id,
+        query,
+      ),
     );
     sessionManager.setSessionExecutionDeadlineLookup((id, query) =>
-      latestSessionExecutionDeadlineMs(executionTracker, sessionManager, pool, id, {
-        onSessionClock: true,
-        ...query,
-      }),
+      latestSessionExecutionDeadlineMs(
+        { tracker: executionTracker, sessionManager, devicePool: pool },
+        id,
+        {
+          onSessionClock: true,
+          ...query,
+        },
+      ),
     );
     unsubscribe.push(subscribeToolCallEndActivity(executionTracker, sessionManager, pool));
     const released: Array<[string, string]> = [];

@@ -487,7 +487,11 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       beforeEach(() => {
         tracker = new ExecutionTracker(timer, new FakeIdGenerator());
         sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-          hasActiveSessionExecution(tracker, sessionManager, pool, sessionId, query),
+          hasActiveSessionExecution(
+            { tracker, sessionManager, devicePool: pool },
+            sessionId,
+            query,
+          ),
         );
         readMonitor = new SessionHeartbeatMonitor(
           sessionManager,

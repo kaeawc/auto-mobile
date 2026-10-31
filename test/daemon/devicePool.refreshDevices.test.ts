@@ -672,11 +672,9 @@ describe("DevicePool", () => {
       await devicePool.initializeWithDevices([device]);
       await bindOwnerSession(device, sourceImage);
       const captured = requirePooledDevice(devicePool, device.deviceId);
-      const readinessRelease = await devicePool.reserveDeviceForReadiness(
-        device.deviceId,
-        device,
-        sourceImage.name,
-      );
+      const readinessRelease = await devicePool.reserveDeviceForReadiness(device.deviceId, device, {
+        stableRuntimeName: sourceImage.name,
+      });
       const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
@@ -732,11 +730,9 @@ describe("DevicePool", () => {
       // Simulate an autolocked device so recovery must preserve exclusivity; an
       // unset autolockSessionId on the replacement would let any session drive it.
       captured.autolockSessionId = "owner-session";
-      const readinessRelease = await devicePool.reserveDeviceForReadiness(
-        device.deviceId,
-        device,
-        sourceImage.name,
-      );
+      const readinessRelease = await devicePool.reserveDeviceForReadiness(device.deviceId, device, {
+        stableRuntimeName: sourceImage.name,
+      });
       const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {

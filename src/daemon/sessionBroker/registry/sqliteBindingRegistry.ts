@@ -88,6 +88,7 @@ import type { LegacySlotDeviceRetirement } from "./legacySlotDeviceRetirement";
 import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import { createRegistryDatabase } from "./RegistryDatabase";
 import { RegistrySqliteDialect } from "./RegistrySqliteDialect";
+import { createRegistryWriteGuard } from "./registryWriteGuard";
 import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
 export { type BindingRegistryDatabase, parseJournalTarget } from "./bindingRegistryRows";
 
@@ -195,9 +196,10 @@ export async function openSqliteBindingRegistry(
   if (!isInMemoryDatabasePath(dbPath)) {
     ensureSecureDirectorySync(dirname(dbPath));
   }
+  let sqlite: RegistrySqliteHandle | undefined;
   const db = new Kysely<BindingRegistryDatabase>({
     dialect: new RegistrySqliteDialect({
-      database: () => openRegistrySqlite(dbPath),
+      database: () => (sqlite = openRegistrySqlite(dbPath)),
       // Applies to BEGIN and autocommit statements: fail fast so the owning operation can retry
       // the whole unit. Migration DDL is atomic and opens are serialized by a file lock;
       // a busy open is forgotten by factories and refused retryably. Transaction bodies already
@@ -225,20 +227,25 @@ export async function openSqliteBindingRegistry(
     }
     throw error;
   }
-  return new SqliteBindingRegistry(db, options, dbPath);
+  return new SqliteBindingRegistry(db, options, dbPath, sqlite);
 }
 
 export class SqliteBindingRegistry implements BindingRegistry {
   private readonly timer: Timer;
   private readonly isExecOwnerLive: BindingExecOwnerLiveness;
+  private readonly claims: SqliteDeviceClaims;
+  private readonly writeTransaction: ReturnType<typeof createRegistryWriteGuard>;
 
   constructor(
     private readonly db: Kysely<BindingRegistryDatabase>,
     options: SqliteBindingRegistryOptions = {},
     private readonly dbPath: string = ":memory:",
+    sqlite?: RegistrySqliteHandle,
   ) {
     this.timer = options.timer ?? defaultTimer;
     this.isExecOwnerLive = options.isExecOwnerLive ?? defaultBindingExecOwnerLiveness;
+    this.writeTransaction = createRegistryWriteGuard({ db, sqlite, dbPath });
+    this.claims = new SqliteDeviceClaims(this.db, (write) => this.writeTransaction(write));
   }
 
   assertSupportedSchema(): Promise<void> {
@@ -259,12 +266,12 @@ export class SqliteBindingRegistry implements BindingRegistry {
 
   /** The host-wide device claims table (#11811), on this connection and transaction lock. */
   deviceClaims(): SqliteDeviceClaims {
-    return new SqliteDeviceClaims(this.db);
+    return this.claims;
   }
 
   async ensureScope(identity: BindingScopeIdentity): Promise<EnsureScopeResult> {
     const scopeKey = computeBindingScopeKey(identity);
-    return this.db.transaction().execute(async (trx): Promise<EnsureScopeResult> => {
+    return this.writeTransaction(async (trx): Promise<EnsureScopeResult> => {
       const nowMs = this.timer.now();
       const existing = await this.readScope(trx, scopeKey);
       if (existing?.state === "valid") {
@@ -336,7 +343,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
   async initBinding(key: BindingKey, init: BindingInit): Promise<InitBindingResult> {
     assertValidBindingKey(key);
     const requestedSpecJson = serializeSpec(init.requestedSpec);
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const scope = await this.readScope(trx, key.scopeKey);
       if (scope?.state !== "valid") {
         return { kind: "scope_not_valid", scope };
@@ -374,7 +381,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
     expected: { generation: number; stableDeviceId: null },
   ): Promise<boolean> {
     assertValidBindingKey(key);
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       if (await this.readOpenJournal(trx, key)) {
         return false;
       }
@@ -400,9 +407,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
     next: BindingBindingCommit,
   ): Promise<CommitBindingResult> {
     assertValidBindingKey(key);
-    return this.db
-      .transaction()
-      .execute((trx) => this.commitBindingIn(trx, key, expected, { next }));
+    return this.writeTransaction((trx) => this.commitBindingIn(trx, key, expected, { next }));
   }
 
   private async commitBindingIn(
@@ -477,9 +482,9 @@ export class SqliteBindingRegistry implements BindingRegistry {
   ): Promise<UpdateBindingStateResult> {
     assertValidBindingKey(key);
     const settler = assertSettlerForState(state, options);
-    return this.db
-      .transaction()
-      .execute((trx) => this.updateBindingStateIn(trx, key, expected, { state, settler }));
+    return this.writeTransaction((trx) =>
+      this.updateBindingStateIn(trx, key, expected, { state, settler }),
+    );
   }
 
   private async updateBindingStateIn(
@@ -524,7 +529,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
     options: ClaimExecutionOptions = {},
   ): Promise<ClaimExecutionResult> {
     assertValidBindingKey(key);
-    return this.db.transaction().execute(async (trx): Promise<ClaimExecutionResult> => {
+    return this.writeTransaction(async (trx): Promise<ClaimExecutionResult> => {
       const checked = await this.checkBinding(trx, key, expected, {
         journaled: false,
         claimingSessionUuid: owner.sessionUuid,
@@ -563,7 +568,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
 
   async releaseExecution(key: BindingKey, sessionUuid: string): Promise<ReleaseExecutionResult> {
     assertValidBindingKey(key);
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       const updated = await trx
         .updateTable("slot_assignments")
         .set({
@@ -592,7 +597,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
   }
 
   async recoverSettledBindings(scopeKey?: string): Promise<BindingAssignmentRecord[]> {
-    return this.db.transaction().execute(async (trx) => {
+    return this.writeTransaction(async (trx) => {
       let query = trx.selectFrom("slot_assignments").selectAll().where("state", "=", "settling");
       if (scopeKey !== undefined) {
         query = query.where("scope_key", "=", scopeKey);
@@ -776,7 +781,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
     assertValidBindingKey(key);
     assertOpenPhase(input.phase);
     const targetJson = serializeSpec(input.target);
-    return this.db.transaction().execute(async (trx): Promise<OpenBindingJournalResult> => {
+    return this.writeTransaction(async (trx): Promise<OpenBindingJournalResult> => {
       const nowMs = this.timer.now();
       await trx
         .deleteFrom("slot_journal")
@@ -824,7 +829,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
     id: number,
     input: AdvanceBindingJournalInput,
   ): Promise<AdvanceBindingJournalResult> {
-    return this.db.transaction().execute(async (trx): Promise<AdvanceBindingJournalResult> => {
+    return this.writeTransaction(async (trx): Promise<AdvanceBindingJournalResult> => {
       const row = await trx
         .selectFrom("slot_journal")
         .selectAll()
@@ -865,7 +870,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
     expected: BindingJournalOwner,
     next: BindingJournalOwner,
   ): Promise<ClaimBindingJournalResult> {
-    return this.db.transaction().execute(async (trx): Promise<ClaimBindingJournalResult> => {
+    return this.writeTransaction(async (trx): Promise<ClaimBindingJournalResult> => {
       const row = await trx
         .selectFrom("slot_journal")
         .selectAll()

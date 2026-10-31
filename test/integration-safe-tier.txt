@@ -64,6 +64,7 @@ test/daemon/sessionBroker/provisioning/simctlCatalog.integration.test.ts | safe 
 test/daemon/sessionBroker/registry/bindingJournal.integration.test.ts | unsafe | Bun.spawn of a crash child process L93
 test/daemon/sessionBroker/registry/bindingRegistryBusyBound.integration.test.ts | safe | real SQLite handles on useScratchRoot temp files and a file-backed harness, explicit dbPath, no host tooling
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.integration.test.ts | unsafe | Bun.spawn of a registry child process L134
+test/daemon/sessionBroker/registry/staleRegistryHandleWriteRefusal.integration.test.ts | safe | two SQLite registry handles over a private mkdtemp file with FakeTimer, closed and removed afterwards
 test/daemon/sessionBroker/sqliteStore.integration.test.ts | unsafe | Bun.spawn of competing admission children with owned process cancellation
 test/daemon/socketRequestCancel.integration.test.ts | safe | tmpdir sockets L55, UnixSocketServer with fake timer
 test/daemon/socketServer/BaseSocketServerBindGuard.integration.test.ts | safe | mkdtemp socket dirs L52 and L96

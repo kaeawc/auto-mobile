@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { z } from "zod/v4";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerAllTools } from "../../src/server/registerAllTools";
 import {
   APPLE_PLATFORM_SUPPORTED_TOOLS,
+  assertRequestedPlatformSupported,
   assertToolSupportsDevicePlatform,
   unsupportedPlatformToolMessage,
 } from "../../src/server/applePlatformToolSupport";
@@ -136,3 +138,85 @@ describe.each(["watchos", "tvos"] as const)(
     });
   },
 );
+
+describe("assertRequestedPlatformSupported", () => {
+  test("refuses a requested Apple TV or watch for a tool that has not opted in", () => {
+    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "tvos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("tapOn", "tvos")),
+    );
+    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "watchos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("tapOn", "watchos")),
+    );
+  });
+
+  test("allows Android, iOS, no platform, and a platform the tool opted in to", () => {
+    const supported = { watchos: new Set(["observe"]), tvos: new Set<string>() };
+    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "ios" })).not.toThrow();
+    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "android" })).not.toThrow();
+    expect(() => assertRequestedPlatformSupported("tapOn", {})).not.toThrow();
+    expect(() =>
+      assertRequestedPlatformSupported("observe", { platform: "watchos" }, supported),
+    ).not.toThrow();
+  });
+});
+
+describe("a device-aware tool refuses a requested tvOS platform before session resolution", () => {
+  const session = "ios-session-asked-for-tvos";
+  const tool = "__tvosRequestProbe__";
+  const handled: BootedDevice[] = [];
+  isolateEmptyToolRegistry();
+  let restoreOverrides: () => void = () => {};
+  let restoreCollaborators: () => void = () => {};
+
+  beforeAll(() => {
+    ToolRegistry.registerDeviceAware(
+      tool,
+      "probe",
+      z.object({ platform: z.string().optional(), sessionUuid: z.string().optional() }),
+      async (device) => {
+        handled.push(device);
+        return { content: [] };
+      },
+    );
+    const readiness = new FakeDeviceReadiness();
+    readiness.setConnectedDevices([iphone]);
+    const previous = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({
+      deviceReadiness: readiness,
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    restoreCollaborators = () =>
+      ToolRegistry.setCollaboratorsForTesting({
+        deviceReadiness: previous.deviceReadiness,
+        toolCallRepository: previous.toolCallRepository,
+      });
+    restoreOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
+    registerDirectSessionDevice(session, iphone);
+  });
+
+  afterAll(() => {
+    unregisterDirectSession(session);
+    restoreOverrides();
+    restoreCollaborators();
+  });
+
+  test("an iOS session runs the tool when the request names iOS", async () => {
+    handled.length = 0;
+    await ToolRegistry.getTool(tool)!.handler({ platform: "ios", sessionUuid: session });
+    expect(handled.map((device) => device.deviceId)).toEqual([iphone.deviceId]);
+  });
+
+  test("naming tvos with that iOS session is refused and never reaches the iPhone", async () => {
+    handled.length = 0;
+    const error = await Promise.resolve(
+      ToolRegistry.getTool(tool)!.handler({ platform: "tvos", sessionUuid: session }),
+    ).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toEqual(new ActionableError(unsupportedPlatformToolMessage(tool, "tvos")));
+    expect(handled).toEqual([]);
+  });
+});

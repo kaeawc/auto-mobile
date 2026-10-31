@@ -139,8 +139,8 @@ export const killDeviceSchema = z
     device: z.object({
       name: z.string().describe("Device image name"),
       deviceId: z.string(),
-      // Its own enum: killDevice stops Apple Watch simulators too (#14908); the shared
-      // platform schema stays Android/iOS for the tools that do not.
+      // Its own enum: killDevice stops Apple Watch simulators too (#14908). tvos is accepted
+      // and refused by name (#15886).
       platform: z.enum(["android", "ios", "watchos", "tvos"]),
     }),
     force: z.boolean().default(false).describe(FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION),

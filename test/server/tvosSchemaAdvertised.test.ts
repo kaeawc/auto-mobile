@@ -100,4 +100,23 @@ describe("tvOS is advertised in tool schemas and refused by every tool (#15886)"
       unsupportedPlatformToolMessage("deleteDevice", "tvos"),
     );
   });
+
+  test("killDevice refuses an Apple TV named only by its device, before any shutdown", async () => {
+    const error = await Promise.resolve(
+      ToolRegistry.getTool("killDevice")!.handler({
+        device: {
+          platform: "tvos",
+          name: "Apple TV 4K (3rd generation)",
+          deviceId: "5B7E1C3D-2A4F-4E6B-8C9D-1E2F3A4B5C6D",
+        },
+      }),
+    ).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as ActionableError).message).toBe(
+      unsupportedPlatformToolMessage("killDevice", "tvos"),
+    );
+  });
 });

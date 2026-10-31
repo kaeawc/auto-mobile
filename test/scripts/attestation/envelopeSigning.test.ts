@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -46,6 +46,11 @@ function signed(p: AttestationPayload, keyId = "producer-1") {
 }
 
 describe("Ed25519 envelope signing", () => {
+  let rsaPair: { publicKey: KeyObject; privateKey: KeyObject };
+  beforeAll(() => {
+    rsaPair = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  });
+
   test("a signed payload verifies under its key", () => {
     const { pair, signature } = signed(payload());
     expect(signature.algorithm).toBe(ED25519_ALGORITHM);
@@ -105,9 +110,8 @@ describe("Ed25519 envelope signing", () => {
     ]) {
       expect(verifyEnvelopeEd25519(payload(), { ...signature, value }, pair.publicKey)).toBe(false);
     }
-    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
-    expect(verifyEnvelopeEd25519(payload(), signature, rsa.publicKey)).toBe(false);
-    expect(() => signEnvelopeEd25519("k", "{}", rsa.privateKey)).toThrow("Ed25519");
+    expect(verifyEnvelopeEd25519(payload(), signature, rsaPair.publicKey)).toBe(false);
+    expect(() => signEnvelopeEd25519("k", "{}", rsaPair.privateKey)).toThrow("Ed25519");
   });
 
   test("a payload that cannot be serialized is unverified, not an exception", () => {
@@ -122,9 +126,8 @@ describe("Ed25519 envelope signing", () => {
     const pem = publicKey.export({ type: "spki", format: "pem" }).toString();
     const signature = signEnvelopeEd25519("k", canonicalizePayload(payload()), privateKey);
     expect(verifyEnvelopeEd25519(payload(), signature, ed25519PublicKeyFromPem(pem))).toBe(true);
-    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 }).publicKey;
     expect(() =>
-      ed25519PublicKeyFromPem(rsa.export({ type: "spki", format: "pem" }).toString()),
+      ed25519PublicKeyFromPem(rsaPair.publicKey.export({ type: "spki", format: "pem" }).toString()),
     ).toThrow("Ed25519");
   });
 

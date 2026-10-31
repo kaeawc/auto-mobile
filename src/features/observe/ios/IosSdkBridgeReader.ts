@@ -73,6 +73,7 @@ export function createIosSdkBridgeReader(options: IosSdkBridgeReaderOptions): Io
         return { kind: "none" };
       }
       if (state.status !== "available") {
+        logger.debug(`[iOS] SDK bridge unavailable for ${appId}: ${state.reason}`);
         return { kind: "none" };
       }
       try {

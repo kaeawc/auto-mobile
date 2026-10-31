@@ -603,6 +603,52 @@ test("down accepts pooled devices and report counts them", async () => {
   ).toBe(1);
 });
 
+test("down keeps a cleanup_pending drain outcome across a retried down until native absence is proven", async () => {
+  const f = fixture(1);
+  expect(await f.run(["up"])).toBe(0);
+  f.broker.statusResults = [
+    {
+      ...f.sessions.get("a-phone")!,
+      outcome: "released",
+      timing: {
+        reset: {
+          mode: "erase",
+          outcome: "clean",
+          phases: {},
+          reuseCount: 0,
+          startedAtMs: 0,
+          totalMs: 1,
+        },
+      },
+    },
+  ];
+  f.deps.devicesView = async () => ({
+    devices: [{ name: "ambroker-a-phone", deviceId: "native-a-phone", platform: "android" }],
+    daemons: [{ alive: true }],
+  });
+  const resources = [
+    { resourceId: "pending-resource", outcome: "cleanup_pending" as const, cleanupPending: true },
+  ];
+  const path = join(f.batchDir, "evidence/pool-drain.json");
+  f.broker.drainResults = [{ resources }];
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pending pool drain" }),
+  ).toBe(2);
+  expect(JSON.parse(f.files.get(path)!)).toEqual(resources);
+
+  f.broker.drainResults = [{ resources: [] }];
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "retried pool drain" }),
+  ).toBe(2);
+  expect(JSON.parse(f.files.get(path)!)).toEqual(resources);
+
+  f.deps.devicesView = async () => ({ devices: [], daemons: [{ alive: true }] });
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "native absence" }),
+  ).toBe(0);
+  expect(JSON.parse(f.files.get(path)!)).toEqual([]);
+});
+
 test("down drains the pool before the absence check and reports per-resource outcomes", async () => {
   const f = fixture(1);
   expect(await f.run(["up"])).toBe(0);
@@ -626,11 +672,13 @@ test("down drains the pool before the absence check and reports per-resource out
   };
   expect(
     await settleByFakeEvents(f.timer, f.run(["down"]), { description: "pool drain teardown" }),
-  ).toBe(2);
+  ).toBe(0);
   expect(f.logs).toContain(
     "Drained pool resource destroyed-resource: destroyed (cleanupPending=false)",
   );
-  expect(JSON.parse(f.files.get(join(f.batchDir, "evidence/pool-drain.json"))!)).toEqual(resources);
+  expect(JSON.parse(f.files.get(join(f.batchDir, "evidence/pool-drain.json"))!)).toEqual([
+    resources[0],
+  ]);
   expect(f.logs.at(-1)).toStartWith("Leak report: 0 unverified grant(s) of 1;");
 });
 

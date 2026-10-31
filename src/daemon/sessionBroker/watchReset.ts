@@ -193,9 +193,11 @@ export class WatchSimulatorReset {
       await this.measure(phases, "stop", () => this.dependencies.stopDevice(device));
     }
     const stopped = await this.expectedWatch(device, profile, signal, "erase watch");
-    if (stopped.isRunning) {
+    // Only a fully Shutdown watch is erased: one still Shutting Down reports not running, but
+    // simctl erase refuses it. The reset fails here, before any erase, and is retried.
+    if (stopped.state !== "Shutdown") {
       throw new ActionableError(
-        `Cannot erase Apple Watch simulator '${device.deviceId}': it is still ${stopped.state}`,
+        `Cannot erase Apple Watch simulator '${device.deviceId}': it is ${stopped.state}, not Shutdown`,
       );
     }
     await owned();

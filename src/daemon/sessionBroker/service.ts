@@ -367,6 +367,23 @@ async function recoverActiveMutationRecorders(
   }
 }
 
+/**
+ * The resource of an active broker session whose device mutations are recorded. A watch session
+ * never records them (no journal, baseline or runner): its binding skips the recorder, so recovery
+ * must not attach one either (#15882).
+ */
+async function recordableSessionResource(
+  store: Pick<SqliteSessionBrokerStore, "getSession" | "getResource">,
+  sessionUuid: string,
+): Promise<BrokerResourceRecord | undefined | "not-recordable"> {
+  const request = await store.getSession(sessionUuid);
+  if (request?.state !== "active" || !request.resourceId) {
+    return "not-recordable";
+  }
+  const resource = await store.getResource(request.resourceId);
+  return resource && nativeProfile(resource).platform === "watchos" ? "not-recordable" : resource;
+}
+
 async function recoverSessionMutationRecorder(
   options: Pick<OpenSessionBrokerServiceOptions, "mutationSessions" | "registry">,
   store: Pick<SqliteSessionBrokerStore, "getSession" | "getResource">,
@@ -386,11 +403,10 @@ async function recoverSessionMutationRecorder(
   if (!session) {
     return undefined;
   }
-  const request = await store.getSession(sessionUuid);
-  if (request?.state !== "active" || !request.resourceId) {
+  const resource = await recordableSessionResource(store, sessionUuid);
+  if (resource === "not-recordable") {
     return undefined;
   }
-  const resource = await store.getResource(request.resourceId);
   const assignment = resource
     ? await options.registry.getAssignment({ scopeKey, bindingIndex: resource.allocationIndex })
     : null;

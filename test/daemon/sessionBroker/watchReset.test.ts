@@ -122,6 +122,19 @@ describe("watch release reset follows the iOS reuse mode", () => {
     expect(r.simctl.stateOf(UDID)).toBe("Booted");
   });
 
+  test("erase never runs on a watch still Shutting Down; the reset fails before any erase", async () => {
+    const r = rig({ mode: "erase" }, "Shutting Down");
+
+    const error = await r.reset().then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(ResetFailureError);
+    expect(String(error)).toContain("Shutting Down, not Shutdown");
+    expect(r.simctl.commands).toEqual([]);
+  });
+
   test("erase refused a boot slot leaves the watch booted and untouched", async () => {
     const full = new Error("simulator capacity reached");
     const r = rig({ mode: "erase" }, "Booted", { refuseReservation: full });

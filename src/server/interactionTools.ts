@@ -413,7 +413,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
 
   ToolRegistry.registerDeviceAware(
     "hoverAt",
-    "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1).",
+    "Hover a stylus or mouse over a path with no contact: hover enter, move, exit (Android; needs hover_input_v1 or, for a stylus, a root adb shell with a writable /dev/uinput).",
     hoverAtSchema,
     {
       handler: hoverAtHandler,

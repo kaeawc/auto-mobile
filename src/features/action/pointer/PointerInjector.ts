@@ -37,6 +37,8 @@ export interface PointerEnvironment {
   apiLevel?: number;
   /** CtrlProxy capability flags from the handshake (`stylus_input_v1`, `hover_input_v1`, ...). */
   capabilities: ReadonlySet<string>;
+  /** True when `adb shell` runs as root (uid 0), as after `adb root`; unread counts as false. */
+  rootShell?: boolean;
 }
 
 export type PointerSupport =

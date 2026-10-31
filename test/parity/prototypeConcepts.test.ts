@@ -1,7 +1,14 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import { lintPrototypeAccessibility } from "../../src/features/prototype/prototypeAccessibilityLint";
+import {
+  prototypeRolePalette,
+  resolvePrototypeColor,
+} from "../../src/features/prototype/prototypeContrast";
+import { prototypePlatformNotes } from "../../src/features/prototype/prototypePlatformNotes";
+import { record } from "../../src/features/prototype/prototypeTemplate";
 import {
   prototypeGateCapabilities,
   requiredPrototypeCapabilities,
@@ -30,6 +37,7 @@ interface Concept {
   requiredCapabilities?: string[];
   untagged?: string[];
   lintFindings?: unknown[];
+  unmappedIcons?: unknown[];
 }
 
 const concepts: Concept[] = readdirSync(conceptsDirectory, { withFileTypes: true })
@@ -61,6 +69,12 @@ describe("prototype concept slices", () => {
       concept.requiredCapabilities = requiredPrototypeCapabilities(concept.spec);
       concept.untagged = untaggedInteractiveNodes(concept.spec);
       concept.lintFindings = lintPrototypeAccessibility(concept.spec).findings;
+      // The SF Symbols path checks every contract iconName slot against the schema's mapped table.
+      concept.unmappedIcons = prototypePlatformNotes(
+        result.data,
+        "ios",
+        (capability) => capability === PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY,
+      ).filter((note) => note.construct === "icon.name");
     }
   });
 
@@ -85,6 +99,29 @@ describe("prototype concept slices", () => {
 
       test("records the gate capabilities every strict policy derives", () => {
         expect(concept.gateCapabilities).toEqual(concept.manifest.capabilities);
+      });
+
+      test("paints an opaque background behind every top-level screen", () => {
+        const root = record(concept.spec?.root);
+        // Direct root.screens entries share the stack's background; nested content need not paint.
+        for (const mode of ["light", "dark"] as const) {
+          const palette = prototypeRolePalette(concept.spec, mode);
+          const isOpaque = (node: unknown): boolean => {
+            const style = record(record(node)?.style);
+            return (
+              (style?.alpha ?? 1) === 1 &&
+              resolvePrototypeColor(style?.background, mode, palette)?.a === 1
+            );
+          };
+          const uncovered = Object.entries(record(root?.screens) ?? {})
+            .filter(([, screen]) => !isOpaque(root) && !isOpaque(screen))
+            .map(([name]) => `${mode}:${name}`);
+          expect(uncovered).toEqual([]);
+        }
+      });
+
+      test("uses only icon names in the iOS symbol schema's mapped table", () => {
+        expect(concept.unmappedIcons).toEqual([]);
       });
 
       test("lists every required capability in its README", () => {

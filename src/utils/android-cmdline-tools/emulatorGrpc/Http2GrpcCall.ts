@@ -21,14 +21,18 @@ export class Http2GrpcCall implements GrpcCall {
   private finished = false;
   private headers: http2.IncomingHttpHeaders | undefined;
   private readonly finalStatus: Promise<GrpcStatusResult>;
+  private readonly initialStatus: Promise<GrpcStatusResult | undefined>;
 
   constructor(private readonly stream: http2.ClientHttp2Stream) {
     this.queue = new BoundedMessageQueue({
       pause: () => stream.pause(),
       resume: () => stream.resume(),
     });
-    stream.on("response", (headers) => {
-      this.headers = headers;
+    this.initialStatus = new Promise((resolve) => {
+      stream.on("response", (headers) => {
+        this.headers = headers;
+        resolve(readGrpcStatus(headers));
+      });
     });
     stream.on("data", (chunk: Buffer) => this.onData(chunk));
     this.finalStatus = new Promise((resolve) => {
@@ -89,6 +93,10 @@ export class Http2GrpcCall implements GrpcCall {
 
   status(): Promise<GrpcStatusResult> {
     return this.finalStatus;
+  }
+
+  responseHeaders(): Promise<GrpcStatusResult | undefined> {
+    return this.initialStatus;
   }
 
   cancel(): void {

@@ -82,6 +82,7 @@ import {
   teardownDeadlineDevice,
   verifyTeardownAbsence,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
+import { assertRequestNotTvos } from "./applePlatformToolSupport";
 
 function teardownDeadlineFailure(
   phase: DeviceTeardownPhase,
@@ -765,6 +766,7 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
+    assertRequestNotTvos("killDevice", args);
     const deps = getDeviceToolsDependencies();
     const requestAbortSignal = abortSignal ?? getAbortSignal();
     const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
@@ -892,6 +894,7 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
+    assertRequestNotTvos("deleteDevice", args);
     if (isWatchTeardownRequest(args)) {
       const force = args.force ?? false;
       return await deleteWatchDevice(

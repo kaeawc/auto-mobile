@@ -109,7 +109,7 @@ export const setActiveDeviceSchema = addSessionUuidToSchema(
       // so callers targeting a concrete `deviceId` need not also send `platform`.
       // A watch is the exception (#14908): it is selected only when "watchos" is named.
       platform: z
-        .enum(["android", "ios", "watchos"])
+        .enum(["android", "ios", "watchos", "tvos"])
         .optional()
         .describe(
           'Inferred from the device; "watchos" is required to select an Apple Watch simulator',

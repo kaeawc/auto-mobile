@@ -46,6 +46,7 @@ import { acquireUndoneIfUndelivered } from "../daemon/acquisitionUndo";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
 import { deviceConnectionIdFor } from "./deviceConnectionId";
+import { assertRequestNotTvos } from "./applePlatformToolSupport";
 
 export interface SetActiveDeviceArgs {
   deviceId: string;
@@ -521,6 +522,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       throw new ActionableError("Inject device readiness before selecting a legacy device.");
     });
   return async (args: HandlerArgs, _progress?: unknown, signal?: AbortSignal) => {
+    assertRequestNotTvos("setActiveDevice", args);
     const mcpSessionId = internalMcpSessionId(args);
     const transportAttempt = transitionalTransportAttempt(args, dependencies, signal);
     let prior: PriorSelection | undefined;

@@ -10,6 +10,7 @@ import { textOrDescription, type SearchableEntry } from "../utility/SearchableNo
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { resolveConfiguredHomePackage } from "../observe/androidLauncherPackages";
 import type { LauncherRefreshDriver } from "./launcherRefresh";
+import { InMemoryLauncherRefreshGate } from "./LauncherRefreshGate";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 
@@ -106,6 +107,8 @@ export async function confirmPinDialog(
   }
 }
 
+const launcherRefreshGate = new InMemoryLauncherRefreshGate();
+
 /** Host adb for the saved actions plus the pin-dialog driver that taps through that same adb. */
 export function savedAdbDependencies(
   device: BootedDevice,
@@ -134,6 +137,17 @@ export function savedAdbDependencies(
       },
     },
     launcherRefresh: {
+      deviceKey: device.deviceId,
+      gate: launcherRefreshGate,
+      swipeWorkspaceToNextPage: async (bounds) => {
+        const width = bounds.right - bounds.left;
+        const y = Math.round((bounds.top + bounds.bottom) / 2);
+        const startX = Math.round(bounds.left + width * 0.8);
+        const endX = Math.round(bounds.left + width * 0.2);
+        await adb.executeCommand(`shell input swipe ${startX} ${y} ${endX} ${y} 300`, {
+          noRetry: true,
+        });
+      },
       capture,
       timer,
       resolveLauncher: () => resolveConfiguredHomePackage(adb, device.deviceId, timer),

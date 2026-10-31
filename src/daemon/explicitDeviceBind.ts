@@ -469,7 +469,7 @@ export class ExplicitDeviceBind {
       this.port.ownershipSessionId(sessionId) !== sessionId &&
       this.port.hasConnectedMcpSessionOwner(sessionId, caller.mcpSessionId)
     ) {
-      throw new InputDeviceOwnedError("Device acquisition", deviceId, sessionId, undefined, {
+      throw new InputDeviceOwnedError("Device acquisition", deviceId, sessionId, {
         message:
           `Session ${sessionId} is a device label of a session another connected client owns, ` +
           `so device '${deviceId}' cannot be bound to it. Acquire the device under your own session.`,

@@ -51,7 +51,7 @@ export function strokeAdmissionEndedError(method: string, admission: StrokeAdmis
         deviceId,
         lifted(`session ${holderSessionId} no longer holds the device`),
       )
-    : new InputDeviceOwnedError(method, deviceId, undefined, undefined, {
+    : new InputDeviceOwnedError(method, deviceId, undefined, {
         message: lifted("a session acquired the device"),
       });
 }

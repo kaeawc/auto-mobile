@@ -223,7 +223,9 @@ describe("--cli surfaces a held-device refusal", () => {
   test("a sessionless tool call prints the daemon's remedy and the CLI hint, then exits 1", async () => {
     respondWith(
       shapeToolCallError(
-        new InputDeviceOwnedError("rotate", "emulator-5554", undefined, TOOL_CALL_REMEDY),
+        new InputDeviceOwnedError("rotate", "emulator-5554", undefined, {
+          remedy: TOOL_CALL_REMEDY,
+        }),
         { toolName: "rotate", source: "MCP" },
       ),
     );
@@ -240,7 +242,9 @@ describe("--cli surfaces a held-device refusal", () => {
   test("a killDevice refusal also names --force", async () => {
     respondWith(
       shapeToolCallError(
-        new InputDeviceOwnedError("killDevice", "emulator-5554", undefined, LIFECYCLE_TOOL_REMEDY),
+        new InputDeviceOwnedError("killDevice", "emulator-5554", undefined, {
+          remedy: LIFECYCLE_TOOL_REMEDY,
+        }),
         { toolName: "killDevice", source: "MCP" },
       ),
     );

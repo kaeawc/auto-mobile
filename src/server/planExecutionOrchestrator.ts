@@ -514,18 +514,12 @@ export class PlanExecutionOrchestrator {
       const taken =
         labelSessionUuid === sessionUuid ? null : sessionManager.peekSession(labelSessionUuid);
       if (taken && taken.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
-        throw new InputDeviceOwnedError(
-          "executePlan",
-          taken.assignedDevice,
-          sessionUuid,
-          undefined,
-          {
-            message:
-              `executePlan refused: device label '${label}' would be session ${labelSessionUuid}, ` +
-              "which is already a live session that no plan run created. " +
-              "Release that session or rename the label, then run the plan again.",
-          },
-        );
+        throw new InputDeviceOwnedError("executePlan", taken.assignedDevice, sessionUuid, {
+          message:
+            `executePlan refused: device label '${label}' would be session ${labelSessionUuid}, ` +
+            "which is already a live session that no plan run created. " +
+            "Release that session or rename the label, then run the plan again.",
+        });
       }
     }
   }

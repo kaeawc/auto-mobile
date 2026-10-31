@@ -477,13 +477,17 @@ function describeDeviceCtrlProxy(
   };
 }
 
+/**
+ * @param failure.log - Logger that records the underlying error before the summarized result.
+ * @param failure.error - The caught device check failure.
+ */
 function androidDoctorDeviceFailure(
   name: string,
   device: BootedDevice,
   probe: DoctorProbeOptions,
-  log: Logger,
-  error: unknown,
+  failure: { log: Logger; error: unknown },
 ): CheckResult {
+  const { log, error } = failure;
   if (probe.signal?.aborted || error instanceof DoctorDeadlineError) {
     throw error;
   }
@@ -551,7 +555,9 @@ export async function checkCtrlProxy(
         try {
           results.push(await checkDeviceCtrlProxy(device, adbFactory, deviceProbe));
         } catch (error) {
-          results.push(androidDoctorDeviceFailure("CtrlProxy", device, currentProbe, log, error));
+          results.push(
+            androidDoctorDeviceFailure("CtrlProxy", device, currentProbe, { log, error }),
+          );
         }
         remainingDoctorProbe(currentProbe);
       }
@@ -679,13 +685,10 @@ export async function checkWorkProfileAccessibility(
         results.push(await checkDeviceWorkProfileAccessibility(device, adbFactory, deviceProbe));
       } catch (error) {
         results.push(
-          androidDoctorDeviceFailure(
-            "Work Profile Accessibility",
-            device,
-            currentProbe,
-            logger,
+          androidDoctorDeviceFailure("Work Profile Accessibility", device, currentProbe, {
+            log: logger,
             error,
-          ),
+          }),
         );
       }
       remainingDoctorProbe(currentProbe);

@@ -969,16 +969,14 @@ export class DeviceAutolockManager {
     if (!sessionUuid || base(device.autolockSessionId) !== base(sessionUuid)) {
       // Typed (device_owned_by_other_session) so the JUnit runner's held-device wait and the CLI
       // held-device hint recognize it (#10833).
-      throw new InputDeviceOwnedError(
-        "Tool call",
-        deviceId,
-        sessionUuid,
-        "autolock is enabled, so tool calls must either come from the same MCP session that " +
+      throw new InputDeviceOwnedError("Tool call", deviceId, sessionUuid, {
+        remedy:
+          "autolock is enabled, so tool calls must either come from the same MCP session that " +
           "called 'getAndroid' or 'getApple', or include the sessionUuid returned for this " +
           "device. Options: pass the sessionUuid from getAndroid or getApple that locked this " +
           "device; use getAndroid or getApple to lock a different available device; or wait for " +
           "the idle timeout to release this device.",
-      );
+      });
     }
   }
 

@@ -4,6 +4,8 @@ import {
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,
 } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import { SessionBrokerMaintenanceError } from "../../../src/daemon/sessionBroker/SessionBrokerMaintenanceError";
+import { SessionBrokerStoppingError } from "../../../src/daemon/sessionBroker/SessionBrokerStoppingError";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
@@ -94,6 +96,63 @@ describe("drainIdlePool", () => {
     expect(await broker.release(result.sessionUuid)).toMatchObject({ outcome: "released" });
     return result.sessionUuid;
   }
+
+  test("refuses during snapshot cleanup without changing the store or devices", async () => {
+    await readyAndReleased("pooled");
+    const before = await options.store.listResources();
+    const finish = Promise.withResolvers<void>();
+    const cleanup = broker.cleanupAvdSnapshots(async () => {
+      await finish.promise;
+      return [];
+    });
+    try {
+      const refusal = broker.drainIdlePool();
+      await expect(refusal).rejects.toBeInstanceOf(SessionBrokerMaintenanceError);
+      await expect(refusal).rejects.toMatchObject({
+        code: "session_broker_maintenance",
+        retryable: true,
+      });
+      expect(await options.store.listResources()).toEqual(before);
+      expect(devices.destroyed).toEqual([]);
+      await broker.markRestartHandoff();
+      await expect(broker.drainIdlePool()).rejects.toBeInstanceOf(SessionBrokerStoppingError);
+    } finally {
+      finish.resolve();
+      await cleanup;
+    }
+  });
+
+  test("snapshot cleanup waits for a drain admitted in the same turn", async () => {
+    await readyAndReleased("pooled");
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const destroy = devices.destroy.bind(devices);
+    devices.destroy = async (resource) => {
+      entered.resolve();
+      await finish.promise;
+      return destroy(resource);
+    };
+    const draining = broker.drainIdlePool();
+    let deleting = false;
+    let destroyedAtCleanup: string[] = [];
+    const cleanup = broker.cleanupAvdSnapshots(async () => {
+      deleting = true;
+      destroyedAtCleanup = [...devices.destroyed];
+      return [];
+    });
+    try {
+      await entered.promise;
+      await drainMicrotasks(20);
+      expect(deleting).toBe(false);
+    } finally {
+      finish.resolve();
+      await draining;
+      await cleanup;
+    }
+    expect(deleting).toBe(true);
+    expect(destroyedAtCleanup).toEqual(devices.destroyed);
+    expect(destroyedAtCleanup).toHaveLength(1);
+  });
 
   test("destroys every idle pooled device with a terminal per-device outcome", async () => {
     // Both sessions are held at once so two distinct devices enter the pool.

@@ -33,6 +33,7 @@ interface CircleJob {
 
 interface CircleConfig {
   parameters?: Record<string, unknown>;
+  commands?: Record<string, { steps?: CircleStep[] }>;
   executors?: Record<string, { environment?: Record<string, string> }>;
   jobs?: Record<string, CircleJob>;
   workflows?: Record<string, CircleWorkflow>;
@@ -130,6 +131,35 @@ function workflowsGatedBy(parameters: string[]): CircleWorkflow[] {
 }
 
 describe("CircleCI macOS policy (#10887, #11010)", () => {
+  test("SwiftPM cache keys include local SDK sources and tests without a fallback", () => {
+    const config = loadCircle(CONTINUE);
+    const steps = config.commands?.restore_spm_cache?.steps ?? [];
+    const compute = steps.find(
+      (step) => typeof step !== "string" && step.run?.name === "Compute SwiftPM cache key",
+    );
+    expect(compute).toBeDefined();
+    const command = runCommand(compute!);
+    expect(command).toContain("Package.swift");
+    expect(command).toContain("/tmp/spm-lock.txt");
+    for (const packageName of ["sdk-wire", "auto-mobile-sdk"]) {
+      for (const directory of ["Sources", "Tests"]) {
+        expect(command).toContain(`${packageName}/${directory}`);
+      }
+    }
+    const restore = steps.find((step) => typeof step !== "string" && step.restore_cache);
+    const keys = typeof restore === "string" ? undefined : restore?.restore_cache?.keys;
+    expect(keys).toEqual(['spm-v2-{{ checksum "/tmp/spm-lock.txt" }}']);
+    const saveKeys = Object.values(config.jobs ?? {}).flatMap((job) =>
+      (job.steps ?? []).flatMap((step) =>
+        typeof step !== "string" && step.save_cache ? [step.save_cache.key] : [],
+      ),
+    );
+    expect(saveKeys.length).toBeGreaterThan(0);
+    for (const key of saveKeys) {
+      expect(key).toBe(Array.isArray(keys) ? keys[0] : undefined);
+    }
+  });
+
   test("pull requests schedule only the advisory Playground simulator job", () => {
     const prJobs = workflowsGatedBy(PR_PARAMETERS).flatMap((workflow) =>
       invocations(workflow).map(([key]) => key),

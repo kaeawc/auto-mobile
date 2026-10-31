@@ -14,6 +14,8 @@ import { SearchableHierarchy } from "../utility/SearchableNode";
 
 export const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 
+export const IOS_LOCK_SCREEN_INDICATOR_RESOURCE_ID = "proud-lock";
+
 /**
  * Duration in milliseconds for swipes that expand or collapse the
  * notification shade / NotificationCenter. Shared between adapters and
@@ -153,6 +155,14 @@ export const nodeHasSystemTrayHint = (node: any): boolean => {
   return matchesResourceId || matchesClassName;
 };
 
+export const hierarchyShowsIosLockScreen = (viewHierarchy: ViewHierarchyResult): boolean =>
+  getHierarchyRoots(viewHierarchy).some((root) =>
+    traverseForHint(
+      root,
+      (node) => rawResourceId(getNodeProperties(node)) === IOS_LOCK_SCREEN_INDICATOR_RESOURCE_ID,
+    ),
+  );
+
 /** A cover sheet contains the notification list or, when empty, the lock-screen clock. */
 export const nodeIsIosCoverSheetNotificationCenter = (node: ViewHierarchyNode | null): boolean => {
   const props = getNodeProperties(node);
@@ -160,7 +170,7 @@ export const nodeIsIosCoverSheetNotificationCenter = (node: ViewHierarchyNode | 
     return false;
   }
   // Require the list or clock INSIDE its cover-sheet UIWindow, never a standalone clock.
-  // An empty locked screen also matches; this hierarchy cannot distinguish it from the tray.
+  // The lock indicator can be a sibling of the cover sheet, so callers check it at hierarchy level.
   return (
     String(props.className ?? props.class ?? "") === "UIWindow" &&
     rawResourceId(props, ["identifier"]) === "SBCoverSheetWindow" &&
@@ -172,6 +182,7 @@ export const nodeIsIosCoverSheetNotificationCenter = (node: ViewHierarchyNode | 
 };
 
 export const hasIosCoverSheetNotificationCenter = (viewHierarchy: ViewHierarchyResult): boolean =>
+  !hierarchyShowsIosLockScreen(viewHierarchy) &&
   getHierarchyRoots(viewHierarchy).some((root) =>
     traverseForHint(root, nodeIsIosCoverSheetNotificationCenter),
   );

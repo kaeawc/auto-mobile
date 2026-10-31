@@ -14,6 +14,11 @@ export interface GrpcCall {
   messages(): AsyncIterable<Uint8Array>;
   /** The final status. Transport failures resolve as UNAVAILABLE rather than rejecting. */
   status(): Promise<GrpcStatusResult>;
+  /**
+   * Resolves when response headers arrive: their gRPC status for a trailers-only response,
+   * or undefined when they contain no grpc-status. Never rejects; stays pending if no headers arrive.
+   */
+  responseHeaders(): Promise<GrpcStatusResult | undefined>;
   /** Aborts the call (RST_STREAM CANCEL). Idempotent. */
   cancel(): void;
 }

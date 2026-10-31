@@ -1,6 +1,7 @@
 import { errorMessage } from "../../../models/describeUnknownError";
 import { durationMs, resampleMono, toMono, type PcmAudio } from "../../audio/pcm";
 import { logger } from "../../logger";
+import { raceWithDeadline } from "../../raceWithDeadline";
 import { defaultTimer, type Timer } from "../../SystemTimer";
 import type { GrpcAuthorizer } from "./emulatorGrpcAuth";
 import {
@@ -11,7 +12,7 @@ import {
   type EmulatorAudioFormat,
 } from "./emulatorAudioMessages";
 import { captureError, injectionError } from "./EmulatorAudioError";
-import { GrpcStatus } from "./grpcFraming";
+import { GrpcStatus, type GrpcStatusResult } from "./grpcFraming";
 import type { GrpcCall, GrpcTransport } from "./grpcTransport";
 import { SilenceFiller } from "./SilenceFiller";
 
@@ -21,6 +22,8 @@ export const STREAM_AUDIO_METHOD = `${SERVICE}/streamAudio`;
 
 /** Packet length for injection. The emulator buffers ~300ms and rejects oversized packets. */
 const INJECT_PACKET_MS = 20;
+// Bound the wait for response headers; a server that stays silent counts as accepted.
+const INJECT_ACCEPTANCE_WINDOW_MS = 200;
 /** How long capture waits past the requested duration before reporting what it has. */
 const CAPTURE_GRACE_MS = 2_000;
 /** Mono 16-bit PCM at a rate the emulator accepts, the one format injection sends. */
@@ -166,6 +169,24 @@ export class EmulatorAudioClient {
   async injectAudio(source: PcmAudio, options: InjectAudioOptions = {}): Promise<AudioInjection> {
     const pcm = prepareForInjection(source);
     const call = await this.open(INJECT_AUDIO_METHOD, options.beforeStreamOpen);
+    let acceptanceTimer!: NodeJS.Timeout;
+    const acceptanceWindow = new Promise<undefined>((resolve) => {
+      acceptanceTimer = this.timer.setTimeout(
+        () => resolve(undefined),
+        INJECT_ACCEPTANCE_WINDOW_MS,
+      );
+    });
+    try {
+      const status = await raceWithDeadline<GrpcStatusResult | undefined>(
+        [call.status(), call.responseHeaders(), acceptanceWindow],
+        { timer: this.timer, label: "Audio injection acceptance" },
+      );
+      if (status && status.code !== GrpcStatus.OK && status.code !== GrpcStatus.CANCELLED) {
+        throw injectionError(status);
+      }
+    } finally {
+      this.timer.clearTimeout(acceptanceTimer);
+    }
     const control = createInjectionControl(call);
     const done = this.streamInjection(call, pcm, options, control);
     // Keep an unobserved failure from becoming an unhandled rejection; callers read it via done/stop.

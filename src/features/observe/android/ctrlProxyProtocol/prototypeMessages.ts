@@ -108,9 +108,10 @@ export interface SavedPrototypeInfo {
 export interface SavedPrototypeEntry {
   id: string;
   label: string;
-  slug: string;
-  savedAt: number;
+  slug?: string;
+  savedAt?: number;
   pinned: boolean;
+  hostOnly?: boolean;
 }
 export const SAVED_PROTOTYPE_ERROR_CODES = [
   "pin_unsupported",

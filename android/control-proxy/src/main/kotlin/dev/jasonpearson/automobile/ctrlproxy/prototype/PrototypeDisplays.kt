@@ -56,12 +56,14 @@ object PrototypeDisplayHotPlug {
  * Everything the host needs to attach a window to one display: a display-specific context (also
  * used to inflate the content, so density and insets are the display's own), its WindowManager, and
  * a density read taken afresh at every layout. [navigationBarBottomPx] is the visible navigation
- * bar's height on this display, read afresh (0 when hidden or unknown).
+ * bar's height on this display; [systemBarTopPx] is its visible system-bar top inset. Both are read
+ * afresh (0 when hidden or unknown).
  */
 class PrototypeDisplayWindow(
   val context: Context,
   val windowManager: WindowManager,
   val navigationBarBottomPx: () -> Int = { 0 },
+  val systemBarTopPx: () -> Int = { 0 },
   val density: () -> Float,
 ) {
   /** Keep a persistent non-fullscreen host, including its close target, inside a round display. */
@@ -169,6 +171,7 @@ class AndroidPrototypeDisplays(
         windowContext,
         it,
         navigationBarBottomPx = { navigationBarBottomPx(it, sdkInt) },
+        systemBarTopPx = { systemBarTopPx(it) },
         density = { windowContext.resources.displayMetrics.density },
       )
     }
@@ -182,6 +185,7 @@ class AndroidPrototypeDisplays(
         app,
         it,
         navigationBarBottomPx = { navigationBarBottomPx(it, sdkInt) },
+        systemBarTopPx = { systemBarTopPx(it) },
         density = { app.resources.displayMetrics.density },
       )
     }

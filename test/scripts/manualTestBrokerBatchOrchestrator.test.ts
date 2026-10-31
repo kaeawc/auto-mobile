@@ -649,6 +649,45 @@ test("down keeps a cleanup_pending drain outcome across a retried down until nat
   expect(JSON.parse(f.files.get(path)!)).toEqual([]);
 });
 
+test("down preserves a pending drain when an info-less grant has no proven native absence", async () => {
+  const f = fixture(2);
+  f.broker.infoResults[1] = new Error("identity unavailable");
+  expect(await f.run(["up"])).toBe(2);
+  f.broker.statusResults = ["a-tablet", "a-phone"].map((client) => ({
+    ...f.sessions.get(client)!,
+    outcome: "released" as const,
+    cleanupPending: false,
+  }));
+  f.deps.devicesView = async () => ({ devices: [], daemons: [{ alive: true }] });
+  const resources = [
+    { resourceId: "pending-resource", outcome: "cleanup_pending" as const, cleanupPending: true },
+  ];
+  f.broker.drainResults = [{ resources }];
+  expect(
+    await settleByFakeEvents(f.timer, f.run(["down"]), { description: "info-less pending drain" }),
+  ).toBe(2);
+  expect(JSON.parse(f.files.get(join(f.batchDir, "evidence/pool-drain.json"))!)).toEqual(resources);
+  expect(f.logs).toContain("Released a-tablet; native absence: not-verifiable (no device info).");
+  expect(f.logs.at(-1)).toStartWith("Leak report:");
+});
+
+test("down reports malformed pool drain evidence without throwing or rewriting it", async () => {
+  const f = fixture(1);
+  expect(await f.run(["up"])).toBe(0);
+  f.broker.statusResults = [
+    { ...f.sessions.get("a-phone")!, outcome: "released", cleanupPending: false },
+  ];
+  const path = join(f.batchDir, "evidence/pool-drain.json");
+  f.files.set(path, "not json{");
+  f.deps.devicesView = async () => ({ devices: [], daemons: [{ alive: true }] });
+  await expect(
+    settleByFakeEvents(f.timer, f.run(["down"]), { description: "malformed pool drain evidence" }),
+  ).resolves.toBe(2);
+  expect(f.logs.some((line) => line.startsWith("Pool drain evidence: "))).toBe(true);
+  expect(f.files.get(path)).toBe("not json{");
+  expect(f.logs.at(-1)).toStartWith("Leak report:");
+});
+
 test("down drains the pool before the absence check and reports per-resource outcomes", async () => {
   const f = fixture(1);
   expect(await f.run(["up"])).toBe(0);

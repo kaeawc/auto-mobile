@@ -335,9 +335,10 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
   }
   const ledger = ledgerFor(deps);
   const grants = ledger.entries.filter((row) => row.kind === "acquired");
-  for (const grant of grants.filter(
+  const infoLessGrants = grants.filter(
     (grant) => !ledger.devices().some((row) => row.sessionUuid === grant.sessionUuid),
-  )) {
+  );
+  for (const grant of infoLessGrants) {
     if (ledger.releaseComplete(grant)) {
       continue;
     }
@@ -406,11 +407,18 @@ async function runDown(deps: BrokerBatchOrchestratorDeps): Promise<number> {
       failed = true;
     }
   }
-  const resources = readPoolDrain(deps);
+  let resources: z.infer<typeof poolDrainSchema> = [];
+  try {
+    resources = readPoolDrain(deps);
+  } catch (error) {
+    deps.log(`Pool drain evidence: ${errorMessage(error)}`);
+    failed = true;
+  }
   const pending = resources.filter((resource) => resource.cleanupPending);
   const devices = ledger.devices();
   if (
     pending.length &&
+    infoLessGrants.length === 0 &&
     absenceResolved &&
     devices.length > 0 &&
     devices.every((row) => ledger.hasEvent(row, "absent"))

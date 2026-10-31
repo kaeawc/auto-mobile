@@ -129,6 +129,7 @@ export class ReadinessSelection {
       "ios-physical": false,
       // Readiness scans never list watches; a watch is resolved only on request (#14908).
       "watchos-simulator": false,
+      "tvos-simulator": false,
     };
     const perf = createGlobalPerformanceTracker();
 

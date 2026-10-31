@@ -759,6 +759,17 @@ async function runDeleteDevice(
   }
 }
 
+/** Canonicalize the simulator family before ownership checks and lifecycle admission. */
+async function resolveKillDeviceArgs(
+  args: KillDeviceArgs,
+  deps: DeviceToolsDependencies,
+  signal?: AbortSignal,
+): Promise<KillDeviceArgs> {
+  const manager = deps.deviceManagerFactory();
+  const device = (await manager.resolveKillDeviceTarget?.(args.device, signal)) ?? args.device;
+  return { ...args, device };
+}
+
 export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurrencyPool } = {}) {
   const iosDeleteGate = options.iosDeleteGate ?? new BootConcurrencyGate(IOS_DELETE_CONCURRENCY);
   const killDeviceHandler = async (
@@ -770,6 +781,7 @@ export function createLifecycleHandlers(options: { iosDeleteGate?: BootConcurren
     const deps = getDeviceToolsDependencies();
     const requestAbortSignal = abortSignal ?? getAbortSignal();
     const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
+    args = await resolveKillDeviceArgs(args, deps, requestAbortSignal);
     const stopIdentity = await assertKillDeviceCaller(args, deps, deadlineMs, requestAbortSignal);
     const { daemonState } = deps;
     const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;

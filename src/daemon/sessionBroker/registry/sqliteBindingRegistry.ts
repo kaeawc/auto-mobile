@@ -1,4 +1,3 @@
-import { getMcpServerVersion } from "../../../utils/mcpVersion";
 import { SqliteAvdSnapshotCleanupRegistry } from "./avdSnapshotCleanupRegistry";
 import { SqliteDeviceClaims } from "./sqliteDeviceClaims";
 import { Kysely } from "kysely";
@@ -68,11 +67,10 @@ import {
   type UpdateBindingStateResult,
 } from "./bindingRegistry";
 import {
-  assertBindingRegistryCurrent,
   assertSupportedRegistrySchema,
   describeBindingRegistrySchema,
-  migrateBindingRegistry,
 } from "./bindingRegistryMigrations";
+import { initializeBindingRegistrySchema } from "./bindingRegistryInitialization";
 import {
   assertOpenPhase,
   AssignmentRow,
@@ -92,7 +90,6 @@ import { defaultBindingExecOwnerLiveness } from "./ownerLiveness";
 import { createRegistryDatabase } from "./RegistryDatabase";
 import { RegistrySqliteDialect } from "./RegistrySqliteDialect";
 import { createRegistryWriteGuard } from "./registryWriteGuard";
-import { SqliteLegacySlotRetirementStore } from "./sqliteLegacySlotRetirementStore";
 export { type BindingRegistryDatabase, parseJournalTarget } from "./bindingRegistryRows";
 
 export { BINDINGS_COORDINATION_SCOPE } from "../persistedIdentity";
@@ -214,18 +211,7 @@ export async function openSqliteBindingRegistry(
     }),
   });
   try {
-    if (options.migrate === false) {
-      await assertBindingRegistryCurrent(db, dbPath);
-    } else {
-      await migrateBindingRegistry(
-        db,
-        dbPath,
-        () =>
-          options.legacyDeviceRetirement?.retire(new SqliteLegacySlotRetirementStore(db)) ??
-          Promise.resolve(),
-        { writerVersion: options.writerVersion ?? getMcpServerVersion() },
-      );
-    }
+    await initializeBindingRegistrySchema(db, dbPath, options);
   } catch (error) {
     await db.destroy();
     if (classifySqliteError(error) === "retryable") {

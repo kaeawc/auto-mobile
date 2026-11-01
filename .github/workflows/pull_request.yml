@@ -616,6 +616,7 @@ jobs:
         with:
           filters: |
             prototype_simulator:
+              - '.github/workflows/pull_request.yml'
               - 'ios/prototype-agent/**'
               - 'scripts/ios/prototype-agent-*'
               - 'scripts/ios/prototype-mcp-smoke*.sh'
@@ -3118,8 +3119,8 @@ jobs:
     # prototype-only change does not build the Xcode projects).
     needs: [detect-changes, fast-validation, ios-xcode-build]
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.prototype_simulator_should_run == 'true' && needs.fast-validation.result == 'success'
-    # Tight bound for the single heavy lane; the smoke boots one simulator.
-    timeout-minutes: 25
+    # Covers a cold Playground build plus the 20-minute agent and 25-minute MCP steps.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

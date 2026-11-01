@@ -3,7 +3,7 @@
 #
 # Creates ONE fresh simulator, builds Playground (Debug) for it, and runs the MCP smoke
 # beside the agent demo lane. The smoke checks launch, show, tap, awaitEvent, dismiss and
-# host-session release. Always shuts down and deletes only the simulator created here.
+# host-session release. Cleans up its simulator and stale simulators from other runs.
 #
 # Usage: scripts/ios/prototype-mcp-smoke-lane.sh <ios-version|latest>   e.g. 26, 18.5, latest
 #
@@ -13,7 +13,9 @@
 #   AUTO_MOBILE_CMD                   CLI command (default bun run src/index.ts --debug --embedded-sdk --cli)
 #   PROTOTYPE_MCP_SMOKE_SCRIPT        MCP smoke script (default prototype-mcp-smoke.sh beside this)
 #   PROTOTYPE_MCP_SMOKE_LOG_DIR       output dir (default scratch/prototype-mcp-smoke-lane/ios-<request>)
-#   PROTOTYPE_SMOKE_DEVICE_TYPE       simulator device type (default newest supported iPhone)
+#   PROTOTYPE_MCP_SMOKE_AUX_ROOT      private socket dir parent (default /tmp; keep paths short)
+#   PROTOTYPE_MCP_SMOKE_RETRY_SLEEP   seconds between simulator delete attempts (default 5)
+#   PROTOTYPE_SMOKE_DEVICE_TYPE       simulator device type (default highest iPhone model generation)
 #
 # Exit codes: 0 pass; 1 setup/build failed; 2 usage; 3 no matching runtime (skip).
 # MCP smoke exit codes are propagated, including 3 for unsupported capability/platform.
@@ -42,13 +44,50 @@ fail() {
 
 udid=""
 derived_data=""
+aux_root=""
+# shellcheck source=scripts/ios/run_with_timeout.sh
+source "${script_dir}/run_with_timeout.sh"
+
+delete_simulator() {
+  local attempt
+  for attempt in 1 2 3; do
+    if run_with_timeout 120 "${XCRUN_BIN}" simctl delete "$1" > /dev/null 2>&1; then
+      return 0
+    fi
+    if [[ ${attempt} -lt 3 ]]; then
+      sleep "${PROTOTYPE_MCP_SMOKE_RETRY_SLEEP:-5}"
+    fi
+  done
+  return 1
+}
+
 cleanup() {
   local result=$?
   trap - EXIT
+  if [[ -n ${aux_root} ]]; then
+    local -a words=(auto-mobile) cli_words=()
+    local word
+    if [[ -n "${AUTO_MOBILE_CMD:-}" ]]; then
+      read -r -a cli_words <<< "$AUTO_MOBILE_CMD"
+      words=()
+      for word in "${cli_words[@]}"; do
+        [[ "$word" == --* ]] && break
+        words+=("$word")
+      done
+    fi
+    if ! run_with_timeout 60 "${words[@]}" --daemon stop; then
+      echo "prototype-mcp-smoke-lane: daemon stop failed for ${aux_root}" >&2
+    fi
+  fi
   if [[ -n ${udid} ]]; then
-    # Best effort: cleanup must not mask the build or MCP smoke result.
-    "${XCRUN_BIN}" simctl shutdown "${udid}" > /dev/null 2>&1 || echo "prototype-mcp-smoke-lane: shutdown skipped (not booted?)"
-    "${XCRUN_BIN}" simctl delete "${udid}" > /dev/null 2>&1 || echo "prototype-mcp-smoke-lane: delete failed for ${udid}"
+    run_with_timeout 60 "${XCRUN_BIN}" simctl shutdown "${udid}" > /dev/null 2>&1 || echo "prototype-mcp-smoke-lane: shutdown skipped (not booted?)"
+    if ! delete_simulator "${udid}"; then
+      echo "prototype-mcp-smoke-lane: FAIL: could not delete simulator ${udid}" >&2
+      if [[ ${result} -eq 0 ]]; then result=1; fi
+    fi
+  fi
+  if [[ -n ${aux_root} ]]; then
+    rm -rf -- "${aux_root}" || true
   fi
   if [[ -n ${derived_data} ]]; then
     rm -rf -- "${derived_data}" || true
@@ -56,6 +95,16 @@ cleanup() {
   exit "${result}"
 }
 trap cleanup EXIT
+
+while IFS= read -r name; do
+  case "${name}" in
+    AUTOMOBILE_DAEMON_* | AUTO_MOBILE_DAEMON_* | AUTOMOBILE_SESSION_* | AUTO_MOBILE_SESSION_*)
+      unset "${name}"
+      ;;
+  esac
+done < <(compgen -e)
+aux_root="$(mktemp -d "${PROTOTYPE_MCP_SMOKE_AUX_ROOT:-/tmp}/apm-aux.XXXXXX")" || fail 'could not allocate private aux socket dir'
+export AUTOMOBILE_AUX_SOCKET_DIR="${aux_root}"
 
 # Pick the newest installed iOS runtime matching the request ("26" matches 26.x).
 runtimes_json="$("${XCRUN_BIN}" simctl list runtimes available iOS --json)" || fail 'could not list runtimes'
@@ -79,11 +128,31 @@ device_type="${PROTOTYPE_SMOKE_DEVICE_TYPE:-}"
 if [[ -z ${device_type} ]]; then
   device_type="$(printf '%s' "${runtimes_json}" | jq -r --arg id "${runtime_id}" '
     [.runtimes[] | select(.identifier == $id) | .supportedDeviceTypes[]
-      | select(.productFamily == "iPhone")] | last // empty | .identifier')" || fail 'could not parse device types'
+      | select(.productFamily == "iPhone")
+      | . + {gen: ([.name | match("iPhone ([0-9]+)") | .captures[0].string | tonumber][0] // 0)}]
+    | sort_by(.gen) | last // empty | .identifier')" || fail 'could not parse device types'
 fi
 [[ -n ${device_type} ]] || fail "runtime ${runtime_id} lists no iPhone device type"
 
-udid="$("${XCRUN_BIN}" simctl create "prototype-mcp-smoke-${runtime_version}-$$" "${device_type}" "${runtime_id}")" || fail 'simctl create failed'
+run_tag=runlocal
+if [[ ${GITHUB_RUN_ID:-} =~ ^[0-9]+$ ]]; then run_tag="run${GITHUB_RUN_ID}"; fi
+if devices_json="$(run_with_timeout 60 "${XCRUN_BIN}" simctl list devices --json)"; then
+  stale_udids="$(jq -r --arg tag "-${run_tag}-" '
+    .devices[][] | select(.name | startswith("prototype-mcp-smoke-"))
+    | select(.name | contains($tag) | not) | .udid' <<< "${devices_json}")" || {
+    echo 'prototype-mcp-smoke-lane: warning: could not parse stale simulators' >&2
+    stale_udids=""
+  }
+  while IFS= read -r stale_udid; do
+    [[ -n ${stale_udid} ]] || continue
+    run_with_timeout 60 "${XCRUN_BIN}" simctl shutdown "${stale_udid}" > /dev/null 2>&1 || true
+    delete_simulator "${stale_udid}" || echo "prototype-mcp-smoke-lane: warning: could not delete stale simulator ${stale_udid}" >&2
+  done <<< "${stale_udids}"
+else
+  echo 'prototype-mcp-smoke-lane: warning: could not list stale simulators' >&2
+fi
+
+udid="$("${XCRUN_BIN}" simctl create "prototype-mcp-smoke-${runtime_version}-${run_tag}-$$" "${device_type}" "${runtime_id}")" || fail 'simctl create failed'
 [[ -n ${udid} ]] || fail 'simctl create returned no UDID'
 "${XCRUN_BIN}" simctl boot "${udid}" || fail 'simulator boot failed'
 "${XCRUN_BIN}" simctl bootstatus "${udid}" -b || fail 'simulator did not finish booting'

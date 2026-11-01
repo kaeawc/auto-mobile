@@ -5,7 +5,7 @@ setup() {
   repo_root="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"
   script="${repo_root}/scripts/ios/prototype-mcp-smoke-lane.sh"
   stubs="${BATS_TEST_TMPDIR}/stubs"
-  mkdir -p "${stubs}" "${BATS_TEST_TMPDIR}/tmp"
+  mkdir -p "${stubs}" "${BATS_TEST_TMPDIR}/tmp" "${BATS_TEST_TMPDIR}/aux"
   export TMPDIR="${BATS_TEST_TMPDIR}/tmp"
   export STUB_LOG="${BATS_TEST_TMPDIR}/calls.log"
   : > "${STUB_LOG}"
@@ -13,9 +13,12 @@ setup() {
   export XCODEBUILD_BIN="${stubs}/xcodebuild"
   export PROTOTYPE_MCP_SMOKE_SCRIPT="${stubs}/smoke.sh"
   export PROTOTYPE_MCP_SMOKE_LOG_DIR="${BATS_TEST_TMPDIR}/out"
+  export PROTOTYPE_MCP_SMOKE_AUX_ROOT="${BATS_TEST_TMPDIR}/aux"
+  export PROTOTYPE_MCP_SMOKE_RETRY_SLEEP=0
   export PATH="${stubs}:${PATH}"
-  unset AUTO_MOBILE_CMD PROTOTYPE_SMOKE_DEVICE_TYPE
+  unset AUTO_MOBILE_CMD PROTOTYPE_SMOKE_DEVICE_TYPE GITHUB_RUN_ID
   export STUB_BUILD_MODE=ok STUB_SMOKE_EXIT=0 STUB_BOOT_FAIL=0 STUB_CLEANUP_FAIL=0
+  export STUB_STALE_DEVICES=0 STUB_DELETE_FAIL_TIMES=0 STUB_LIST_FAIL=0 STUB_STALE_DELETE_FAIL=0 STUB_DAEMON_STOP_EXIT=0
 
   cat > "${XCRUN_BIN}" <<'STUB'
 #!/usr/bin/env bash
@@ -24,17 +27,36 @@ case "$*" in
   'simctl list runtimes available iOS --json')
     cat <<'JSON'
 {"runtimes":[
- {"version":"18.5","identifier":"runtime.18.5","isAvailable":true,"supportedDeviceTypes":[{"identifier":"dt.old","productFamily":"iPhone"}]},
- {"version":"26.5","identifier":"runtime.26.5","isAvailable":true,"supportedDeviceTypes":[{"identifier":"dt.first","productFamily":"iPhone"},{"identifier":"dt.newest","productFamily":"iPhone"},{"identifier":"dt.tablet","productFamily":"iPad"}]},
+ {"version":"18.5","identifier":"runtime.18.5","isAvailable":true,"supportedDeviceTypes":[{"identifier":"dt.old","name":"iPhone 15","productFamily":"iPhone"}]},
+ {"version":"26.5","identifier":"runtime.26.5","isAvailable":true,"supportedDeviceTypes":[{"identifier":"dt.first","name":"iPhone 16","productFamily":"iPhone"},{"identifier":"dt.newest","name":"iPhone 17 Pro","productFamily":"iPhone"},{"identifier":"dt.old","name":"iPhone 15","productFamily":"iPhone"},{"identifier":"dt.tablet","name":"iPad Pro","productFamily":"iPad"}]},
  {"version":"26.4","identifier":"runtime.26.4","isAvailable":true,"supportedDeviceTypes":[]},
  {"version":"27.0","identifier":"runtime.27","isAvailable":false,"supportedDeviceTypes":[]}
 ]}
 JSON
     ;;
+  'simctl list devices --json')
+    [[ "${STUB_LIST_FAIL}" -eq 0 ]] || exit 1
+    if [[ "${STUB_STALE_DEVICES}" -eq 1 ]]; then
+      printf '%s\n' '{"devices":{"runtime.26.5":[{"name":"prototype-mcp-smoke-26.5-run424241-123","udid":"UDID-STALE"},{"name":"prototype-mcp-smoke-26.5-run424242-456","udid":"UDID-CURRENT"},{"name":"AutoMobile CI iPhone","udid":"UDID-CI"}]}}'
+    else
+      printf '%s\n' '{"devices":{"runtime.26.5":[{"name":"AutoMobile CI iPhone","udid":"UDID-CI"}]}}'
+    fi
+    ;;
   'simctl create prototype-mcp-smoke-'*) echo UDID-FRESH ;;
   'simctl boot UDID-FRESH') ;;
   'simctl bootstatus UDID-FRESH -b') exit "${STUB_BOOT_FAIL}" ;;
-  'simctl shutdown UDID-FRESH'|'simctl delete UDID-FRESH') exit "${STUB_CLEANUP_FAIL}" ;;
+  'simctl shutdown UDID-FRESH') exit "${STUB_CLEANUP_FAIL}" ;;
+  'simctl delete UDID-FRESH')
+    counter="${BATS_TEST_TMPDIR}/delete-count"
+    count=0
+    if [[ -f "${counter}" ]]; then read -r count < "${counter}"; fi
+    count=$((count + 1))
+    printf '%s\n' "${count}" > "${counter}"
+    [[ "${count}" -gt "${STUB_DELETE_FAIL_TIMES}" ]] || exit 1
+    exit "${STUB_CLEANUP_FAIL}"
+    ;;
+  'simctl shutdown UDID-STALE') ;;
+  'simctl delete UDID-STALE') exit "${STUB_STALE_DELETE_FAIL}" ;;
   *) exit 99 ;;
 esac
 STUB
@@ -54,6 +76,8 @@ STUB
   cat > "${PROTOTYPE_MCP_SMOKE_SCRIPT}" <<'STUB'
 #!/usr/bin/env bash
 printf 'smoke %s\ncmd %s\napp %s\ncwd %s\n' "$*" "${AUTO_MOBILE_CMD}" "${PROTOTYPE_SMOKE_APP_BUNDLE}" "$PWD" >> "${STUB_LOG}"
+printf 'smoke aux=%s socket=%s pid=%s session=%s legacy-session=%s\n' "${AUTOMOBILE_AUX_SOCKET_DIR}" "${AUTOMOBILE_DAEMON_SOCKET_PATH-unset}" "${AUTO_MOBILE_DAEMON_PID_FILE_PATH-unset}" "${AUTOMOBILE_SESSION_UUID-unset}" "${AUTO_MOBILE_SESSION_UUID-unset}" >> "${STUB_LOG}"
+[[ -d "${AUTOMOBILE_AUX_SOCKET_DIR}" ]] || exit 99
 [[ "$*" == UDID-FRESH && -d "${PROTOTYPE_SMOKE_APP_BUNDLE}" ]] || exit 99
 read -r -a cli <<< "${AUTO_MOBILE_CMD}"
 "${cli[@]}" || exit 99
@@ -62,11 +86,18 @@ STUB
   cat > "${stubs}/bun" <<'STUB'
 #!/usr/bin/env bash
 printf 'bun %s\n' "$*" >> "${STUB_LOG}"
+printf 'cli aux=%s socket=%s pid=%s\n' "${AUTOMOBILE_AUX_SOCKET_DIR}" "${AUTOMOBILE_DAEMON_SOCKET_PATH-unset}" "${AUTO_MOBILE_DAEMON_PID_FILE_PATH-unset}" >> "${STUB_LOG}"
+[[ -d "${AUTOMOBILE_AUX_SOCKET_DIR}" ]] || exit 99
+if [[ " $* " == *' --daemon stop '* ]]; then
+  printf 'daemon-stop aux=%s\n' "${AUTOMOBILE_AUX_SOCKET_DIR}" >> "${STUB_LOG}"
+  exit "${STUB_DAEMON_STOP_EXIT}"
+fi
 STUB
   chmod +x "${XCRUN_BIN}" "${XCODEBUILD_BIN}" "${stubs}/bun"
 }
 
 assert_cleaned() {
+  ! grep -q 'xcrun .*UDID-CI' "${STUB_LOG}"
   grep -qx 'xcrun simctl shutdown UDID-FRESH' "${STUB_LOG}"
   grep -qx 'xcrun simctl delete UDID-FRESH' "${STUB_LOG}"
   [ "$(grep -c '^xcrun simctl delete ' "${STUB_LOG}")" -eq 1 ]
@@ -114,9 +145,115 @@ assert_cleaned() {
 }
 
 @test "MCP smoke failure propagates its exit code and still cleans up" {
+  export STUB_SMOKE_EXIT=42
+  run bash "${script}" 26
+  [ "${status}" -eq 42 ]
+  assert_cleaned
+}
+
+@test "private aux directory exists before the first CLI call and is removed afterward" {
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  aux="$(sed -n 's/^smoke aux=\([^ ]*\).*/\1/p' "${STUB_LOG}")"
+  [[ "${aux}" == /* && "${aux}" == "${PROTOTYPE_MCP_SMOKE_AUX_ROOT}/apm-aux."* ]]
+  [[ "${aux}" != /tmp/auto-mobile-daemon-* ]]
+  grep -Fx "cli aux=${aux} socket=unset pid=unset" "${STUB_LOG}"
+  [ ! -e "${aux}" ]
+  assert_cleaned
+}
+
+@test "inherited daemon and session routing variables are scrubbed for smoke and stop" {
+  export AUTOMOBILE_DAEMON_SOCKET_PATH="${BATS_TEST_TMPDIR}/resident.sock"
+  export AUTO_MOBILE_DAEMON_PID_FILE_PATH="${BATS_TEST_TMPDIR}/resident.pid"
+  export AUTOMOBILE_SESSION_UUID=resident-session AUTO_MOBILE_SESSION_UUID=legacy-session
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  grep -q '^smoke aux=.* socket=unset pid=unset session=unset legacy-session=unset$' "${STUB_LOG}"
+  ! grep -q 'resident\|legacy-session=legacy' "${STUB_LOG}"
+  [ "$(grep -c '^cli aux=.* socket=unset pid=unset$' "${STUB_LOG}")" -eq 2 ]
+  assert_cleaned
+}
+
+@test "owned daemon stops exactly once using the smoke aux directory before simulator shutdown" {
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  aux="$(sed -n 's/^smoke aux=\([^ ]*\).*/\1/p' "${STUB_LOG}")"
+  [ "$(grep -c '^daemon-stop ' "${STUB_LOG}")" -eq 1 ]
+  grep -Fx "daemon-stop aux=${aux}" "${STUB_LOG}"
+  grep -qx 'bun run src/index.ts --daemon stop' "${STUB_LOG}"
+  [[ "$(cat "${STUB_LOG}")" == *"daemon-stop aux=${aux}"*'xcrun simctl shutdown UDID-FRESH'* ]]
+  assert_cleaned
+}
+
+@test "stale simulators from other runs are removed before create while current and CI devices are untouched" {
+  export GITHUB_RUN_ID=424242 STUB_STALE_DEVICES=1
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  [[ "$(cat "${STUB_LOG}")" == *'xcrun simctl shutdown UDID-STALE'*'xcrun simctl delete UDID-STALE'*'xcrun simctl create '* ]]
+  ! grep -q 'xcrun .*UDID-CURRENT\|xcrun .*UDID-CI' "${STUB_LOG}"
+  [ "$(grep -c '^xcrun simctl delete UDID-STALE$' "${STUB_LOG}")" -eq 1 ]
+  [ "$(grep -c '^xcrun simctl delete UDID-FRESH$' "${STUB_LOG}")" -eq 1 ]
+}
+
+@test "delete retries twice then succeeds without failing the lane" {
+  export STUB_DELETE_FAIL_TIMES=2
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  [ "$(grep -c '^xcrun simctl delete UDID-FRESH$' "${STUB_LOG}")" -eq 3 ]
+}
+
+@test "delete exhaustion fails an otherwise passing smoke" {
+  export STUB_CLEANUP_FAIL=1
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *'prototype-mcp-smoke-lane: FAIL: could not delete simulator UDID-FRESH'* ]]
+  [ "$(grep -c '^xcrun simctl delete UDID-FRESH$' "${STUB_LOG}")" -eq 3 ]
+}
+
+@test "delete exhaustion preserves an existing smoke failure" {
   export STUB_SMOKE_EXIT=42 STUB_CLEANUP_FAIL=1
   run bash "${script}" 26
   [ "${status}" -eq 42 ]
+  [ "$(grep -c '^xcrun simctl delete UDID-FRESH$' "${STUB_LOG}")" -eq 3 ]
+}
+
+@test "simulator name contains the GitHub run tag" {
+  export GITHUB_RUN_ID=424242
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  grep -q '^xcrun simctl create prototype-mcp-smoke-26.5-run424242-' "${STUB_LOG}"
+  assert_cleaned
+}
+
+@test "device selection uses model generation even when older iPhones appear later" {
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  grep -q '^xcrun simctl create .* dt.newest runtime.26.5$' "${STUB_LOG}"
+  assert_cleaned
+}
+
+@test "stale listing failure warns and continues" {
+  export STUB_LIST_FAIL=1
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *'warning: could not list stale simulators'* ]]
+  assert_cleaned
+}
+
+@test "stale delete exhaustion warns and continues" {
+  export GITHUB_RUN_ID=424242 STUB_STALE_DEVICES=1 STUB_STALE_DELETE_FAIL=1
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *'warning: could not delete stale simulator UDID-STALE'* ]]
+  [ "$(grep -c '^xcrun simctl delete UDID-STALE$' "${STUB_LOG}")" -eq 3 ]
+  ! grep -q 'xcrun .*UDID-CURRENT\|xcrun .*UDID-CI' "${STUB_LOG}"
+}
+
+@test "daemon stop failure does not fail the lane or skip cleanup" {
+  export STUB_DAEMON_STOP_EXIT=1
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *'prototype-mcp-smoke-lane: daemon stop failed for '* ]]
   assert_cleaned
 }
 

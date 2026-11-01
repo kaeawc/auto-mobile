@@ -48,7 +48,7 @@ describe("tapOn schema", () => {
       selector: { text: "Login" },
     });
     expect(result.selector).toEqual({ text: "Login" });
-    expect(result.action).toBe("tap");
+    expect(result.action).toBeUndefined();
   });
 
   test("accepts selector with elementId", () => {

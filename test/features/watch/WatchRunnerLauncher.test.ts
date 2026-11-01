@@ -4,9 +4,23 @@ import { XcodebuildWatchRunnerLauncher } from "../../../src/features/watch/Watch
 import { watchRunners } from "../../../src/features/watch/WatchRunnerRegistry";
 import { FakeWatchRunnerLauncher } from "../../fakes/FakeWatchRunnerLauncher";
 import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
-import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
+import type {
+  Xcodebuild,
+  XcodebuildStreamingOptions,
+} from "../../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+class FakeStreamingXcodebuild implements Pick<Xcodebuild, "startStreaming"> {
+  readonly launches: Array<{ args: string[]; options?: XcodebuildStreamingOptions }> = [];
+
+  constructor(readonly child = new FakeChildProcess()) {}
+
+  async startStreaming(args: string[], options?: XcodebuildStreamingOptions) {
+    this.launches.push({ args, options });
+    return this.child;
+  }
+}
 
 let stop: (() => void) | undefined;
 afterEach(() => {
@@ -17,13 +31,12 @@ const options = { deviceId: "watch-launch", xctestrun: "/build/Watch.xctestrun",
 
 test("launches only the service test with the requested port and binds the exact device", async () => {
   const timer = new FakeTimer();
-  const processes = new FakeProcessExecutor();
   const child = new FakeChildProcess(timer);
-  processes.setNextSpawnProcess(child);
+  const xcodebuild = new FakeStreamingXcodebuild(child);
   const client = new FakeWatchRunnerClient();
   const urls: string[] = [];
   const launcher = new XcodebuildWatchRunnerLauncher({
-    processes,
+    xcodebuild,
     timer,
     connect: (url) => {
       urls.push(url);
@@ -31,8 +44,7 @@ test("launches only the service test with the requested port and binds the exact
     },
   });
   ({ stop } = await launcher.launch(options));
-  const launch = processes.getSpawnedProcesses()[0];
-  expect(launch.command).toBe("xcodebuild");
+  const launch = xcodebuild.launches[0];
   expect(launch.args).toEqual([
     "test-without-building",
     "-xctestrun",
@@ -41,7 +53,10 @@ test("launches only the service test with the requested port and binds the exact
     `platform=watchOS Simulator,id=${options.deviceId}`,
     "-only-testing:CtrlProxyWatchUITests/CtrlProxyWatchUITests/testRunService",
   ]);
-  expect(launch.options?.env?.TEST_RUNNER_AM_PORT).toBe("8765");
+  expect(launch.options?.env).toEqual({ ...process.env, TEST_RUNNER_AM_PORT: "8765" });
+  expect(launch.options?.stdio).toBe("ignore");
+  expect(launch.options?.signal).toBeUndefined();
+  expect(child.killed).toBe(false);
   expect(urls).toEqual(["ws://127.0.0.1:8765/ws"]);
   expect(watchRunners.get(options.deviceId)).toBe(client);
   expect(timer.getSleepHistory()).toEqual([]);
@@ -60,12 +75,11 @@ test("the fake launcher registers without creating a process", async () => {
 
 test("process exit unregisters the runner", async () => {
   const timer = new FakeTimer();
-  const processes = new FakeProcessExecutor();
   const child = new FakeChildProcess(timer);
-  processes.setNextSpawnProcess(child);
+  const xcodebuild = new FakeStreamingXcodebuild(child);
   const client = new FakeWatchRunnerClient();
   ({ stop } = await new XcodebuildWatchRunnerLauncher({
-    processes,
+    xcodebuild,
     timer,
     connect: () => client,
   }).launch(options));
@@ -76,24 +90,23 @@ test("process exit unregisters the runner", async () => {
 });
 
 test("rejects invalid ports and duplicate device bindings before spawning", async () => {
-  const processes = new FakeProcessExecutor();
-  const launcher = new XcodebuildWatchRunnerLauncher({ processes });
+  const xcodebuild = new FakeStreamingXcodebuild();
+  const launcher = new XcodebuildWatchRunnerLauncher({ xcodebuild });
   await expect(launcher.launch({ ...options, port: 0 })).rejects.toThrow("port");
   ({ stop } = await new FakeWatchRunnerLauncher().launch(options));
   await expect(launcher.launch(options)).rejects.toThrow("already connected");
-  expect(processes.getSpawnedProcesses()).toEqual([]);
+  expect(xcodebuild.launches).toEqual([]);
 });
 
 test("startup retries readiness with FakeTimer and closes failed clients", async () => {
   const timer = new FakeTimer();
-  const processes = new FakeProcessExecutor();
-  processes.setNextSpawnProcess(new FakeChildProcess(timer));
+  const xcodebuild = new FakeStreamingXcodebuild(new FakeChildProcess(timer));
   const first = new FakeWatchRunnerClient();
   first.failure = new Error("connection refused while starting");
   const ready = new FakeWatchRunnerClient();
   let attempts = 0;
   const pending = new XcodebuildWatchRunnerLauncher({
-    processes,
+    xcodebuild,
     timer,
     connect: () => (++attempts === 1 ? first : ready),
   }).launch(options);
@@ -109,13 +122,12 @@ test("startup retries readiness with FakeTimer and closes failed clients", async
 
 test("startup deadline stops only its fake process and cannot register a late runner", async () => {
   const timer = new FakeTimer();
-  const processes = new FakeProcessExecutor();
   const child = new FakeChildProcess(timer);
-  processes.setNextSpawnProcess(child);
+  const xcodebuild = new FakeStreamingXcodebuild(child);
   const client = new FakeWatchRunnerClient();
   client.failure = new Error("not ready");
   const pending = new XcodebuildWatchRunnerLauncher({
-    processes,
+    xcodebuild,
     timer,
     connect: () => client,
   }).launch(options);
@@ -129,5 +141,5 @@ test("startup deadline stops only its fake process and cannot register a late ru
   expect(client.closed).toBe(true);
   expect(child.killed).toBe(true);
   expect(watchRunners.get(options.deviceId)).toBeUndefined();
-  expect(processes.getSpawnedProcesses()).toHaveLength(1);
+  expect(xcodebuild.launches).toHaveLength(1);
 });

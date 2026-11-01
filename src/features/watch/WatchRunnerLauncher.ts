@@ -1,10 +1,7 @@
 import { WatchRunnerError } from "./WatchRunnerError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
-import {
-  DefaultHostCommandExecutor,
-  type HostProcessExecutor,
-} from "../../utils/HostCommandExecutor";
+import { XcodebuildClient, type Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { WebSocketWatchRunnerClient, type WatchRunnerClient } from "./WatchRunnerClient";
@@ -27,7 +24,7 @@ interface WatchStartup {
 export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
   constructor(
     private readonly dependencies: {
-      processes?: Pick<HostProcessExecutor, "spawn">;
+      xcodebuild?: Pick<Xcodebuild, "startStreaming">;
       connect?: (url: string) => WatchRunnerClient;
       timer?: Timer;
     } = {},
@@ -41,8 +38,7 @@ export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
       throw new ActionableError("Watch runner is already connected.");
     }
     const timer = this.dependencies.timer ?? defaultTimer;
-    const process = (this.dependencies.processes ?? new DefaultHostCommandExecutor()).spawn(
-      "xcodebuild",
+    const process = await (this.dependencies.xcodebuild ?? new XcodebuildClient()).startStreaming(
       [
         "test-without-building",
         "-xctestrun",

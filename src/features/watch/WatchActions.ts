@@ -38,22 +38,26 @@ function rejectOptions(options: object, allowed: readonly string[]): void {
   }
 }
 
-async function elements(client: WatchRunnerClient, signal?: AbortSignal): Promise<Element[]> {
+async function elements(
+  client: WatchRunnerClient,
+  signal?: AbortSignal,
+): Promise<{ all: Element[]; available: Element[] }> {
   const hierarchy = normalizeWatchHierarchy(await client.hierarchy(signal));
-  return new DefaultElementParser()
+  const all = new DefaultElementParser()
     .flattenViewHierarchy(hierarchy)
-    .map((entry) => entry.element)
-    .filter((element) => {
-      const { left, top, right, bottom } = element.bounds;
-      return (
-        right > left &&
-        bottom > top &&
-        left >= 0 &&
-        top >= 0 &&
-        right <= hierarchy.screenWidth! &&
-        bottom <= hierarchy.screenHeight!
-      );
-    });
+    .map((entry) => entry.element);
+  const available = all.filter((element) => {
+    const { left, top, right, bottom } = element.bounds;
+    return (
+      right > left &&
+      bottom > top &&
+      left >= 0 &&
+      top >= 0 &&
+      right <= hierarchy.screenWidth! &&
+      bottom <= hierarchy.screenHeight!
+    );
+  });
+  return { all, available };
 }
 
 function matches(element: Element, selector: { elementId?: string; text?: string }): boolean {
@@ -81,7 +85,7 @@ export async function watchTapOn(
   }
   signal?.throwIfAborted();
   const client = watchRunners.require(deviceId);
-  const available = await elements(client, signal);
+  const { all, available } = await elements(client, signal);
   const candidates = available.filter((element) => matches(element, options));
   const element = candidates[options.index ?? 0];
   if (!element) {
@@ -94,8 +98,7 @@ export async function watchTapOn(
   const y = (top + bottom) / 2;
   await client.request(
     element["resource-id"] &&
-      available.filter((candidate) => candidate["resource-id"] === element["resource-id"])
-        .length === 1
+      all.filter((candidate) => candidate["resource-id"] === element["resource-id"]).length === 1
       ? { type: "tap", identifier: element["resource-id"] }
       : { type: "tap", x, y },
     signal,
@@ -162,7 +165,7 @@ export async function watchSwipeOn(
   let found: Element | undefined;
   for (;;) {
     if (options.lookFor) {
-      found = (await elements(client, signal)).find((element) =>
+      found = (await elements(client, signal)).available.find((element) =>
         matches(element, options.lookFor!),
       );
     }

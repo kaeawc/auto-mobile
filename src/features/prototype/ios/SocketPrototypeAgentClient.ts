@@ -16,6 +16,7 @@ import {
 } from "../prototypeRequestProtocol";
 import { PrototypeAgentFrameTooLargeError } from "./PrototypeAgentFrameTooLargeError";
 import { PrototypeAgentRequestTimeoutError } from "./PrototypeAgentRequestTimeoutError";
+import { parsePrototypeAgentStatus } from "./prototypeAgentClient";
 import type {
   PendingHandshake,
   PrototypeAgentClient,
@@ -226,6 +227,9 @@ export class SocketPrototypeAgentClient implements PrototypeAgentClient {
 
   private dispatch(message: PrototypeAgentMessage): void {
     if (isResult(message)) {
+      if (message.status !== undefined) {
+        message.status = parsePrototypeAgentStatus(message.status);
+      }
       const waiter = this.waiters.get(message.requestId);
       if (waiter !== undefined) {
         this.waiters.delete(message.requestId);

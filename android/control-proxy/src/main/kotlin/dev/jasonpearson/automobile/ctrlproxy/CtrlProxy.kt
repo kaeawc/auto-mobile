@@ -2239,44 +2239,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override suspend fun requestSelectAll(requestId: String?) =
     textInputController.performSelectAll(requestId)
 
-  override suspend fun requestClickFocusedInput(requestId: String?) {
-    textInputController.forgetRememberedInsert()
-    val startTime = System.currentTimeMillis()
-    // Like NodeActionController.performNodeAction, stay on the inbound command queue until settling
-    // and replying.
-    try {
-      val outcome =
-        clickFocusedInput(
-          findFocusedInput = {
-            findNodeInDisplayWindows { root -> findFocusedEditableNode(root) }
-          },
-          click = { node ->
-            nodeActionFailure("click", node.actionList?.map { it.id }) == null &&
-              node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-          },
-          recycle = { node -> node.recycle() },
-          settleAfterClick = nodeActionController::refreshHierarchyAfterNodeAction,
-        )
-      broadcastActionResult(
-        requestId,
-        "click",
-        outcome.success,
-        outcome.error,
-        System.currentTimeMillis() - startTime,
-      )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Focused input click failed", e)
-      broadcastActionResult(
-        requestId,
-        "click",
-        false,
-        e.message ?: "Focused input click failed",
-        System.currentTimeMillis() - startTime,
-      )
-    }
-  }
+  override suspend fun requestClickFocusedInput(requestId: String?) =
+    nodeActionController.clickFocusedInputRequest(requestId)
 
   override suspend fun requestAction(
     requestId: String?,

@@ -8,6 +8,7 @@ import {
 } from "../../../../src/features/observe/ios/IosSdkWebReader";
 import type { CtrlProxySdkWebSnapshotResult } from "../../../../src/features/observe/ios/types";
 import type { ViewHierarchyResult } from "../../../../src/models";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import { logger } from "../../../../src/utils/logger";
 
 const entry = (webViewId: string) => ({
@@ -19,11 +20,13 @@ const snapshotOf = (snapshotId: string) => ({ snapshotId, elements: [] });
 
 class FakeWebClient implements IosSdkWebClient {
   requests: Array<string | undefined> = [];
+  requestOptions: Array<SdkWebSnapshotRequestOptions | undefined> = [];
   constructor(private readonly replies: Record<string, CtrlProxySdkWebSnapshotResult | Error>) {}
   async requestSdkWebSnapshotForIos(
     options?: SdkWebSnapshotRequestOptions,
   ): Promise<CtrlProxySdkWebSnapshotResult> {
     this.requests.push(options?.webViewId);
+    this.requestOptions.push(options);
     const reply = this.replies[options?.webViewId ?? "first"];
     if (reply instanceof Error) {
       throw reply;
@@ -162,6 +165,91 @@ describe("returned snapshot failures (#5162)", () => {
       expect(warn.mock.calls.some(([message]) => String(message).includes("garbled"))).toBe(true);
     } finally {
       warn.mockRestore();
+    }
+  });
+});
+
+describe("SDK web-view snapshot budget", () => {
+  const screen = (): ViewHierarchyResult => ({
+    hierarchy: {
+      node: { $: { class: "WKWebView", bounds: { left: 0, top: 0, right: 400, bottom: 800 } } },
+    },
+  });
+  const noSnapshot: CtrlProxySdkWebSnapshotResult = {
+    success: false,
+    available: true,
+    totalTimeMs: 1,
+    failure: "no_snapshot",
+    webViews: [entry("a")],
+  };
+
+  test("the single runner read receives the budget left at call time", async () => {
+    const timer = new FakeTimer();
+    const client = new FakeWebClient({ first: noSnapshot });
+    const web = createIosSdkWebReader({
+      timer,
+      enabled: () => true,
+      client: () => {
+        timer.advanceTime(125);
+        return client;
+      },
+    });
+    const signal = new AbortController().signal;
+    expect(await web.snapshots(signal, 500)).toEqual([{ webViewId: "a" }]);
+    expect(client.requestOptions).toEqual([{ signal, timeoutMs: 375 }]);
+  });
+
+  test("elapsed, zero and negative budgets skip the runner and merge without error", async () => {
+    const debug = spyOn(logger, "debug").mockImplementation(() => undefined);
+    try {
+      for (const timeoutMs of [500, 0, -1]) {
+        const timer = new FakeTimer();
+        const client = new FakeWebClient({ first: noSnapshot });
+        const web = createIosSdkWebReader({
+          timer,
+          enabled: () => true,
+          client: () => {
+            timer.advanceTime(500);
+            return client;
+          },
+        });
+        expect(await web.snapshots(undefined, timeoutMs)).toEqual([]);
+        expect(await mergeIosSdkWebInto(screen(), web, undefined, timeoutMs)).toBeNull();
+        expect(client.requests).toEqual([]);
+      }
+      expect(debug).toHaveBeenCalledWith(
+        "[iOS] SDK web-view snapshot skipped: time budget exhausted",
+      );
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  test("omitted and larger budgets retain the 2000 ms per-read cap", async () => {
+    const timer = new FakeTimer();
+    const client = new FakeWebClient({ first: noSnapshot });
+    const web = createIosSdkWebReader({ client: () => client, enabled: () => true, timer });
+    timer.advanceTime(10_000);
+    await web.snapshots();
+    await web.snapshots(undefined, 3000);
+    expect(client.requestOptions.map((options) => options?.timeoutMs)).toEqual([2000, 2000]);
+  });
+
+  test("merge forwards its remaining budget and signal to the reader", async () => {
+    const client = new FakeWebClient({ first: noSnapshot });
+    const web = createIosSdkWebReader({
+      client: () => client,
+      enabled: () => true,
+      timer: new FakeTimer(),
+    });
+    const snapshots = spyOn(web, "snapshots");
+    const signal = new AbortController().signal;
+    try {
+      expect(await mergeIosSdkWebInto(screen(), web, signal, 500)).toBeNull();
+      expect(snapshots).toHaveBeenCalledWith(signal, 500);
+      expect(client.requestOptions).toEqual([{ signal, timeoutMs: 500 }]);
+    } finally {
+      snapshots.mockRestore();
     }
   });
 });

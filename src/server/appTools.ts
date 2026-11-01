@@ -10,6 +10,7 @@ import {
   type InstallGuardOptions,
 } from "../features/action/InstallApp";
 import { ResetKeychain } from "../features/action/ResetKeychain";
+import type { KeystoreResetBackend } from "../features/storage/keystoreReset";
 import type { TerminateAppCall } from "../features/action/TerminateApp";
 import { type UninstallAppCall, type UninstallGuardOptions } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
@@ -719,6 +720,7 @@ function subscribePrototypeAgentLifecycle(
 
 /** Overrides for the collaborators `registerAppTools` wires into its handlers (tests, embedders). */
 export interface AppToolsDependencies {
+  keystoreReset?: (device: BootedDevice) => KeystoreResetBackend;
   listApps?: Partial<ListAppsToolDependencies>;
   launchApp?: Partial<LaunchAppToolDependencies>;
   terminateApp?: Partial<TerminateAppToolDependencies>;
@@ -803,20 +805,26 @@ const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermis
   return withIsErrorOnFailure(response, result.success);
 };
 
-const resetKeychainHandler = async (device: BootedDevice, args: ResetKeychainArgs) => {
-  // A destructive, device-wide reset must target an explicitly selected device.
-  // deviceId/device-label/sessionUuid are the device-bound selectors; if none is
-  // present the device was ambiently resolved and the action refuses to run.
-  const explicitlyTargeted = Boolean(args.deviceId || args.device || args.sessionUuid);
-  const action = new ResetKeychain(device);
-  const result = await action.execute({
-    appId: args.appId,
-    confirm: args.confirm,
-    explicitlyTargeted,
-  });
+const createResetKeychainHandler =
+  (dependencies: AppToolsDependencies) => async (device: BootedDevice, args: ResetKeychainArgs) => {
+    // A destructive, device-wide reset must target an explicitly selected device.
+    // deviceId/device-label/sessionUuid are the device-bound selectors; if none is
+    // present the device was ambiently resolved and the action refuses to run.
+    const explicitlyTargeted = Boolean(args.deviceId || args.device || args.sessionUuid);
+    // The Keystore backend is Android-only; resolving it for iOS would throw.
+    const keystoreBackend =
+      device.platform === "android" ? dependencies.keystoreReset?.(device) : undefined;
+    const action = new ResetKeychain(device, null, keystoreBackend);
+    const result = await action.execute({
+      appId: args.appId,
+      confirm: args.confirm,
+      scope: args.scope,
+      alias: args.alias,
+      explicitlyTargeted,
+    });
 
-  return createStructuredToolResponse({ ...result });
-};
+    return withIsErrorOnFailure(createStructuredToolResponse({ ...result }), result.success);
+  };
 
 export function registerAppTools(dependencies: AppToolsDependencies = {}) {
   const {
@@ -831,6 +839,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     inspectPackageSigningToolDependencies,
     setAppPermissionsHandler,
   } = createAppToolHandlers(dependencies);
+  const resetKeychainHandler = createResetKeychainHandler(dependencies);
   unsubscribePrototypeAgentLifecycle?.();
   unsubscribePrototypeAgentLifecycle = subscribePrototypeAgentLifecycle(launchAppDependencies);
   const inspectPackageSigningHandler = async (
@@ -957,7 +966,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "resetKeychain",
-    "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
+    "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization; confirm is not needed, but confirm:false refuses. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
     resetKeychainSchema,
     {
       handler: resetKeychainHandler,

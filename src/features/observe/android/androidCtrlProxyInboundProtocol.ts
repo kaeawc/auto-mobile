@@ -346,6 +346,12 @@ export interface WsDeviceInfoResultMessage extends WsMessageBase {
   totalTimeMs?: number;
 }
 
+export interface WsKeystoreResetMessage extends WsMessageBase {
+  type: "keystore_reset";
+  requestId?: string | null;
+  state: unknown;
+}
+
 export interface WsKeystoreDiscoveryMessage extends WsMessageBase {
   type: "keystore_discovery";
   requestId?: string | null;
@@ -646,6 +652,7 @@ export type WebSocketMessage =
   | WsGlobalActionResultMessage
   | WsDeviceInfoResultMessage
   | WsKeystoreDiscoveryMessage
+  | WsKeystoreResetMessage
   | WsSdkCapabilitiesMessage
   | WsPreferenceFilesMessage
   | WsPreferencesMessage

@@ -50,7 +50,7 @@ function registerResetKeychain(simctl: FakeSimctl): void {
     {
       handler: async (args: {
         appId: string;
-        confirm: boolean;
+        confirm?: boolean;
         deviceId?: string;
         sessionUuid?: string;
       }) => {
@@ -139,6 +139,111 @@ describe("resetKeychain replay of a recorded plan (#10052)", () => {
     expect(result.warnings).toEqual([
       "resetKeychain was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand",
     ]);
+  });
+});
+
+const EMULATOR: BootedDevice = { name: "Pixel 9", platform: "android", deviceId: "emulator-5554" };
+
+/** resetKeychain over a recording Android Keystore backend, with the real handler's targeting rule. */
+function registerAndroidResetKeychain(resets: unknown[][]): void {
+  ToolRegistry.register(
+    "resetKeychain",
+    "Fake Android resetKeychain over a recording Keystore backend",
+    resetKeychainSchema,
+    {
+      handler: async (args: {
+        appId: string;
+        scope?: string;
+        alias?: string;
+        confirm?: boolean;
+        deviceId?: string;
+        sessionUuid?: string;
+      }) => {
+        const result = await new ResetKeychain(EMULATOR, null, {
+          async resetKeystore(...call) {
+            resets.push(call);
+            return {
+              schemaVersion: 1,
+              capability: "storage.keystore",
+              outcome: "ok",
+              bridgeAvailable: true,
+              status: "deleted",
+              deletedCount: 1,
+              requestedScope: "login",
+              aliases: [{ alias: "token", outcome: "deleted" }],
+            };
+          },
+        }).execute({
+          appId: args.appId,
+          scope: args.scope,
+          alias: args.alias,
+          confirm: args.confirm,
+          explicitlyTargeted: Boolean(args.deviceId || args.sessionUuid),
+        });
+        return createJSONToolResponse({ ...result });
+      },
+      defaultEnabled: true,
+    },
+  );
+  Object.assign(ToolRegistry.getTool("resetKeychain")!, { requiresDevice: true });
+}
+
+function recordAndroidResetKeychain(): Plan {
+  const timer = new FakeTimer();
+  startToolCallRecording({ timer });
+  // Android calls do not need confirm, so the recorded call carries none.
+  recordPlanCall(getToolCallRecorder()!, "resetKeychain", {
+    appId: "com.example.app",
+    scope: "login",
+    deviceId: EMULATOR.deviceId,
+    sessionUuid: "recording-session",
+    platform: "android",
+  });
+  return yaml.load(stopToolCallRecording({ timer }).planContent) as Plan;
+}
+
+describe("Android resetKeychain replay of a recorded plan (#16274)", () => {
+  test("the recorded step is withheld and deletes no alias, as the export warning says", async () => {
+    const resets: unknown[][] = [];
+    registerAndroidResetKeychain(resets);
+    const plan = recordAndroidResetKeychain();
+    expect(plan.steps).toEqual([
+      {
+        tool: "resetKeychain",
+        params: { appId: "com.example.app", scope: "login", confirm: false },
+      },
+    ]);
+
+    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
+      plan,
+      0,
+      "android",
+      EMULATOR.deviceId,
+      "replay-session",
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.executedSteps).toBe(0);
+    expect(result.failedStep?.error).toContain("Set confirm: true to proceed");
+    expect(resets).toEqual([]);
+  });
+
+  test("once the author sets confirm: true by hand the replay deletes the declared aliases", async () => {
+    const resets: unknown[][] = [];
+    registerAndroidResetKeychain(resets);
+    const plan = recordAndroidResetKeychain();
+    plan.steps[0].params!.confirm = true;
+
+    const result = await createDefaultPlanExecutor(new FakeTimer()).executePlan(
+      plan,
+      0,
+      "android",
+      EMULATOR.deviceId,
+      "replay-session",
+    );
+
+    expect(result.success).toBe(true);
+    expect(resets).toEqual([["com.example.app", "login", undefined]]);
   });
 });
 

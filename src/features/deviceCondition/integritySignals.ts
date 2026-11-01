@@ -32,7 +32,7 @@ export interface IntegritySignalReading extends IntegritySignal {
 }
 
 /** The declarative signal catalogue; the probe below reads each one. */
-export const INTEGRITY_SIGNALS: readonly IntegritySignal[] = [
+export const INTEGRITY_SIGNALS = [
   {
     id: "su-binary",
     family: "root",
@@ -99,7 +99,7 @@ export const INTEGRITY_SIGNALS: readonly IntegritySignal[] = [
     description: "Build FINGERPRINT/MODEL/PRODUCT look like an emulator (sdk_gphone, generic)",
     mutability: "image-fixed",
   },
-];
+] as const satisfies readonly IntegritySignal[];
 
 /** Parse `getprop` output (`[key]: [value]` lines) into a map. */
 export function parseGetprop(output: string): Map<string, string> {
@@ -117,7 +117,7 @@ export function parseGetprop(output: string): Map<string, string> {
  * RootBeer-style suPaths and artifacts the probe lists. The rootState fixture plants only the
  * /system ones; the rest are common locations a real root leaves behind, so detection stays honest.
  */
-const SU_PATHS = [
+export const SU_PATHS = [
   "/system/xbin/su",
   "/system/bin/su",
   "/su/bin/su",
@@ -128,7 +128,7 @@ const SU_PATHS = [
   "/system/xbin/busybox",
   "/system/bin/busybox",
 ] as const;
-const SUPERUSER_APK = "/system/app/Superuser.apk";
+export const SUPERUSER_APK = "/system/app/Superuser.apk";
 
 const EMULATOR_BUILD_PATTERN = /sdk_gphone|generic|emulator|ranchu|goldfish|vbox/i;
 

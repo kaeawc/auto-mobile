@@ -74,6 +74,40 @@ describe("storage SDK error mapping", () => {
 // SdkHierarchyServer.requireApplicationActive, and IOSCtrlProxyClient.sdkUnavailableResult.
 const sdkPrefix =
   "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)";
+const coreDataErrors = [
+  [
+    "unknown_core_data_store",
+    "The requested Core Data store is not registered by the app (unknown_core_data_store). List registered stores in databases.stores in the storage capabilities resource (automobile:devices/{deviceId}/storage/capabilities?appId={appId}).",
+  ],
+  [
+    "unknown_core_data_entity",
+    "The requested Core Data entity is not registered for this store (unknown_core_data_entity). The entity must be one of the store's registered entities.",
+  ],
+  [
+    "core_data_query_unavailable",
+    "The app registered this Core Data store without a CoreDataReadOnlyFetching fetcher (core_data_query_unavailable). Only metadata is available; ask the app developer to enable read access for this store.",
+  ],
+  [
+    "core_data_fetch_failed",
+    "The Core Data fetch threw an error inside the app (core_data_fetch_failed). Check the app logs.",
+  ],
+] as const;
+
+test.each(coreDataErrors)(
+  "maps Core Data refusal %s without SDK setup advice",
+  (code, expected) => {
+    for (const message of [code, `${sdkPrefix}: ${code}`]) {
+      const error = new Error(message);
+      expect(mapStorageSdkError(error, { operation: "database" })).toBe(expected);
+      expect(iosSqlErrorMessage(new Error(`${sdkPrefix}: ${code}`), "/app/notes.db")).toBe(
+        expected,
+      );
+      expect(expected).not.toContain("database inspection unavailable");
+      expect(mapStorageSdkError(error, { operation: "storage" })).toBeNull();
+    }
+  },
+);
+
 const foregroundMessage =
   "The target app is not in the foreground; bring it to the foreground and retry.";
 const capabilityMessage =

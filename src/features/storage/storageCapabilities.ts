@@ -456,7 +456,7 @@ function secureStateDomain(ctx: StorageCapabilityContext): DomainCapability {
       domain: "secure_state",
       portable: false,
       platformScope: "android",
-      note: "App-owned Android Keystore metadata via storage.keystore; exact declared scopes only, never key material. Package-data reset is separate.",
+      note: "App-owned Android Keystore metadata via storage.keystore; exact declared scopes only, never key material. resetKeychain deletes only declared aliases; package-data reset is separate.",
       capabilities: ctx.keystore ? [ctx.keystore] : [],
       operations: [
         {
@@ -468,12 +468,12 @@ function secureStateDomain(ctx: StorageCapabilityContext): DomainCapability {
         },
         deriveOperation(
           "write",
-          "Keystore mutation is declared_unsupported in this slice (#5190).",
+          "Keystore aliases are not written; scoped alias deletion is exposed by resetKeychain with a declared scope or alias.",
           [],
         ),
         deriveOperation(
           "namespace_reset",
-          "Keystore mutation is declared_unsupported; package-data reset is explicit and separate (#5190).",
+          "Package-data reset is explicit and separate; resetKeychain deletes only aliases declared in a scope.",
           [],
         ),
       ],

@@ -34,6 +34,22 @@ export function parseEmulatedStorageMount(output: string): "ro" | "rw" | undefin
   return ro === rw ? undefined : ro ? "ro" : "rw";
 }
 
+/** An unreadable probe must not claim ownership of pre-existing privileges. */
+async function probeRoot(adb: AdbExecutor, signal?: AbortSignal): Promise<boolean | undefined> {
+  try {
+    return (await shell(adb, ["id", "-u"], signal)) === "0";
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    logger.warn(
+      `readOnlyFilesystem root probe failed; preserving existing privileges: ${errorMessage(error)}`,
+      error,
+    );
+    return undefined;
+  }
+}
+
 /** Device-wide FUSE superblock remount: every app writing /sdcard sees EROFS. No files are created. */
 export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceConditionInjector {
   const serialize = createSerializer();
@@ -51,10 +67,15 @@ export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceCondit
     if (!owned) {
       return;
     }
-    // Re-acquire root if another fixture or a reboot has unrooted adbd since apply.
-    await ensureRootAdb(adb, signal);
+    const rootedAtRestore = await probeRoot(adb, signal);
+    const notRootedAtProbe = rootedAtRestore === false;
+    if (!rootedAtRestore) {
+      // Record privileges cleanup before restarting the transport, including a failed wait.
+      acquiredRoot ||= notRootedAtProbe;
+      await ensureRootAdb(adb, signal);
+    }
     await remount("rw", signal);
-    if (acquiredRoot) {
+    if (acquiredRoot || notRootedAtProbe) {
       await adbCommand(adb, ["unroot"], signal);
       acquiredRoot = false;
     }
@@ -63,7 +84,7 @@ export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceCondit
   const reset = (signal?: AbortSignal): Promise<void> => serialize(() => restoreNow(signal));
   const checkRootableImage = async (signal?: AbortSignal): Promise<void> => {
     try {
-      await assertRootableImage(adb, signal);
+      await assertRootableImage(adb, signal, "faults.readOnlyFilesystem");
     } catch (error) {
       if (signal?.aborted) {
         throw error;
@@ -72,28 +93,35 @@ export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceCondit
     }
   };
   const acquireRoot = async (signal?: AbortSignal): Promise<void> => {
-    let wasRooted = true;
-    try {
-      wasRooted = (await shell(adb, ["id", "-u"], signal)) === "0";
-    } catch (error) {
-      if (signal?.aborted) {
-        throw error;
-      }
-      logger.warn(
-        `readOnlyFilesystem root probe failed; preserving existing privileges: ${errorMessage(error)}`,
-        error,
-      );
-    }
+    const wasRooted = (await probeRoot(adb, signal)) ?? true;
+    // A repeat apply after mount drift must retain the original privilege cleanup.
+    acquiredRoot ||= !wasRooted;
     try {
       await ensureRootAdb(adb, signal);
     } catch (error) {
+      if (acquiredRoot) {
+        try {
+          // Do not reacquire transport or use the aborted apply signal for rollback.
+          await adbCommand(adb, ["unroot"]);
+          acquiredRoot = false;
+        } catch (restoreError) {
+          owned = true;
+          logger.warn(
+            `readOnlyFilesystem root rollback failed: ${errorMessage(restoreError)}`,
+            restoreError,
+          );
+          throw new OwedResetError(
+            `${errorMessage(error)} Rollback also failed (${errorMessage(restoreError)}); root was left on, and release will retry.`,
+            reset,
+            { cause: error },
+          );
+        }
+      }
       if (signal?.aborted) {
         throw error;
       }
       unsupported(errorMessage(error));
     }
-    // A repeat apply after mount drift must retain the original privilege cleanup.
-    acquiredRoot ||= !wasRooted;
   };
   const applyNow = async (
     value: string,
@@ -110,8 +138,8 @@ export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceCondit
     if (mode === "ro") {
       return { status: "unchanged", detail: "Shared storage is already read-only for every app." };
     }
-    await acquireRoot(signal);
     const wasOwned = owned;
+    await acquireRoot(signal);
     // Own the remount before its first mutation, including a command that fails after changing it.
     owned = true;
     try {

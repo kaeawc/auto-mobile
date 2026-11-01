@@ -13,6 +13,8 @@ import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
+import { SelinuxOwner, resolveSelinuxOwner, selinuxOwnersByDevice } from "./SelinuxOwner";
+import { ArtifactOwner, artifactOwnersByDevice, resolveArtifactOwner } from "./ArtifactOwner";
 import { OwedResetError } from "./OwedResetError";
 import { adbCommand, rejectValue, shell } from "./injectorSupport";
 
@@ -37,12 +39,16 @@ export const ROOT_ARTIFACT_PATHS = [
 const STUB_SCRIPT = "#!/system/bin/sh\\nexit 1\\n";
 
 /** A Play image is a production build: not debuggable, and `adb root` is refused. */
-export async function assertRootableImage(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+export async function assertRootableImage(
+  adb: AdbExecutor,
+  signal?: AbortSignal,
+  key = "rootState",
+): Promise<void> {
   const debuggable = await shell(adb, ["getprop", "ro.debuggable"], signal);
   const buildType = await shell(adb, ["getprop", "ro.build.type"], signal);
   if (debuggable !== "1" || buildType === "user") {
     throw new ActionableError(
-      "rootState needs a non-Play image (google_apis, default or aosp): this device is a production " +
+      `${key} needs a non-Play image (google_apis, default or aosp): this device is a production ` +
         `build (ro.debuggable=${debuggable || "?"}, ro.build.type=${buildType || "?"}) and refuses adb root. ` +
         "For real root on a Play image, use the rootAVD/Magisk fixture (#14070).",
     );
@@ -84,12 +90,12 @@ async function remountSystem(adb: AdbExecutor, signal?: AbortSignal): Promise<vo
   }
 }
 
-async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+export async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
   await ensureRootAdb(adb, signal);
   await remountSystem(adb, signal);
 }
 
-async function plantArtifacts(
+export async function plantArtifacts(
   adb: AdbExecutor,
   paths: readonly string[],
   planted: Set<string>,
@@ -110,7 +116,7 @@ async function plantArtifacts(
  * partial listing. A read that genuinely fails (transport error) throws instead of reading as
  * "none exist".
  */
-async function listExisting(
+export async function listExisting(
   adb: AdbExecutor,
   paths: readonly string[],
   signal?: AbortSignal,
@@ -128,14 +134,16 @@ async function listExisting(
   );
 }
 
-const selinuxFlag = (mode: string): string => (/permissive/i.test(mode) ? "0" : "1");
-
-export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInjector {
-  let baselineSelinux = "Enforcing";
-  // The baseline is captured once and kept until a reset fully succeeds: recapturing it while
-  // anything is still owed would record the fixture's own Permissive as "the original".
-  let baselineCaptured = false;
-  let selinuxChanged = false;
+export function createRootStateInjector(
+  adb: AdbExecutor,
+  selinux = new SelinuxOwner(),
+  artifacts = new ArtifactOwner(),
+): DeviceConditionInjector {
+  const selinuxToken = {};
+  const artifactToken = {};
+  // Every artifact this fixture depends on, planted here or already present. Shared with
+  // integrityState through `artifacts`, so neither deletes a stub the other still needs (#16275).
+  const held = new Set<string>();
   // True while this fixture is applied and its reset is owed; a repeat apply is then coalesced.
   let active = false;
   // Only artifacts WE planted. A userdebug image ships a real su; it is never overwritten here
@@ -148,16 +156,16 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
     // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
     await ensureRootAdb(adb, resetSignal);
     let remaining = new Set<string>();
-    if (planted.size > 0) {
+    // Planted by a fixture (here or by integrityState) and needed by no other fixture.
+    const removable = [...held].filter((path) => artifacts.removableBy(artifactToken, path));
+    if (removable.length > 0) {
       // A reboot can return /system to read-only while the planted files survive.
       await remountSystem(adb, resetSignal);
-      await shell(adb, ["rm", "-f", ...planted], resetSignal);
-      // Confirm the removal; `planted` is only cleared once the files are really gone.
-      remaining = await listExisting(adb, [...planted], resetSignal);
+      await shell(adb, ["rm", "-f", ...removable], resetSignal);
+      // Confirm the removal; the holds are only released once the files are really gone.
+      remaining = await listExisting(adb, removable, resetSignal);
     }
-    if (selinuxChanged) {
-      await shell(adb, ["setenforce", selinuxFlag(baselineSelinux)], resetSignal);
-    }
+    await selinux.release(adb, selinuxToken, resetSignal);
     await adbCommand(adb, ["unroot"], resetSignal);
     if (remaining.size > 0) {
       // Everything else is restored, but the reset stays owed so release retries and reports it.
@@ -165,19 +173,23 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
         `rootState reset left artifacts on the device: ${[...remaining].join(", ")}`,
       );
     }
+    for (const path of held) {
+      artifacts.release(artifactToken, path);
+    }
+    held.clear();
     planted.clear();
-    selinuxChanged = false;
-    baselineCaptured = false;
     active = false;
   };
-  const plantedStillThere = async (signal?: AbortSignal): Promise<boolean> => {
-    const existing = await listExisting(adb, [...planted], signal);
-    return [...planted].every((path) => existing.has(path));
+  // Every artifact the fixture depends on, not only those it planted: a file another fixture
+  // planted can be removed under it.
+  const artifactsStillThere = async (signal?: AbortSignal): Promise<boolean> => {
+    const existing = await listExisting(adb, [...held], signal);
+    return [...held].every((path) => existing.has(path));
   };
   // After a reboot that keeps the modified system image the files survive but SELinux is back
   // to Enforcing, so "already applied" has to check the mode as well as the files.
   const selinuxStillPermissive = async (signal?: AbortSignal): Promise<boolean> =>
-    !selinuxChanged || /permissive/i.test(await shell(adb, ["getenforce"], signal));
+    !selinux.has(selinuxToken) || /permissive/i.test(await shell(adb, ["getenforce"], signal));
   return {
     key: "rootState",
     async apply(value, signal): Promise<DeviceConditionApplyOutcome> {
@@ -188,22 +200,29 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
       const wasActive = active;
       if (
         wasActive &&
-        (await plantedStillThere(signal)) &&
+        (await artifactsStillThere(signal)) &&
         (await selinuxStillPermissive(signal))
       ) {
         return { status: "unchanged", detail: "rooted-detectable fixture is already applied" };
       }
       // Both reads happen before the first mutation, so a failed probe changes nothing.
       const existing = await listExisting(adb, ROOT_ARTIFACT_PATHS, signal);
-      if (!baselineCaptured) {
-        baselineSelinux = (await shell(adb, ["getenforce"], signal)) || "Enforcing";
-        baselineCaptured = true;
+      if (!selinux.has(selinuxToken)) {
+        await selinux.capture(adb, selinuxToken, signal);
       }
       const toPlant = ROOT_ARTIFACT_PATHS.filter((path) => !existing.has(path));
       try {
         await remountWritable(adb, signal);
-        selinuxChanged = true;
-        await shell(adb, ["setenforce", "0"], signal);
+        await selinux.set(adb, selinuxToken, true, signal);
+        // Registered before the writes, so a rollback after a half-planted file removes it.
+        for (const path of ROOT_ARTIFACT_PATHS) {
+          if (toPlant.includes(path)) {
+            artifacts.plant(artifactToken, path);
+          } else {
+            artifacts.hold(artifactToken, path);
+          }
+          held.add(path);
+        }
         await plantArtifacts(adb, toPlant, planted, signal);
       } catch (error) {
         try {
@@ -234,9 +253,10 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
       };
     },
     async isClean(signal): Promise<boolean> {
-      if (planted.size > 0) {
+      const owed = [...held].filter((path) => artifacts.removableBy(artifactToken, path));
+      if (owed.length > 0) {
         try {
-          if ((await listExisting(adb, [...planted], signal)).size > 0) {
+          if ((await listExisting(adb, owed, signal)).size > 0) {
             return false;
           }
         } catch (error) {
@@ -251,8 +271,7 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
           return false;
         }
       }
-      const mode = await shell(adb, ["getenforce"], signal);
-      return /permissive/i.test(mode) === /permissive/i.test(baselineSelinux);
+      return !selinux.has(selinuxToken) && (await selinux.isClean(adb, signal));
     },
   };
 }
@@ -268,14 +287,27 @@ export function resolveRootStateInjector(
   device: BootedDevice,
   key: DeviceConditionKey,
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
-  cache: Map<string, DeviceConditionInjector> = injectorsByDevice,
+  options:
+    | Map<string, DeviceConditionInjector>
+    | {
+        cache: Map<string, DeviceConditionInjector>;
+        selinuxOwners?: Map<string, SelinuxOwner>;
+        artifactOwners?: Map<string, ArtifactOwner>;
+      } = injectorsByDevice,
 ): DeviceConditionInjector | undefined {
   if (device.platform !== "android" || key !== "rootState") {
     return undefined;
   }
+  const cache = options instanceof Map ? options : options.cache;
+  const selinuxOwners = options instanceof Map ? selinuxOwnersByDevice : options.selinuxOwners;
+  const artifactOwners = options instanceof Map ? artifactOwnersByDevice : options.artifactOwners;
   let injector = cache.get(device.deviceId);
   if (!injector) {
-    injector = createRootStateInjector(adbFactory.create(device));
+    injector = createRootStateInjector(
+      adbFactory.create(device),
+      resolveSelinuxOwner(device.deviceId, selinuxOwners),
+      resolveArtifactOwner(device.deviceId, artifactOwners),
+    );
     cache.set(device.deviceId, injector);
   }
   return injector;

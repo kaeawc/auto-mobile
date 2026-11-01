@@ -10,6 +10,7 @@ import {
   type DeviceConditionInput,
   type DeviceConditionKey,
   type DeviceConditionResult,
+  type DeviceConditionSignalResult,
   type DeviceConditionRestoreFailure,
   type DeviceConditionRestoreReport,
 } from "./DeviceConditionTypes";
@@ -40,6 +41,7 @@ export interface DeviceConditionInjector {
 export interface DeviceConditionApplyOutcome {
   /** How the request resolved, mirrored into the per-change result. */
   status: "applied" | "unchanged";
+  signals?: DeviceConditionSignalResult[];
   detail?: string;
   /** Run on restore; absent when nothing changed. Idempotent. */
   reset?: (signal?: AbortSignal) => Promise<void>;
@@ -134,6 +136,7 @@ export class DeviceConditionController {
       return {
         key: change.key,
         status: outcome.status,
+        ...(outcome.signals ? { signals: outcome.signals } : {}),
         ...(outcome.detail ? { detail: outcome.detail } : {}),
       };
     } catch (error) {

@@ -56,6 +56,8 @@ import { registerDisplayProfileTools } from "./displayProfileTools";
 import { registerPersonaTools } from "./personaTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
 import type { IosRunnerLocationResolver } from "../features/utility/device-state/IosRunnerLocation";
+import type { BootedDevice } from "../models";
+import type { KeystoreResetBackend } from "../features/storage/keystoreReset";
 
 export interface RegisterAllToolsOptions {
   /**
@@ -70,6 +72,7 @@ export interface RegisterAllToolsOptions {
   includeToolSelection?: boolean;
   /** Physical iOS location runner (#14091), resolved by the composition root (#11806). */
   iosRunnerLocation?: IosRunnerLocationResolver;
+  keystoreReset?: (device: BootedDevice) => KeystoreResetBackend;
 }
 
 /**
@@ -82,7 +85,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerInteractionTools();
   registerSwipeAtTools();
   registerMultiTouchTools();
-  registerAppTools();
+  registerAppTools({ keystoreReset: options.keystoreReset });
   registerUtilityTools({ iosRunnerLocation: options.iosRunnerLocation });
   registerDeviceTools();
   registerDeepLinkTools();

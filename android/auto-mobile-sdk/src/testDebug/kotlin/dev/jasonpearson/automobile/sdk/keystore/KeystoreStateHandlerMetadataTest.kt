@@ -109,12 +109,12 @@ internal class KeystoreStateHandlerMetadataTest : KeystoreStateHandlerTestBase()
   }
 
   @Test
-  fun `all unknown and mutation calls are unsupported without backend calls`() {
-    listOf("delete", "reset", "set", "unknown").forEach {
+  fun `unknown calls are unsupported without backend calls`() {
+    listOf("reset", "set", "unknown").forEach {
       assertEquals("disabled", handler.handle(it).getString("outcome"))
     }
     enable()
-    listOf("delete", "reset", "set", "unknown").forEach {
+    listOf("reset", "set", "unknown").forEach {
       assertEquals("unsupported", handler.handle(it).getString("outcome"))
     }
     assertTrue(backend.calls.isEmpty())

@@ -399,10 +399,21 @@ export const resetKeychainSchema = withAppIdAliases(
           .describe(
             "Required. The app whose Keychain/Keystore state to reset. NOTE: iOS Simulator only supports a device-wide reset and erases EVERY app's Keychain regardless of this value.",
           ),
+        scope: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Android declared scope to reset; required unless alias is given."),
+        alias: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Android declared alias to delete; with scope, must belong to it."),
         confirm: z
           .boolean()
+          .optional()
           .describe(
-            "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
+            "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not need confirm (app opt-in, declared aliases and the SDK mutation gate authorize deletion), but confirm: false refuses the reset.",
           ),
       })
       .strict(),

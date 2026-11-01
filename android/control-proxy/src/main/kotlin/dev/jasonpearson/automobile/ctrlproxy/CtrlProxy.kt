@@ -5,7 +5,6 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ClipboardManager
@@ -13,12 +12,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
-import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
@@ -773,6 +770,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     AppDiscoveryController(
       source =
         object : AppDiscoveryController.Source {
+          override fun resetKeystore(packageName: String, scope: String?, alias: String?) =
+            dev.jasonpearson.automobile.ctrlproxy.storage.resetKeystore(
+              this@CtrlProxy,
+              packageName,
+              scope,
+              alias,
+            )
+
           override fun keystore(packageName: String) =
             dev.jasonpearson.automobile.ctrlproxy.storage.discoverKeystore(
               this@CtrlProxy,
@@ -1335,7 +1340,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     PackageEventReceiver(
       serviceScope,
       object : PackageEventHost {
-        override fun isSystemApp(packageName: String) = resolveSystemApp(packageName)
+        override fun isSystemApp(packageName: String) =
+          packageManager.systemAppFlag(packageName) {
+            Log.w(TAG, "Failed to resolve system flag for $packageName", it)
+          }
 
         override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
           deviceEvents.packageEvent(event)
@@ -1401,6 +1409,26 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private val eventBatchReceiver = EventBatchReceiver(eventBatchBroadcastHandler)
 
+  private val displayTransitions =
+    DisplayTransitionRelay(
+      object : DisplayTransitionRelay.Host {
+        override fun launch(block: suspend () -> Unit) {
+          serviceScope.launch { block() }
+        }
+
+        override fun isPrototypeReady() = ::prototypeController.isInitialized
+
+        override suspend fun prototypeDisplayTransition(displayId: Int, removed: Boolean) {
+          prototypeController.onDisplayTransition(displayId, removed)
+        }
+
+        override fun isServerRunning() =
+          ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+        override suspend fun broadcast(frame: String) = webSocketServer.broadcast(frame)
+      },
+    )
+
   override fun onCreate() {
     super.onCreate()
     // Keep the production queue running from service creation, before any connection or request.
@@ -1438,19 +1466,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val displaySignal =
         DisplayRotationChangeSignal(
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
-          onTransition = { transition ->
-            serviceScope.launch {
-              if (::prototypeController.isInitialized) {
-                prototypeController.onDisplayTransition(
-                  transition.displayId,
-                  removed = transition.change == "removed",
-                )
-              }
-              if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-                webSocketServer.broadcast(displayTransitionFrame(transition))
-              }
-            }
-          },
+          onTransition = displayTransitions::onTransition,
         )
       rotationProvenance = RotationProvenanceTracker(displaySignal)
       deviceStateRegistration =
@@ -1464,11 +1480,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayDrawer.attachOverlayManager(overlayManager)
       if (!::prototypeController.isInitialized) {
         // Locks are shared safety facts; foreground suspension is request-local per surface.
-        val prototypeWindowBlocked = {
-          val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-          val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
-          keyguard?.isKeyguardLocked != false || power?.isInteractive != true
-        }
+        val windowBlocked = { this@CtrlProxy.prototypeWindowBlocked() }
         val createPrototypeHost = {
           DefaultPrototypeHost(
             context = this,
@@ -1478,7 +1490,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               overlayManager.setPrototypeAttached(true)
             },
             onWindowLost = ::refreshPrototypeWindow,
-            isBlocked = prototypeWindowBlocked,
+            isBlocked = windowBlocked,
             imeInset = PrototypeImeInset { displayId -> prototypeImeLiftPx(displayId) },
             backScope = serviceScope,
           )
@@ -1496,7 +1508,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             lifecycle =
               PrototypeLifecycle(
                 CoroutinePrototypeScheduler(serviceScope),
-                isBlocked = prototypeWindowBlocked,
+                isBlocked = windowBlocked,
                 observerSession = {
                   if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
                   else 0
@@ -2263,6 +2275,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     storageController.handleGetPreferences(requestId, packageName, fileName)
 
+  override suspend fun resetKeystore(
+    requestId: String?,
+    packageName: String,
+    scope: String?,
+    alias: String?,
+  ) = appDiscovery.resetKeystore(requestId, packageName, scope, alias)
+
   override suspend fun discoverKeystore(requestId: String?, packageName: String) =
     appDiscovery.discoverKeystore(requestId, packageName)
 
@@ -2469,17 +2488,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun onInterrupt() {
     Log.w(TAG, "Accessibility service interrupted")
-  }
-
-  private fun resolveSystemApp(packageName: String): Boolean? {
-    return try {
-      val appInfo = packageManager.getApplicationInfo(packageName, 0)
-      (appInfo.flags and
-        (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to resolve system flag for $packageName", e)
-      null
-    }
   }
 
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId

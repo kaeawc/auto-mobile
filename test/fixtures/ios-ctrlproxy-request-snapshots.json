@@ -632,6 +632,18 @@
       }
     },
     {
+      "name": "query_core_data",
+      "builder": "CtrlProxyDatabase.queryCoreData",
+      "wire": {
+        "type": "query_core_data",
+        "requestId": "fixture-request-id",
+        "appId": "com.example.app",
+        "store": "app.sqlite",
+        "entity": "User",
+        "limit": 25
+      }
+    },
+    {
       "name": "list_databases",
       "builder": "CtrlProxyDatabase.listDatabases",
       "wire": {

@@ -8,7 +8,7 @@ import type {
   AppleDeviceType,
 } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { parseAvdConfig } from "../../src/utils/android-cmdline-tools/AvdConfigReader";
-import type { DeviceInfo } from "../../src/models";
+import { ActionableError, type DeviceInfo } from "../../src/models";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -93,7 +93,10 @@ describe("DefaultExactDeviceProvisioner", () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [androidImage("slot-avd")],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: {
         readConfig: async (name: string) => {
           configReads.push(name);
@@ -146,6 +149,7 @@ describe("DefaultExactDeviceProvisioner", () => {
         listDeviceImages: async () => [],
         isCreationAllowed: () => true,
         avdManager: {
+          listInstalledSystemImages: async () => [],
           createAvd: async (params) => ({
             success: true,
             message: "created",
@@ -277,9 +281,12 @@ describe("DefaultExactDeviceProvisioner", () => {
     ]);
   });
 
-  test("creates the requested Android AVD without selecting a substitute", async () => {
+  test("creates an uninstalled non-TV Android runtime without checking installed images", async () => {
     const calls: unknown[] = [];
     const avdManager: ExactAndroidAvdClient = {
+      listInstalledSystemImages: async () => {
+        throw new Error("Non-TV creation must not list installed images");
+      },
       createAvd: async (params) => {
         calls.push(params);
         return { success: true, message: "created", avdName: params.name };
@@ -329,14 +336,94 @@ describe("DefaultExactDeviceProvisioner", () => {
     ]);
   });
 
-  test.each(["tv_1080p", "tv_4k", "tv_720p"])(
-    "creates an explicit TV spec with the requested %s profile (#15881)",
-    async (deviceType) => {
+  test.each(["android-tv", "google-tv", "google-tv-ps16k"])(
+    "rejects an uninstalled exact %s image with installation guidance",
+    async (tag) => {
+      const runtime = `system-images;android-37;${tag};arm64-v8a`;
+      const calls: unknown[] = [];
+      let creationStarted = false;
+      let capacityChecked = false;
+      let createdDeviceReported = false;
+      const signal = new AbortController().signal;
+      const provisioner = new DefaultExactDeviceProvisioner({
+        listDeviceImages: async () => [],
+        isCreationAllowed: () => true,
+        avdManager: {
+          listInstalledSystemImages: async (receivedSignal) => {
+            expect(receivedSignal).toBeInstanceOf(AbortSignal);
+            return [
+              {
+                packageName: `system-images;android-36;${tag};arm64-v8a`,
+                apiIdentifier: "36",
+                apiLevel: 36,
+                tag,
+                abi: "arm64-v8a",
+                versionInfo: "",
+              },
+            ];
+          },
+          createAvd: async (params) => {
+            calls.push(params);
+            return { success: true, message: "created" };
+          },
+        },
+        androidConfigReader: { readConfig: async () => null },
+        androidConfigWriter: { setMemoryMb: async () => {} },
+        iosSimulator: {} as ExactIosSimulatorClient,
+      });
+      const result = provisioner
+        .provision({
+          platform: "android",
+          name: "tv-37",
+          signal,
+          spec: { runtime, deviceType: "tv_1080p" },
+          assertCapacityBeforeCreate: async () => {
+            capacityChecked = true;
+          },
+          onBeforeCreate: () => {
+            creationStarted = true;
+          },
+        })
+        .then((provisioned) => {
+          createdDeviceReported = provisioned.created;
+          return provisioned;
+        });
+      await expect(result).rejects.toBeInstanceOf(ActionableError);
+      await expect(result).rejects.toMatchObject({
+        message:
+          `No installed Android TV system image matches the requested package '${runtime}'. ` +
+          `AutoMobile does not download system images. Install one with 'sdkmanager "${runtime}"', then retry.`,
+      });
+      expect(capacityChecked).toBe(false);
+      expect(creationStarted).toBe(false);
+      expect(createdDeviceReported).toBe(false);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  test.each([
+    { deviceType: "tv_1080p", tag: "android-tv" },
+    { deviceType: "tv_4k", tag: "google-tv" },
+    { deviceType: "tv_720p", tag: "google-tv-ps16k" },
+  ])(
+    "creates an installed explicit $tag spec with the requested $deviceType profile (#15881)",
+    async ({ deviceType, tag }) => {
+      const runtime = `system-images;android-34;${tag};x86_64`;
       const calls: unknown[] = [];
       const provisioner = new DefaultExactDeviceProvisioner({
         listDeviceImages: async () => [],
         isCreationAllowed: () => true,
         avdManager: {
+          listInstalledSystemImages: async () => [
+            {
+              packageName: runtime,
+              apiIdentifier: "34",
+              apiLevel: 34,
+              tag,
+              abi: "x86_64",
+              versionInfo: "",
+            },
+          ],
           createAvd: async (params) => {
             calls.push(params);
             return { success: true, message: "created", avdName: params.name };
@@ -350,14 +437,14 @@ describe("DefaultExactDeviceProvisioner", () => {
       const result = await provisioner.provision({
         platform: "android",
         name: "tv-34",
-        spec: { runtime: "system-images;android-34;android-tv;x86_64", deviceType },
+        spec: { runtime: runtime, deviceType },
       });
 
       expect(result.created).toBe(true);
       expect(calls).toEqual([
         {
           name: "tv-34",
-          package: "system-images;android-34;android-tv;x86_64",
+          package: runtime,
           device: deviceType,
         },
       ]);
@@ -370,6 +457,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       listDeviceImages: async () => [],
       isCreationAllowed: () => true,
       avdManager: {
+        listInstalledSystemImages: async () => [],
         createAvd: async (params) => {
           calls.push(params);
           return { success: true, message: "created", avdName: params.name };
@@ -412,7 +500,10 @@ describe("DefaultExactDeviceProvisioner", () => {
         },
       ],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: { readConfig: async () => null },
       androidConfigWriter: {} as AndroidAvdConfigWriter,
       iosSimulator,
@@ -469,7 +560,10 @@ describe("DefaultExactDeviceProvisioner", () => {
         },
       ],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: { readConfig: async () => null },
       androidConfigWriter: {} as AndroidAvdConfigWriter,
       iosSimulator: {
@@ -514,7 +608,10 @@ describe("DefaultExactDeviceProvisioner", () => {
         },
       ],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: { readConfig: async () => null },
       androidConfigWriter: {} as AndroidAvdConfigWriter,
       iosSimulator: {
@@ -552,7 +649,10 @@ describe("DefaultExactDeviceProvisioner", () => {
         },
       ],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: { readConfig: async () => null },
       androidConfigWriter: {} as AndroidAvdConfigWriter,
       iosSimulator: {
@@ -592,6 +692,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       listDeviceImages: async () => images,
       isCreationAllowed: () => true,
       avdManager: {
+        listInstalledSystemImages: async () => [],
         createAvd: async (params) => {
           createCalls++;
           signalCreateStarted();
@@ -652,6 +753,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       listDeviceImages: async () => images,
       isCreationAllowed: () => true,
       avdManager: {
+        listInstalledSystemImages: async () => [],
         createAvd: async (params) => {
           createCalls++;
           signalCreateStarted();
@@ -695,6 +797,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       listDeviceImages: async () => [androidImage("phone-api-36-a")],
       isCreationAllowed: () => true,
       avdManager: {
+        listInstalledSystemImages: async () => [],
         createAvd: async () => {
           throw new Error("must not create a replacement");
         },
@@ -737,7 +840,10 @@ describe("DefaultExactDeviceProvisioner", () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [androidImage("minor-runtime")],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: { readConfig: async () => config },
       androidConfigWriter: {} as AndroidAvdConfigWriter,
       iosSimulator: {} as ExactIosSimulatorClient,
@@ -767,7 +873,10 @@ describe("DefaultExactDeviceProvisioner", () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [androidImage("minor-runtime")],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: { readConfig: async () => config },
       androidConfigWriter: {} as AndroidAvdConfigWriter,
       iosSimulator: {} as ExactIosSimulatorClient,
@@ -790,6 +899,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       listDeviceImages: async () => [androidImage("phone-api-36-a")],
       isCreationAllowed: () => true,
       avdManager: {
+        listInstalledSystemImages: async () => [],
         createAvd: async () => {
           throw new Error("must not create a replacement");
         },
@@ -826,7 +936,10 @@ describe("DefaultExactDeviceProvisioner", () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [androidImage("phone-api-36-a")],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: {
         readConfig: async () => ({
           apiLevel: 36,
@@ -867,7 +980,10 @@ describe("DefaultExactDeviceProvisioner", () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [androidImage("phone-api-36-a")],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: {
         readConfig: async () => ({
           apiLevel: 36,
@@ -903,7 +1019,10 @@ describe("DefaultExactDeviceProvisioner", () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [androidImage("phone-api-36-a")],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: {
         readConfig: async () => ({
           apiLevel: 36,
@@ -933,7 +1052,10 @@ describe("DefaultExactDeviceProvisioner", () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: { readConfig: async () => null },
       androidConfigWriter: {} as AndroidAvdConfigWriter,
       iosSimulator: {} as ExactIosSimulatorClient,
@@ -978,7 +1100,10 @@ describe("exact iOS provisioning runtime compatibility", () => {
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [],
       isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: { readConfig: async () => null },
       androidConfigWriter: {} as AndroidAvdConfigWriter,
       iosSimulator: {
@@ -1113,7 +1238,10 @@ test.each([false, true])(
       lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
       listDeviceImages: async () => [],
       isCreationAllowed: () => true,
-      avdManager: { createAvd: async () => ({ success: true, message: "" }) },
+      avdManager: {
+        listInstalledSystemImages: async () => [],
+        createAvd: async () => ({ success: true, message: "" }),
+      },
       androidConfigReader: { readConfig: async () => null },
       androidConfigWriter: { setMemoryMb: async () => {} },
       iosSimulator: {
@@ -1159,7 +1287,10 @@ test("exact creation with default none and no resources has no host effects", as
     lifecycleCoordinator: new FakeVirtualDeviceLifecycleCoordinator(),
     listDeviceImages: async () => [],
     isCreationAllowed: () => true,
-    avdManager: { createAvd: async () => ({ success: true, message: "" }) },
+    avdManager: {
+      listInstalledSystemImages: async () => [],
+      createAvd: async () => ({ success: true, message: "" }),
+    },
     androidConfigReader: { readConfig: async () => null },
     androidConfigWriter: { setMemoryMb: async () => {} },
     iosSimulator: { createSimulator: async () => "12345678-1234-ABCD-9876-123456789ABC" },
@@ -1182,7 +1313,19 @@ test("exact Android creation returns configured metadata without booting", async
   const provisioner = new DefaultExactDeviceProvisioner({
     listDeviceImages: async () => [],
     isCreationAllowed: () => true,
-    avdManager: { createAvd: async () => ({ success: true, message: "created" }) },
+    avdManager: {
+      listInstalledSystemImages: async () => [
+        {
+          packageName: "system-images;android-36;android-tv;arm64-v8a",
+          apiIdentifier: "36",
+          apiLevel: 36,
+          tag: "android-tv",
+          abi: "arm64-v8a",
+          versionInfo: "",
+        },
+      ],
+      createAvd: async () => ({ success: true, message: "created" }),
+    },
     androidConfigReader: reader,
     androidConfigWriter: { setMemoryMb: async () => {} },
     iosSimulator: {} as ExactIosSimulatorClient,

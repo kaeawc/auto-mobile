@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { INTEGRITY_SIGNALS } from "./integritySignals";
 import { DEVICE_CLOCK_TOLERANCE_MS, MAX_DEVICE_CLOCK_ADVANCE_MS } from "../utility/DeviceClock";
 
 /**
@@ -26,8 +27,8 @@ export type DeviceConditionKey =
 export const DEVICE_CONDITION_UNSET = "unset";
 
 /**
- * The injector value for a fault requested with an object (#14069), whose fields travel as the
- * change's `params`. A fault with parameters has no enum value to hand the injector.
+ * The injector value for a condition requested with an object, whose fields travel as the
+ * change's `params`. Used by parameterized faults and integrity presets with signal overrides.
  */
 export const DEVICE_CONDITION_APPLY = "apply";
 
@@ -87,6 +88,34 @@ export interface DeviceConditionPermissionTarget {
   permission: string;
 }
 
+export type DeviceConditionIntegrityPreset = "maximally-detectable" | "minimally-detectable";
+export type DeviceConditionSignalId = (typeof INTEGRITY_SIGNALS)[number]["id"];
+
+export interface DeviceConditionIntegrityParams {
+  preset?: DeviceConditionIntegrityPreset;
+  signals?: Partial<Record<DeviceConditionSignalId, "on" | "off">>;
+}
+
+/** Shared strict contract for public requests and injector-side parameter validation. */
+export const integrityStateParamsSchema = () =>
+  z
+    .object({
+      preset: z.enum(["maximally-detectable", "minimally-detectable"]).optional(),
+      signals: z
+        .object(
+          Object.fromEntries(
+            INTEGRITY_SIGNALS.map(({ id }) => [id, z.enum(["on", "off"]).optional()]),
+          ) as Record<DeviceConditionSignalId, z.ZodOptional<z.ZodEnum<["on", "off"]>>>,
+        )
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .refine(
+      (input) => input.preset !== undefined || input.signals !== undefined,
+      "Provide at least one of preset or signals",
+    );
+
 /**
  * A validated `deviceCondition` request. Declared as an explicit interface (not
  * `z.infer`) so that embedding {@link deviceConditionInputSchema} in the large
@@ -97,7 +126,10 @@ export interface DeviceConditionPermissionTarget {
 export interface DeviceConditionInput {
   version?: typeof DEVICE_CONDITION_SCHEMA_VERSION;
   rootState?: "rooted-detectable" | typeof DEVICE_CONDITION_UNSET;
-  integrityState?: typeof DEVICE_CONDITION_UNSET;
+  integrityState?:
+    | DeviceConditionIntegrityPreset
+    | DeviceConditionIntegrityParams
+    | typeof DEVICE_CONDITION_UNSET;
   /**
    * Power-domain fault injectors (#14063), each optional and each clearable with
    * `"unset"`. More fault families add their key here as they land. Kept as named
@@ -208,10 +240,13 @@ export const deviceConditionInputSchema: z.ZodType<DeviceConditionInput> = z
         "Root fixture: 'rooted-detectable' plants inert su/busybox stubs and sets SELinux permissive so root-detection checks trip (Android, non-Play image, needs a writable /system); 'unset' restores.",
       ),
     integrityState: z
-      .literal(DEVICE_CONDITION_UNSET)
+      .union([
+        z.enum(["maximally-detectable", "minimally-detectable", DEVICE_CONDITION_UNSET]),
+        integrityStateParamsSchema(),
+      ])
       .optional()
       .describe(
-        "Integrity-signal state. Only 'unset' (clear) is available until an integrity injector lands.",
+        "Integrity signals (Android): maximally-detectable enables su-binary, superuser-apk and selinux-permissive; minimally-detectable disables them. Or { preset?, signals?: { <signal-id>: 'on' | 'off' } }, with at least one field and signals overriding the preset. Needs root and writable /system for files. Image-fixed signals and missing-otacerts report unsupported. Results include per-signal status and post-apply active readings. 'unset' restores prior state; existing image/rootState files are never removed.",
       ),
     faults: z
       .object({
@@ -354,7 +389,15 @@ export function deviceConditionChanges(input: DeviceConditionInput): DeviceCondi
     changes.push({ key: "rootState", value: input.rootState });
   }
   if (input.integrityState !== undefined) {
-    changes.push({ key: "integrityState", value: input.integrityState });
+    changes.push(
+      typeof input.integrityState === "string"
+        ? { key: "integrityState", value: input.integrityState }
+        : {
+            key: "integrityState",
+            value: DEVICE_CONDITION_APPLY,
+            params: { ...input.integrityState },
+          },
+    );
   }
   const faults = input.faults ?? {};
   for (const name of Object.keys(faults).sort()) {
@@ -387,9 +430,18 @@ export function deviceConditionInputIsMeaningful(input: DeviceConditionInput): b
 /** What happened to one requested condition. */
 export type DeviceConditionChangeStatus = "applied" | "cleared" | "unchanged" | "unsupported";
 
+export interface DeviceConditionSignalResult {
+  id: DeviceConditionSignalId;
+  requested: "on" | "off";
+  status: "applied" | "unchanged" | "unsupported";
+  active?: boolean;
+  detail?: string;
+}
+
 export interface DeviceConditionChangeResult {
   key: DeviceConditionKey;
   status: DeviceConditionChangeStatus;
+  signals?: DeviceConditionSignalResult[];
   /** Why the condition was not applied, or what the injector reported. */
   detail?: string;
 }

@@ -28,7 +28,10 @@ class KeystoreStateProvider : ContentProvider() {
     // Re-contribute after SDK shutdown clears the registry.
     registerCapability()
     val response =
-      KeystoreStateHandler(AndroidKeystoreBackend(), AndroidDeviceLockProbe(context))
+      KeystoreStateHandler(AndroidKeystoreBackend(), AndroidDeviceLockProbe(context)) {
+          AutoMobileSDK.capabilities.policy.allowMutations &&
+            AutoMobileSDK.isCapabilitySupported("storage.mutation")
+        }
         .handle(method, extras?.getString("scope"), extras?.getString("alias"))
     return Bundle().apply { putString("result", response.toString()) }
   }
@@ -41,7 +44,7 @@ class KeystoreStateProvider : ContentProvider() {
     sortOrder: String?,
   ): Cursor? {
     DebugInspectorAccess.enforceCaller(context)
-    throw UnsupportedOperationException("Use call for read-only metadata")
+    throw UnsupportedOperationException("Use call for metadata or scoped deletion")
   }
 
   override fun getType(uri: Uri): String? {
@@ -51,12 +54,12 @@ class KeystoreStateProvider : ContentProvider() {
 
   override fun insert(uri: Uri, values: ContentValues?): Uri? {
     DebugInspectorAccess.enforceCaller(context)
-    throw UnsupportedOperationException("Keystore mutation is unsupported")
+    throw UnsupportedOperationException("Use call delete for scoped alias deletion")
   }
 
   override fun delete(uri: Uri, selection: String?, selectionArgs: Array<String>?): Int {
     DebugInspectorAccess.enforceCaller(context)
-    throw UnsupportedOperationException("Keystore mutation is unsupported")
+    throw UnsupportedOperationException("Use call delete for scoped alias deletion")
   }
 
   override fun update(
@@ -66,6 +69,6 @@ class KeystoreStateProvider : ContentProvider() {
     selectionArgs: Array<String>?,
   ): Int {
     DebugInspectorAccess.enforceCaller(context)
-    throw UnsupportedOperationException("Keystore mutation is unsupported")
+    throw UnsupportedOperationException("Use call delete for scoped alias deletion")
   }
 }

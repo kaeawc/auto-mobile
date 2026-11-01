@@ -470,6 +470,14 @@ export interface GetPreferencesMessage {
 }
 
 /** Discovers the app-owned read-only Keystore metadata bridge. */
+export interface ResetKeystoreMessage {
+  type: "reset_keystore";
+  requestId: string;
+  packageName: string;
+  scope?: string;
+  alias?: string;
+}
+
 export interface DiscoverKeystoreMessage {
   type: "discover_keystore";
   requestId: string;
@@ -751,6 +759,7 @@ export type CtrlProxyRequest =
   | ListPreferenceFilesMessage
   | GetPreferencesMessage
   | DiscoverKeystoreMessage
+  | ResetKeystoreMessage
   | GetSdkCapabilitiesMessage
   | ListDataStoresMessage
   | GetDataStoreMessage

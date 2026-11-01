@@ -8,6 +8,7 @@ import type { SdkCapabilityQueryOptions } from "./CtrlProxySdkCapabilities";
  */
 
 import { sendCommand } from "../DeviceServiceUtils";
+import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import { logger } from "../../../utils/logger";
 import type {
   DatabaseInfo,
@@ -87,6 +88,29 @@ interface ExecuteSqlOptions {
 
 export class CtrlProxyDatabase {
   constructor(private readonly context: DelegateContext) {}
+
+  async queryCoreData(
+    appId: string,
+    store: string,
+    entity: string,
+    {
+      limit,
+      timeout = 5000,
+    }: { limit?: number; timeout?: number | SdkCapabilityQueryOptions } = {},
+  ): Promise<SQLResult> {
+    const result = await this.request<ExecuteSqlResult>(
+      "query_core_data",
+      "execute_sql_result",
+      { appId, store, entity, ...(limit === undefined ? {} : { limit }) },
+      { timeout, operationName: "Query Core Data" },
+    );
+    return {
+      type: "query",
+      columns: result.columns ?? [],
+      rows: result.rows ?? [],
+      truncated: result.truncated,
+    };
+  }
 
   async executeSQL(
     appId: string,
@@ -272,7 +296,7 @@ export class CtrlProxyDatabase {
         ),
     });
     if (!result.success) {
-      throw new Error(result.error || `${operationName} failed`);
+      throw new Error(rewriteUnknownCommandError(result.error || `${operationName} failed`, "ios"));
     }
     return result;
   }

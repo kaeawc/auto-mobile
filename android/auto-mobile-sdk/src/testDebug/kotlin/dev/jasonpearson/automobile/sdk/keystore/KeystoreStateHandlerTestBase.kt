@@ -10,6 +10,14 @@ internal abstract class KeystoreStateHandlerTestBase {
     val calls = mutableListOf<String>()
     var failure: Exception? = null
 
+    val aliasFailures = mutableMapOf<String, Exception>()
+
+    override fun deleteAlias(alias: String) {
+      calls.add("deleteAlias:$alias")
+      aliasFailures[alias]?.let { throw it }
+      entries.remove(alias)
+    }
+
     override fun containsAlias(alias: String): Boolean {
       calls.add("containsAlias:$alias")
       failure?.let { throw it }

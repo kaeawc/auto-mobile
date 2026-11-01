@@ -654,6 +654,15 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     resolveWith: { success: true, totalTimeMs: 1, queryType: "query", columns: [], rows: [] },
   },
   {
+    name: "query_core_data",
+    builder: "CtrlProxyDatabase.queryCoreData",
+    invoke: (h) =>
+      new CtrlProxyDatabase(h.context).queryCoreData("com.example.app", "app.sqlite", "User", {
+        limit: 25,
+      }),
+    resolveWith: { success: true, totalTimeMs: 1, queryType: "query", columns: [], rows: [] },
+  },
+  {
     name: "list_databases",
     builder: "CtrlProxyDatabase.listDatabases",
     invoke: (h) => new CtrlProxyDatabase(h.context).listDatabases("com.example.app"),
@@ -843,6 +852,7 @@ describe("iOS control-proxy — request snapshot fixture matches live TS builder
       "delete_keychain_item",
       // database
       "execute_sql",
+      "query_core_data",
       "list_databases",
       "list_tables",
       "get_table_data",

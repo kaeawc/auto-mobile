@@ -1152,6 +1152,14 @@ data class PrototypeEvent(
 // =============================================================================
 
 @Serializable
+@SerialName("keystore_reset")
+data class KeystoreResetResult(
+  override val timestamp: Long,
+  override val requestId: String? = null,
+  val state: KeystoreResetState,
+) : WebSocketResponse(), CorrelatedResponse
+
+@Serializable
 @SerialName("keystore_discovery")
 data class KeystoreDiscoveryResult(
   override val timestamp: Long,

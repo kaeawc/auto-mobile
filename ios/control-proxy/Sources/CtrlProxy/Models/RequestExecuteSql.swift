@@ -12,3 +12,14 @@ public struct RequestExecuteSql: Decodable, Sendable {
 }
 
 extension RequestExecuteSql: CommandPayload {}
+
+/// Read-only entity fetch; no SQL or mutation credentials are accepted by this command.
+public struct RequestQueryCoreData: Codable, Sendable {
+    public var requestId: String?
+    public var appId: String?
+    public var store: String
+    public var entity: String
+    public var limit: Int?
+}
+
+extension RequestQueryCoreData: CommandPayload {}

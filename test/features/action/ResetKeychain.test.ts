@@ -71,6 +71,17 @@ describe("ResetKeychain", () => {
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 
+  test("iOS requires confirmation even when omitted", async () => {
+    const simctl = new FakeSimctl();
+    await expect(
+      new ResetKeychain(simulatorDevice, simctl).execute({
+        appId: APP_ID,
+        explicitlyTargeted: true,
+      }),
+    ).rejects.toThrow(/confirm: true/);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
   test("rejects physical iOS devices before execution (scoped reset tracked in #5188)", async () => {
     const simctl = new FakeSimctl();
     const action = new ResetKeychain(physicalDevice, simctl);
@@ -81,13 +92,13 @@ describe("ResetKeychain", () => {
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 
-  test("rejects Android devices before execution (scoped Keystore reset tracked in #5190)", async () => {
+  test("rejects Android empty selectors before execution", async () => {
     const simctl = new FakeSimctl();
     const action = new ResetKeychain(androidDevice, simctl);
 
     await expect(
       action.execute({ appId: APP_ID, confirm: true, explicitlyTargeted: true }),
-    ).rejects.toThrow(/#5190/);
+    ).rejects.toThrow(/scope or alias/);
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 

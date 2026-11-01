@@ -272,3 +272,61 @@ test("tap hierarchy read gives stalled bridge discovery only the search time rem
     sync.mockRestore();
   }
 });
+
+test.each([25, 60])(
+  "tap hierarchy read forwards the budget after %d ms of bridge work",
+  async (bridgeMs) => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1000);
+    const client = new FakeIOSCtrlProxy(timer);
+    const webRaw: XCTestHierarchy = {
+      ...raw,
+      hierarchy: {
+        ...raw.hierarchy,
+        node: [{ className: "WKWebView", scrollable: "true", bounds: saveBounds }],
+      },
+    };
+    const instance = spyOnIosClientInstance(client);
+    const convert = spyOn(client, "convertToViewHierarchyResult").mockImplementation((value) =>
+      converter.convertToViewHierarchyResult(value),
+    );
+    const sync = spyOn(client, "requestHierarchySync").mockImplementation(async () => {
+      timer.advanceTime(60);
+      return { hierarchy: webRaw, totalTimeMs: 60 };
+    });
+    const signal = new AbortController().signal;
+    const webReads: Array<{ signal?: AbortSignal; timeoutMs?: number }> = [];
+    try {
+      const result = await readFreshPlatformHierarchy(
+        {
+          device,
+          timer,
+          adb: new FakeAdbClient(),
+          androidService: new FakeCtrlProxy(timer),
+          viewHierarchy: new ViewHierarchy(device, new FakeAdbClientFactory(), null, { timer }),
+          prepareForResponse: (hierarchy) => hierarchy,
+          actionLabel: "tapOn",
+          sdkBridge: {
+            observe: async () => {
+              timer.advanceTime(bridgeMs);
+              return { kind: "none" };
+            },
+          },
+          sdkWeb: {
+            snapshots: async (signal, timeoutMs) => {
+              webReads.push({ signal, timeoutMs });
+              return [];
+            },
+          },
+        },
+        { timeoutMs: 100, forceCapture: false, signal },
+      );
+      expect(result).not.toBeNull();
+      expect(webReads).toEqual([{ signal, timeoutMs: Math.max(0, 40 - bridgeMs) }]);
+    } finally {
+      instance.mockRestore();
+      convert.mockRestore();
+      sync.mockRestore();
+    }
+  },
+);

@@ -77,6 +77,20 @@ export function uinputRawPoint(
   return { x: clamp(raw.x, maxX), y: clamp(raw.y, maxY) };
 }
 
+/** A screen tilt direction in natural-display space, matching uinputRawPoint's inverse rotation. */
+export function uinputRawOrientation(orientation: number, rotation: number): number {
+  switch (rotation) {
+    case 1:
+      return orientation + Math.PI / 2;
+    case 2:
+      return orientation + Math.PI;
+    case 3:
+      return orientation - Math.PI / 2;
+    default:
+      return orientation;
+  }
+}
+
 function clamp(value: number, max: number): number {
   return Math.min(Math.max(value, 0), max);
 }
@@ -167,7 +181,9 @@ function scaled(value: number, max: number): number {
 function positionEvents(frame: Frame, geometry: UinputDisplayGeometry, hover: boolean): number[] {
   const raw = uinputRawPoint(frame, geometry);
   const axes =
-    !hover && frame.tilt !== undefined ? uinputTiltAxes(frame.tilt, frame.orientation) : undefined;
+    !hover && frame.tilt !== undefined
+      ? uinputTiltAxes(frame.tilt, uinputRawOrientation(frame.orientation, geometry.rotation))
+      : undefined;
   return [
     ...abs(ABS_X, raw.x),
     ...abs(ABS_Y, raw.y),

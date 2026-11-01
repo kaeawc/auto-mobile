@@ -12,7 +12,7 @@ import { appLocaleJournalKey } from "../daemon/sessionBroker/appLocaleJournalKey
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
-import { dataToolMutations } from "./deviceMutationDataAdapters";
+import { dataToolMutations, isCoreDataRead } from "./deviceMutationDataAdapters";
 import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
 import { interactionToolMutations } from "./deviceMutationInteractionAdapters";
 import { lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
@@ -225,7 +225,9 @@ function mutationCallIsRead(
     case "clipboard":
       return args.action === "get";
     case "sqlQuery":
-      return typeof args.query === "string" && isReadOnlySqlQuery(args.query);
+      return (
+        isCoreDataRead(args) || (typeof args.query === "string" && isReadOnlySqlQuery(args.query))
+      );
     case "displayConfig":
       return settingMutations(args, platform).length === 0;
     case "network":

@@ -297,6 +297,13 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     timestamp: "optional",
     error: "optional",
   },
+  keystore_reset: {
+    type: "required",
+    requestId: "optional",
+    state: "optional",
+    timestamp: "optional",
+    error: "optional",
+  },
   keystore_discovery: {
     type: "required",
     requestId: "optional",

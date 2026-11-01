@@ -39,7 +39,19 @@ const appearanceSchema = z.object({
 const lastResultSchema = z.object({
   id: z.string().optional(),
   all: z.literal(true).optional(),
-  lastAction: z.enum(["show", "dismiss"]),
+  lastAction: z
+    .enum(["show", "dismiss", "patch"])
+    .describe(
+      "The last mutation: show or dismiss; a shown prototype's entry reads patch once a patch has landed since its show",
+    ),
+  revision: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Shown prototypes: the newest revision the device reported, from a landed patch or a device /data write; absent until one arrives after the show",
+    ),
   adopted: z
     .literal(true)
     .optional()

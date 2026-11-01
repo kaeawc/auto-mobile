@@ -3,12 +3,14 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult
 import dev.jasonpearson.automobile.protocol.KeystoreDiscoveryState
+import dev.jasonpearson.automobile.protocol.KeystoreResetResult
+import dev.jasonpearson.automobile.protocol.KeystoreResetState
 import dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult
 import dev.jasonpearson.automobile.protocol.SdkCapabilitiesState
 
 /**
- * Answers `discover_keystore` and `get_sdk_capabilities`: what the target app's debug bridge can
- * do, read off the request queue and returned as a correlated result.
+ * Routes app-owned capability discovery and scoped Keystore deletion off the request queue,
+ * returning correlated results from the target app's debug bridge.
  */
 internal class AppDiscoveryController(
   private val source: Source,
@@ -16,12 +18,27 @@ internal class AppDiscoveryController(
   private val resultSender: ResultSender,
   private val timeProvider: TimeProvider,
 ) {
-  /** Reads the target app's bridge providers. */
+  /** Accesses the target app's bridge providers. */
   interface Source {
+    fun resetKeystore(packageName: String, scope: String?, alias: String?): KeystoreResetState
+
     fun keystore(packageName: String): KeystoreDiscoveryState
 
     /** [userId] targets another Android user's instance of the app; null is the service's own. */
     fun sdkCapabilities(packageName: String, userId: Int?): SdkCapabilitiesState
+  }
+
+  fun resetKeystore(requestId: String?, packageName: String, scope: String?, alias: String?) {
+    asyncActionRunner.launch(requestId, "reset_keystore") {
+      val state = source.resetKeystore(packageName, scope, alias)
+      resultSender.send(requestId, "keystore_reset", attachPerf = false) { _ ->
+        KeystoreResetResult(
+          timestamp = timeProvider.currentTimeMillis(),
+          requestId = requestId,
+          state = state,
+        )
+      }
+    }
   }
 
   fun discoverKeystore(requestId: String?, packageName: String) {

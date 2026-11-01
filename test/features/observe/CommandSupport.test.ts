@@ -137,6 +137,8 @@ describe("CtrlProxy command support", () => {
     expect(ANDROID_CAPABILITY_GATED_COMMANDS).toEqual(
       new Set([
         ...oldApkAdvertisedCommands,
+        // Newer than the old-APK fixture (#5190).
+        "reset_keystore",
         "show_prototype",
         "dismiss_prototype",
         // Newer than the old-APK fixture: no older APK advertises it.

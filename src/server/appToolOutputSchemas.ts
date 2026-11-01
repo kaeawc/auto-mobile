@@ -1,3 +1,4 @@
+import { keystoreResetSchema } from "../features/storage/keystoreReset";
 import { z } from "zod/v4";
 import { APP_TRIM_MEMORY_LEVELS } from "../models/AppLifecycleResult";
 
@@ -366,15 +367,16 @@ export const uninstallAppResultSchema = z
   })
   .passthrough();
 
-/** Refusals and reset failures throw; iOS Simulator reports its device-wide over-reset. */
+/** Android refusals and partial failures are structured; iOS reports its device-wide over-reset. */
 export const resetKeychainResultSchema = z
   .object({
-    success: z.literal(true),
+    success: z.boolean(),
     deviceId: z.string(),
     platform: z.enum(["ios", "android"]),
     requestedAppId: z.string(),
     scope: z.enum(["app", "all-apps"]),
     exceededRequestedScope: z.boolean(),
     message: z.string(),
+    ...keystoreResetSchema.partial().shape,
   })
   .passthrough();

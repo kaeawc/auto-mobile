@@ -27,15 +27,44 @@ Branch on `reason`, not on error text: `BRIDGE_NOT_INSTALLED`, `DISABLED`,
 `unsupported` / `DECLARED_UNSUPPORTED`; update the APK to get discovery.
 
 `deviceLocked: locked` reports the device lock state but does not block metadata
-reads. The per-alias outcomes `locked` and `authentication_required` are reserved
-and are not reported today.
+reads. Deletion can report per-alias `locked` and `authentication_required` outcomes.
 
-## What is not supported
+## Android scoped deletion
 
-This feature is discovery only. `secure_state.read` stays unavailable, and all
-mutation calls are unsupported. To reset an app's data, use the separate, explicit
-package-data reset. Locked-device behavior, authenticated or StrongBox keys, and
-Keychain on iOS are not covered.
+Call `resetKeychain` with `appId`, an explicit device target (`deviceId`, `device`,
+or `sessionUuid`), and `scope` and/or `alias`. A scope deletes every exact alias
+registered in that scope. An alias alone is allowed when declared in any scope;
+with a scope it must belong to that scope. An empty selector is rejected.
+
+The app must enable Keystore test state, declare the selected aliases, and enable
+both its storage mutation capability and mutation policy. Android does not need
+`confirm` and requires no session, but `confirm: false` refuses the reset. A recorded
+plan writes `confirm: false`, so its replay stops at this step until you set
+`confirm: true`. No keys are created or re-provisioned.
+
+The result reports `scope: "app"`, `requestedScope`/`requestedAlias`, `deletedCount`
+and one outcome per attempted alias: `deleted`, `not_found`, `locked`,
+`authentication_required`, or `failed`. Every selected alias is attempted. Overall
+`status` is `deleted` when all are deleted, `partial` when some are deleted, and
+`failed` when none are deleted (including when all are absent). `success` is true
+only for `deleted`; partial and failed results are tool errors. Only identifiers
+and counts are returned, never key material.
+
+Request-level refusals have an `outcome` and `reason`, zero deleted count and no
+per-alias results: `disabled` / `DISABLED`, `scope_not_declared` /
+`SCOPE_NOT_DECLARED`, `authorization_denied` / `MUTATION_NOT_ALLOWED`,
+`invalid_selector` / `EMPTY_SELECTOR`, `unsupported` / `DECLARED_UNSUPPORTED`, or
+`unavailable` / `BRIDGE_NOT_INSTALLED` or `BRIDGE_UNAVAILABLE`. Enable the app's
+opt-in and mutation policy, correct its declarations, or install/update its debug
+bridge and CtrlProxy as indicated. Unlock or use the app's normal authentication
+flow for protected keys; AutoMobile does not bypass authentication. A transport
+timeout leaves deletion completion uncertain; inspect app state before retrying.
+
+Discovery retains `mutation: "declared_unsupported"` for compatibility; it does
+not advertise deletion authorization. `secure_state.read` remains unavailable.
+The provider and its discovery/deletion calls are absent from release builds.
+Package-data reset remains a separate operation. On iOS Simulator,
+`resetKeychain` still requires `confirm: true` and clears every app's Keychain.
 
 ## iOS Keychain item deletion
 

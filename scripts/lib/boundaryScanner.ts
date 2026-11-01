@@ -1,3 +1,4 @@
+import { relative } from "node:path";
 import ts from "typescript";
 
 /**
@@ -22,6 +23,8 @@ export interface BoundaryRow {
   readonly skipPrefixes: readonly string[];
   /** Repo-relative paths, beyond the owner, that are never scanned (documented exceptions or allowlists). */
   readonly skipFiles?: readonly string[];
+  /** The directory a `tree` row walks; defaults to `src`. */
+  readonly treeRoot?: string;
   /** File extensions scanned by `tree` rows; defaults to `.ts`. */
   readonly extensions?: readonly string[];
   /**
@@ -36,10 +39,12 @@ export interface BoundaryRow {
    * indented `file:line:col: text`; `positions` indented `file:line:col`;
    * `src-locations` unindented `file:line:col: text` with the leading `src/`
    * stripped; `bare-locations` and `bare-positions` are the same unindented
-   * forms with the full repo path kept. `file-messages` prints `fileMessage(file)` once per file.
+   * forms with the full repo path kept. `root-locations` is `file:line:col: text` with the file
+   * relative to the row's `treeRoot`. `file-messages` prints `fileMessage(file)` once per file.
    */
   readonly report:
     | "file-messages"
+    | "root-locations"
     | "files"
     | "locations"
     | "positions"
@@ -157,13 +162,18 @@ export function scanBoundary(
 }
 
 function reportLines(
-  { report, fileMessage }: Pick<BoundaryRow, "report" | "fileMessage">,
+  { report, fileMessage, treeRoot }: Pick<BoundaryRow, "report" | "fileMessage" | "treeRoot">,
   violations: readonly BoundaryViolation[],
 ): string[] {
   switch (report) {
     case "file-messages":
       return [...new Set(violations.map((violation) => violation.file))].map(
         (file) => fileMessage?.(file) ?? file,
+      );
+    case "root-locations":
+      return violations.map(
+        (violation) =>
+          `${relative(treeRoot ?? "src", violation.file).replaceAll("\\", "/")}:${violation.line}:${violation.column}: ${violation.text}`,
       );
     case "files":
       return [...new Set(violations.map((violation) => violation.file))].map((file) => `  ${file}`);

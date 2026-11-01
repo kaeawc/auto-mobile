@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { repositoryPath } from "../../scripts/check-daemon-launcher-boundary";
+import { repositoryPath } from "../../scripts/lib/daemonLauncherBoundary";
 
 describe("daemon launcher boundary", () => {
   test("normalizes Windows separators before applying the owner exemption", () => {

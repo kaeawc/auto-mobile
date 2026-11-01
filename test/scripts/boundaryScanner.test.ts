@@ -410,3 +410,44 @@ describe("sdkmanager-execution row (#13219)", () => {
     );
   });
 });
+
+describe("daemon-launcher row (#13219)", () => {
+  const treeFile = (path: string, source: string) => ({
+    path,
+    addedLines: new Set<number>(),
+    source,
+  });
+  const launch =
+    'import { spawn } from "node:child_process";\nspawn("auto-mobile", ["--daemon-mode"]);';
+
+  test("reports each daemon execution call site and skips the owner", () => {
+    const owner = treeFile("src/daemon/DaemonLauncher.ts", launch);
+    const other = treeFile("src/daemon/sub/y.ts", launch);
+
+    expect(
+      scan("daemon-launcher", [owner, other]).map(({ file, line, column, text }) => [
+        file,
+        line,
+        column,
+        text,
+      ]),
+    ).toEqual([["src/daemon/sub/y.ts", 2, 1, 'spawn("auto-mobile", ["--daemon-mode"])']]);
+  });
+
+  test("prints locations relative to src/daemon and keeps the success message", () => {
+    const violation = {
+      file: "src/daemon/sub/y.ts",
+      line: 2,
+      column: 1,
+      text: 'spawn("auto-mobile", ["--daemon-mode"])',
+    };
+
+    expect(renderBoundaryResult(row("daemon-launcher"), [violation]).stderr).toBe(
+      "error: daemon execution must use DaemonLauncher:\n" +
+        'sub/y.ts:2:1: spawn("auto-mobile", ["--daemon-mode"])\n',
+    );
+    expect(renderBoundaryResult(row("daemon-launcher"), []).stdout).toBe(
+      "daemon-launcher-boundary: no direct production daemon invocations.\n",
+    );
+  });
+});

@@ -306,5 +306,7 @@ export const awaitWhileRequestIsLive = async <T>(
  * ObserveResult as its top-level payload, every action tool nests the same snapshot under
  * `.observation`. The one place that encodes that difference.
  */
-export const observationOfPayload = (toolName: string, payload: Record<string, unknown>): unknown =>
-  toolName === "observe" ? payload : payload.observation;
+export const observationOfPayload = (
+  toolName: string,
+  payload: Record<string, unknown>,
+): unknown => (toolName === "observe" ? payload : payload.observation);

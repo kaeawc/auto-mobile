@@ -1,3 +1,4 @@
+import { watchPress, unsupportedWatchAction } from "../watch/WatchActions";
 import { getIosLockStateCache } from "../observe/ios/IosLockStateCacheRegistry";
 import type { IosLockStateInvalidator } from "../observe/ios/CachedIosLockStateProbe";
 import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
@@ -278,6 +279,12 @@ export class PressButton extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<PressButtonResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
+    if (this.device.platform === "watchos") {
+      if (typeof progressOrCall === "object" && progressOrCall.steps !== undefined) {
+        unsupportedWatchAction("home with steps");
+      }
+      return watchPress(this.device.deviceId, button, signal);
+    }
     const rotary = isRotaryButton(button) ? this.rotaryInput() : undefined;
     // Refuse a bad rotary call before observing; `steps` means nothing on any other button.
     const rotarySteps = isRotaryButton(button)

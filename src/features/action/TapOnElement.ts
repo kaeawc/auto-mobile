@@ -1,3 +1,4 @@
+import { watchTapOn } from "../watch/WatchActions";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { TapDisplayRouter } from "./TapDisplayRouter";
@@ -487,9 +488,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return (
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
-        platform: requireAndroidOrIosPlatform(this.device.platform, "tapOn"),
+        // Watch trees use iOS attribute/geometry conventions; watch dispatch stays separate.
+        platform:
+          this.device.platform === "watchos"
+            ? "ios"
+            : requireAndroidOrIosPlatform(this.device.platform, "tapOn"),
         iosMultiPanel:
-          this.platformTraits.panelAwareSelection && (this.device.displays?.panels.length ?? 0) > 1,
+          this.device.platform !== "watchos" &&
+          this.platformTraits.panelAwareSelection &&
+          (this.device.displays?.panels.length ?? 0) > 1,
       })
     );
   }
@@ -840,6 +847,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @returns Result of the command
    */
   async execute(options: TapOnElementOptions, call: TapOnCall = {}): Promise<TapOnFocusResult> {
+    if (this.device.platform === "watchos") {
+      return watchTapOn(this.device.deviceId, options, call.signal);
+    }
     return withObservationReadScope(() => this.executeWithReadScope(options, call));
   }
 

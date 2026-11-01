@@ -13,6 +13,7 @@ import {
   addDeviceTargetingToSchema,
   appIdFieldAliases,
   platformSchema,
+  watchAwarePlatformSchema,
   responseShapeControlFields,
   withAppIdAliases,
   withJsonSchemaOverride,
@@ -128,7 +129,7 @@ export const pressButtonInput = z.object({
   // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
   // not required — a device handle from getAndroid/getApple is sufficient on
   // its own.
-  platform: platformSchema.optional(),
+  platform: watchAwarePlatformSchema(),
   ...responseShapeControlFields,
 });
 

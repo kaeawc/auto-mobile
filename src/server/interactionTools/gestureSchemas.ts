@@ -43,6 +43,7 @@ import {
   addDeviceTargetingToSchema,
   compactExclusiveSelectorProperties,
   platformSchema,
+  watchAwarePlatformSchema,
   responseShapeControlFields,
   withJsonSchemaOverride,
 } from "../../utils/schemaHelpers";
@@ -235,7 +236,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
         // its own.
-        platform: platformSchema.optional(),
+        platform: watchAwarePlatformSchema(),
         ...responseShapeControlFields,
       })
       .strict(),

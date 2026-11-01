@@ -15,6 +15,7 @@ import {
   addDeviceTargetingToSchema,
   compactExclusiveSelectorProperties,
   platformSchema,
+  watchAwarePlatformSchema,
   responseShapeControlFields,
   withJsonSchemaOverride,
 } from "../../utils/schemaHelpers";
@@ -160,7 +161,7 @@ export const tapOnSchema = withJsonSchemaOverride(
           ),
         // #5870: a `sessionUuid` resolves the platform, so `platform` is not
         // required — a device handle from getAndroid is sufficient on its own.
-        platform: platformSchema.optional(),
+        platform: watchAwarePlatformSchema(),
         ...responseShapeControlFields,
       })
       .strict(),
@@ -225,6 +226,7 @@ export const tapOnSchema = withJsonSchemaOverride(
 export const tapAtSchema = withJsonSchemaOverride(
   coordinatePointInputSchema()
     .extend({
+      platform: watchAwarePlatformSchema(),
       includeExtras: responseShapeControlFields.includeExtras,
       x: coordinatePointInputSchema().shape.x.optional(),
       y: coordinatePointInputSchema().shape.y.optional(),

@@ -130,10 +130,13 @@ targets:
       - path: Sources/CtrlProxy/RangeReplaceableCollection+MaxSizeEnforcement.swift
       - path: Sources/CtrlProxy/CommandError.swift
       - path: Sources/CtrlProxy/Models/CommandPayload.swift
+      - path: Sources/CtrlProxy/Models/RequestAppendText.swift
       - path: Sources/CtrlProxy/Models/RequestHierarchy.swift
       - path: Sources/CtrlProxy/Models/RequestPressButton.swift
+      - path: Sources/CtrlProxy/Models/ResponseType.swift
       - path: Sources/CtrlProxy/Models/WebSocketResponse.swift
       - path: Sources/CtrlProxy/Models/HierarchyUpdateResponse.swift
+      - path: Sources/CtrlProxy/Models/ScreenshotResponse.swift
       - path: Sources/CtrlProxy/Models/ViewHierarchy.swift
       - path: Sources/CtrlProxy/Models/UIElementInfo.swift
       - path: Sources/CtrlProxy/Models/ElementBounds.swift

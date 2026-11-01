@@ -54,6 +54,31 @@ final class TVCommandRouter {
                     type: "press_button_result", requestId: requestId,
                     totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)
                 ))
+            case "request_append_text":
+                let request = try decoder.decode(RequestAppendText.self, from: data)
+                // This runner does not advertise frame-context validation.
+                guard request.frameContext == nil else {
+                    throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
+                }
+                let startTime = Date()
+                let snapshot = try application.snapshot()
+                guard hasFocusedKeyboard(snapshot) else {
+                    throw CommandError.invalidParameter("text", "no focused text input")
+                }
+                application.typeText(request.text)
+                return try JSONEncoder().encode(WebSocketResponse.success(
+                    type: ResponseType.appendTextResult.rawValue, requestId: request.requestId,
+                    totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)
+                ))
+            case "request_screenshot":
+                let screenshot = XCUIScreen.main.screenshot()
+                return try JSONEncoder().encode(ScreenshotResponse(
+                    requestId: requestId,
+                    data: screenshot.pngRepresentation.base64EncodedString(),
+                    format: "png",
+                    rotation: nil,
+                    frameContext: nil
+                ))
             default:
                 // The allowlist is exhaustive; do not silently execute newly advertised commands.
                 throw CommandError.unknownCommand(envelope.type)
@@ -68,6 +93,11 @@ final class TVCommandRouter {
             return (try? JSONEncoder().encode(response))
                 ?? Data(#"{"type":"error","success":false,"error":"Response encoding failed"}"#.utf8)
         }
+    }
+
+    private func hasFocusedKeyboard(_ snapshot: any XCUIElementSnapshot) -> Bool {
+        (snapshot.hasFocus && snapshot.elementType == .keyboard)
+            || snapshot.children.contains { hasFocusedKeyboard($0) }
     }
 
     private func element(_ snapshot: any XCUIElementSnapshot) -> UIElementInfo {

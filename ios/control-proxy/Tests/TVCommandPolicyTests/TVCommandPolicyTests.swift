@@ -4,18 +4,38 @@ import Foundation
 import XCTest
 
 final class TVCommandPolicyTests: XCTestCase {
-    func testOnlyHierarchyAndRemotePressAreSupported() {
-        XCTAssertEqual(TVCommandPolicy.supportedCommands, ["request_hierarchy", "request_press_button"])
-        for command in RequestType.allCases {
-            XCTAssertEqual(
-                TVCommandPolicy.supports(command.rawValue),
-                ["request_hierarchy", "request_press_button"].contains(command.rawValue),
-                command.rawValue
-            )
-        }
+    func testOnlyHierarchyRemotePressAppendTextAndScreenshotAreSupported() {
+        XCTAssertEqual(TVCommandPolicy.supportedCommands, [
+            "request_hierarchy", "request_press_button", "request_append_text", "request_screenshot",
+        ])
         for command in ["", "unknown", "connected", "REQUEST_HIERARCHY", "request_focus"] {
             XCTAssertFalse(TVCommandPolicy.supports(command))
         }
+    }
+
+    func testAppendTextAndScreenshotAreSupportedAndOtherRequestTypesStayRejected() {
+        XCTAssertTrue(TVCommandPolicy.supports(RequestType.requestAppendText.rawValue))
+        XCTAssertTrue(TVCommandPolicy.supports(RequestType.requestScreenshot.rawValue))
+        for command in RequestType.allCases {
+            let supported: Bool
+            switch command {
+            case .requestHierarchy, .requestPressButton, .requestAppendText, .requestScreenshot:
+                supported = true
+            default:
+                supported = false
+            }
+            XCTAssertEqual(
+                TVCommandPolicy.supports(command.rawValue),
+                supported,
+                command.rawValue
+            )
+        }
+    }
+
+    func testSetTextClearTextAndPressKeyStayUnsupported() {
+        XCTAssertFalse(TVCommandPolicy.supports("request_set_text"))
+        XCTAssertFalse(TVCommandPolicy.supports("request_clear_text"))
+        XCTAssertFalse(TVCommandPolicy.supports("request_press_key"))
     }
 
     func testRemoteButtonsAreExactlyTheSpikeSubset() {
@@ -35,6 +55,9 @@ final class TVCommandPolicyTests: XCTestCase {
         XCTAssertEqual(event["id"] as? Int, 42)
         XCTAssertEqual(event["platform"] as? String, "tvos")
         XCTAssertEqual(event["supportedCommands"] as? [String], TVCommandPolicy.supportedCommands)
+        XCTAssertEqual(event["supportedCommands"] as? [String], [
+            "request_hierarchy", "request_press_button", "request_append_text", "request_screenshot",
+        ])
         XCTAssertEqual(event["supportedFeatures"] as? [String], [])
     }
 }

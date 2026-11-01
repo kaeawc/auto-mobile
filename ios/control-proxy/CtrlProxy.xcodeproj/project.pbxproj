@@ -10,6 +10,7 @@
 		005A50C28599EDEF27B18CFC /* GestureApplicationTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C863F0B626BD634624BF6F47 /* GestureApplicationTarget.swift */; };
 		007003055AE962D1D18F31B7 /* HierarchyDebouncing.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3DFDFAA5CA43D97D35197B /* HierarchyDebouncing.swift */; };
 		0083872FB6A6F358F82F2288 /* ProxyTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69BE05DF9D7441D280E0E1DB /* ProxyTimer.swift */; };
+		01800AB70CB04BD7C6F3EAD7 /* RequestAppendText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C500B98A70C6E2B29C66B7D /* RequestAppendText.swift */; };
 		01AB32F080D46E2E2BC3377A /* Highlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62C3DE1B03DB762B0B5B003B /* Highlight.swift */; };
 		0228EE761B6F08DEFF2D6F67 /* AppStateWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 506EC1282270501812886D66 /* AppStateWait.swift */; };
 		0358FD7723BCAE10D40A447A /* SdkColumnInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7286862D3B53AA931874F604 /* SdkColumnInfo.swift */; };
@@ -19,6 +20,7 @@
 		0781D30634E75B4E02752745 /* SdkTableDataResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14749849D9A4AE01797B0A69 /* SdkTableDataResult.swift */; };
 		0A3949B83D0643E842B2C8C6 /* HTTPRequesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D737AC14EC90BA34BA0D3D7 /* HTTPRequesting.swift */; };
 		0B1EDC5365D6A33E66714C31 /* HingeAngleSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7F8ECB539968753B6A6396F /* HingeAngleSetting.swift */; };
+		0B8D8402F5CE665217F70E36 /* ScreenshotResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A4FD49FFF4C9C286C2ADE9 /* ScreenshotResponse.swift */; };
 		0BCC415B05792AC932C2F734 /* GesturePerformer+FocusDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F42A3144E0096330181CF7 /* GesturePerformer+FocusDiagnostics.swift */; };
 		0CA6FCCBEAFE7EA7CE982B50 /* WebSocketResponding.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8AB11A7BF22041EE27F3B2 /* WebSocketResponding.swift */; };
 		0DD80B9475700E816D970365 /* GesturePerformer+ImeActionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2782EB695F1EF1147BEF7163 /* GesturePerformer+ImeActionPolicy.swift */; };
@@ -223,6 +225,7 @@
 		BAE91EA92281A7A46027EDC6 /* CommandPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3D7FDE2BDA51768404C5A5 /* CommandPayload.swift */; };
 		BB46C21F652BB4C5AC05146F /* SdkHierarchyServerInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A54C0434A1884302C47B38B /* SdkHierarchyServerInfo.swift */; };
 		BD254299D080B07666983D18 /* GesturePerformer+Keyboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E269A2DAAF796ADA465A0242 /* GesturePerformer+Keyboard.swift */; };
+		BE0120AB37A767646BA20CE9 /* ResponseType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11831960E40932AEA24D41DA /* ResponseType.swift */; };
 		BE1EF3486A541736E283FD16 /* CommandPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3D7FDE2BDA51768404C5A5 /* CommandPayload.swift */; };
 		BE845309ABC366797D8E4C75 /* RequestActivateAccessibilityLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 543DF72D942FA1E6ADD96229 /* RequestActivateAccessibilityLink.swift */; };
 		BEF9637ADC36E8FBBFCDA004 /* StorageEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A67FA9C8343014367FEDD0 /* StorageEntry.swift */; };
@@ -1633,8 +1636,11 @@
 				81E57E2A26AF4C51C74A3AF1 /* ObservationInsetsInfo.swift in Sources */,
 				AA17AF41907E632FF756E50E /* PerfTiming.swift in Sources */,
 				CBC6DDDB8DAF71FA770D4A3A /* RangeReplaceableCollection+MaxSizeEnforcement.swift in Sources */,
+				01800AB70CB04BD7C6F3EAD7 /* RequestAppendText.swift in Sources */,
 				AE57B07F36ABAB0EA5920A9F /* RequestHierarchy.swift in Sources */,
 				8EAED3627DEE7380FC25EA36 /* RequestPressButton.swift in Sources */,
+				BE0120AB37A767646BA20CE9 /* ResponseType.swift in Sources */,
+				0B8D8402F5CE665217F70E36 /* ScreenshotResponse.swift in Sources */,
 				4061387ED25758150CE09466 /* SdkEventBuffer.swift in Sources */,
 				F04DC883EC7C4B7499F53FA2 /* SemanticLink.swift in Sources */,
 				61ACDD5AB36F07628FE81A2F /* SystemChromeInfo.swift in Sources */,

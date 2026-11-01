@@ -21,7 +21,8 @@ import { StructuredToolResponse, createStructuredToolResponse } from "../../util
 import { resolveTransportDeadlineMs } from "../formTools";
 import { defaultTapOnElementFactory, isIosAppOpenAlertHierarchy } from "../interactionToolHandlers";
 import type { TapAnyArgs, TapAtArgs, TapOnArgs } from "../interactionToolTypes";
-import { internalTapAtContext } from "../internalToolParams";
+import type { TapAtPlanContext } from "../../models/TapAtGeometry";
+import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import type {
   InteractionHandlerOptions,
   InteractionToolDependencies,
@@ -317,6 +318,15 @@ export async function tapOnHandler(
   return result.success ? response : { ...response, isError: true as const };
 }
 
+/**
+ * The geometry context a tapAt resolves against and records into (#15663): a plan step's, else the
+ * one the device-aware dispatch created for recording. Returned by reference so the handler fills it.
+ */
+function tapAtContext(): TapAtPlanContext | undefined {
+  const context = getToolSelectionContext();
+  return context?.tapAtPlanContext ?? context?.toolCallRecording?.tapAt;
+}
+
 export async function tapAtHandler(
   device: BootedDevice,
   args: TapAtArgs,
@@ -335,7 +345,7 @@ export async function tapAtHandler(
       layer: args.layer,
       pointer: args.pointer,
     } as Parameters<TapAtElementLike["execute"]>[0],
-    { progress, signal, planContext: internalTapAtContext(args) },
+    { progress, signal, planContext: tapAtContext() },
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`

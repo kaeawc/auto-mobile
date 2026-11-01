@@ -1016,6 +1016,32 @@ describe("DeviceBootService", () => {
     });
   }
 
+  it("refuses requires.playStore for iOS before creating a simulator (#14302)", async () => {
+    let provisionCalls = 0;
+    const boot = new DeviceBootService({
+      deviceManager: new FakeDeviceUtils(),
+      deviceMatcher: new DefaultDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async () => {
+          provisionCalls++;
+          throw new Error("must not provision");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer: new FakeTimer(),
+    });
+    await expect(
+      boot.boot({
+        platform: "ios",
+        requires: { playStore: true },
+        createIfMissing: true,
+        preferRunning: false,
+      }),
+    ).rejects.toThrow(/requires\.playStore.*Android/);
+    expect(provisionCalls).toBe(0);
+  });
+
   it("requires.playStore creates a Play Store AVD, reuses it, and never reuses a google_apis one (#14302)", async () => {
     const devices = new FakeDeviceUtils();
     const image = (tag: string) => ({

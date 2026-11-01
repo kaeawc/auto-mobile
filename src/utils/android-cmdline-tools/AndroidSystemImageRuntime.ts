@@ -38,6 +38,14 @@ function isNonNegativeSafeInteger(component: number): boolean {
   return Number.isSafeInteger(component) && component >= 0;
 }
 
+/**
+ * Whether a system-image tag ships Google Play (#14302): the `*playstore*` phone, tablet and car
+ * images, and the Google TV images.
+ */
+export function isPlayStoreSystemImageTag(tag: string): boolean {
+  return tag.includes("playstore") || tag.startsWith("google-tv");
+}
+
 export function parseAndroidSystemImageRuntime(
   runtime: string,
 ): ParsedAndroidSystemImageRuntime | undefined {

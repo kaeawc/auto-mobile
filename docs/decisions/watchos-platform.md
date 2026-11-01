@@ -74,8 +74,17 @@ never reuses a TV. Unlike watchOS,
   watch UDID and reserved localhost port; it launches only the watch service test, forwards
   `TEST_RUNNER_AM_PORT`, and registers the device after a successful watchOS handshake and
   hierarchy read. Startup retries connection/readiness for a bounded budget. Process exit or
-  the returned stop handle closes the client and removes the registration. Provisioning does
-  not automatically launch a runner. The WebSocket client correlates request IDs and bounds
+  the returned stop handle closes the client and removes the registration. After boot, before session
+  binding, `startDevice` discovers a watchsimulator xctestrun in the configured CtrlProxy derived
+  data, building the `CtrlProxyWatch` scheme with `build-for-testing` if absent.
+  `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` selects an explicit prebuilt artifact. A per-launch copy
+  injects `AM_PORT` for the allocated localhost port. The lifecycle owner reuses a registered
+  runner and attaches its own runner to the newly bound session. It stops its own handle on
+  device stop/deletion, session release/unbinding and daemon shutdown/exit. A failed or cancelled
+  bind stops only a runner launched by that call. Missing artifacts or failed startup warn and
+  leave readiness at `booted`, with
+  the reason in the response message and screenshot-only observation available.
+  The WebSocket client correlates request IDs and bounds
   handshake plus command time with the injectable timer, refusing non-watchOS handshakes.
 - **Explicit resolution.** A watch session resolves through the pooled-session path (readiness
   setup and keep-awake are Android-only). A sessionless call reaches a watch only with
@@ -87,7 +96,7 @@ never reuses a TV. Unlike watchOS,
   behind the registry gate. They reach a watch only through watch inventory, so each decides
   watches explicitly. `startDevice` with `platform: "watchos"` takes an exact UDID or exact name
   only (every other option is refused), boots or adopts the watch under its stable lifecycle lease
-  and binds a pooled session at readiness `booted`; no automation runner step runs. `killDevice`
+  and prepares its automation runner before binding a pooled session at readiness `booted`. `killDevice`
   takes a watch through the same holder checks and stops it with `simctl shutdown`. Both resolve
   the target from the watch listing, so a non-watch UDID is refused before any simctl command.
   `provisionDevice` with `device.platform: "watchos"` (its own branch of the request union, so

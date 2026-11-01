@@ -35,7 +35,12 @@ test("launches only the service test with the requested port and binds the exact
   const xcodebuild = new FakeStreamingXcodebuild(child);
   const client = new FakeWatchRunnerClient();
   const urls: string[] = [];
+  const environments: Array<Record<string, string>> = [];
   const launcher = new XcodebuildWatchRunnerLauncher({
+    writeRunnerEnvironment: async (file, env) => {
+      environments.push(env);
+      return file;
+    },
     xcodebuild,
     timer,
     connect: (url) => {
@@ -56,6 +61,7 @@ test("launches only the service test with the requested port and binds the exact
   expect(launch.options?.env).toEqual({ ...process.env, TEST_RUNNER_AM_PORT: "8765" });
   expect(launch.options?.stdio).toBe("ignore");
   expect(launch.options?.signal).toBeUndefined();
+  expect(environments).toEqual([{ AM_PORT: "8765" }]);
   expect(child.killed).toBe(false);
   expect(urls).toEqual(["ws://127.0.0.1:8765/ws"]);
   expect(watchRunners.get(options.deviceId)).toBe(client);
@@ -79,6 +85,7 @@ test("process exit unregisters the runner", async () => {
   const xcodebuild = new FakeStreamingXcodebuild(child);
   const client = new FakeWatchRunnerClient();
   ({ stop } = await new XcodebuildWatchRunnerLauncher({
+    writeRunnerEnvironment: async (file) => file,
     xcodebuild,
     timer,
     connect: () => client,
@@ -91,7 +98,10 @@ test("process exit unregisters the runner", async () => {
 
 test("rejects invalid ports and duplicate device bindings before spawning", async () => {
   const xcodebuild = new FakeStreamingXcodebuild();
-  const launcher = new XcodebuildWatchRunnerLauncher({ xcodebuild });
+  const launcher = new XcodebuildWatchRunnerLauncher({
+    xcodebuild,
+    writeRunnerEnvironment: async (file) => file,
+  });
   await expect(launcher.launch({ ...options, port: 0 })).rejects.toThrow("port");
   ({ stop } = await new FakeWatchRunnerLauncher().launch(options));
   await expect(launcher.launch(options)).rejects.toThrow("already connected");
@@ -106,6 +116,7 @@ test("startup retries readiness with FakeTimer and closes failed clients", async
   const ready = new FakeWatchRunnerClient();
   let attempts = 0;
   const pending = new XcodebuildWatchRunnerLauncher({
+    writeRunnerEnvironment: async (file) => file,
     xcodebuild,
     timer,
     connect: () => (++attempts === 1 ? first : ready),
@@ -127,6 +138,7 @@ test("startup deadline stops only its fake process and cannot register a late ru
   const client = new FakeWatchRunnerClient();
   client.failure = new Error("not ready");
   const pending = new XcodebuildWatchRunnerLauncher({
+    writeRunnerEnvironment: async (file) => file,
     xcodebuild,
     timer,
     connect: () => client,
@@ -142,4 +154,34 @@ test("startup deadline stops only its fake process and cannot register a late ru
   expect(child.killed).toBe(true);
   expect(watchRunners.get(options.deviceId)).toBeUndefined();
   expect(xcodebuild.launches).toHaveLength(1);
+});
+
+test("startup cancellation stops its child and cannot register after readiness resolves", async () => {
+  const timer = new FakeTimer();
+  const child = new FakeChildProcess(timer);
+  const xcodebuild = new FakeStreamingXcodebuild(child);
+  const client = new FakeWatchRunnerClient();
+  const ready = Promise.withResolvers<typeof client.tree>();
+  client.hierarchy = async () => await ready.promise;
+  const request = new AbortController();
+  const pending = new XcodebuildWatchRunnerLauncher({
+    xcodebuild,
+    timer,
+    connect: () => client,
+    writeRunnerEnvironment: async (file) => file,
+  }).launch({ ...options, signal: request.signal });
+  const failure = pending.then(
+    () => "connected",
+    () => "cancelled",
+  );
+  await drainUntil(() => xcodebuild.launches.length === 1, { description: "runner spawn" });
+  request.abort();
+  expect(await failure).toBe("cancelled");
+  ready.resolve(client.tree);
+  await Promise.resolve();
+  expect(child.killed).toBe(true);
+  expect(client.closed).toBe(true);
+  expect(watchRunners.get(options.deviceId)).toBeUndefined();
+  expect(xcodebuild.launches[0]?.options?.signal).toBeUndefined();
+  expect(timer.getSleepHistory()).toEqual([]);
 });

@@ -8,6 +8,9 @@ describe("cleanupDaemonChildProcesses", () => {
     const calls: string[] = [];
 
     await cleanupDaemonChildProcesses({
+      stopWatchRunners: () => {
+        calls.push("stop-watch-runners");
+      },
       stopAcceptingVideoRecordingStarts: async () => {
         calls.push("stop-recording-starts");
       },
@@ -32,6 +35,7 @@ describe("cleanupDaemonChildProcesses", () => {
     });
 
     expect(calls).toEqual([
+      "stop-watch-runners",
       "stop-recording-starts",
       "shutdown-ios-ctrl-proxies",
       "stop:recording-a",
@@ -68,6 +72,7 @@ describe("cleanupDaemonChildProcesses", () => {
         calls.push("shutdown-ios-ctrl-proxies");
         throw new Error("iproxy cleanup failed");
       },
+      stopWatchRunners: () => {},
     });
 
     expect(calls).toEqual([
@@ -116,6 +121,7 @@ describe("cleanupDaemonChildProcesses", () => {
       },
       timer,
       timeoutMs: 10,
+      stopWatchRunners: () => {},
     });
 
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -163,6 +169,7 @@ describe("cleanupDaemonChildProcesses", () => {
         calls.push(`interrupt:${recordingId}`);
       },
       shutdownIOSCtrlProxies: async () => {},
+      stopWatchRunners: () => {},
     });
 
     expect(calls).toEqual(["stop:in-memory-recording"]);
@@ -184,6 +191,7 @@ test("shutdown aborts inventory background work before draining capture owners",
     forceStopVideoRecording: async () => {},
     interruptVideoRecording: async () => {},
     shutdownIOSCtrlProxies: async () => {},
+    stopWatchRunners: () => {},
   };
   await cleanupDaemonChildProcesses(dependencies);
   expect(calls).toEqual(["inventory", "captures"]);

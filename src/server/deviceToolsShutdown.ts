@@ -50,6 +50,7 @@ import {
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { waitForEmulatorShutdownWithEscalation } from "../features/deviceLifecycle/teardown/stuckEmulatorEscalation";
 import { exponentialBackoff } from "../utils/Backoff";
+import { stopWatchRunnerBeforeShutdown } from "../features/deviceLifecycle/teardown/shutdownPreparation";
 import {
   AndroidObserverShutdownState,
   stopIosCtrlProxyBeforeShutdown,
@@ -810,6 +811,7 @@ async function preparePlatformShutdown(
       dependencies.stopAndroidObservers,
       dependencies.daemonState,
     );
+    stopWatchRunnerBeforeShutdown(context.device, dependencies);
     return { ...target, androidObserverState };
   } catch (error) {
     clearFence();

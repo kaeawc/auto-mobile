@@ -4,13 +4,7 @@ export { readPrototypeBundle } from "./bundle/bundleReader";
 export {
   exportPrototypeBundle,
   type BundleExportInput,
-  type BundleExportResult,
   type BundleExportAsset,
 } from "./bundle/bundleExport";
-export {
-  commitBundleToDirectory,
-  type BundleCommitFileSystem,
-  type BundleCommitResult,
-} from "./bundle/bundleCommit";
-export { NodeBundleCommitFileSystem } from "./bundle/NodeBundleCommitFileSystem";
-export { scanBundleForSecrets, type BundleSecretWarning } from "./bundle/bundleSecrets";
+export { commitBundleToDirectory, type BundleCommitFileSystem } from "./bundle/bundleCommit";
+export { scanBundleForSecrets } from "./bundle/bundleSecrets";

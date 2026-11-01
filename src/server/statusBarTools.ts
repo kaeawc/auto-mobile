@@ -216,5 +216,3 @@ const statusBarTool = defineDeviceTool({
 export function registerStatusBarTools(deps: StatusBarToolDependencies = {}): void {
   statusBarTool.register(undefined, createStatusBarHandler(deps));
 }
-
-export const statusBarToolSchema = statusBarTool.schema;

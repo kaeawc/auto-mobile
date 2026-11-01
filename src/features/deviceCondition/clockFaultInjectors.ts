@@ -46,8 +46,6 @@ import { createSerializer, rejectValue, unsupported } from "./injectorSupport";
  * clock may have moved before the failure.
  */
 
-export const CLOCK_FAULT_KEYS = ["faults.clockSkew"] as const;
-
 export interface ClockFaultInjectorDeps {
   /** A fresh adapter per operation, so it carries the clock registry's current incarnation signal. */
   adapter: () => DeviceClockAdapter;

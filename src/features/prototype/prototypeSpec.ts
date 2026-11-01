@@ -32,7 +32,6 @@ import {
   dataActionPathSchema,
   dataActionFields,
   pointerSchema,
-  prototypeDataActionValueSchema,
   setStateValueSchema,
   stateKeySchema,
   type PrototypeDataActionValue,
@@ -75,7 +74,7 @@ import { bindPrototypeRequestFollowUps, requestActionSchema } from "./prototypeR
 import { prototypeStorageSchema } from "./prototypeStorageSchema";
 import { record } from "./prototypeTemplate";
 export { type PrototypeAnchor, type PrototypeData } from "./prototypePresentationSchemas";
-export { prototypeDataActionValueSchema, type PrototypeDataActionValue };
+export { type PrototypeDataActionValue };
 export const {
   MAX_PROTOTYPE_SPEC_BYTES,
   MAX_PROTOTYPE_TEXT_SPANS,
@@ -93,10 +92,7 @@ export const {
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
 } = contract.limits;
 export { prototypeJsonObjectSchema, prototypeJsonSchema, type PrototypeJson };
-export {
-  prototypeEmitContextBindingSchema,
-  type PrototypeEmitContextBinding,
-} from "./prototypeActionValues";
+export { type PrototypeEmitContextBinding } from "./prototypeActionValues";
 export { prototypeEmitContextSchema };
 export const actionSchema = z.discriminatedUnion("type", [
   z

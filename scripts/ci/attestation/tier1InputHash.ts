@@ -1,4 +1,4 @@
-import { type AttestationLane, type AttestationPayload } from "./attestationSchema";
+import { type AttestationLane } from "./attestationSchema";
 import { TIER2_INPUT_HASH_ALGORITHM, TIER3_INPUT_HASH_ALGORITHM } from "./tier23InputHash";
 import {
   canonicalEnvironmentInputs,
@@ -106,5 +106,3 @@ export function tier1InputHash(inputs: Tier1Inputs): string {
     ["platform-independent", [...TIER1_PLATFORM_INDEPENDENT_TASKS].sort()],
   ]);
 }
-
-export type PayloadEnvironment = AttestationPayload["environment"];

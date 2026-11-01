@@ -52,13 +52,20 @@ test.each([{ elementId: "B01" }, { text: "B01" }, { elementId: "B01", text: "B01
   },
 );
 
-test("index selects among repeated captured text", async () => {
+test("index selects repeated captured text by smallest eligible area", async () => {
   for (const button of client.buttons) {
     button.text = "Repeated";
   }
   const result = await tvosTapOn(deviceId, { action: "tap", text: "Repeated", index: 1 });
-  expect(result.element?.["resource-id"]).toBe("B01");
-  expect(client.commands).toEqual([hierarchy, press("select")]);
+  expect(result.element?.["resource-id"]).toBe("B21");
+  expect(client.commands).toEqual([
+    hierarchy,
+    press("down"),
+    hierarchy,
+    press("down"),
+    hierarchy,
+    press("select"),
+  ]);
 });
 
 test.each([{ text: "missing" }, { elementId: "B01", text: "B02" }, { text: "B01", index: 1 }, {}])(

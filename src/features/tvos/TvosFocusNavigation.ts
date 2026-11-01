@@ -1,6 +1,8 @@
 import { ActionableError } from "../../models/ActionableError";
 import type { Element, TapOnElementOptions, TapOnElementResult } from "../../models";
+import { boundsArea } from "../../utils/bounds";
 import { DefaultElementParser } from "../utility/ElementParser";
+import { compareSelectionRank } from "../utility/selectionRank";
 import { normalizeTvosHierarchy } from "./TvosHierarchy";
 import type { TvosRunnerClient } from "./TvosRunnerClient";
 import { tvosRunners } from "./TvosRunnerRegistry";
@@ -88,7 +90,15 @@ async function readFocusAndTarget(
       matches(element, options)
     );
   });
-  const target = candidates[options.index ?? 0];
+  const target = candidates
+    .map((element, order) => ({
+      element,
+      windowRank: 0,
+      area: boundsArea(element.bounds),
+      order,
+      interactive: false,
+    }))
+    .sort(compareSelectionRank)[options.index ?? 0]?.element;
   if (!target) {
     throw new ActionableError(
       "No tvOS element matched; observe and check the identifier, exact text or index.",

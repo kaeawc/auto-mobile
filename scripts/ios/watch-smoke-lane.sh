@@ -167,6 +167,8 @@ export AUTOMOBILE_DAEMON_LOCK_FILE_PATH="${aux_dir}/daemon.lock"
 export AUTOMOBILE_DAEMON_TOKEN_FILE_PATH="${aux_dir}/daemon.token"
 export AUTOMOBILE_DATA_DIR="${aux_dir}/data"
 export AUTOMOBILE_DB_DIR="${aux_dir}/db"
+export AUTOMOBILE_DB_PATH="${AUTOMOBILE_DB_DIR}/auto-mobile.db"
+unset AUTO_MOBILE_DB_PATH
 export AUTOMOBILE_LOG_DIR="${log_dir}/daemon"
 export AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA="${log_dir}/derived-data"
 export AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true

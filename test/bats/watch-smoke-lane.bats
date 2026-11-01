@@ -31,6 +31,11 @@ STUB
 printf 'cli %s aux=%s socket=%s\n' "$*" "$AUTOMOBILE_AUX_SOCKET_DIR" "$AUTOMOBILE_DAEMON_SOCKET_PATH" >> "$CALLS"
 if [[ "$*" == *'--daemon start'* ]]; then
   [[ "$*" == "--debug --embedded-sdk --daemon start --debug --embedded-sdk --port "* ]] || exit 1
+  if [[ ${CHECK_PRIVATE_DB:-} == 1 ]]; then
+    [[ "$AUTOMOBILE_DB_DIR" == "$AUTOMOBILE_AUX_SOCKET_DIR/db" ]] || exit 1
+    [[ "$AUTOMOBILE_DB_PATH" == "$AUTOMOBILE_DB_DIR/auto-mobile.db" ]] || exit 1
+    [[ -z ${AUTO_MOBILE_DB_PATH+x} ]] || exit 1
+  fi
   port="${@: -1}"
   [[ "$port" =~ ^[0-9]+$ ]] && ((port >= 40000 && port <= 65535)) || exit 1
   [[ -z ${WATCH_SMOKE_DAEMON_PORT:-} || "$port" == "$WATCH_SMOKE_DAEMON_PORT" ]] || exit 1
@@ -141,6 +146,7 @@ STUB
 
 @test "smoke uses label-only context, text tap, one owned UDID, private daemon and cleanup" {
   export AUTOMOBILE_DAEMON_SOCKET_PATH=/tmp/forbidden-resident.sock
+  unset GITHUB_RUN_ID
   run bash "$SCRIPT" latest
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *watch-smoke-lane:\ PASS* ]]
@@ -160,6 +166,15 @@ STUB
   ! grep -q 'forbidden-resident' "$CALLS" || return 1
   grep -q '^simctl shutdown 11111111-2222-3333-4444-555555555555$' "$CALLS"
   grep -q '^simctl delete 11111111-2222-3333-4444-555555555555$' "$CALLS"
+}
+
+@test "private daemon database overrides inherited exact paths and clears legacy alias" {
+  export AUTOMOBILE_DB_PATH="$BATS_TEST_TMPDIR/resident.db"
+  export AUTO_MOBILE_DB_PATH="$BATS_TEST_TMPDIR/legacy-resident.db"
+  export CHECK_PRIVATE_DB=1
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q -- '--daemon start --debug --embedded-sdk --port 45678' "$CALLS"
 }
 
 @test "failed next-screen check captures failure screenshot and cleans up" {

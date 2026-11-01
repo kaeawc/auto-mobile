@@ -29,6 +29,7 @@ import {
   ROOT_ARTIFACT_PATHS,
 } from "./rootStateInjector";
 import { SelinuxOwner, resolveSelinuxOwner, selinuxOwnersByDevice } from "./SelinuxOwner";
+import { ArtifactOwner, artifactOwnersByDevice, resolveArtifactOwner } from "./ArtifactOwner";
 import { OwedResetError } from "./OwedResetError";
 
 const TOGGLE_IDS = ["su-binary", "superuser-apk", "selinux-permissive"] as const;
@@ -75,7 +76,23 @@ class IntegrityStateInjector implements DeviceConditionInjector {
   constructor(
     private readonly adb: AdbExecutor,
     private readonly selinux: SelinuxOwner,
+    private readonly artifacts: ArtifactOwner,
   ) {}
+
+  /** A file signal's state without the stubs another fixture (rootState) still needs (#16275). */
+  private withoutOthers(id: ToggleId, state: SignalState): SignalState {
+    if (id === "selinux-permissive") {
+      return state;
+    }
+    const paths = new Set(
+      [...state.paths].filter((path) => !this.artifacts.plantedForOther(this, path)),
+    );
+    return { active: paths.size > 0, paths };
+  }
+
+  private async ownState(id: ToggleId, signal?: AbortSignal): Promise<SignalState> {
+    return this.withoutOthers(id, await this.readState(id, signal));
+  }
 
   private async readState(id: ToggleId, signal?: AbortSignal): Promise<SignalState> {
     if (id !== "selinux-permissive") {
@@ -160,7 +177,10 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       await this.selinux.release(this.adb, mutation, signal, true);
     } else {
       await this.root(signal, true);
-      const remove = [...mutation.paths].filter((path) => !mutation.before.paths.has(path));
+      // A stub another fixture still needs stays; that fixture's reset removes it (#16275).
+      const remove = [...mutation.paths].filter(
+        (path) => !mutation.before.paths.has(path) && !this.artifacts.heldByOther(this, path),
+      );
       const replace = [...mutation.paths].filter((path) => mutation.before.paths.has(path));
       if (remove.length > 0) {
         await shell(this.adb, ["rm", "-f", ...remove], signal);
@@ -174,19 +194,33 @@ class IntegrityStateInjector implements DeviceConditionInjector {
         signal,
       );
     }
-    const state = await this.readState(mutation.id, signal);
+    // Stubs handed to another fixture are released before the read-back, so they read as that
+    // fixture's. Removed ones keep their provenance until the read-back confirms they are gone
+    // (the bookkeeping below releases them), so an unverified removal is never taken for the
+    // image's (#16275).
+    for (const path of mutation.paths) {
+      if (!mutation.before.paths.has(path) && this.artifacts.heldByOther(this, path)) {
+        this.artifacts.release(this, path);
+      }
+    }
+    // Read the device and the baseline the same way: stubs another fixture still needs are not
+    // this mutation's to restore or count (#16275).
+    const state = await this.ownState(mutation.id, signal);
+    const before = this.withoutOthers(mutation.id, mutation.before);
     if (
       state.active !==
-        (mutation.id === "selinux-permissive" ? this.selinux.expected : mutation.before.active) ||
-      [...mutation.paths].some((path) => state.paths.has(path) !== mutation.before.paths.has(path))
+        (mutation.id === "selinux-permissive" ? this.selinux.expected : before.active) ||
+      [...mutation.paths].some((path) => state.paths.has(path) !== before.paths.has(path))
     ) {
       throw new ActionableError(`integrityState reset did not restore ${mutation.id} read-back`);
     }
     for (const path of mutation.paths) {
       if (mutation.before.paths.has(path)) {
         this.planted.add(path);
+        this.artifacts.plant(this, path);
       } else {
         this.planted.delete(path);
+        this.artifacts.release(this, path);
       }
     }
   }
@@ -234,7 +268,8 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       try {
         const state = await this.readState(id, signal);
         frame.baseline.set(id, state);
-        frame.expected.set(id, state.active);
+        // Read the way isClean reads: stubs another fixture still needs are not this baseline's.
+        frame.expected.set(id, this.withoutOthers(id, state).active);
       } catch (error) {
         logger.warn(`integrityState baseline for ${id} failed: ${errorMessage(error)}`, error);
         frame.failures.set(id, errorMessage(error));
@@ -264,9 +299,17 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       const paths = ROOT_ARTIFACT_PATHS.filter(
         (path) => pathsFor(mutation.id).includes(path) && !mutation.before.paths.has(path),
       );
-      await plantArtifacts(this.adb, paths, mutation.paths, signal);
-      for (const path of mutation.paths) {
-        this.planted.add(path);
+      try {
+        // mutation.paths records each path before its write, so a rollback removes a
+        // half-planted file.
+        await plantArtifacts(this.adb, paths, mutation.paths, signal);
+      } finally {
+        // Provenance for every attempted write, even one whose rollback later fails, so another
+        // fixture never reads a leftover stub as the image's; never for an unattempted path.
+        for (const path of mutation.paths) {
+          this.planted.add(path);
+          this.artifacts.plant(this, path);
+        }
       }
     } else {
       for (const path of mutation.before.paths) {
@@ -275,6 +318,7 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       await shell(this.adb, ["rm", "-f", ...mutation.paths], signal);
       for (const path of mutation.paths) {
         this.planted.delete(path);
+        this.artifacts.release(this, path);
       }
     }
   }
@@ -345,7 +389,9 @@ class IntegrityStateInjector implements DeviceConditionInjector {
     if (
       !target &&
       id !== "selinux-permissive" &&
-      [...before.paths].some((path) => !this.planted.has(path))
+      [...before.paths].some(
+        (path) => !this.planted.has(path) || this.artifacts.heldByOther(this, path),
+      )
     ) {
       signalResult.detail = "present on the image or planted by rootState; use rootState reset";
       return;
@@ -473,7 +519,7 @@ class IntegrityStateInjector implements DeviceConditionInjector {
           const clean =
             id === "selinux-permissive" && this.frames.length === 0
               ? await this.selinux.isClean(this.adb, signal)
-              : (await this.readState(id, signal)).active === active;
+              : (await this.ownState(id, signal)).active === active;
           if (!clean) {
             return false;
           }
@@ -490,8 +536,9 @@ class IntegrityStateInjector implements DeviceConditionInjector {
 export function createIntegrityStateInjector(
   adb: AdbExecutor,
   selinux = new SelinuxOwner(),
+  artifacts = new ArtifactOwner(),
 ): DeviceConditionInjector {
-  return new IntegrityStateInjector(adb, selinux);
+  return new IntegrityStateInjector(adb, selinux, artifacts);
 }
 
 const injectorsByDevice = new Map<string, DeviceConditionInjector>();
@@ -506,6 +553,7 @@ export function resolveIntegrityStateInjector(
     | {
         cache: Map<string, DeviceConditionInjector>;
         selinuxOwners?: Map<string, SelinuxOwner>;
+        artifactOwners?: Map<string, ArtifactOwner>;
       } = injectorsByDevice,
 ): DeviceConditionInjector | undefined {
   if (device.platform !== "android" || key !== "integrityState") {
@@ -513,11 +561,13 @@ export function resolveIntegrityStateInjector(
   }
   const cache = options instanceof Map ? options : options.cache;
   const selinuxOwners = options instanceof Map ? selinuxOwnersByDevice : options.selinuxOwners;
+  const artifactOwners = options instanceof Map ? artifactOwnersByDevice : options.artifactOwners;
   let injector = cache.get(device.deviceId);
   if (!injector) {
     injector = createIntegrityStateInjector(
       adbFactory.create(device),
       resolveSelinuxOwner(device.deviceId, selinuxOwners),
+      resolveArtifactOwner(device.deviceId, artifactOwners),
     );
     cache.set(device.deviceId, injector);
   }

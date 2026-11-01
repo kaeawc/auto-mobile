@@ -1,4 +1,5 @@
 import { SelinuxOwner } from "./SelinuxOwner";
+import type { ArtifactOwner } from "./ArtifactOwner";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { resolveIntegrityStateInjector } from "./integrityStateInjector";
 import type { BootedDevice } from "../../models";
@@ -237,15 +238,22 @@ export function createDefaultInjectorResolver(
   const adbFactory = deps.adbFactory ?? defaultAdbClientFactory;
   // Factory-local caches keep injected adb clients separate from the production instances.
   const selinuxOwners = new Map<string, SelinuxOwner>();
+  // Shared like selinuxOwners: rootState and integrityState plant the same stubs (#16275).
+  const artifactOwners = new Map<string, ArtifactOwner>();
   const rootCache = new Map<string, DeviceConditionInjector>();
   const integrityCache = new Map<string, DeviceConditionInjector>();
   const readOnlyCache = deps.cache ?? new Map<string, DeviceConditionInjector>();
   const resolveFixture = (device: BootedDevice, key: DeviceConditionKey) =>
     resolveIosRefusalInjector(device, key) ??
-    resolveRootStateInjector(device, key, adbFactory, { cache: rootCache, selinuxOwners }) ??
+    resolveRootStateInjector(device, key, adbFactory, {
+      cache: rootCache,
+      selinuxOwners,
+      artifactOwners,
+    }) ??
     resolveIntegrityStateInjector(device, key, adbFactory, {
       cache: integrityCache,
       selinuxOwners,
+      artifactOwners,
     });
   return (owner, key) =>
     owner.device

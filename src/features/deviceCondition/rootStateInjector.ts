@@ -14,6 +14,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { SelinuxOwner, resolveSelinuxOwner, selinuxOwnersByDevice } from "./SelinuxOwner";
+import { ArtifactOwner, artifactOwnersByDevice, resolveArtifactOwner } from "./ArtifactOwner";
 import { OwedResetError } from "./OwedResetError";
 import { adbCommand, rejectValue, shell } from "./injectorSupport";
 
@@ -136,8 +137,13 @@ export async function listExisting(
 export function createRootStateInjector(
   adb: AdbExecutor,
   selinux = new SelinuxOwner(),
+  artifacts = new ArtifactOwner(),
 ): DeviceConditionInjector {
   const selinuxToken = {};
+  const artifactToken = {};
+  // Every artifact this fixture depends on, planted here or already present. Shared with
+  // integrityState through `artifacts`, so neither deletes a stub the other still needs (#16275).
+  const held = new Set<string>();
   // True while this fixture is applied and its reset is owed; a repeat apply is then coalesced.
   let active = false;
   // Only artifacts WE planted. A userdebug image ships a real su; it is never overwritten here
@@ -150,12 +156,14 @@ export function createRootStateInjector(
     // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
     await ensureRootAdb(adb, resetSignal);
     let remaining = new Set<string>();
-    if (planted.size > 0) {
+    // Planted by a fixture (here or by integrityState) and needed by no other fixture.
+    const removable = [...held].filter((path) => artifacts.removableBy(artifactToken, path));
+    if (removable.length > 0) {
       // A reboot can return /system to read-only while the planted files survive.
       await remountSystem(adb, resetSignal);
-      await shell(adb, ["rm", "-f", ...planted], resetSignal);
-      // Confirm the removal; `planted` is only cleared once the files are really gone.
-      remaining = await listExisting(adb, [...planted], resetSignal);
+      await shell(adb, ["rm", "-f", ...removable], resetSignal);
+      // Confirm the removal; the holds are only released once the files are really gone.
+      remaining = await listExisting(adb, removable, resetSignal);
     }
     await selinux.release(adb, selinuxToken, resetSignal);
     await adbCommand(adb, ["unroot"], resetSignal);
@@ -165,12 +173,18 @@ export function createRootStateInjector(
         `rootState reset left artifacts on the device: ${[...remaining].join(", ")}`,
       );
     }
+    for (const path of held) {
+      artifacts.release(artifactToken, path);
+    }
+    held.clear();
     planted.clear();
     active = false;
   };
-  const plantedStillThere = async (signal?: AbortSignal): Promise<boolean> => {
-    const existing = await listExisting(adb, [...planted], signal);
-    return [...planted].every((path) => existing.has(path));
+  // Every artifact the fixture depends on, not only those it planted: a file another fixture
+  // planted can be removed under it.
+  const artifactsStillThere = async (signal?: AbortSignal): Promise<boolean> => {
+    const existing = await listExisting(adb, [...held], signal);
+    return [...held].every((path) => existing.has(path));
   };
   // After a reboot that keeps the modified system image the files survive but SELinux is back
   // to Enforcing, so "already applied" has to check the mode as well as the files.
@@ -186,7 +200,7 @@ export function createRootStateInjector(
       const wasActive = active;
       if (
         wasActive &&
-        (await plantedStillThere(signal)) &&
+        (await artifactsStillThere(signal)) &&
         (await selinuxStillPermissive(signal))
       ) {
         return { status: "unchanged", detail: "rooted-detectable fixture is already applied" };
@@ -200,6 +214,15 @@ export function createRootStateInjector(
       try {
         await remountWritable(adb, signal);
         await selinux.set(adb, selinuxToken, true, signal);
+        // Registered before the writes, so a rollback after a half-planted file removes it.
+        for (const path of ROOT_ARTIFACT_PATHS) {
+          if (toPlant.includes(path)) {
+            artifacts.plant(artifactToken, path);
+          } else {
+            artifacts.hold(artifactToken, path);
+          }
+          held.add(path);
+        }
         await plantArtifacts(adb, toPlant, planted, signal);
       } catch (error) {
         try {
@@ -230,9 +253,10 @@ export function createRootStateInjector(
       };
     },
     async isClean(signal): Promise<boolean> {
-      if (planted.size > 0) {
+      const owed = [...held].filter((path) => artifacts.removableBy(artifactToken, path));
+      if (owed.length > 0) {
         try {
-          if ((await listExisting(adb, [...planted], signal)).size > 0) {
+          if ((await listExisting(adb, owed, signal)).size > 0) {
             return false;
           }
         } catch (error) {
@@ -268,6 +292,7 @@ export function resolveRootStateInjector(
     | {
         cache: Map<string, DeviceConditionInjector>;
         selinuxOwners?: Map<string, SelinuxOwner>;
+        artifactOwners?: Map<string, ArtifactOwner>;
       } = injectorsByDevice,
 ): DeviceConditionInjector | undefined {
   if (device.platform !== "android" || key !== "rootState") {
@@ -275,11 +300,13 @@ export function resolveRootStateInjector(
   }
   const cache = options instanceof Map ? options : options.cache;
   const selinuxOwners = options instanceof Map ? selinuxOwnersByDevice : options.selinuxOwners;
+  const artifactOwners = options instanceof Map ? artifactOwnersByDevice : options.artifactOwners;
   let injector = cache.get(device.deviceId);
   if (!injector) {
     injector = createRootStateInjector(
       adbFactory.create(device),
       resolveSelinuxOwner(device.deviceId, selinuxOwners),
+      resolveArtifactOwner(device.deviceId, artifactOwners),
     );
     cache.set(device.deviceId, injector);
   }

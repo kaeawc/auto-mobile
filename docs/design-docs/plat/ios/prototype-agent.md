@@ -76,6 +76,13 @@ and a MaterialLook/PlatformLook renderer split are follow-ups. Segmented Picker,
 remain custom-drawn because they cannot preserve per-item identifiers; segmentedButton, tabBar,
 bottomNav, menu and select therefore remain Material.
 
+`bottomNav` applies selected `safeAreaPadding` inside its navigation-container background, so
+the fill covers the home-indicator inset while its items remain above it. This padding is applied
+once; without selected safe-area edges, the bar keeps its ordinary size.
+Authored `style.padding` remains outside this fill and can expose a transparent band;
+`style.background` paints behind the default navigation fill rather than replacing it.
+Custom navigation-container painting requires integrating the style paint layer with the bar's fill.
+
 ### Native container testability
 
 Native SwiftUI containers at the agent's window level have the following accessibility and touch behavior on iOS 18.6, 26.5 and 27.0 unless noted. "Listed" means `observe` returns the element's id or label; "tap works" means `tapOn` fires the control's action. The agent's own touch routing is described in [Native presentations and touches](#native-presentations-and-touches-15463).

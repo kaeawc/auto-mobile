@@ -1218,6 +1218,73 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       broadcast = { webSocketServer.broadcast(it) },
     )
 
+  private val staleFrames =
+    StaleFrameRejector(
+      isStale = frameContextGate::isStale,
+      host =
+        object : StaleFrameRejector.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override suspend fun broadcastTapCoordinatesResult(
+            requestId: String?,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+          ) =
+            gestureController.broadcastTapCoordinatesResult(requestId, success, error, totalTimeMs)
+
+          override suspend fun broadcastSwipeResult(
+            requestId: String?,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+            gestureTimeMs: Long?,
+          ) =
+            gestureController.broadcastSwipeResult(
+              requestId,
+              success,
+              error,
+              totalTimeMs,
+              gestureTimeMs,
+            )
+
+          override suspend fun broadcastDragResult(
+            requestId: String?,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+            gestureTimeMs: Long?,
+          ) =
+            gestureController.broadcastDragResult(
+              requestId,
+              success,
+              error,
+              totalTimeMs,
+              gestureTimeMs,
+            )
+
+          override suspend fun broadcastSetTextResult(
+            requestId: String?,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+          ) = textInputController.broadcastSetTextResult(requestId, success, error, totalTimeMs)
+
+          override suspend fun broadcastImeActionResult(outcome: ImeActionFrameResult) =
+            textInputController.broadcastImeActionResult(outcome)
+
+          override suspend fun broadcastGlobalActionResult(
+            result: GlobalActionResult,
+          ) = webSocketServer.broadcast(result)
+        },
+      timeProvider = timeProvider,
+    )
+
   private val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
 
   private fun currentFrameContext(): String = frameContextGate.current()
@@ -1972,7 +2039,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     frameContext: String?,
     displayId: Int?,
   ) {
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
+    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP))
+      return
     gestureController.performTapCoordinates(
       RequestTapCoordinates(
         requestId = requestId,
@@ -1988,140 +2056,37 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override suspend fun requestTapCoordinates(request: RequestTapCoordinates) {
     val requestId = request.requestId
-    val x = request.x
-    val y = request.y
-    val duration = request.duration
     val frameContext = request.frameContext
-    val displayId = request.displayId
-
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
-    gestureController.performTapCoordinates(
-      RequestTapCoordinates(
-        requestId = requestId,
-        x = x,
-        y = y,
-        duration = duration,
-        frameContext = frameContext,
-        displayId = displayId,
-      ),
-    )
+    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP))
+      return
+    // A plain tap request is never a double tap; that arrives as its own request.
+    gestureController.performTapCoordinates(request.copy(doubleTap = false))
   }
 
   override suspend fun requestSwipe(request: RequestSwipe) {
     val requestId = request.requestId
-    val x1 = request.x1
-    val y1 = request.y1
-    val x2 = request.x2
-    val y2 = request.y2
-    val duration = request.duration
     val frameContext = request.frameContext
-    val displayId = request.displayId
-
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
-    gestureController.performSwipe(
-      RequestSwipe(
-        requestId = requestId,
-        x1 = x1,
-        y1 = y1,
-        x2 = x2,
-        y2 = y2,
-        duration = duration,
-        frameContext = frameContext,
-        displayId = displayId,
-      ),
-    )
+    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE))
+      return
+    gestureController.performSwipe(request)
   }
 
-  override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {
-    val requestId = request.requestId
-    val x1 = request.x1
-    val y1 = request.y1
-    val x2 = request.x2
-    val y2 = request.y2
-    val duration = request.duration
-    val offset = request.offset
-    val displayId = request.displayId
-
-    gestureController.performTwoFingerSwipe(
-      RequestTwoFingerSwipe(
-        requestId = requestId,
-        x1 = x1,
-        y1 = y1,
-        x2 = x2,
-        y2 = y2,
-        duration = duration,
-        offset = offset,
-        displayId = displayId,
-        fingerCount = request.fingerCount,
-      ),
-    )
-  }
+  override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) =
+    gestureController.performTwoFingerSwipe(request)
 
   override suspend fun requestDrag(request: RequestDrag) {
     val requestId = request.requestId
-    val x1 = request.x1
-    val y1 = request.y1
-    val x2 = request.x2
-    val y2 = request.y2
-    val pressDurationMs = request.resolvedPressDurationMs
-    val dragDurationMs = request.resolvedDragDurationMs
-    val holdDurationMs = request.holdDurationMs
     val frameContext = request.frameContext
-    val displayId = request.displayId
-
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
-    gestureController.performDrag(
-      RequestDrag(
-        requestId = requestId,
-        x1 = x1,
-        y1 = y1,
-        x2 = x2,
-        y2 = y2,
-        pressDurationMs = pressDurationMs,
-        dragDurationMs = dragDurationMs,
-        holdDurationMs = holdDurationMs,
-        frameContext = frameContext,
-        displayId = displayId,
-      ),
-    )
+    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG))
+      return
+    // The drag reads the resolved durations, so the legacy holdTime/duration fields need no copy.
+    gestureController.performDrag(request)
   }
 
-  override suspend fun requestPinch(request: RequestPinch) {
-    val requestId = request.requestId
-    val centerX = request.centerX
-    val centerY = request.centerY
-    val distanceStart = request.distanceStart
-    val distanceEnd = request.distanceEnd
-    val rotationDegrees = request.rotationDegrees
-    val duration = request.duration
-    val displayId = request.displayId
+  override suspend fun requestPinch(request: RequestPinch) = gestureController.performPinch(request)
 
-    gestureController.performPinch(
-      RequestPinch(
-        requestId = requestId,
-        centerX = centerX,
-        centerY = centerY,
-        distanceStart = distanceStart,
-        distanceEnd = distanceEnd,
-        rotationDegrees = rotationDegrees,
-        duration = duration,
-        displayId = displayId,
-      ),
-    )
-  }
-
-  override suspend fun requestGestureStart(request: RequestGestureStart) {
-    gestureController.startStream(
-      RequestGestureStart(
-        requestId = request.requestId,
-        gestureId = request.gestureId,
-        x = request.x,
-        y = request.y,
-        displayId = request.displayId,
-      ),
-      requester = CommandOriginContext.currentClient(),
-    )
-  }
+  override suspend fun requestGestureStart(request: RequestGestureStart) =
+    gestureController.startStream(request, requester = CommandOriginContext.currentClient())
 
   override suspend fun requestGestureMove(
     requestId: String?,
@@ -2151,78 +2116,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
-  private enum class StaleFrameContextAction(val wireName: String) {
-    TAP("tap"),
-    SWIPE("swipe"),
-    DRAG("drag"),
-    SET_TEXT("set_text"),
-    IME_ACTION("ime_action"),
-    GLOBAL_ACTION("global_action"),
-  }
-
-  /**
-   * Rejects an input that was mapped through a screen state the service has since observed change.
-   */
-  private fun rejectStaleFrameContext(
-    requestId: String?,
-    expected: String?,
-    action: StaleFrameContextAction,
-  ): Boolean {
-    if (!frameContextGate.isStale(expected)) return false
-    val error =
-      "Stale frame context for input/${action.wireName}; observe a fresh frame before retrying"
-    launchRequestScope(requestId) { broadcastStaleFrameRejection(requestId, action, error) }
-    return true
-  }
-
-  /**
-   * Broadcasts the correlated stale-frame rejection for [action].
-   *
-   * A future [StaleFrameContextAction] added without its own branch must never route through no
-   * branch and leave the caller to hang until timeout (issue #4577). At this module's Kotlin
-   * language version the compiler already enforces that: a non-exhaustive `when` over the enum is a
-   * compile error in statement or expression form. This is written expression-bodied so the
-   * guarantee also survives lowering the language version below the level where non-exhaustive
-   * `when` *statements* became errors (they are only warnings pre-2.0). Do not add an `else ->`
-   * branch — it would defeat the check by making a missing action compile.
-   */
-  private suspend fun broadcastStaleFrameRejection(
-    requestId: String?,
-    action: StaleFrameContextAction,
-    error: String,
-  ) =
-    when (action) {
-      StaleFrameContextAction.TAP ->
-        gestureController.broadcastTapCoordinatesResult(requestId, false, error, 0)
-      StaleFrameContextAction.SWIPE ->
-        gestureController.broadcastSwipeResult(requestId, false, error, 0, null)
-      StaleFrameContextAction.DRAG ->
-        gestureController.broadcastDragResult(requestId, false, error, 0, null)
-      StaleFrameContextAction.SET_TEXT ->
-        textInputController.broadcastSetTextResult(requestId, false, error, 0)
-      StaleFrameContextAction.IME_ACTION ->
-        textInputController.broadcastImeActionResult(
-          ImeActionFrameResult(
-            requestId = requestId,
-            action = action.wireName,
-            success = false,
-            error = error,
-            totalTimeMs = 0,
-          ),
-        )
-      StaleFrameContextAction.GLOBAL_ACTION ->
-        webSocketServer.broadcast(
-          dev.jasonpearson.automobile.protocol.GlobalActionResult(
-            timestamp = System.currentTimeMillis(),
-            requestId = requestId,
-            success = false,
-            action = action.wireName,
-            totalTimeMs = 0,
-            error = error,
-          ),
-        )
-    }
-
   override suspend fun requestSetText(request: RequestSetText) {
     val requestId = request.requestId
     val text = request.text
@@ -2230,7 +2123,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val dismissKeyboard = request.dismissKeyboard
     val frameContext = request.frameContext
 
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)) return
+    if (
+      staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)
+    )
+      return
     textInputController.performSetText(requestId, text, resourceId, dismissKeyboard)
   }
 
@@ -2272,7 +2168,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val action = request.action
     val frameContext = request.frameContext
 
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.IME_ACTION)) return
+    if (
+      staleFrames.rejectStaleFrameContext(
+        requestId,
+        frameContext,
+        StaleFrameContextAction.IME_ACTION,
+      )
+    )
+      return
     textInputController.performImeAction(requestId, action)
   }
 
@@ -2314,7 +2217,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val action = request.action
     val frameContext = request.frameContext
 
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.GLOBAL_ACTION))
+    if (
+      staleFrames.rejectStaleFrameContext(
+        requestId,
+        frameContext,
+        StaleFrameContextAction.GLOBAL_ACTION,
+      )
+    )
       return
     globalActionController.performGlobalActionRequest(requestId, action)
   }

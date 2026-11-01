@@ -1,6 +1,8 @@
 import { createExecResult } from "../../../src/utils/execResult";
 import { readFileSync } from "node:fs";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { convertToViewHierarchyResult } from "../../../src/features/observe/ios/IosHierarchyConverter";
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice, ExecResult, ObserveResult, ViewHierarchyResult } from "../../../src/models";
@@ -87,6 +89,23 @@ function sequencedWindow(appIds: string[]): WindowInterface {
 
 function iosHierarchy(packageName: string): CtrlProxyHierarchy {
   return { packageName, updatedAt: 1, hierarchy: { className: "XCUIApplication" } };
+}
+
+function iosSwitcherHierarchy(): CtrlProxyHierarchy {
+  return {
+    ...iosHierarchy("com.apple.springboard"),
+    hierarchy: {
+      className: "XCUIApplication",
+      node: {
+        resourceId: "AppSwitcherContentView",
+        bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+        node: {
+          resourceId: "card:com.apple.Preferences:sceneID:com.apple.Preferences-default",
+          bounds: { left: 63, top: 128, right: 338, bottom: 727 },
+        },
+      },
+    },
+  };
 }
 
 type GlobalActionResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestGlobalAction"]>>;
@@ -874,6 +893,118 @@ describe("HomeScreen", () => {
       expect(result.success).toBe(true);
       expect(readCount).toBe(3);
       expect(fakeTimer.getSleepHistory()).toEqual([300, 600]);
+    });
+
+    describe("App Switcher recovery", () => {
+      test.each([false, true])(
+        "dismisses the switcher using runner Home (simulator %s)",
+        async (simulator) => {
+          const { action, client } = createIosHomeScreen({
+            simulator,
+            simctl: { executeCommandArgs: async () => createExecResult("", "") },
+          });
+          const before = createObserveResult();
+          before.viewHierarchy = convertToViewHierarchyResult(iosSwitcherHierarchy());
+          const after = createObserveResult();
+          after.viewHierarchy = convertToViewHierarchyResult(iosHierarchy("com.apple.springboard"));
+          fakeObserveScreen.setObserveSequence([before, after]);
+          const expectedPresses = simulator ? 1 : 2;
+          const read = spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+            hierarchy:
+              client.getPressHomeRequestCount() >= expectedPresses
+                ? iosHierarchy("com.apple.springboard")
+                : iosSwitcherHierarchy(),
+          }));
+
+          const result = await action.execute();
+          expect(result.success).toBe(true);
+          expect(result.message).toBeUndefined();
+          expect(client.getPressHomeRequestCount()).toBe(expectedPresses);
+          expect(read).toHaveBeenCalledTimes(2);
+          expect(fakeTimer.getSleepHistory()).toEqual([]);
+        },
+      );
+
+      test.each([false, true])(
+        "retries when dismissing the switcher returns to an app (simulator %s)",
+        async (simulator) => {
+          const { action, client } = createIosHomeScreen({
+            simulator,
+            simctl: { executeCommandArgs: async () => createExecResult("", "") },
+          });
+          client.setPressHomeResult({
+            success: false,
+            totalTimeMs: 1,
+            error: "Home press did not bring SpringBoard to the foreground",
+          });
+          const before = createObserveResult();
+          before.viewHierarchy = convertToViewHierarchyResult(iosSwitcherHierarchy());
+          const after = createObserveResult();
+          after.viewHierarchy = convertToViewHierarchyResult(iosHierarchy("com.apple.springboard"));
+          fakeObserveScreen.setObserveSequence([before, after]);
+          spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+            hierarchy:
+              client.getPressHomeRequestCount() === 0
+                ? iosSwitcherHierarchy()
+                : iosHierarchy(
+                    client.getPressHomeRequestCount() === 1
+                      ? "com.apple.Preferences"
+                      : "com.apple.springboard",
+                  ),
+          }));
+
+          const result = await action.execute();
+          expect(result.success).toBe(true);
+          expect(result.message).toBeUndefined();
+          expect(client.getPressHomeRequestCount()).toBe(2);
+        },
+      );
+
+      test.each([false, true])(
+        "fails when the app stays foreground after two runner presses (simulator %s)",
+        async (simulator) => {
+          const { action, client } = createIosHomeScreen({
+            simulator,
+            simctl: { executeCommandArgs: async () => createExecResult("", "") },
+          });
+          const before = createObserveResult();
+          before.viewHierarchy = convertToViewHierarchyResult(iosSwitcherHierarchy());
+          fakeObserveScreen.setObserveResult(before);
+          spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+            hierarchy:
+              client.getPressHomeRequestCount() === 0
+                ? iosSwitcherHierarchy()
+                : iosHierarchy("com.apple.Preferences"),
+          }));
+
+          const failure = await action.execute().catch((error: unknown) => error);
+          expect(failure).toBeInstanceOf(ActionableError);
+          expect(failure).toHaveProperty(
+            "message",
+            expect.stringContaining("Home press did not background com.apple.Preferences"),
+          );
+          expect(client.getPressHomeRequestCount()).toBe(2);
+        },
+      );
+
+      test.each([false, true])(
+        "fails if the switcher survives the extra press (simulator %s)",
+        async (simulator) => {
+          const { action, client } = createIosHomeScreen({
+            simulator,
+            simctl: { executeCommandArgs: async () => createExecResult("", "") },
+          });
+          client.setHierarchyData(iosSwitcherHierarchy());
+          const failure = await action.executeIosHomeNavigation().catch((error: unknown) => error);
+          expect(failure).toBeInstanceOf(ActionableError);
+          expect(failure).toHaveProperty(
+            "message",
+            expect.stringContaining("App Switcher is still open"),
+          );
+          expect(client.getPressHomeRequestCount()).toBe(2);
+          expect(client.getHierarchyRequestCount()).toBe(simulator ? 3 : 2);
+        },
+      );
     });
 
     describe("simulator Spotlight recovery (#14827)", () => {

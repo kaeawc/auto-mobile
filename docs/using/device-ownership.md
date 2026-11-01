@@ -356,6 +356,10 @@ observation. Releasing the session, killing or deleting the simulator stops its 
 With a connected runner, `observe` returns the hierarchy and the existing `focusedElement`;
 use `project: "full"` to include the full hierarchy. Navigate focus with `pressButton`
 using `up`, `down`, `left`, `right`, `select`, `menu`, `home` or `playPause`.
+Use `tapOn` with an exact `text` or `elementId` selector and optional zero-based `index` to
+move focus to a visible element and select it. Only the tap action is supported. A missing
+match, absent focus, stalled focus or the 30-move limit produces an error; observe and
+use `pressButton` to establish focus or move closer before retrying.
 Touch gestures, long press and text input are unsupported. Without a runner, observation
 returns a screenshot and `hierarchyUnavailable`; call `startDevice` again to prepare automation.
 

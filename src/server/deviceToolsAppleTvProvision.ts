@@ -32,7 +32,11 @@ import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
 import { bootAdmissionServices } from "../devices/bootAdmissionServices";
 import { formatToolParamError } from "./toolParamError";
-import { stripInternalToolParams } from "./internalToolParams";
+import {
+  internalMcpSessionId,
+  internalOneShotCli,
+  stripInternalToolParams,
+} from "./internalToolParams";
 
 type AppleTvProvisioner = ReturnType<
   NonNullable<DeviceToolsDependencies["appleTvSimulatorProvisionerFactory"]>
@@ -86,6 +90,7 @@ export async function provisionAppleTvDevice(
               // provisionDevice is an explicit creation request, as on Android and iOS.
               allowCreate: deps.deviceCreationGateFactory().isCreationAllowed(true),
               signal: requestSignal,
+              discardUnconfirmed: (tv) => discardUnclaimedCreatedTv(tv, provisioner, deps, lease),
             });
             const createdTv = resolved.tv;
             let cleanupNeeded = resolved.created;
@@ -182,7 +187,13 @@ async function bootAndBind(
   { signal, stage }: { signal: AbortSignal; stage: { current: string } },
 ): Promise<{ boot: AppleTvBootResult; sessionId: string }> {
   try {
-    assertTvUnclaimed(tv.deviceId, deps, lease);
+    const reusableSessionId = internalOneShotCli(rawArgs)
+      ? undefined
+      : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
+          internalMcpSessionId(rawArgs),
+          tv.deviceId,
+        );
+    assertTvUnclaimed(tv.deviceId, deps, lease, reusableSessionId);
     stage.current = "booting the Apple TV simulator";
     const lifecycle = (deps.appleTvSimulatorBootFactory ?? defaultAppleTvBoot)();
     const boot = await lifecycle.boot(tv, {
@@ -209,11 +220,12 @@ async function bootAndBind(
   }
 }
 
-/** The canonical lease proves this lifecycle owns the UDID; a pool holder still wins. */
+/** The canonical lease owns the UDID; only boot may reuse the caller's own pool holder. */
 function assertTvUnclaimed(
   udid: string,
   deps: DeviceToolsDependencies,
   lease?: VirtualDeviceLifecycleLease,
+  reusableSessionId?: string,
 ): void {
   const held = holderOf(initializedDevicePool()?.getDevice(udid));
   const ownsIdentity =
@@ -221,7 +233,7 @@ function assertTvUnclaimed(
     lease.identity.platform === "tvos" &&
     lease.identity.stableId === udid;
   if (
-    held ||
+    (held && held !== reusableSessionId) ||
     (!ownsIdentity &&
       deps.lifecycleCoordinator.isReserved({
         kind: "stable",
@@ -235,9 +247,9 @@ function assertTvUnclaimed(
   }
 }
 
-/** Cleanup is fenced by the same ownership check as boot, including before canonical binding. */
+/** Cleanup requires an unclaimed pool entry and the canonical lifecycle lease. */
 async function discardUnclaimedCreatedTv(
-  tv: ListedAppleTv,
+  tv: Pick<ListedAppleTv, "deviceId">,
   provisioner: AppleTvProvisioner,
   deps: DeviceToolsDependencies,
   lease?: VirtualDeviceLifecycleLease,

@@ -30,6 +30,8 @@ export interface AppleTvProvisionOptions {
   allowCreate: boolean;
   /** Runs immediately before `simctl create`, after every check passed. */
   onBeforeCreate?: () => void;
+  /** Lifecycle-fenced cleanup when the listing cannot confirm the newly created TV. */
+  discardUnconfirmed?: (tv: Pick<ListedAppleTv, "deviceId">) => Promise<AppleTvDiscardResult>;
   signal?: AbortSignal;
 }
 
@@ -77,7 +79,7 @@ export class AppleTvSimulatorProvisioner {
     }
     options.signal?.throwIfAborted();
     options.onBeforeCreate?.();
-    return { tv: await this.create(request, options.signal), created: true };
+    return { tv: await this.create(request, options), created: true };
   }
 
   /**
@@ -147,7 +149,7 @@ export class AppleTvSimulatorProvisioner {
 
   private async create(
     request: AppleTvProvisionRequest,
-    signal: AbortSignal | undefined,
+    { signal, discardUnconfirmed }: AppleTvProvisionOptions,
   ): Promise<ListedAppleTv> {
     const { name, spec } = request;
     let udid: string;
@@ -165,12 +167,14 @@ export class AppleTvSimulatorProvisioner {
       }
       return tv;
     } catch (error) {
-      const discarded = await this.discardCreated({ deviceId: udid });
+      const discarded = await discardUnconfirmed?.({ deviceId: udid });
       throw new ActionableError(
         `Could not confirm created Apple TV simulator ${udid}; ` +
-          (discarded.deleted
+          (discarded?.deleted
             ? "the TV was deleted again. Retry provisionDevice"
-            : `deleting it again failed (${discarded.error}); delete it with deleteDevice`) +
+            : "the TV was left in place; " +
+              (discarded ? `deleting it again failed (${discarded.error}); ` : "") +
+              "delete it with deleteDevice") +
           `: ${errorMessage(error)}`,
         { cause: error },
       );

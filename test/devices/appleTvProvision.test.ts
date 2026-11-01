@@ -126,7 +126,12 @@ describe("AppleTvSimulatorProvisioner", () => {
       if (mode === "delete fails") {
         simctl.deleteError = new Error("delete busy");
       }
-      const error = await rejection(provisioner.provision(request(), { allowCreate: true }));
+      const error = await rejection(
+        provisioner.provision(request(), {
+          allowCreate: true,
+          discardUnconfirmed: (tv) => provisioner.discardCreated(tv),
+        }),
+      );
       const udid = "C0FFEE00-0000-4000-8000-000000000001";
       expect(error).toBeInstanceOf(ActionableError);
       expect(simctl.commands.at(-1)).toBe(`delete ${udid}`);
@@ -143,6 +148,25 @@ describe("AppleTvSimulatorProvisioner", () => {
       }
     });
   }
+
+  test("leaves an unconfirmed TV in place without a lifecycle cleanup callback", async () => {
+    const { simctl, provisioner } = arrange([]);
+    const create = simctl.createSimulator.bind(simctl);
+    simctl.createSimulator = async (...args) => {
+      const udid = await create(...args);
+      simctl.listingError = new Error("inventory unavailable after create");
+      return udid;
+    };
+
+    const error = await rejection(provisioner.provision(request(), { allowCreate: true }));
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain("the TV was left in place");
+    expect(String(error)).toContain("delete it with deleteDevice");
+    expect(String(error)).toContain("inventory unavailable after create");
+    expect(simctl.commands.map((cmd) => cmd.split(" ")[0])).toEqual(["create"]);
+    expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
+  });
 
   test("a missing tv is not created while device creation is disabled", async () => {
     const { simctl, provisioner } = arrange([]);

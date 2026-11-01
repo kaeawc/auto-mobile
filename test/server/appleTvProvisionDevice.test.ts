@@ -4,6 +4,7 @@ import {
 } from "../../src/daemon/acquisitionReceipt";
 import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { provisionAppleTvDevice } from "../../src/server/deviceToolsAppleTvProvision";
+import { bindBootedDeviceSession } from "../../src/server/deviceToolsStartDevice";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { toolJson } from "../helpers/toolResponse";
@@ -174,6 +175,92 @@ describe("provisionDevice on an Apple TV simulator", () => {
 
     expect(pool.resolveAutolockSessionForMcpSession("client-a", "tvos")).toBe(sessionId);
   });
+
+  for (const caller of ["client-a", "client-b"] as const) {
+    test(`reprovisioning a held TV checks the caller's ownership (${caller})`, async () => {
+      const { simctl, timer } = await arrange();
+      const { sessionId } = sessionSchema.parse(toolJson(await provision({ device: TV })));
+      simctl.commands.length = 0;
+      let bindCalls = 0;
+      const outcome = await provisionAppleTvDevice(
+        { __mcpSessionId: caller, device: TV },
+        async (...args) => {
+          bindCalls++;
+          return await bindBootedDeviceSession(...args);
+        },
+      ).then(toolJson, (error: unknown) => error);
+
+      if (caller === "client-a") {
+        expect(outcome).toMatchObject({ sessionId, lifecycleState: "ready", adopted: true });
+        expect(bindCalls).toBe(1);
+      } else {
+        expect(outcome).toBeInstanceOf(ActionableError);
+        expect(String(outcome)).toContain(`held by session ${sessionId}`);
+        expect(bindCalls).toBe(0);
+      }
+      expect(simctl.commands).toEqual([]);
+      expect(timer.getSleepHistory()).toEqual([]);
+    });
+  }
+
+  for (const held of [true, false]) {
+    for (const confirmation of ["throws", "omits"] as const) {
+      test(`unconfirmed create respects a stable lifecycle holder (held=${held}, ${confirmation})`, async () => {
+        const { simctl, lifecycleCoordinator, timer } = await arrange();
+        const udid = "C0FFEE00-0000-4000-8000-000000000001";
+        const identity = { kind: "stable", platform: "tvos", stableId: udid } as const;
+        const foreign = held
+          ? await lifecycleCoordinator.reserve(identity, {
+              operation: "start",
+              deadlineMs: timer.now() + 60_000,
+            })
+          : undefined;
+        const inventory = new AppleTvSimulatorInventory(simctl, "arm64");
+        setDeviceToolsDependencies({
+          appleTvSimulatorProvisionerFactory: () =>
+            new AppleTvSimulatorProvisioner(
+              {
+                readCatalog: inventory.readCatalog.bind(inventory),
+                listAppleTvSimulators: async (signal) => {
+                  if (simctl.commands.length > 0) {
+                    if (confirmation === "omits") {
+                      return [];
+                    }
+                    throw new Error("inventory unavailable after create");
+                  }
+                  return await inventory.listAppleTvSimulators(signal);
+                },
+              },
+              simctl,
+            ),
+        });
+        try {
+          const error = await failure(provision({ device: TV }));
+          expect(error).toBeInstanceOf(ActionableError);
+          expect(String(error)).toContain("Could not confirm created Apple TV simulator");
+          expect(String(error)).toContain(
+            confirmation === "throws" ? "inventory unavailable after create" : "does not show it",
+          );
+          expect(simctl.commands.filter((cmd) => cmd.startsWith("delete "))).toEqual(
+            held ? [] : [`delete ${udid}`],
+          );
+          if (held) {
+            expect(String(error)).toContain("the TV was left in place");
+            expect(String(error)).toContain("deleteDevice");
+            expect(lifecycleCoordinator.isReserved(identity)).toBe(true);
+            expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
+          } else {
+            expect(String(error)).toContain("the TV was deleted again");
+            expect(lifecycleCoordinator.isReserved(identity)).toBe(false);
+            expect(Object.values(simctl.listing.devices).flat()).toEqual([]);
+          }
+          expect(timer.getSleepHistory()).toEqual([]);
+        } finally {
+          foreign?.release();
+        }
+      });
+    }
+  }
 
   test("a TV shut down while provisioning waited for its lease is booted, not adopted as booted", async () => {
     const existing = tvDevice({ name: NAME, state: "Booted" });

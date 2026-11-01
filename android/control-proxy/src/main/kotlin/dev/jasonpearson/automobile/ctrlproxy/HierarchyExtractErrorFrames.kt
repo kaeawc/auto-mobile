@@ -48,3 +48,48 @@ object HierarchyExtractErrorFrames {
     )
   }
 }
+
+/**
+ * Emits the correlated WebSocket `type:"error"` frame for a failed `EXTRACT_HIERARCHY` broadcast,
+ * keyed by the broadcast's `sync_` `requestId` uuid. A null frame (blank/absent uuid, or a
+ * cancellation the caller rethrows — see [HierarchyExtractErrorFrames]) is a no-op.
+ *
+ * The daemon's ADB-broadcast hierarchy fallback awaits that uuid in `waitForFreshData` over this
+ * same WebSocket (the response channel the success-path `hierarchy_update` push also travels on).
+ * Before issue #3089 a broadcast-handler failure only sent an ADB `OPERATION_RESULT` that the
+ * daemon's wait could not correlate, so it degraded to a full timeout. Emitting this frame closes
+ * that last member of the #3032/#3061 `waitForFreshData` hang class, mirroring the WebSocket
+ * `req_`/`stale_` paths and the #2985 decode/handler error envelope.
+ *
+ * Routed through [ResultBroadcaster.guard] so a throw while *sending* this frame degrades to the
+ * daemon's timeout rather than escaping the receiver coroutine (issue #3045 / #3085).
+ */
+internal class HierarchyExtractFrameSender(
+  private val transport: Transport,
+  private val resultBroadcaster: ResultBroadcaster,
+) {
+  /** The late-bound WebSocket server. */
+  interface Transport {
+    fun isRunning(): Boolean
+
+    /**
+     * For an id minted outside the socket server (an ADB broadcast), which owns no route for it.
+     */
+    suspend fun broadcastExternallyCorrelated(frame: ErrorResponse)
+
+    suspend fun broadcast(frame: ErrorResponse)
+  }
+
+  suspend fun send(frame: ErrorResponse?, externallyCorrelated: Boolean = true) {
+    // A null frame means there was nothing to correlate (blank/absent uuid, or a cooperative
+    // cancellation that must propagate); HierarchyExtractErrorFrames already made that decision, so
+    // there is no WebSocket frame to send here. See issue #3131.
+    if (frame == null) return
+    resultBroadcaster.guard(frame.requestId, "hierarchy_extract_error") {
+      if (transport.isRunning()) {
+        if (externallyCorrelated) transport.broadcastExternallyCorrelated(frame)
+        else transport.broadcast(frame)
+      }
+    }
+  }
+}

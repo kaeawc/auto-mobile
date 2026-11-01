@@ -22,11 +22,13 @@ import {
 import { readIntegritySignals, SU_PATHS, SUPERUSER_APK } from "./integritySignals";
 import { adbCommand, createSerializer, rejectValue, shell } from "./injectorSupport";
 import {
+  ensureRootAdb,
   listExisting,
   plantArtifacts,
   remountWritable,
   ROOT_ARTIFACT_PATHS,
 } from "./rootStateInjector";
+import { SelinuxOwner, resolveSelinuxOwner, selinuxOwnersByDevice } from "./SelinuxOwner";
 import { OwedResetError } from "./OwedResetError";
 
 const TOGGLE_IDS = ["su-binary", "superuser-apk", "selinux-permissive"] as const;
@@ -65,11 +67,15 @@ class IntegrityStateInjector implements DeviceConditionInjector {
   private readonly serialize = createSerializer();
   private readonly planted = new Set<string>();
   private readonly frames: ApplyFrame[] = [];
+  private acquiredRoot = false;
   // The baseline of the latest changed apply or reset, including earlier touched signals. A controller
   // verifies after EACH newest-first reset, so this must follow that reset's baseline.
   private cleanBaseline = new Map<ToggleId, boolean>();
 
-  constructor(private readonly adb: AdbExecutor) {}
+  constructor(
+    private readonly adb: AdbExecutor,
+    private readonly selinux: SelinuxOwner,
+  ) {}
 
   private async readState(id: ToggleId, signal?: AbortSignal): Promise<SignalState> {
     if (id !== "selinux-permissive") {
@@ -121,20 +127,39 @@ class IntegrityStateInjector implements DeviceConditionInjector {
     return readings.find((reading) => reading.id === id)?.active === true;
   }
 
-  private async root(signal?: AbortSignal): Promise<void> {
-    const out = await adbCommand(this.adb, ["root"], signal);
-    if (/cannot|not allowed|denied|refused/i.test(out)) {
-      throw new ActionableError(out);
+  private async root(signal?: AbortSignal, writable = false): Promise<void> {
+    let wasRooted = true;
+    try {
+      wasRooted = (await shell(this.adb, ["id", "-u"], signal)) === "0";
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(
+        `integrityState root probe failed; preserving existing privileges: ${errorMessage(error)}`,
+        error,
+      );
     }
-    await adbCommand(this.adb, ["wait-for-device"], signal);
+    // Record before root: it may succeed even when the following transport wait fails.
+    this.acquiredRoot ||= !wasRooted;
+    await (writable ? remountWritable(this.adb, signal) : ensureRootAdb(this.adb, signal));
+  }
+
+  private async restorePrivileges(signal?: AbortSignal): Promise<void> {
+    if (this.acquiredRoot) {
+      await adbCommand(this.adb, ["unroot"], signal);
+      this.acquiredRoot = false;
+    }
   }
 
   private async restoreMutation(mutation: Mutation, signal?: AbortSignal): Promise<void> {
     if (mutation.id === "selinux-permissive") {
-      await this.root(signal);
-      await shell(this.adb, ["setenforce", mutation.before.active ? "0" : "1"], signal);
+      if (this.selinux.changed(mutation)) {
+        await this.root(signal);
+      }
+      await this.selinux.release(this.adb, mutation, signal, true);
     } else {
-      await remountWritable(this.adb, signal);
+      await this.root(signal, true);
       const remove = [...mutation.paths].filter((path) => !mutation.before.paths.has(path));
       const replace = [...mutation.paths].filter((path) => mutation.before.paths.has(path));
       if (remove.length > 0) {
@@ -151,7 +176,8 @@ class IntegrityStateInjector implements DeviceConditionInjector {
     }
     const state = await this.readState(mutation.id, signal);
     if (
-      state.active !== mutation.before.active ||
+      state.active !==
+        (mutation.id === "selinux-permissive" ? this.selinux.expected : mutation.before.active) ||
       [...mutation.paths].some((path) => state.paths.has(path) !== mutation.before.paths.has(path))
     ) {
       throw new ActionableError(`integrityState reset did not restore ${mutation.id} read-back`);
@@ -175,6 +201,10 @@ class IntegrityStateInjector implements DeviceConditionInjector {
     this.cleanBaseline = frame.expected;
     for (const mutation of [...frame.mutations].reverse()) {
       await this.restoreMutation(mutation, signal);
+      frame.mutations.splice(frame.mutations.indexOf(mutation), 1);
+    }
+    if (this.frames.length === 1) {
+      await this.restorePrivileges(signal);
     }
     frame.resetDone = true;
     this.frames.pop();
@@ -220,13 +250,14 @@ class IntegrityStateInjector implements DeviceConditionInjector {
     signal?: AbortSignal,
   ): Promise<void> {
     if (mutation.id === "selinux-permissive") {
-      await this.root(signal);
+      await this.selinux.capture(this.adb, mutation, signal);
       frame.mutations.push(mutation);
-      await shell(this.adb, ["setenforce", target ? "0" : "1"], signal);
+      await this.root(signal);
+      await this.selinux.set(this.adb, mutation, target, signal);
       return;
     }
     // A remount failure affects the two file signals, but must not block SELinux.
-    frame.writable ??= remountWritable(this.adb, signal);
+    frame.writable ??= this.root(signal, true);
     await frame.writable;
     frame.mutations.push(mutation);
     if (target) {
@@ -268,6 +299,35 @@ class IntegrityStateInjector implements DeviceConditionInjector {
     }
   }
 
+  private async cancelFrame(frame: ApplyFrame, error: unknown): Promise<never> {
+    if (frame.mutations.length > 0 || (this.frames.length === 0 && this.acquiredRoot)) {
+      this.frames.push(frame);
+      try {
+        // An aborted request cannot cancel restoration of its already completed writes.
+        await this.resetFrame(frame);
+      } catch (cleanupError) {
+        logger.warn(
+          `integrityState cancellation cleanup failed: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+        throw new OwedResetError(
+          `integrityState cancellation cleanup failed (${errorMessage(cleanupError)}); release will retry.`,
+          this.resetFor(frame),
+          { cause: error },
+        );
+      }
+    }
+    throw toActionableError(error, "integrityState apply aborted");
+  }
+
+  private shouldJoinSelinux(id: ToggleId): boolean {
+    return (
+      id === "selinux-permissive" &&
+      this.selinux.owned &&
+      !this.frames.some((prior) => prior.mutations.some((entry) => entry.id === id))
+    );
+  }
+
   private async applyToggle(
     frame: ApplyFrame,
     signalResult: DeviceConditionSignalResult,
@@ -292,7 +352,7 @@ class IntegrityStateInjector implements DeviceConditionInjector {
     }
     const mutation: Mutation = { id, before, paths: new Set() };
     try {
-      if (before.active !== target) {
+      if (before.active !== target || this.shouldJoinSelinux(id)) {
         await this.mutate(frame, mutation, target, signal);
       }
       const active = await this.readActive(id, signal);
@@ -307,6 +367,29 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       logger.warn(`integrityState ${id} failed: ${errorMessage(error)}`, error);
       signalResult.detail = errorMessage(error);
       await this.rollback(frame, mutation, error);
+      if (signal?.aborted) {
+        await this.cancelFrame(frame, error);
+      }
+    }
+  }
+
+  private async finishFrame(frame: ApplyFrame): Promise<void> {
+    if (frame.mutations.length === 0 && this.frames.length === 0) {
+      try {
+        await this.restorePrivileges();
+      } catch (error) {
+        logger.warn(`integrityState privilege cleanup failed: ${errorMessage(error)}`, error);
+        this.frames.push(frame);
+        throw new OwedResetError(
+          `integrityState privilege cleanup failed (${errorMessage(error)}); release will retry.`,
+          this.resetFor(frame),
+          { cause: error },
+        );
+      }
+    }
+    if (frame.mutations.length > 0) {
+      this.cleanBaseline = frame.expected;
+      this.frames.push(frame);
     }
   }
 
@@ -344,10 +427,7 @@ class IntegrityStateInjector implements DeviceConditionInjector {
             : "baked into the system image and only a different image changes it";
       }
     }
-    if (frame.mutations.length > 0) {
-      this.cleanBaseline = frame.expected;
-      this.frames.push(frame);
-    }
+    await this.finishFrame(frame);
     return {
       status: signals.some((signalResult) => signalResult.status === "applied")
         ? "applied"
@@ -383,9 +463,16 @@ class IntegrityStateInjector implements DeviceConditionInjector {
 
   isClean(signal?: AbortSignal): Promise<boolean> {
     return this.serialize(async () => {
+      if (this.acquiredRoot) {
+        return false;
+      }
       try {
         for (const [id, active] of this.cleanBaseline) {
-          if ((await this.readState(id, signal)).active !== active) {
+          const clean =
+            id === "selinux-permissive" && this.frames.length === 0
+              ? await this.selinux.isClean(this.adb, signal)
+              : (await this.readState(id, signal)).active === active;
+          if (!clean) {
             return false;
           }
         }
@@ -398,8 +485,11 @@ class IntegrityStateInjector implements DeviceConditionInjector {
   }
 }
 
-export function createIntegrityStateInjector(adb: AdbExecutor): DeviceConditionInjector {
-  return new IntegrityStateInjector(adb);
+export function createIntegrityStateInjector(
+  adb: AdbExecutor,
+  selinux = new SelinuxOwner(),
+): DeviceConditionInjector {
+  return new IntegrityStateInjector(adb, selinux);
 }
 
 const injectorsByDevice = new Map<string, DeviceConditionInjector>();
@@ -409,14 +499,24 @@ export function resolveIntegrityStateInjector(
   device: BootedDevice,
   key: DeviceConditionKey,
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
-  cache: Map<string, DeviceConditionInjector> = injectorsByDevice,
+  options:
+    | Map<string, DeviceConditionInjector>
+    | {
+        cache: Map<string, DeviceConditionInjector>;
+        selinuxOwners?: Map<string, SelinuxOwner>;
+      } = injectorsByDevice,
 ): DeviceConditionInjector | undefined {
   if (device.platform !== "android" || key !== "integrityState") {
     return undefined;
   }
+  const cache = options instanceof Map ? options : options.cache;
+  const selinuxOwners = options instanceof Map ? selinuxOwnersByDevice : options.selinuxOwners;
   let injector = cache.get(device.deviceId);
   if (!injector) {
-    injector = createIntegrityStateInjector(adbFactory.create(device));
+    injector = createIntegrityStateInjector(
+      adbFactory.create(device),
+      resolveSelinuxOwner(device.deviceId, selinuxOwners),
+    );
     cache.set(device.deviceId, injector);
   }
   return injector;

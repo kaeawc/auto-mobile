@@ -13,6 +13,7 @@ import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
+import { SelinuxOwner, resolveSelinuxOwner, selinuxOwnersByDevice } from "./SelinuxOwner";
 import { OwedResetError } from "./OwedResetError";
 import { adbCommand, rejectValue, shell } from "./injectorSupport";
 
@@ -128,14 +129,11 @@ export async function listExisting(
   );
 }
 
-const selinuxFlag = (mode: string): string => (/permissive/i.test(mode) ? "0" : "1");
-
-export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInjector {
-  let baselineSelinux = "Enforcing";
-  // The baseline is captured once and kept until a reset fully succeeds: recapturing it while
-  // anything is still owed would record the fixture's own Permissive as "the original".
-  let baselineCaptured = false;
-  let selinuxChanged = false;
+export function createRootStateInjector(
+  adb: AdbExecutor,
+  selinux = new SelinuxOwner(),
+): DeviceConditionInjector {
+  const selinuxToken = {};
   // True while this fixture is applied and its reset is owed; a repeat apply is then coalesced.
   let active = false;
   // Only artifacts WE planted. A userdebug image ships a real su; it is never overwritten here
@@ -155,9 +153,7 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
       // Confirm the removal; `planted` is only cleared once the files are really gone.
       remaining = await listExisting(adb, [...planted], resetSignal);
     }
-    if (selinuxChanged) {
-      await shell(adb, ["setenforce", selinuxFlag(baselineSelinux)], resetSignal);
-    }
+    await selinux.release(adb, selinuxToken, resetSignal);
     await adbCommand(adb, ["unroot"], resetSignal);
     if (remaining.size > 0) {
       // Everything else is restored, but the reset stays owed so release retries and reports it.
@@ -166,8 +162,6 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
       );
     }
     planted.clear();
-    selinuxChanged = false;
-    baselineCaptured = false;
     active = false;
   };
   const plantedStillThere = async (signal?: AbortSignal): Promise<boolean> => {
@@ -177,7 +171,7 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
   // After a reboot that keeps the modified system image the files survive but SELinux is back
   // to Enforcing, so "already applied" has to check the mode as well as the files.
   const selinuxStillPermissive = async (signal?: AbortSignal): Promise<boolean> =>
-    !selinuxChanged || /permissive/i.test(await shell(adb, ["getenforce"], signal));
+    !selinux.has(selinuxToken) || /permissive/i.test(await shell(adb, ["getenforce"], signal));
   return {
     key: "rootState",
     async apply(value, signal): Promise<DeviceConditionApplyOutcome> {
@@ -195,15 +189,13 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
       }
       // Both reads happen before the first mutation, so a failed probe changes nothing.
       const existing = await listExisting(adb, ROOT_ARTIFACT_PATHS, signal);
-      if (!baselineCaptured) {
-        baselineSelinux = (await shell(adb, ["getenforce"], signal)) || "Enforcing";
-        baselineCaptured = true;
+      if (!selinux.has(selinuxToken)) {
+        await selinux.capture(adb, selinuxToken, signal);
       }
       const toPlant = ROOT_ARTIFACT_PATHS.filter((path) => !existing.has(path));
       try {
         await remountWritable(adb, signal);
-        selinuxChanged = true;
-        await shell(adb, ["setenforce", "0"], signal);
+        await selinux.set(adb, selinuxToken, true, signal);
         await plantArtifacts(adb, toPlant, planted, signal);
       } catch (error) {
         try {
@@ -251,8 +243,7 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
           return false;
         }
       }
-      const mode = await shell(adb, ["getenforce"], signal);
-      return /permissive/i.test(mode) === /permissive/i.test(baselineSelinux);
+      return !selinux.has(selinuxToken) && (await selinux.isClean(adb, signal));
     },
   };
 }
@@ -268,14 +259,24 @@ export function resolveRootStateInjector(
   device: BootedDevice,
   key: DeviceConditionKey,
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
-  cache: Map<string, DeviceConditionInjector> = injectorsByDevice,
+  options:
+    | Map<string, DeviceConditionInjector>
+    | {
+        cache: Map<string, DeviceConditionInjector>;
+        selinuxOwners?: Map<string, SelinuxOwner>;
+      } = injectorsByDevice,
 ): DeviceConditionInjector | undefined {
   if (device.platform !== "android" || key !== "rootState") {
     return undefined;
   }
+  const cache = options instanceof Map ? options : options.cache;
+  const selinuxOwners = options instanceof Map ? selinuxOwnersByDevice : options.selinuxOwners;
   let injector = cache.get(device.deviceId);
   if (!injector) {
-    injector = createRootStateInjector(adbFactory.create(device));
+    injector = createRootStateInjector(
+      adbFactory.create(device),
+      resolveSelinuxOwner(device.deviceId, selinuxOwners),
+    );
     cache.set(device.deviceId, injector);
   }
   return injector;

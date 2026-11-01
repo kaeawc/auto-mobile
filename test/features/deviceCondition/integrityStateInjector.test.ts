@@ -5,6 +5,8 @@ import {
   DeviceConditionController,
   type DeviceConditionInjector,
 } from "../../../src/features/deviceCondition/DeviceConditionController";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { createDefaultInjectorResolver } from "../../../src/features/deviceCondition/DeviceConditionRegistry";
 import { INTEGRITY_SIGNALS } from "../../../src/features/deviceCondition/integritySignals";
 import { ROOT_ARTIFACT_PATHS } from "../../../src/features/deviceCondition/rootStateInjector";
 import {
@@ -34,14 +36,33 @@ class IntegrityAdb extends FakeAdbExecutor {
   commands: string[] = [];
   failures = new Set<string>();
   ignoreWrites = false;
-  async execute(args: string[]): Promise<ExecResult> {
+  rooted = true;
+  onRootProbe?: () => void;
+  async execute(args: string[], options?: AdbExecuteOptions): Promise<ExecResult> {
     const command = args.join(" ");
     this.commands.push(command);
     if ([...this.failures].some((prefix) => command.startsWith(prefix))) {
       throw new Error(`refused ${command}`);
     }
+    if (command === "shell id -u") {
+      this.onRootProbe?.();
+      options?.signal?.throwIfAborted();
+      return result(this.rooted ? "0" : "2000");
+    }
+    if (command === "root") {
+      this.rooted = true;
+    }
+    if (command === "unroot") {
+      this.rooted = false;
+    }
     if (args[0] === "remount") {
       return result("remount succeeded");
+    }
+    if (command === "shell getprop ro.debuggable") {
+      return result("1");
+    }
+    if (command === "shell getprop ro.build.type") {
+      return result("userdebug");
     }
     if (command === "shell getprop") {
       return result("[ro.debuggable]: [1]\n[ro.build.type]: [userdebug]");
@@ -72,6 +93,174 @@ class IntegrityAdb extends FakeAdbExecutor {
 const ids = ["su-binary", "superuser-apk", "selinux-permissive"] as const;
 
 describe("integrityState injector", () => {
+  for (const signals of [{ "selinux-permissive": "on" }, { "su-binary": "on" }] as const) {
+    test(`restores non-root adbd after ${Object.keys(signals)[0]} reset`, async () => {
+      const adb = new IntegrityAdb();
+      adb.rooted = false;
+      const injector = createIntegrityStateInjector(adb);
+      const outcome = await injector.apply("apply", undefined, { signals });
+      expect(adb.rooted).toBe(true);
+      await outcome.reset?.();
+      expect(adb.rooted).toBe(false);
+      expect(await injector.isClean()).toBe(true);
+    });
+  }
+
+  for (const failure of ["remount", "wait-for-device"]) {
+    test(`failed ${failure} restores privilege even before a mutation is registered`, async () => {
+      const adb = new IntegrityAdb();
+      adb.rooted = false;
+      adb.failures.add(failure);
+      const injector = createIntegrityStateInjector(adb);
+      await injector.apply("apply", undefined, { signals: { "su-binary": "on" } });
+      expect(adb.rooted).toBe(false);
+      expect(await injector.isClean()).toBe(true);
+    });
+  }
+
+  test("pre-existing root and failed privilege probes preserve privileges", async () => {
+    for (const probeFails of [false, true]) {
+      const adb = new IntegrityAdb();
+      if (probeFails) {
+        adb.failures.add("shell id -u");
+      }
+      const injector = createIntegrityStateInjector(adb);
+      const outcome = await injector.apply("maximally-detectable");
+      await outcome.reset?.();
+      expect(adb.rooted).toBe(true);
+      expect(adb.commands).not.toContain("unroot");
+      expect(await injector.isClean()).toBe(true);
+    }
+  });
+
+  test("failed-apply unroot failure carries a retryable reset", async () => {
+    const adb = new IntegrityAdb();
+    adb.rooted = false;
+    adb.failures.add("remount");
+    adb.failures.add("unroot");
+    const injector = createIntegrityStateInjector(adb);
+    const controller = new DeviceConditionController(() => injector);
+    await controller.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    expect(adb.rooted).toBe(true);
+    expect(controller.hasActiveConditions()).toBe(true);
+    expect(await injector.isClean()).toBe(false);
+    adb.failures.clear();
+    expect((await controller.restore()).verifiedClean).toBe(true);
+    expect(adb.rooted).toBe(false);
+  });
+
+  test("successful mutation with failed unroot keeps privilege cleanup owed", async () => {
+    const adb = new IntegrityAdb();
+    adb.rooted = false;
+    const injector = createIntegrityStateInjector(adb);
+    const outcome = await injector.apply("maximally-detectable");
+    adb.failures.add("unroot");
+    await expect(outcome.reset?.()).rejects.toThrow("unroot");
+    expect(adb.files.size).toBe(0);
+    expect(adb.mode).toBe("Enforcing");
+    expect(await injector.isClean()).toBe(false);
+    adb.failures.clear();
+    await outcome.reset?.();
+    expect(adb.rooted).toBe(false);
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("stacked frames and failed later applies retain root until the last reset", async () => {
+    const adb = new IntegrityAdb();
+    adb.rooted = false;
+    const injector = createIntegrityStateInjector(adb);
+    const first = await injector.apply("apply", undefined, { signals: { "su-binary": "on" } });
+    const second = await injector.apply("apply", undefined, {
+      signals: { "selinux-permissive": "on" },
+    });
+    adb.failures.add("remount");
+    await injector.apply("apply", undefined, { signals: { "superuser-apk": "on" } });
+    expect(adb.rooted).toBe(true);
+    expect(adb.commands).not.toContain("unroot");
+    adb.failures.clear();
+    await second.reset?.();
+    expect(adb.rooted).toBe(true);
+    expect(await injector.isClean()).toBe(false);
+    await first.reset?.();
+    expect(adb.rooted).toBe(false);
+    expect(await injector.isClean()).toBe(true);
+  });
+
+  test("aborted privilege probe rethrows without acquiring root", async () => {
+    const adb = new IntegrityAdb();
+    adb.rooted = false;
+    const abort = new AbortController();
+    adb.onRootProbe = () => abort.abort(new Error("probe aborted"));
+    const injector = createIntegrityStateInjector(adb);
+    await expect(
+      injector.apply("apply", abort.signal, { signals: { "su-binary": "on" } }),
+    ).rejects.toThrow("probe aborted");
+    expect(adb.commands).not.toContain("root");
+    expect(adb.rooted).toBe(false);
+  });
+
+  for (const integrityFirst of [true, false]) {
+    test(`shared SELinux baseline survives clearing ${integrityFirst ? "integrity" : "root"} first`, async () => {
+      const adb = new IntegrityAdb();
+      const resolve = createDefaultInjectorResolver({ create: () => adb });
+      const device = { name: "e", platform: "android" as const, deviceId: "shared" };
+      const owner = { device, deviceId: device.deviceId };
+      const integrity = resolve(owner, "integrityState")!;
+      const root = resolve(owner, "rootState")!;
+      const integrityOutcome = await integrity.apply("maximally-detectable");
+      const rootOutcome = await root.apply("rooted-detectable");
+      expect(adb.mode).toBe("Permissive");
+      await (integrityFirst ? integrityOutcome : rootOutcome).reset?.();
+      expect(adb.mode).toBe("Permissive");
+      await (integrityFirst ? rootOutcome : integrityOutcome).reset?.();
+      expect(adb.mode).toBe("Enforcing");
+      expect(await integrity.isClean()).toBe(true);
+      expect(await root.isClean()).toBe(true);
+    });
+  }
+
+  test("factory-local SELinux owners isolate the same device id across adb clients", async () => {
+    const firstAdb = new IntegrityAdb();
+    const secondAdb = new IntegrityAdb();
+    secondAdb.mode = "Permissive";
+    const device = { name: "e", platform: "android" as const, deviceId: "same-id" };
+    const owner = { device, deviceId: device.deviceId };
+    const firstResolve = createDefaultInjectorResolver({ create: () => firstAdb });
+    const secondResolve = createDefaultInjectorResolver({ create: () => secondAdb });
+    const integrity = firstResolve(owner, "integrityState")!;
+    const root = secondResolve(owner, "rootState")!;
+    const first = await integrity.apply("maximally-detectable");
+    const second = await root.apply("rooted-detectable");
+    await first.reset?.();
+    await second.reset?.();
+    expect(firstAdb.mode).toBe("Enforcing");
+    expect(secondAdb.mode).toBe("Permissive");
+    expect(await integrity.isClean()).toBe(true);
+    expect(await root.isClean()).toBe(true);
+  });
+
+  for (const integrityFirst of [true, false]) {
+    test(`root-first acquisition restores the first baseline when ${integrityFirst ? "integrity" : "root"} clears first`, async () => {
+      const adb = new IntegrityAdb();
+      const resolve = createDefaultInjectorResolver({ create: () => adb });
+      const device = { name: "e", platform: "android" as const, deviceId: "root-first" };
+      const owner = { device, deviceId: device.deviceId };
+      const integrity = resolve(owner, "integrityState")!;
+      const root = resolve(owner, "rootState")!;
+      const rootOutcome = await root.apply("rooted-detectable");
+      const integrityOutcome = await integrity.apply("apply", undefined, {
+        signals: { "selinux-permissive": "on" },
+      });
+      expect(integrityOutcome.reset).toBeDefined();
+      await (integrityFirst ? integrityOutcome : rootOutcome).reset?.();
+      expect(adb.mode).toBe("Permissive");
+      await (integrityFirst ? rootOutcome : integrityOutcome).reset?.();
+      expect(adb.mode).toBe("Enforcing");
+      expect(await integrity.isClean()).toBe(true);
+      expect(await root.isClean()).toBe(true);
+    });
+  }
+
   test("maximal preset applies and reads each signal back from adb", async () => {
     const adb = new IntegrityAdb();
     const injector = createIntegrityStateInjector(adb);

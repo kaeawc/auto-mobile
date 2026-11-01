@@ -1,3 +1,4 @@
+import { SelinuxOwner } from "./SelinuxOwner";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -234,13 +235,17 @@ export function createDefaultInjectorResolver(
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
 ): DeviceConditionInjectorResolver {
   // Factory-local caches keep injected adb clients separate from the production instances.
+  const selinuxOwners = new Map<string, SelinuxOwner>();
   const rootCache = new Map<string, DeviceConditionInjector>();
   const integrityCache = new Map<string, DeviceConditionInjector>();
   const readOnlyCache = new Map<string, DeviceConditionInjector>();
   const resolveFixture = (device: BootedDevice, key: DeviceConditionKey) =>
     resolveIosRefusalInjector(device, key) ??
-    resolveRootStateInjector(device, key, adbFactory, rootCache) ??
-    resolveIntegrityStateInjector(device, key, adbFactory, integrityCache);
+    resolveRootStateInjector(device, key, adbFactory, { cache: rootCache, selinuxOwners }) ??
+    resolveIntegrityStateInjector(device, key, adbFactory, {
+      cache: integrityCache,
+      selinuxOwners,
+    });
   return (owner, key) =>
     owner.device
       ? (resolveFixture(owner.device, key) ??

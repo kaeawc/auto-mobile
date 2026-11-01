@@ -4,6 +4,23 @@ import { join } from "node:path";
 import { prototypeSensitiveSinkErrors } from "../../../src/features/prototype/prototypeStrictPolicy";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
+interface SensitiveFixture {
+  spec: unknown;
+  options: { library: boolean };
+}
+
+interface RefusedFixture extends SensitiveFixture {
+  sinkOnly?: never;
+  expectedPath: string;
+  expectedMessage: string;
+}
+
+interface SinkOnlyFixture extends SensitiveFixture {
+  sinkOnly: true;
+  expectedPath?: never;
+  expectedMessage?: never;
+}
+
 const directory = join(import.meta.dir, "../../fixtures/prototype-spec/library-sensitive");
 const files = readdirSync(directory)
   .filter((name) => name.endsWith(".json"))
@@ -11,18 +28,14 @@ const files = readdirSync(directory)
 
 describe("shared sensitive library fixtures", () => {
   test.each(files)("%s", (name) => {
-    const fixture = JSON.parse(readFileSync(join(directory, name), "utf8")) as {
-      spec: unknown;
-      options: { library: boolean };
-      sinkOnly?: boolean;
-      expectedPath?: string;
-      expectedMessage?: string;
-    };
+    const fixture = JSON.parse(readFileSync(join(directory, name), "utf8")) as
+      | RefusedFixture
+      | SinkOnlyFixture;
     expect(fixture.options.library).toBe(fixture.expectedPath !== undefined);
     expect(fixture.sinkOnly).toBe(fixture.expectedPath === undefined ? true : undefined);
     expect(validatePrototypeSpec(fixture.spec).success).toBe(true);
     expect(prototypeSensitiveSinkErrors(fixture.spec)).toEqual(
-      fixture.expectedPath
+      fixture.expectedPath !== undefined
         ? [{ path: fixture.expectedPath, message: fixture.expectedMessage }]
         : [],
     );

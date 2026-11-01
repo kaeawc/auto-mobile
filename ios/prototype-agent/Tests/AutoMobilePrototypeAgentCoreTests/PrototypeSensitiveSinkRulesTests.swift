@@ -97,6 +97,14 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
         try validate(spec(), path: "\(requestPath).query.q")
     }
 
+    func testNestedDataTokenConsumesTheWholePlaceholder() throws {
+        try validate(spec(#"{"query":{"q":"{data:/other{data:/code}}"}}"#), path: nil)
+        try validate(
+            spec(#"{"query":{"q":"{data:/other{data:/code}}{data:/code}"}}"#),
+            path: "\(requestPath).query.q"
+        )
+    }
+
     func testRequestSinkKindsAndOpaqueBindings() throws {
         for (sink, suffix) in [
             (#"{"query":{"q":{"data":"/code"}}}"#, "query.q"),
@@ -295,7 +303,7 @@ final class PrototypeSensitiveSinkRulesTests: XCTestCase {
             .appendingPathComponent("test/fixtures/prototype-spec/library-sensitive")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
-        XCTAssertEqual(files.count, 7)
+        XCTAssertEqual(files.count, 8)
         for file in files {
             let fixture = try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file)).objectFields)
             let value = try XCTUnwrap(fixture["spec"]?.objectFields)

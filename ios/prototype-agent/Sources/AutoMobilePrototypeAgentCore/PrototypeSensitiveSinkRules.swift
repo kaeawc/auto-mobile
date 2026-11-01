@@ -167,15 +167,14 @@ enum PrototypeSensitiveSinkRules {
         var result: [String] = []
         var cursor = text.startIndex
         while let open = text.range(of: "{data:", options: .literal, range: cursor ..< text.endIndex) {
-            let suffix = String(
-                decoding: text.utf16[open.upperBound...]
-                    .prefix(PrototypeLimits.maxDataPointerLength + 1),
-                as: UTF16.self
-            )
-            if let close = suffix.range(of: "}", options: .literal) {
-                let candidate = String(suffix[..<close.lowerBound])
+            let suffix = text.utf16[open.upperBound...]
+                .prefix(PrototypeLimits.maxDataPointerLength + 1)
+            if let close = suffix.firstIndex(of: 125) {
+                let candidate = String(decoding: suffix[..<close], as: UTF16.self)
                 if PrototypeDataPointer.isValid(candidate) {
                     result += PrototypePlatformValidator.placeholders("{platform:\(candidate)}")
+                    cursor = text.utf16.index(after: close)
+                    continue
                 }
             }
             cursor = open.upperBound

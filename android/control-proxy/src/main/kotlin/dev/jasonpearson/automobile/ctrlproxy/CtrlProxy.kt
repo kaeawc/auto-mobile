@@ -941,15 +941,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun createView() = View(this@CtrlProxy)
 
           override suspend fun publishSettledHierarchy() {
-            val freshHierarchy =
-              hierarchyController.debouncer.extractAfterQuiescenceSuspending(
-                quiescenceMs = HierarchyQuiescence.POLL_MS,
-                maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-                pollIntervalMs = 10L,
-              )
-            if (freshHierarchy != null) {
-              hierarchyController.broadcastHierarchyUpdate(freshHierarchy, sync = true)
-            }
+            hierarchyController.publishSettledHierarchy()
           }
 
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
@@ -1045,15 +1037,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
 
           override suspend fun publishSettledHierarchy() {
-            val freshHierarchy =
-              hierarchyController.debouncer.extractAfterQuiescenceSuspending(
-                quiescenceMs = HierarchyQuiescence.POLL_MS,
-                maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-                pollIntervalMs = 10L,
-              )
-            if (freshHierarchy != null) {
-              hierarchyController.broadcastHierarchyUpdate(freshHierarchy, sync = true)
-            }
+            hierarchyController.publishSettledHierarchy()
           }
         },
       serviceScope = serviceScope,
@@ -1153,12 +1137,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
 
           override suspend fun settledHierarchy(displayId: Int?) =
-            hierarchyController.debouncer.extractAfterQuiescenceSuspending(
-              quiescenceMs = HierarchyQuiescence.POLL_MS,
-              maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-              pollIntervalMs = 10L,
-              snapshotOptions = HierarchySnapshotOptions(displayId = displayId),
-            )
+            hierarchyController.settledHierarchy(displayId)
 
           override suspend fun publishHierarchy(hierarchy: ViewHierarchy) =
             hierarchyController.broadcastHierarchyUpdate(hierarchy, sync = true)

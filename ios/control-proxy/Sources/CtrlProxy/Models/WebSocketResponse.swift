@@ -27,6 +27,8 @@ public struct WebSocketResponse: Codable, Sendable {
     /// `pinch_result` responses (issue #2910); nil elsewhere.
     public let pinchPath: String?
     public let tapDiagnostics: TapDiagnostics?
+    /// Recent-apps navigation mechanism; absent on older runners and unrelated results.
+    public let recentAppsRoute: String?
     /// Single-finger swipe only (#13145): the dispatch route that ran (`SwipeRoute` raw value) and
     /// the stroke duration it really used. Absent from older runners and from other results.
     public let swipeRoute: String?
@@ -53,6 +55,7 @@ public struct WebSocketResponse: Codable, Sendable {
         resolvedStore: String? = nil,
         tapDiagnostics: TapDiagnostics? = nil,
         swipeRoute: String? = nil,
+        recentAppsRoute: String? = nil,
         effectiveDurationMs: Int64? = nil
     ) {
         self.type = type
@@ -72,6 +75,7 @@ public struct WebSocketResponse: Codable, Sendable {
         self.tapDiagnostics = tapDiagnostics
         self.pinchPath = pinchPath
         self.resolvedStore = resolvedStore
+        self.recentAppsRoute = recentAppsRoute
         self.swipeRoute = swipeRoute
         self.effectiveDurationMs = effectiveDurationMs
     }
@@ -86,6 +90,7 @@ public struct WebSocketResponse: Codable, Sendable {
         tapDiagnostics: TapDiagnostics? = nil,
         warning: String? = nil,
         swipeRoute: String? = nil,
+        recentAppsRoute: String? = nil,
         effectiveDurationMs: Int64? = nil
     )
         -> WebSocketResponse
@@ -101,6 +106,7 @@ public struct WebSocketResponse: Codable, Sendable {
             resolvedStore: resolvedStore,
             tapDiagnostics: tapDiagnostics,
             swipeRoute: swipeRoute,
+            recentAppsRoute: recentAppsRoute,
             effectiveDurationMs: effectiveDurationMs
         )
     }
@@ -110,7 +116,8 @@ public struct WebSocketResponse: Codable, Sendable {
         requestId: String?,
         error: String,
         totalTimeMs: Int64? = nil,
-        errorCode: String? = nil
+        errorCode: String? = nil,
+        recentAppsRoute: String? = nil
     )
         -> WebSocketResponse
     {
@@ -120,7 +127,8 @@ public struct WebSocketResponse: Codable, Sendable {
             success: false,
             totalTimeMs: totalTimeMs,
             error: error,
-            errorCode: errorCode
+            errorCode: errorCode,
+            recentAppsRoute: recentAppsRoute
         )
     }
 
@@ -146,6 +154,7 @@ public struct WebSocketResponse: Codable, Sendable {
             resolvedStore: resolvedStore,
             tapDiagnostics: tapDiagnostics,
             swipeRoute: swipeRoute,
+            recentAppsRoute: recentAppsRoute,
             effectiveDurationMs: effectiveDurationMs
         )
         response.effectiveValueDiffers = effectiveValueDiffers

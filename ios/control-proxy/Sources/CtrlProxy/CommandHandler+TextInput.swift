@@ -181,9 +181,9 @@ extension CommandHandler {
         perf.serial("handlePressButton")
         defer { perf.end() }
 
-        try await performContextCheckedGesture(expected: request.frameContext) {
-            try self.tracked("pressButton") {
-                try self.gesturePerformer.pressButton(button)
+        try await performContextCheckedGestureAsync(expected: request.frameContext) {
+            try await self.trackedAsync("pressButton") {
+                try await self.gesturePerformer.pressButton(button)
             }
         }
 
@@ -276,18 +276,19 @@ extension CommandHandler {
         perf.serial("handleRecentApps")
         defer { perf.end() }
 
-        let didOpen = try await performContextCheckedGesture(expected: request.frameContext) {
-            try self.tracked("openRecentApps") {
-                try self.gesturePerformer.openRecentApps()
+        let outcome = try await performContextCheckedGestureAsync(expected: request.frameContext) {
+            try await self.trackedAsync("openRecentApps") {
+                try await self.gesturePerformer.openRecentAppsReportingRoute()
             }
         }
 
-        guard didOpen else {
+        guard outcome.visible else {
             return WebSocketResponse.error(
                 type: ResponseType.recentAppsResult.rawValue,
                 requestId: request.requestId,
-                error: "iOS App Switcher did not appear after recent apps invocation",
-                totalTimeMs: totalTimeMs(from: startTime)
+                error: "iOS App Switcher was not detected after the gesture. Observe the screen; call homeScreen then retry. On a physical device, swipe-up-and-hold requires an unlocked device.",
+                totalTimeMs: totalTimeMs(from: startTime),
+                recentAppsRoute: outcome.route
             )
         }
 
@@ -305,7 +306,8 @@ extension CommandHandler {
         return WebSocketResponse.success(
             type: ResponseType.recentAppsResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: totalTimeMs(from: startTime),
+            recentAppsRoute: outcome.route
         )
     }
 }

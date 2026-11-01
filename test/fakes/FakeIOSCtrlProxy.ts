@@ -183,7 +183,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   private pinchResult: IOSDispatchResult<CtrlProxyPinchResult> | null = null;
   private tapResult: IOSDispatchResult<CtrlProxyTapResult> | null = null;
   private swipeResult: IOSDispatchResult<CtrlProxySwipeResult> | null = null;
-  private recentAppsResult: CtrlProxyRecentAppsResult | null = null;
+  private recentAppsResult: IOSDispatchResult<CtrlProxyRecentAppsResult> | null = null;
   private voiceOverState: boolean = false;
   private voiceOverActivateResult: CtrlProxyActionResult | null = null;
   private setVoiceOverEnabledResult: CtrlProxyActionResult | null = null;
@@ -342,7 +342,7 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
     this.swipeResult = result;
   }
 
-  setRecentAppsResult(result: CtrlProxyRecentAppsResult | null): void {
+  setRecentAppsResult(result: IOSDispatchResult<CtrlProxyRecentAppsResult> | null): void {
     this.recentAppsResult = result;
   }
 
@@ -1148,9 +1148,9 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   }
 
   async requestRecentApps(
-    timeoutMs: number = 5000,
+    timeoutMs: number = 10000,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyRecentAppsResult> {
+  ): Promise<IOSDispatchResult<CtrlProxyRecentAppsResult>> {
     this.recentAppsRequestCount++;
     await this.applyDelay("recentApps");
     this.checkFailure("recentApps");

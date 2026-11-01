@@ -426,7 +426,9 @@ export type CtrlProxyLaunchAppResult = BaseResult;
 export type CtrlProxyResetPermissionsResult = BaseResult;
 
 /** Recent apps result from CtrlProxy iOS */
-export type CtrlProxyRecentAppsResult = BaseResult;
+export type CtrlProxyRecentAppsResult = BaseResult & {
+  recentAppsRoute?: string;
+};
 
 /** Clipboard result from CtrlProxy iOS */
 export interface CtrlProxyClipboardResult {

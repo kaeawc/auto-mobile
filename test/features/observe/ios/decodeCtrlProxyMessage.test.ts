@@ -1042,6 +1042,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
     verified: { value: true, types: ["press_key_result"] },
     text: { value: "clipboard text", types: ["clipboard_result"] },
     pinchPath: { value: "element-anchored", types: ["pinch_result"] },
+    recentAppsRoute: { value: "sim-hid-home-double", types: ["recent_apps_result"] },
     swipeRoute: { value: "unpinnedSynthesized", types: ["swipe_result"] },
     effectiveDurationMs: { value: 50, types: ["swipe_result"] },
     tapDiagnostics: { value: { requested: { x: 1, y: 2 } }, types: ["tap_coordinates_result"] },
@@ -1454,4 +1455,29 @@ test("preserves structured keychain denial and deletion scope", () => {
       totalTimeMs: 1,
     });
   }
+});
+
+describe("recentApps route diagnostics", () => {
+  test("carries the route on verified success and honest failure", () => {
+    for (const success of [true, false]) {
+      const decoded = decodeCtrlProxyMessage(
+        msg({
+          type: "recent_apps_result",
+          success,
+          recentAppsRoute: "sim-hid-home-double",
+        }),
+      );
+      expect(decoded?.result).toMatchObject({ success, recentAppsRoute: "sim-hid-home-double" });
+    }
+  });
+
+  test("drops malformed routes and preserves older replies", () => {
+    for (const recentAppsRoute of [undefined, 42, null]) {
+      const decoded = decodeCtrlProxyMessage(
+        msg({ type: "recent_apps_result", success: true, recentAppsRoute }),
+      );
+      expect(decoded?.result).toMatchObject({ success: true });
+      expect(decoded?.result).not.toHaveProperty("recentAppsRoute");
+    }
+  });
 });

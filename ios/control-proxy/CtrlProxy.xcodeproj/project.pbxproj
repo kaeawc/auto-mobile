@@ -296,6 +296,7 @@
 		F223FFCE85318CBF1CC6A07A /* GesturePerformer+ClipboardIOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3BC0E58E2CC66966C4BF4E1 /* GesturePerformer+ClipboardIOS.swift */; };
 		F3B9817EBCBA458E3C55D8DD /* RequestPressKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09CFC99E558D6D0E96084A48 /* RequestPressKey.swift */; };
 		F59EAD9C7177D6E23B95D835 /* StorageError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49030ABC56E34792661140F /* StorageError.swift */; };
+		F809823EBB70CF9F833951A2 /* AppSwitcherSnapshotClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E42A7B5B4E76B2F7875DB5F /* AppSwitcherSnapshotClassifier.swift */; };
 		F81599E0F76C7944E03B4C9C /* TapDiagnosticsSampling.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2EC65A82AE485F2F268665A /* TapDiagnosticsSampling.swift */; };
 		F81BAFE4413BA67CFB1E5832 /* ElementLocating.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B6D1796193ECF4C7BE99435 /* ElementLocating.swift */; };
 		F8AF836DFC5C4A9062B7D0A6 /* CtrlProxyTVUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96652918AA6C8469173F9860 /* CtrlProxyTVUITests.swift */; };
@@ -437,6 +438,7 @@
 		3B6D1796193ECF4C7BE99435 /* ElementLocating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocating.swift; sourceTree = "<group>"; };
 		3DDAE7398B49AF6F2BB5D197 /* SdkExecuteSqlResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkExecuteSqlResult.swift; sourceTree = "<group>"; };
 		3DDE9EA8FE4272AD9064DDA0 /* ErrorResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorResponse.swift; sourceTree = "<group>"; };
+		3E42A7B5B4E76B2F7875DB5F /* AppSwitcherSnapshotClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSwitcherSnapshotClassifier.swift; sourceTree = "<group>"; };
 		3EB1E06878A9A325A53E9EF8 /* SdkPreferenceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkPreferenceClient.swift; sourceTree = "<group>"; };
 		3F933075C5863704CF09B5F2 /* RotationChangeGeneration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotationChangeGeneration.swift; sourceTree = "<group>"; };
 		401502F4542F2B4B460018E9 /* HierarchyIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyIntegrationTests.swift; sourceTree = "<group>"; };
@@ -938,6 +940,7 @@
 				506EC1282270501812886D66 /* AppStateWait.swift */,
 				C7BE547A5D26B9DD8C6ECD7C /* AppStateWaiter.swift */,
 				A30B499577DFCB50D9811BD3 /* AppSwitcherDetector.swift */,
+				3E42A7B5B4E76B2F7875DB5F /* AppSwitcherSnapshotClassifier.swift */,
 				A16A4782F3C8F0BDCC0E4AD0 /* BundleId.swift */,
 				5F36105F9F820A2C2A4E0A09 /* ByteChannel.swift */,
 				354B036507C8004C1057AFE1 /* ByteChannelState.swift */,
@@ -1372,6 +1375,7 @@
 				0228EE761B6F08DEFF2D6F67 /* AppStateWait.swift in Sources */,
 				E49F5A63637E53CC6EDB146F /* AppStateWaiter.swift in Sources */,
 				E565A6D5074719D517B15717 /* AppSwitcherDetector.swift in Sources */,
+				F809823EBB70CF9F833951A2 /* AppSwitcherSnapshotClassifier.swift in Sources */,
 				2547724B566DA3883714175C /* BundleId.swift in Sources */,
 				2709ACC32A6F0C9C9831D70E /* ByteChannel.swift in Sources */,
 				AB52AA325088E2DE7E93541E /* ByteChannelState.swift in Sources */,

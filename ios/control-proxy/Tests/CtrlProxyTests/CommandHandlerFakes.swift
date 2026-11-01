@@ -302,7 +302,9 @@ final class FakeGesturePerformer: GesturePerforming {
     func pressBack() throws {}
     func shake() throws { shakeCalls += 1 }
     func pressButton(_: String) throws {}
-    func openRecentApps() throws -> Bool { true }
+    var recentAppsOutcome = RecentAppsOutcome(visible: true)
+    func openRecentApps() throws -> Bool { recentAppsOutcome.visible }
+    func openRecentAppsReportingRoute() async throws -> RecentAppsOutcome { recentAppsOutcome }
     func launchApp(bundleId _: String) throws {}
     func terminateApp(bundleId _: String) throws {}
     func activateApp(bundleId _: String) throws {}

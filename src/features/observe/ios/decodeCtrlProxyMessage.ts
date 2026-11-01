@@ -217,7 +217,13 @@ function decodeGestureActionResult(
       ? { tapDiagnostics: message.tapDiagnostics }
       : {}),
     ...(type === "swipe_result" ? decodeSwipeRouteReport(message) : {}),
+    ...(type === "recent_apps_result" ? decodeRecentAppsRouteReport(message) : {}),
   };
+}
+
+function decodeRecentAppsRouteReport(message: WebSocketMessage): { recentAppsRoute?: string } {
+  const { recentAppsRoute } = message as { recentAppsRoute?: unknown };
+  return typeof recentAppsRoute === "string" ? { recentAppsRoute } : {};
 }
 
 /** Additive `swipe_result` fields (#13145); a malformed value is dropped, not trusted. */

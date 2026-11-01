@@ -171,6 +171,25 @@ export function acceptAndroidHomeAlreadyOnLauncher(
   }
 }
 
+/** The runner verified the App Switcher is already open, so the press is a no-op success. */
+export function isVerifiedAlreadyOpenSwitcher(reply: {
+  success: boolean;
+  recentAppsRoute?: string;
+}): boolean {
+  return reply.success && reply.recentAppsRoute === "already-open";
+}
+
+/** A verified already-open switcher needs no visual change: turn "No visual change" into success. */
+export function acceptVerifiedAlreadyOpenSwitcher(
+  result: { success: boolean; error?: string },
+  verifiedAlreadyOpen: boolean,
+): void {
+  if (verifiedAlreadyOpen && result.error === "No visual change observed") {
+    result.success = true;
+    delete result.error;
+  }
+}
+
 /** Display-fence collaborators, CtrlProxy overrides and the iOS/dispatch seams; all optional. */
 export type PressButtonCollaborators = DisplayFenceDependencies &
   PressButtonCtrlProxyOverrides & {
@@ -184,6 +203,8 @@ interface PressDispatchOptions {
   frameContext?: string;
   signal?: AbortSignal;
   onDispatch?: () => void;
+  /** Receives the runner's iOS recent-apps route so callers can accept a verified no-op. */
+  onRecentAppsRoute?: (route: string | undefined) => void;
 }
 
 export class PressButton extends BaseVisualChange {
@@ -313,6 +334,7 @@ export class PressButton extends BaseVisualChange {
     };
     let startedOnFallbackSpringboard = false;
     let pressSucceeded = false;
+    let verifiedAlreadyOpen = false;
     const result = await this.observedInteraction(async (previousObservation) => {
       // A Home press on SpringBoard may change nothing (#14954); that is a no-op success.
       if (isIosHomePressOnSpringboard(this.device.platform, button, previousObservation)) {
@@ -326,12 +348,22 @@ export class PressButton extends BaseVisualChange {
       const pressed = await perf.track("buttonPress", () =>
         rotary && isRotaryButton(button)
           ? this.pressRotary(rotary, button, rotarySteps ?? 1, signal)
-          : this.press(button, { signal }),
+          : this.press(button, {
+              signal,
+              onRecentAppsRoute: (recentAppsRoute) => {
+                verifiedAlreadyOpen = isVerifiedAlreadyOpenSwitcher({
+                  success: true,
+                  recentAppsRoute,
+                });
+              },
+            }),
       );
       pressSucceeded = pressed.success;
+      verifiedAlreadyOpen &&= pressed.success;
       return pressed;
     }, options);
     acceptIosHomeAlreadyOnSpringboard(result, startedOnFallbackSpringboard);
+    acceptVerifiedAlreadyOpenSwitcher(result, verifiedAlreadyOpen);
     acceptAndroidHomeAlreadyOnLauncher(result, {
       platform: this.device.platform,
       button,
@@ -383,11 +415,13 @@ export class PressButton extends BaseVisualChange {
       frameContext,
       signal,
       onDispatch,
+      onRecentAppsRoute,
     }: {
       timeoutMs?: number;
       frameContext?: string;
       signal?: AbortSignal;
       onDispatch?: () => void;
+      onRecentAppsRoute?: (route: string | undefined) => void;
     } = {},
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
@@ -413,6 +447,7 @@ export class PressButton extends BaseVisualChange {
             frameContext,
             signal,
             onDispatch: markDispatch,
+            onRecentAppsRoute,
           });
         default:
           throw unsupportedPlatformError(this.device.platform, "press buttons");
@@ -793,7 +828,7 @@ export class PressButton extends BaseVisualChange {
     button: string,
     dispatch: PressDispatchOptions,
   ): Promise<PressButtonResult> {
-    const { timeoutMs, frameContext, signal, onDispatch } = dispatch;
+    const { timeoutMs, frameContext, signal, onDispatch, onRecentAppsRoute } = dispatch;
     throwIfAborted(signal);
     const normalizedButton = button.toLowerCase();
     if (
@@ -815,6 +850,7 @@ export class PressButton extends BaseVisualChange {
             { onDispatch },
           );
       this.assertHeldRequestLive(signal);
+      onRecentAppsRoute?.((result as { recentAppsRoute?: string }).recentAppsRoute);
       return result.success
         ? { success: true, button, keyCode: -1 }
         : iosPressFailureResult(button, normalizedButton, result);

@@ -29,6 +29,10 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../../src/models/IosHomeLaunchTimeoutError";
 import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
+import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
+import { FakeWindow } from "../../fakes/FakeWindow";
+import { buildObserveResult, observeResultFromFixture } from "../../helpers/observeFixture";
+import capturedRecents from "../../fixtures/android-launcher/launcher-recents-emulator-5600.json";
 
 /** Fails the test if a press reads or captures an observation. */
 class ThrowingObserveScreen extends FakeObserveScreen {
@@ -980,3 +984,45 @@ for (const platform of ["ios", "android"] as const) {
     expect(invalidated).toEqual(platform === "ios" ? [device.deviceId] : []);
   });
 }
+
+describe("iOS recent press with the App Switcher already open", () => {
+  const device: BootedDevice = { deviceId: "ios-device", platform: "ios", name: "iPhone" };
+
+  test.each([
+    ["already-open", true, undefined, true, undefined],
+    ["sim-hid-home-double", true, undefined, false, "No visual change observed"],
+    [undefined, true, undefined, false, "No visual change observed"],
+    ["already-open", false, "Runner verification failed", false, "Runner verification failed"],
+  ] as const)(
+    "unchanged screen with route %s, runner success %s and error %s yields success %s",
+    async (recentAppsRoute, success, error, expectedSuccess, expectedError) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const unchangedScreen = new FakeObserveScreen();
+      unchangedScreen.setObserveResult(() =>
+        buildObserveResult({
+          ...observeResultFromFixture(capturedRecents),
+          updatedAt: timer.now(),
+        }),
+      );
+      const fakeProxy = new FakeIOSCtrlProxy();
+      fakeProxy.setRecentAppsResult({ success, totalTimeMs: 0, recentAppsRoute, error });
+      const getInstanceSpy = spyOnIosClientInstance(fakeProxy);
+      try {
+        const pressButton = new PressButton(device, null, timer, {
+          observeScreen: unchangedScreen,
+          awaitIdle: new FakeAwaitIdle(),
+          window: new FakeWindow(),
+        });
+
+        const result = await pressButton.execute("recent");
+
+        expect(result.success).toBe(expectedSuccess);
+        expect(result.error).toBe(expectedError);
+        expect(fakeProxy.getRecentAppsRequestCount()).toBe(1);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    },
+  );
+});

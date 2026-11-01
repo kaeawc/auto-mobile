@@ -150,9 +150,12 @@ class StaleFrameContextRejectionWiringTest {
       .map { it.groupValues[1] }
       .toSet()
 
-  // The call sites stay in the service; the rejection and its dispatch live in StaleFrameRejector.
+  // The call sites are the action handlers in CtrlProxyActionRouter (and any left in the service);
+  // the rejection and its dispatch live in StaleFrameRejector.
   private fun readCtrlProxySource(): String =
-    listOf("CtrlProxy.kt", "StaleFrameRejector.kt").joinToString("\n") {
+    listOf("CtrlProxy.kt", "CtrlProxyActionRouter.kt", "StaleFrameRejector.kt").joinToString(
+      "\n",
+    ) {
       locateCtrlProxySource(it).readText()
     }
 

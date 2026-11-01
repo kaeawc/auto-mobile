@@ -162,11 +162,11 @@ class CtrlProxyOnDestroyTest {
   @Test
   fun `onDestroy dispatches in-flight terminal lift and answers pending ends before quitting without awaiting completion`() =
     runTest {
-      service.requestGestureStart(
+      service.actions.requestGestureStart(
         RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
       )
-      service.requestGestureEnd("end-1", "gesture", 3.0, 4.0, false)
-      service.requestGestureEnd("end-2", "gesture", 5.0, 6.0, false)
+      service.actions.requestGestureEnd("end-1", "gesture", 3.0, 4.0, false)
+      service.actions.requestGestureEnd("end-2", "gesture", 5.0, 6.0, false)
       assertEquals(listOf(Ack("start", true, null)), acks)
       assertEquals(1, shadow.gesturesDispatched.size)
       assertTrue(shadow.gesturesDispatched.single().description().getStroke(0).willContinue())
@@ -202,7 +202,7 @@ class CtrlProxyOnDestroyTest {
   @Test
   fun `onDestroy dispatches terminal lift for a parked continued stroke before quitting`() =
     runTest {
-      service.requestGestureStart(
+      service.actions.requestGestureStart(
         RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
       )
       val press = shadow.gesturesDispatched.single()
@@ -221,7 +221,7 @@ class CtrlProxyOnDestroyTest {
   @Test
   fun `onDestroy quits gesture thread and cancels service scope even when real router close throws`() =
     runTest {
-      service.requestGestureStart(
+      service.actions.requestGestureStart(
         RequestGestureStart(requestId = "start", gestureId = "gesture", x = 1.0, y = 2.0),
       )
       val failure = IllegalStateException("gesture close post failed")
@@ -266,11 +266,11 @@ class CtrlProxyOnDestroyTest {
       it.callback().onCompleted(it.description())
       it.callback().onCancelled(it.description())
     }
-    service.requestGestureStart(
+    service.actions.requestGestureStart(
       RequestGestureStart(requestId = "late-start", gestureId = "late", x = 7.0, y = 8.0),
     )
-    service.requestGestureMove("late-move", "gesture", 7.0, 8.0)
-    service.requestGestureEnd("late-end", "gesture", 7.0, 8.0, false)
+    service.actions.requestGestureMove("late-move", "gesture", 7.0, 8.0)
+    service.actions.requestGestureEnd("late-end", "gesture", 7.0, 8.0, false)
     assertEquals(before, acks)
     assertEquals(dispatched, shadow.gesturesDispatched)
   }

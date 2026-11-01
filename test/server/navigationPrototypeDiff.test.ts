@@ -76,6 +76,39 @@ describe("getNavigationGraph prototype diff (#14125)", () => {
     expect(diff?.observedTransitions).toHaveLength(1);
   });
 
+  test("expands reusable components before mapping, like the screenMap action", async () => {
+    const withComponent = {
+      ...spec,
+      components: {
+        home: {
+          root: {
+            type: "button",
+            label: "Open",
+            testTag: "HomeScreen",
+            onTap: [{ type: "push", stack: "nav", screen: "detail", params: {} }],
+          },
+        },
+      },
+      root: {
+        ...spec.root,
+        start: "start",
+        screens: {
+          start: { type: "use", component: "home", props: {} },
+          detail: spec.root.screens.detail,
+        },
+      },
+    };
+    const diff = await diffOf({ prototypeSpec: withComponent });
+    expect(diff?.matched).toContainEqual({
+      prototype: "stack:nav/start",
+      real: "HomeScreen",
+      by: "identifier",
+    });
+    expect(diff?.observedTransitions.map((t) => [t.from, t.to])).toEqual([
+      ["stack:nav/start", "stack:nav/detail"],
+    ]);
+  });
+
   test("reads the spec and the mapping from files", async () => {
     files.addFile("/work/spec.json", Buffer.from(JSON.stringify(spec)));
     files.addFile(

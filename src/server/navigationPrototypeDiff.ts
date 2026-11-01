@@ -7,6 +7,7 @@ import {
   realNavigationGraphFrom,
   type PrototypeNavigationDiff,
 } from "../features/prototype/prototypeNavigationDiff";
+import { prototypeSpecForDevice } from "../features/prototype/prototypeComponents";
 import { buildPrototypeScreenMap } from "../features/prototype/prototypeScreenMap";
 import { readPrototypeSpecFile } from "../features/prototype/prototypeSpecFile";
 import { specProblem } from "./prototypeTools/schemas";
@@ -64,7 +65,9 @@ async function specOf(args: PrototypeDiffArgs, reader: PrototypeAssetFileReader)
   if (problem) {
     throw new ActionableError(`prototype spec is invalid at ${problem.path}: ${problem.text}`);
   }
-  return spec;
+  // Map the expanded spec, as the screenMap action does, so a screen drawn by a component keeps
+  // its testTag and its actions.
+  return prototypeSpecForDevice(spec);
 }
 
 async function mappingOf(

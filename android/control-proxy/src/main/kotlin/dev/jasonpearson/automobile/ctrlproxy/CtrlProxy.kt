@@ -1239,6 +1239,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       timeProvider = timeProvider,
     )
 
+  private val accessibilityEvents =
+    AccessibilityEventDispatcher(
+      object : AccessibilityEventDispatcher.Host {
+        override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+
+        override fun onTextSelectionChanged(fromIndex: Int, toIndex: Int) =
+          textInputController.onTextSelectionChanged(fromIndex, toIndex)
+
+        override fun onWindowStateChanged(className: String?) {
+          lastWindowClassName = className
+        }
+
+        override fun advanceFrameContext() = frameContextGate.advance()
+
+        override fun connectionCount() =
+          if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
+
+        override fun recordInteraction(event: AccessibilityEvent, dispatch: InteractionDispatch) =
+          interactionEventController.record(event, dispatch)
+
+        override fun refreshHierarchy() = hierarchyController.onAccessibilityEvent()
+      },
+    )
+
   private val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
 
   private fun currentFrameContext(): String = frameContextGate.current()
@@ -2531,54 +2555,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       refreshPrototypeWindow()
 
     try {
-      when (event.eventType) {
-        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-        AccessibilityEvent.TYPE_WINDOWS_CHANGED,
-        AccessibilityEvent.TYPE_VIEW_FOCUSED,
-        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
-        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED ->
-          textInputController.forgetRememberedInsert()
-        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ->
-          textInputController.onTextSelectionChanged(event.fromIndex, event.toIndex)
-        else -> Unit
-      }
-      if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-        lastWindowClassName = event.className?.toString()
-      }
-
-      // Advance the frameContext staleness token on every UI-changing event REGARDLESS of observers
-      // (issue #5470 review). If it froze while unobserved, a token minted before the last client
-      // disconnected could still pass the daemon/runner staleness check after reconnect even though
-      // the screen changed during the gap, aiming an input action at the wrong UI state. This is a
-      // cheap atomic increment maintaining the invariant; only the expensive work below is gated.
-      if (advancesFrameContext(event.eventType)) {
-        frameContextGate.advance()
-      }
-
-      val connectionCount =
-        if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
-
-      // "Is anyone observing?" gate (issue #5470). Both the interaction/scroll recording below and
-      // the debounced hierarchy refresh further down are PUSH work only a connected client
-      // consumes, so with zero connections we skip them — before touching event.source, allocating,
-      // extracting, or hashing. The frameContext token above still advanced. Stale cross-session
-      // scroll deltas are discarded at scroll-accumulation time via accumulatePendingScroll (keyed
-      // on the observer-session generation), so no observer-gap cleanup is needed here. The pull
-      // path (request_hierarchy) does not go through here and stays functional with zero observers.
-      val work = accessibilityEventWorkFor(event.eventType, connectionCount)
-
-      // Broadcast interaction events for telemetry tracking. Classification is routed through the
-      // shared [interactionDispatchFor] so the subscribed event-type mask (derived from the same
-      // classifier) can never drift from what the controller actually acts on.
-      work.interaction?.let { interactionEventController.record(event, it) }
-
-      // Delegate to the smart debouncer for content/window changes (same shared classifier). The
-      // debouncer uses structural hash comparison to detect animation vs real changes. Gated on an
-      // observer (issue #5470): with no client connected, work.refreshesHierarchy is false, so the
-      // extraction/hash is skipped. The frameContext token advanced unconditionally above.
-      if (work.refreshesHierarchy) {
-        hierarchyController.onAccessibilityEvent()
-      }
+      accessibilityEvents.dispatch(event)
     } catch (e: Exception) {
       Log.e(TAG, "Error handling accessibility event", e)
       // Don't let event handling crash the service

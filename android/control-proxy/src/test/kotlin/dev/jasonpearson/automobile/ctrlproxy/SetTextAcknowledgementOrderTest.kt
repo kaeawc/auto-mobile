@@ -208,12 +208,31 @@ class SetTextAcknowledgementOrderTest {
     val gestureStart = gestureSource.indexOf("private fun dispatchGestureWithResult(")
     val gestureLifecycle = gestureSource.indexOf("val lifecycle", gestureStart)
     assertTrue(gestureSource.substring(gestureStart, gestureLifecycle).contains(hostForget))
-    val events = functionBody(serviceSource, "override fun onAccessibilityEvent(")
-    assertTrue(events.indexOf(forget) in 0 until events.indexOf("val connectionCount"))
-    assertTrue(events.contains("AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED"))
+    assertEventCaretHooks(serviceSource, forget, hostForget)
+  }
+
+  /** Accessibility events reach the caret through AccessibilityEventDispatcher.Host. */
+  private fun assertEventCaretHooks(serviceSource: String, forget: String, hostForget: String) {
     assertTrue(
-      events.contains("textInputController.onTextSelectionChanged(event.fromIndex, event.toIndex)"),
+      functionBody(serviceSource, "override fun onAccessibilityEvent(")
+        .contains("accessibilityEvents.dispatch(event)"),
     )
+    assertTrue(serviceSource.contains("override fun forgetRememberedInsert() = $forget"))
+    assertTrue(
+      serviceSource.contains(
+        "textInputController.onTextSelectionChanged(fromIndex, toIndex)",
+      ),
+    )
+    val dispatcherSource =
+      KotlinSourceScan.maskLiteralsAndComments(
+        locateSource("AccessibilityEventDispatcher.kt").readText(),
+      )
+    val events = functionBody(dispatcherSource, "fun dispatch(")
+    assertTrue(
+      events.indexOf(hostForget) in 0 until events.indexOf("accessibilityEventWorkFor("),
+    )
+    assertTrue(events.contains("AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED"))
+    assertTrue(events.contains("host.onTextSelectionChanged(event.fromIndex, event.toIndex)"))
   }
 
   @Test

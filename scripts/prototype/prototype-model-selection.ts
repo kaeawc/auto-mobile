@@ -104,7 +104,8 @@ export const prototypeModelSelection = {
     doc: "Container `stagger` (#15247): each `visibleWhen` child enters `ms` after the previous one.",
   },
   zoomable: {
-    languages: ["kotlin"],
+    swiftName: "PrototypeImageZoomable",
+    swiftConformances: ["Decodable"],
     doc: "An image's zoom range: 1 up to `maxScale` (1..8).",
   },
   radioOption: {},

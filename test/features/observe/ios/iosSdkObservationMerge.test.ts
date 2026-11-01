@@ -9,6 +9,14 @@ import type {
   IosSdkObservationNode,
 } from "../../../../src/features/observe/ios/sdkObservationBridge";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
+import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
+import { isEditableElementProperties } from "../../../../src/features/utility/elementProperties";
+import { sdkTargetField } from "../../../../src/features/action/SendKeys";
+import capturedInputNodes from "../../../fixtures/ios-contract/observation-run4-input-nodes.json";
+import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
+import { projectSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
+import { identifyObservedHierarchy } from "../../../../src/features/observe/HierarchyCapture";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const bounds = (left: number, top: number, right: number, bottom: number) => ({
   left,
@@ -57,6 +65,85 @@ function observation(root: IosSdkObservationNode): IosSdkObservation {
 }
 
 describe("mergeIosSdkObservation (#5159)", () => {
+  test("run4's bridge field gains input in observe and the bound sendKeys selector", async () => {
+    const [capturedEmail, capturedSearch] = capturedInputNodes;
+    expect(capturedEmail.affordances).toEqual(["tap"]);
+    expect(capturedSearch.affordances).toEqual(["tap", "input"]);
+    const [left, top, right, bottom] = capturedEmail.bounds;
+    const hierarchy = xctestHierarchy();
+    const timer = new FakeTimer();
+    identifyObservedHierarchy("ios", hierarchy, "fresh", {
+      timer,
+      ids: { next: () => "contract-capture" },
+    });
+    await mergeIosSdkBridgeInto(hierarchy, {
+      observe: async () => ({
+        kind: "observation",
+        observation: observation(
+          node({
+            id: capturedEmail.elementId,
+            label: capturedEmail.label,
+            bounds: bounds(left, top, right, bottom),
+            // Public rows omit role/focus; these come from the actual contract provider's
+            // SdkContractObservationScenario.snapshot, not inferred from the captured label.
+            role: "textField",
+            focused: true,
+            value: "",
+          }),
+        ),
+      }),
+    });
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "ios");
+    const row = projectSkeleton(elements!).skeleton.find(
+      (entry) => entry.elementId === capturedEmail.elementId,
+    );
+    expect(row).toEqual({
+      ...capturedEmail,
+      bounds: [left, top, right, bottom],
+      affordances: ["tap", "input"],
+    });
+    const selected = new ResolverElementSelector().select(
+      hierarchy,
+      { elementId: row!.elementId },
+      { intentAction: "focus-input", selectionIntent: "focus-input" },
+    );
+    expect(selected.element).not.toBeNull();
+    expect(selected.captureId).toBe("contract-capture");
+    expect(sdkTargetField({ platform: "ios" }, selected.element ?? undefined)).toEqual({
+      sdkTarget: { elementId: capturedEmail.elementId, observationIdentity: 41 },
+    });
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("the contract host's textField role remains an editable sendKeys focus target", () => {
+    const hierarchy = xctestHierarchy();
+    // The provider's model contract from SdkContractObservationScenario.snapshot; no device I/O.
+    mergeIosSdkObservation(
+      hierarchy,
+      observation(
+        node({
+          id: "contract-email",
+          role: "textField",
+          label: "Contract email",
+          value: "",
+          focused: true,
+          bounds: bounds(24, 280, 366, 324),
+        }),
+      ),
+    );
+    const selected = new ResolverElementSelector().select(
+      hierarchy,
+      { elementId: "contract-email" },
+      { intentAction: "focus-input", selectionIntent: "focus-input" },
+    );
+    expect(selected.element).not.toBeNull();
+    expect(isEditableElementProperties(selected.element!)).toBe(true);
+    expect(selected.element?.focused).toBe("true");
+    expect(sdkTargetField({ platform: "ios" }, selected.element ?? undefined)).toEqual({
+      sdkTarget: { elementId: "contract-email", observationIdentity: 41 },
+    });
+  });
+
   test("attaches visible bridge nodes under the app node with mapped attributes", () => {
     const hierarchy = xctestHierarchy();
     const appNode = hierarchy.hierarchy.node;

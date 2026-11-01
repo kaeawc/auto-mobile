@@ -54,6 +54,7 @@ enum PrototypeAgentProtocol {
         chartCapability,
         keyframesCapability,
         motionTokensCapability,
+        "prototype_motion_v2",
         lazyListCapability,
         loadingStatesCapability,
         effectsCapability,

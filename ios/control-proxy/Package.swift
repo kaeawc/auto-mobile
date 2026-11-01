@@ -67,6 +67,7 @@ let package = Package(
                 .product(name: "AutoMobileSdkWire", package: "sdk-wire"),
             ],
             path: "Tests/CtrlProxyTests",
+            resources: [.copy("Fixtures")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

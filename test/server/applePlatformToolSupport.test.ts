@@ -41,9 +41,9 @@ describe("assertToolSupportsDevicePlatform", () => {
   });
 
   test("rejects an Apple TV for a tool that has not opted in, naming the tool and platform", () => {
-    expect(() => assertToolSupportsDevicePlatform("observe", appleTv)).toThrow(
+    expect(() => assertToolSupportsDevicePlatform("tapOn", appleTv)).toThrow(
       new ActionableError(
-        "observe does not support tvOS yet. Target an Android or iOS device instead.",
+        "tapOn does not support tvOS yet. Target an Android or iOS device instead.",
       ),
     );
   });
@@ -58,6 +58,14 @@ describe("assertToolSupportsDevicePlatform", () => {
     expect(() => assertToolSupportsDevicePlatform("launchApp", watch, supported)).toThrow(
       "does not support watchOS yet",
     );
+  });
+
+  test("admits tvOS lifecycle tools without enabling watchOS lifecycle tools", () => {
+    for (const tool of ["startDevice", "setActiveDevice", "killDevice"]) {
+      expect(() => assertToolSupportsDevicePlatform(tool, appleTv)).not.toThrow();
+      expect(() => assertRequestedPlatformSupported(tool, { platform: "tvos" })).not.toThrow();
+      expect(APPLE_PLATFORM_SUPPORTED_TOOLS.watchos.has(tool)).toBe(false);
+    }
   });
 
   test("never rejects an Android or iOS device", () => {
@@ -215,4 +223,9 @@ describe("a device-aware tool refuses a requested tvOS platform before session r
     expect(error).toEqual(new ActionableError(unsupportedPlatformToolMessage(tool, "tvos")));
     expect(handled).toEqual([]);
   });
+});
+
+test("tvOS opts into observe", () => {
+  expect(APPLE_PLATFORM_SUPPORTED_TOOLS.tvos.has("observe")).toBe(true);
+  expect(() => assertToolSupportsDevicePlatform("observe", appleTv)).not.toThrow();
 });

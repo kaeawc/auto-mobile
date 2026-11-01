@@ -1,0 +1,605 @@
+{
+      "observationId": "ed7ae88d-f3d0-4563-a968-56b590af56e1",
+      "deviceId": "0BDA702B-0D65-4587-A82E-7398D8A2B6AE",
+      "display": {
+        "key": "0",
+        "role": "unknown",
+        "posture": "unknown",
+        "generation": 0
+      },
+      "updatedAt": 1793509563776,
+      "screenSize": {
+        "width": 402,
+        "height": 874,
+        "units": "points"
+      },
+      "systemInsets": {
+        "bottom": 34,
+        "left": 0,
+        "right": 0,
+        "top": 62
+      },
+      "insets": {
+        "available": true,
+        "displayCutoutInfo": {
+          "classification": "unknown"
+        },
+        "safeArea": {
+          "bottom": 34,
+          "left": 0,
+          "right": 0,
+          "top": 62
+        },
+        "source": "ios-sdk-safe-area",
+        "systemChrome": {
+          "homeIndicatorAutoHideRequested": false,
+          "source": "ios-status-bar-manager",
+          "statusBar": "visible",
+          "visibility": "visible"
+        },
+        "units": "points"
+      },
+      "rotation": 0,
+      "activeWindow": {
+        "appId": "dev.jasonpearson.automobile.Playground",
+        "activityName": "",
+        "layoutSeqSum": 0
+      },
+      "backend": "sdk",
+      "screenIdentity": {
+        "platform": "ios",
+        "source": "sdk",
+        "confidence": "high",
+        "key": "[[\"bundle\",\"dev.jasonpearson.automobile.Playground\"],[\"route\",\"discover\"]]",
+        "components": {
+          "bundleId": "dev.jasonpearson.automobile.Playground",
+          "navigationRoute": "discover"
+        }
+      },
+      "accessibilityState": {
+        "enabled": false,
+        "service": "unknown"
+      },
+      "freshness": {
+        "actualTimestamp": 1793509563776,
+        "ageMs": 109,
+        "verified": true,
+        "isFresh": true
+      },
+      "deviceLock": {
+        "locked": false,
+        "keyguardShowing": false
+      },
+      "settled": false,
+      "skeleton": [
+        {
+          "bounds": [
+            16,
+            169,
+            386,
+            213
+          ],
+          "affordances": [
+            "tap",
+            "input"
+          ],
+          "elementId": "s2-03144510d78b1e13",
+          "label": "Search videos"
+        },
+        {
+          "bounds": [
+            28,
+            181,
+            48,
+            199
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "magnifyingglass",
+          "label": "Search",
+          "index": 0
+        },
+        {
+          "bounds": [
+            0,
+            791,
+            402,
+            874
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "s2-73cac3b5235bb505",
+          "label": "Tab Bar",
+          "sublabel": "Discover, Demos, Files, Settings"
+        },
+        {
+          "bounds": [
+            25,
+            795,
+            120,
+            849
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "magnifyingglass",
+          "label": "Discover",
+          "index": 2
+        },
+        {
+          "bounds": [
+            59,
+            801,
+            86,
+            828
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "magnifyingglass",
+          "label": "Search",
+          "index": 1
+        },
+        {
+          "bounds": [
+            110,
+            795,
+            205,
+            849
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "play.fill",
+          "label": "Demos",
+          "index": 1
+        },
+        {
+          "bounds": [
+            147,
+            803,
+            168,
+            826
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "play.fill",
+          "label": "play",
+          "index": 0
+        },
+        {
+          "bounds": [
+            196,
+            795,
+            291,
+            849
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "folder",
+          "label": "Files"
+        },
+        {
+          "bounds": [
+            228,
+            802,
+            260,
+            827
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "folder.fill",
+          "label": "move"
+        },
+        {
+          "bounds": [
+            282,
+            795,
+            377,
+            849
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "gearshape.fill",
+          "label": "Settings",
+          "index": 1
+        },
+        {
+          "bounds": [
+            316,
+            801,
+            344,
+            829
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "gearshape.fill",
+          "label": "gearshape.fill",
+          "index": 0
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            390,
+            844
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "contract-root",
+          "label": "SDK contract",
+          "testTag": "contract-root"
+        },
+        {
+          "bounds": [
+            24,
+            160,
+            366,
+            204
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "contract-save",
+          "label": "Contract save",
+          "testTag": "contract-save"
+        },
+        {
+          "bounds": [
+            24,
+            220,
+            366,
+            264
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "contract-tap-count",
+          "label": "1",
+          "testTag": "contract-tap-count"
+        },
+        {
+          "bounds": [
+            24,
+            280,
+            366,
+            324
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "contract-email",
+          "label": "Contract email",
+          "testTag": "contract-email"
+        },
+        {
+          "bounds": [
+            24,
+            340,
+            366,
+            384
+          ],
+          "affordances": [
+            "tap"
+          ],
+          "elementId": "contract-arm-stale",
+          "label": "Contract arm stale",
+          "testTag": "contract-arm-stale"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            402,
+            874
+          ],
+          "affordances": [
+            "scroll"
+          ],
+          "elementId": "s2-0700e32a3708f253",
+          "label": "Playground"
+        }
+      ],
+      "context": [
+        {
+          "bounds": [
+            16,
+            228,
+            386,
+            308
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-83a916ba33ac0b4c"
+        },
+        {
+          "bounds": [
+            16,
+            228,
+            386,
+            308
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-86ee0ce1b8eba9b6",
+          "label": "Getting Started with SwiftUI, 10:23",
+          "sublabel": "Getting Started with SwiftUI, 10:23"
+        },
+        {
+          "bounds": [
+            48,
+            258,
+            77,
+            277
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "video.fill",
+          "label": "Facetime Video Call"
+        },
+        {
+          "bounds": [
+            360,
+            262,
+            367,
+            274
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "chevron.forward"
+        },
+        {
+          "bounds": [
+            16,
+            308,
+            386,
+            388
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-fbc6261c796068a3"
+        },
+        {
+          "bounds": [
+            16,
+            308,
+            386,
+            388
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-a3a72a53a9fcd0ae",
+          "label": "Advanced Animations, 15:45",
+          "sublabel": "Advanced Animations, 15:45"
+        },
+        {
+          "bounds": [
+            49,
+            336,
+            73,
+            359
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "wand.and.stars",
+          "label": "wand.and.stars"
+        },
+        {
+          "bounds": [
+            360,
+            342,
+            367,
+            354
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "chevron.forward"
+        },
+        {
+          "bounds": [
+            16,
+            388,
+            386,
+            468
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-a9760353b011a57a"
+        },
+        {
+          "bounds": [
+            16,
+            388,
+            386,
+            468
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-cb6ff5360df18947",
+          "label": "Building Custom Components, 22:10",
+          "sublabel": "Building Custom Components, 22:10"
+        },
+        {
+          "bounds": [
+            50,
+            415,
+            74,
+            441
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "cube.fill",
+          "label": "Cube"
+        },
+        {
+          "bounds": [
+            360,
+            422,
+            367,
+            434
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "chevron.forward"
+        },
+        {
+          "bounds": [
+            16,
+            468,
+            386,
+            548
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-e4616fb38764ccda"
+        },
+        {
+          "bounds": [
+            16,
+            468,
+            386,
+            548
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-0c604513b5cd4d40",
+          "label": "State Management Deep Dive, 18:30",
+          "sublabel": "State Management Deep Dive, 18:30"
+        },
+        {
+          "bounds": [
+            47,
+            496,
+            76,
+            520
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "arrow.triangle.2.circlepath",
+          "label": "Syncing"
+        },
+        {
+          "bounds": [
+            360,
+            502,
+            367,
+            514
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "chevron.forward"
+        },
+        {
+          "bounds": [
+            16,
+            548,
+            386,
+            628
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-7c8202935ce99a52"
+        },
+        {
+          "bounds": [
+            16,
+            548,
+            386,
+            628
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "s2-f36725e59a6c6877",
+          "label": "Networking Best Practices, 12:55",
+          "sublabel": "Networking Best Practices, 12:55"
+        },
+        {
+          "bounds": [
+            50,
+            576,
+            74,
+            600
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "network",
+          "label": "network"
+        },
+        {
+          "bounds": [
+            360,
+            582,
+            367,
+            594
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "chevron.forward"
+        },
+        {
+          "bounds": [
+            24,
+            8,
+            160,
+            40
+          ],
+          "affordances": [],
+          "occluded": true,
+          "elementId": "contract-hold",
+          "label": "Contract hold",
+          "testTag": "contract-hold"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            402,
+            874
+          ],
+          "affordances": [],
+          "elementId": "s2-23ae3248b19e7f6b",
+          "label": "Playground"
+        },
+        {
+          "bounds": [
+            16,
+            119,
+            154,
+            160
+          ],
+          "affordances": [],
+          "elementId": "s2-eda8cdaefaf8e047",
+          "label": "Discover"
+        },
+        {
+          "bounds": [
+            16,
+            169,
+            386,
+            213
+          ],
+          "affordances": [],
+          "label": "Search videos"
+        },
+        {
+          "bounds": [
+            369,
+            116,
+            399,
+            791
+          ],
+          "affordances": [],
+          "elementId": "s2-edd1e9ee444fedac",
+          "label": "Vertical scroll bar, 1 page"
+        }
+      ],
+      "observationScreenshotResourceUri": "automobile:observation/0BDA702B-0D65-4587-A82E-7398D8A2B6AE/ed7ae88d-f3d0-4563-a968-56b590af56e1/screenshot"
+    }

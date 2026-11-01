@@ -57,7 +57,9 @@ export const OBSERVATION_STEPS: readonly ObservationStep[] = [
   {
     caseName: "unsupported-long-press",
     tool: "tapOn",
-    args: { platform: "ios", selector: selector(OBSERVATION_NODES.hold), action: "longPress" },
+    // Reuse the visible tap target: contract-hold is under the status bar and fails geometry
+    // validation before the bridge can reject the unsupported action.
+    args: { platform: "ios", selector: selector(OBSERVATION_NODES.save), action: "longPress" },
   },
   {
     caseName: "arm-stale",
@@ -114,7 +116,7 @@ function succeeded(outcome: ToolOutcome): boolean {
   return outcome.error === undefined && outcome.result?.success !== false;
 }
 
-/** observe merged the bridge: `backend: sdk` and the contract nodes carry bridge identities. */
+/** Judge the public skeleton; internal bridge attributes are intentionally not serialized. */
 export function judgeObserve(step: ObservationStep, outcome: ToolOutcome): ContractFinding[] {
   if (outcome.error !== undefined) {
     return [finding(step.caseName, "ios-client", `observe ${describe(outcome, step)}`)];
@@ -129,8 +131,17 @@ export function judgeObserve(step: ObservationStep, outcome: ToolOutcome): Contr
       ),
     ];
   }
-  const text = JSON.stringify(outcome.result);
-  return text.includes(OBSERVATION_NODES.save) && text.includes("sdk-element-id")
+  const skeleton = outcome.result?.skeleton;
+  return Array.isArray(skeleton) &&
+    skeleton.some(
+      (row: unknown) =>
+        row !== null &&
+        typeof row === "object" &&
+        "elementId" in row &&
+        row.elementId === OBSERVATION_NODES.save &&
+        "testTag" in row &&
+        row.testTag === OBSERVATION_NODES.save,
+    )
     ? []
     : [
         finding(
@@ -204,12 +215,12 @@ function judgeUnsupported(
   log: ObservationHostLog,
 ): ContractFinding[] {
   const { backend, fallbackReason } = backendOf(step, outcome.result);
-  if (hostCount(log, "longPress", OBSERVATION_NODES.hold) > 0 || backend === "sdk") {
+  if (hostCount(log, "longPress", OBSERVATION_NODES.save) > 0 || backend === "sdk") {
     return [
       finding(step.caseName, "sdk-adapter", "the bridge accepted an action it did not declare"),
     ];
   }
-  if (backend === "xctest" && fallbackReason === "unsupported") {
+  if (succeeded(outcome) && backend === "xctest" && fallbackReason === "unsupported") {
     return [];
   }
   if (backend === "xctest" && fallbackReason === "unavailable") {

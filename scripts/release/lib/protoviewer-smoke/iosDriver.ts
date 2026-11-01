@@ -58,3 +58,23 @@ export function createIosDriver(udid: string, runner: ToolRunner): SmokeDriver {
     }),
   };
 }
+
+/** Explicit display selection uses the same simctl client as the product. */
+export function createDuoScreens(udid: string): import("./duoFlow").DuoScreens {
+  const client = new SimCtlClient();
+  return {
+    enumerate: () => client.enumerateDisplays(udid),
+    screenshot: (display) => client.screenshot(udid, display),
+  };
+}
+
+export function createPostureSetter(
+  command: string,
+  runner: ToolRunner,
+): import("./duoFlow").PostureSetter {
+  return {
+    async set(posture) {
+      await runner.run(command, [posture]);
+    },
+  };
+}

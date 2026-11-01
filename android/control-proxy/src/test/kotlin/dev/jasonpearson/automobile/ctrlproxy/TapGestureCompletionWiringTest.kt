@@ -86,10 +86,17 @@ class TapGestureCompletionWiringTest {
       settled >= 0 &&
         maskedServiceSource
           .substring(settled, maskedServiceSource.indexOf("override suspend fun publishHierarchy("))
-          .let {
-            "hierarchyController.debouncer.extractAfterQuiescenceSuspending(" in it &&
-              "HierarchySnapshotOptions(displayId = displayId)" in it
-          },
+          .let { "hierarchyController.settledHierarchy(displayId)" in it },
+    )
+    assertTrue(
+      "the settled hierarchy must wait for quiescence on the requested display",
+      maskedHierarchySource
+        .substringAfter("fun settledHierarchy(")
+        .substringBefore("fun broadcastHierarchyUpdate(")
+        .let {
+          "debouncer.extractAfterQuiescenceSuspending(" in it &&
+            "HierarchySnapshotOptions(displayId = displayId)" in it
+        },
     )
     assertTrue(
       "the service must publish the settled hierarchy synchronously",
@@ -126,6 +133,7 @@ class TapGestureCompletionWiringTest {
   companion object {
     private lateinit var maskedGestureSource: String
     private lateinit var maskedServiceSource: String
+    private lateinit var maskedHierarchySource: String
 
     @BeforeClass
     @JvmStatic
@@ -134,6 +142,8 @@ class TapGestureCompletionWiringTest {
         KotlinSourceScan.maskLiteralsAndComments(locateSource("GestureController.kt").readText())
       maskedServiceSource =
         KotlinSourceScan.maskLiteralsAndComments(locateSource("CtrlProxy.kt").readText())
+      maskedHierarchySource =
+        KotlinSourceScan.maskLiteralsAndComments(locateSource("HierarchyController.kt").readText())
     }
 
     private fun locateSource(fileName: String): File {

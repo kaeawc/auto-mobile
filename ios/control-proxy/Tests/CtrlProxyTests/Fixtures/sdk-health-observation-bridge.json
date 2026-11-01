@@ -1,0 +1,1 @@
+{"status":"ok","capabilities":["magic-tap","network-fault-rules","sdk-trigger"],"simulatorUdid":"0BDA702B-0D65-4587-A82E-7398D8A2B6AE","webViewBridge":{"webViews":[],"schemaVersion":1},"observationBridge":{"supportedActions":["clearText","insertText","tap"],"schemaVersion":1,"available":true},"bundleId":"dev.jasonpearson.automobile.Playground"}

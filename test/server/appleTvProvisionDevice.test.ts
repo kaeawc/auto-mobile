@@ -1,8 +1,11 @@
+import { DeviceCriteriaMatcher } from "../../src/daemon/DeviceCriteriaMatcher";
 import {
   runWithAcquisitionReceipt,
   type AcquisitionReceipt,
 } from "../../src/daemon/acquisitionReceipt";
 import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
+import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
+import { startDeviceOutputSchema } from "../../src/server/toolOutputSchemas";
 import { provisionAppleTvDevice } from "../../src/server/deviceToolsAppleTvProvision";
 import { bindBootedDeviceSession } from "../../src/server/deviceToolsStartDevice";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -22,7 +25,7 @@ import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRe
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { isAnonymousAcquisitionSession, SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { AppleTvSimulatorInventory } from "../../src/utils/ios-cmdline-tools/AppleTvSimulatorInventory";
@@ -84,6 +87,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
     const simctl = new FakeAppleTvProvisionSimctl(devices);
     const inventory = new AppleTvSimulatorInventory(simctl, "arm64");
     const deviceUtils = new FakeDeviceUtils();
+    deviceUtils.listDeviceImages = () => inventory.listAppleTvSimulators();
     const publishBootedAppleTves = () =>
       deviceUtils.setBootedDevices(
         "tvos",
@@ -139,6 +143,192 @@ describe("provisionDevice on an Apple TV simulator", () => {
       () => undefined,
       (error: unknown) => error,
     );
+
+  test("startDevice boots an existing TV and binds at booted readiness without a runner", async () => {
+    const tv = tvDevice({ name: NAME, state: "Shutdown" });
+    const { simctl, sessions, runnerCalls, timer } = await arrange([tv]);
+    const result = toolJson(
+      await ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+    expect(startDeviceOutputSchema.safeParse(result).success).toBe(true);
+    expect(result).toMatchObject({
+      platform: "tvos",
+      acquisition: "cold-boot",
+      readiness: { level: "booted", checks: ["bootCompleted", "sessionBound"] },
+    });
+    expect(
+      sessions.getSession(
+        z
+          .object({ runtime: z.object({ session: z.object({ sessionUuid: z.string() }) }) })
+          .parse(result).runtime.session.sessionUuid,
+      )?.cacheData.deviceReadiness,
+    ).toBe("booted");
+    expect(simctl.commands).toEqual([`boot ${tv.udid} 360000`]);
+    expect(runnerCalls).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("startDevice adopts an already booted TV by exact name without another boot", async () => {
+    const { simctl, timer } = await arrange([tvDevice({ name: NAME, state: "Booted" })]);
+    const result = toolJson(
+      await ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        name: NAME,
+        __mcpSessionId: "client-a",
+      }),
+    );
+    expect(result).toMatchObject({ platform: "tvos", acquisition: "already-booted" });
+    expect(simctl.commands).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("one-shot CLI startDevice reuses the anonymous acquisition session for the same TV", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { sessions, simctl, timer } = await arrange([tv]);
+    const start = () =>
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __oneShotCli: true,
+      });
+    const resultSchema = z.object({
+      runtime: z.object({ session: z.object({ sessionUuid: z.string() }) }),
+    });
+    const first = resultSchema.parse(toolJson(await start()));
+    const sessionId = first.runtime.session.sessionUuid;
+    const session = sessions.getSession(sessionId);
+    expect(session).not.toBeNull();
+    expect(session && isAnonymousAcquisitionSession(session)).toBe(true);
+
+    const repeated = resultSchema.parse(toolJson(await start()));
+    expect(repeated.runtime.session.sessionUuid).toBe(sessionId);
+    expect(sessions.getAllSessions()).toHaveLength(1);
+    expect(simctl.commands).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("one-shot CLI startDevice rejects a TV held by another client's session", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { sessions, simctl, timer } = await arrange([tv]);
+    const result = toolJson(
+      await ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+    const sessionId = z
+      .object({ runtime: z.object({ session: z.object({ sessionUuid: z.string() }) }) })
+      .parse(result).runtime.session.sessionUuid;
+    const session = sessions.getSession(sessionId);
+    expect(session).not.toBeNull();
+    expect(session && isAnonymousAcquisitionSession(session)).toBe(false);
+
+    await expect(
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __oneShotCli: true,
+      }),
+    ).rejects.toThrow(`held by session ${sessionId}`);
+    expect(sessions.getAllSessions()).toHaveLength(1);
+    expect(simctl.commands).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("an unqualified pool request never selects an Apple TV", async () => {
+    const { pool } = await arrange([tvDevice({ name: NAME, state: "Booted" })]);
+    expect(new DeviceCriteriaMatcher().filterDevices(pool.getAllDevices())).toEqual([]);
+    expect(
+      new DeviceCriteriaMatcher()
+        .filterDevices(pool.getAllDevices(), { platform: "tvos" })
+        .map((device) => device.platform),
+    ).toEqual(["tvos"]);
+  });
+
+  test("startDevice waits for simctl readiness before binding a session", async () => {
+    const tv = tvDevice({ name: NAME, state: "Shutdown" });
+    const { simctl, timer, sessions } = await arrange([tv]);
+    const reachedBoot = Promise.withResolvers<void>();
+    const readyDevice = Promise.withResolvers<BootedDevice>();
+    simctl.waitForSimulatorReady = async () => {
+      reachedBoot.resolve();
+      return await readyDevice.promise;
+    };
+    const pending = ToolRegistry.getTool("startDevice")!.handler({
+      platform: "tvos",
+      deviceId: tv.udid,
+      timeoutMs: 50,
+      __mcpSessionId: "client-a",
+    });
+    const ready = await Promise.race([reachedBoot.promise.then(() => "boot"), pending]);
+    expect(ready).toBe("boot");
+    expect(sessions.getAllSessions()).toEqual([]);
+    timer.advanceTime(7);
+    tv.state = "Booted";
+    simctl.onStateChange?.();
+    readyDevice.resolve({ platform: "ios", name: tv.name, deviceId: tv.udid });
+    expect(toolJson(await pending)).toMatchObject({
+      platform: "tvos",
+      readiness: { elapsedMs: 7 },
+    });
+    expect(sessions.getAllSessions()).toHaveLength(1);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("startDevice reports a failed simctl boot without binding or preparing a runner", async () => {
+    const tv = tvDevice({ name: NAME, state: "Shutdown" });
+    const { simctl, sessions, runnerCalls, timer } = await arrange([tv]);
+    simctl.bootError = new Error("simctl bootstatus failed");
+    await expect(
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      }),
+    ).rejects.toThrow("simctl bootstatus failed");
+    expect(sessions.getAllSessions()).toEqual([]);
+    expect(runnerCalls).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("startDevice refuses Android/iOS setup options before booting a TV", async () => {
+    const { simctl } = await arrange([tvDevice({ name: NAME })]);
+    await expect(
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        name: NAME,
+        screenSize: "1080x1920",
+        __mcpSessionId: "client-a",
+      }),
+    ).rejects.toThrow("Invalid tvOS startDevice request");
+    expect(simctl.commands).toEqual([]);
+  });
+
+  test("setActiveDevice selects a TV only when tvos is named and skips runner preparation", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { pool, sessions, timer } = await arrange([tv]);
+    const sessionId = "tv-selection";
+    expect(sessions.getSession(sessionId)).toBeNull();
+    expect(pool.getDevice(tv.udid)?.sessionId).toBeNull();
+    const handler = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {
+        throw new Error("a TV must not resume CtrlProxy");
+      },
+    });
+    await expect(handler({ deviceId: tv.udid, sessionUuid: sessionId })).rejects.toThrow(
+      "platform",
+    );
+    await handler({ deviceId: tv.udid, platform: "tvos", sessionUuid: sessionId });
+    expect(sessions.getSession(sessionId)?.platform).toBe("tvos");
+    expect(sessions.getSession(sessionId)?.assignedDevice).toBe(tv.udid);
+    expect(pool.getDevice(tv.udid)?.sessionId).toBe(sessionId);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
 
   test("creates a missing tv, boots it and binds a TVos session without a runner", async () => {
     const { simctl, pool, sessions, runnerCalls } = await arrange();
@@ -309,6 +499,46 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(outcome).toBe("refused");
     expect(seen).toEqual([false, true]);
     expect(simctl.commands.filter((cmd) => cmd.startsWith("delete "))).toHaveLength(1);
+  });
+
+  test("a start preempted while its boot waits for admission neither boots nor binds", async () => {
+    const tv = tvDevice({ name: NAME, state: "Shutdown" });
+    const reachedAdmission = Promise.withResolvers<AbortSignal | undefined>();
+    const releaseAdmission = Promise.withResolvers<void>();
+    const { simctl, pool, sessions, timer, lifecycleCoordinator } = await arrange([tv], {
+      admission: {
+        run: async (request, boot) => {
+          reachedAdmission.resolve(request.signal);
+          await releaseAdmission.promise;
+          request.signal?.throwIfAborted();
+          return await boot(request.timeoutMs);
+        },
+      },
+    });
+    const pending = failure(
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+    const admissionSignal = await reachedAdmission.promise;
+    const teardown = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "tvos", stableId: tv.udid },
+      { operation: "teardown", deadlineMs: timer.now() + 60_000 },
+    );
+    releaseAdmission.resolve();
+    const error = await pending;
+    const lease = await teardown;
+    lease.release();
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain("preempted by teardown");
+    expect(admissionSignal?.aborted).toBe(true);
+    expect(simctl.commands).toEqual([]);
+    expect(sessions.getAllSessions()).toEqual([]);
+    expect(pool.getDevice(tv.udid)).toBeNull();
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 
   test("boot false adopts the existing TV and binds nothing", async () => {

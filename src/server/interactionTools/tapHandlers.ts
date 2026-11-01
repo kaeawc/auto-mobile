@@ -389,7 +389,7 @@ export async function tapAnyHandler(
       container: args.container,
       selectionStrategy: args.selectionStrategy,
       scrollableContainer: args.scrollableContainer,
-      action: args.action,
+      action: args.action ?? (args.duration !== undefined ? "longPress" : "tap"),
       duration: args.duration,
       searchUntil: args.searchUntil,
       layer: args.layer,

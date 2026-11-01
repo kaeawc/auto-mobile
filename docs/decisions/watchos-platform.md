@@ -9,8 +9,12 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
 (`src/models/Platform.ts`), not an iOS device with a family flag. The same rule covers every
 non-iOS Apple platform (`NonIosApplePlatform`): an Apple TV simulator is `platform: "tvos"`, and
 everything below that says "watch" applies to it unless a section names watchOS specifically.
-`tvos` supports no tool yet: discovery lists no Apple TVs (no discovery source sweeps them), a
-broker binding never reuses one, and a boot is admitted through the simulator gate. Unlike watchOS,
+`tvos` supports `listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`,
+`startDevice`, `setActiveDevice`, `killDevice`, `installApp`, `uninstallApp`, `launchApp`,
+`terminateApp` and `listApps`. Discovery and selection require an explicit
+tvOS request. Boot uses simctl readiness and the simulator gate; start binds at `booted`
+readiness without an automation runner, keyboard, biometric or prototype setup. A broker binding
+never reuses a TV. Unlike watchOS,
 `tvos` is advertised in tool input schemas ahead of support (see the schema rule below).
 
 - **Fail closed at the tool boundary.** Every device-aware tool rejects a watch or an Apple TV with
@@ -34,16 +38,13 @@ broker binding never reuses one, and a boot is admitted through the simulator ga
   enum lists `watchos` only when the tool supports a watch, so agents are not offered a watch value
   the tool rejects; such a tool gets its own enum. Every input `platform` enum lists `tvos`,
   including the shared `platformSchema` (owner decision 2026-10-31, #15886), so clients can name an
-  Apple TV before any tool supports one; every tool refuses it. The device-aware tools refuse a
-  requested non-iOS Apple platform they have not opted in to before resolving a target
-  (`assertRequestedPlatformSupported`), because resolution replaces the requested platform with a
-  session's own, and refuse a resolved Apple TV at the registry gate; the plain tools that offer it and look up their own target (`listDevices`,
-  `listDeviceImages`, `startDevice`, `setActiveDevice`, `killDevice`, `deleteDevice`) refuse it
-  by name before any lookup, wherever the request names it (`platform`, `target.platform` or
-  `device.platform`; `assertRequestNotTvos`), so a `tvos` request never reaches an iOS
-  simulator path or returns an empty listing. `provisionDevice`'s request is a
-  per-platform union with platform-specific spec fields, so it gains a `tvos` branch only with
-  tvOS provisioning. Output schemas list `tvos` only where they already list `watchos`.
+  Apple TV explicitly. Device-aware tools refuse a requested non-iOS Apple platform they
+  have not opted in to before resolving a target (`assertRequestedPlatformSupported`), because
+  resolution replaces the requested platform with a session's own, and refuse an unsupported
+  resolved platform at the registry gate. Plain tools look up tvOS targets through their own
+  platform-specific paths; unsupported plain tools refuse tvOS before lookup
+  (`assertRequestNotTvos`). `provisionDevice` uses a per-platform union with platform-specific
+  spec fields, including a tvOS branch. Output schemas list `tvos` only where they already list `watchos`.
 - **Allowlisted app tools.** `installApp`, `uninstallApp`, `listApps`, `launchApp` and
   `terminateApp` route a watch to `WatchAppManager` (`simctl install|uninstall|listapps|launch|
   terminate` on the watch UDID) through their executor factories; Android and iOS keep their

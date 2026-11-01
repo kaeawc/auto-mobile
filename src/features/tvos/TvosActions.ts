@@ -61,6 +61,11 @@ export async function tvosSendKeys(
     if (command.action !== "type" || command.text.length === 0) {
       return unsupported();
     }
+    if (command.operation === "replace") {
+      throw new ActionableError(
+        "Text replacement is unsupported on tvOS; only appending type commands are supported. Clear/select the existing text via the on-screen keyboard with pressButton, then type.",
+      );
+    }
     return command;
   });
   const results: SendKeysResult["commands"] = [];

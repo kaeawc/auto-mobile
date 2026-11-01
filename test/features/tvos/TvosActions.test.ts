@@ -170,6 +170,20 @@ test.each([
   expect(client.commands).toEqual([]);
 });
 
+test("sendKeys refuses replacement before typing any earlier commands", async () => {
+  const args = sendKeysSchema.parse({
+    commands: [
+      { action: "type", text: "first" },
+      { action: "type", text: "new", operation: "replace" },
+    ],
+  });
+  await expect(sendKeys(device, args)).rejects.toBeInstanceOf(ActionableError);
+  await expect(sendKeys(device, args)).rejects.toThrow(
+    "Text replacement is unsupported on tvOS; only appending type commands are supported. Clear/select the existing text via the on-screen keyboard with pressButton, then type.",
+  );
+  expect(client.commands).toEqual([]);
+});
+
 test("sendKeys refuses empty text before dispatch", async () => {
   const args = sendKeysSchema.parse({ commands: [{ action: "type", text: "hello" }] });
   args.commands = [{ action: "type", text: "", operation: "insert", mode: "auto" }];

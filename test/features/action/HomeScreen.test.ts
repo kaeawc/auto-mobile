@@ -946,6 +946,34 @@ describe("HomeScreen", () => {
         expect(fakeTimer.now()).toBe(500);
       });
 
+      test("reserves the default budget for a second press after landing in an app", async () => {
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: { executeCommandArgs: async () => createExecResult("", "") },
+        });
+        const pressBudgets: number[] = [];
+        spyOn(client, "requestPressHome").mockImplementation(async (timeoutMs) => {
+          pressBudgets.push(timeoutMs);
+          fakeTimer.advanceTime(1000);
+          return { success: true, totalTimeMs: 1000 };
+        });
+        const read = spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+          hierarchy:
+            pressBudgets.length === 0
+              ? iosSwitcherHierarchy()
+              : iosHierarchy(
+                  pressBudgets.length === 1 ? "com.apple.Preferences" : "com.apple.springboard",
+                ),
+        }));
+
+        await action.executeIosHomeNavigation();
+
+        expect(pressBudgets).toEqual([5000, 4000]);
+        expect(read.mock.calls.map((call) => call[3]?.timeoutMs)).toEqual([1500, 1000, 1500]);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+        expect(fakeTimer.now()).toBe(2000);
+      });
+
       test.each([false, true])(
         "dismisses the switcher using runner Home (simulator %s)",
         async (simulator) => {
@@ -1003,16 +1031,13 @@ describe("HomeScreen", () => {
                   ),
           }));
 
+          const result = await action.execute();
+          expect(result.success).toBe(true);
+          expect(result.message).toBeUndefined();
+          expect(client.getPressHomeRequestCount()).toBe(2);
           if (simulator) {
-            await expect(action.execute()).rejects.toThrow(
-              "iOS Home deadline exhausted before SpringBoard could be verified",
-            );
-          } else {
-            const result = await action.execute();
-            expect(result.success).toBe(true);
-            expect(result.message).toBeUndefined();
+            expect(fakeTimer.getSleepHistory()).toEqual([]);
           }
-          expect(client.getPressHomeRequestCount()).toBe(simulator ? 1 : 2);
         },
       );
 
@@ -1037,13 +1062,9 @@ describe("HomeScreen", () => {
           expect(failure).toBeInstanceOf(ActionableError);
           expect(failure).toHaveProperty(
             "message",
-            expect.stringContaining(
-              simulator
-                ? "iOS Home deadline exhausted before SpringBoard could be verified"
-                : "Home press did not background com.apple.Preferences",
-            ),
+            expect.stringContaining("Home press did not background com.apple.Preferences"),
           );
-          expect(client.getPressHomeRequestCount()).toBe(simulator ? 1 : 2);
+          expect(client.getPressHomeRequestCount()).toBe(2);
         },
       );
 

@@ -86,6 +86,7 @@ export class HomeScreen extends BaseVisualChange {
    */
   private static readonly HOME_KEYEVENT_TIMEOUT_MS = 3000;
   private static readonly IOS_HOME_VERIFICATION_TIMEOUT_MS = 4000;
+  private static readonly IOS_HOME_FIRST_PRESS_VERIFICATION_TIMEOUT_MS = 1000;
   private static readonly IOS_HOME_HIERARCHY_READ_TIMEOUT_MS = 1000;
   private static readonly IOS_HOME_RETRY_DELAYS_MS: readonly number[] = [300, 600, 900];
   private static readonly IOS_SIMULATOR_RETRY_DELAYS_MS: readonly number[] = [100, 200, 400, 500];
@@ -463,7 +464,7 @@ export class HomeScreen extends BaseVisualChange {
     deadline?: number,
   ): Promise<void> {
     for (let press = 0; press < remainingPresses; press++) {
-      const remainingMs = this.iosHomeRemainingMs(deadline) ?? 5000;
+      const remainingMs = this.iosHomeRemainingMs(deadline);
       const pressError = await awaitWhileRequestIsLive(
         this.tryIosRunnerHome(client, Math.min(5000, remainingMs), { perf, signal, onDispatch }),
         signal,
@@ -474,11 +475,12 @@ export class HomeScreen extends BaseVisualChange {
       if (pressError && pressError !== RUNNER_HOME_NOT_FOREGROUND_ERROR) {
         throw new ActionableError(pressError);
       }
+      const isLastPress = press + 1 === remainingPresses;
       let hierarchy: CtrlProxyHierarchy;
       try {
         hierarchy = await this.verifyIosHomeForeground(client, {
           perf,
-          timeoutMs: this.iosHomeRemainingMs(deadline),
+          ...this.iosHomePressVerificationPolicy(isLastPress, deadline),
           retryDelaysMs: HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
           readTimeoutMs: HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
           pollUntilDeadline: true,
@@ -486,9 +488,12 @@ export class HomeScreen extends BaseVisualChange {
         });
       } catch (error) {
         this.iosHomeRemainingMs(deadline);
-        if (!(error instanceof IosHomeNotForegroundError) || press + 1 === remainingPresses) {
+        if (!(error instanceof IosHomeNotForegroundError) || isLastPress) {
           throw error;
         }
+        continue;
+      }
+      if (hierarchy.packageName !== "com.apple.springboard") {
         continue;
       }
       if (!isIosAppSwitcherVisible(hierarchy.hierarchy)) {
@@ -500,6 +505,19 @@ export class HomeScreen extends BaseVisualChange {
         );
       }
     }
+  }
+
+  private iosHomePressVerificationPolicy(isLastPress: boolean, deadline?: number) {
+    const boundMs = isLastPress
+      ? HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS
+      : HomeScreen.IOS_HOME_FIRST_PRESS_VERIFICATION_TIMEOUT_MS;
+    const timeoutMs = Math.min(boundMs, this.iosHomeRemainingMs(deadline));
+    return {
+      timeoutMs,
+      // With less than one recovery window left, use it to verify this press.
+      returnOnNonSpringboard:
+        !isLastPress && timeoutMs === HomeScreen.IOS_HOME_FIRST_PRESS_VERIFICATION_TIMEOUT_MS,
+    };
   }
 
   /** The device's runner client, resolved at each use so a retired client is never reused. */
@@ -580,10 +598,7 @@ export class HomeScreen extends BaseVisualChange {
     }
   }
 
-  private iosHomeRemainingMs(deadline?: number): number | undefined {
-    if (deadline === undefined) {
-      return undefined;
-    }
+  private iosHomeRemainingMs(deadline = this.timer.now() + 5000): number {
     const remaining = deadline - this.timer.now();
     if (remaining <= 0) {
       throw new ActionableError("iOS Home deadline exhausted before SpringBoard could be verified");
@@ -599,6 +614,7 @@ export class HomeScreen extends BaseVisualChange {
       timeoutMs?: number;
       readTimeoutMs?: number;
       pollUntilDeadline?: boolean;
+      returnOnNonSpringboard?: boolean;
       signal?: AbortSignal;
     } = {},
   ): Promise<CtrlProxyHierarchy> {
@@ -630,7 +646,10 @@ export class HomeScreen extends BaseVisualChange {
       if (hierarchy) {
         lastHierarchy = hierarchy;
       }
-      if (hierarchy?.packageName === "com.apple.springboard" && this.timer.now() <= deadline) {
+      if (
+        hierarchy &&
+        this.isIosHomeVerificationResult(hierarchy, deadline, options.returnOnNonSpringboard)
+      ) {
         return hierarchy;
       }
 
@@ -646,6 +665,18 @@ export class HomeScreen extends BaseVisualChange {
     }
 
     this.throwIosHomeNotForeground(client, lastHierarchy);
+  }
+
+  private isIosHomeVerificationResult(
+    hierarchy: CtrlProxyHierarchy,
+    deadline: number,
+    returnOnNonSpringboard = false,
+  ): boolean {
+    return (
+      this.timer.now() <= deadline &&
+      (hierarchy.packageName === "com.apple.springboard" ||
+        (returnOnNonSpringboard && Boolean(hierarchy.packageName)))
+    );
   }
 
   private async waitForIosHomeRetry(

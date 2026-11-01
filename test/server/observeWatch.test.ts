@@ -4,6 +4,7 @@ import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/Scre
 import { ActionableError, type BootedDevice } from "../../src/models";
 import {
   WATCH_HIERARCHY_UNAVAILABLE_MESSAGE,
+  isWatchObservation,
   type WatchObservation,
 } from "../../src/models/WatchObservation";
 import { getStructuredPayload } from "../../src/utils/toolUtils";
@@ -181,6 +182,14 @@ describe("observe on an Apple Watch simulator (#14910)", () => {
     expect(screenshots.captures).toEqual([]);
   });
 
+  test.each(refusals)("tvOS refuses %s by name before capturing", async (name, args) => {
+    const { observe, screenshots } = arrange();
+    const error = await failure(observe(args, { ...watch, platform: "tvos" }));
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain(`does not support: ${name}`);
+    expect(screenshots.captures).toEqual([]);
+  });
+
   test("names every refused option at once", async () => {
     const { observe } = arrange();
 
@@ -224,6 +233,29 @@ describe("observe on an Apple Watch simulator (#14910)", () => {
 
     expect(error).toBeInstanceOf(ActionableError);
     expect(String(error)).toContain("simctl returned no readable PNG");
+    expect(writer.written).toEqual([]);
+  });
+});
+
+const appleTv: BootedDevice = { ...watch, platform: "tvos", name: "Apple TV 4K" };
+describe("observe on an Apple TV simulator", () => {
+  test("returns a retained PNG with tvOS metadata and no hierarchy fields", async () => {
+    const { observe, writer } = arrange(pngOfSize(1920, 1080));
+    const result = getStructuredPayload<WatchObservation>(await observe({}, appleTv))!;
+    expect(result.hierarchyUnavailable.platform).toBe("tvos");
+    expect(result.hierarchyUnavailable.message).toContain("not available on tvOS yet");
+    expect(result.screenSize).toEqual({ width: 1920, height: 1080, units: "physical-pixels" });
+    expect(result.screenshotMimeType).toBe("image/png");
+    expect(writer.written).toEqual([result.screenshotPath!]);
+    expect(HIERARCHY_FIELDS.filter((field) => Object.hasOwn(result, field))).toEqual([]);
+    expect(isWatchObservation(result)).toBe(true);
+    expect(observeToolResultSchema.safeParse(result).success).toBe(true);
+  });
+  test("a tvOS capture failure is actionable and stores nothing", async () => {
+    const { observe, writer } = arrange(new Error("simctl failed"));
+    const error = await failure(observe({}, appleTv));
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain("tvOS simulator");
     expect(writer.written).toEqual([]);
   });
 });

@@ -395,6 +395,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * The one path every request result takes to the wire (#11877): running check, broadcast guard,
    * perf flush and routing. Declared ahead of the eagerly built [textInputController].
    */
+  private val hierarchyExtractFrames =
+    HierarchyExtractFrameSender(
+      transport =
+        object : HierarchyExtractFrameSender.Transport {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcastExternallyCorrelated(frame: ErrorResponse) =
+            webSocketServer.broadcastExternallyCorrelatedResponse(frame)
+
+          override suspend fun broadcast(frame: ErrorResponse) = webSocketServer.broadcast(frame)
+        },
+      resultBroadcaster = resultBroadcaster,
+    )
   private val resultSender: ResultSender =
     GuardedResultSender(
       transport =
@@ -676,7 +689,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           this@CtrlProxy.sendResult(success, data, error)
 
         override suspend fun sendErrorFrame(frame: ErrorResponse?) =
-          broadcastHierarchyExtractFrame(frame)
+          hierarchyExtractFrames.send(frame)
       },
     )
   }
@@ -872,7 +885,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override suspend fun broadcastHierarchyExtractFrame(
             frame: ErrorResponse?,
             externallyCorrelated: Boolean,
-          ) = this@CtrlProxy.broadcastHierarchyExtractFrame(frame, externallyCorrelated)
+          ) = hierarchyExtractFrames.send(frame, externallyCorrelated)
 
           override fun launchRequestScope(
             requestId: String?,
@@ -2584,37 +2597,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun sendResult(success: Boolean, data: String? = null, error: String? = null) =
     sendBroadcast(operationResultIntent(success, data, error, timeProvider.currentTimeMillis()))
-
-  /**
-   * Emit the correlated WebSocket `type:"error"` [frame] for a failed `EXTRACT_HIERARCHY`
-   * broadcast, keyed by the broadcast's `sync_` `requestId` uuid. A null [frame] (blank/absent
-   * uuid, or a cancellation the caller rethrows — see [HierarchyExtractErrorFrames]) is a no-op.
-   *
-   * The daemon's ADB-broadcast hierarchy fallback awaits that uuid in `waitForFreshData` over this
-   * same WebSocket (the response channel the success-path `hierarchy_update` push also travels on).
-   * Before issue #3089 a broadcast-handler failure only sent an ADB [ACTION_OPERATION_RESULT]
-   * result that the daemon's wait could not correlate, so it degraded to a full timeout. Emitting
-   * this frame closes that last member of the #3032/#3061 `waitForFreshData` hang class, mirroring
-   * the WebSocket `req_`/`stale_` paths and the #2985 decode/handler error envelope.
-   *
-   * Routed through [ResultBroadcaster.guard] so a throw while *sending* this frame degrades to the
-   * daemon's timeout rather than escaping the receiver coroutine (issue #3045 / #3085).
-   */
-  private suspend fun broadcastHierarchyExtractFrame(
-    frame: ErrorResponse?,
-    externallyCorrelated: Boolean = true,
-  ) {
-    // A null frame means there was nothing to correlate (blank/absent uuid, or a cooperative
-    // cancellation that must propagate); HierarchyExtractErrorFrames already made that decision, so
-    // there is no WebSocket frame to send here. See issue #3131.
-    if (frame == null) return
-    resultBroadcaster.guard(frame.requestId, "hierarchy_extract_error") {
-      if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-        if (externallyCorrelated) webSocketServer.broadcastExternallyCorrelatedResponse(frame)
-        else webSocketServer.broadcast(frame)
-      }
-    }
-  }
 
   /**
    * Search the active window's root first, then the other windows the hierarchy extractor reports

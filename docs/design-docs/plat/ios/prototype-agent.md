@@ -295,6 +295,8 @@ iOS prototypes expire like Android session prototypes
 
 ## How it works
 
+A fullscreen root defaults each omitted `width` or `height` to `fill`; explicit dimensions (including `wrap`) and size constraints still apply, while floating and sheet roots keep their existing sizing.
+
 1. `ios/prototype-agent/` builds a simulator-only dylib, ad-hoc signed (no Developer ID,
    notarization or provisioning, since it only loads into simulator processes).
 2. The app is launched with `simctl launch` and `SIMCTL_CHILD_DYLD_INSERT_LIBRARIES` pointing at the

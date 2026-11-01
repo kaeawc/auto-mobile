@@ -84,7 +84,7 @@ import {
   getVideoArchiveItem,
   type VideoRecordingResourceStore,
 } from "../../src/server/videoRecordingResources";
-import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { registerResourceUpdateNotifier } from "../../src/daemon/resourceUpdateNotifier";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import {
   buildVideoArchiveItemUri,
@@ -1710,20 +1710,25 @@ describe("videoRecordingManager", () => {
   });
 
   test("notifies video resources after rollback removes the durable row", async () => {
-    const updates = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
     const active = await startVideoRecording({ device: testDevice });
+    const itemUri = buildVideoArchiveItemUri(active.recordingId);
+    const updates: { uris: string[]; row: VideoRecordingRecord | null }[] = [];
+    const restoreNotifier = registerResourceUpdateNotifier(async (uris) => {
+      updates.push({
+        uris,
+        row: await fakeRepository.getRecording(active.recordingId),
+      });
+    });
 
     try {
       await rollbackVideoRecordingStart(active.recordingId);
 
-      expect(updates).toHaveBeenCalledTimes(2);
-      expect(updates).toHaveBeenLastCalledWith([
-        VIDEO_RESOURCE_URIS.LATEST,
-        VIDEO_RESOURCE_URIS.ARCHIVE,
-        buildVideoArchiveItemUri(active.recordingId),
-      ]);
+      expect(updates.at(-1)).toEqual({
+        uris: [VIDEO_RESOURCE_URIS.LATEST, VIDEO_RESOURCE_URIS.ARCHIVE, itemUri],
+        row: null,
+      });
     } finally {
-      updates.mockRestore();
+      restoreNotifier();
     }
   });
 

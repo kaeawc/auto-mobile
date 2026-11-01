@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { DeviceConditionRegistry } from "../../../src/features/deviceCondition/DeviceConditionRegistry";
+import {
+  createDefaultInjectorResolver,
+  DeviceConditionRegistry,
+} from "../../../src/features/deviceCondition/DeviceConditionRegistry";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { DeviceConditionController } from "../../../src/features/deviceCondition/DeviceConditionController";
 import { OwedResetError } from "../../../src/features/deviceCondition/OwedResetError";
@@ -27,6 +30,7 @@ const result = (stdout: string): ExecResult => ({
 function device() {
   const adb = new FakeAdbExecutor();
   const commands: string[] = [];
+  const unrootSignals: (AbortSignal | undefined)[] = [];
   const state = {
     mode: "rw",
     debuggable: "1",
@@ -34,6 +38,8 @@ function device() {
     root: "restarting adbd as root",
     rooted: false,
     failId: false,
+    waitFailure: undefined as Error | undefined,
+    abortOnWait: undefined as AbortController | undefined,
     failUnroot: false,
     ignoreRo: false,
     ignoreRw: false,
@@ -42,7 +48,7 @@ function device() {
   };
   let gate: Promise<void> | undefined;
   let entered = (): void => {};
-  adb.execute = async (args) => {
+  adb.execute = async (args, options) => {
     const cmd = args.join(" ");
     commands.push(cmd);
     if (cmd === "shell getprop ro.debuggable") {
@@ -57,7 +63,14 @@ function device() {
       }
       return result(state.root);
     }
+    if (cmd === "wait-for-device" && state.waitFailure) {
+      const error = state.waitFailure;
+      state.waitFailure = undefined;
+      state.abortOnWait?.abort(error);
+      throw error;
+    }
     if (cmd === "unroot") {
+      unrootSignals.push(options?.signal);
       if (state.failUnroot) {
         throw new Error("unroot refused");
       }
@@ -97,6 +110,7 @@ function device() {
     adb,
     state,
     commands,
+    unrootSignals,
     holdReset() {
       let release = (): void => {};
       gate = new Promise<void>((resolve) => {
@@ -138,6 +152,116 @@ describe("read-only shared storage", () => {
     expect(await injector.isClean()).toBe(true);
     expect(d.state.rooted).toBe(false);
   });
+  for (const aborted of [false, true]) {
+    test(`transport failure rolls back root without the apply signal (abort=${aborted})`, async () => {
+      const d = device();
+      const abort = new AbortController();
+      const failure = new Error(aborted ? "aborted wait" : "transport lost");
+      d.state.waitFailure = failure;
+      d.state.abortOnWait = aborted ? abort : undefined;
+      const injector = createReadOnlyFilesystemInjector(d.adb);
+      if (aborted) {
+        await expect(injector.apply("on", abort.signal)).rejects.toBe(failure);
+      } else {
+        await expect(injector.apply("on", abort.signal)).rejects.toThrow(
+          "unsupported on this image: transport lost",
+        );
+      }
+      expect(d.commands.filter((cmd) => cmd === "root")).toHaveLength(1);
+      expect(d.commands.at(-1)).toBe("unroot");
+      expect(d.unrootSignals).toEqual([undefined]);
+      expect(d.state.rooted).toBe(false);
+      expect(await injector.isClean()).toBe(true);
+    });
+    test(`transport rollback failure carries a retryable reset (abort=${aborted})`, async () => {
+      const d = device();
+      const abort = new AbortController();
+      d.state.waitFailure = new Error("transport lost");
+      d.state.abortOnWait = aborted ? abort : undefined;
+      d.state.failUnroot = true;
+      const injector = createReadOnlyFilesystemInjector(d.adb);
+      let caught: unknown;
+      try {
+        await injector.apply("on", abort.signal);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(OwedResetError);
+      if (!(caught instanceof OwedResetError)) {
+        throw new Error("missing owed reset");
+      }
+      expect(d.state.rooted).toBe(true);
+      expect(d.unrootSignals).toEqual([undefined]);
+      expect(await injector.isClean()).toBe(false);
+      d.state.failUnroot = false;
+      await caught.owedReset();
+      expect(d.state.rooted).toBe(false);
+      expect(await injector.isClean()).toBe(true);
+    });
+  }
+  test("controller cannot verify clean until failed transport rollback is retried", async () => {
+    const d = device();
+    d.state.waitFailure = new Error("transport lost");
+    d.state.failUnroot = true;
+    const injector = createReadOnlyFilesystemInjector(d.adb);
+    const controller = new DeviceConditionController(() => injector);
+    expect(
+      (await controller.apply({ faults: { readOnlyFilesystem: "on" } })).changes[0].status,
+    ).toBe("unsupported");
+    expect((await controller.restore()).verifiedClean).toBe(false);
+    expect(d.state.rooted).toBe(true);
+    d.state.failUnroot = false;
+    expect((await controller.restore()).verifiedClean).toBe(true);
+    expect(d.state.rooted).toBe(false);
+  });
+  test("restore removes root it reacquires after another condition unroots adbd", async () => {
+    const d = device();
+    d.state.rooted = true;
+    const injector = createReadOnlyFilesystemInjector(d.adb);
+    const outcome = await injector.apply("on");
+    d.state.rooted = false;
+    await outcome.reset?.();
+    expect(d.state.rooted).toBe(false);
+    expect(d.state.mode).toBe("rw");
+    expect(await injector.isClean()).toBe(true);
+  });
+  test("restore retry remembers root acquired before its transport wait fails", async () => {
+    const d = device();
+    d.state.rooted = true;
+    const injector = createReadOnlyFilesystemInjector(d.adb);
+    const outcome = await injector.apply("on");
+    d.state.rooted = false;
+    d.state.waitFailure = new Error("restore transport lost");
+    await expect(outcome.reset?.()).rejects.toThrow("restore transport lost");
+    expect(d.state.rooted).toBe(true);
+    expect(await injector.isClean()).toBe(false);
+    await outcome.reset?.();
+    expect(d.state.rooted).toBe(false);
+    expect(d.state.mode).toBe("rw");
+    expect(await injector.isClean()).toBe(true);
+  });
+  test("a failed restore probe preserves pre-existing root", async () => {
+    const d = device();
+    d.state.rooted = true;
+    const injector = createReadOnlyFilesystemInjector(d.adb);
+    const outcome = await injector.apply("on");
+    d.state.failId = true;
+    await outcome.reset?.();
+    expect(d.commands.filter((cmd) => cmd === "root")).toHaveLength(2);
+    expect(d.commands).not.toContain("unroot");
+    expect(d.state.rooted).toBe(true);
+    expect(await injector.isClean()).toBe(true);
+  });
+  test("non-rootable refusal names the requested filesystem fault", async () => {
+    const d = device();
+    d.state.debuggable = "0";
+    const controller = new DeviceConditionController(() => createReadOnlyFilesystemInjector(d.adb));
+    const response = await controller.apply({ faults: { readOnlyFilesystem: "on" } });
+    expect(response.changes[0].detail).toContain(
+      "faults.readOnlyFilesystem needs a non-Play image",
+    );
+    expect(response.changes[0].detail).not.toContain("rootState");
+  });
   test("preserves adbd that was already rooted", async () => {
     const d = device();
     d.state.rooted = true;
@@ -147,6 +271,7 @@ describe("read-only shared storage", () => {
     expect(await injector.isClean()).toBe(true);
     expect(d.state.rooted).toBe(true);
     expect(d.commands).not.toContain("unroot");
+    expect(d.commands.filter((cmd) => cmd === "root")).toHaveLength(1);
   });
   test("a failed privilege probe conservatively preserves root", async () => {
     const d = device();
@@ -273,6 +398,17 @@ describe("read-only shared storage", () => {
       expect(d.commands.some((cmd) => cmd.includes("remount,"))).toBe(false);
     }
   });
+  test("refused adb root keeps its unsupported wording without owing a reset", async () => {
+    const d = device();
+    d.state.root = "adbd cannot run as root in production builds";
+    const injector = createReadOnlyFilesystemInjector(d.adb);
+    await expect(injector.apply("on")).rejects.toThrow(
+      "unsupported on this image: adb root refused: adbd cannot run as root in production builds",
+    );
+    expect(d.commands.at(-1)).toBe("unroot");
+    expect(d.state.rooted).toBe(false);
+    expect(await injector.isClean()).toBe(true);
+  });
   test("missing and unreadable mount tables are not clean and cannot apply", async () => {
     const d = device();
     const injector = createReadOnlyFilesystemInjector(d.adb);
@@ -343,6 +479,25 @@ describe("read-only shared storage", () => {
     await controller.apply({ faults: { readOnlyFilesystem: "on" } });
     expect((await controller.restore()).verifiedClean).toBe(true);
     expect(d.state.mode).toBe("rw");
+  });
+  test("default registry resolver applies and restores the filesystem fault", async () => {
+    const d = device();
+    d.state.rooted = true;
+    const android: BootedDevice = { name: "emu", platform: "android", deviceId: "emulator-5554" };
+    const registry = new DeviceConditionRegistry(
+      createDefaultInjectorResolver({
+        adbFactory: { create: () => d.adb },
+        cache: new Map(),
+      }),
+      new FakeTimer(),
+    );
+    const owner = { deviceId: android.deviceId, sessionUuid: "default-session", device: android };
+    const response = await registry.apply(owner, { faults: { readOnlyFilesystem: "on" } });
+    expect(response.changes[0].status).toBe("applied");
+    expect(d.state.mode).toBe("ro");
+    expect(await registry.restore(owner)).toBe(true);
+    expect(d.state.mode).toBe("rw");
+    expect(d.state.rooted).toBe(true);
   });
   test("session close and device release restore shared storage through the registry", async () => {
     const d = device();

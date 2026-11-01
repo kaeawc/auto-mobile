@@ -165,7 +165,7 @@ for (const cleanup of ["explicit", "release", "expiry"] as const) {
     };
     const timer = new FakeTimer();
     const registry = new DeviceConditionRegistry(
-      createDefaultInjectorResolver({ create: () => adb }),
+      createDefaultInjectorResolver({ adbFactory: { create: () => adb } }),
       timer,
     );
     const device = {

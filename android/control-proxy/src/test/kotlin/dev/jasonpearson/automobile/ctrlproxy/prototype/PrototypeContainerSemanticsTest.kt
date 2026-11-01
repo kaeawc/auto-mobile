@@ -58,7 +58,12 @@ class PrototypeContainerSemanticsTest {
         PrototypeFlowNode(
           testTag = "flow",
           maxLines = 1,
-          style = PrototypeStyle(width = PrototypeDimension.Dp(80.0), spacing = 4.0),
+          style =
+            PrototypeStyle(
+              width = PrototypeDimension.Dp(80.0),
+              height = PrototypeDimension.Wrap,
+              spacing = 4.0,
+            ),
           children =
             (0 until 8).map {
               PrototypeTextNode(

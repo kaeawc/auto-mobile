@@ -22,6 +22,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 
+private const val CANCEL_SETTLE_MS = 600L
+
 @RunWith(RobolectricTestRunner::class)
 class PrototypeStackTransitionRenderTest {
   @get:Rule val compose = createComposeRule()
@@ -401,7 +403,9 @@ class PrototypeStackTransitionRenderTest {
     repeat(4) { compose.mainClock.advanceTimeByFrame() }
     assertEquals(1, count("home"))
     mutate { seek.result = false }
-    settle()
+    // The cancel animation runs from the seek progress back to the current frame.
+    compose.mainClock.advanceTimeBy(CANCEL_SETTLE_MS)
+    compose.waitForIdle()
     assertEquals(2, runtime.current.stacks.getValue("nav").depth)
     assertEquals(0, count("home"))
     mutate {

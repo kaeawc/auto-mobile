@@ -32,6 +32,39 @@ final class PrototypeSizingTests: XCTestCase {
         }
     }
 
+    func testFullscreenRootDefaultsEachMissingAxisToFill() throws {
+        let implicit = PrototypeSizeRules(style: nil, rootPlacementType: "fullscreen")
+        XCTAssertEqual(implicit.width, .fill)
+        XCTAssertEqual(implicit.height, .fill)
+        XCTAssertEqual(size(implicit, in: (400, 600)).width, 400)
+        XCTAssertEqual(size(implicit, in: (400, 600)).height, 600)
+
+        // Reuse the existing sizing inputs; explicit fixed and wrap sizes still win per axis.
+        var fixedWidth = try rules(#"{"width":{"dp":117}}"#)
+        fixedWidth.height = .fill
+        let widthStyle = try style(#"{"width":{"dp":117}}"#)
+        let width = PrototypeSizeRules(style: widthStyle, rootPlacementType: "fullscreen")
+        XCTAssertEqual(width, fixedWidth)
+        XCTAssertEqual(size(width, in: (400, 600)).width, 117)
+        XCTAssertEqual(size(width, in: (400, 600)).height, 600)
+        let height = try PrototypeSizeRules(
+            style: style(#"{"height":{"dp":49}}"#), rootPlacementType: "fullscreen"
+        )
+        XCTAssertEqual(height.width, .fill)
+        XCTAssertEqual(height.height, .points(49))
+        let wrap = try PrototypeSizeRules(
+            style: style(#"{"width":"wrap","height":"wrap"}"#), rootPlacementType: "fullscreen"
+        )
+        XCTAssertEqual(size(wrap, in: (400, 600)).width, 30)
+        XCTAssertEqual(size(wrap, in: (400, 600)).height, 10)
+        for placement in ["floating", "sheet"] {
+            let unchanged = PrototypeSizeRules(style: nil, rootPlacementType: placement)
+            XCTAssertEqual(unchanged, PrototypeSizeRules(style: nil))
+            XCTAssertEqual(size(unchanged, in: (400, 600)).width, 30)
+            XCTAssertEqual(size(unchanged, in: (400, 600)).height, 10)
+        }
+    }
+
     // MARK: decoding
 
     func testTheSharedFixtureDecodesEveryNewField() throws {

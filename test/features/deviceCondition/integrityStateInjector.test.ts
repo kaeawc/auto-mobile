@@ -202,7 +202,7 @@ describe("integrityState injector", () => {
   for (const integrityFirst of [true, false]) {
     test(`shared SELinux baseline survives clearing ${integrityFirst ? "integrity" : "root"} first`, async () => {
       const adb = new IntegrityAdb();
-      const resolve = createDefaultInjectorResolver({ create: () => adb });
+      const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
       const device = { name: "e", platform: "android" as const, deviceId: "shared" };
       const owner = { device, deviceId: device.deviceId };
       const integrity = resolve(owner, "integrityState")!;
@@ -225,8 +225,10 @@ describe("integrityState injector", () => {
     secondAdb.mode = "Permissive";
     const device = { name: "e", platform: "android" as const, deviceId: "same-id" };
     const owner = { device, deviceId: device.deviceId };
-    const firstResolve = createDefaultInjectorResolver({ create: () => firstAdb });
-    const secondResolve = createDefaultInjectorResolver({ create: () => secondAdb });
+    const firstResolve = createDefaultInjectorResolver({ adbFactory: { create: () => firstAdb } });
+    const secondResolve = createDefaultInjectorResolver({
+      adbFactory: { create: () => secondAdb },
+    });
     const integrity = firstResolve(owner, "integrityState")!;
     const root = secondResolve(owner, "rootState")!;
     const first = await integrity.apply("maximally-detectable");
@@ -242,7 +244,7 @@ describe("integrityState injector", () => {
   for (const integrityFirst of [true, false]) {
     test(`root-first acquisition restores the first baseline when ${integrityFirst ? "integrity" : "root"} clears first`, async () => {
       const adb = new IntegrityAdb();
-      const resolve = createDefaultInjectorResolver({ create: () => adb });
+      const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
       const device = { name: "e", platform: "android" as const, deviceId: "root-first" };
       const owner = { device, deviceId: device.deviceId };
       const integrity = resolve(owner, "integrityState")!;

@@ -38,12 +38,16 @@ export const ROOT_ARTIFACT_PATHS = [
 const STUB_SCRIPT = "#!/system/bin/sh\\nexit 1\\n";
 
 /** A Play image is a production build: not debuggable, and `adb root` is refused. */
-export async function assertRootableImage(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+export async function assertRootableImage(
+  adb: AdbExecutor,
+  signal?: AbortSignal,
+  key = "rootState",
+): Promise<void> {
   const debuggable = await shell(adb, ["getprop", "ro.debuggable"], signal);
   const buildType = await shell(adb, ["getprop", "ro.build.type"], signal);
   if (debuggable !== "1" || buildType === "user") {
     throw new ActionableError(
-      "rootState needs a non-Play image (google_apis, default or aosp): this device is a production " +
+      `${key} needs a non-Play image (google_apis, default or aosp): this device is a production ` +
         `build (ro.debuggable=${debuggable || "?"}, ro.build.type=${buildType || "?"}) and refuses adb root. ` +
         "For real root on a Play image, use the rootAVD/Magisk fixture (#14070).",
     );

@@ -31,8 +31,8 @@ class PrototypeWindowMetadataTest {
         PrototypeBoxNode(
           style =
             PrototypeStyle(
-              width = if (fill) PrototypeDimension.Fill else null,
-              height = if (fill) PrototypeDimension.Fill else null,
+              width = if (fill) PrototypeDimension.Fill else PrototypeDimension.Wrap,
+              height = if (fill) PrototypeDimension.Fill else PrototypeDimension.Wrap,
               background = background?.let(PrototypeModeValue::Single),
               alpha = alpha,
             ),

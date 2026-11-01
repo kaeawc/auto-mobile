@@ -1,8 +1,5 @@
 import { SelinuxOwner } from "./SelinuxOwner";
-import {
-  defaultAdbClientFactory,
-  type AdbClientFactory,
-} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { resolveIntegrityStateInjector } from "./integrityStateInjector";
 import type { BootedDevice } from "../../models";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -20,7 +17,10 @@ import { resolvePackageFaultInjector } from "./packageFaultInjectors";
 import { resolvePermissionFaultInjector } from "./permissionFaultInjectors";
 import { resolvePowerFaultInjector } from "./powerFaultInjectors";
 import { resolveProcessFaultInjector } from "./processFaultInjectors";
-import { resolveReadOnlyFilesystemInjector } from "./readOnlyFilesystemInjector";
+import {
+  resolveReadOnlyFilesystemInjector,
+  type ReadOnlyFilesystemInjectorDeps,
+} from "./readOnlyFilesystemInjector";
 import { resolveStorageFaultInjector } from "./storageFaultInjectors";
 import { resolveVehicleStateInjector } from "./vehicleStateInjectors";
 import { resolveRootStateInjector } from "./rootStateInjector";
@@ -232,13 +232,14 @@ export class DeviceConditionRegistry {
  * `unsupported` rather than silently dropping.
  */
 export function createDefaultInjectorResolver(
-  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  deps: ReadOnlyFilesystemInjectorDeps = {},
 ): DeviceConditionInjectorResolver {
+  const adbFactory = deps.adbFactory ?? defaultAdbClientFactory;
   // Factory-local caches keep injected adb clients separate from the production instances.
   const selinuxOwners = new Map<string, SelinuxOwner>();
   const rootCache = new Map<string, DeviceConditionInjector>();
   const integrityCache = new Map<string, DeviceConditionInjector>();
-  const readOnlyCache = new Map<string, DeviceConditionInjector>();
+  const readOnlyCache = deps.cache ?? new Map<string, DeviceConditionInjector>();
   const resolveFixture = (device: BootedDevice, key: DeviceConditionKey) =>
     resolveIosRefusalInjector(device, key) ??
     resolveRootStateInjector(device, key, adbFactory, { cache: rootCache, selinuxOwners }) ??

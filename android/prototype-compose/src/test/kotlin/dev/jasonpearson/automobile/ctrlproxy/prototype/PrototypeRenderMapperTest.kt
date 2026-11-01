@@ -19,6 +19,83 @@ class PrototypeRenderMapperTest {
     )
 
   @Test
+  fun `cached fullscreen root honors conditional dimensions and placement changes`() {
+    val condition = PrototypeCondition("a", PrototypeScalar.BooleanValue(true))
+    val input =
+      spec(
+        PrototypeTextNode(
+          text = "root",
+          styleWhen =
+            listOf(
+              PrototypeStyleWhen(
+                condition,
+                PrototypeStyle(
+                  width = PrototypeDimension.Dp(117.0),
+                  height = PrototypeDimension.Wrap,
+                ),
+              ),
+            ),
+        ),
+      )
+    val mapper = PrototypeRenderMapper()
+    assertEquals(PrototypeDimension.Fill, mapper.map(input, emptyMap()).root.style.source.width)
+    val changed = input.copy(state = mapOf("a" to PrototypeScalar.BooleanValue(true)))
+    val explicit = mapper.map(changed, emptyMap()).root.style.source
+    assertEquals(PrototypeDimension.Dp(117.0), explicit.width)
+    assertEquals(PrototypeDimension.Wrap, explicit.height)
+    val floating =
+      input.copy(
+        window = PrototypeWindow(PrototypeFloatingPlacement("center", PrototypeOffset(0.0, 0.0))),
+      )
+    val unchanged = mapper.map(floating, emptyMap()).root.style.source
+    assertNull(unchanged.width)
+    assertNull(unchanged.height)
+  }
+
+  @Test
+  fun `fullscreen root defaults missing dimensions without changing explicit sizes or children`() {
+    fun mapped(style: PrototypeStyle = PrototypeStyle()) =
+      mapPrototypeSpec(
+        spec(PrototypeBoxNode(style = style, children = listOf(PrototypeTextNode(text = "child")))),
+      )
+    val implicit = mapped()
+    assertEquals(PrototypeDimension.Fill, implicit.root.style.source.width)
+    assertEquals(PrototypeDimension.Fill, implicit.root.style.source.height)
+    assertNull(implicit.root.children.single().style.source.width)
+    assertNull(implicit.root.children.single().style.source.height)
+    val width = mapped(PrototypeStyle(width = PrototypeDimension.Dp(117.0))).root.style.source
+    assertEquals(PrototypeDimension.Dp(117.0), width.width)
+    assertEquals(PrototypeDimension.Fill, width.height)
+    val height = mapped(PrototypeStyle(height = PrototypeDimension.Dp(49.0))).root.style.source
+    assertEquals(PrototypeDimension.Fill, height.width)
+    assertEquals(PrototypeDimension.Dp(49.0), height.height)
+    val wrap =
+      mapped(PrototypeStyle(width = PrototypeDimension.Wrap, height = PrototypeDimension.Wrap))
+        .root
+        .style
+        .source
+    assertEquals(PrototypeDimension.Wrap, wrap.width)
+    assertEquals(PrototypeDimension.Wrap, wrap.height)
+    val solid = mapped(PrototypeStyle(background = PrototypeModeValue.Single("#FF101010")))
+    assertTrue(prototypeWindowMetadata(solid, dismissBarDrawn = false).opaque)
+    assertFalse(prototypeWindowMetadata(solid, dismissBarDrawn = true).opaque)
+    assertFalse(
+      prototypeWindowMetadata(
+          mapped(
+            PrototypeStyle(background = PrototypeModeValue.Single("#FF101010"), maxWidth = 200.0),
+          ),
+          dismissBarDrawn = false,
+        )
+        .opaque,
+    )
+    val sheet =
+      spec(PrototypeTextNode(text = "sheet"))
+        .copy(window = PrototypeWindow(PrototypeSheetPlacement("bottom", 200.0)))
+    assertNull(mapPrototypeSpec(sheet).root.style.source.width)
+    assertNull(mapPrototypeSpec(sheet).root.style.source.height)
+  }
+
+  @Test
   fun `state changes retain independent subtrees and unchanged dependent children`() {
     val condition = PrototypeCondition("a", PrototypeScalar.BooleanValue(true))
     val dependent =

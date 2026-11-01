@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protocol
 
+import dev.jasonpearson.automobile.protocol.PrototypePlatformModules.member
 import kotlinx.serialization.json.*
 
 /** The only resolution failure is a typed platform invalid_args outcome, before any UI. */
@@ -40,6 +41,18 @@ object PrototypeShare {
     PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_SHARE_IMAGES").jsonPrimitive.int
   val MAX_PROTOTYPE_SHARE_FILES =
     PrototypeSpecContract.limits.getValue("MAX_PROTOTYPE_SHARE_FILES").jsonPrimitive.int
+
+  internal fun platformArgumentsError(
+    call: String?,
+    action: JsonObject,
+    path: String,
+  ): PrototypeSpecError? =
+    when (call) {
+      "share.open" -> argumentsError(action.member("args") ?: JsonObject(emptyMap()), "$path.args")
+      "links.open" ->
+        PrototypeLinks.argumentsError(action.member("args") ?: JsonObject(emptyMap()), "$path.args")
+      else -> null
+    }
 
   fun argumentsError(
     args: JsonObject,

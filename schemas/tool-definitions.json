@@ -11175,6 +11175,32 @@
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
+        "prototypeSpec": {
+          "description": "A prototype spec to diff against this graph: returns prototypeDiff with matched screens, prototype screens and transitions the app lacks, and app screens the prototype lacks. Not with prototypeSpecPath",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "prototypeSpecPath": {
+          "description": "Absolute path of a prototype spec JSON file to diff against. Not with prototypeSpec",
+          "type": "string"
+        },
+        "screenMapping": {
+          "description": "Explicit matches for the diff: prototype screen id (as screenMap reports it, e.g. stack:nav/home) to real screen name. Tried before testTag and name matching. Not with screenMappingPath",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "screenMappingPath": {
+          "description": "Absolute path of a JSON file holding screenMapping. Not with screenMapping",
+          "type": "string"
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -11410,6 +11436,153 @@
             "required": ["from", "to", "type"],
             "additionalProperties": {}
           }
+        },
+        "prototypeDiff": {
+          "description": "Only with prototypeSpec or prototypeSpecPath: the prototype compared with this graph",
+          "type": "object",
+          "properties": {
+            "matched": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "prototype": {
+                    "type": "string"
+                  },
+                  "real": {
+                    "type": "string"
+                  },
+                  "by": {
+                    "type": "string",
+                    "enum": ["mapping", "identifier", "name"]
+                  }
+                },
+                "required": ["prototype", "real", "by"],
+                "additionalProperties": false
+              }
+            },
+            "unmatchedPrototypeScreens": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": ["root", "stackScreen", "pagerPage", "sheet", "dialog"]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "const": "mappedScreenMissing"
+                  }
+                },
+                "required": ["id", "kind", "path"],
+                "additionalProperties": false
+              }
+            },
+            "unmatchedRealScreens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "observedTransitions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": ["push", "replace", "pop", "popToRoot", "setPage"]
+                  },
+                  "real": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "type": "string"
+                      },
+                      "to": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["from", "to"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["from", "to", "action", "real"],
+                "additionalProperties": false
+              }
+            },
+            "unobservedTransitions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": ["push", "replace", "pop", "popToRoot", "setPage"]
+                  },
+                  "trigger": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "testTag": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["path"],
+                    "additionalProperties": false
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": ["unmatchedScreen", "dynamicTarget", "notObserved"]
+                  }
+                },
+                "required": ["from", "to", "action", "trigger", "reason"],
+                "additionalProperties": false
+              }
+            },
+            "ignoredMappings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "matched",
+            "unmatchedPrototypeScreens",
+            "unmatchedRealScreens",
+            "observedTransitions",
+            "unobservedTransitions",
+            "ignoredMappings"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -38543,6 +38716,9 @@
                   "start": {
                     "type": "boolean",
                     "const": true
+                  },
+                  "testTag": {
+                    "type": "string"
                   }
                 },
                 "required": ["id", "kind", "path"],

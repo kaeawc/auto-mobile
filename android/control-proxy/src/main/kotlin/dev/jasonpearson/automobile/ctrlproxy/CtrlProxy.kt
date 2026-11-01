@@ -110,15 +110,10 @@ import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
-import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
-import dev.jasonpearson.automobile.sdk.AutoMobileSDK
-import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
-import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
-import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import java.io.File
 import java.util.UUID
 import kotlin.math.max
@@ -1585,113 +1580,31 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
       overlayManager.setPrototypeAttached(prototypeController.isShowing)
 
-      // Register broadcast receiver for commands
-      val commandFilter = IntentFilter().apply { addAction(ACTION_EXTRACT_HIERARCHY) }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(commandReceiver, commandFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(commandReceiver, commandFilter)
+      // Commands first, then the SDK event receivers, before the slower service initialization
+      // below. The SDK sender cannot detect an absent dynamic receiver, while
+      // SdkEventBatchProcessor retains accepted events until the WebSocket starts.
+      for ((name, receiver, filter) in
+        listOf(
+          Triple("Command", commandReceiver, ReceiverFilters.command()),
+          Triple("Navigation event", navigationEventReceiver, ReceiverFilters.navigation()),
+          Triple("Event batch", eventBatchReceiver, ReceiverFilters.eventBatch()),
+          Triple("Recomposition", recompositionReceiver, ReceiverFilters.recomposition()),
+          Triple("Frame metrics", frameMetricsReceiver, ReceiverFilters.frameMetrics()),
+          Triple("Package", packageReceiver, ReceiverFilters.packages()),
+          Triple(
+            "Handled exception",
+            handledExceptionReceiver,
+            ReceiverFilters.handledException(),
+          ),
+          Triple("Crash", crashReceiver, ReceiverFilters.crash()),
+          Triple("ANR", anrReceiver, ReceiverFilters.anr()),
+        )) {
+        registerExportedReceiver(receiver, filter)
+        Log.d(TAG, "$name receiver registered")
       }
 
-      // Register SDK event receivers before the slower service initialization below. The SDK
-      // sender cannot detect an absent dynamic receiver, while SdkEventBatchProcessor retains
-      // accepted events until the WebSocket starts.
-      val navigationFilter =
-        IntentFilter().apply { addAction(AutoMobileSDK.ACTION_NAVIGATION_EVENT) }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(navigationEventReceiver, navigationFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(navigationEventReceiver, navigationFilter)
-      }
-      Log.d(TAG, "Navigation event receiver registered")
-
-      val eventBatchFilter =
-        IntentFilter().apply { addAction(SdkEventSerializer.ACTION_SDK_EVENT_BATCH) }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(eventBatchReceiver, eventBatchFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(eventBatchReceiver, eventBatchFilter)
-      }
-      Log.d(TAG, "Event batch receiver registered")
-
-      // Register broadcast receiver for recomposition snapshots
-      val recompositionFilter =
-        IntentFilter().apply { addAction(AutoMobileSDK.ACTION_RECOMPOSITION_SNAPSHOT) }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(recompositionReceiver, recompositionFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(recompositionReceiver, recompositionFilter)
-      }
-      Log.d(TAG, "Recomposition receiver registered")
-
-      // Register broadcast receiver for frame-metrics snapshots (issue #5076)
-      val frameMetricsFilter =
-        IntentFilter().apply { addAction(AutoMobileSDK.ACTION_FRAME_METRICS_SNAPSHOT) }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(frameMetricsReceiver, frameMetricsFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(frameMetricsReceiver, frameMetricsFilter)
-      }
-      Log.d(TAG, "Frame metrics receiver registered")
-
-      // Register broadcast receiver for package changes
-      val packageFilter =
-        IntentFilter().apply {
-          addAction(Intent.ACTION_PACKAGE_ADDED)
-          addAction(Intent.ACTION_PACKAGE_REMOVED)
-          addAction(Intent.ACTION_PACKAGE_REPLACED)
-          addDataScheme("package")
-        }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(packageReceiver, packageFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(packageReceiver, packageFilter)
-      }
-      Log.d(TAG, "Package receiver registered")
-
-      // Register broadcast receiver for handled exceptions from SDK
-      val handledExceptionFilter =
-        IntentFilter().apply { addAction(AutoMobileFailures.ACTION_HANDLED_EXCEPTION) }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(handledExceptionReceiver, handledExceptionFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(handledExceptionReceiver, handledExceptionFilter)
-      }
-      Log.d(TAG, "Handled exception receiver registered")
-
-      // Register broadcast receiver for crashes from SDK
-      val crashFilter = IntentFilter().apply { addAction(AutoMobileCrashes.ACTION_CRASH) }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(crashReceiver, crashFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(crashReceiver, crashFilter)
-      }
-      Log.d(TAG, "Crash receiver registered")
-
-      // Register broadcast receiver for ANRs from SDK
-      val anrFilter = IntentFilter().apply { addAction(AutoMobileAnr.ACTION_ANR) }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        registerReceiver(anrReceiver, anrFilter, RECEIVER_EXPORTED)
-      } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag") registerReceiver(anrReceiver, anrFilter)
-      }
-      Log.d(TAG, "ANR receiver registered")
-
+      // Screen on/off and unlock are protected system broadcasts, so this one is not exported. The
+      // filter stays inline so lint can see that and accept the flagless registration.
       val screenStateFilter =
         IntentFilter().apply {
           addAction(Intent.ACTION_SCREEN_ON)
@@ -1813,6 +1726,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     } catch (e: Exception) {
       Log.e(TAG, "Error during service connection", e)
       // Service will continue running even if some initialization fails
+    }
+  }
+
+  /**
+   * Registers a receiver for broadcasts sent from other processes (the SDK in an app under test,
+   * the daemon's ADB broadcasts, the package manager), exported as Android 13+ requires.
+   */
+  internal fun registerExportedReceiver(receiver: BroadcastReceiver, filter: IntentFilter) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      registerReceiver(receiver, filter, RECEIVER_EXPORTED)
+    } else {
+      @SuppressLint("UnspecifiedRegisterReceiverFlag") registerReceiver(receiver, filter)
     }
   }
 

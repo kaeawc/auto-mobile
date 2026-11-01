@@ -76,10 +76,7 @@ const IOS_BUTTONS: Record<string, { kind: SystemAlertButtonKind; rank: number }>
 };
 
 function normalizeLabel(label: string): string {
-  return label
-    .replace(/[‘’]/g, "'")
-    .trim()
-    .toLowerCase();
+  return label.replace(/[‘’]/g, "'").trim().toLowerCase();
 }
 
 function attributes(node: ViewHierarchyNode): Record<string, unknown> {

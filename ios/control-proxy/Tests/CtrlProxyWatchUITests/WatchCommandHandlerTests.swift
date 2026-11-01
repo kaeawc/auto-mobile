@@ -4,6 +4,35 @@ import XCTest
 
 @MainActor
 final class WatchCommandHandlerTests: XCTestCase {
+    func testCommandFailureCoordinatorScopesAndBoundsFailures() {
+        let coordinator = WatchXCUISource.CommandFailureCoordinator()
+        XCTAssertFalse(coordinator.recordDeflectedFailure("Outside gesture"))
+        coordinator.begin()
+        XCTAssertTrue(coordinator.recordDeflectedFailure("Tap failed"))
+        XCTAssertTrue(coordinator.recordDeflectedFailure("Swipe failed"))
+        XCTAssertEqual(coordinator.finish(), ["Tap failed", "Swipe failed"])
+        XCTAssertFalse(coordinator.recordDeflectedFailure("After gesture"))
+        XCTAssertEqual(coordinator.finish(), [])
+
+        coordinator.begin()
+        for _ in 0 ... WatchXCUISource.CommandFailureCoordinator.maxFailures {
+            XCTAssertTrue(coordinator.recordDeflectedFailure("Failure"))
+        }
+        let failures = coordinator.finish()
+        XCTAssertEqual(failures.count, WatchXCUISource.CommandFailureCoordinator.maxFailures + 1)
+        XCTAssertEqual(failures.last, "Additional command failures truncated")
+
+        coordinator.begin()
+        XCTAssertTrue(coordinator.recordDeflectedFailure(String(repeating: "🐾", count: 4096)))
+        let descriptions = coordinator.finish()
+        XCTAssertLessThanOrEqual(
+            descriptions.reduce(0) { $0 + $1.utf8.count },
+            WatchXCUISource.CommandFailureCoordinator.maxDescriptionBytes
+        )
+        XCTAssertEqual(descriptions.last, "Additional command failures truncated")
+        XCTAssertFalse(coordinator.recordDeflectedFailure("After truncated gesture"))
+    }
+
     func testAllowlistContainsExactlyHierarchyTapAndSwipe() {
         XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe"])
     }

@@ -6,6 +6,10 @@ typealias ConnectedEvent = TVConnectedEvent
 
 /// Minimal loopback listener; the existing connection owns HTTP upgrade and RFC 6455 framing.
 final class TVWebSocketServer: @unchecked Sendable {
+    private struct RequestEnvelope: Decodable {
+        let requestId: String?
+    }
+
     private static let maxPendingRequests = 8
     private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.tv-server")
     private let connections = ConnectionRegistry<WebSocketConnection>()
@@ -52,8 +56,9 @@ final class TVWebSocketServer: @unchecked Sendable {
                 onMessage: { [weak self] data in
                     guard let self else { return }
                     guard pendingRequests < Self.maxPendingRequests else {
+                        let requestId = (try? JSONDecoder().decode(RequestEnvelope.self, from: data))?.requestId
                         let response = WebSocketResponse.error(
-                            type: "error", requestId: nil,
+                            type: "error", requestId: requestId,
                             error: "Too many pending requests", errorCode: nil
                         )
                         if let reply = try? JSONEncoder().encode(response) {

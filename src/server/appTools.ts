@@ -966,7 +966,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
 
   ToolRegistry.registerDeviceAware(
     "resetKeychain",
-    "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization, without confirm. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
+    "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization; confirm is not needed, but confirm:false refuses. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
     resetKeychainSchema,
     {
       handler: resetKeychainHandler,

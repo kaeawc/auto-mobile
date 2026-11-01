@@ -136,6 +136,14 @@ export class ResetKeychain {
     };
   }
   private async resetAndroid(options: ResetKeychainOptions): Promise<ResetKeychainResult> {
+    // Android does not need confirm, but an explicit `false` withholds the reset. A recorded
+    // plan writes `confirm: false` so its replay stops here instead of deleting aliases (#16274).
+    if (options.confirm === false) {
+      throw new ActionableError(
+        `Refusing to delete Android Keystore aliases for '${options.appId}' because confirm is false. ` +
+          `Set confirm: true to proceed.`,
+      );
+    }
     if (!options.scope?.trim() && !options.alias?.trim()) {
       throw new ActionableError("Android Keystore reset requires a scope or alias selector.");
     }

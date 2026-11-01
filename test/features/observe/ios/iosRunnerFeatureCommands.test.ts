@@ -34,6 +34,22 @@ describe("iOS runner feature commands", () => {
     expect(getMissingIosRunnerFeatureCommands(new Set(sharedCommands), "physical")).toEqual([]);
   });
 
+  test("the released 0.0.88 command set does not require query_core_data", () => {
+    const releasedCommands = new Set([
+      "request_shake",
+      "request_press_button",
+      "request_multi_finger_swipe",
+      "add_highlight",
+      "execute_sql",
+      "set_network_mock_rules",
+      "set_hinge_angle",
+    ]);
+    for (const environment of ["simulator", "physical", undefined] as const) {
+      expect(getRequiredIosRunnerFeatureCommands(environment)).not.toContain("query_core_data");
+      expect(getMissingIosRunnerFeatureCommands(releasedCommands, environment)).toEqual([]);
+    }
+  });
+
   const environments: (IosRunnerEnvironment | undefined)[] = ["simulator", "physical", undefined];
   for (const environment of environments) {
     test(`both consumers' shared check selects applicable requirements for ${environment ?? "unknown"}`, () => {

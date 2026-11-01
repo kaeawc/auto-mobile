@@ -135,6 +135,37 @@ describe("CtrlProxyDatabase (iOS)", function () {
     }
   });
 
+  for (const responseType of ["hierarchy_update", "execute_sql_result"]) {
+    test(`queryCoreDataForIos explains runner version skew for ${responseType} unknown-command replies`, async () => {
+      const { factory, getSocket } = createCapturingFactory();
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: fakeTimer,
+      });
+      try {
+        const pending = client.queryCoreDataForIos("com.example.app", "Main", "Item", 2);
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket);
+        const sent = commandPayloads(socket!)[0];
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: responseType,
+            requestId: sent.requestId,
+            success: false,
+            error: "Unknown command type: query_core_data",
+            totalTimeMs: 0,
+          }),
+        );
+        await expect(pending).rejects.toThrow(
+          "iOS CtrlProxy runner rejected query_core_data as unknown. The runner is likely older than this daemon; rebuild and redeploy the iOS CtrlProxy runner from this source checkout, or run the iOS hot-reload watcher with --manage-ios-runner.",
+        );
+      } finally {
+        await client.close();
+      }
+    });
+  }
+
   test("executeSQLForIos sends execute_sql and returns query rows including blob strings", async function () {
     const { factory, getSocket } = createCapturingFactory();
     const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {

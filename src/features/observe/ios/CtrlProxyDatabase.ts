@@ -8,6 +8,7 @@ import type { SdkCapabilityQueryOptions } from "./CtrlProxySdkCapabilities";
  */
 
 import { sendCommand } from "../DeviceServiceUtils";
+import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import { logger } from "../../../utils/logger";
 import type {
   DatabaseInfo,
@@ -295,7 +296,7 @@ export class CtrlProxyDatabase {
         ),
     });
     if (!result.success) {
-      throw new Error(result.error || `${operationName} failed`);
+      throw new Error(rewriteUnknownCommandError(result.error || `${operationName} failed`, "ios"));
     }
     return result;
   }

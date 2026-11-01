@@ -230,11 +230,12 @@
             let limit = min(request.limit ?? configuration.maxRows, configuration.maxRows)
             do {
                 let result = try fetcher.fetch(entity: request.entity, limit: limit)
-                var rows = StorageInspectionAccess.redactedRows(
+                let redacted = StorageInspectionAccess.redactedRows(
                     columns: result.columns,
                     rows: Array(result.rows.prefix(limit)),
                     configuredKeys: configuration.sensitiveKeys
                 )
+                var rows = boundRows(redacted, maxBytes: configuration.maxBytes)
                 while true {
                     let payload = CoreDataQueryResult(
                         columns: result.columns, rows: rows,

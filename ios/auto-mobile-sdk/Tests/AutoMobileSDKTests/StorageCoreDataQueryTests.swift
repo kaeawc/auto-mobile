@@ -54,6 +54,33 @@
             XCTAssertEqual(try query(limit: nil).statusCode, 200)
         }
 
+        func testOversizedRowsReturnBoundedTruncatedResponse() throws {
+            struct OversizedFetcher: CoreDataReadOnlyFetching {
+                func fetch(entity _: String, limit _: Int) throws -> CoreDataQueryResult {
+                    CoreDataQueryResult(
+                        columns: ["name"],
+                        rows: [["A"], [String(repeating: "B", count: 512)]],
+                        truncated: false
+                    )
+                }
+            }
+            let maxBytes = 128
+            DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+                coreDataStores: [.init(identifier: "Main", entities: ["Item"], fetcher: OversizedFetcher())],
+                maxRows: 2,
+                maxBytes: maxBytes
+            ))
+            DatabaseInspector.shared.setEnabled(true)
+
+            let response = try query()
+            XCTAssertEqual(response.statusCode, 200)
+            XCTAssertLessThanOrEqual(response.body.count, maxBytes)
+            let result = try JSONDecoder().decode(CoreDataQueryResult.self, from: response.body)
+            XCTAssertEqual(result.rows, [["A"]])
+            XCTAssertLessThan(result.rows.count, 2)
+            XCTAssertTrue(result.truncated)
+        }
+
         func testUnknownStoreAndEntityAreStructuredErrors() throws {
             configure()
             for (store, entity, code) in [

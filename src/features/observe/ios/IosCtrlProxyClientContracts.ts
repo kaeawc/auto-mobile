@@ -404,7 +404,6 @@ export const IOS_RUNNER_FEATURE_COMMANDS = [
   "request_press_button",
   "request_multi_finger_swipe",
   "add_highlight",
-  "query_core_data",
   "execute_sql",
   "set_network_mock_rules",
   "set_hinge_angle",

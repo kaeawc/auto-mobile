@@ -221,7 +221,7 @@ async function bootAndBind(
 }
 
 /** The canonical lease owns the UDID; only boot may reuse the caller's own pool holder. */
-function assertTvUnclaimed(
+export function assertTvUnclaimed(
   udid: string,
   deps: DeviceToolsDependencies,
   lease?: VirtualDeviceLifecycleLease,
@@ -337,7 +337,7 @@ function defaultAppleTvProvisioner(): AppleTvSimulatorProvisioner {
   return new AppleTvSimulatorProvisioner(new AppleTvSimulatorInventory(simctl), simctl);
 }
 
-function defaultAppleTvBoot(): AppleTvSimulatorBoot {
+export function defaultAppleTvBoot(): AppleTvSimulatorBoot {
   return new AppleTvSimulatorBoot(new SimCtlClient(), {
     run: (request, boot) => bootAdmissionServices.iosBootInstrumentation().run(request, boot),
   });

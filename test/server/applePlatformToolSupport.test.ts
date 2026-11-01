@@ -60,6 +60,14 @@ describe("assertToolSupportsDevicePlatform", () => {
     );
   });
 
+  test("admits tvOS lifecycle tools without enabling watchOS lifecycle tools", () => {
+    for (const tool of ["startDevice", "setActiveDevice", "killDevice"]) {
+      expect(() => assertToolSupportsDevicePlatform(tool, appleTv)).not.toThrow();
+      expect(() => assertRequestedPlatformSupported(tool, { platform: "tvos" })).not.toThrow();
+      expect(APPLE_PLATFORM_SUPPORTED_TOOLS.watchos.has(tool)).toBe(false);
+    }
+  });
+
   test("never rejects an Android or iOS device", () => {
     expect(() => assertToolSupportsDevicePlatform("tapOn", iphone)).not.toThrow();
     expect(() =>

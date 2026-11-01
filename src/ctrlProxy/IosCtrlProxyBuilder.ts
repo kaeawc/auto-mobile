@@ -343,7 +343,9 @@ export class IosCtrlProxyBuilder {
   /**
    * Get the .xctestrun file path
    */
-  public async getXctestrunPath(platform?: IOSCtrlProxyPlatform): Promise<string | null> {
+  public async getXctestrunPath(
+    platform?: IOSCtrlProxyPlatform | "watchSimulator",
+  ): Promise<string | null> {
     // Local discovery/prefetch follows the simulator default of build-product paths.
     platform ??= this.isLocalBuildMode() ? "simulator" : undefined;
     const cacheKey = platform || "any";
@@ -372,13 +374,18 @@ export class IosCtrlProxyBuilder {
         return null;
       }
 
-      // An empty filter preserves platform-agnostic discovery in release mode.
+      // The release-mode default remains iOS-only even when local watch products share this dir.
       const platformFilter = {
         device: "iphoneos",
         simulator: "iphonesimulator",
+        watchSimulator: "watchsimulator",
         any: "",
       }[cacheKey];
-      const candidates = xctestrunFiles.filter((file) => file.includes(platformFilter));
+      const candidates = xctestrunFiles.filter(
+        (file) =>
+          file.includes(platformFilter) &&
+          (platform === "watchSimulator" || !file.includes("watchsimulator")),
+      );
 
       if (candidates.length === 0) {
         return null;

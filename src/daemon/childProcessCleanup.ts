@@ -12,6 +12,7 @@ import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { stopWatchRunners } from "../features/watch/WatchRunnerLifecycle";
 
 // DaemonManager and stdin lifecycle both force-exit after ten seconds. Keep each
 // best-effort stage short enough for the fallback force-stop to run before that
@@ -32,6 +33,7 @@ export interface DaemonChildProcessCleanupDependencies {
   forceStopVideoRecording(recordingId: string): Promise<void>;
   interruptVideoRecording(recordingId: string): Promise<void>;
   shutdownIOSCtrlProxies(): Promise<void>;
+  stopWatchRunners(): void;
   timer?: Timer;
   timeoutMs?: number;
 }
@@ -47,6 +49,7 @@ const defaultDependencies: DaemonChildProcessCleanupDependencies = {
   forceStopVideoRecording,
   interruptVideoRecording,
   shutdownIOSCtrlProxies: () => IOSCtrlProxyManager.shutdownAll(),
+  stopWatchRunners,
 };
 
 /**
@@ -58,6 +61,7 @@ export async function cleanupDaemonChildProcesses(
   dependencies: DaemonChildProcessCleanupDependencies = defaultDependencies,
 ): Promise<void> {
   dependencies.shutdownInventoryReads?.();
+  dependencies.stopWatchRunners();
   const timer = dependencies.timer ?? defaultTimer;
   const timeoutMs = dependencies.timeoutMs ?? CHILD_PROCESS_CLEANUP_TIMEOUT_MS;
   const recordingIds = new Set<string>();

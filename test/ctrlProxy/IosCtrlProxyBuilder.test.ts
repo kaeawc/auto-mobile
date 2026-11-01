@@ -763,6 +763,26 @@ describe("IosCtrlProxyBuilder", function () {
   });
 
   describe("getXctestrunPath", function () {
+    test("discovers only watchsimulator artifacts and excludes them from iOS discovery", async function () {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+      const watchFile = path.join(productsDir, "CtrlProxyWatch_watchsimulator26.0-arm64.xctestrun");
+      await fs.writeFile(watchFile, "watch artifact");
+      await fs.writeFile(
+        path.join(productsDir, "AutoMobileTest_iphonesimulator26.0-arm64.xctestrun"),
+        "phone artifact",
+      );
+      const builder = IosCtrlProxyBuilder.getInstance({
+        projectRoot: tempDir,
+        derivedDataPath: tempDir,
+      });
+      expect(await builder.getXctestrunPath("watchSimulator")).toBe(watchFile);
+      await fs.utimes(watchFile, new Date("2030-01-01"), new Date("2030-01-01"));
+      expect(await builder.getXctestrunPath()).toBe(
+        path.join(productsDir, "AutoMobileTest_iphonesimulator26.0-arm64.xctestrun"),
+      );
+    });
+
     test("should return null when xctestrun doesn't exist", async function () {
       const builder = IosCtrlProxyBuilder.getInstance({
         derivedDataPath: path.join(tempDir, "nonexistent"),

@@ -6,11 +6,15 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { WebSocketWatchRunnerClient, type WatchRunnerClient } from "./WatchRunnerClient";
 import { watchRunners } from "./WatchRunnerRegistry";
+import type { IosCtrlProxyBuilder } from "../../ctrlProxy/IosCtrlProxyBuilder";
+import { rm } from "node:fs/promises";
 
 export interface WatchRunnerLaunchOptions {
   deviceId: string;
   xctestrun: string;
   port: number;
+  /** Startup cancellation only; the resident process outlives a completed start request. */
+  signal?: AbortSignal;
 }
 export interface WatchRunnerLauncher {
   launch(options: WatchRunnerLaunchOptions): Promise<{ stop(): void }>;
@@ -27,7 +31,8 @@ export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
       xcodebuild?: Pick<Xcodebuild, "startStreaming">;
       connect?: (url: string) => WatchRunnerClient;
       timer?: Timer;
-    } = {},
+      writeRunnerEnvironment: IosCtrlProxyBuilder["writeRunnerEnvironment"];
+    },
   ) {}
 
   async launch(options: WatchRunnerLaunchOptions): Promise<{ stop(): void }> {
@@ -37,7 +42,35 @@ export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
     if (watchRunners.get(options.deviceId)) {
       throw new ActionableError("Watch runner is already connected.");
     }
+    options.signal?.throwIfAborted();
+    const prepared = await this.dependencies.writeRunnerEnvironment(
+      options.xctestrun,
+      { AM_PORT: String(options.port) },
+      `watch-${options.deviceId}`,
+    );
+    let removed = false;
+    const removePrepared = () => {
+      if (!removed && prepared !== options.xctestrun) {
+        removed = true;
+        void rm(prepared, { force: true }).catch((error) => {
+          logger.warn("Failed to remove watch runner xctestrun copy", error);
+        });
+      }
+    };
+    try {
+      return await this.launchPrepared({ ...options, xctestrun: prepared }, removePrepared);
+    } catch (error) {
+      removePrepared();
+      throw toActionableError(error, "Failed to launch watch runner");
+    }
+  }
+
+  private async launchPrepared(
+    options: WatchRunnerLaunchOptions,
+    removePrepared: () => void,
+  ): Promise<{ stop(): void }> {
     const timer = this.dependencies.timer ?? defaultTimer;
+    options.signal?.throwIfAborted();
     const process = await (this.dependencies.xcodebuild ?? new XcodebuildClient()).startStreaming(
       [
         "test-without-building",
@@ -50,6 +83,7 @@ export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
       {
         env: { ...globalThis.process.env, TEST_RUNNER_AM_PORT: String(options.port) },
         stdio: "ignore",
+        startupSignal: options.signal,
       },
     );
     const state: WatchStartup = { exited: false, unregister: () => {} };
@@ -57,6 +91,7 @@ export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
       state.exited = true;
       state.unregister();
       state.client?.close();
+      removePrepared();
     };
     const stop = () => {
       const running = !state.exited;
@@ -73,6 +108,7 @@ export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
         timeoutMs: 60_000,
         label: "Watch runner startup",
         onTimeout: stop,
+        signal: options.signal,
       });
       return { stop };
     } catch (error) {
@@ -93,10 +129,10 @@ export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
       )(`ws://127.0.0.1:${options.port}/ws`);
       state.client = client;
       try {
-        await client.hierarchy();
+        await client.hierarchy(options.signal);
       } catch (error) {
         client.close();
-        if (state.exited || error instanceof WatchRunnerError) {
+        if (state.exited || options.signal?.aborted || error instanceof WatchRunnerError) {
           throw toActionableError(error, "Watch runner exited during startup");
         }
         // Connection refusal is expected until xcodebuild launches the service bundle.
@@ -107,6 +143,7 @@ export class XcodebuildWatchRunnerLauncher implements WatchRunnerLauncher {
       if (state.exited) {
         break;
       }
+      options.signal?.throwIfAborted();
       state.unregister = watchRunners.register(options.deviceId, client);
       return;
     }

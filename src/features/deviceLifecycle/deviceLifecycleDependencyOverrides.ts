@@ -87,6 +87,8 @@ function readinessDependencyOverrides(
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
     watchSimulatorLifecycleFactory:
       deps.watchSimulatorLifecycleFactory ?? currentDeps.watchSimulatorLifecycleFactory,
+    watchRunnerLifecycleFactory:
+      deps.watchRunnerLifecycleFactory ?? currentDeps.watchRunnerLifecycleFactory,
     watchSimulatorProvisionerFactory:
       deps.watchSimulatorProvisionerFactory ?? currentDeps.watchSimulatorProvisionerFactory,
     appleTvSimulatorBootFactory:

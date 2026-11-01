@@ -545,6 +545,7 @@ or holding a launch slot (#15291). Retry the observe shortly.
 | ------------------------------------------------ | --------------------------------------------------------------------------------------------------- | --------------------------------------- |
 | `AUTOMOBILE_PROJECT_ROOT`                        | Root used by local iOS CtrlProxy source builds; filesystem path.                                    | process working directory               |
 | `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`         | Derived-data root for local iOS CtrlProxy builds; filesystem path.                                  | data directory `derived-data`           |
+| `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN`              | Prebuilt watchOS simulator runner xctestrun path used by `startDevice`; filesystem path.            | discover or build `CtrlProxyWatch`      |
 | `AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`            | iOS CtrlProxy bundle cache; filesystem path.                                                        | coordination directory `ctrl-proxy-ios` |
 | `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL`           | Custom iOS bundle download URL; HTTPS unless the insecure asset URL opt-in is set.                  | release bundle URL                      |
 | `AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`             | Local iOS archive or bundle; filesystem path. Wins over the bundle-path override.                   | released bundle                         |

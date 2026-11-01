@@ -12,6 +12,16 @@ import { type DeviceToolsDependencies } from "../core/dependencies";
 import { type TeardownContext, type TeardownResolvedTarget } from "./teardownContracts";
 import { runWithinShutdownDeadline } from "../core/deadlines";
 import { type TeardownDeviceArgs } from "../core/contracts";
+import { getWatchRunnerLifecycle } from "../../watch/WatchRunnerLifecycle";
+
+export function stopWatchRunnerBeforeShutdown(
+  device: BootedDevice,
+  dependencies: DeviceToolsDependencies,
+): void {
+  if (device.platform === "watchos") {
+    (dependencies.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(device.deviceId);
+  }
+}
 
 export async function notifyResourcesAfterShutdown(
   dependencies: DeviceToolsDependencies,
@@ -51,7 +61,11 @@ export async function evictTeardownManagers(
   runtimeId?: string,
 ): Promise<void> {
   const { platform, stableId } = context.args.target;
-  if (platform === "ios") {
+  if (platform === "watchos") {
+    (context.dependencies.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(
+      runtimeId ?? stableId,
+    );
+  } else if (platform === "ios") {
     if (runtimeId) {
       await IOSCtrlProxyManager.evict(runtimeId, context.dependencies.timer, context.deadlineMs);
     } else {

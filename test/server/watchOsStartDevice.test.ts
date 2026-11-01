@@ -8,6 +8,8 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
+import { startWatchDevice } from "../../src/server/deviceToolsWatchOs";
+import { bindBootedDeviceSession } from "../../src/server/deviceToolsStartDevice";
 import { startDeviceOutputSchema } from "../../src/server/toolOutputSchemas";
 import { clearDirectSessionDevices } from "../../src/utils/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -27,11 +29,14 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWatchLifecycleSimctl, IPHONE_UDID, watchDevice } from "../fakes/FakeWatchSimctl";
+import { WatchRunnerLifecycle } from "../../src/features/watch/WatchRunnerLifecycle";
+import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
+import { FakeWatchRunnerLauncher } from "../fakes/FakeWatchRunnerLauncher";
 
 isolateToolRegistry();
 
 // startDevice on an Apple Watch simulator boots (or adopts) it and binds a pooled session at
-// readiness "booted", with no automation-runner step anywhere on the way (#14908).
+// readiness "booted", after best-effort preparing its watch automation runner.
 
 /** This daemon's watch claim store, with every claim publish held until the test lets it land. */
 class GatedWatchClaims implements ForeignDeviceOwnership {
@@ -62,8 +67,10 @@ describe("startDevice on an Apple Watch simulator", () => {
   const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
   let restoreEnv: (() => void) | undefined;
   let sessionManager: SessionManager | undefined;
+  let watchRunner: WatchRunnerLifecycle | undefined;
 
   const cleanup = () => {
+    watchRunner?.stopAll();
     env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
     restoreEnv?.();
     restoreEnv = undefined;
@@ -120,6 +127,20 @@ describe("startDevice on an Apple Watch simulator", () => {
     await pool.initializeWithDevices(await deviceUtils.getBootedDevices("watchos"));
     DaemonState.getInstance().initialize(sessionManager, pool);
     const runnerCalls: string[] = [];
+    const watchLauncher = new FakeWatchRunnerLauncher();
+    const allocated: string[] = [];
+    const artifacts = { resolve: async () => "/products/CtrlProxyWatch_watchsimulator.xctestrun" };
+    watchRunner = new WatchRunnerLifecycle({
+      artifacts,
+      launcher: watchLauncher,
+      ports: {
+        allocate: (id) => {
+          allocated.push(id);
+          return 9011;
+        },
+        release: () => {},
+      },
+    });
     setDeviceToolsDependencies({
       env,
       timer,
@@ -134,24 +155,54 @@ describe("startDevice on an Apple Watch simulator", () => {
       },
       watchSimulatorLifecycleFactory: () =>
         new WatchSimulatorLifecycle(simctl, inventory, admission),
+      watchRunnerLifecycleFactory: () => watchRunner!,
     });
     registerDeviceTools();
-    return { simctl, pool, sessions: sessionManager, runnerCalls, deviceUtils };
+    return {
+      simctl,
+      pool,
+      sessions: sessionManager,
+      runnerCalls,
+      deviceUtils,
+      watchLauncher,
+      artifacts,
+      allocated,
+    };
   }
 
   const start = (args: Record<string, unknown>) =>
     ToolRegistry.getTool("startDevice")!.handler({ __mcpSessionId: "client-a", ...args });
 
   test.each(["0", "1"])(
-    "autolock %s: boots a shutdown watch and binds a pooled watchos session without any runner step",
+    "autolock %s: boots and launches its runner before binding the watch once",
     async (autolock) => {
       env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
-      const { simctl, pool, sessions, runnerCalls } = await arrange();
+      const { simctl, pool, sessions, runnerCalls, watchLauncher, allocated } = await arrange();
+      const launch = watchLauncher.launch.bind(watchLauncher);
+      watchLauncher.launch = async (options) => {
+        expect(
+          Object.values(simctl.listing.devices)
+            .flat()
+            .find((device) => device.udid === WATCH_UDID)?.state,
+        ).toBe("Booted");
+        expect(pool.getDevice(WATCH_UDID)?.sessionId ?? null).toBeNull();
+        expect(sessions.getAllSessions()).toEqual([]);
+        return await launch(options);
+      };
 
       const result = toolJson(await start({ platform: "watchos", deviceId: WATCH_UDID }));
 
       expect(simctl.commands).toEqual([`boot ${WATCH_UDID} 360000`]);
       expect(runnerCalls).toEqual([]);
+      expect(watchLauncher.launches).toEqual([
+        expect.objectContaining({
+          deviceId: WATCH_UDID,
+          port: 9011,
+          xctestrun: "/products/CtrlProxyWatch_watchsimulator.xctestrun",
+        }),
+      ]);
+      expect(allocated).toEqual([WATCH_UDID]);
+      expect(watchRunners.get(WATCH_UDID)).toBe(watchLauncher.client);
       const sessionId = boundSessionSchema.parse(result).runtime.session.sessionUuid;
       expect(pool.getDevice(WATCH_UDID)).toMatchObject({ platform: "watchos", sessionId });
       expect(sessions.getSession(sessionId)).toMatchObject({
@@ -170,6 +221,183 @@ describe("startDevice on an Apple Watch simulator", () => {
     },
   );
 
+  test("launch happens before bind and release after attach stops the runner", async () => {
+    const f = await arrange();
+    const response = await startWatchDevice(
+      { platform: "watchos", deviceId: WATCH_UDID, __mcpSessionId: "client-a" },
+      async (...args) => {
+        f.watchLauncher.calls.push("bind");
+        return await bindBootedDeviceSession(...args);
+      },
+    );
+    expect(f.watchLauncher.calls).toEqual(["launch", "bind"]);
+    const sessionId = boundSessionSchema.parse(toolJson(response)).runtime.session.sessionUuid;
+    await f.sessions.releaseSession(sessionId, "explicit-release");
+    expect(f.watchLauncher.calls).toEqual(["launch", "bind", "stop"]);
+  });
+
+  test("a bind failure stops the runner launched by this call", async () => {
+    const f = await arrange();
+    await expect(
+      startWatchDevice({ platform: "watchos", deviceId: WATCH_UDID }, async () => {
+        f.watchLauncher.calls.push("bind");
+        throw new ActionableError("bind refused");
+      }),
+    ).rejects.toThrow("bind refused");
+    expect(f.watchLauncher.calls).toEqual(["launch", "bind", "stop"]);
+    expect(watchRunners.get(WATCH_UDID)).toBeUndefined();
+    expect(f.sessions.getAllSessions()).toEqual([]);
+  });
+
+  test("a failed bind preserves a runner reused from an earlier session", async () => {
+    const f = await arrange();
+    const first = toolJson(await start({ platform: "watchos", deviceId: WATCH_UDID }));
+    await expect(
+      startWatchDevice({ platform: "watchos", deviceId: WATCH_UDID }, async () => {
+        throw new ActionableError("bind refused");
+      }),
+    ).rejects.toThrow("bind refused");
+    expect(f.watchLauncher.launches).toHaveLength(1);
+    expect(f.watchLauncher.stops).toBe(0);
+    const sessionId = boundSessionSchema.parse(first).runtime.session.sessionUuid;
+    await f.sessions.releaseSession(sessionId, "explicit-release");
+    expect(f.watchLauncher.stops).toBe(1);
+  });
+
+  test("a repeat start attaches the reused runner to its new session", async () => {
+    const f = await arrange();
+    for (const sessionId of ["old-watch-session", "new-watch-session"]) {
+      await startWatchDevice({ platform: "watchos", deviceId: WATCH_UDID }, async () => {
+        await f.sessions.createSession(sessionId, WATCH_UDID, "watchos");
+        return sessionId;
+      });
+    }
+    expect(f.watchLauncher.launches).toHaveLength(1);
+    await f.sessions.releaseSession("old-watch-session", "explicit-release");
+    expect(f.watchLauncher.stops).toBe(0);
+    await f.sessions.releaseSession("new-watch-session", "explicit-release");
+    expect(f.watchLauncher.stops).toBe(1);
+  });
+
+  test("a session ending before attach returns booted readiness with an explanation", async () => {
+    const f = await arrange();
+    const result = toolJson(
+      await startWatchDevice({ platform: "watchos", deviceId: WATCH_UDID }, async () => {
+        await f.sessions.createSession("ended-session", WATCH_UDID, "watchos");
+        await f.sessions.releaseSession("ended-session", "explicit-release");
+        return "ended-session";
+      }),
+    );
+    expect(result).toMatchObject({ isReady: true, readiness: { level: "booted" } });
+    expect(result.message).toContain("the watch session ended before runner startup");
+    expect(f.watchLauncher.stops).toBe(1);
+  });
+
+  test.each(["missing xctestrun", "launch failed"])(
+    "%s still delivers a booted session and explains runner unavailability",
+    async (reason) => {
+      const f = await arrange();
+      if (reason === "missing xctestrun") {
+        f.artifacts.resolve = async () => {
+          throw new Error(reason);
+        };
+      } else {
+        f.watchLauncher.launch = async () => {
+          throw new Error(reason);
+        };
+      }
+      const result = toolJson(await start({ platform: "watchos", deviceId: WATCH_UDID }));
+      expect(result).toMatchObject({ isReady: true, readiness: { level: "booted" } });
+      expect(result.message).toContain(`watch runner unavailable: ${reason}`);
+      expect(watchRunners.get(WATCH_UDID)).toBeUndefined();
+    },
+  );
+
+  test("a second start keeps the runner and release of the bound session stops it exactly once", async () => {
+    const f = await arrange();
+    const result = toolJson(await start({ platform: "watchos", deviceId: WATCH_UDID }));
+    await start({ platform: "watchos", deviceId: WATCH_UDID });
+    expect(f.watchLauncher.launches).toHaveLength(1);
+    const sessionId = boundSessionSchema.parse(result).runtime.session.sessionUuid;
+    await f.sessions.releaseSession(sessionId, "explicit-release");
+    expect(watchRunners.get(WATCH_UDID)).toBeUndefined();
+    expect(f.watchLauncher.stops).toBe(1);
+    watchRunner?.stopAll();
+    expect(f.watchLauncher.stops).toBe(1);
+  });
+
+  test("cancellation during runner startup never binds a session", async () => {
+    const f = await arrange();
+    const request = new AbortController();
+    f.watchLauncher.launch = async (options) => {
+      expect(f.pool.getDevice(WATCH_UDID)?.sessionId ?? null).toBeNull();
+      request.abort();
+      options.signal?.throwIfAborted();
+      throw new Error("cancelled startup must not continue");
+    };
+    const outcome = await ToolRegistry.getTool("startDevice")!
+      .handler(
+        { __mcpSessionId: "client-a", platform: "watchos", deviceId: WATCH_UDID },
+        undefined,
+        request.signal,
+      )
+      .then(
+        () => "delivered",
+        () => "refused",
+      );
+    expect(outcome).toBe("refused");
+    expect(f.pool.getDevice(WATCH_UDID)?.sessionId ?? null).toBeNull();
+    expect(f.sessions.getAllSessions()).toEqual([]);
+    expect(watchRunners.get(WATCH_UDID)).toBeUndefined();
+  });
+
+  test("lease cancellation during startup stops the runner before binding", async () => {
+    const f = await arrange();
+    const lease = new AbortController();
+    let released = 0;
+    let binds = 0;
+    setDeviceToolsDependencies({
+      lifecycleCoordinator: {
+        isReserved: () => false,
+        reserve: async (identity) => ({
+          identity,
+          signal: lease.signal,
+          bindCanonicalIdentity: async () => {},
+          transitionToTeardown: () => {},
+          release: () => {
+            released++;
+          },
+        }),
+      },
+    });
+    const launch = f.watchLauncher.launch.bind(f.watchLauncher);
+    f.watchLauncher.launch = async (options) => {
+      const handle = await launch(options);
+      lease.abort();
+      expect(options.signal?.aborted).toBe(true);
+      return handle;
+    };
+    await expect(
+      startWatchDevice({ platform: "watchos", deviceId: WATCH_UDID }, async () => {
+        binds++;
+        return "unexpected-session";
+      }),
+    ).rejects.toThrow();
+    expect(binds).toBe(0);
+    expect(f.watchLauncher.stops).toBe(1);
+    expect(released).toBe(1);
+    expect(watchRunners.get(WATCH_UDID)).toBeUndefined();
+  });
+
+  test("a direct start without daemon session ownership still delivers booted readiness", async () => {
+    const f = await arrange();
+    DaemonState.getInstance().reset();
+    const result = toolJson(await start({ platform: "watchos", deviceId: WATCH_UDID }));
+    expect(result).toMatchObject({ isReady: true, readiness: { level: "booted" } });
+    expect(result.message).toContain("watch runner unavailable");
+    expect(f.watchLauncher.launches).toEqual([]);
+  });
+
   // A cancellation that lands after the bind minted the session, while it still publishes its
   // claim, must take the session back: the client never receives its UUID.
   test.each(["0", "1"])(
@@ -177,7 +405,9 @@ describe("startDevice on an Apple Watch simulator", () => {
     async (autolock) => {
       env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
       const claims = new GatedWatchClaims();
-      const { pool, sessions } = await arrange([watchDevice()], { ownership: claims });
+      const { pool, sessions, watchLauncher } = await arrange([watchDevice()], {
+        ownership: claims,
+      });
       const request = new AbortController();
 
       const outcome = ToolRegistry.getTool("startDevice")!
@@ -202,6 +432,8 @@ describe("startDevice on an Apple Watch simulator", () => {
       expect(pool.getDevice(WATCH_UDID)?.sessionId ?? null).toBeNull();
       expect(sessions.getAllSessions()).toEqual([]);
       expect(claims.held.size).toBe(0);
+      expect(watchLauncher.stops).toBe(1);
+      expect(watchRunners.get(WATCH_UDID)).toBeUndefined();
     },
   );
 

@@ -24,6 +24,9 @@ import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSuppor
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { WatchRunnerLifecycle } from "../../src/features/watch/WatchRunnerLifecycle";
+import { FakeWatchRunnerLauncher } from "../fakes/FakeWatchRunnerLauncher";
+import { watchRunners } from "../../src/features/watch/WatchRunnerRegistry";
 import {
   FakeWatchProvisionSimctl,
   WATCH_DEVICE_TYPE,
@@ -45,8 +48,10 @@ describe("deleteDevice on an Apple Watch simulator", () => {
   const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
   let restoreEnv: (() => void) | undefined;
   let sessionManager: SessionManager | undefined;
+  let runnerOwner: WatchRunnerLifecycle | undefined;
 
   const cleanup = () => {
+    runnerOwner?.stopAll();
     env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
     restoreEnv?.();
     restoreEnv = undefined;
@@ -100,6 +105,12 @@ describe("deleteDevice on an Apple Watch simulator", () => {
     DaemonState.getInstance().initialize(sessionManager, pool);
     const runnerCalls: string[] = [];
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const launcher = new FakeWatchRunnerLauncher();
+    runnerOwner = new WatchRunnerLifecycle({
+      artifacts: { resolve: async () => "/watch.xctestrun" },
+      launcher,
+      ports: { allocate: () => 9013, release: () => {} },
+    });
     setDeviceToolsDependencies({
       lifecycleCoordinator,
       env,
@@ -114,10 +125,19 @@ describe("deleteDevice on an Apple Watch simulator", () => {
         throw new Error("a watch provision must never prepare an automation runner");
       },
       watchSimulatorLifecycleFactory: () => new WatchSimulatorLifecycle(simctl, inventory),
+      watchRunnerLifecycleFactory: () => runnerOwner!,
       watchSimulatorProvisionerFactory: () => new WatchSimulatorProvisioner(inventory, simctl),
     });
     registerDeviceTools();
-    return { simctl, pool, sessions: sessionManager, runnerCalls, timer, lifecycleCoordinator };
+    return {
+      simctl,
+      pool,
+      sessions: sessionManager,
+      runnerCalls,
+      timer,
+      lifecycleCoordinator,
+      launcher,
+    };
   }
 
   const provision = (args: Record<string, unknown>) =>
@@ -163,9 +183,10 @@ describe("deleteDevice on an Apple Watch simulator", () => {
   });
 
   test("the holding session stops its running watch, releasing the session, then deletes it", async () => {
-    const { simctl, pool, sessions, timer } = await arrange();
+    const { simctl, pool, sessions, timer, launcher } = await arrange();
     const { sessionId } = sessionSchema.parse(toolJson(await provision({ device: WATCH })));
     const udid = createdUdid(simctl);
+    await runnerOwner!.ensure({ deviceId: udid, ownerSession: sessionId, sessions });
     simctl.commands.length = 0;
 
     const result = toolJson(
@@ -181,6 +202,9 @@ describe("deleteDevice on an Apple Watch simulator", () => {
     expect(simctl.commands).toEqual([`shutdown ${udid}`, `delete ${udid}`]);
     expect(pool.getDevice(udid)).toBeNull();
     expect(sessions.getSession(sessionId)?.assignedDevice ?? null).toBeNull();
+    expect(watchRunners.get(udid)).toBeUndefined();
+    runnerOwner?.stopAll();
+    expect(launcher.stops).toBe(1);
   });
 
   test("a watch another connection's session holds is refused, and nothing is stopped or deleted", async () => {

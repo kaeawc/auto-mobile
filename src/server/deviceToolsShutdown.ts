@@ -50,6 +50,7 @@ import {
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { waitForEmulatorShutdownWithEscalation } from "../features/deviceLifecycle/teardown/stuckEmulatorEscalation";
 import { exponentialBackoff } from "../utils/Backoff";
+import { stopWatchRunnerBeforeShutdown } from "../features/deviceLifecycle/teardown/shutdownPreparation";
 import {
   AndroidObserverShutdownState,
   stopIosCtrlProxyBeforeShutdown,
@@ -802,6 +803,7 @@ async function preparePlatformShutdown(
   try {
     // Identity first: a refusal must leave a still-running device untouched.
     const target = await resolveRestartStopKillTarget(dependencies, context, options, devicePool);
+    stopWatchRunnerBeforeShutdown(context.device, dependencies);
     await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
     await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf, dependencies.daemonState);
     const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(

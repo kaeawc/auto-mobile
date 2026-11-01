@@ -199,6 +199,7 @@ test("preserves the device lifecycle core runtime exports", () => {
     "stopUnownedColdBoot",
     "stopVideoRecordingBeforeShutdown",
     "stopVideoRecordingsBeforeShutdown",
+    "stopWatchRunnerBeforeShutdown",
     "teardownDeadlineDevice",
     "teardownInventoryVerificationFailure",
     "teardownProbeBudget",

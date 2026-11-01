@@ -56,9 +56,14 @@ class NodeActionControllerTest {
 
     override fun activeWindowRoot(): AccessibilityNodeInfo? = root
 
+    var failLookup: RuntimeException? = null
+
     override fun findNodeInDisplayWindows(
       find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
-    ) = node
+    ): AccessibilityNodeInfo? {
+      failLookup?.let { throw it }
+      return node
+    }
 
     override fun screenDimensions(displayId: Int): ScreenDimensions? = null
 
@@ -233,5 +238,56 @@ class NodeActionControllerTest {
     assertEquals("activate_accessibility_link", result.action)
     assertFalse(result.success)
     assertEquals("Semantic link activation failed: span failed", result.error)
+  }
+
+  @Test
+  fun `clicking the focused input settles before acknowledging and recycles the node`() = runTest {
+    val (controller, host) = setup()
+    val input = node(actions = listOf(AccessibilityNodeInfo.ACTION_CLICK))
+    host.node = input
+
+    controller.clickFocusedInputRequest("r9")
+
+    assertEquals(listOf("forget", "publish", "result"), host.events)
+    assertEquals(Result("r9", "click", true, null, false), host.results.single())
+    verify { input.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+    verify { input.recycle() }
+  }
+
+  @Test
+  fun `clicking with no focused input reports it without settling`() = runTest {
+    val (controller, host) = setup()
+
+    controller.clickFocusedInputRequest("r10")
+
+    assertEquals(listOf("forget", "result"), host.events)
+    assertEquals(
+      Result("r10", "click", false, "No focused editable input", false),
+      host.results.single(),
+    )
+  }
+
+  @Test
+  fun `a focused input that offers no click is refused without performing it`() = runTest {
+    val (controller, host) = setup()
+    val input = node(actions = listOf(AccessibilityNodeInfo.ACTION_FOCUS))
+    host.node = input
+
+    controller.clickFocusedInputRequest("r11")
+
+    assertEquals("Focused input click returned false", host.results.single().error)
+    verify(exactly = 0) { input.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+    verify { input.recycle() }
+  }
+
+  @Test
+  fun `a failing focused input lookup still answers the request`() = runTest {
+    val (controller, host) = setup()
+    host.failLookup = IllegalStateException("window gone")
+
+    controller.clickFocusedInputRequest("r12")
+
+    assertEquals(listOf("forget", "result"), host.events)
+    assertEquals(Result("r12", "click", false, "window gone", false), host.results.single())
   }
 }

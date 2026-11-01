@@ -54,6 +54,45 @@ internal class NodeActionController(
     private const val TAG = "CtrlProxy"
   }
 
+  /**
+   * Click the input-focused editable node and reply with a correlated `click` result. Like
+   * [performNodeAction], this stays on the inbound command queue until settling and replying.
+   */
+  // Any click failure must still answer the request instead of hanging the caller.
+  @Suppress("TooGenericExceptionCaught")
+  suspend fun clickFocusedInputRequest(requestId: String?) {
+    host.forgetRememberedInsert()
+    val startTime = timeProvider.currentTimeMillis()
+    val outcome =
+      try {
+        clickFocusedInput(
+          findFocusedInput = {
+            host.findNodeInDisplayWindows { root -> findFocusedEditableNode(root) }
+          },
+          click = { node ->
+            nodeActionFailure("click", node.actionList?.map { it.id }) == null &&
+              node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+          },
+          recycle = { node -> node.recycle() },
+          settleAfterClick = ::refreshHierarchyAfterNodeAction,
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Focused input click failed", e)
+        FocusedInputClickOutcome(false, e.message ?: "Focused input click failed")
+      }
+    host.sendActionResult(
+      NodeActionResult(
+        requestId = requestId,
+        action = "click",
+        success = outcome.success,
+        error = outcome.error,
+        totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+      ),
+    )
+  }
+
   fun performAccessibilityLinkActivation(
     requestId: String?,
     text: String,

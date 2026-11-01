@@ -27,6 +27,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "observe",
   ]),
   tvos: new Set<string>([
+    "sendKeys",
     "tapOn",
     "pressButton",
     "observe",

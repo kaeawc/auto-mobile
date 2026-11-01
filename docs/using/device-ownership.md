@@ -360,7 +360,9 @@ Use `tapOn` with an exact `text` or `elementId` selector and optional zero-based
 move focus to a visible element and select it. Only the tap action is supported. A missing
 match, absent focus, stalled focus or the 30-move limit produces an error; observe and
 use `pressButton` to establish focus or move closer before retrying.
-Touch gestures, long press and text input are unsupported. Without a runner, observation
+Touch gestures and long press are unsupported. Text input supports only `type` (append)
+into the keyboard opened with `pressButton select`; selector, key and clear operations
+are unsupported. Without a runner, observation
 returns a screenshot and `hierarchyUnavailable`; call `startDevice` again to prepare automation.
 
 ## Apple Watch simulators

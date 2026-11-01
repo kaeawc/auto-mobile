@@ -2613,28 +2613,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId
 
   private suspend fun handleCommand(intent: Intent) =
-    hierarchyExtractCommands.handle(
-      if (intent.action == ACTION_EXTRACT_HIERARCHY) {
-        ExtractHierarchyCommand(
-          uuid = intent.getStringExtra("uuid"),
-          textFilter = intent.getStringExtra("text"),
-          disableAllFiltering = intent.getBooleanExtra("disableAllFiltering", false),
-        )
-      } else {
-        null
-      },
-    )
+    hierarchyExtractCommands.handle(extractHierarchyCommand(intent))
 
-  private fun sendResult(success: Boolean, data: String? = null, error: String? = null) {
-    val resultIntent =
-      Intent(ACTION_OPERATION_RESULT).apply {
-        putExtra("success", success)
-        putExtra("timestamp", System.currentTimeMillis())
-        data?.let { putExtra("data", it) }
-        error?.let { putExtra("error", it) }
-      }
-    sendBroadcast(resultIntent)
-  }
+  private fun sendResult(success: Boolean, data: String? = null, error: String? = null) =
+    sendBroadcast(operationResultIntent(success, data, error, timeProvider.currentTimeMillis()))
 
   /**
    * Emit the correlated WebSocket `type:"error"` [frame] for a failed `EXTRACT_HIERARCHY`

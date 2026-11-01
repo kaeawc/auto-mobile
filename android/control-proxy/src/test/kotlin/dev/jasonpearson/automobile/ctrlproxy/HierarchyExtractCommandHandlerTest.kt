@@ -1,11 +1,14 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.content.Intent
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -174,5 +177,48 @@ class HierarchyExtractCommandHandlerTest {
     handler.handle(null)
 
     assertEquals(listOf("cleanup"), host.calls)
+  }
+
+  @Test
+  fun `an extract broadcast becomes a command carrying its extras`() {
+    val intent =
+      Intent(CtrlProxy.ACTION_EXTRACT_HIERARCHY)
+        .putExtra("uuid", "sync_9")
+        .putExtra("text", "Login")
+        .putExtra("disableAllFiltering", true)
+
+    assertEquals(
+      ExtractHierarchyCommand(uuid = "sync_9", textFilter = "Login", disableAllFiltering = true),
+      extractHierarchyCommand(intent),
+    )
+    assertEquals(
+      "absent extras keep filtering on",
+      ExtractHierarchyCommand(uuid = null, textFilter = null, disableAllFiltering = false),
+      extractHierarchyCommand(Intent(CtrlProxy.ACTION_EXTRACT_HIERARCHY)),
+    )
+  }
+
+  @Test
+  fun `any other broadcast action is not a command`() {
+    assertNull(
+      extractHierarchyCommand(Intent(CtrlProxy.ACTION_OPERATION_RESULT).putExtra("uuid", "x")),
+    )
+  }
+
+  @Test
+  fun `the operation result broadcast carries only the extras that are present`() {
+    val success = operationResultIntent(success = true, data = "saved", error = null, 4_200L)
+
+    assertEquals(CtrlProxy.ACTION_OPERATION_RESULT, success.action)
+    assertTrue(success.getBooleanExtra("success", false))
+    assertEquals(4_200L, success.getLongExtra("timestamp", 0L))
+    assertEquals("saved", success.getStringExtra("data"))
+    assertFalse(success.hasExtra("error"))
+
+    val failure = operationResultIntent(success = false, data = null, error = "no uuid", 4_201L)
+
+    assertFalse(failure.getBooleanExtra("success", true))
+    assertEquals("no uuid", failure.getStringExtra("error"))
+    assertFalse(failure.hasExtra("data"))
   }
 }

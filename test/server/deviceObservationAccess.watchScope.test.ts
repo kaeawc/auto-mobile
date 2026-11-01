@@ -103,3 +103,44 @@ describe("observation read listing scope", () => {
     expect(error).toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
   });
 });
+
+test("a tvOS read lists Apple TVs and resolves the named device", async () => {
+  const tv: BootedDevice = { ...WATCH, platform: "tvos", name: "Apple TV" };
+  const { read, scopes } = access({
+    either: either([IPHONE]),
+    tvos: { devices: [tv], scanned: { android: false, ios: false, watchos: false, tvos: true } },
+  });
+  expect(
+    await resolveDeviceForObservationRead(tv.deviceId, undefined, {
+      access: read,
+      platform: "tvos",
+    }),
+  ).toBe(tv);
+  expect(scopes).toEqual(["tvos"]);
+});
+
+test("a successful iOS read never lists tvOS", async () => {
+  const { read, scopes } = access({ either: either([IPHONE]) });
+  expect(await resolveDeviceForObservationRead(IPHONE.deviceId, undefined, { access: read })).toBe(
+    IPHONE,
+  );
+  expect(scopes).toEqual(["either"]);
+});
+
+test("failed tvOS discovery is incomplete rather than not-found", async () => {
+  const { read } = access({
+    tvos: {
+      devices: [],
+      scanned: { android: false, ios: false, watchos: false, tvos: false },
+      discoveryErrors: { tvos: { code: "unavailable", message: "simctl missing" } },
+    },
+  });
+  expect(
+    await failure(
+      resolveDeviceForObservationRead(WATCH.deviceId, undefined, {
+        access: read,
+        platform: "tvos",
+      }),
+    ),
+  ).toBeInstanceOf(BootedDeviceDiscoveryIncompleteError);
+});

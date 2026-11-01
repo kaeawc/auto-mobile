@@ -980,7 +980,7 @@ test.each([true, false])(
       } as ObserveResult);
     }
     const revision = displayTransitions.revision(device.deviceId);
-    const captures: string[] = [];
+    const captures: (string | undefined)[] = [];
     const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockImplementation(
       async (_deviceId, display) => {
         captures.push(display);

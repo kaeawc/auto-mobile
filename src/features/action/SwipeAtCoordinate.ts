@@ -59,7 +59,7 @@ export interface SwipeAtCoordinateDependencies extends DisplayFenceDependencies 
   /** CtrlProxy client that carries `displayId` for an explicit-display swipe. */
   androidClient?: Pick<AndroidCtrlProxy, "requestSwipe" | "supportsCommand">;
   lastRenderedObservation?: RenderedObservationReader;
-  /** Stylus routes and device facts; the defaults use the instrumentation route and the live device. */
+  /** Stylus routes and device facts; the defaults use instrumentation or root-only uinput and live device facts. */
   stylus?: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
 }
 
@@ -399,8 +399,8 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
     try {
       if (pointerNeedsInstrumentation(pointer)) {
-        // Pressure, tilt, orientation or buttons: the instrumentation route, refused before input
-        // when the device lacks it (#13099).
+        // Pressure, tilt, orientation or buttons: instrumentation or root-only uinput, refused
+        // before input when neither route is available (#13099, #13084).
         await dispatchRichStylus(
           this.device,
           this.adb,

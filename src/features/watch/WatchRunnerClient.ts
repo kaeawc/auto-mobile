@@ -9,10 +9,15 @@ export type WatchCommand =
   | { type: "hierarchy" | "home" }
   | { type: "tap"; identifier: string }
   | { type: "tap"; x: number; y: number }
+  | { type: "crown"; delta: number; velocity?: number }
   | { type: "swipe"; direction: "up" | "down" | "left" | "right" };
 
 export interface WatchRunnerClient {
-  request(command: WatchCommand, signal?: AbortSignal): Promise<unknown>;
+  request(
+    command: WatchCommand,
+    signal?: AbortSignal,
+    options?: { timeoutMs?: number },
+  ): Promise<unknown>;
   hierarchy(signal?: AbortSignal): Promise<WatchHierarchy>;
   close(): void;
 }
@@ -145,9 +150,13 @@ export class WebSocketWatchRunnerClient implements WatchRunnerClient {
     }
   }
 
-  async request(command: WatchCommand, signal?: AbortSignal): Promise<unknown> {
+  async request(
+    command: WatchCommand,
+    signal?: AbortSignal,
+    options?: { timeoutMs?: number },
+  ): Promise<unknown> {
     const timer = this.options.timer ?? defaultTimer;
-    const timeoutMs = this.options.timeoutMs ?? 5000;
+    const timeoutMs = options?.timeoutMs ?? this.options.timeoutMs ?? 5000;
     // One budget covers both handshake and command; correlation entries are removed even on abort.
     const requestId = String(++this.sequence);
     const cancellation = new AbortController();

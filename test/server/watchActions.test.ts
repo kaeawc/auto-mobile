@@ -9,6 +9,17 @@ import { swipeOnSchema } from "../../src/server/interactionTools/gestureSchemas"
 import { pressButtonSchema } from "../../src/server/interactionTools";
 import { assertToolSupportsDevicePlatform } from "../../src/server/applePlatformToolSupport";
 import type { BootedDevice } from "../../src/models";
+import { ActionableError } from "../../src/models/ActionableError";
+import {
+  rotateCrownHandler,
+  rotateCrownSchema,
+  registerRotateCrownTools,
+} from "../../src/server/rotateCrownTool";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
 const device: BootedDevice = { deviceId: "watch-handlers", platform: "watchos", name: "Watch" };
 let client: FakeWatchRunnerClient;
 let unregister: () => void;
@@ -17,6 +28,65 @@ beforeEach(() => {
   unregister = watchRunners.register(device.deviceId, client);
 });
 afterEach(() => unregister());
+
+test("registers a watch-only crown tool with device targeting", () => {
+  registerRotateCrownTools();
+  expect(ToolRegistry.getTool("rotateCrown")?.requiresDevice).toBe(true);
+  expect(() => assertToolSupportsDevicePlatform("rotateCrown", device)).not.toThrow();
+  expect(
+    rotateCrownSchema.parse({ delta: -0.5, platform: "watchos", sessionUuid: "watch-session" }),
+  ).toMatchObject({
+    delta: -0.5,
+    platform: "watchos",
+    sessionUuid: "watch-session",
+  });
+  for (const platform of ["android", "ios", "tvos"]) {
+    expect(rotateCrownSchema.safeParse({ delta: 1, platform }).success).toBe(false);
+  }
+});
+
+test.each([
+  {},
+  { delta: 0 },
+  { delta: NaN },
+  { delta: Infinity },
+  { delta: -Infinity },
+  { delta: "1" },
+  { delta: null },
+  { delta: true },
+  { delta: 1, velocity: 0 },
+  { delta: 1, velocity: -1 },
+  { delta: 1, velocity: NaN },
+  { delta: 1, velocity: Infinity },
+  { delta: 1, velocity: -Infinity },
+  { delta: 1, velocity: "1" },
+  { delta: 1, velocity: null },
+  { delta: 1, extra: true },
+])("crown schema rejects invalid arguments %j", (args) => {
+  expect(rotateCrownSchema.safeParse(args).success).toBe(false);
+  expect(client.commands).toEqual([]);
+});
+
+test.each([undefined, 0.25])("crown handler dispatches velocity %s", async (velocity) => {
+  const result = await rotateCrownHandler(
+    device,
+    rotateCrownSchema.parse({ delta: -0.5, velocity }),
+  );
+  expect(result).toMatchObject({
+    structuredContent: { success: true, delta: -0.5, velocity: velocity ?? 1 },
+  });
+  expect(client.commands).toEqual([{ type: "crown", delta: -0.5, velocity: velocity ?? 1 }]);
+});
+
+test.each(["android", "ios"] as const)(
+  "crown handler rejects a resolved %s device",
+  async (platform) => {
+    await expect(rotateCrownHandler({ ...device, platform }, { delta: 1 })).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+    expect(client.commands).toEqual([]);
+  },
+);
 
 test("existing tool schemas and registry admit watch tapOn, tapAt, swipeOn and home press", async () => {
   for (const tool of ["tapOn", "tapAt", "swipeOn", "pressButton"]) {

@@ -19,6 +19,8 @@ import { SendKeys } from "../../../src/features/action/SendKeys";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { MultiTouchGesture } from "../../../src/features/action/MultiTouchGesture";
 import type { BootedDevice } from "../../../src/models";
+import { ActionableError } from "../../../src/models/ActionableError";
+import * as watchActions from "../../../src/features/watch/WatchActions";
 
 const device: BootedDevice = { deviceId: "watch-actions", platform: "watchos", name: "Watch" };
 let client: FakeWatchRunnerClient;
@@ -30,6 +32,51 @@ beforeEach(() => {
 afterEach(() => unregister());
 
 describe("watch actions", () => {
+  test.each([0.5, -0.5])("rotates the crown by signed delta %s", async (delta) => {
+    expect(await watchActions.watchRotateCrown(device, { delta, velocity: 2 })).toEqual({
+      success: true,
+      delta,
+      velocity: 2,
+    });
+    expect(client.commands).toEqual([{ type: "crown", delta, velocity: 2 }]);
+  });
+  test("defaults crown velocity to 1 before dispatch", async () => {
+    await watchActions.watchRotateCrown(device, { delta: 0.25 });
+    expect(client.commands).toEqual([{ type: "crown", delta: 0.25, velocity: 1 }]);
+    expect(watchActions.CROWN_REQUEST_TIMEOUT_MS).toBe(30_000);
+    expect(client.requestOptions).toEqual([{ timeoutMs: watchActions.CROWN_REQUEST_TIMEOUT_MS }]);
+  });
+  test.each([0, NaN, Infinity, -Infinity])("refuses invalid crown delta %s", async (delta) => {
+    await expect(watchActions.watchRotateCrown(device, { delta })).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+    expect(client.commands).toEqual([]);
+  });
+  test.each([0, -1, NaN, Infinity, -Infinity])(
+    "refuses invalid crown velocity %s",
+    async (velocity) => {
+      await expect(
+        watchActions.watchRotateCrown(device, { delta: 1, velocity }),
+      ).rejects.toBeInstanceOf(ActionableError);
+      expect(client.commands).toEqual([]);
+    },
+  );
+  test.each(["android", "ios", "tvos"] as const)("refuses crown input on %s", async (platform) => {
+    await expect(
+      watchActions.watchRotateCrown({ ...device, platform }, { delta: 1 }),
+    ).rejects.toBeInstanceOf(ActionableError);
+    expect(client.commands).toEqual([]);
+  });
+  test("refuses an aborted crown action before dispatch", async () => {
+    await expect(
+      watchActions.watchRotateCrown(
+        device,
+        { delta: 1 },
+        AbortSignal.abort(new Error("cancelled")),
+      ),
+    ).rejects.toThrow("cancelled");
+    expect(client.commands).toEqual([]);
+  });
   test.each([false, true])(
     "refuses ensureChecked=%s before any runner command",
     async (ensureChecked) => {

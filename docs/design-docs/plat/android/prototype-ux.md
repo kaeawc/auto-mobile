@@ -1524,8 +1524,10 @@ uses the default visibility animation; wrap the stack in a box to give that a cu
   directly.
 
 Android draws scale and rotation with a `graphicsLayer`, animates with `animateFloatAsState` and
-`animateColorAsState`, and zooms with `transformable`. The iOS agent does not implement motion v2
-yet and does not advertise the capability (#14684), so the host refuses these fields there.
+`animateColorAsState`, and zooms with `transformable`. The iOS agent supports and advertises
+`prototype_motion_v2`: `animate`, style `scale`/`rotation`, `slideStart`/`slideEnd`/`scale`
+transitions, and `image.zoomable`. Motion v3 requirements are detected, but iOS does not advertise
+`prototype_motion_v3`, so the host refuses motion v3 features until iOS advertises that capability.
 
 ### Transition choreography (#15247, `prototype_choreography_v1`, not device-verified)
 

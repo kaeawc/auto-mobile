@@ -1207,7 +1207,9 @@ until unmounted because SF Symbols provides no completion callback. iOS has no
 shared motion-active wire signal or shimmer reporter yet; this local signal is
 not exposed to the host, and captures that bypass `hide_for_capture` do not rest effects.
 
-Expressive motion, node `press`, and layout `animate` are Android only until #14684; the host refuses them against the iOS agent, which does not advertise `prototype_motion_v3`.
+Motion v3 requirements, including node `press` and layout `animate`, are detected, but the iOS agent
+does not advertise `prototype_motion_v3`; the host refuses motion v3 features until iOS advertises
+that capability.
 
 ### Motion tokens
 
@@ -1228,10 +1230,11 @@ color and border color use critically damped effects springs.
 Compose uses `spring(dampingRatio, stiffness)`. SwiftUI uses
 `interpolatingSpring(mass: 1, stiffness: k, damping: 2 * dampingRatio * sqrt(k))`,
 so both renderers use the same physical spring. Reduced motion snaps spatial
-changes and retains effects; motion off snaps everything. Existing motion v2/v3
-capability requirements still apply; iOS advertises the token capability but
-continues to refuse those broader features until its corresponding capabilities
-are available.
+changes and retains effects; motion off snaps everything. iOS advertises the token
+capability and `prototype_motion_v2`, supporting `animate`, style `scale`/`rotation`,
+`slideStart`/`slideEnd`/`scale` transitions, and `image.zoomable`. Motion v3 requirements
+are detected, but iOS does not advertise `prototype_motion_v3`, so the host refuses
+motion v3 features until iOS advertises that capability.
 
 ## Glass and scroll edges
 

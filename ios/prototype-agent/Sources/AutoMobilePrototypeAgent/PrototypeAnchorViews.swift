@@ -74,9 +74,13 @@
                 layerOrigin: layerOrigin,
                 rightToLeft: direction == .rightToLeft
             ) {
-                NodeView(node: entry.node, model: model, anchorPlaced: true, coverSize: cover)
-                    .environment(\.layoutDirection, direction)
-                    .reportFrame(key: "anchor.\(entry.path)", model: model, clip: clip, enabled: entry.ancestorsShown)
+                NodeView(
+                    node: entry.node, model: model,
+                    rootPlacementType: entry.path == "root" ? model.spec?.window.placement.type : nil,
+                    anchorPlaced: true, coverSize: cover
+                )
+                .environment(\.layoutDirection, direction)
+                .reportFrame(key: "anchor.\(entry.path)", model: model, clip: clip, enabled: entry.ancestorsShown)
             }
             .opacity(entry.ancestorsShown ? 1 : 0)
             .animation(fade.map { .easeInOut(duration: $0) }, value: entry.ancestorsShown)

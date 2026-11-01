@@ -174,6 +174,7 @@ fun mapPrototypeSpec(
           shownErrors = shownErrors,
           data = resolved.data,
           derive = resolved.derive.orEmpty(),
+          fullscreenRoot = resolved.window.placement is PrototypeFullscreenPlacement,
         )
         .map(resolved.root, "root"),
     )
@@ -215,6 +216,7 @@ internal class PrototypeNodeMapping(
   private val data: JsonObject? = null,
   private val derive: Map<String, PrototypeDerivedEntry> = emptyMap(),
   private val formatter: PrototypeValueFormatter = AndroidPrototypeValueFormatter(),
+  private val fullscreenRoot: Boolean = false,
 ) {
   private val derivedState by lazy {
     derive
@@ -297,7 +299,15 @@ internal class PrototypeNodeMapping(
     val selected =
       pager?.let { pages[it] } ?: (state[stateKey] as? PrototypeScalar.Numeric)?.value?.toInt() ?: 0
     val old = previous[path]
-    val resolved = resolvePrototypeStyle(node.style, node.styleWhen, localState, validity)
+    val authored = resolvePrototypeStyle(node.style, node.styleWhen, localState, validity)
+    // Only the fullscreen root defaults to fill; explicit dimensions and descendants are unchanged.
+    val resolved =
+      if (path == "root" && fullscreenRoot)
+        authored.copy(
+          width = authored.width ?: PrototypeDimension.Fill,
+          height = authored.height ?: PrototypeDimension.Fill,
+        )
+      else authored
     val style =
       old?.style?.takeIf { it.source === resolved || it.source == resolved }
         ?: mapPrototypeStyle(resolved)

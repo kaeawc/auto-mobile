@@ -167,6 +167,8 @@
         let model: PrototypeModel
         /// Modals, including bottom sheets, draw nothing in place; `PrototypeModalLayer` draws them with this set.
         var presentedAsModal = false
+        /// Set only on the authored window root; descendants keep content sizing.
+        var rootPlacementType: String?
         /// Anchored nodes draw nothing in place; `PrototypeAnchorLayer` draws them with this set (#10803).
         var anchorPlaced = false
         /// A `cover` anchor's size, which replaces the authored width and height.
@@ -1029,7 +1031,8 @@
                         coverSize: coverSize.map { (Double($0.width), Double($0.height)) },
                         weightedAxis: stackAxis,
                         fillsByDefault: node.type == "spacer",
-                        constrainsWidth: constrainsWidth
+                        constrainsWidth: constrainsWidth,
+                        rootPlacementType: rootPlacementType
                     ),
                     alignment: contentAlignment,
                     animation: styleAnimation

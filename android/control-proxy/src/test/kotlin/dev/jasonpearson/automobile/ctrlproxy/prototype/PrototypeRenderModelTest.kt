@@ -273,7 +273,10 @@ class PrototypeRenderModelTest {
         offset = PrototypeOffset(4.0, -2.0),
       )
     val mapped = mapPrototypeSpec(spec(PrototypeTextNode(text = "t", style = style))).root.style
-    assertEquals(style, mapped.source)
+    assertEquals(
+      style.copy(width = PrototypeDimension.Fill, height = PrototypeDimension.Fill),
+      mapped.source,
+    )
     assertEquals(Color(0x80FF0000), mapped.shadowColor)
     assertEquals(FontStyle.Italic, mapped.fontStyle)
     assertEquals(
@@ -359,7 +362,10 @@ class PrototypeRenderModelTest {
           ),
       )
     val node = mapPrototypeSpec(spec(PrototypeTextNode(text = "t", style = style))).root
-    assertEquals(style, node.style.source)
+    assertEquals(
+      style.copy(width = PrototypeDimension.Fill, height = PrototypeDimension.Fill),
+      node.style.source,
+    )
   }
 
   @Test

@@ -35,7 +35,9 @@ struct PrototypeSizeRules: Equatable {
         coverSize: (width: Double, height: Double)? = nil,
         weightedAxis: PrototypeAxis? = nil,
         fillsByDefault: Bool = false,
-        constrainsWidth: Bool = false
+        constrainsWidth: Bool = false,
+        // Only the window root supplies its placement; child nodes keep their authored sizing.
+        rootPlacementType: String? = nil
     ) {
         self.fillsByDefault = fillsByDefault
         self.constrainsWidth = constrainsWidth
@@ -46,8 +48,8 @@ struct PrototypeSizeRules: Equatable {
             height = .points(coverSize.height)
             return
         }
-        width = style?.width
-        height = style?.height
+        width = style?.width ?? (rootPlacementType == "fullscreen" ? .fill : nil)
+        height = style?.height ?? (rootPlacementType == "fullscreen" ? .fill : nil)
         minWidth = style?.minWidth
         maxWidth = style?.maxWidth
         minHeight = style?.minHeight

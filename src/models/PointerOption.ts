@@ -5,14 +5,14 @@ export type StylusButton = "primary" | "secondary";
  * Input pointer for a coordinate gesture. Omitted means the default finger touch.
  *
  * Plain `stylus` at full pressure goes through `adb shell input stylus`, which hard-codes pressure to
- * 1.0 (#13081). Any other pressure, a tilt or orientation, or a barrel button needs the instrumentation
- * route (`stylus_input_v1`, Android 12+) and is refused before any input when the device lacks it, never
- * rounded or sent as a finger (#13099).
+ * 1.0 (#13081). Any other pressure, a tilt or orientation, or a barrel button needs instrumentation
+ * (`stylus_input_v1`, Android 12+) or root-only uinput and is refused before any input when neither
+ * route is available, never rounded or sent as a finger (#13099, #13084).
  */
 export interface PointerOption {
   /** An eraser is the pen's rubber end; only a pointer route injects it (`adb input` cannot). */
   toolType: "stylus" | "eraser";
-  /** 0–1. Anything but 1 needs the instrumentation route. */
+  /** 0–1. Anything but 1 needs instrumentation or root-only uinput. */
   pressure?: number;
   /** Radians from the surface normal (`AXIS_TILT`), 0 to PI/2. Android only. */
   tilt?: number;

@@ -58,12 +58,24 @@ describe("UinputRoute (#13105)", () => {
     }
   });
 
-  test("refuses iOS, a finger, a mouse, and tilt, orientation or buttons", () => {
+  test("refuses iOS, a finger and a mouse", () => {
     expect(route.supports({ toolType: "stylus" }, env({ platform: "ios" })).supported).toBe(false);
     expect(route.supports({ toolType: "finger" }, env()).supported).toBe(false);
     expect(route.supports({ toolType: "mouse", hover: true }, env()).supported).toBe(false);
-    const axes = route.supports({ toolType: "stylus", extendedAxes: true }, env());
-    expect(axes.supported ? "" : axes.reason).toContain("tilt, orientation and barrel buttons");
+  });
+
+  test("takes extended axes only for a rooted pen", () => {
+    for (const toolType of ["stylus", "eraser"] as const) {
+      expect(route.supports({ toolType, extendedAxes: true }, env())).toEqual({ supported: true });
+      for (const rootShell of [false, undefined]) {
+        expect(route.supports({ toolType, extendedAxes: true }, env({ rootShell })).supported).toBe(
+          false,
+        );
+      }
+    }
+    for (const toolType of ["finger", "mouse"] as const) {
+      expect(route.supports({ toolType, extendedAxes: true }, env()).supported).toBe(false);
+    }
   });
 
   const routes = () =>

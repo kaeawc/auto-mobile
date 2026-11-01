@@ -81,12 +81,33 @@ function clamp(value: number, max: number): number {
   return Math.min(Math.max(value, 0), max);
 }
 
+/** Inverts InputReader's tilt/orientation mapping; evdev tilt axes are integer degrees. */
+export function uinputTiltAxes(tilt: number, orientation: number): { x: number; y: number } {
+  const sinTiltSquared = Math.sin(tilt) ** 2;
+  const s = Math.sin(orientation) * Math.cos(orientation);
+  const root = Math.sqrt(Math.max(0, 1 - 4 * s * s * sinTiltSquared));
+  // Rationalize (1 - root) / (2*s*s) to avoid cancellation near cardinal orientations.
+  const u = s === 0 ? sinTiltSquared : (2 * sinTiltSquared) / (1 + root);
+  const r = Math.sqrt(u);
+  const degrees = (sine: number) =>
+    Math.max(
+      -TILT_RANGE_DEGREES,
+      Math.min(
+        TILT_RANGE_DEGREES,
+        Math.round((Math.asin(Math.max(-1, Math.min(1, sine))) * 180) / Math.PI),
+      ),
+    ) || 0;
+  return { x: degrees(-r * Math.sin(orientation)), y: degrees(r * Math.cos(orientation)) };
+}
+
 interface Frame {
   atMs: number;
   x: number;
   y: number;
   pressure: number;
   distance: number;
+  tilt?: number;
+  orientation: number;
 }
 
 /** Waypoints as timed frames: the first point, then interpolated frames every 16 ms per segment. */
@@ -95,23 +116,34 @@ function planFrames(request: PointerRequest): Frame[] {
   const first = request.points[0];
   let pressure = first.pressure ?? (hover ? 0 : 1);
   let distance = first.distance ?? (hover ? DEFAULT_HOVER_DISTANCE : 0);
-  const frames: Frame[] = [{ atMs: 0, x: first.x, y: first.y, pressure, distance }];
+  const hasTilt = request.points.some(
+    (point) => point.tilt !== undefined || point.orientation !== undefined,
+  );
+  let tilt = hasTilt ? (first.tilt ?? 0) : undefined;
+  let orientation = first.orientation ?? 0;
+  const frames: Frame[] = [
+    { atMs: 0, x: first.x, y: first.y, pressure, distance, tilt, orientation },
+  ];
   let elapsed = 0;
   request.points.slice(1).forEach((to, index) => {
     const from = request.points[index];
     const durationMs = to.durationMs ?? DEFAULT_SEGMENT_MS;
     const count = Math.max(1, Math.ceil(durationMs / FRAME_INTERVAL_MS));
-    const start = { pressure, distance };
+    const start = { pressure, distance, tilt, orientation };
     for (let frame = 1; frame <= count; frame++) {
       const fraction = frame / count;
       pressure = lerp(start.pressure, to.pressure ?? start.pressure, fraction);
       distance = lerp(start.distance, to.distance ?? start.distance, fraction);
+      tilt = start.tilt === undefined ? undefined : lerp(start.tilt, to.tilt ?? 0, fraction);
+      orientation = lerp(start.orientation, to.orientation ?? 0, fraction);
       frames.push({
         atMs: elapsed + Math.floor((durationMs * frame) / count),
         x: frame === count ? to.x : lerp(from.x, to.x, fraction),
         y: frame === count ? to.y : lerp(from.y, to.y, fraction),
         pressure,
         distance,
+        tilt,
+        orientation,
       });
     }
     elapsed += durationMs;
@@ -133,12 +165,15 @@ function scaled(value: number, max: number): number {
 
 function positionEvents(frame: Frame, geometry: UinputDisplayGeometry, hover: boolean): number[] {
   const raw = uinputRawPoint(frame, geometry);
+  const axes =
+    !hover && frame.tilt !== undefined ? uinputTiltAxes(frame.tilt, frame.orientation) : undefined;
   return [
     ...abs(ABS_X, raw.x),
     ...abs(ABS_Y, raw.y),
     ...(hover
       ? abs(ABS_DISTANCE, scaled(frame.distance, DISTANCE_MAX))
       : abs(ABS_PRESSURE, scaled(frame.pressure, PRESSURE_MAX))),
+    ...(axes ? [...abs(ABS_TILT_X, axes.x), ...abs(ABS_TILT_Y, axes.y)] : []),
   ];
 }
 
@@ -149,13 +184,20 @@ function toolKey(request: PointerRequest): number {
   return request.features.toolType === "eraser" ? BTN_TOOL_RUBBER : BTN_TOOL_PEN;
 }
 
+function buttonEvents(buttons: number, value: number): number[] {
+  return [
+    ...(buttons & 32 ? [EV_KEY, BTN_STYLUS, value] : []),
+    ...(buttons & 64 ? [EV_KEY, BTN_STYLUS2, value] : []),
+  ];
+}
+
 function openEvents(
   frame: Frame,
   geometry: UinputDisplayGeometry,
   hover: boolean,
-  key: number,
+  request: PointerRequest,
 ): number[] {
-  const tool = [EV_KEY, key, 1];
+  const tool = [EV_KEY, toolKey(request), 1];
   return hover
     ? [...tool, ...positionEvents(frame, geometry, true), ...abs(ABS_PRESSURE, 0), ...SYN]
     : [
@@ -165,13 +207,24 @@ function openEvents(
         1,
         ...positionEvents(frame, geometry, false),
         ...abs(ABS_DISTANCE, 0),
+        ...buttonEvents(request.buttons ?? 0, 1),
         ...SYN,
       ];
 }
 
-function closeEvents(hover: boolean, key: number): number[] {
+function closeEvents(hover: boolean, key: number, buttons: number): number[] {
   const toolUp = [EV_KEY, key, 0, ...SYN];
-  return hover ? toolUp : [EV_KEY, BTN_TOUCH, 0, ...abs(ABS_PRESSURE, 0), ...SYN, ...toolUp];
+  return hover
+    ? toolUp
+    : [
+        ...buttonEvents(buttons, 0),
+        EV_KEY,
+        BTN_TOUCH,
+        0,
+        ...abs(ABS_PRESSURE, 0),
+        ...SYN,
+        ...toolUp,
+      ];
 }
 
 function absInfo(code: number, minimum: number, maximum: number) {
@@ -212,14 +265,14 @@ function registration(geometry: UinputDisplayGeometry) {
 const inject = (events: number[]) => ({ id: DEVICE_ID, command: "inject", events });
 const delay = (duration: number) => ({ id: DEVICE_ID, command: "delay", duration });
 
-/** The stdin script for a stylus or eraser stroke or a hover; tilt, orientation and buttons are not encoded. */
+/** The stdin script for a stylus or eraser stroke (including tilt and barrel buttons) or a hover. */
 export function uinputPenScript(request: PointerRequest, geometry: UinputDisplayGeometry): string {
   const hover = request.features.hover === true;
   const [first, ...rest] = planFrames(request);
   const commands: object[] = [
     registration(geometry),
     delay(UINPUT_REGISTRATION_SETTLE_MS),
-    inject(openEvents(first, geometry, hover, toolKey(request))),
+    inject(openEvents(first, geometry, hover, request)),
   ];
   let previousMs = 0;
   for (const frame of rest) {
@@ -229,7 +282,10 @@ export function uinputPenScript(request: PointerRequest, geometry: UinputDisplay
     }
     commands.push(inject([...positionEvents(frame, geometry, hover), ...SYN]));
   }
-  commands.push(inject(closeEvents(hover, toolKey(request))), delay(CLOSE_SETTLE_MS));
+  commands.push(
+    inject(closeEvents(hover, toolKey(request), request.buttons ?? 0)),
+    delay(CLOSE_SETTLE_MS),
+  );
   return `${commands.map((command) => JSON.stringify(command)).join("\n")}\n`;
 }
 

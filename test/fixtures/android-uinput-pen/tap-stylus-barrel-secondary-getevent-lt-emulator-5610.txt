@@ -1,0 +1,40 @@
+add device 1: /dev/input/event11
+  name:     "virtio_input_multi_touch_11"
+add device 2: /dev/input/event10
+  name:     "virtio_input_multi_touch_10"
+add device 3: /dev/input/event9
+  name:     "virtio_input_multi_touch_9"
+add device 4: /dev/input/event8
+  name:     "virtio_input_multi_touch_8"
+add device 5: /dev/input/event7
+  name:     "virtio_input_multi_touch_7"
+add device 6: /dev/input/event6
+  name:     "virtio_input_multi_touch_6"
+add device 7: /dev/input/event5
+  name:     "virtio_input_multi_touch_5"
+add device 8: /dev/input/event4
+  name:     "virtio_input_multi_touch_4"
+add device 9: /dev/input/event3
+  name:     "virtio_input_multi_touch_3"
+add device 10: /dev/input/event2
+  name:     "virtio_input_multi_touch_2"
+add device 11: /dev/input/event1
+  name:     "virtio_input_multi_touch_1"
+add device 12: /dev/input/event0
+  name:     "gpio-keys"
+add device 13: /dev/input/event12
+  name:     "automobile-pen"
+[     241.662979] /dev/input/event12: EV_KEY       BTN_DIGI             DOWN                
+[     241.662979] /dev/input/event12: EV_KEY       BTN_TOUCH            DOWN                
+[     241.662979] /dev/input/event12: EV_ABS       ABS_X                0000021c            
+[     241.662979] /dev/input/event12: EV_ABS       ABS_Y                00000492            
+[     241.662979] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000800            
+[     241.662979] /dev/input/event12: EV_KEY       BTN_STYLUS2          DOWN                
+[     241.662979] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     241.706203] /dev/input/event12: EV_KEY       BTN_STYLUS2          UP                  
+[     241.706203] /dev/input/event12: EV_KEY       BTN_TOUCH            UP                  
+[     241.706203] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000000            
+[     241.706203] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     241.706203] /dev/input/event12: EV_KEY       BTN_DIGI             UP                  
+[     241.706203] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+remove device 13: /dev/input/event12

@@ -154,12 +154,6 @@ class SetTextAcknowledgementOrderTest {
   private fun assertCaretResetHooks() {
     val forget = "textInputController.forgetRememberedInsert()"
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    for (signature in
-      listOf(
-        "override suspend fun requestClickFocusedInput(",
-      )) {
-      assertTrue("$signature clears caret", functionBody(serviceSource, signature).contains(forget))
-    }
     // Global actions moved to GlobalActionController (#11876); its Host seam reaches the caret.
     val globalActionSource =
       KotlinSourceScan.maskLiteralsAndComments(locateSource("GlobalActionController.kt").readText())
@@ -181,6 +175,11 @@ class SetTextAcknowledgementOrderTest {
     assertTrue(
       "performNodeAction clears caret",
       functionBody(nodeActionSource, "suspend fun performNodeAction(")
+        .contains("host.forgetRememberedInsert()"),
+    )
+    assertTrue(
+      "clickFocusedInputRequest clears caret",
+      functionBody(nodeActionSource, "suspend fun clickFocusedInputRequest(")
         .contains("host.forgetRememberedInsert()"),
     )
     // Gestures reach the caret through GestureController.Host, which the service wires to it.

@@ -182,6 +182,7 @@ export const prototypeOutputSchema = z.object({
           path: z.string(),
           label: z.string().optional(),
           start: z.literal(true).optional(),
+          testTag: z.string().optional(),
         }),
       ),
       edges: z.array(

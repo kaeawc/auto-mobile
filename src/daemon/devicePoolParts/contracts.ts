@@ -431,6 +431,8 @@ export interface DevicePoolDependencies {
   iosForeignDeviceOwnership?: ForeignDeviceOwnership;
   /** The same for Apple Watch simulators, claimed by UDID (#14908). */
   watchForeignDeviceOwnership?: ForeignDeviceOwnership;
+  /** The same for Apple TV simulators, claimed by UDID. */
+  tvForeignDeviceOwnership?: ForeignDeviceOwnership;
   /** Mirrors the claims `DevicePool.create` builds into the host-wide claims table (#11811 b). */
   deviceClaimMirrors?: { android?: DeviceClaimMirror; ios?: DeviceClaimMirror };
   /**

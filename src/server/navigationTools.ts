@@ -25,6 +25,15 @@ import {
   getNavigationGraphResultSchema,
   navigateToResultSchema,
 } from "./navigationToolOutputSchemas";
+import {
+  prototypeDiffArgsShape,
+  prototypeDiffForGraph,
+  type PrototypeDiffArgs,
+} from "./navigationPrototypeDiff";
+import {
+  nodePrototypeAssetFileReader,
+  type PrototypeAssetFileReader,
+} from "../features/prototype/prototypeAssetUploader";
 
 // Schema definitions
 // #6712: `.strict()` on each of these — the advertised schemas already said
@@ -48,6 +57,7 @@ export const getNavigationGraphSchema = addDeviceTargetingToSchema(
         .string()
         .optional()
         .describe("Scope the graph to this app id instead of the device's current foreground app"),
+      ...prototypeDiffArgsShape(),
     })
     .strict(),
 );
@@ -93,7 +103,7 @@ export interface NavigateToArgs {
   sessionUuid?: string;
 }
 
-export interface GetNavigationGraphArgs {
+export interface GetNavigationGraphArgs extends PrototypeDiffArgs {
   platform?: Platform;
   appId?: string;
   sessionUuid?: string;
@@ -189,6 +199,8 @@ export const navigateToHandler = createNavigateToHandler();
 
 // Register navigation tools
 export interface NavigationToolDependencies extends NavigateToHandlerDependencies {
+  /** Reads prototypeSpecPath and screenMappingPath for the getNavigationGraph diff. */
+  prototypeFileReader?: PrototypeAssetFileReader;
   installedAppsFactory?: (
     device: BootedDevice,
   ) => Pick<ListInstalledApps, "executeDetailedResult" | "executeIosDetailedResult">;
@@ -197,6 +209,7 @@ export interface NavigationToolDependencies extends NavigateToHandlerDependencie
 export function registerNavigationTools({
   navigateToFactory,
   navigationManagerFactory = getNavigationManager,
+  prototypeFileReader = nodePrototypeAssetFileReader,
   installedAppsFactory = (device) =>
     new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
 }: NavigationToolDependencies = {}) {
@@ -215,6 +228,7 @@ export function registerNavigationTools({
       const appId = requestedAppId ?? observedAppId;
       const stats = await manager.getStatsForApp(appId);
       const graph = await manager.exportGraphForApp(appId);
+      const prototypeDiff = await prototypeDiffForGraph(args, graph, prototypeFileReader);
 
       return createStructuredToolResponse({
         message: `Navigation graph for app: ${appId || "none"}`,
@@ -238,6 +252,7 @@ export function registerNavigationTools({
           args: e.interaction?.args,
           uiState: e.uiState,
         })),
+        ...(prototypeDiff ? { prototypeDiff } : {}),
       });
     } catch (error) {
       throw toActionableError(error, `Failed to get navigation graph`);

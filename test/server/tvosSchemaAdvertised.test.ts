@@ -28,7 +28,7 @@ function platformEnums(
   });
 }
 
-describe("tvOS is advertised in tool schemas and refused by every tool (#15886)", () => {
+describe("tvOS is advertised in tool schemas and refused by unsupported tools (#15886)", () => {
   beforeAll(() => {
     registerAllTools({ daemonMode: true });
   });
@@ -50,13 +50,14 @@ describe("tvOS is advertised in tool schemas and refused by every tool (#15886)"
     const plain = ToolRegistry.getEveryRegisteredTool().filter(
       (tool) =>
         tool.deviceAwareHandler === undefined &&
-        !["listDevices", "listDeviceImages"].includes(tool.name) &&
+        !["listDevices", "listDeviceImages", "provisionDevice", "deleteDevice"].includes(
+          tool.name,
+        ) &&
         JSON.stringify(toAdvertisedJsonSchema(tool.schema, { constrainAppIds: false })).includes(
           '"tvos"',
         ),
     );
     expect(plain.map((tool) => tool.name).sort()).toEqual([
-      "deleteDevice",
       "killDevice",
       "setActiveDevice",
       "startDevice",
@@ -81,23 +82,6 @@ describe("tvOS is advertised in tool schemas and refused by every tool (#15886)"
       }),
     );
     expect(outcomes.filter((outcome) => outcome !== "refused")).toEqual([]);
-  });
-
-  test("deleteDevice refuses an Apple TV named only by its target, before any teardown", async () => {
-    const error = await Promise.resolve(
-      ToolRegistry.getTool("deleteDevice")!.handler({
-        target: { platform: "tvos", isVirtual: true, stableId: "5B7E1C3D" },
-        mode: "destroy",
-        verifyAbsence: true,
-      }),
-    ).then(
-      () => undefined,
-      (caught: unknown) => caught,
-    );
-    expect(error).toBeInstanceOf(ActionableError);
-    expect((error as ActionableError).message).toBe(
-      unsupportedPlatformToolMessage("deleteDevice", "tvos"),
-    );
   });
 
   test("killDevice refuses an Apple TV named only by its device, before any shutdown", async () => {

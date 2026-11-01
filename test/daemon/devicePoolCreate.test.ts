@@ -76,6 +76,19 @@ describe("DevicePool.create", () => {
     expect(watch).not.toBe(pool.testHooks.foreignDeviceOwnership);
   });
 
+  test("wires a TV claim store of its own, so TVes are cross-daemon owned", () => {
+    const timer = new FakeTimer();
+    const pool = DevicePool.create({
+      sessionManager: makeSessionManager(timer),
+      daemonSessionId: "tv-claims-daemon",
+      timer,
+    });
+
+    const tv = pool.testHooks.tvForeignDeviceOwnership;
+    expect(tv).toBeInstanceOf(ForwardLeaseForeignDeviceOwnership);
+    expect(tv).not.toBe(pool.testHooks.foreignDeviceOwnership);
+  });
+
   test("accepts an injected ADB reset quarantine factory", () => {
     const timer = new FakeTimer();
     const sessionManager = makeSessionManager(timer);

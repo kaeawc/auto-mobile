@@ -21,7 +21,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "terminateApp",
     "observe",
   ]),
-  tvos: new Set<string>(["listDevices", "listDeviceImages"]),
+  tvos: new Set<string>(["listDevices", "listDeviceImages", "provisionDevice", "deleteDevice"]),
 };
 
 export function unsupportedPlatformToolMessage(

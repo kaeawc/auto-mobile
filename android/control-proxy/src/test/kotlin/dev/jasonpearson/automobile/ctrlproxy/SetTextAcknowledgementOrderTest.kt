@@ -54,9 +54,22 @@ class SetTextAcknowledgementOrderTest {
     )
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     assertTrue(
-      "the service's settled-hierarchy hook must wait for quiescence",
-      "hierarchyController.debouncer.extractAfterQuiescenceSuspending(" in
+      "the service's settled-hierarchy hook must publish through the hierarchy controller",
+      "hierarchyController.publishSettledHierarchy()" in
         functionBody(serviceSource, "override suspend fun publishSettledHierarchy()"),
+    )
+    val hierarchySource = KotlinSourceScan.maskLiteralsAndComments(readHierarchySource())
+    assertTrue(
+      "the published hierarchy must be extracted after quiescence",
+      "settledHierarchy()" in
+        functionBody(hierarchySource, "fun HierarchyController.publishSettledHierarchy()"),
+    )
+    assertTrue(
+      "the settled hierarchy must wait for quiescence",
+      "debouncer.extractAfterQuiescenceSuspending(" in
+        hierarchySource
+          .substringAfter("fun settledHierarchy(")
+          .substringBefore("fun broadcastHierarchyUpdate("),
     )
 
     val broadcaster = functionBody(source, "suspend fun broadcastSetTextResult(")
@@ -344,6 +357,8 @@ class SetTextAcknowledgementOrderTest {
   private fun readCtrlProxySource(): String = locateSource("CtrlProxy.kt").readText()
 
   private fun readTextInputSource(): String = locateSource("TextInputController.kt").readText()
+
+  private fun readHierarchySource(): String = locateSource("HierarchyController.kt").readText()
 
   private fun readGestureSource(): String = locateSource("GestureController.kt").readText()
 

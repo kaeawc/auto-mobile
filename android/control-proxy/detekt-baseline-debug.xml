@@ -6,7 +6,6 @@
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$!surface.runtime.persistent &amp;&amp; count == 0 &amp;&amp; (observerSession == null || observerSession == surface.observerSession)</ID>
     <ID>ComplexCondition:PrototypeController.kt:PrototypeController$count == 0 &amp;&amp; surfaces.isEmpty() &amp;&amp; (observerSession == null || observerSession == lifecycle.observerSession())</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onAccessibilityEvent</ID>
-    <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>CyclomaticComplexMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
     <ID>CyclomaticComplexMethod:PrototypeController.kt:PrototypeController$private suspend fun display: Surface</ID>
     <ID>CyclomaticComplexMethod:PrototypeLayoutParams.kt:@SuppressLint("NewApi") fun prototypeLayoutParams: WindowManager.LayoutParams</ID>
@@ -22,7 +21,6 @@
     <ID>LargeClass:TextInputController.kt:TextInputController</ID>
     <ID>LargeClass:ViewHierarchyExtractor.kt:ViewHierarchyExtractor</ID>
     <ID>LargeClass:WebSocketServer.kt:WebSocketServer</ID>
-    <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onDestroy</ID>
     <ID>LongMethod:CtrlProxy.kt:CtrlProxy$override fun onServiceConnected</ID>
     <ID>LongMethod:PrototypeController.kt:PrototypeController$private suspend fun display: Surface</ID>
     <ID>LongMethod:WebSocketServer.kt:WebSocketServer.Companion$internal fun correlationRequestId: String?</ID>

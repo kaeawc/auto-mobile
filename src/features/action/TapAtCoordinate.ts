@@ -124,7 +124,7 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   invalidateIosCache?: () => void;
   lastRenderedObservation?: RenderedObservationReader;
   snapshotReferences?: SnapshotReferenceStore;
-  /** Stylus routes and device facts; the defaults use the instrumentation route and the live device. */
+  /** Stylus routes and device facts; the defaults use instrumentation or root-only uinput and live device facts. */
   stylus?: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
 }
 
@@ -321,7 +321,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     return this.executeTap(options, progress, signal, planContext);
   }
 
-  /** A stylus tap or long press: `adb input stylus` for the plain case, the instrumentation route for more. */
+  /** A stylus tap or long press: `adb input stylus` for the plain case, instrumentation or uinput for more. */
   private async dispatchStylusTapAt(
     options: TapAtOptions,
     resolved: { x: number; y: number },
@@ -440,7 +440,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           switch (this.device.platform) {
             case "android": {
               if (options.pointer) {
-                // Stylus goes straight through `input stylus` or the instrumentation route: no
+                // Stylus goes straight through `input stylus`, instrumentation or uinput: no
                 // TalkBack routing and no finger fallback.
                 await this.dispatchStylusTapAt(options, resolved, transitionRevision, signal);
                 onTapDelivered();

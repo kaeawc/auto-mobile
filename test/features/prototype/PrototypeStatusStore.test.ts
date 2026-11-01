@@ -419,19 +419,61 @@ describe("patch spec and data hooks", () => {
     store.recordEvent(other, { ...event(1), id: "panel" });
     const before = store.status(other);
     const data = { count: 2 };
-    store.recordPatchedData("device", "panel", data);
+    store.recordPatch("device", "panel", { data });
     data.count = 99;
     expect(store.status(other).prototypes[0]).toEqual({
       ...before.prototypes[0],
       data: { count: 2 },
+      lastAction: "patch",
     });
     expect(store.status(other).lastResult).toEqual(before.lastResult);
-    store.recordPatchedData("device", "panel", undefined);
-    expect(store.status(other)).toEqual(before);
+    store.recordPatch("device", "panel", { data: undefined });
+    const cleared = store.status(other).prototypes[0];
+    expect(cleared).not.toHaveProperty("data");
+    expect(cleared.lastAction).toBe("patch");
+    expect(store.status(other).lastResult).toEqual(before.lastResult);
     // Insert another session presence through the public show path, then prove device/id filtering.
     store.record(scope, "show", { id: "panel" }, { result: ok, details: { data: { count: 1 } } });
-    store.recordPatchedData("device", "other", { count: 3 });
+    store.recordPatch("device", "other", { data: { count: 3 } });
     expect(store.status(scope).prototypes[0].data).toEqual({ count: 1 });
+  });
+  test("a patch and later device writes report the latest revision (#16277)", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    track(store);
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("revision");
+    store.recordPatch("device", "panel", { data: { count: 2 }, revision: 2 });
+    expect(store.status(scope).prototypes[0]).toMatchObject({ lastAction: "patch", revision: 2 });
+    store.recordEvent(scope, {
+      ...event(1, "panel", "change", "/data/count"),
+      payload: { op: "set", value: 7, revision: 5 },
+    });
+    expect(store.status(scope).prototypes[0]).toMatchObject({ lastAction: "patch", revision: 5 }); // A patch reply that trails a newer device write never moves the revision back.
+    store.recordPatch("device", "panel", { data: { count: 7 }, revision: 3 });
+    expect(store.status(scope).prototypes[0].revision).toBe(5);
+  });
+  test("inspect keeps a patched prototype's last action and revision", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    track(store);
+    store.recordPatch("device", "panel", { data: { count: 2 }, revision: 2 });
+    store.adopt(scope, { id: "panel", pages: {}, state: {}, data: { count: 2 } });
+    expect(store.status(scope).prototypes[0]).toMatchObject({
+      adopted: true,
+      lastAction: "patch",
+      revision: 2,
+    });
+    store.adopt(scope, { id: "fresh", pages: {}, state: {} });
+    const fresh = store.status(scope).prototypes.find((entry) => entry.id === "fresh");
+    expect(fresh?.lastAction).toBe("show");
+    expect(fresh).not.toHaveProperty("revision");
+  });
+  test("a new show of a patched prototype starts over at lastAction show with no revision", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    track(store);
+    store.recordPatch("device", "panel", { data: { count: 2 }, revision: 2 });
+    store.record(scope, "show", { id: "panel" }, { result: ok, details: { data: { count: 1 } } });
+    const entry = store.status(scope).prototypes[0];
+    expect(entry.lastAction).toBe("show");
+    expect(entry).not.toHaveProperty("revision");
   });
   test("a device data write updates reported data and the tracked spec, or drops them", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());

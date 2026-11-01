@@ -22,7 +22,7 @@ function dependencies(): PrototypePatchDependencies {
   const ticket = shownSpecs.beginShow("d", "p");
   shownSpecs.endShow("d", ticket, { id: "p", spec });
   return {
-    store: { shownSpecs, recordPatchedData: () => {} },
+    store: { shownSpecs, recordPatch: () => {} },
     transport: { patch: async () => ({ success: true, delivery: "answered" }) },
     supportsPatch: async () => true,
     specRefusal: async () => undefined,

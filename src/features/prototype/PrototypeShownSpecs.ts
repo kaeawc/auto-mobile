@@ -153,6 +153,11 @@ export class PrototypeShownSpecs {
       .sort();
   }
 
+  /** Whether a show to this device began after the {@link read} that returned `version`. */
+  showStartedSince(deviceId: string, version: number): boolean {
+    return (this.devices.get(deviceId)?.issued ?? 0) > version;
+  }
+
   commitPatch(deviceId: string, id: string, version: number, spec: ShownSpecJson): boolean {
     const state = this.devices.get(deviceId);
     if (!state) {

@@ -55,7 +55,7 @@ function observation(captureIdentity: number): IosSdkObservation {
   };
 }
 
-function readerFor(captureIdentity: number) {
+function readerFor(captureIdentity: number, coordinateSpace = "screen") {
   const client: IosSdkBridgeClient = {
     getObservationBridgeStateForIos: async () => ({
       status: "available",
@@ -65,7 +65,7 @@ function readerFor(captureIdentity: number) {
     requestSdkObservationForIos: async () => ({
       success: true,
       available: true,
-      observation: observation(captureIdentity),
+      observation: { ...observation(captureIdentity), coordinateSpace },
       totalTimeMs: 1,
     }),
     requestSdkActionForIos: async () => {
@@ -78,6 +78,16 @@ function readerFor(captureIdentity: number) {
 const ids = { next: () => "capture-1" };
 
 describe("SDK bridge merge keeps selectors and change detection right (#5159)", () => {
+  test("a window-space bridge falls back to XCTest instead of merging local bounds (#15819)", async () => {
+    const hierarchy = xctestHierarchy();
+    const before = JSON.stringify(hierarchy);
+    expect(await mergeIosSdkBridgeInto(hierarchy, readerFor(7, "window"))).toEqual({
+      backend: "xctest",
+      fallbackReason: "unavailable",
+    });
+    expect(JSON.stringify(hierarchy)).toBe(before);
+  });
+
   test("a snapshot bound before the merge indexes the merged bridge nodes", async () => {
     const hierarchy = xctestHierarchy();
     identifyObservedHierarchy("ios", hierarchy, "fresh", { timer: new FakeTimer(), ids });

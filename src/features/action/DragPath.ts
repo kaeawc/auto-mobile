@@ -45,7 +45,7 @@ export interface DragPathDependencies extends DisplayFenceDependencies {
   idGenerator?: IdGenerator;
   lastRenderedObservation?: RenderedObservationReader;
   snapshotReferences?: SnapshotReferenceStore;
-  /** Stylus routes and device facts; the defaults use the instrumentation route and the live device. */
+  /** Stylus routes and device facts; the defaults use instrumentation or root-only uinput and live device facts. */
   stylus?: Pick<RichStylusOptions, "injectors" | "readEnvironment">;
 }
 
@@ -255,7 +255,7 @@ export class DragPath extends BaseVisualChange {
   }
 
   /**
-   * A stylus path through the instrumentation route (#13099): the plan's vertices become waypoints with
+   * A stylus path through instrumentation or root-only uinput (#13099, #13084): the plan's vertices become waypoints with
    * the authored per-point pressure and tilt, and the holds become repeats of the first and last point.
    * Refused before any input when the device lacks the route; never a finger.
    */

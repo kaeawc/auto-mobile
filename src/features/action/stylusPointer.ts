@@ -98,7 +98,7 @@ export async function checkStylusPointer(
 ): Promise<string | undefined> {
   const refusal = stylusRefusal(request);
   if (refusal || !request.pointer || pointerNeedsInstrumentation(request.pointer)) {
-    // The instrumentation route checks the device itself, from its own capability flag.
+    // Rich pointer routes check device capabilities and root-shell availability themselves.
     return refusal;
   }
   return stylusSdkRefusal(adb, signal);

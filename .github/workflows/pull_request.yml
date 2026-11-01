@@ -618,6 +618,10 @@ jobs:
             prototype_simulator:
               - 'ios/prototype-agent/**'
               - 'scripts/ios/prototype-agent-*'
+              - 'scripts/ios/prototype-mcp-smoke*.sh'
+              - 'scripts/lib/session-release.sh'
+              - 'test/bats/prototype-mcp-smoke.bats'
+              - 'test/bats/prototype-mcp-smoke-lane.bats'
               - 'scripts/ios/run_with_timeout.sh'
               - 'src/features/prototype/prototypeSpec.ts'
               - 'src/features/prototype/prototypeValidation.ts'
@@ -3175,12 +3179,18 @@ jobs:
         timeout-minutes: 20
         run: bash scripts/ios/prototype-agent-smoke.sh "${{ matrix.ios }}"
 
+      - name: "Run prototype MCP smoke (iOS ${{ matrix.ios }})"
+        timeout-minutes: 25
+        run: bash scripts/ios/prototype-mcp-smoke-lane.sh "${{ matrix.ios }}"
+
       - name: "Upload prototype agent smoke artifacts"
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: prototype-agent-smoke-ios-${{ matrix.ios }}
-          path: scratch/prototype-agent-smoke/
+          path: |
+            scratch/prototype-agent-smoke/
+            scratch/prototype-mcp-smoke-lane/
           if-no-files-found: ignore
           retention-days: 7
 

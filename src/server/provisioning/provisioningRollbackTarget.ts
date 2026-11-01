@@ -73,8 +73,10 @@ async function resolveCreatedIosProvisionDeviceRollbackTarget(
   identity: ExactIosDeviceIdentity,
   deps: DeviceToolsDependencies,
   deviceManager: PlatformDeviceManager,
-  pendingMutationSettlement: Promise<unknown> | undefined,
-  rollbackDeadlineMs: number,
+  {
+    pendingMutationSettlement,
+    rollbackDeadlineMs,
+  }: { pendingMutationSettlement?: Promise<unknown>; rollbackDeadlineMs: number },
 ): Promise<ProvisionRollbackTarget> {
   if (
     pendingMutationSettlement &&
@@ -90,17 +92,14 @@ async function resolveCreatedIosProvisionDeviceRollbackTarget(
     return { kind: "unresolved" };
   }
   try {
-    const discovery = await runOperationWithinDeadline(
-      deps.timer,
-      rollbackDeadlineMs,
-      undefined,
-      () => new Error("iOS rollback identity discovery exceeded the rollback budget"),
-      async (deadlineSignal) =>
+    const discovery = await runOperationWithinDeadline(deps.timer, rollbackDeadlineMs, undefined, {
+      operation: async (deadlineSignal) =>
         await deviceManager.getDeviceImagesDetailed("ios", {
           bypassIosDeviceListCache: true,
           signal: deadlineSignal,
         }),
-    );
+      timeoutError: () => new Error("iOS rollback identity discovery exceeded the rollback budget"),
+    });
     if (!discovery.succeededPlatforms.has("ios")) {
       logger.warn(
         `[DeviceTools] Cannot roll back iOS simulator '${identity.name}': identity discovery did not complete.`,
@@ -150,8 +149,7 @@ export async function resolveProvisionDeviceRollbackTarget(
           exactIosProvisionDeviceIdentity(args),
           deps,
           deviceManager,
-          pendingMutationSettlement,
-          rollbackDeadlineMs,
+          { pendingMutationSettlement, rollbackDeadlineMs },
         );
   if (target.kind !== "device" || !observedRuntimeDevice?.deviceId) {
     return target;
@@ -256,7 +254,6 @@ export async function resolveCreatedIosRollbackTargetForAcquisition(
     },
     deps,
     deps.deviceManagerFactory(),
-    pendingMutationSettlement,
-    rollbackDeadlineMs,
+    { pendingMutationSettlement, rollbackDeadlineMs },
   );
 }

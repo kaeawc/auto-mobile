@@ -214,7 +214,7 @@ describe("MCP session autolock routing", () => {
         let provisionalKey: string | undefined;
         startExecution = spyOn(executionTracker, "startExecution").mockImplementation((...args) => {
           const execution = originalStart(...args);
-          provisionalKey = args[4];
+          provisionalKey = args[3]?.unresolvedAutolockMcpSessionId;
           activeForA = executionTracker.hasActiveAutolockSessionExecutions(sessionA!);
           cancelledForA = executionTracker.cancelDeviceSessionExecutions(sessionA!);
           drainedA = executionTracker.waitForDeviceSessionExecutionsToEnd(sessionA!, 1_000);

@@ -133,8 +133,10 @@ export class BoundSessionHeartbeat {
             sessionUuid,
             client,
             releaseReasonFromError(error),
-            daemonInstanceFromError(error),
-            { mayAskAgain: asked?.notFound === false },
+            {
+              daemonInstance: daemonInstanceFromError(error),
+              mayAskAgain: asked?.notFound === false,
+            },
           );
           if (asked !== undefined) {
             asked.notFound = true;
@@ -161,11 +163,7 @@ export class BoundSessionHeartbeat {
           () => this.askSessionHeartbeat(sessionUuid, claimLivenessOwnership, asked),
           sessionUuid,
           undefined,
-          // A replacement daemon has not materialized a persisted session until a
-          // device operation reaches recovery. Heartbeat misses before that point
-          // are not proof that the UUID is terminal; the first tool call remains
-          // responsible for either restoring it or applying the existing fence.
-          false,
+          { fenceSessionNotFoundOnRetry: false },
         ),
       );
       this.recordBoundSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership, isCurrent);
@@ -183,12 +181,9 @@ export class BoundSessionHeartbeat {
         // The answer to ask again could not be asked (the proxy is closing): decided as it stands.
         this.applyNotFoundOutcome(
           sessionUuid,
-          this.noteNotFoundAnswer(
-            sessionUuid,
-            null,
-            releaseReasonFromError(error),
-            daemonInstanceFromError(error),
-          ),
+          this.noteNotFoundAnswer(sessionUuid, null, releaseReasonFromError(error), {
+            daemonInstance: daemonInstanceFromError(error),
+          }),
         );
         return;
       }
@@ -227,13 +222,22 @@ export class BoundSessionHeartbeat {
    * first heartbeat of a connection). The daemon behind that connection is the one to wait for,
    * and with no reason it is what a restarted daemon answers until it has rehydrated the session
    * (#11529, #11557). Each session has its own first answer and its own window.
+   *
+   * @param sessionUuid - The session the daemon did not find
+   * @param client - The connection that answered, when known
+   * @param releaseReason - The daemon's release reason, if any
+   * @param options.daemonInstance - The answering daemon's instance id
+   * @param options.establishes - The answer is the first on a just-established connection
+   * @param options.mayAskAgain - The caller may ask once more on a fresh connection
    */
   noteNotFoundAnswer(
     sessionUuid: string,
     client: DaemonClientLike | null,
     releaseReason: string | undefined,
-    daemonInstance: string | undefined,
-    options: { establishes?: boolean; mayAskAgain?: boolean } = {},
+    {
+      daemonInstance,
+      ...options
+    }: { daemonInstance?: string; establishes?: boolean; mayAskAgain?: boolean } = {},
   ): NotFoundAnswerOutcome {
     const answeredByOtherDaemon = this.port.noteHeartbeatDaemonInstance(
       sessionUuid,

@@ -39,9 +39,10 @@ SCRIPT
   cat > "${MOCK_BIN}/lipo" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
-# Real lipo takes the input file FIRST: `lipo <file> -verify_arch <arch>...`. The
-# file-last form fails with "unknown architecture specification flag" (0.0.85 release).
-if [[ "$1" == -* || "$2 $3 $4" != '-verify_arch arm64 x86_64' || ! -x "$1" ]]; then
+# Real lipo takes the input file FIRST: `lipo <file> -verify_arch <arch>`. The
+# file-last form fails with "unknown architecture specification flag" (0.0.85 release), and
+# Xcode 27.1 beta rejects several architectures after one flag (#15823): one arch per call.
+if [[ "$1" == -* || "$2" != -verify_arch || $# -ne 3 || ! -x "$1" ]]; then
   echo "error: lipo: unknown architecture specification flag: $*" >&2
   exit 1
 fi

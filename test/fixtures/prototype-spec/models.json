@@ -518,6 +518,29 @@
   "nodeProgress": {
     "type": "progress"
   },
+  "nodeMap": {
+    "type": "map",
+    "camera": { "lat": 37.77, "lng": -122.42, "zoom": 12 },
+    "markers": {
+      "path": "/stops",
+      "as": "stop",
+      "id": "{stop.id}",
+      "lat": "{stop.lat}",
+      "lng": "{stop.lng}",
+      "title": "{stop.name}"
+    },
+    "onMarkerTap": [{ "type": "setState", "key": "text", "value": "{stop.id}" }]
+  },
+  "nodeVideoPlayer": { "type": "videoPlayer", "id": "clip", "source": { "sample": "countdown" } },
+  "nodeCastButton": { "type": "castButton", "player": "main", "protocols": ["airplay"] },
+  "nodeCameraPreview": {
+    "type": "cameraPreview",
+    "id": "vf",
+    "lensKey": "text",
+    "zoomKey": "count",
+    "aspectRatio": "1:1",
+    "mode": "photo"
+  },
   "nodeDialog": {
     "type": "dialog",
     "openWhen": {
@@ -707,6 +730,9 @@
   },
   "actionDismiss": {
     "type": "dismiss"
+  },
+  "actionHideKeyboard": {
+    "type": "hideKeyboard"
   },
   "actionDecrement": {
     "type": "decrement",
@@ -903,6 +929,7 @@
     "into": "/data/response",
     "statusKey": "status",
     "via": "host",
+    "allowSecureInRequest": false,
     "timeoutMs": 1000,
     "onSuccess": [
       {

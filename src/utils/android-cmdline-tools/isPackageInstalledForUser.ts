@@ -6,8 +6,7 @@ export async function isPackageInstalledForUser(
   adb: AdbExecutor,
   packageName: string,
   userId: number,
-  timeoutMs?: number,
-  signal?: AbortSignal,
+  { timeoutMs, signal }: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<boolean> {
   const result = await adb.executeCommand(`shell pm list packages --user ${userId}`, {
     timeoutMs,

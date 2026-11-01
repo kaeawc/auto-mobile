@@ -86,6 +86,7 @@
     "mediaSession",
     "windowMode",
     "rotaryScroll",
+    "rotateCrown",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -114,6 +115,9 @@
     "killProfile",
     "systemAlerts",
     "setSensor",
+    "injectAudioInput",
+    "stopAudioInput",
+    "captureAudio",
     "displayProfile",
     "manufacturerProfile",
     "setToolEnabled"
@@ -202,6 +206,7 @@
     "mediaSession",
     "windowMode",
     "rotaryScroll",
+    "rotateCrown",
     "highlight",
     "prototype",
     "sqlQuery",
@@ -230,6 +235,9 @@
     "killProfile",
     "systemAlerts",
     "setSensor",
+    "injectAudioInput",
+    "stopAudioInput",
+    "captureAudio",
     "displayProfile",
     "manufacturerProfile",
     "setToolEnabled"
@@ -350,7 +358,11 @@
     "resetAppLogs",
     "performanceTrace",
     "windowMode",
-    "rotaryScroll"
+    "rotaryScroll",
+    "rotateCrown",
+    "injectAudioInput",
+    "stopAudioInput",
+    "captureAudio"
   ],
   "measurementScripts": [
     "observe",

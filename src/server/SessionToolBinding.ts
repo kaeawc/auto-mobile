@@ -9,6 +9,26 @@ import {
   type SessionToolBindingLocalState,
 } from "./sessionToolBindingStore";
 
+/** How a {@link SessionToolBinding} is seeded beyond its initial session and profile. */
+export interface SessionToolBindingOptions {
+  initialReleasedSessionUuid?: string;
+  /**
+   * Whether the first session is a live session of the same plan as the second (#11602): a
+   * derived `${base}:${label}` session counts as its base. The daemon ingress asks the same
+   * question with the same function, so the two cannot disagree.
+   */
+  namesLiveSessionOfBoundPlan?: (sessionUuid: string, boundSessionUuid: string) => boolean;
+  /** Where keyed bindings live; a private store keeps them to this instance. */
+  store?: SessionToolBindingStore;
+}
+
+/** How a call's device selector routes: see {@link SessionToolBinding.resolveDeviceSessionUuid}. */
+export interface DeviceSessionRouting {
+  selectingActiveDevice?: boolean;
+  deferForeignDevice?: boolean;
+  readOnly?: boolean;
+}
+
 /**
  * One server's view of the session-tool bindings. The `mcpSessionId` every method
  * takes is the request's session key (#4678): bindings recorded under a key live in
@@ -27,27 +47,27 @@ export class SessionToolBinding implements SessionToolBindingLocalState {
   /** The single stdio transport has no MCP session ID, so retain its profile here. */
   private directToolSelectionProfileUuid?: string;
   private readonly detachFromStore: () => void;
+  private readonly namesLiveSessionOfBoundPlan: (
+    sessionUuid: string,
+    boundSessionUuid: string,
+  ) => boolean;
+  private readonly store: SessionToolBindingStore;
 
   constructor(
     initialSessionUuid?: string,
     initialToolSelectionProfileUuid?: string,
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
-    initialReleasedSessionUuid?: string,
-    /**
-     * Whether the first session is a live session of the same plan as the second (#11602): a
-     * derived `${base}:${label}` session counts as its base. The daemon ingress asks the same
-     * question with the same function, so the two cannot disagree.
-     */
-    private readonly namesLiveSessionOfBoundPlan: (
-      sessionUuid: string,
-      boundSessionUuid: string,
-    ) => boolean = () => false,
-    /** Where keyed bindings live; a private store keeps them to this instance. */
-    private readonly store: SessionToolBindingStore = new SessionToolBindingStore(),
+    {
+      initialReleasedSessionUuid,
+      namesLiveSessionOfBoundPlan = () => false,
+      store = new SessionToolBindingStore(),
+    }: SessionToolBindingOptions = {},
   ) {
     this.initialSessionUuid = initialSessionUuid;
     this.initialToolSelectionProfileUuid = initialToolSelectionProfileUuid;
     this.releasedInitialSessionUuid = initialReleasedSessionUuid;
+    this.namesLiveSessionOfBoundPlan = namesLiveSessionOfBoundPlan;
+    this.store = store;
     this.detachFromStore = store.attach(this);
   }
 
@@ -113,9 +133,8 @@ export class SessionToolBinding implements SessionToolBindingLocalState {
     mcpSessionId: string | undefined,
     params: Record<string, unknown>,
     lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
-    selectingActiveDevice = false,
-    deferForeignDevice = false,
-    readOnly?: boolean,
+    // An unset `selectingActiveDevice` is false: resolveAcquiredDeviceSession defaults it.
+    { selectingActiveDevice, deferForeignDevice = false, readOnly }: DeviceSessionRouting = {},
   ): string | undefined {
     const fallback = this.effectiveSessionUuid(mcpSessionId, params, {
       readOnly,
@@ -134,32 +153,28 @@ export class SessionToolBinding implements SessionToolBindingLocalState {
     }
     if (this.initialSessionUuid) {
       // A named foreign device may be deferred to the registry; a platform alone cannot.
-      assertBoundSessionMatches(
-        lookup(this.initialSessionUuid),
-        matches,
-        fallback,
-        deferForeignDevice && deviceId !== undefined,
-        { deviceId, platform },
-      );
+      assertBoundSessionMatches(lookup(this.initialSessionUuid), matches, fallback, {
+        deferForeignDevice: deferForeignDevice && deviceId !== undefined,
+        requested: { deviceId, platform },
+      });
       return fallback;
     }
-    return this.resolveAcquiredDeviceSession(
-      mcpSessionId,
-      lookup,
-      matches,
+    return this.resolveAcquiredDeviceSession(mcpSessionId, lookup, matches, {
       deviceId,
-      fallback,
+      rebindFallback: fallback,
       selectingActiveDevice,
-    );
+    });
   }
 
   private resolveAcquiredDeviceSession(
     mcpSessionId: string | undefined,
     lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
     matches: (device: { deviceId: string; platform: string }) => boolean,
-    deviceId: string | undefined,
-    rebindFallback?: string,
-    selectingActiveDevice = false,
+    {
+      deviceId,
+      rebindFallback,
+      selectingActiveDevice = false,
+    }: { deviceId?: string; rebindFallback?: string; selectingActiveDevice?: boolean },
   ): string | undefined {
     const candidates = [...this.acquiredSessionUuids(mcpSessionId)].flatMap((sessionUuid) => {
       const device = lookup(sessionUuid);
@@ -350,8 +365,10 @@ function assertBoundSessionMatches(
   device: { deviceId: string; platform: string } | undefined,
   matches: (device: { deviceId: string; platform: string }) => boolean,
   sessionUuid: string | undefined,
-  deferForeignDevice: boolean,
-  requested: { deviceId?: string; platform?: string },
+  {
+    deferForeignDevice,
+    requested,
+  }: { deferForeignDevice: boolean; requested: { deviceId?: string; platform?: string } },
 ): void {
   if (!device || matches(device) || deferForeignDevice) {
     return;

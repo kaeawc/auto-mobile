@@ -24,7 +24,14 @@ import {
 } from "../features/observe/SnapshotReferenceStore";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 import { createStructuredToolResponse, StructuredToolResponse } from "../utils/toolUtils";
-import { BootedDevice, ObserveResult, ObserveToolPayload } from "../models";
+import {
+  type AndroidOrIosPlatform,
+  type Platform,
+  BootedDevice,
+  ObserveResult,
+  ObserveToolPayload,
+  requireAndroidOrIosPlatform,
+} from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import {
   hasOwnPrototype,
@@ -47,6 +54,7 @@ import {
 } from "../features/observe/output/ObserveScopeExperiments";
 import { type WaitForObservationOutcome } from "../features/observe/wait/WaitEvaluation";
 import type { ObserveArgs } from "./observeTools";
+import type { WatchObserveDependencies } from "./observeWatch";
 import {
   defaultAudioInputDiagnostic,
   type AudioInputDiagnosticResolver,
@@ -71,6 +79,8 @@ export interface ObserveToolDependencies {
   hidesPrototypeForScreenshot?: (device: BootedDevice) => Promise<boolean>;
   /** Device-level audio input condition (#13627); defaults to the host probe and AVD inventory. */
   audioInputDiagnostic?: AudioInputDiagnosticResolver;
+  /** Screenshot-only observe on an Apple Watch simulator (#14910); tests pass a fake capture. */
+  watch?: WatchObserveDependencies;
 }
 
 /**
@@ -117,8 +127,10 @@ export async function observeScreenshotOptions(
   args: ObserveArgs,
   device: BootedDevice,
   deviceRead: boolean,
-  screenshotMode: ScreenshotMode | undefined,
-  dependencies: ObserveToolDependencies,
+  {
+    screenshotMode,
+    dependencies,
+  }: { screenshotMode?: ScreenshotMode; dependencies: ObserveToolDependencies },
 ): Promise<ObserveScreenshotOptions | undefined> {
   if (args.layer !== "app" || deviceRead || screenshotMode === "none") {
     return args.screenshotOptions;
@@ -154,12 +166,12 @@ export function screenForObserve(
 }
 
 // Register tools (this will be called when this file is imported)
-async function withCapturedScreenshotImage(
-  result: ObserveToolPayload,
+async function withCapturedScreenshotImage<T extends ObserveResponsePayload>(
+  result: T,
   screenshotPath: string | undefined,
   options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
-): Promise<ObserveResponse> {
-  const delivery = await inlineScreenshotImage(screenshotPath, result, options.signal);
+): Promise<ObserveResponse<T>> {
+  const delivery = await inlineScreenshotImage(screenshotPath, result, { signal: options.signal });
   await publishScreenshotPaths(result, options.protection);
   const response = createStructuredToolResponse({
     ...result,
@@ -171,17 +183,29 @@ async function withCapturedScreenshotImage(
   };
 }
 
-export type ObserveResponse = Omit<StructuredToolResponse<ObserveToolPayload>, "content"> & {
+/** The screenshot fields observe's response publishes; a watch observation carries only these. */
+type ObserveResponsePayload = Pick<
+  ObserveToolPayload,
+  | "screenshotPath"
+  | "screenshotExpiresAt"
+  | "displays"
+  | "crop"
+  | "screenshotFormat"
+  | "screenshotMimeType"
+  | "screenshotImage"
+>;
+
+export type ObserveResponse<T = ObserveToolPayload> = Omit<StructuredToolResponse<T>, "content"> & {
   content: Array<
     { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
   >;
 };
 
-export async function createObserveResponse(
-  result: ObserveToolPayload,
+export async function createObserveResponse<T extends ObserveResponsePayload>(
+  result: T,
   includeScreenshotImage: boolean | undefined,
   options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
-): Promise<ObserveResponse> {
+): Promise<ObserveResponse<T>> {
   const { signal, protection = screenshotPathProtection } = options;
   await publishScreenshotPaths(result, protection);
   const response = includeScreenshotImage
@@ -225,7 +249,8 @@ export function attachSnapshotReference(
   }
 }
 
-export function prepareObserveOptions(platform: BootedDevice["platform"], args: ObserveArgs) {
+export function prepareObserveOptions(devicePlatform: Platform, args: ObserveArgs) {
+  const platform = requireAndroidOrIosPlatform(devicePlatform, "observe");
   const deviceRead = getToolSelectionContext()?.explicitObserveDeviceRead === true;
   if (args.display === "all") {
     assertAllDisplayObserveSupported(platform, args);
@@ -252,6 +277,7 @@ export function prepareObserveOptions(platform: BootedDevice["platform"], args: 
   assertActiveWindowWaitForSupportedOnPlatform(platform, args.waitFor);
   const screenshot = requestedScreenshotMode(args);
   return {
+    platform,
     deviceRead,
     aggregate: args.display === "all",
     timeoutMs: aggregateObserveTimeoutMs(args),
@@ -320,9 +346,8 @@ export async function attachObserveCrop(
   result.crop = await createObserveCrop(
     args.crop,
     { ...result, deviceId: device.deviceId },
-    device.platform,
-    dependencies,
-    selectorObservation,
+    requireAndroidOrIosPlatform(device.platform, "Observe crop"),
+    { dependencies, selectorObservation },
   );
 }
 
@@ -334,7 +359,7 @@ export async function attachObserveCrop(
 export function layerScopedObserveResult(
   result: ObserveResult,
   layer: HierarchyLayer | undefined,
-  platform: BootedDevice["platform"],
+  platform: AndroidOrIosPlatform,
   requirePrototype: boolean,
 ): ObserveResult {
   if (layer === undefined) {

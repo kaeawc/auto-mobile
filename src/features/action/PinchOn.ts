@@ -1,3 +1,4 @@
+import { rejectWatchAction } from "../watch/WatchActions";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
@@ -22,6 +23,7 @@ import {
   ObserveResult,
   PinchOnOptions,
   PinchOnResult,
+  requireAndroidOrIosPlatform,
 } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ElementResolver } from "../utility/ElementResolver";
@@ -183,7 +185,11 @@ export class PinchOn extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     deps: PinchOnDependencies = {},
   ) {
-    super(device, adb, deps.timer, deps.renderedDisplayRevision, deps);
+    super(device, {
+      adb,
+      timer: deps.timer,
+      displayFence: deps,
+    });
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.resolver = deps.resolver ?? new ElementResolver();
     this.capture =
@@ -225,6 +231,7 @@ export class PinchOn extends BaseVisualChange {
   ): Promise<PinchOnResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     throwIfAborted(signal);
+    rejectWatchAction(this.device.platform, "pinch");
     this.validateDuration(options.duration);
     this.validateRotation(options.rotationDegrees);
     let displayTarget: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
@@ -302,9 +309,11 @@ export class PinchOn extends BaseVisualChange {
         this.screenshotCapturer,
         viewHierarchy,
         searchCriteria,
-        this.visionConfig,
-        finalErrorMessage,
-        { visionAnalyzer: this.visionAnalyzer },
+        {
+          visionConfig: this.visionConfig,
+          baseError: finalErrorMessage,
+          visionAnalyzer: this.visionAnalyzer,
+        },
       );
     }
 
@@ -576,8 +585,8 @@ export class PinchOn extends BaseVisualChange {
       this.device,
       options.display!,
       this.observeScreen,
-      this.adb,
       {
+        adb: this.adb,
         lastRenderedObservation: this.lastRenderedObservation,
         signal,
         transitions: this.displayTransitionReader,
@@ -658,12 +667,10 @@ export class PinchOn extends BaseVisualChange {
     return scoped === snapshot.hierarchy
       ? snapshot
       : identifyObservedHierarchy(
-          this.device.platform,
+          requireAndroidOrIosPlatform(this.device.platform, "pinchOn"),
           scoped,
           snapshot.requestedFreshness,
-          this.timer,
-          undefined,
-          snapshot.captureId,
+          { timer: this.timer, captureId: snapshot.captureId },
         );
   }
 
@@ -799,7 +806,9 @@ export class PinchOn extends BaseVisualChange {
 
     throwIfAborted(signal);
     const snapshot = displayObservation?.viewHierarchy
-      ? identifyObservedHierarchy("android", displayObservation.viewHierarchy, "fresh", this.timer)
+      ? identifyObservedHierarchy("android", displayObservation.viewHierarchy, "fresh", {
+          timer: this.timer,
+        })
       : await this.capture.capture({
           freshness: "fresh",
           searchRaw: serverConfig.isRawElementSearchEnabled(),

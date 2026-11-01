@@ -139,7 +139,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
           signal,
         });
       }
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, { perf, signal });
+      return this.executeGesture.swipe({ x1, y1, x2, y2 }, gestureOptions, { perf, signal });
     }
 
     // Check if TalkBack is enabled (not just any accessibility service).
@@ -208,7 +208,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
 
       // Standard mode: Use coordinate-based swipes
       logger.debug("[SwipeOn] TalkBack disabled, using standard swipe");
-      const result = await this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, {
+      const result = await this.executeGesture.swipe({ x1, y1, x2, y2 }, gestureOptions, {
         perf,
         signal,
       });
@@ -244,7 +244,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     const forwardOptions = this.buildGestureOptions(gestureOptions, forwardDuration);
     const returnOptions = this.buildGestureOptions(gestureOptions, returnDuration);
 
-    const forwardResult = await this.executeGesture.swipe(x1, y1, x2, y2, forwardOptions, {
+    const forwardResult = await this.executeGesture.swipe({ x1, y1, x2, y2 }, forwardOptions, {
       perf,
       signal,
     });
@@ -258,7 +258,11 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       timer: this.timer,
       apexPauseMs: boomerang.apexPauseMs,
       signal,
-      returnSwipe: () => this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, { perf, signal }),
+      returnSwipe: () =>
+        this.executeGesture.swipe({ x1: x2, y1: y2, x2: x1, y2: y1 }, returnOptions, {
+          perf,
+          signal,
+        }),
     });
     if (!returnResult.success) {
       return {
@@ -319,7 +323,9 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     }
 
     throwIfAborted(signal);
-    const result = await this.accessibilityService.requestAction("focus", resourceId, 5000, perf);
+    const result = await this.accessibilityService.requestAction("focus", resourceId, 5000, {
+      perf,
+    });
     throwIfAborted(signal);
 
     if (!result.success) {
@@ -467,13 +473,13 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     try {
       throwIfAborted(signal);
       const result = needsNodeSelector
-        ? await this.accessibilityService.requestNodeAction(scrollAction, selector, 5000, perf)
-        : await this.accessibilityService.requestAction(
-            scrollAction,
-            selector.resourceId,
-            5000,
-            perf || new NoOpPerformanceTracker(),
-          );
+        ? await this.accessibilityService.requestNodeAction(scrollAction, selector, {
+            timeoutMs: 5000,
+            perf,
+          })
+        : await this.accessibilityService.requestAction(scrollAction, selector.resourceId, 5000, {
+            perf: perf || new NoOpPerformanceTracker(),
+          });
 
       if (result.success) {
         logger.info("[SwipeOn] ACTION_SCROLL succeeded");

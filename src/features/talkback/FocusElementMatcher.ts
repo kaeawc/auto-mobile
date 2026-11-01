@@ -39,18 +39,15 @@ export class FocusElementMatcher {
         elements,
         currentFocus,
         (element) => this.getResourceId(element),
-        resourceId,
+        { value: resourceId },
       );
     }
 
     const testTag = this.getTestTag(currentFocus);
     if (testTag) {
-      return this.findIndexByValue(
-        elements,
-        currentFocus,
-        (element) => this.getTestTag(element),
-        testTag,
-      );
+      return this.findIndexByValue(elements, currentFocus, (element) => this.getTestTag(element), {
+        value: testTag,
+      });
     }
 
     const contentDesc = this.getContentDesc(currentFocus);
@@ -59,20 +56,16 @@ export class FocusElementMatcher {
         elements,
         currentFocus,
         (element) => this.getContentDesc(element),
-        contentDesc,
-        true,
+        { value: contentDesc, caseInsensitive: true },
       );
     }
 
     const text = this.getText(currentFocus);
     if (text) {
-      return this.findIndexByValue(
-        elements,
-        currentFocus,
-        (element) => this.getText(element),
-        text,
-        true,
-      );
+      return this.findIndexByValue(elements, currentFocus, (element) => this.getText(element), {
+        value: text,
+        caseInsensitive: true,
+      });
     }
 
     if (currentFocus.bounds) {
@@ -236,8 +229,7 @@ export class FocusElementMatcher {
     elements: Element[],
     currentFocus: Element,
     getter: (element: Element) => string | undefined,
-    value: string,
-    caseInsensitive: boolean = false,
+    { value, caseInsensitive = false }: { value: string; caseInsensitive?: boolean },
   ): number | null {
     const target = caseInsensitive ? value.toLowerCase() : value;
     const matches = elements.flatMap((element, index) => {

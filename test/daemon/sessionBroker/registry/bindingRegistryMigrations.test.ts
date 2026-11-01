@@ -10,7 +10,9 @@ import {
   BINDING_REGISTRY_MIGRATIONS,
   migrateBindingRegistry,
   bindingRegistryMigrationProvider,
+  assertBindingRegistryCurrent,
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
+import { BindingRegistrySchemaUnsupportedError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import {
   SqliteBindingRegistry,
   type BindingRegistryDatabase as CurrentBindingRegistryDatabase,
@@ -41,6 +43,43 @@ interface BindingFreeDevicesTable {
 }
 
 describe("binding registry migrations", () => {
+  test.each([
+    ["writer", migrateBindingRegistry],
+    ["reader", assertBindingRegistryCurrent],
+  ] as const)(
+    "%s refuses unknown migrations without changing the registry",
+    async (_role, probe) => {
+      const raw = new Sqlite(":memory:");
+      const db = new Kysely<BindingRegistryDatabase>({
+        dialect: new BunSqliteDialect({ database: raw }),
+      });
+      try {
+        raw.exec("CREATE TABLE kysely_migration (name TEXT PRIMARY KEY, timestamp TEXT NOT NULL)");
+        const migrations = ["2099_01_01_016_future_schema", "2099_01_02_017_future_schema"];
+        for (const migration of migrations) {
+          raw.query("INSERT INTO kysely_migration VALUES (?, ?)").run(migration, "2099-01-01");
+        }
+        const before = raw.serialize();
+        let caught: unknown;
+        try {
+          await probe(db, ":memory:");
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught).toBeInstanceOf(BindingRegistrySchemaUnsupportedError);
+        expect(caught).toMatchObject({
+          code: "registry_schema_unsupported",
+          retryable: false,
+          unknownMigrations: migrations,
+        });
+        expect(caught).not.toHaveProperty("retryAfterMs");
+        expect(raw.serialize()).toEqual(before);
+      } finally {
+        await db.destroy();
+      }
+    },
+  );
+
   test("the public pending-migration probe never creates bookkeeping tables", async () => {
     const db = new Kysely<BindingRegistryDatabase>({
       dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),
@@ -50,10 +89,10 @@ describe("binding registry migrations", () => {
         db,
         provider: bindingRegistryMigrationProvider,
       }).getMigrations();
-      expect(migrations).toHaveLength(16);
+      expect(migrations).toHaveLength(Object.keys(BINDING_REGISTRY_MIGRATIONS).length);
       expect(migrations.every((migration) => migration.executedAt === undefined)).toBe(true);
       expect(await db.introspection.getTables({ withInternalKyselyTables: true })).toEqual([]);
-      await migrateBindingRegistry(db, ":memory:");
+      await migrateBindingRegistry(db, ":memory:", undefined, { writerVersion: "test-writer" });
       const migrated = await new Migrator({
         db,
         provider: bindingRegistryMigrationProvider,
@@ -68,7 +107,7 @@ describe("binding registry migrations", () => {
       dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),
     });
     try {
-      await migrateBindingRegistry(db, ":memory:");
+      await migrateBindingRegistry(db, ":memory:", undefined, { writerVersion: "test-writer" });
       const columns = await sql<{
         name: string;
       }>`SELECT name FROM pragma_table_info('session_broker_exports')`.execute(db);
@@ -137,7 +176,7 @@ describe("binding registry migrations", () => {
         VALUES ('legacy', 'fingerprint', '{}', '{"daemonId":"d","pid":1}', 'failed', 'native failure', 'timeout')`.execute(
         db,
       );
-      await migrateBindingRegistry(db, ":memory:");
+      await migrateBindingRegistry(db, ":memory:", undefined, { writerVersion: "test-writer" });
       expect(
         (await db.selectFrom("session_broker_requests").selectAll().executeTakeFirstOrThrow())
           .retryable,

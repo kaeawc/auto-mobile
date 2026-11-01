@@ -88,7 +88,7 @@ class ChaoticRepository extends DeviceSessionRepository {
     private readonly clock: FakeTimer,
     private readonly random: Random,
   ) {
-    super(db, clock);
+    super({ db, timer: clock });
   }
 
   private async land(delayMs: number): Promise<void> {
@@ -126,9 +126,9 @@ class ChaoticRepository extends DeviceSessionRepository {
     const delayMs = this.nextReleaseDelayMs ?? this.writeDelayMs();
     this.nextReleaseDelayMs = undefined;
     this.releaseWritesIssued++;
-    const write = `release(${args[3]}, generation ${args[4]?.expectedRowGeneration ?? "any"})`;
+    const write = `release(${args[3].reason}, generation ${args[3].expectedRowGeneration ?? "any"})`;
     this.log.push(`${write} issued, lands in ${delayMs}ms`);
-    const terminal = isTerminalReleaseReason(args[3]);
+    const terminal = isTerminalReleaseReason(args[3].reason);
     this.terminalWritesInFlight += terminal ? 1 : 0;
     try {
       await this.land(delayMs);
@@ -323,7 +323,7 @@ export async function runSessionRowInterleaving(
   const durability = options.durable ? "durable" : "volatile";
   const journal = new MemoryJournal([], durability);
   /** The peer daemon's writes: its own repository over the same database, landing at once. */
-  const peer = new DeviceSessionRepository(db, timer);
+  const peer = new DeviceSessionRepository({ db, timer });
   if (extended) {
     await db.deleteFrom("device_sessions").execute();
     manager.attachDaemonSessionId(DAEMON);
@@ -502,7 +502,7 @@ export async function runSessionRowInterleaving(
     const now = timer.now();
     switch (operation) {
       case "peer-terminal-row": {
-        await peer.markReleased(sessionId, "released", now, PEER_TERMINAL_REASON);
+        await peer.markReleased(sessionId, "released", now, { reason: PEER_TERMINAL_REASON });
         if ((await peer.getSession(sessionId))?.release_reason === PEER_TERMINAL_REASON) {
           peerTerminal = "decisive";
           repository.log.push(`the peer's terminal row landed (${peerTerminal})`);
@@ -664,7 +664,9 @@ export async function runSessionRowInterleaving(
           background(
             "re-issue",
             manager
-              .getOrCreateSession(sessionId, poolOf(manager), "android", undefined, true)
+              .getOrCreateSession(sessionId, poolOf(manager), "android", {
+                requireIssuedSession: true,
+              })
               .then(adoptIncarnation)
               .finally(() => {
                 reissuing = false;
@@ -900,7 +902,7 @@ export async function runSessionRowInterleaving(
     const unjudged = !ownTerminal && handedOffAfterRelease && issuingAtShutdown;
 
     repository.log.push("-- restart");
-    const store = new DeviceSessionRepository(db, timer);
+    const store = new DeviceSessionRepository({ db, timer });
     const liveDaemons = new Set([RESTARTED_DAEMON, PEER_DAEMON]);
     await store.markStaleActiveSessionsExpired(
       RESTARTED_DAEMON,

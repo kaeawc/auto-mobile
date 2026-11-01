@@ -29,7 +29,9 @@ const INDICATOR_TEXTS = [
 export async function analyseChooserCapture(capturePath = CHOOSER_CAPTURE_PATH) {
   const capture = JSON.parse(fs.readFileSync(capturePath, "utf8"));
   const hierarchy = capture.viewHierarchy;
-  const manager = new IntentChooserHandler(null, { create: () => new FakeAdbExecutor() });
+  const manager = new IntentChooserHandler(null, {
+    adbFactory: { create: () => new FakeAdbExecutor() },
+  });
   const parser = manager.parser;
   const props = (node: unknown): Props => parser.extractNodeProperties(node as never) as Props;
   const visit = (h: unknown, fn: (node: Mutable) => void) => {
@@ -94,7 +96,9 @@ export async function analyseChooserCapture(capturePath = CHOOSER_CAPTURE_PATH) 
     const apps: Record<string, unknown> = {};
     const labels: Record<string, unknown> = {};
     for (const pkg of [...packages, "com.example.nomatch"]) {
-      const probe = new IntentChooserHandler(null, { create: () => new FakeAdbExecutor() });
+      const probe = new IntentChooserHandler(null, {
+        adbFactory: { create: () => new FakeAdbExecutor() },
+      });
       const select = IntentChooserHandler.prototype.selectUniqueChooserRow;
       Object.defineProperty(probe, "selectUniqueChooserRow", {
         value: (...args: Parameters<IntentChooserHandler["selectUniqueChooserRow"]>) => {
@@ -110,7 +114,7 @@ export async function analyseChooserCapture(capturePath = CHOOSER_CAPTURE_PATH) 
         },
       });
       try {
-        const match = await probe.findAppInChooser(roots, pkg, h.packageName);
+        const match = await probe.findAppInChooser(roots, pkg, { hierarchyPackage: h.packageName });
         apps[pkg] = {
           ok: true,
           packageVerified: match.packageVerified,

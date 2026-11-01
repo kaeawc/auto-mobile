@@ -62,6 +62,13 @@ export interface InputRequestContext {
   requester?: () => string | undefined;
 }
 
+/** How an `input/*` frame's target is listed and whose frame it is. */
+export interface InputTargetResolveOptions {
+  /** Re-read the Android device list instead of a cached one; defaults off. */
+  bypassAndroidDeviceListCache?: boolean;
+  requester?: InputRequestContext["requester"];
+}
+
 /** Owner fence and device-key wait bound for one tracked `input/*` execution. */
 export interface InputDeviceGate {
   onDispatch?: () => void;
@@ -155,8 +162,7 @@ export interface InputDeviceGatingPorts {
     signal: AbortSignal | undefined,
     timeoutMs: number,
     send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-    onDispatch?: () => void,
-    label?: string,
+    options?: { onDispatch?: () => void; label?: string },
   ): Promise<T>;
   assertDeviceActionable: InputDeviceGating["assertDeviceActionable"];
   assertInputBindingGate: InputDeviceGating["assertInputBindingGate"];
@@ -230,16 +236,17 @@ export class InputDeviceGating {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: InputTargetAction,
-    bypassAndroidDeviceListCache: boolean = false,
-    requester?: () => string | undefined,
+    {
+      action,
+      bypassAndroidDeviceListCache = false,
+      requester,
+    }: InputTargetResolveOptions & { action: InputTargetAction },
   ): Promise<BootedDevice> {
     const targetDevice = await this.ports.selectInputTargetDevice(
       platform,
       deviceId,
       socketSessionId,
-      action,
-      bypassAndroidDeviceListCache,
+      { action, bypassAndroidDeviceListCache },
     );
     await this.ports.assertFrameTargetProven(targetDevice, action, requester);
     this.ports.assertBrokerConnectionInputTarget(socketSessionId, action, targetDevice.deviceId);
@@ -316,8 +323,10 @@ export class InputDeviceGating {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action: InputTargetAction,
-    bypassAndroidDeviceListCache: boolean = false,
+    {
+      action,
+      bypassAndroidDeviceListCache = false,
+    }: { action: InputTargetAction; bypassAndroidDeviceListCache?: boolean },
   ): Promise<BootedDevice> {
     const { devices: bootedDevices, deviceId: canonicalDeviceId } =
       await this.ports.discoverInputTargetDevices(
@@ -385,8 +394,7 @@ export class InputDeviceGating {
           executionKey,
           gate?.chainWait,
         ),
-      gate?.ownerSignal,
-      gate?.requester,
+      { ownerSignal: gate?.ownerSignal, requester: gate?.requester },
     );
   }
 
@@ -399,8 +407,7 @@ export class InputDeviceGating {
     toolName: string,
     origin: string,
     totalTimeoutMs: number,
-    budgetStartMs: number,
-    input?: InputRequestContext,
+    { budgetStartMs, input }: { budgetStartMs: number; input?: InputRequestContext },
   ): InputDeviceGate {
     const remainingMs = () => totalTimeoutMs - (this.ports.timer().now() - budgetStartMs);
     return {
@@ -459,20 +466,22 @@ export class InputDeviceGating {
     gesture: "Tap" | "Swipe",
     signal: AbortSignal | undefined,
     timeoutMs: number,
-    send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-    onDispatch?: () => void,
+    {
+      send,
+      onDispatch,
+    }: {
+      send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>;
+      onDispatch?: () => void;
+    },
   ): Promise<T> {
     return this.ports.runHeldInputOperation(
       `input/${gesture.toLowerCase()}`,
       signal,
       (_signal, dispatch) =>
-        this.ports.holdDispatchedInputRequest(
-          signal,
-          timeoutMs,
-          send,
-          dispatch,
-          `${gesture} request`,
-        ),
+        this.ports.holdDispatchedInputRequest(signal, timeoutMs, send, {
+          onDispatch: dispatch,
+          label: `${gesture} request`,
+        }),
       () => onDispatch?.(),
     );
   }
@@ -534,8 +543,7 @@ export class InputDeviceGating {
     toolName: string,
     targetDevice: BootedDevice,
     operation: InputOperation<T>,
-    ownerSignal?: AbortSignal,
-    requester?: () => string | undefined,
+    { ownerSignal, requester }: { ownerSignal?: AbortSignal; requester?: () => string | undefined },
   ): Promise<T> {
     // FUNNEL 2, ahead of the session lookup: a device-addressed input on a
     // quarantined serial must be refused WITH OR WITHOUT a session. The
@@ -576,7 +584,12 @@ export class InputDeviceGating {
     try {
       executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
       signal.throwIfAborted();
-      await this.ports.admitInputAsControlCall(execution, targetDevice.deviceId, sessionUuid);
+      await this.ports.admitInputAsControlCall(
+        execution,
+        targetDevice.deviceId,
+        sessionUuid,
+        ownerSignal,
+      );
       // The holder, readiness and admission checks passed, so the execution stays tracked as
       // control in flight on the session from here on. It is USE of the session (#10824) only once
       // the handler's own pre-dispatch checks passed too: a frame refused for a stale frame
@@ -622,20 +635,27 @@ export class InputDeviceGating {
    * Input on a held device is a control call on the holder's session: refused while the session is
    * suspect, lapsed or past its idle deadline, exactly as an MCP control call is (#11417). Input
    * on a device no session holds has no session to admit.
+   *
+   * Admission runs under the execution's signal and the caller's own (`ownerSignal`: the frame's
+   * socket close or client cancel, or the `ide/*` route's signal), passed explicitly rather than
+   * read ambiently (#15671).
    */
   async admitInputAsControlCall(
     execution: ActiveExecution,
     deviceId: string,
     holderSessionUuid: string | undefined,
+    ownerSignal: AbortSignal | undefined,
   ): Promise<void> {
     if (!holderSessionUuid) {
       return;
     }
+    const trackerSignal = execution.abortController.signal;
     await admitInputOnHolderSession({
       deviceId,
       holderSessionUuid,
       sessionManager: this.ports.daemonState().getSessionManager(),
       execution: sessionExecutionMetadataOf(execution),
+      signal: ownerSignal ? AbortSignal.any([trackerSignal, ownerSignal]) : trackerSignal,
     });
     // A release that landed while admission was awaited answers its own typed refusal.
     await this.ports.answeringSessionRelease(execution, async () =>

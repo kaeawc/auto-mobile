@@ -1,0 +1,61 @@
+{
+  "spec": {
+    "id": "n8",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "postStatus": ""
+    },
+    "requires": {
+      "platform": ["notifications"],
+      "permissions": [
+        {
+          "name": "notifications",
+          "purpose": "Tell you about new messages"
+        }
+      ]
+    },
+    "root": {
+      "type": "button",
+      "label": "Notify",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "notifications.post",
+          "args": {
+            "id": {
+              "value": "msg-1"
+            },
+            "channel": {
+              "value": "messages"
+            },
+            "title": {
+              "value": "Ada"
+            },
+            "actions": {
+              "value": [
+                {
+                  "id": "a-b",
+                  "label": "A"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "notifications": {
+      "channels": [
+        {
+          "id": "messages",
+          "name": "Messages",
+          "importance": "default"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].args.actions.value[0].id"
+}

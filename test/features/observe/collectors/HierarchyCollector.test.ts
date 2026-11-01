@@ -68,7 +68,7 @@ describe("HierarchyCollector", () => {
           import("../../../../src/features/observe/interfaces/ViewHierarchy").ViewHierarchy["getViewHierarchy"]
         >
       ) => {
-        expect(args[5]).toBe(readOptions);
+        expect(args[1]).toMatchObject(readOptions);
         calls.push("read");
         return hierarchy;
       };
@@ -139,7 +139,7 @@ describe("HierarchyCollector", () => {
       let readTimeout: number | undefined;
       const read = fakeViewHierarchy.getViewHierarchy.bind(fakeViewHierarchy);
       fakeViewHierarchy.getViewHierarchy = async (...args) => {
-        readTimeout = typeof args[5] === "number" ? args[5] : undefined;
+        readTimeout = args[1]?.timeoutMs;
         return read(...args);
       };
       await collector.collect(makeResult(), {

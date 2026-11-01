@@ -211,7 +211,10 @@ test("Android search uses the existing continuous drag, zero press and 100ms end
   const adb = new FakeAdbExecutor();
   const gesture = new ExecuteGesture(device, adb, new FakeTimer());
   expect(
-    await gesture.swipe(540, 2114, 540, 590, { duration: 600, searchScroll: true }),
+    await gesture.swipe(
+      { x1: 540, y1: 2114, x2: 540, y2: 590 },
+      { duration: 600, searchScroll: true },
+    ),
   ).toMatchObject({ success: true });
   expect(drag.mock.calls[0]?.[0]).toMatchObject({
     x1: 540,
@@ -230,7 +233,7 @@ test("ordinary Android swipe keeps its exact coordinates, duration and ADB route
   const drag = spyOn(AndroidCtrlProxyClient.prototype, "requestDrag");
   const adb = new FakeAdbExecutor();
   const gesture = new ExecuteGesture(device, adb, new FakeTimer());
-  expect(await gesture.swipe(540, 2114, 540, 505)).toMatchObject({
+  expect(await gesture.swipe({ x1: 540, y1: 2114, x2: 540, y2: 505 })).toMatchObject({
     success: true,
     x1: 540,
     y1: 2114,
@@ -251,11 +254,14 @@ test("correction: issue geometry fallback travels 1509px over the slow 600ms pre
   const adb = new FakeAdbExecutor();
   const gesture = new ExecuteGesture(device, adb, new FakeTimer());
   expect(
-    await gesture.swipe(540, 2114, 540, 505, {
-      searchScroll: true,
-      duration: 1,
-      searchScrollBounds: { left: 0, top: 304, right: 1080, bottom: 2316 },
-    }),
+    await gesture.swipe(
+      { x1: 540, y1: 2114, x2: 540, y2: 505 },
+      {
+        searchScroll: true,
+        duration: 1,
+        searchScrollBounds: { left: 0, top: 304, right: 1080, bottom: 2316 },
+      },
+    ),
   ).toMatchObject({ success: true, y1: 2114, y2: 605, duration: 600 });
   expect(adb.getExecutedCommands()).toEqual(["shell input swipe 540 2114 540 605 600"]);
   expect((2114 - 605) / (600 / 1000)).toBe(2515);

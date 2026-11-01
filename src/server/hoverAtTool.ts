@@ -117,7 +117,7 @@ export const hoverAtSchema = withJsonSchemaOverride(
   ).superRefine(validateHoverAtValue),
   (js) => {
     js.description =
-      "Hover a stylus or mouse over a path of points with no contact: hover enter, move and exit (Android, needs the hover_input_v1 capability; refused on iOS and on runners without it, never turned into a touch).";
+      "Hover a stylus or mouse over a path of points with no contact: hover enter, move and exit (Android, needs the hover_input_v1 capability or, for a stylus, a root adb shell with a writable /dev/uinput; refused on iOS and otherwise, never turned into a touch).";
   },
 );
 

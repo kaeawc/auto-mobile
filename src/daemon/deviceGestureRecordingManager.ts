@@ -272,8 +272,7 @@ const buildPlanFromSteps = (
   steps: PlanStep[],
   session: RecordingSession,
   planName: string,
-  stoppedAt: number,
-  omittedInput?: string,
+  { stoppedAt, omittedInput }: { stoppedAt: number; omittedInput?: string },
 ): { plan: Plan; stepCount: number } => {
   if (steps.length === 0) {
     throw new NoUserInputCapturedError(omittedInput);
@@ -317,46 +316,66 @@ const formatPlanName = (planName?: string): string => {
   return `recorded-plan-${timestamp}`;
 };
 
+/** Which session owns a new recording, and how owner UUIDs fold onto their base session. */
+export interface DeviceGestureRecordingOwnership {
+  ownerSessionUuid?: string;
+  baseSessionUuid?: (sessionUuid: string) => string;
+}
+
+/** Refuses joining a recording on another device or one another session owns. */
+function assertRecordingJoinable(
+  existing: Pick<RecordingSession, "deviceId" | "recordingId" | "ownerSessionUuid">,
+  device: BootedDevice,
+  { ownerSessionUuid, baseSessionUuid }: DeviceGestureRecordingOwnership,
+): void {
+  if (existing.deviceId !== device.deviceId) {
+    throw new Error(
+      `Recording already active on device ${existing.deviceId} (${existing.recordingId}). ` +
+        `Stop the existing recording before starting a new one on ${device.deviceId}.`,
+    );
+  }
+  const ownerMatches =
+    existing.ownerSessionUuid === ownerSessionUuid ||
+    deviceGestureRecordingOwnerVisible(
+      existing.ownerSessionUuid,
+      ownerSessionUuid,
+      baseSessionUuid ?? daemonBaseSessionUuid,
+    );
+  if (!ownerMatches) {
+    throw new ActionableError(
+      `A recording owned by another session is active on device ${device.deviceId}. Wait for it to stop before starting a recording.`,
+    );
+  }
+}
+
+/**
+ * @param device - Device to record on
+ * @param timer - Clock for recording timestamps
+ * @param idGenerator - Recording id source
+ * @param options.recorderFactory - Builds the recorder (defaults to a dual-track recorder)
+ * @param options.ownerSessionUuid - Session that owns the recording
+ * @param options.baseSessionUuid - Maps a session to the base session ownership compares
+ */
 export async function startDeviceGestureRecording(
   device: BootedDevice,
   timer: Timer = defaultTimer,
   idGenerator: IdGenerator = defaultIdGenerator,
-  recorderFactory: RecorderFactory = (target) => new DualTrackRecorder(target),
-  ownerSessionUuid?: string,
-  baseSessionUuid?: (sessionUuid: string) => string,
+  {
+    recorderFactory = (target) => new DualTrackRecorder(target),
+    ...ownership
+  }: DeviceGestureRecordingOwnership & { recorderFactory?: RecorderFactory } = {},
 ): Promise<DeviceGestureRecordingStartResult> {
   if (stoppingRecording) {
     await stoppingRecording.promise.catch(() => undefined);
-    return startDeviceGestureRecording(
-      device,
-      timer,
-      idGenerator,
+    return startDeviceGestureRecording(device, timer, idGenerator, {
       recorderFactory,
-      ownerSessionUuid,
-      baseSessionUuid,
-    );
+      ...ownership,
+    });
   }
-
-  const ownerMatches = (existingOwner: string | undefined): boolean =>
-    existingOwner === ownerSessionUuid ||
-    deviceGestureRecordingOwnerVisible(
-      existingOwner,
-      ownerSessionUuid,
-      baseSessionUuid ?? daemonBaseSessionUuid,
-    );
+  const { ownerSessionUuid } = ownership;
 
   if (activeRecording) {
-    if (activeRecording.deviceId !== device.deviceId) {
-      throw new Error(
-        `Recording already active on device ${activeRecording.deviceId} (${activeRecording.recordingId}). ` +
-          `Stop the existing recording before starting a new one on ${device.deviceId}.`,
-      );
-    }
-    if (!ownerMatches(activeRecording.ownerSessionUuid)) {
-      throw new ActionableError(
-        `A recording owned by another session is active on device ${device.deviceId}. Wait for it to stop before starting a recording.`,
-      );
-    }
+    assertRecordingJoinable(activeRecording, device, ownership);
     logger.info(
       `[DeviceGestureRecording] Recording already active (${activeRecording.recordingId}), returning existing session`,
     );
@@ -369,19 +388,8 @@ export async function startDeviceGestureRecording(
   }
 
   if (startingRecording) {
-    const { session, promise } = startingRecording;
-    if (session.deviceId !== device.deviceId) {
-      throw new Error(
-        `Recording already active on device ${session.deviceId} (${session.recordingId}). ` +
-          `Stop the existing recording before starting a new one on ${device.deviceId}.`,
-      );
-    }
-    if (!ownerMatches(session.ownerSessionUuid)) {
-      throw new ActionableError(
-        `A recording owned by another session is active on device ${device.deviceId}. Wait for it to stop before starting a recording.`,
-      );
-    }
-    return promise;
+    assertRecordingJoinable(startingRecording.session, device, ownership);
+    return startingRecording.promise;
   }
 
   if (device.platform !== "android") {
@@ -576,13 +584,10 @@ async function stopAndBuildResult(
 
   const stoppedAt = timer.now();
   const resolvedPlanName = formatPlanName(planName);
-  const { plan, stepCount } = buildPlanFromSteps(
-    steps,
-    session,
-    resolvedPlanName,
+  const { plan, stepCount } = buildPlanFromSteps(steps, session, resolvedPlanName, {
     stoppedAt,
-    exportMessage,
-  );
+    omittedInput: exportMessage,
+  });
   const planContent = yaml.dump(plan, {
     indent: 2,
     lineWidth: -1,

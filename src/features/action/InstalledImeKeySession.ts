@@ -110,7 +110,7 @@ export class InstalledImeKeySession {
     let result: Awaited<ReturnType<typeof this.performTap>> | undefined;
     let failure: unknown;
     try {
-      result = await this.performTap(catalog, imeId, key, editorBefore, signal);
+      result = await this.performTap(catalog, imeId, key, { editorBefore, signal });
     } catch (error) {
       failure = error;
     }
@@ -195,8 +195,7 @@ export class InstalledImeKeySession {
     catalog: SessionImeCatalog,
     imeId: string,
     key: string,
-    editorBefore: FocusedEditorEvidence | null,
-    signal?: AbortSignal,
+    { editorBefore, signal }: { editorBefore: FocusedEditorEvidence | null; signal?: AbortSignal },
   ) {
     const { tap } = this.dependencies;
     signal?.throwIfAborted();
@@ -390,6 +389,7 @@ function findVisibleImeKey(
     return null;
   }
   const matches: Array<{ x: number; y: number }> = [];
+  const search: ImeKeySearch = { parser, key, windows: imeWindows };
   // CtrlProxy can flatten all window nodes into the root hierarchy while retaining
   // only bounds/type metadata for each window. Traverse those nodes once, then
   // require both target-package ownership and containment in a real IME window.
@@ -406,7 +406,7 @@ function findVisibleImeKey(
         ownedAtDepth[depth - 1],
       );
       ownedAtDepth[depth] = owned;
-      const point = matchingImeKeyCenter(node, properties, parser, key, owned, imeWindows);
+      const point = matchingImeKeyCenter(node, properties, owned, search);
       const ancestorMatched = matchedAtDepth[depth - 1] ?? false;
       matchedAtDepth[depth] = ancestorMatched || point !== null;
       if (point && !ancestorMatched) {
@@ -427,14 +427,20 @@ function matchingImeWindows(hierarchy: ViewHierarchyResult, imeId: string) {
   );
 }
 
+/** What one visible-IME-key search holds fixed across every node it visits. */
+interface ImeKeySearch {
+  parser: DefaultElementParser;
+  key: string;
+  windows: NonNullable<ViewHierarchyResult["windows"]>;
+}
+
 function matchingImeKeyCenter(
   node: ViewHierarchyNode,
   properties: Record<string, unknown>,
-  parser: DefaultElementParser,
-  key: string,
   owned: boolean,
-  windows: NonNullable<ViewHierarchyResult["windows"]>,
+  search: ImeKeySearch,
 ): { x: number; y: number } | null {
+  const { parser, key, windows } = search;
   const searchable = toSearchable(properties);
   if (!Object.values(searchable.textSources).includes(key) && properties.contentDesc !== key) {
     return null;

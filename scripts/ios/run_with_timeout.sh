@@ -63,10 +63,14 @@ run_with_timeout() {
     # shell, so unsetting it here would drop it for every later call (#14497).
     ( unset -v AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE; "$@" ) 3>&- &
     local cmd_pid=$!
+    # Test seam (#16140): BATS cases that exercise the deadline set a fractional wait here so the
+    # watcher fires without spending the caller's whole budget, which callers keep validating as
+    # whole seconds. Production never sets it.
+    local wait_secs="${AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS:-$secs}"
 
     (
-      if [[ "$secs" =~ ^[0-9]+$ ]]; then
-        local deadline=$((SECONDS + 10#$secs))
+      if [[ "$wait_secs" =~ ^[0-9]+$ ]]; then
+        local deadline=$((SECONDS + 10#$wait_secs))
         while ((SECONDS < deadline)); do
           if ! kill -0 "$caller_pid" 2>/dev/null; then
             kill -TERM -"${cmd_pid}" 2>/dev/null || true
@@ -78,7 +82,7 @@ run_with_timeout() {
         done
       else
         # Preserve sleep's fractional and platform-specific duration syntax.
-        sleep "$secs"
+        sleep "$wait_secs"
       fi
       if kill -0 "${cmd_pid}" 2> /dev/null; then
         printf 'fired' > "${fired_marker}"

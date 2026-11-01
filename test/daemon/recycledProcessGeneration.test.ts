@@ -129,18 +129,17 @@ describe("isConfirmedRecycledProcess (issue #10108)", () => {
 
 describe("PsDaemonProcessFinder.readProcessGenerationToken", () => {
   test("reads the live PID's token from /proc on linux", () => {
-    const finder = new PsDaemonProcessFinder(
-      undefined,
-      "linux",
-      undefined,
-      (pid) => `linux:boot:${pid}`,
-    );
+    const finder = new PsDaemonProcessFinder(undefined, "linux", undefined, {
+      linuxProcessGenerationTokenForPid: (pid) => `linux:boot:${pid}`,
+    });
 
     expect(finder.readProcessGenerationToken(42)).toBe("linux:boot:42");
   });
 
   test("has no token source on an unsupported platform", () => {
-    const finder = new PsDaemonProcessFinder(undefined, "freebsd", undefined, () => "never-read");
+    const finder = new PsDaemonProcessFinder(undefined, "freebsd", undefined, {
+      linuxProcessGenerationTokenForPid: () => "never-read",
+    });
 
     expect(finder.readProcessGenerationToken(42)).toBeUndefined();
   });

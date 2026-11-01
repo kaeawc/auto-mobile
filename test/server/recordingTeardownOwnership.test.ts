@@ -62,11 +62,8 @@ class FakeSessionManager implements CleanupManager {
     });
   }
   releaseA(deviceId = device.deviceId): void {
-    this.release(
-      "session-a",
-      deviceId,
-      "idle-timeout",
-      {
+    this.release("session-a", deviceId, "idle-timeout", {
+      snapshot: {
         sessionId: "session-a",
         deviceId,
         releaseReason: "idle-timeout",
@@ -74,8 +71,7 @@ class FakeSessionManager implements CleanupManager {
         terminal: false,
         heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
       },
-      {},
-    );
+    });
   }
 }
 

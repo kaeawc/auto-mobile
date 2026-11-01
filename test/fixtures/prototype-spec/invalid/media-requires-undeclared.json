@@ -1,0 +1,63 @@
+{
+  "spec": {
+    "id": "m",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "feed": [
+        {
+          "video": {
+            "url": "https://example.com/clip.mp4"
+          }
+        }
+      ]
+    },
+    "state": {
+      "scrub": 0
+    },
+    "media": {
+      "players": {
+        "main": {
+          "kind": "video",
+          "source": {
+            "asset": "trailer"
+          },
+          "loop": false
+        },
+        "stream": {
+          "kind": "video",
+          "source": {
+            "url": "https://example.com/live/master.m3u8"
+          }
+        },
+        "feedItem": {
+          "kind": "video",
+          "source": {
+            "data": "/feed/0/video"
+          }
+        },
+        "podcast": {
+          "kind": "audio",
+          "source": {
+            "sample": "tone440"
+          },
+          "loop": true
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "x"
+        }
+      ]
+    }
+  },
+  "expectedPath": "media",
+  "expectedMessage": "Media players require media in requires.platform"
+}

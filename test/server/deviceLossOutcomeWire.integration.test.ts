@@ -69,19 +69,14 @@ describe("device loss MCP outcome", () => {
         async afterExecution() {},
       },
     });
-    ToolRegistry.registerDeviceAware(
-      toolName,
-      "device loss wire probe",
-      z.object({}),
-      async () => {
+    ToolRegistry.registerDeviceAware(toolName, "device loss wire probe", z.object({}), {
+      handler: async () => {
         throw new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554");
       },
-      {
-        outputSchema: z.object({
-          success: z.boolean(),
-        }),
-      },
-    );
+      outputSchema: z.object({
+        success: z.boolean(),
+      }),
+    });
     fixture = new McpTestFixture({
       sessionContext: {
         sessionId: "transport-a",
@@ -130,23 +125,18 @@ describe("device loss MCP outcome", () => {
         async afterExecution() {},
       },
     });
-    ToolRegistry.registerDeviceAware(
-      toolName,
-      "wrapped device loss wire probe",
-      z.object({}),
-      async (_device, _args, _progress, signal) => {
+    ToolRegistry.registerDeviceAware(toolName, "wrapped device loss wire probe", z.object({}), {
+      handler: async (_device, _args, _progress, signal) => {
         rememberDeviceLossAbort(
           signal!,
           new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554"),
         );
         throw new ActionableError("Failed to install app: operation cancelled");
       },
-      {
-        outputSchema: z.object({
-          success: z.boolean(),
-        }),
-      },
-    );
+      outputSchema: z.object({
+        success: z.boolean(),
+      }),
+    });
     fixture = new McpTestFixture({
       sessionContext: {
         sessionId: "transport-a",
@@ -194,11 +184,8 @@ describe("device loss MCP outcome", () => {
         async afterExecution() {},
       },
     });
-    ToolRegistry.registerDeviceAware(
-      toolName,
-      "swallowed device loss wire probe",
-      z.object({}),
-      async (_device, _args, _progress, signal) => {
+    ToolRegistry.registerDeviceAware(toolName, "swallowed device loss wire probe", z.object({}), {
+      handler: async (_device, _args, _progress, signal) => {
         rememberDeviceLossAbort(
           signal!,
           new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554"),
@@ -208,12 +195,10 @@ describe("device loss MCP outcome", () => {
           structuredContent: { success: false },
         };
       },
-      {
-        outputSchema: z.object({
-          success: z.boolean(),
-        }),
-      },
-    );
+      outputSchema: z.object({
+        success: z.boolean(),
+      }),
+    });
     fixture = new McpTestFixture({
       sessionContext: {
         sessionId: "transport-a",
@@ -265,17 +250,17 @@ describe("device loss MCP outcome", () => {
       toolName,
       "successful swallowed device loss wire probe",
       z.object({}),
-      async (_device, _args, _progress, signal) => {
-        rememberDeviceLossAbort(
-          signal!,
-          new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554"),
-        );
-        return {
-          content: [{ type: "text" as const, text: "operation completed" }],
-          structuredContent: { success: true },
-        };
-      },
       {
+        handler: async (_device, _args, _progress, signal) => {
+          rememberDeviceLossAbort(
+            signal!,
+            new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554"),
+          );
+          return {
+            content: [{ type: "text" as const, text: "operation completed" }],
+            structuredContent: { success: true },
+          };
+        },
         outputSchema: z.object({
           success: z.boolean(),
         }),

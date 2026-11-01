@@ -44,7 +44,7 @@ function harness(): Harness {
   server.testHooks.transport.handleConnection(socket);
   const gate = Promise.withResolvers<unknown>();
   const seen: Harness["seen"] = [];
-  server["handleLocalSocketRequest"] = (_request, _sessionId, signal, receivedAtMs) => {
+  server["handleLocalSocketRequest"] = (_request, { signal, receivedAtMs } = {}) => {
     seen.push({ signal, receivedAtMs });
     return gate.promise;
   };

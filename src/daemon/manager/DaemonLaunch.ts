@@ -43,10 +43,12 @@ export interface DaemonLaunchHost {
   readonly seams: DaemonManagerSeams;
   waitForReady(
     timeout: number,
-    signal?: AbortSignal,
-    shouldContinueWaiting?: () => boolean,
-    maxProbeDurationMs?: number,
-    launchedProcess?: { pid: number | undefined; launchNonce?: string },
+    options?: {
+      signal?: AbortSignal;
+      shouldContinueWaiting?: () => boolean;
+      maxProbeDurationMs?: number;
+      launchedProcess?: { pid: number | undefined; launchNonce?: string };
+    },
   ): Promise<boolean>;
   isLaunchedProcessReady(
     pid: number | undefined,
@@ -126,9 +128,12 @@ export class DaemonLaunch {
           },
           timeoutMs: attemptBudget,
           waitForReady: (timeoutMs, signal) =>
-            this.host.waitForReady(timeoutMs, signal, undefined, undefined, {
-              pid: launchedPid,
-              launchNonce,
+            this.host.waitForReady(timeoutMs, {
+              signal,
+              launchedProcess: {
+                pid: launchedPid,
+                launchNonce,
+              },
             }),
           isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
             this.host.isLaunchedProcessReady(pid, timeoutMs, signal, launchNonce),

@@ -359,13 +359,11 @@ export class IosCtrlProxyProcessClient implements RunnerLaunchProgressProbe {
     // can be recycled between capture and shutdown, so killing it blind could
     // tear down an unrelated process (#6579).
     if (
-      await this.isTerminationTargetForeign(
-        pid,
-        options.expectedDeviceId,
-        options.preKillDeadlineMs ?? deadline,
-        options.preKillDeadlineMs !== undefined,
-        options.expectedGenerationToken,
-      )
+      await this.isTerminationTargetForeign(pid, options.expectedDeviceId, {
+        deadline: options.preKillDeadlineMs ?? deadline,
+        failOpenAfterBudget: options.preKillDeadlineMs !== undefined,
+        expectedGenerationToken: options.expectedGenerationToken,
+      })
     ) {
       return;
     }
@@ -448,9 +446,11 @@ export class IosCtrlProxyProcessClient implements RunnerLaunchProgressProbe {
   private async isTerminationTargetForeign(
     pid: number,
     expectedDeviceId: string | undefined,
-    deadline?: number,
-    failOpenAfterBudget: boolean = false,
-    expectedGenerationToken?: string,
+    {
+      deadline,
+      failOpenAfterBudget = false,
+      expectedGenerationToken,
+    }: { deadline?: number; failOpenAfterBudget?: boolean; expectedGenerationToken?: string } = {},
   ): Promise<boolean> {
     // No launch token or an unknown/unreadable comparison preserves PID-only behavior.
     if (

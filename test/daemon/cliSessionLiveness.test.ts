@@ -67,7 +67,7 @@ describe("CLI-owned session liveness (#6870)", () => {
       async (sessionId, reason) => {
         reaped.push({ sessionId, reason });
       },
-      timer,
+      { timer },
     );
 
   it("defaults a freshly created session to the heartbeat liveness policy", async () => {

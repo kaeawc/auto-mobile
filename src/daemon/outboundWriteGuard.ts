@@ -51,13 +51,34 @@ export class OutboundWriteGuard {
   private drainedAtSample = 0;
   private watchdog: NodeJS.Timeout | undefined;
 
+  private readonly socket: OutboundQueueView;
+  private readonly timer: Timer;
+  private readonly onStalled: (stall: OutboundWriteStall) => void;
+  private readonly maxQueuedBytes: number;
+  private readonly stallTimeoutMs: number;
+
+  /**
+   * @param socket - The outbound queue being guarded
+   * @param timer - Clock for the stall watchdog
+   * @param onStalled - Called once when the reader stalls
+   * @param options.maxQueuedBytes - Cap on bytes queued behind the head frame
+   * @param options.stallTimeoutMs - No-progress window before a stall is reported
+   */
   constructor(
-    private readonly socket: OutboundQueueView,
-    private readonly timer: Timer,
-    private readonly onStalled: (stall: OutboundWriteStall) => void,
-    private readonly maxQueuedBytes: number = DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES,
-    private readonly stallTimeoutMs: number = DAEMON_RPC_SOCKET_WRITE_STALL_TIMEOUT_MS,
-  ) {}
+    socket: OutboundQueueView,
+    timer: Timer,
+    onStalled: (stall: OutboundWriteStall) => void,
+    {
+      maxQueuedBytes = DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES,
+      stallTimeoutMs = DAEMON_RPC_SOCKET_WRITE_STALL_TIMEOUT_MS,
+    }: { maxQueuedBytes?: number; stallTimeoutMs?: number } = {},
+  ) {
+    this.socket = socket;
+    this.timer = timer;
+    this.onStalled = onStalled;
+    this.maxQueuedBytes = maxQueuedBytes;
+    this.stallTimeoutMs = stallTimeoutMs;
+  }
 
   /**
    * Account for a frame about to be written. Returns undefined when it is

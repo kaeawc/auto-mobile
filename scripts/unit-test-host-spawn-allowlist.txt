@@ -11,6 +11,11 @@
 test/cli/termination.test.ts bun
 # mkfifo in a fresh temp dir: the launcher must refuse a package.json that is not a regular file.
 test/daemon/DaemonLauncher.test.ts mkfifo
+# mkfifo in a fresh temp dir: the audio source reader must refuse a FIFO without blocking on open.
+test/features/audio/readRegularFileCapped.test.ts mkfifo
+# Executes generated volume scripts locally with a cmd function fake and fixture output; no adb,
+# device, network, or writes. Verifies actual shell fallback and fail-closed read-back branches.
+test/features/media/AndroidVolume.test.ts sh
 # `scripts/all_fast_validate_checks.sh --list` prints the check registry and runs no check.
 test/lint/fastValidationRegistryCoverage.test.ts bash
 # `git ls-files -z`, read-only, to check tracked TypeScript import path casing.

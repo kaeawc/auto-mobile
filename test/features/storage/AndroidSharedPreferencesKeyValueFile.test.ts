@@ -325,7 +325,12 @@ describe("removeAndroidKeyValueDirect", () => {
       { appId: "com.example.app", fileName: "settings" },
       { key: "probeA", value: "1", type: "STRING" },
     );
-    await removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "probeA");
+    await removeAndroidKeyValueDirect(
+      adb,
+      "device-1",
+      { appId: "com.example.app", fileName: "settings" },
+      "probeA",
+    );
 
     const commands = adb.getExecutedCommands();
     const secondWrite = commands
@@ -344,7 +349,12 @@ describe("removeAndroidKeyValueDirect", () => {
     );
 
     await expect(
-      removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "probeA"),
+      removeAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        { appId: "com.example.app", fileName: "settings" },
+        "probeA",
+      ),
     ).resolves.toBeUndefined();
     expect(adb.getExecutedCommands()).not.toContainEqual(
       expect.stringContaining("base64 -d > shared_prefs/settings.xml"),
@@ -357,7 +367,9 @@ describe("clearAndroidKeyValueFileDirect", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult("<map/>", ""));
 
-    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", "settings");
+    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", {
+      fileName: "settings",
+    });
 
     const commands = adb.getExecutedCommands();
     expect(commands.some((entry) => entry.includes("cat shared_prefs/settings.xml"))).toBe(true);
@@ -374,7 +386,9 @@ describe("clearAndroidKeyValueFileDirect", () => {
       new Error("cat: shared_prefs/settings.xml: No such file or directory"),
     );
 
-    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", "settings");
+    await clearAndroidKeyValueFileDirect(adb, "device-1", "com.example.app", {
+      fileName: "settings",
+    });
 
     expect(adb.getExecutedCommands()).not.toContainEqual(
       expect.stringContaining("base64 -d > shared_prefs/settings.xml"),
@@ -483,7 +497,12 @@ describe("direct mutation serialization (#6292)", () => {
         { appId: "com.example.app", fileName: "settings" },
         { key: "added", value: "9", type: "STRING" },
       ),
-      removeAndroidKeyValueDirect(adb, "device-1", "com.example.app", "settings", "existing"),
+      removeAndroidKeyValueDirect(
+        adb,
+        "device-1",
+        { appId: "com.example.app", fileName: "settings" },
+        "existing",
+      ),
     ]);
 
     const finalXml = adb.currentXml();
@@ -593,11 +612,17 @@ describe("Android user targeting for the direct key-value fallback (#9964)", () 
     [
       "removeAndroidKeyValueDirect",
       (adb, userId) =>
-        removeAndroidKeyValueDirect(adb, "device-1", APP, "settings", "probeA", userId),
+        removeAndroidKeyValueDirect(
+          adb,
+          "device-1",
+          { appId: APP, fileName: "settings", userId: userId },
+          "probeA",
+        ),
     ],
     [
       "clearAndroidKeyValueFileDirect",
-      (adb, userId) => clearAndroidKeyValueFileDirect(adb, "device-1", APP, "settings", userId),
+      (adb, userId) =>
+        clearAndroidKeyValueFileDirect(adb, "device-1", APP, { fileName: "settings", userId }),
     ],
   ];
 

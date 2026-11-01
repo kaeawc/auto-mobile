@@ -49,14 +49,13 @@ test.each(["waiting", "in-flight", "absent", "prepared"])(
     });
     try {
       expect(
-        await hooks.recordAndTryRecoverCapturedDisconnect(
-          "device",
-          null,
-          0,
-          "session",
-          null,
-          undefined,
-        ),
+        await hooks.recordAndTryRecoverCapturedDisconnect("device", {
+          pooledDeviceAtDisconnect: null,
+          assignmentCountAtDisconnect: 0,
+          sessionIdAtDisconnect: "session",
+          sessionAtDisconnect: null,
+          forceGenerationAtDisconnect: undefined,
+        }),
       ).toEqual({
         incidentId: "incident",
         handled: branch === "waiting" || branch === "in-flight",
@@ -153,22 +152,29 @@ test.each([
     });
     try {
       expect(
-        await hooks.recordAndTryRecoverCapturedDisconnect(
-          deviceId,
-          pooledDevice,
-          assignmentCount,
-          sessionId,
-          session,
-          forceGeneration,
-        ),
+        await hooks.recordAndTryRecoverCapturedDisconnect(deviceId, {
+          pooledDeviceAtDisconnect: pooledDevice,
+          assignmentCountAtDisconnect: assignmentCount,
+          sessionIdAtDisconnect: sessionId,
+          sessionAtDisconnect: session,
+          forceGenerationAtDisconnect: forceGeneration,
+        }),
       ).toEqual({ incidentId, handled: hasSession && outcome !== "not-attempted" });
       expect(prepare.mock.calls).toEqual([[deviceId, pooledDevice]]);
       expect(skip.mock.calls).toEqual([[pooledDevice, deviceId, forceGeneration]]);
       expect(current.mock.calls).toEqual([
-        [deviceId, pooledDevice, assignmentCount, sessionId, session],
+        [
+          deviceId,
+          {
+            pooledDeviceAtDisconnect: pooledDevice,
+            assignmentCountAtDisconnect: assignmentCount,
+            sessionIdAtDisconnect: sessionId,
+            sessionAtDisconnect: session,
+          },
+        ],
       ]);
-      expect(current.mock.calls[0][1]).toBe(pooledDevice);
-      expect(current.mock.calls[0][4]).toBe(session);
+      expect(current.mock.calls[0][1].pooledDeviceAtDisconnect).toBe(pooledDevice);
+      expect(current.mock.calls[0][1].sessionAtDisconnect).toBe(session);
       expect(wait.mock.calls).toEqual([[sessionId, incidentId]]);
       expect(inFlight.mock.calls).toEqual([[sessionId]]);
       expect(recover.mock.calls).toEqual(hasSession ? [[deviceId, incidentId, pooledDevice]] : []);

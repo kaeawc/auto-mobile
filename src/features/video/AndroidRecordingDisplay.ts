@@ -21,6 +21,17 @@ export interface AndroidRecordingDisplay {
   warning?: string;
 }
 
+/** Carry the display warning onto a started recording; a rejected flag records no panel. */
+export function applyRecordingDisplayWarning(
+  active: { warning?: string; recordedPanel?: unknown },
+  recordingDisplay: AndroidRecordingDisplay | undefined,
+): void {
+  active.warning = recordingDisplay?.warning ?? active.warning;
+  if (active.warning?.includes("rejected --display-id")) {
+    active.recordedPanel = undefined;
+  }
+}
+
 /** A short failed screenrecord launch may prove the optional flag is unsupported. */
 export function rejectedScreenrecordDisplayFlag(
   exitCode: number | null | undefined,
@@ -90,9 +101,11 @@ function resolveWithoutMultiplePanels(
 export async function resolveAndroidRecordingDisplay(
   device: BootedDevice,
   adb: AdbCommandRunner,
-  request?: string,
-  signal?: AbortSignal,
-  timer: Pick<Timer, "now"> = defaultTimer,
+  {
+    request,
+    signal,
+    timer = defaultTimer,
+  }: { request?: string; signal?: AbortSignal; timer?: Pick<Timer, "now"> } = {},
 ): Promise<AndroidRecordingDisplay | undefined> {
   if ((device.displays?.panels.length ?? 0) < 2) {
     return resolveWithoutMultiplePanels(device, request);

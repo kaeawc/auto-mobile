@@ -302,11 +302,9 @@ export function createHostToolchainResourceHandler(
 export function registerHostToolchainResources(
   options: { iosDependencies?: IosDoctorDependencies } = {},
 ): void {
-  ResourceRegistry.register(
-    HOST_TOOLCHAIN_RESOURCE_URI,
-    "Host Toolchain",
-    "Read-only diagnostic status for Android and Apple host tooling.",
-    "application/json",
-    createHostToolchainResourceHandler(options),
-  );
+  ResourceRegistry.register(HOST_TOOLCHAIN_RESOURCE_URI, "Host Toolchain", {
+    description: "Read-only diagnostic status for Android and Apple host tooling.",
+    mimeType: "application/json",
+    handler: createHostToolchainResourceHandler(options),
+  });
 }

@@ -51,13 +51,9 @@ export function strokeAdmissionEndedError(method: string, admission: StrokeAdmis
         deviceId,
         lifted(`session ${holderSessionId} no longer holds the device`),
       )
-    : new InputDeviceOwnedError(
-        method,
-        deviceId,
-        undefined,
-        undefined,
-        lifted("a session acquired the device"),
-      );
+    : new InputDeviceOwnedError(method, deviceId, undefined, {
+        message: lifted("a session acquired the device"),
+      });
 }
 
 /** Timeout for the best-effort cancelling `gestureEnd` issued when a socket owning a gesture closes. */
@@ -133,13 +129,10 @@ export class InputStrokes {
         // Frame-identity-free: no frameContext is required or checked.
         checksFrame: false,
         around: (device, run) =>
-          this.ports.liftingStrokeOnSessionRefusal(
-            kind,
-            socketSessionId,
-            device,
-            args.gestureId,
+          this.ports.liftingStrokeOnSessionRefusal(kind, socketSessionId, device, {
+            gestureId: args.gestureId,
             run,
-          ),
+          }),
         dispatch: async ({ targetDevice, signal, dispatching, remainingTimeoutMs }) => {
           // Before the start's admission is captured: it reads the session this frame uses.
           dispatching?.();
@@ -158,13 +151,10 @@ export class InputStrokes {
     }
 
     if (socketSessionId) {
-      await this.ports.trackAckedGestureFrame(
-        kind,
-        socketSessionId,
-        targetDevice,
-        args.gestureId,
+      await this.ports.trackAckedGestureFrame(kind, socketSessionId, targetDevice, {
+        gestureId: args.gestureId,
         startAdmission,
-      );
+      });
     }
 
     return {
@@ -187,8 +177,7 @@ export class InputStrokes {
     kind: "start" | "move" | "end",
     socketSessionId: string,
     targetDevice: BootedDevice,
-    gestureId: string,
-    startAdmission: StrokeAdmission | undefined,
+    { gestureId, startAdmission }: { gestureId: string; startAdmission?: StrokeAdmission },
   ): Promise<void> {
     if (kind === "end") {
       this.ports.ownedGestures().onEndAcked(socketSessionId, targetDevice.deviceId, gestureId);
@@ -202,15 +191,10 @@ export class InputStrokes {
     // (#11541). Evaluated in the same turn the stroke is recorded, so no release or acquisition
     // can land between the check and the record.
     const admissionHolds = !startAdmission || this.ports.strokeAdmissionStillHolds(startAdmission);
-    await this.ports
-      .ownedGestures()
-      .onStartAcked(
-        socketSessionId,
-        targetDevice,
-        gestureId,
-        startAdmission?.holderSessionId,
-        admissionHolds,
-      );
+    await this.ports.ownedGestures().onStartAcked(socketSessionId, targetDevice, gestureId, {
+      holderSessionId: startAdmission?.holderSessionId,
+      admissionStillHolds: admissionHolds,
+    });
     if (startAdmission && !admissionHolds) {
       throw strokeAdmissionEndedError(GESTURE_FRAME_METHODS.start, startAdmission);
     }
@@ -232,8 +216,7 @@ export class InputStrokes {
     kind: "start" | "move" | "end",
     socketSessionId: string | undefined,
     targetDevice: BootedDevice,
-    gestureId: string,
-    run: () => Promise<T>,
+    { gestureId, run }: { gestureId: string; run: () => Promise<T> },
   ): Promise<T> {
     try {
       return await run();
@@ -323,7 +306,10 @@ export class InputStrokes {
       return started;
     }
     try {
-      await client.requestGestureEnd(args.gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
+      await client.requestGestureEnd(args.gestureId, 0, 0, {
+        cancel: true,
+        timeoutMs: OWNED_GESTURE_CANCEL_TIMEOUT_MS,
+      });
     } catch (error) {
       logger.warn(
         `Failed to lift gesture ${args.gestureId} on ${admission.deviceId} whose holder left ` +
@@ -374,7 +360,10 @@ export class InputStrokes {
       async () => {
         const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
         // Coordinates are ignored for a cancel (the runner lifts in place), so 0,0 is fine.
-        return client.requestGestureEnd(gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
+        return client.requestGestureEnd(gestureId, 0, 0, {
+          cancel: true,
+          timeoutMs: OWNED_GESTURE_CANCEL_TIMEOUT_MS,
+        });
       },
       `device:${targetDevice.deviceId}`,
     );
@@ -392,9 +381,9 @@ export class InputStrokes {
       case "start":
         return client.requestGestureStart({ gestureId, x, y, timeoutMs });
       case "move":
-        return client.requestGestureMove(gestureId, x, y, timeoutMs);
+        return client.requestGestureMove(gestureId, x, y, { timeoutMs });
       case "end":
-        return client.requestGestureEnd(gestureId, x, y, cancel, timeoutMs);
+        return client.requestGestureEnd(gestureId, x, y, { cancel, timeoutMs });
     }
   }
 }

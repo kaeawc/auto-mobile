@@ -192,7 +192,10 @@ for (const stillShuttingDown of [true, false]) {
       ownedSimulatorName: owned.name,
       shutdown: async () => {
         throw stillShuttingDown
-          ? new SimulatorStillShuttingDownError(owned.deviceId!, owned.name, "Shutting Down", 5000)
+          ? new SimulatorStillShuttingDownError(owned.deviceId!, owned.name, {
+              lastState: "Shutting Down",
+              waitedMs: 5000,
+            })
           : new Error("shutdown command failed");
       },
       erase: async () => {

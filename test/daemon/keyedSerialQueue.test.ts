@@ -57,7 +57,7 @@ describe("runKeyedSerial", () => {
   test("the tail is held while work is queued and cleared, re-arming idle close, once drained", async () => {
     const { state, events } = fixture();
     const gate = Promise.withResolvers<void>();
-    const run = runKeyedSerial(state, "k", () => gate.promise, "client");
+    const run = runKeyedSerial(state, "k", () => gate.promise, { idleCloseKey: "client" });
     await drainMicrotasks(20);
     expect(state.tails.has("k")).toBe(true);
     expect(events).toEqual(["acquired:client"]);
@@ -92,8 +92,9 @@ describe("runKeyedSerial", () => {
       async () => {
         events.push("waiter:ran");
       },
-      undefined,
-      { remainingMs: () => 50, timeoutError: (key) => new Error(`gave up on ${key}`) },
+      {
+        chainWait: { remainingMs: () => 50, timeoutError: (key) => new Error(`gave up on ${key}`) },
+      },
     );
     const caught = giveUp.then(
       () => undefined,

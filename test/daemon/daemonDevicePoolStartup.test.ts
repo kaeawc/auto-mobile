@@ -442,7 +442,9 @@ describe("Daemon startup device discovery", () => {
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: true,
     });
-    await persistence.markReleased("restored-ios-session", "released", 0, "daemon-restart");
+    await persistence.markReleased("restored-ios-session", "released", 0, {
+      reason: "daemon-restart",
+    });
     const verifiedDeviceIds: string[] = [];
     const iosVerifier = () => ({
       verifyIosDevice: async (deviceId: string) => {

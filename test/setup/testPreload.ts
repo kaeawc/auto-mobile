@@ -1,6 +1,7 @@
 import { cleanupTestDirectories } from "./testDirectories";
 import { afterAll } from "bun:test";
 import { testOverrides } from "../../src/utils/testOverrides";
+import { FakeEmulatorGrpcPortRegistry } from "../fakes/FakeEmulatorGrpcPortRegistry";
 import { rmSync } from "node:fs";
 import childProcess from "node:child_process";
 import { ensureAuxSocketDir } from "./auxSocketDir";
@@ -125,6 +126,9 @@ testOverrides.logSinksDisabled = () => isUnitTestPath(Bun.main);
 testOverrides.hostPortAvailabilityChecker = {
   isPortAvailable: () => true,
 };
+
+// Emulator gRPC leases default to an in-memory registry: unit tests must never create real lock files.
+testOverrides.emulatorGrpcPortRegistry = () => new FakeEmulatorGrpcPortRegistry();
 
 /**
  * Globally neutralize the per-session Android accessibility-service readiness

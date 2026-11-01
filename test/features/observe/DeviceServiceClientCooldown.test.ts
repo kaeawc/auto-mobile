@@ -62,7 +62,9 @@ class TestDeviceServiceClient extends DeviceServiceClient {
   ): Promise<void> {}
 
   registerPendingRequest(): Promise<boolean> {
-    return this.requestManager.register<boolean>("old", "test", 10000, () => false);
+    return this.requestManager.register<boolean>("old", "test", 10000, {
+      timeoutErrorFactory: () => false,
+    });
   }
 
   getConnectionAttempts(): number {

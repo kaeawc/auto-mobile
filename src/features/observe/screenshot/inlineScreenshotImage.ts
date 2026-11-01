@@ -56,9 +56,11 @@ function screenshotMimeType(
 export async function inlineScreenshotImage(
   path: string | undefined,
   metadata: ScreenshotImageMetadata,
-  signal?: AbortSignal,
-  fileSystem: ScreenshotImageFileSystem = defaultFileSystem,
-  capBytes = MAX_INLINE_SCREENSHOT_BYTES,
+  {
+    signal,
+    fileSystem = defaultFileSystem,
+    capBytes = MAX_INLINE_SCREENSHOT_BYTES,
+  }: { signal?: AbortSignal; fileSystem?: ScreenshotImageFileSystem; capBytes?: number } = {},
 ): Promise<InlineScreenshotImageResult> {
   throwIfAborted(signal);
   if (!path) {

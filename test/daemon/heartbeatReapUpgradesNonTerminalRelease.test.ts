@@ -111,7 +111,7 @@ describe("a non-terminal release whose teardown outlasts lease + grace, owner st
         reaped.push(reason);
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
+      { timer },
     );
     const session = await manager.createSession(SESSION, DEVICE, "android");
     manager.setClock(session, {
@@ -211,8 +211,8 @@ describe("a non-terminal release and the bounds the heartbeat monitor still keep
         reaped.push(reason);
         await manager.releaseSession(sessionId, reason);
       },
-      timer,
       {
+        timer,
         forceStuckRelease: async (sessionId) => {
           forcedAt.push(timer.now());
           manager.forceStuckRelease(sessionId);

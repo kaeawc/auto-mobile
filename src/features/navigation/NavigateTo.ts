@@ -123,7 +123,7 @@ export interface UIStateSetupContext {
 export type UIStateSetupFactory = (context: UIStateSetupContext) => UIStateSetup;
 
 const defaultUIStateSetupFactory: UIStateSetupFactory = ({ device, adb, timer, sessionUuid }) =>
-  new DefaultUIStateSetup(device, adb, undefined, timer, sessionUuid);
+  new DefaultUIStateSetup(device, adb, undefined, { timer, sessionUuid });
 
 /** Optional collaborators for {@link NavigateTo}; each defaults to the production implementation. */
 export interface NavigateToDependencies {
@@ -275,8 +275,7 @@ export class NavigateTo {
             backNavResult.backPresses,
             targetScreen,
             startTime,
-            progress,
-            signal,
+            { progress, signal },
           );
           throwIfAborted(signal);
           perf.end();
@@ -296,13 +295,10 @@ export class NavigateTo {
         perf.end();
         const knownScreens = await this.navigationManager.getKnownScreens();
         throwIfAborted(signal);
-        return this.noKnownPathResult(
-          currentScreen,
-          targetScreen,
-          knownScreens,
+        return this.noKnownPathResult(currentScreen, targetScreen, knownScreens, {
           startTime,
-          pathResult.unreplayableEdges,
-        );
+          unreplayableEdges: pathResult.unreplayableEdges,
+        });
       }
 
       const result = await this.followPath(
@@ -363,7 +359,7 @@ export class NavigateTo {
     const attempted = new Set<string>();
     let path = initialPath.path;
     for (;;) {
-      const outcome = await this.runPathSteps(path, context, executedPath, progress, signal);
+      const outcome = await this.runPathSteps(path, context, executedPath, { progress, signal });
       if (!outcome.retryFrom) {
         return outcome.result;
       }
@@ -392,8 +388,7 @@ export class NavigateTo {
     path: NavigationEdge[],
     context: PathRunContext,
     executedPath: string[],
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
+    { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
   ): Promise<PathStepsOutcome> {
     const { targetScreen, startTime, options, uiStateSetup } = context;
     const resultContext = { targetScreen, executedPath, startTime };
@@ -420,14 +415,10 @@ export class NavigateTo {
 
       // Execute navigation step
       try {
-        await this.replayStep(
-          edge,
-          options,
-          uiStateSetup,
-          executedPath,
-          { startTime, state: context.replayState },
+        await this.replayStep(edge, options, uiStateSetup, {
+          run: { startTime, state: context.replayState, executedPath },
           signal,
-        );
+        });
       } catch (error) {
         throwIfAborted(signal);
         logger.warn(`[NAVIGATE_TO] Error executing step: ${errorMessage(error)}`, error);
@@ -617,8 +608,7 @@ export class NavigateTo {
     currentScreen: string,
     targetScreen: string,
     knownScreens: string[],
-    startTime: number,
-    unreplayableEdges = 0,
+    { startTime, unreplayableEdges = 0 }: { startTime: number; unreplayableEdges?: number },
   ): NavigateToResult {
     const skipped =
       unreplayableEdges > 0
@@ -796,12 +786,9 @@ export class NavigateTo {
       // Keep the caller's injected ADB executor and timer for Android recovery.
       // PressButton retains the accessibility-service/ADB fallback without
       // observing, so this internal recovery does not advance any diff baseline.
-      const result = await new PressButton(this.device, this.adb, this.timer).press(
-        "back",
-        undefined,
-        undefined,
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back", {
         signal,
-      );
+      });
       throwIfAborted(signal);
       if (!result.success) {
         throw new Error(result.error ?? "Android back navigation failed");
@@ -845,8 +832,10 @@ export class NavigateTo {
     edge: NavigationEdge,
     interaction: ToolCallInteraction,
     options: NavigateToOptions,
-    progress: ReplayRun & { executedPath: string[] },
-    signal?: AbortSignal,
+    {
+      progress,
+      signal,
+    }: { progress: ReplayRun & { executedPath: string[] }; signal?: AbortSignal },
   ): Promise<void> {
     this.refuseCoordinateReplayAfterFailedSearch(interaction, progress.state);
     try {
@@ -956,10 +945,9 @@ export class NavigateTo {
     edge: NavigationEdge,
     options: NavigateToOptions,
     uiStateSetup: UIStateSetup,
-    executedPath: string[],
-    run: ReplayRun,
-    signal?: AbortSignal,
+    { run, signal }: { run: ReplayRun & { executedPath: string[] }; signal?: AbortSignal },
   ): Promise<void> {
+    const { executedPath } = run;
     throwIfAborted(signal);
     if (edge.interaction) {
       // Set up scroll position if required (must happen before UI state setup)
@@ -987,7 +975,7 @@ export class NavigateTo {
         ...edge.interaction,
         args: stripNavigationToolParams(edge.interaction.args),
       };
-      await this.replayToolCall(edge, interaction, options, { ...run, executedPath }, signal);
+      await this.replayToolCall(edge, interaction, options, { progress: run, signal });
       executedPath.push(`${edge.interaction.toolName}(${JSON.stringify(interaction.args)})`);
     } else if (edge.edgeType === "back") {
       logger.info(`[NAVIGATE_TO] Edge ${edge.from} → ${edge.to} is a Back edge, using back button`);
@@ -1005,8 +993,7 @@ export class NavigateTo {
     backPresses: number,
     targetScreen: string,
     startTime: number,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
+    { progress, signal }: { progress?: ProgressCallback; signal?: AbortSignal } = {},
   ): Promise<NavigateToResult> {
     // Execute back button presses
     const executedPath: string[] = [];

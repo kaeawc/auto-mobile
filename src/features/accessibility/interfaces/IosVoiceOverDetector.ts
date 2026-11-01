@@ -24,15 +24,13 @@ export interface IosVoiceOverDetector {
    *
    * @param deviceId - The device identifier (for caching)
    * @param client - CtrlProxy service for executing the detection command
-   * @param featureFlags - Feature flag service for override support (optional)
+   * @param options.featureFlags - Feature flag service for override support (optional)
    * @returns Promise resolving to true only when VoiceOver is confirmed enabled
    */
   isVoiceOverEnabled(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    signal?: AbortSignal,
+    options?: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal },
   ): Promise<boolean>;
 
   /**
@@ -49,15 +47,13 @@ export interface IosVoiceOverDetector {
    *
    * @param deviceId - The device identifier (for caching)
    * @param client - CtrlProxy service for executing the detection command
-   * @param featureFlags - Feature flag service for override support (optional)
+   * @param options.featureFlags - Feature flag service for override support (optional)
    * @returns Promise resolving to the confirmed boolean state, or null when indeterminate
    */
   resolveState(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    signal?: AbortSignal,
+    options?: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal },
   ): Promise<boolean | null>;
 
   /**
@@ -78,15 +74,13 @@ export interface IosVoiceOverDetector {
    *
    * @param deviceId - The device identifier (for caching)
    * @param client - CtrlProxy service for executing the detection command
-   * @param featureFlags - Feature flag service for override support (optional)
+   * @param options.featureFlags - Feature flag service for override support (optional)
    * @returns Promise resolving to true when VoiceOver is confirmed enabled or the probe is indeterminate
    */
   isVoiceOverActiveOrUnknown(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagReader,
-    timeoutMs?: number,
-    signal?: AbortSignal,
+    options?: { featureFlags?: FeatureFlagReader; timeoutMs?: number; signal?: AbortSignal },
   ): Promise<boolean>;
 
   /**

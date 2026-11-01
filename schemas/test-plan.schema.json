@@ -2038,6 +2038,24 @@
                       "additionalProperties": false
                     }
                   ]
+                },
+                "clockSkew": {
+                  "oneOf": [
+                    { "type": "string", "const": "unset" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "offsetSeconds": {
+                          "type": "integer",
+                          "minimum": -315360000,
+                          "maximum": 315360000,
+                          "anyOf": [{ "minimum": 3 }, { "maximum": -3 }]
+                        }
+                      },
+                      "required": ["offsetSeconds"],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "additionalProperties": false

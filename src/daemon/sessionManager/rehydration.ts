@@ -17,6 +17,7 @@ import { RecoveredTerminalReleaseIntents } from "../sessionManager/recoveredTerm
 import {
   type RehydrationRowOutcome,
   type SessionLifecycleSlots,
+  type PersistedSessionRecovery,
   type SharedSessionAssignment,
   persistedStableDeviceId,
 } from "./internalContracts";
@@ -32,9 +33,7 @@ export interface SessionRehydrationHost {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
-    listed: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    recovery: PersistedSessionRecovery & { listed?: DeviceSession },
   ): Promise<Session>;
   waitForSharedAssignment(
     sessionId: string,
@@ -83,14 +82,11 @@ export class SessionRehydration {
   ): Promise<Session> {
     const shared = this.host.newSharedAssignment(sessionId);
     const recoveryPromise = this.host
-      .recoverPersistedSession(
-        sessionId,
-        devicePool,
-        persisted.platform,
-        persisted,
-        "awaiting-owner",
+      .recoverPersistedSession(sessionId, devicePool, persisted.platform, {
+        listed: persisted,
+        initialOwnership: "awaiting-owner",
         shared,
-      )
+      })
       .finally(() => {
         shared.recoveryWait.resolve(undefined);
         if (this.host.sessionSlots.getAssignment(sessionId) === recoveryPromise) {

@@ -13,6 +13,7 @@ import {
 import { LifecycleConnectionInFlightError } from "./LifecycleConnectionInFlightError";
 import { heartbeatRequestTimeoutMs } from "./heartbeatCadence";
 import type { LatestHeartbeatAsk, ProxySessionState } from "./ProxySessionState";
+import type { RecoverableReconnectOptions } from "./ConnectionRecovery";
 
 /**
  * Proxy operations shared with routing, reconnects, release handling and recovery:
@@ -41,9 +42,7 @@ export interface HeartbeatKeeperPort {
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
-    fenceSessionNotFoundOnRetry?: boolean,
-    nonIdempotentToolName?: string,
-    signal?: AbortSignal,
+    options?: RecoverableReconnectOptions,
   ): Promise<T>;
   askSessionHeartbeat(
     sessionUuid: string,
@@ -173,7 +172,7 @@ export class HeartbeatKeeper {
             },
             sessionUuid,
             true,
-            false,
+            { fenceSessionNotFoundOnRetry: false },
           ),
         );
         if (sent && isCurrent()) {

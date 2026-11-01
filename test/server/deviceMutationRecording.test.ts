@@ -70,8 +70,11 @@ function harness() {
   const journal = new FakeDeviceMutationJournal(timer);
   const reader = new FakePriorReader();
   const recorder = new SessionMutationRecorder(journal, SCOPE);
-  const recording = new SessionDeviceMutationRecording(() => recorder, reader, {
-    appId: async () => "com.example",
+  const recording = new SessionDeviceMutationRecording(() => recorder, {
+    reader,
+    artifactReader: {
+      appId: async () => "com.example",
+    },
   });
   const dispatch = (
     name: string,
@@ -141,7 +144,7 @@ describe("broker tool-surface mutation recording", () => {
           },
           SCOPE,
         ),
-      new FakePriorReader(),
+      { reader: new FakePriorReader() },
     );
     const handler = journaledDeviceHandler(
       "clipboard",
@@ -205,7 +208,7 @@ describe("broker tool-surface mutation recording", () => {
           },
           SCOPE,
         ),
-      new FakePriorReader(),
+      { reader: new FakePriorReader() },
     );
     let acted = false;
     await dispatch(
@@ -228,7 +231,7 @@ describe("broker tool-surface mutation recording", () => {
     const { dispatch, journal } = harness();
     const reader = new FakePriorReader();
     const recovered = Promise.withResolvers<SessionMutationRecorder>();
-    const recording = new SessionDeviceMutationRecording(() => recovered.promise, reader);
+    const recording = new SessionDeviceMutationRecording(() => recovered.promise, { reader });
     let acted = false;
     const dispatched = dispatch(
       "clipboard",
@@ -250,7 +253,7 @@ describe("broker tool-surface mutation recording", () => {
   test("a non-broker session without a recorder proceeds without warning", async () => {
     const { dispatch } = harness();
     const reader = new FakePriorReader();
-    const recording = new SessionDeviceMutationRecording(() => undefined, reader);
+    const recording = new SessionDeviceMutationRecording(() => undefined, { reader });
     let acted = false;
     await dispatch(
       "clipboard",
@@ -275,8 +278,7 @@ describe("broker tool-surface mutation recording", () => {
       );
       const recording = new SessionDeviceMutationRecording(
         () => new SessionMutationRecorder(journal, SCOPE),
-        new FakePriorReader(),
-        { appId: async () => "com.example" },
+        { reader: new FakePriorReader(), artifactReader: { appId: async () => "com.example" } },
       );
       let acted = false;
       try {
@@ -336,8 +338,7 @@ describe("broker tool-surface mutation recording", () => {
           }
           return recorder;
         },
-        new FakePriorReader(),
-        { appId: async () => "com.example" },
+        { reader: new FakePriorReader(), artifactReader: { appId: async () => "com.example" } },
       );
       let acted = false;
       await expect(
@@ -361,9 +362,12 @@ describe("broker tool-surface mutation recording", () => {
   test("failed broker recorder recovery warns, skips capture and proceeds with dispatch", async () => {
     const { dispatch } = harness();
     const reader = new FakePriorReader();
-    const recording = new SessionDeviceMutationRecording(async () => {
-      throw new Error("native assignment unavailable");
-    }, reader);
+    const recording = new SessionDeviceMutationRecording(
+      async () => {
+        throw new Error("native assignment unavailable");
+      },
+      { reader },
+    );
     let acted = false;
     await dispatch(
       "clipboard",
@@ -385,7 +389,9 @@ describe("broker tool-surface mutation recording", () => {
   test("unreadable prior state is non-revertible even when support claims it can revert", async () => {
     const { recording, journal, reader } = harness();
     reader.error = new Error("reader unavailable");
-    await recording.beforeToolCall("clipboard", { action: "clear" }, DEVICE, SCOPE.sessionUuid);
+    await recording.beforeToolCall("clipboard", { action: "clear" }, DEVICE, {
+      sessionUuid: SCOPE.sessionUuid,
+    });
     expect(
       planDeviceMutationRevert(
         await journal.list(SCOPE),
@@ -400,12 +406,9 @@ describe("broker tool-surface mutation recording", () => {
 
   test("unobservable priors never reach platform revert-support predicates", async () => {
     const { recording, journal } = harness();
-    await recording.beforeToolCall(
-      "installApp",
-      { artifactPath: "/app.apk" },
-      DEVICE,
-      SCOPE.sessionUuid,
-    );
+    await recording.beforeToolCall("installApp", { artifactPath: "/app.apk" }, DEVICE, {
+      sessionUuid: SCOPE.sessionUuid,
+    });
     expect(
       planDeviceMutationRevert(
         await journal.list(SCOPE),
@@ -436,7 +439,9 @@ describe("broker tool-surface mutation recording", () => {
       },
       SCOPE,
     );
-    const recording = new SessionDeviceMutationRecording(() => recorder, new FakePriorReader());
+    const recording = new SessionDeviceMutationRecording(() => recorder, {
+      reader: new FakePriorReader(),
+    });
     await dispatch(
       "setDeviceState",
       { clock: {}, location: {} },
@@ -502,8 +507,10 @@ describe("broker tool-surface mutation recording", () => {
 
   test("legacy and sessionless calls perform no recording and no prior-value reads", async () => {
     const reader = new FakePriorReader();
-    const recording = new SessionDeviceMutationRecording(() => undefined, reader);
-    await recording.beforeToolCall("clipboard", { action: "copy" }, DEVICE, "legacy");
+    const recording = new SessionDeviceMutationRecording(() => undefined, { reader });
+    await recording.beforeToolCall("clipboard", { action: "copy" }, DEVICE, {
+      sessionUuid: "legacy",
+    });
     await recording.beforeToolCall("clipboard", { action: "clear" }, DEVICE);
     expect(reader.calls).toBe(0);
   });
@@ -519,7 +526,7 @@ describe("broker tool-surface mutation recording", () => {
       ["keyboard", { action: "listImes" }],
       ["keyboard", { action: "listProfiles" }],
     ] as const) {
-      await recording.beforeToolCall(name, args, DEVICE, SCOPE.sessionUuid);
+      await recording.beforeToolCall(name, args, DEVICE, { sessionUuid: SCOPE.sessionUuid });
     }
     expect(reader.calls).toBe(0);
     expect(await journal.list(SCOPE)).toEqual([]);
@@ -535,11 +542,18 @@ describe("broker tool-surface mutation recording", () => {
 
   test("read-only and pending adapters never resolve a recorder or its database", async () => {
     const reader = new FakePriorReader();
-    const recording = new SessionDeviceMutationRecording(() => {
-      throw new Error("read must not resolve a recorder");
-    }, reader);
-    await recording.beforeToolCall("keyboard", { action: "detect" }, DEVICE, SCOPE.sessionUuid);
-    await recording.beforeToolCall("setPreference", { key: "theme" }, DEVICE, SCOPE.sessionUuid);
+    const recording = new SessionDeviceMutationRecording(
+      () => {
+        throw new Error("read must not resolve a recorder");
+      },
+      { reader },
+    );
+    await recording.beforeToolCall("keyboard", { action: "detect" }, DEVICE, {
+      sessionUuid: SCOPE.sessionUuid,
+    });
+    await recording.beforeToolCall("setPreference", { key: "theme" }, DEVICE, {
+      sessionUuid: SCOPE.sessionUuid,
+    });
     expect(reader.calls).toBe(0);
   });
 
@@ -575,9 +589,13 @@ describe("broker tool-surface mutation recording", () => {
   test("first-write wins preserves the original prior value across repeated tool calls", async () => {
     const { recording, journal, reader } = harness();
     reader.priorValue = { state: "present", value: "original" };
-    await recording.beforeToolCall("clipboard", { action: "copy" }, DEVICE, SCOPE.sessionUuid);
+    await recording.beforeToolCall("clipboard", { action: "copy" }, DEVICE, {
+      sessionUuid: SCOPE.sessionUuid,
+    });
     reader.priorValue = { state: "present", value: "intermediate" };
-    await recording.beforeToolCall("clipboard", { action: "clear" }, DEVICE, SCOPE.sessionUuid);
+    await recording.beforeToolCall("clipboard", { action: "clear" }, DEVICE, {
+      sessionUuid: SCOPE.sessionUuid,
+    });
     expect(await journal.list(SCOPE)).toMatchObject([
       { priorValue: { state: "present", value: "original" } },
     ]);
@@ -597,10 +615,14 @@ describe("broker tool-surface mutation recording", () => {
     };
     try {
       reader.priorValue = { state: "present", value: "original" };
-      await recording.beforeToolCall("setDeviceState", args, DEVICE, SCOPE.sessionUuid);
+      await recording.beforeToolCall("setDeviceState", args, DEVICE, {
+        sessionUuid: SCOPE.sessionUuid,
+      });
       expect(list).toHaveBeenCalledTimes(1);
       reader.priorValue = { state: "present", value: "changed" };
-      await recording.beforeToolCall("setDeviceState", args, DEVICE, SCOPE.sessionUuid);
+      await recording.beforeToolCall("setDeviceState", args, DEVICE, {
+        sessionUuid: SCOPE.sessionUuid,
+      });
       expect(list).toHaveBeenCalledTimes(2);
       expect(reader.calls).toBe(1);
       expect((await journal.list(SCOPE)).map((entry) => entry.priorValue)).toEqual(
@@ -619,9 +641,11 @@ describe("broker tool-surface mutation recording", () => {
     const { dispatch, journal } = harness();
     const recorder = new SessionMutationRecorder(journal, SCOPE);
     const recording = new SessionDeviceMutationRecording(() => recorder, {
-      read: async () => {
-        controller.abort();
-        return [{ state: "absent" }];
+      reader: {
+        read: async () => {
+          controller.abort();
+          return [{ state: "absent" }];
+        },
       },
     });
     let acted = false;
@@ -655,7 +679,9 @@ describe("broker tool-surface mutation recording", () => {
       },
       SCOPE,
     );
-    const recording = new SessionDeviceMutationRecording(() => recorder, new FakePriorReader());
+    const recording = new SessionDeviceMutationRecording(() => recorder, {
+      reader: new FakePriorReader(),
+    });
     let acted = false;
     const handler = journaledDeviceHandler(
       "clipboard",
@@ -902,10 +928,14 @@ describe("review regression coverage", () => {
       }),
       "test-scope",
       { acquire: async () => {}, release: async () => {} },
-      new FakeTimer(),
-      gaps,
-      async () => {
-        throw new Error("base recovery failed");
+      {
+        timer: new FakeTimer(),
+        mutations: {
+          recordingGaps: gaps,
+          recorderFor: async () => {
+            throw new Error("base recovery failed");
+          },
+        },
       },
     );
     try {
@@ -951,7 +981,9 @@ describe("review regression coverage", () => {
       },
     );
 
-    await recording.beforeToolCall("keyboard", { action: "setProfile" }, DEVICE, SCOPE.sessionUuid);
+    await recording.beforeToolCall("keyboard", { action: "setProfile" }, DEVICE, {
+      sessionUuid: SCOPE.sessionUuid,
+    });
 
     expect(await journal.list(SCOPE)).toMatchObject([
       {
@@ -975,9 +1007,7 @@ describe("review regression coverage", () => {
       z.object({ action: z.string() }),
       async () => ({ content: [] }),
     );
-    await registry.callInternal("clipboard", { action: "clear" }, undefined, undefined, {
-      targetDevice: DEVICE,
-    });
+    await registry.callInternal("clipboard", { action: "clear" }, { targetDevice: DEVICE });
     const restore = registry.setPipelineOverridesForTesting({
       mutationRecording: {
         beforeToolCall: async (name) => {
@@ -1003,9 +1033,7 @@ describe("review regression coverage", () => {
     } finally {
       restore();
     }
-    await registry.callInternal("clipboard", { action: "clear" }, undefined, undefined, {
-      targetDevice: DEVICE,
-    });
+    await registry.callInternal("clipboard", { action: "clear" }, { targetDevice: DEVICE });
     expect(calls).toEqual(["clipboard", "override:clipboard", "clipboard"]);
   });
 
@@ -1016,7 +1044,9 @@ describe("review regression coverage", () => {
     for (const key of keys) {
       const { recording, journal } = harness();
       const value = key === "connectivity" ? { wifiEnabled: true } : {};
-      await recording.beforeToolCall("setDeviceState", { [key]: value }, DEVICE, SCOPE.sessionUuid);
+      await recording.beforeToolCall("setDeviceState", { [key]: value }, DEVICE, {
+        sessionUuid: SCOPE.sessionUuid,
+      });
       const entries = await journal.list(SCOPE);
       expect(entries.length).toBeGreaterThan(0);
       expect(entries.every((entry) => entry.toolName === "setDeviceState")).toBe(true);
@@ -1026,12 +1056,9 @@ describe("review regression coverage", () => {
   test("a journaled non-read adapter miss records an opaque unobservable prior", async () => {
     const { recording, journal, reader } = harness();
     reader.priorValue = { state: "present", value: "not an observable opaque prior" };
-    await recording.beforeToolCall(
-      "setDeviceState",
-      { futureSetting: true },
-      DEVICE,
-      SCOPE.sessionUuid,
-    );
+    await recording.beforeToolCall("setDeviceState", { futureSetting: true }, DEVICE, {
+      sessionUuid: SCOPE.sessionUuid,
+    });
     expect(await journal.list(SCOPE)).toMatchObject([
       { kind: "opaque", key: "tool:setDeviceState", priorValue: { state: "unobservable" } },
     ]);
@@ -1050,14 +1077,19 @@ describe("review regression coverage", () => {
   });
 
   test("transient actions have explicit exemptions and never resolve a recorder", async () => {
-    const recording = new SessionDeviceMutationRecording(() => {
-      throw new Error("transient action must not resolve a recorder");
-    }, new FakePriorReader());
+    const recording = new SessionDeviceMutationRecording(
+      () => {
+        throw new Error("transient action must not resolve a recorder");
+      },
+      { reader: new FakePriorReader() },
+    );
     for (const [name, exemption] of Object.entries(DEVICE_MUTATION_CALL_EXEMPTIONS)) {
       expect(exemption.status).toBe("notJournaled");
       expect(exemption.reason.trim().length).toBeGreaterThan(0);
       for (const action of exemption.actions) {
-        await recording.beforeToolCall(name, { action }, DEVICE, SCOPE.sessionUuid);
+        await recording.beforeToolCall(name, { action }, DEVICE, {
+          sessionUuid: SCOPE.sessionUuid,
+        });
       }
     }
     expect(deviceToolMutations("keyboard", { action: "selectIme" })).toHaveLength(1);
@@ -1077,12 +1109,9 @@ describe("review regression coverage", () => {
       observations: [],
       unobservable: [],
     });
-    await recording.beforeToolCall(
-      "installApp",
-      { artifactPath: "/app.apk" },
-      DEVICE,
-      SCOPE.sessionUuid,
-    );
+    await recording.beforeToolCall("installApp", { artifactPath: "/app.apk" }, DEVICE, {
+      sessionUuid: SCOPE.sessionUuid,
+    });
     const entries = await journal.list(SCOPE);
     expect(entries).toMatchObject([
       { kind: "installed-app", key: "com.example", priorValue: { state: "absent" } },
@@ -1118,21 +1147,21 @@ describe("review regression coverage", () => {
 
   test("readable state, rotation and screen reader priors use legacy device keys and the call signal", async () => {
     const signal = new AbortController().signal;
-    const reader = new DefaultMutationPriorReader(
-      {
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: {
         read: async (_device, _keys, actualSignal) => {
           expect(actualSignal).toBe(signal);
           return { fontScale: 1 };
         },
       },
-      () => ({ execute: async () => ({ success: false, action: "get" }) }),
-      () => ({
+      clipboardFor: () => ({ execute: async () => ({ success: false, action: "get" }) }),
+      biometricsFor: () => ({
         getBiometricEnrollmentState: async (actualSignal) => {
           expect(actualSignal).toBe(signal);
           return { supported: true, verified: true, enrollment: "enrolled" };
         },
       }),
-      () => ({
+      stateFor: () => ({
         getState: async (fields, actualSignal) => {
           expect(actualSignal).toBe(signal);
           expect(fields).toEqual([
@@ -1159,14 +1188,14 @@ describe("review regression coverage", () => {
           };
         },
       }),
-      () => ({
+      rotationFor: () => ({
         getRestoreState: async (actualSignal) => {
           expect(actualSignal).toBe(signal);
           return { accelerometerRotation: 1, userRotation: 0 };
         },
       }),
-      { screenReaderFor: () => ({ getEnabled: async () => false }) },
-    );
+      observationReaders: { screenReaderFor: () => ({ getEnabled: async () => false }) },
+    });
     const mutations = [
       ...deviceToolMutations("setDeviceState", {
         doNotDisturb: {},
@@ -1193,21 +1222,17 @@ describe("review regression coverage", () => {
 describe("existing cheap mutation prior readers", () => {
   test("iOS rotation records an unobservable prior without invoking Android orientation reads", async () => {
     let rotationReads = 0;
-    const reader = new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => ({
+    const reader = new DefaultMutationPriorReader({
+      rotationFor: () => ({
         getRestoreState: async () => {
           rotationReads++;
           return { orientation: "portrait" };
         },
       }),
-    );
+    });
     const journal = new FakeDeviceMutationJournal(new FakeTimer());
     const recorder = new SessionMutationRecorder(journal, SCOPE);
-    const recording = new SessionDeviceMutationRecording(() => recorder, reader);
+    const recording = new SessionDeviceMutationRecording(() => recorder, { reader });
     let acted = false;
     const handler = journaledDeviceHandler(
       "rotate",
@@ -1232,13 +1257,8 @@ describe("existing cheap mutation prior readers", () => {
     "keyboard setProfile captures active profile %s or records unobservable and still dispatches",
     async (activeProfileId) => {
       let profileReads = 0;
-      const reader = new DefaultMutationPriorReader(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        {
+      const reader = new DefaultMutationPriorReader({
+        observationReaders: {
           keyboardProfilesFor: () => ({
             listKeyboardProfiles: async () => {
               profileReads++;
@@ -1246,11 +1266,11 @@ describe("existing cheap mutation prior readers", () => {
             },
           }),
         },
-      );
+      });
       const journal = new FakeDeviceMutationJournal(new FakeTimer());
       const recording = new SessionDeviceMutationRecording(
         () => new SessionMutationRecorder(journal, SCOPE),
-        reader,
+        { reader },
       );
       let actions = 0;
       const handler = journaledDeviceHandler(
@@ -1288,24 +1308,19 @@ describe("existing cheap mutation prior readers", () => {
   );
 
   test("failed keyboard profile reads record unobservable without preventing the action", async () => {
-    const reader = new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+    const reader = new DefaultMutationPriorReader({
+      observationReaders: {
         keyboardProfilesFor: () => ({
           listKeyboardProfiles: async () => {
             throw new Error("profile unreadable");
           },
         }),
       },
-    );
+    });
     const journal = new FakeDeviceMutationJournal(new FakeTimer());
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, SCOPE),
-      reader,
+      { reader },
     );
     let acted = false;
     const handler = journaledDeviceHandler(
@@ -1329,16 +1344,16 @@ describe("existing cheap mutation prior readers", () => {
 
   test("verified biometric enrollment is read before mutation without recording transient auth state as enrollment", async () => {
     let reads = 0;
-    const reader = new DefaultMutationPriorReader(
-      { read: async () => ({}) },
-      () => ({ execute: async () => ({ success: false, action: "get" }) }),
-      () => ({
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({}) },
+      clipboardFor: () => ({ execute: async () => ({ success: false, action: "get" }) }),
+      biometricsFor: () => ({
         getBiometricEnrollmentState: async () => {
           reads++;
           return { supported: true, verified: true, enrollment: "not_enrolled" };
         },
       }),
-    );
+    });
     expect(await reader.read(DEVICE, [{ kind: "biometric-enrollment", key: "device" }])).toEqual([
       { state: "present", value: "not_enrolled" },
     ]);
@@ -1349,23 +1364,23 @@ describe("existing cheap mutation prior readers", () => {
   });
 
   test("unverified biometric enrollment remains non-revertible", async () => {
-    const reader = new DefaultMutationPriorReader(
-      { read: async () => ({}) },
-      () => ({ execute: async () => ({ success: false, action: "get" }) }),
-      () => ({
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({}) },
+      clipboardFor: () => ({ execute: async () => ({ success: false, action: "get" }) }),
+      biometricsFor: () => ({
         getBiometricEnrollmentState: async () => ({ supported: true, enrollment: "enrolled" }),
       }),
-    );
+    });
     expect(await reader.read(DEVICE, [{ kind: "biometric-enrollment", key: "device" }])).toEqual([
       { state: "unobservable" },
     ]);
   });
 
   test("restorable settings distinguish missing prior state from an absent setting", async () => {
-    const reader = new DefaultMutationPriorReader(
-      { read: async () => ({ fontScale: 1.25, timeFormat: null }) },
-      () => ({ execute: async () => ({ success: true, action: "get", text: "" }) }),
-    );
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({ fontScale: 1.25, timeFormat: null }) },
+      clipboardFor: () => ({ execute: async () => ({ success: true, action: "get", text: "" }) }),
+    });
     expect(
       await reader.read(DEVICE, [
         { kind: "device-setting", key: "fontScale" },
@@ -1382,9 +1397,12 @@ describe("existing cheap mutation prior readers", () => {
   });
 
   test("failed clipboard reads are unobservable, never absent", async () => {
-    const reader = new DefaultMutationPriorReader({ read: async () => ({}) }, () => ({
-      execute: async () => ({ success: false, action: "get" }),
-    }));
+    const reader = new DefaultMutationPriorReader({
+      settingsAccess: { read: async () => ({}) },
+      clipboardFor: () => ({
+        execute: async () => ({ success: false, action: "get" }),
+      }),
+    });
     expect(await reader.read(DEVICE, [{ kind: "clipboard", key: "device" }])).toEqual([
       { state: "unobservable" },
     ]);
@@ -1422,14 +1440,14 @@ test.each(["record", "marker", "gap", "mismatch", "recovery", "missing", "abort"
         }
         return stage === "missing" ? undefined : recorder;
       },
-      priorReader,
-      undefined,
-      undefined,
-      (uuid, reason) => {
-        marks.push([uuid, reason]);
-        if (stage === "gap") {
-          throw new Error("gap service unavailable");
-        }
+      {
+        reader: priorReader,
+        markUnrecorded: (uuid, reason) => {
+          marks.push([uuid, reason]);
+          if (stage === "gap") {
+            throw new Error("gap service unavailable");
+          }
+        },
       },
     );
     let acted = false;
@@ -1480,7 +1498,9 @@ test("createRecording forwards a gap for the call session, never the mismatched 
       },
     }),
   });
-  await recording.beforeToolCall("clipboard", { action: "clear" }, DEVICE, SCOPE.sessionUuid);
+  await recording.beforeToolCall("clipboard", { action: "clear" }, DEVICE, {
+    sessionUuid: SCOPE.sessionUuid,
+  });
   expect(marks).toEqual([
     [SCOPE.sessionUuid, expect.stringContaining("clipboard: Device mutation recorder must match")],
   ]);

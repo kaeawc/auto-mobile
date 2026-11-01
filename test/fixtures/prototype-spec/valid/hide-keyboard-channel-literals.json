@@ -1,0 +1,44 @@
+{
+  "id": "hide-keyboard-channel-literals",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["realtime"]
+  },
+  "channels": {
+    "chat": {
+      "kind": "websocket",
+      "url": "wss://chat.example.com/rooms/lobby",
+      "headers": {
+        "type": "hideKeyboard"
+      },
+      "routes": [
+        {
+          "when": {
+            "pointer": "",
+            "equals": {
+              "type": "hideKeyboard"
+            }
+          },
+          "actions": [
+            {
+              "type": "setState",
+              "key": "seen",
+              "value": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Chat"
+  },
+  "state": {
+    "seen": false
+  }
+}

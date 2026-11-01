@@ -17,11 +17,12 @@ enum PrototypeTooltips {
         collect(raw.objectFields ?? [:], path: "root")
         for node in nodes where ["tooltip", "drawer"].contains(node.value["type"]?.stringValue ?? "") {
             // Reuse the generated structural contract rather than maintaining a second key vocabulary.
+            // The subtree is already expanded, so drop the row keys keyed repeats added (#15815).
             do {
                 _ = try PrototypeContractValidator.inspect(.object([
                     "id": .string("prototype"),
                     "window": .object(["placement": .object(["type": .string("fullscreen")])]),
-                    "root": .object(node.value),
+                    "root": PrototypeRepeat.withoutRowKeys(.object(node.value)),
                 ]))
             } catch let PrototypeLoadError.invalidSpec(path, message) {
                 throw PrototypeContractValidator.invalid(node.path + path.dropFirst(4), message)
@@ -74,7 +75,7 @@ extension PrototypeNode {
         -> PrototypeNode?
     {
         guard visibleWhen?.holds(state) ?? true else { return nil }
-        if prototypeModalTypes.contains(type) || type == "bottomSheet",
+        if prototypeModalTypes.contains(type),
            !(openWhen?.holds(state) ?? false) { return nil }
         if id == wanted { return self }
         for entry in currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) {

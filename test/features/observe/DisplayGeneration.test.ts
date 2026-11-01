@@ -121,8 +121,7 @@ function harness(platform: "android" | "ios" = "android", singlePanel = false) {
       // Explicit fake: no notifyutil/simulator operation, including the setPosture UDID test.
       iosLockStateProbe: { read: async () => ({ kind: "unknown", reason: "error" }) },
     },
-    timer,
-    ids,
+    { timer, idGenerator: ids },
   );
   return { device, timer, adb, adbFactory, hierarchy, ids, client, panel, screen, cache };
 }
@@ -447,7 +446,11 @@ test("action prepared at surfaced generation N is rejected after transition to N
   const generation = prepared.display.generation;
   expect(generation).toBe(1);
   expect(generation).toBe(displayTransitions.identityRevision(h.device.deviceId));
-  const action = new BaseVisualChange(h.device, h.adb, h.timer, () => generation);
+  const action = new BaseVisualChange(h.device, {
+    adb: h.adb,
+    timer: h.timer,
+    renderedDisplayRevision: () => generation,
+  });
   h.panel("inner");
   expect((await h.screen.execute(options)).display.generation).toBe(generation + 1);
   let dispatched = false;
@@ -520,7 +523,11 @@ for (const platform of ["android", "ios"] as const) {
     if (!("display" in result)) {
       throw new Error("Expected a supported posture result");
     }
-    const action = new BaseVisualChange(h.device, h.adb, h.timer, () => result.display.generation);
+    const action = new BaseVisualChange(h.device, {
+      adb: h.adb,
+      timer: h.timer,
+      renderedDisplayRevision: () => result.display.generation,
+    });
     let dispatched = false;
     await expect(
       action.observedInteraction(

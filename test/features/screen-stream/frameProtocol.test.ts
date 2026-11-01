@@ -35,7 +35,7 @@ function push(
   onMalformed?: (error: MalformedFrameError) => void,
 ): DecodedEncodedVideo[] {
   const out: DecodedEncodedVideo[] = [];
-  decoder.push(chunk, onMalformed, undefined, (video) => out.push(video));
+  decoder.push(chunk, { onMalformed, onEncodedVideo: (video) => out.push(video) });
   return out;
 }
 
@@ -292,12 +292,11 @@ describe("FrameDecoder marker-based resynchronization", () => {
     const corrupt = Buffer.concat([corruptHeader(), pseudoRandomPayload(512)]);
     const record = Buffer.concat([encodeHeader(0, 8_000, 1, 32), Buffer.alloc(32, 0x09)]);
     const out: DecodedEncodedVideo[] = [];
-    decoder.push(
-      Buffer.concat([corrupt, record]),
-      (err) => errors.push(err),
-      (a) => audio.push(a.pcm16le),
-      (v) => out.push(v),
-    );
+    decoder.push(Buffer.concat([corrupt, record]), {
+      onMalformed: (err) => errors.push(err),
+      onAudio: (a) => audio.push(a.pcm16le),
+      onEncodedVideo: (v) => out.push(v),
+    });
     expect(errors).toHaveLength(1);
     expect(audio).toHaveLength(1);
     expect(audio[0].length).toBe(32);

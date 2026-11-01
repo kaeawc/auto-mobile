@@ -17,23 +17,25 @@ import type { SetTextOptions } from "../DeviceService";
 import type { TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
 import type {
   AndroidAccessibilityActionRequest,
+  AndroidActionRequestOptions,
   AndroidActivateAccessibilityLinkRequest,
 } from "./AndroidActionDispatcher";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import type { ImeCommitActionResult } from "./CtrlProxyText";
+import type { AndroidSettingsPutOptions } from "./AndroidClientRequests";
+import type { AndroidScreenshotRequestOptions } from "./AndroidScreenshotRequester";
 import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import type { PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
 import type {
-  PrototypeAppearanceOverride,
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
   PrototypeResult,
 } from "./ctrlProxyProtocol";
 import type { PackageInfoOptions } from "./CtrlProxyPackages";
-import type { DragRequest, SwipeRequest } from "../shared/types";
+import type { DispatchOptions, DragRequest, SwipeRequest } from "../shared/types";
 import type {
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
@@ -60,7 +62,9 @@ import type {
   A11yPackageInfoResult,
   A11yLaunchIntentResult,
   AndroidPerfTiming,
-  HierarchySyncDiagnostics,
+  HierarchySyncRequestOptions,
+  ImeCommitOptions,
+  LatestHierarchyOptions,
 } from "./types";
 import type { AndroidCtrlProxyClient } from "./AndroidCtrlProxyClient";
 
@@ -128,17 +132,14 @@ export interface AndroidCtrlProxy
     waitForFresh?: boolean,
     timeout?: number,
     perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
+    options?: LatestHierarchyOptions & { skipWaitForFresh?: boolean },
   ): Promise<AccessibilityHierarchyResponse>;
 
   requestHierarchySync(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number,
-    diagnostics?: HierarchySyncDiagnostics,
-    displayId?: number,
+    options?: HierarchySyncRequestOptions & { timeoutMs?: number },
   ): Promise<{
     hierarchy: AccessibilityHierarchy;
     perfTiming?: AndroidPerfTiming[];
@@ -174,24 +175,23 @@ export interface AndroidCtrlProxy
 
   requestInsertText(
     text: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: {
-      expectedSuffix?: string;
-      acceptsCaretNotPlaced?: boolean;
-      precedingState?: InsertTextState;
+    opts?: {
+      timeoutMs?: number;
+      perf?: PerformanceTracker;
+      options?: {
+        expectedSuffix?: string;
+        acceptsCaretNotPlaced?: boolean;
+        precedingState?: InsertTextState;
+      };
+      transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">;
     },
-    transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
   ): Promise<A11ySetTextResult>;
 
   commitViaIme(
     text: string,
     priorImeId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents" | "clearField",
-    trace?: boolean,
+    options?: ImeCommitOptions & { perf?: PerformanceTracker },
   ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
@@ -220,8 +220,7 @@ export interface AndroidCtrlProxy
     action: ImeAction,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: { abortSignal?: AbortSignal; onDispatch?: () => void },
   ): Promise<A11yImeActionResult>;
 
   requestSelectAll(timeoutMs?: number, perf?: PerformanceTracker): Promise<A11ySelectAllResult>;
@@ -230,7 +229,7 @@ export interface AndroidCtrlProxy
     action: string,
     resourceId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
+    options?: AndroidActionRequestOptions & { perf?: PerformanceTracker },
   ): Promise<A11yActionResult>;
 
   requestClickFocusedInput(
@@ -242,9 +241,7 @@ export interface AndroidCtrlProxy
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    options?: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal },
   ): Promise<A11yActionResult>;
 
   supportsNodeActionSelectors(perf?: PerformanceTracker, signal?: AbortSignal): Promise<boolean>;
@@ -264,26 +261,20 @@ export interface AndroidCtrlProxy
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    options?: DispatchOptions & { perf?: PerformanceTracker },
   ): Promise<A11yClipboardResult>;
 
   requestSettingsGet(
     namespace: SettingsNamespace,
     key: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    options?: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal },
   ): Promise<A11ySettingsGetResult>;
 
   requestSettingsPut(
     namespace: SettingsNamespace,
     key: string,
     value: string | null,
-    valueType?: SettingsValueType,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    options?: AndroidSettingsPutOptions & { valueType?: SettingsValueType },
   ): Promise<A11ySettingsPutResult>;
 
   requestSettingsList(
@@ -327,9 +318,7 @@ export interface AndroidCtrlProxy
     spec: PrototypeSpec,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
+    overrides?: PrototypeShowOverrides,
   ): Promise<PrototypeResult>;
   requestDismissPrototype(
     target: PrototypeDismiss,
@@ -393,10 +382,7 @@ export interface AndroidCtrlProxy
   requestScreenshot(
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    suppressObservationStreamPush?: boolean,
-    signal?: AbortSignal,
-    displayId?: number,
-    hidePrototypes?: boolean,
+    options?: AndroidScreenshotRequestOptions,
   ): Promise<ScreenshotResult>;
 
   requestScreenshotWithoutObservationStreamPush(

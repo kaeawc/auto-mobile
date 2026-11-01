@@ -495,6 +495,10 @@ internal fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeTooltipNode -> "tooltip"
     is PrototypeAdaptiveNode -> "adaptive"
     is PrototypeDrawerNode -> "drawer"
+    is PrototypeVideoPlayerNode -> "videoPlayer"
+    is PrototypeMapNode -> "map"
+    is PrototypeCastButtonNode -> "castButton"
+    is PrototypeCameraPreviewNode -> "cameraPreview"
   }
 
 private fun prototypeNodeText(

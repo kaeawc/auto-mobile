@@ -142,7 +142,8 @@ describe("assertFrameTargetIdentityProven", () => {
     requesterSessionUuid?: string,
     heldBySession = false,
   ) =>
-    assertFrameTargetIdentityProven(pool, device, "input/tap", heldBySession, {
+    assertFrameTargetIdentityProven(pool, device, "input/tap", {
+      heldBySession,
       sessions,
       requesterSessionUuid,
     });
@@ -179,16 +180,14 @@ describe("assertFrameTargetIdentityProven", () => {
       sessionManager: { getDeviceLabels: () => ({ label: "holder:label" }) },
     };
     await expect(
-      assertFrameTargetIdentityProven(
-        unassignable,
-        android(WIRELESS),
-        "ide/setKeyValue",
-        false,
-        ownership,
-      ),
+      assertFrameTargetIdentityProven(unassignable, android(WIRELESS), "ide/setKeyValue", {
+        heldBySession: false,
+        ...ownership,
+      }),
     ).rejects.toThrow("no proven identity");
     await expect(
-      assertFrameTargetIdentityProven(unassignable, android(WIRELESS), "ide/setKeyValue", false, {
+      assertFrameTargetIdentityProven(unassignable, android(WIRELESS), "ide/setKeyValue", {
+        heldBySession: false,
         ...ownership,
         sessions: [held, { ...held, sessionId: "other", assignedDevice: "PHONE-B" }],
       }),

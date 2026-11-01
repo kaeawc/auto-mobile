@@ -30,6 +30,7 @@ import {
   rememberActionsCompactMetadata,
   rememberToolResultsNoStructuredContent,
 } from "./connectionPresentation";
+import type { Platform } from "../../../models";
 import type { CallContext } from "./callContext";
 import { namesLiveSessionOfBoundPlan } from "./namesLiveSessionOfBoundPlan";
 
@@ -125,7 +126,7 @@ function knownPlatform(value: unknown): "android" | "ios" | undefined {
   return value === "android" || value === "ios" ? value : undefined;
 }
 
-function grantedPlatformOfSession(sessionUuid: string): "android" | "ios" | undefined {
+function grantedPlatformOfSession(sessionUuid: string): Platform | undefined {
   const session = defaultDaemonContext.sessionManager()?.peekSession(sessionUuid);
   return session?.assignedDevice
     ? defaultDaemonContext.devicePool()?.getDevice(session.assignedDevice)?.platform
@@ -167,9 +168,12 @@ function routeViaBinding(scope: RoutingScope, rawArgs: Record<string, unknown>):
     sessionId,
     toolParams,
     admittedSessionDevice,
-    tool.selectsActiveDevice === true,
-    tool.selectsActiveDevice !== true && (readOnly || managedBinding !== undefined),
-    readOnly,
+    {
+      selectingActiveDevice: tool.selectsActiveDevice === true,
+      deferForeignDevice:
+        tool.selectsActiveDevice !== true && (readOnly || managedBinding !== undefined),
+      readOnly,
+    },
   );
   return { routingSessionUuid, resolvedImplicitAutolockSessionUuid: undefined };
 }

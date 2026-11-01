@@ -52,13 +52,18 @@ export async function bindProvisionedDeviceSession(
   ctx: ProvisioningContext,
   args: ProvisionDeviceArgs,
   boot: DeviceBootResult,
-  sourceImage: DeviceInfo,
-  binding: {
-    timer: DeviceToolsDependencies["timer"];
-    totalDeadlineMs: number;
-    signal: AbortSignal;
-    readinessReservation: DeviceReadinessReservation | undefined;
-    settlementState: ProvisionSettlementState;
+  {
+    sourceImage,
+    binding,
+  }: {
+    sourceImage: DeviceInfo;
+    binding: {
+      timer: DeviceToolsDependencies["timer"];
+      totalDeadlineMs: number;
+      signal: AbortSignal;
+      readinessReservation: DeviceReadinessReservation | undefined;
+      settlementState: ProvisionSettlementState;
+    };
   },
 ): Promise<string> {
   const { readinessReservation, settlementState } = binding;
@@ -66,22 +71,24 @@ export async function bindProvisionedDeviceSession(
     binding.timer,
     binding.totalDeadlineMs,
     binding.signal,
-    "binding the device session",
-    bindUndoneIfUndelivered(
-      async (receipt) =>
-        ctx.bindBootedDeviceSession(
-          boot.device,
-          provisionSessionArgs(args),
-          sourceImage,
-          boot.processHandle,
-          // Our own stable-name readiness reservation must not deny our
-          // own bind when the pooled incarnation changed during readiness.
-          provisionSessionBindingOptions(args, readinessReservation, settlementState, receipt),
-        ),
-      () => boot,
-    ),
-    (settlement) => {
-      settlementState.bindingSettlements.push(settlement);
+    {
+      operation: bindUndoneIfUndelivered(
+        async (receipt, bindSignal) =>
+          ctx.bindBootedDeviceSession(boot.device, provisionSessionArgs(args), sourceImage, {
+            childProcess: boot.processHandle,
+            // Our own stable-name readiness reservation must not deny our
+            // own bind when the pooled incarnation changed during readiness.
+            ...provisionSessionBindingOptions(args, readinessReservation, settlementState, {
+              receipt,
+              signal: bindSignal,
+            }),
+          }),
+        () => boot,
+      ),
+      phase: "binding the device session",
+      onPendingSettlement: (settlement) => {
+        settlementState.bindingSettlements.push(settlement);
+      },
     },
   );
 }
@@ -90,10 +97,11 @@ function provisionSessionBindingOptions(
   args: ProvisionDeviceArgs,
   readinessReservation: DeviceReadinessReservation | undefined,
   settlementState: ProvisionSettlementState,
-  receipt: AcquisitionReceipt,
+  { receipt, signal }: { receipt: AcquisitionReceipt; signal: AbortSignal },
 ) {
   return {
     receipt,
+    signal,
     readinessReservationOwners: readinessReservation
       ? new Set([readinessReservation.owner])
       : undefined,

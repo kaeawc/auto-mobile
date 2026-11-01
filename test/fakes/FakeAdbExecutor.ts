@@ -95,6 +95,7 @@ export class FakeAdbExecutor implements AdbExecutor {
     const stderr = response.stderr;
 
     return {
+      ...response,
       stdout,
       stderr,
       toString:

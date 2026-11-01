@@ -313,7 +313,7 @@ describe("RecentApps inner result", () => {
     globalActionSpy!.mockImplementation(
       async (...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>) => {
         if (!undelivered) {
-          args[5]?.();
+          args[3]?.onDispatch?.();
         }
         if (reason === "thrown after send") {
           throw new Error(reason);

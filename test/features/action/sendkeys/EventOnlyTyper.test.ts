@@ -50,7 +50,7 @@ function harness() {
       calls.push({ plan, mutated, signal });
       return undefined;
     },
-    verifyKeyEventLetterCase: async (text, typed, signal, display, before) => {
+    verifyKeyEventLetterCase: async (text, typed, signal, { display, before } = {}) => {
       calls.push({ text, signal, display, before });
       return typed;
     },

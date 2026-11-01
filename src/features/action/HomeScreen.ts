@@ -94,17 +94,27 @@ export class HomeScreen extends BaseVisualChange {
 
   private readonly globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
 
+  private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
+
   constructor(
     device: BootedDevice,
-    adb: AdbExecutor | null = null,
-    timer: Timer = defaultTimer,
-    private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
-    collaborators: DisplayFenceDependencies & {
-      /** Defaults to the device's real CtrlProxy client. */
-      globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+    {
+      adb = null,
+      timer = defaultTimer,
+      simctl = new SimCtlClient(device),
+      collaborators = {},
+    }: {
+      adb?: AdbExecutor | null;
+      timer?: Timer;
+      simctl?: Pick<SimCtl, "executeCommandArgs">;
+      collaborators?: DisplayFenceDependencies & {
+        /** Defaults to the device's real CtrlProxy client. */
+        globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+      };
     } = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
+    this.simctl = simctl;
     this.device = device;
     this.globalActionClient = collaborators.globalActionClient;
   }
@@ -259,7 +269,9 @@ export class HomeScreen extends BaseVisualChange {
       return false;
     }
     if (
-      !(await isForegroundLauncher(launcherPackage, this.adb, this.device.deviceId, this.timer, {
+      !(await isForegroundLauncher(launcherPackage, this.adb, this.device.deviceId, {
+        timer: this.timer,
+        formFactor: this.device.formFactor,
         incarnationToken: deviceIncarnationToken(this.device.deviceId),
         signal,
         timeoutMs: 5000,
@@ -495,13 +507,11 @@ export class HomeScreen extends BaseVisualChange {
   ): Promise<string | undefined> {
     const { perf, frameContext } = options;
     try {
-      const result = await client.requestPressHome(
-        timeoutMs,
-        perf,
+      const result = await client.requestPressHome(timeoutMs, perf, {
         frameContext,
-        options.signal,
-        options.onDispatch,
-      );
+        signal: options.signal,
+        onDispatch: options.onDispatch,
+      });
       if (frameContext && result.error?.includes("Stale frame context")) {
         throw new ActionableError(result.error);
       }
@@ -618,7 +628,7 @@ export class HomeScreen extends BaseVisualChange {
       // earlier hierarchy cannot establish the Home postcondition.
       throwIfAborted(signal);
       const response = await awaitWhileRequestIsLive(
-        client.requestHierarchySync(perf, true, undefined, remainingMs),
+        client.requestHierarchySync(perf, true, undefined, { timeoutMs: remainingMs }),
         signal,
       );
       return response?.hierarchy;

@@ -52,7 +52,7 @@ function scriptedClient(options: {
   const signals: Array<AbortSignal | undefined> = [];
   return {
     signals,
-    requestDoubleTapCoordinates: async (_x, _y, _t, _frame, signal, onDispatch) => {
+    requestDoubleTapCoordinates: async (_x, _y, _t, { signal, onDispatch } = {}) => {
       signals.push(signal);
       if (options.dispatch) {
         onDispatch?.();
@@ -85,7 +85,9 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
         dispatch: true,
         reply: { success: false, error: "Tap timed out after 5000ms", dispatched: true },
       });
-      await expect(dispatchIosCoordinateTap(client, 202, 816, 50)).rejects.toThrow(INDETERMINATE);
+      await expect(
+        dispatchIosCoordinateTap(client, { x: 202, y: 816 }, { durationMs: 50 }),
+      ).rejects.toThrow(INDETERMINATE);
       const logged = warn.mock.calls.map((call) => String(call[0])).join("\n");
       expect(logged).toContain("tap at (202, 816) unconfirmed after");
       expect(logged).toContain("may stay busy");
@@ -110,7 +112,9 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
         acknowledged: false,
       },
     });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(
+    await expect(
+      dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50 }),
+    ).rejects.toThrow(
       `${INDETERMINATE}: the request was dispatched but no result was confirmed (Tap timed out after 5000ms). Do not retry automatically.`,
     );
   });
@@ -120,7 +124,9 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
       dispatch: true,
       reply: { success: false, error: "Tap timed out after 5000ms" },
     });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(INDETERMINATE);
+    await expect(
+      dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50 }),
+    ).rejects.toThrow(INDETERMINATE);
   });
 
   test("a socket close after the write is indeterminate", async () => {
@@ -128,7 +134,9 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
       dispatch: true,
       rejectWith: new Error("WebSocket connection closed"),
     });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(
+    await expect(
+      dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50 }),
+    ).rejects.toThrow(
       `${INDETERMINATE}: the request was dispatched but no result was confirmed (WebSocket connection closed)`,
     );
   });
@@ -138,9 +146,9 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
       dispatch: false,
       reply: { success: false, error: "Not connected", dispatched: false, acknowledged: false },
     });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(
-      "CtrlProxy iOS tap failed: Not connected",
-    );
+    await expect(
+      dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50 }),
+    ).rejects.toThrow("CtrlProxy iOS tap failed: Not connected");
   });
 
   test("a runner refusal after dispatch stays a plain failure", async () => {
@@ -148,9 +156,9 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
       dispatch: true,
       reply: { success: false, error: "Element gone", dispatched: true, acknowledged: true },
     });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50, "frame")).rejects.toThrow(
-      "CtrlProxy iOS tap failed: Element gone",
-    );
+    await expect(
+      dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50, frameContext: "frame" }),
+    ).rejects.toThrow("CtrlProxy iOS tap failed: Element gone");
   });
 
   test("an acknowledged reply with the gesture-bound code is indeterminate (#10016)", async () => {
@@ -158,19 +166,23 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
       dispatch: true,
       reply: { ...ACKED, error: "runner said something else", errorCode: "gesture_bound_exceeded" },
     });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(INDETERMINATE);
+    await expect(
+      dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50 }),
+    ).rejects.toThrow(INDETERMINATE);
   });
 
   test("an older runner's gesture-bound wording is indeterminate (#10016)", async () => {
     const client = scriptedClient({ dispatch: true, reply: { ...ACKED, error: STILL_EXECUTING } });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(INDETERMINATE);
+    await expect(
+      dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50 }),
+    ).rejects.toThrow(INDETERMINATE);
   });
 
   test("the query-bound error stays a plain failure (#10016)", async () => {
     const client = scriptedClient({ dispatch: true, reply: { ...ACKED, error: QUERY_BOUND } });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(
-      `CtrlProxy iOS tap failed: ${QUERY_BOUND}`,
-    );
+    await expect(
+      dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50 }),
+    ).rejects.toThrow(`CtrlProxy iOS tap failed: ${QUERY_BOUND}`);
   });
 
   test("a stale-frame refusal stays plain even from a client that does not report acknowledged", async () => {
@@ -178,15 +190,17 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
       dispatch: true,
       reply: { success: false, error: "Stale frame context for input/tap; observe again" },
     });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50, "frame")).rejects.toThrow(
-      "CtrlProxy iOS tap failed: Stale frame context",
-    );
+    await expect(
+      dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50, frameContext: "frame" }),
+    ).rejects.toThrow("CtrlProxy iOS tap failed: Stale frame context");
   });
 
   test("a dispatched runner ActionableError keeps its original throw", async () => {
     const refusal = new ActionableError("runner_busy: retry shortly");
     const client = scriptedClient({ dispatch: true, rejectWith: refusal });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toBe(refusal);
+    await expect(dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50 })).rejects.toBe(
+      refusal,
+    );
   });
 
   test("the caller's abort reason after dispatch is not rewritten", async () => {
@@ -195,14 +209,25 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
     const client = scriptedClient({ dispatch: true, rejectWith: reason });
     controller.abort(reason);
     await expect(
-      dispatchIosCoordinateTap(client, 1, 2, 50, undefined, { signal: controller.signal }),
+      dispatchIosCoordinateTap(
+        client,
+        { x: 1, y: 2 },
+        {
+          durationMs: 50,
+          options: {
+            signal: controller.signal,
+          },
+        },
+      ),
     ).rejects.toBe(reason);
   });
 
   test("a pre-dispatch transport throw is not reported as indeterminate", async () => {
     const failure = new Error("connect failed");
     const client = scriptedClient({ dispatch: false, rejectWith: failure });
-    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toBe(failure);
+    await expect(dispatchIosCoordinateTap(client, { x: 1, y: 2 }, { durationMs: 50 })).rejects.toBe(
+      failure,
+    );
   });
 
   test("forwards the signal, frame context and an explicit timeout", async () => {
@@ -215,10 +240,18 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
         return { success: true };
       },
     };
-    await dispatchIosCoordinateTap(client, 3, 4, 50, "epoch:1", {
-      signal: controller.signal,
-      timeoutMs: 7777,
-    });
+    await dispatchIosCoordinateTap(
+      client,
+      { x: 3, y: 4 },
+      {
+        durationMs: 50,
+        frameContext: "epoch:1",
+        options: {
+          signal: controller.signal,
+          timeoutMs: 7777,
+        },
+      },
+    );
     expect(seen[0]).toMatchObject({ x: 3, y: 4, duration: 50, timeoutMs: 7777 });
     expect(seen[0]?.frameContext).toBe("epoch:1");
     expect(seen[0]?.signal).toBe(controller.signal);
@@ -231,8 +264,7 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
         dispatch: true,
         reply: { success: false, error: "Tap timed out", dispatched: true, acknowledged: false },
       }),
-      1,
-      2,
+      { x: 1, y: 2 },
     ).catch((error: unknown) => error);
     expect((error as Error).message).toContain(INDETERMINATE);
     expect((error as Error).message).not.toContain("one tap was delivered");
@@ -246,14 +278,10 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
     onDispatch?: () => void,
   ) =>
     doubleTap
-      ? new CtrlProxyGestures(h.context).requestDoubleTapCoordinates(
-          1,
-          2,
-          50,
-          undefined,
+      ? new CtrlProxyGestures(h.context).requestDoubleTapCoordinates(1, 2, 50, {
           signal,
           onDispatch,
-        )
+        })
       : new CtrlProxyGestures(h.context).requestTapCoordinates({
           x: 1,
           y: 2,
@@ -332,8 +360,7 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "tap-forward", platform: "ios", name: "iPhone" },
       8765,
-      (url) => new FakeWebSocket(url, "none", 0, h.timer),
-      h.timer,
+      { wsFactory: (url) => new FakeWebSocket(url, "none", 0, h.timer), timer: h.timer },
     );
     const signal = new AbortController().signal;
     const onDispatch = () => {};
@@ -365,14 +392,10 @@ describe.each([false, true])("iOS CtrlProxy tap transport (doubleTap=%s)", (doub
 
 describe("iOS requestAction dispatch tracking (#9971)", () => {
   const act = (h: ReturnType<typeof createIosDelegateHarness>, onDispatch: () => void) =>
-    new CtrlProxyVoiceOver(h.context).requestAction(
-      "activate",
-      "com.app:id/go",
-      undefined,
-      50,
-      undefined,
-      { onDispatch },
-    );
+    new CtrlProxyVoiceOver(h.context).requestAction("activate", "com.app:id/go", undefined, {
+      timeoutMs: 50,
+      onDispatch,
+    });
 
   test("a timeout after the write is dispatched, unacknowledged and not retryable", async () => {
     const h = createIosDelegateHarness();
@@ -461,14 +484,11 @@ describe("tapAt on iOS (#9971)", () => {
       expect(result.success).toBe(true);
       expect(double).toHaveBeenCalledTimes(1);
       expect(single).toHaveBeenCalledTimes(0);
-      expect(double).toHaveBeenCalledWith(
-        10,
-        20,
-        undefined,
-        "epoch:1",
-        controller.signal,
-        expect.any(Function),
-      );
+      expect(double).toHaveBeenCalledWith(10, 20, undefined, {
+        frameContext: "epoch:1",
+        signal: controller.signal,
+        onDispatch: expect.any(Function),
+      });
       // Explicit-display settling may sleep after delivery; there is no double-tap gap.
       expect(timer.getSleepHistory()).not.toContain(200);
     },
@@ -611,8 +631,11 @@ describe("tapOn on iOS (#9971)", () => {
     const tap = spyOn(client, "requestTapCoordinates");
     const controller = new AbortController();
     try {
-      await tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, 1000, {
-        signal: controller.signal,
+      await tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, {
+        durationMs: 1000,
+        fenceOptions: {
+          signal: controller.signal,
+        },
       });
       expect(tap.mock.calls[0]?.[0]?.signal).toBe(controller.signal);
     } finally {
@@ -632,7 +655,7 @@ describe("tapOn on iOS (#9971)", () => {
     const { tapOn, instance } = createTapOn(client);
     try {
       await expect(
-        tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, 1000),
+        tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, { durationMs: 1000 }),
       ).rejects.toThrow(INDETERMINATE);
     } finally {
       instance.mockRestore();
@@ -649,7 +672,7 @@ describe("tapOn on iOS (#9971)", () => {
       const { tapOn, instance } = createTapOn(client);
       try {
         await expect(
-          tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, 1000),
+          tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, { durationMs: 1000 }),
         ).rejects.toThrow(INDETERMINATE);
       } finally {
         instance.mockRestore();
@@ -663,7 +686,7 @@ describe("tapOn on iOS (#9971)", () => {
     const { tapOn, instance } = createTapOn(client);
     try {
       await expect(
-        tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, 1000),
+        tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, { durationMs: 1000 }),
       ).rejects.toThrow(`CtrlProxy iOS tap failed: ${QUERY_BOUND}`);
     } finally {
       instance.mockRestore();
@@ -682,7 +705,7 @@ describe("tapOn on iOS (#9971)", () => {
     });
     try {
       await expect(
-        tapOn["executeiOSTapWithCoordinates"]("doubleTap", point.x, point.y, 1000),
+        tapOn["executeiOSTapWithCoordinates"]("doubleTap", point.x, point.y, { durationMs: 1000 }),
       ).rejects.toThrow(INDETERMINATE);
       expect(client.doubleTapHistory).toEqual([point]);
       expect(client.getTapHistory()).toEqual([]);

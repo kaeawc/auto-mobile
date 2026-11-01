@@ -365,7 +365,18 @@ function indexSource(
       node.expression.expression.text === "ToolRegistry" &&
       ["register", "registerDeviceAware"].includes(node.expression.name.text)
     ) {
-      const [name, , , handler, options] = node.arguments;
+      // The fourth argument is the bare handler or a grouped `{ handler, ...options }`
+      // registration (#11835); the legacy fifth-argument options form is still read.
+      const [name, , , registration, legacyOptions] = node.arguments;
+      const grouped =
+        registration && ts.isObjectLiteralExpression(registration) ? registration : undefined;
+      const handler = grouped
+        ? grouped.properties.find(
+            (property): property is ts.PropertyAssignment =>
+              ts.isPropertyAssignment(property) && property.name.getText(ast) === "handler",
+          )?.initializer
+        : registration;
+      const options = grouped ?? legacyOptions;
       if (
         name &&
         ts.isStringLiteral(name) &&
@@ -563,7 +574,8 @@ beforeAll(() => {
   );
 });
 test("every schema registration reaches a structured builder and no text-only builder", () => {
-  expect(sourceAudit.length).toBeGreaterThanOrEqual(26);
+  // 104 registrations today; a large drop means the indexer stopped recognising a registration form.
+  expect(sourceAudit.length).toBeGreaterThanOrEqual(100);
   expect(
     sourceAudit.filter(({ structured, offenders }) => !structured || offenders.length > 0),
   ).toEqual([]);
@@ -595,7 +607,8 @@ test("source guard captures nonDeviceHandler so session-resolved tools are audit
   const file = path.join(serverDirectory, "nonDevice.ts");
   const index = indexSource(
     file,
-    `ToolRegistry.registerDeviceAware("viaNonDevice", "", schema, async () => { throw new Error("x"); }, {
+    `ToolRegistry.registerDeviceAware("viaNonDevice", "", schema, {
+  handler: async () => { throw new Error("x"); },
   outputSchema: schema,
   nonDeviceHandler: async () => createJSONToolResponse({ success: true }),
 });`,
@@ -615,9 +628,9 @@ test("source guard follows factory helpers returned through object shorthand", (
 const { structured } = createGoodHandlers();
 const { textOnly } = createBadHandlers();
 const { mixed } = createMixedHandlers();
-ToolRegistry.register("good", "", schema, structured, { outputSchema: schema });
-ToolRegistry.register("bad", "", schema, textOnly, { outputSchema: schema });
-ToolRegistry.register("mixed", "", schema, mixed, { outputSchema: schema });`,
+ToolRegistry.register("good", "", schema, { handler: structured, outputSchema: schema });
+ToolRegistry.register("bad", "", schema, { handler: textOnly, outputSchema: schema });
+ToolRegistry.register("mixed", "", schema, { handler: mixed, outputSchema: schema });`,
   );
   const handlerIndex = indexSource(
     handlerFile,
@@ -653,7 +666,7 @@ test("follows a hook injected into a handler factory from a sibling handler set 
     `import { createBase, createStart } from "./injectedHandlers";
 const base = createBase();
 const { start } = createStart({ prepare: base.prepare });
-ToolRegistry.register("start", "", schema, (args) => start(args), { outputSchema: schema });`,
+ToolRegistry.register("start", "", schema, { handler: (args) => start(args), outputSchema: schema });`,
   );
   const handlerIndex = indexSource(
     handlerFile,
@@ -701,8 +714,8 @@ test("source guard follows named and star re-exports, including cyclic barrels",
     [
       "registration.ts",
       `import { good, bad } from "./barrel";
-ToolRegistry.register("good", "", schema, good, { outputSchema: schema });
-ToolRegistry.register("bad", "", schema, bad, { outputSchema: schema });`,
+ToolRegistry.register("good", "", schema, { handler: good, outputSchema: schema });
+ToolRegistry.register("bad", "", schema, { handler: bad, outputSchema: schema });`,
     ],
     ["barrel.ts", `export * from "./responses"; export * from "./cycle";`],
     ["cycle.ts", `export * from "./barrel";`],
@@ -741,8 +754,8 @@ test("source guard follows Windows cross-file handlers and rejects text-only bui
   const registrationIndex = indexSource(
     registrationFile,
     `import { good as structuredHandler, bad as textHandler } from "./handlers/responses";
-ToolRegistry.register("structured", "", schema, structuredHandler, { outputSchema: schema });
-ToolRegistry.registerDeviceAware("text", "", schema, textHandler, { outputSchema: schema });`,
+ToolRegistry.register("structured", "", schema, { handler: structuredHandler, outputSchema: schema });
+ToolRegistry.registerDeviceAware("text", "", schema, { handler: textHandler, outputSchema: schema });`,
     directory,
     path.win32,
   );
@@ -792,9 +805,9 @@ function raw() {
 function error() {
   return { content: [], isError: true };
 }
-ToolRegistry.register("mixed", "", schema, mixed, { outputSchema: schema });
-ToolRegistry.register("raw", "", schema, raw, { outputSchema: schema });
-ToolRegistry.register("error", "", schema, error, { outputSchema: schema });`;
+ToolRegistry.register("mixed", "", schema, { handler: mixed, outputSchema: schema });
+ToolRegistry.register("raw", "", schema, { handler: raw, outputSchema: schema });
+ToolRegistry.register("error", "", schema, { handler: error, outputSchema: schema });`;
   const audit = (input: string) => {
     const index = indexSource(file, input, directory, path.win32);
     const indexes = new Map([[sourceKey(file, path.win32), index]]);

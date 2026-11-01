@@ -92,7 +92,11 @@ refusal neither admits a request nor stores a receipt. Already-admitted
 preparations interrupted by shutdown store a terminal `session_broker_stopping`
 receipt with `retryable: true`, `retryAfterMs: 5000`,
 `retryRequires: "new_request_id"` (even while cleanup is pending); first reply and
-replays carry identical guidance.
+replays carry identical guidance. Operator `daemon/cleanupBrokerAvdSnapshots` maintenance
+refuses new prepare calls with `session_broker_maintenance` and the same retry hints,
+without storing a receipt. Its fence waits for all admitted preparations to settle
+before AVD discovery or snapshot deletion, and releases even when cleanup fails.
+Pool drain and idle expiry remain outside this fence.
 
 `session_restart_handoff_pending` and configured-but-unavailable refusals use the
 same hint, matching the service's five-second recovery interval. It is a pacing
@@ -489,6 +493,19 @@ receipts and admission reservations to the same SQLite database, using immediate
 transactions for cross-process admission; assignment generations and native journal
 operations stay private, and allocation indices are never public session
 identities. Provider-local SQLite only (no Talos PostgreSQL change).
+An executed migration unknown to this daemon disables registry exclusion for generic
+acquisition: the `files_only` diagnostic names the path, migrations, recorded writer
+versions and remedy, and a warning is logged once per process per registry path.
+Managed bindings are not enforced
+in files-only mode: this daemon can allocate a device held only by a managed binding,
+because allocation claim files alone decide ownership. The device-claims mirror skips
+reads, writes, opens and retries until daemon restart. Writers and ownership readers
+requiring current registry evidence still fail with non-retryable
+`registry_schema_unsupported`; its payload includes recorded writer versions and the
+schema guard runs before any migration or write. Migration provenance records only
+migrations executed by the current upgrade; earlier migrations remain unknown.
+In broker mode, `daemon/capabilities` describes the schema and its compatibility on
+an already-open registry connection without opening or migrating a registry.
 
 Broker mode holds a process-generation-aware host lock and refuses startup over
 unaccounted managed inventory or live generic sessions (drain the prior provider
@@ -524,5 +541,8 @@ inventory or an unconfirmed stop leave retirement pending for a later startup (a
 broker provider fails startup; an ordinary daemon warns and continues). The
 verification pass is bounded to 30 s. Broker records and their private scope
 survive; registry locations, SQL storage names and migration keys stay compatible.
+Unknown executed migrations are never upgraded or modified by an older daemon.
+Managed bindings are not enforced in files-only mode.
+Upgrade the daemons sharing managed devices to a release that includes these migrations.
 The retained native-resource budget variable is documented under
 [environment variables](../using/environment-variables.md).

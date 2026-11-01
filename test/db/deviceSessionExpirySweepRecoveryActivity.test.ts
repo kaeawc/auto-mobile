@@ -44,17 +44,17 @@ describe("expired-row sweep vs. restart-recovery activity", () => {
       override async markReleased(
         ...args: Parameters<DeviceSessionRepository["markReleased"]>
       ): Promise<void> {
-        if (args[3] === "expired") {
+        if (args[3].reason === "expired") {
           await super.recordRestartRecoveryActivity(SESSION, SWEEP_AT_MS);
         }
         return await super.markReleased(...args);
       }
     }
-    return new RacingRepository(db, timer);
+    return new RacingRepository({ db, timer });
   }
 
   test("a row whose deadline was extended after the sweep selected it stays recoverable", async () => {
-    const repo = new DeviceSessionRepository(db, timer);
+    const repo = new DeviceSessionRepository({ db, timer });
     await repo.upsertActiveSession({
       sessionUuid: SESSION,
       deviceId: "emulator-5554",
@@ -69,7 +69,7 @@ describe("expired-row sweep vs. restart-recovery activity", () => {
       hasReceivedHeartbeat: true,
     });
     // The device restarted: the session waits for it under a recoverable handoff reason.
-    await repo.markReleased(SESSION, "released", 2_000, DEVICE_RESTART);
+    await repo.markReleased(SESSION, "released", 2_000, { reason: DEVICE_RESTART });
 
     const recoverable =
       await sweepRacingRestartRecoveryActivity().listRecoverableSessions(SWEEP_AT_MS);

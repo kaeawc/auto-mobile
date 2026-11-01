@@ -43,7 +43,7 @@ describe("FailureEventRepository", () => {
   beforeEach(async () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
-    repo = new FailureEventRepository(db, timer);
+    repo = new FailureEventRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -63,7 +63,11 @@ describe("FailureEventRepository", () => {
         await repo.saveCrash(makeCrashEvent());
         await repo.saveAnr(makeAnrEvent());
       }
-      const fresh = new FailureEventRepository(db, timer, { crashMaxRows: cap, anrMaxRows: cap });
+      const fresh = new FailureEventRepository({
+        db,
+        timer,
+        retention: { crashMaxRows: cap, anrMaxRows: cap },
+      });
       await fresh.saveCrash(makeCrashEvent());
       await fresh.saveAnr(makeAnrEvent());
       expect(await countRows()).toEqual({ crashes: cap, anrs: cap });
@@ -576,7 +580,7 @@ describe("FailureEventRepository", () => {
       const oneDayMs = 24 * 60 * 60 * 1000;
       timer.setCurrentTime(10 * oneDayMs);
 
-      const toolCallRepo = new ToolCallRepository(db);
+      const toolCallRepo = new ToolCallRepository({ db });
       await toolCallRepo.recordToolCall({
         toolName: "old-tool",
         timestamp: new Date(1 * oneDayMs).toISOString(),

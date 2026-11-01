@@ -1,6 +1,7 @@
 import type { Server as NetServer, Socket } from "node:net";
 import { UnixSocketServer, type StrokeAdmission } from "../../../src/daemon/socketServer";
 import type { ProgressExtendableDeadline } from "../../../src/daemon/mcpRequestTimeout";
+import type { SocketRequestHandling } from "../../../src/daemon/socketServerParts/SocketAdmission";
 import type { BootedDevice } from "../../../src/models";
 import type { DaemonNotification, DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { ResourceUpdateTargets } from "../../../src/daemon/listChangedBroadcast";
@@ -38,7 +39,7 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     frame: DaemonResponse | DaemonNotification,
     onFlushed?: (error?: Error | null) => void,
   ): void {
-    this.writeFrameData(socket, sessionId, frame, onFlushed);
+    this.writeFrameData(socket, sessionId, frame, { onFlushed });
   }
 
   /** Replace the local (non-forwarded) request handler. */
@@ -52,8 +53,7 @@ export class UnixSocketServerHarness extends UnixSocketServer {
       sessionId: string,
       socket: Socket,
       request: DaemonRequest,
-      receivedAtMs: number,
-      onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
+      options: { receivedAtMs: number; handling?: SocketRequestHandling },
     ) => Promise<DaemonResponse | undefined>,
   ) {
     this.handleRequest = handler;
@@ -71,7 +71,7 @@ export class UnixSocketServerHarness extends UnixSocketServer {
     request: DaemonRequest,
     receivedAtMs: number,
   ): Promise<DaemonResponse | undefined> {
-    return this.handleRequest(sessionId, socket, request, receivedAtMs);
+    return this.handleRequest(sessionId, socket, request, { receivedAtMs });
   }
 
   /** Run the real local (non-forwarded) handler for one request. */

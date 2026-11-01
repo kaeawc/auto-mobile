@@ -44,32 +44,17 @@ function prototypeMutations(args: Record<string, unknown>, platform?: Platform):
 
 /**
  * Orchestration, composite and device-resource tools (#14359).
- * - `getAndroid`, `getApple`, `startDevice`, `provisionDevice`, `killDevice` and `deleteDevice` are
- *   registered without a device handler: they never reach the recorder, and a broker session
- *   refuses them (the binding journal owns native lifecycle).
- * - `barrier` only waits on a host-side coordinator.
- * - `criticalSection`, `executePlan`, `explore` and `navigateTo` run their device steps through the
- *   recorded dispatcher or through input primitives that change no persistent state; an
- *   `executePlan` whose cleanup clears app data records the same intent `launchApp` does.
+ * - Device lifecycle and coordination tools (`getAndroid`, `killDevice`, `barrier`,
+ *   `criticalSection`, `explore`, `navigateTo`, ...) are `notJournaled` in
+ *   `DEVICE_MUTATION_TOOL_COVERAGE` and never reach this adapter.
+ * - `executePlan` runs its device steps through the recorded dispatcher; one whose cleanup clears
+ *   app data records the same intent `launchApp` does.
  * - `setDeviceResources` and `reconcileDeviceResources` repair change optional apps, settings and
  *   simulator services whose prior state has no captured reader, so a call that applies resources
  *   records a `fallback:` intent. `restore` and report-only calls change nothing new.
  * - `prototype` records according to {@link prototypeMutations}; shows, patches, dismissals and
  *   reads of a session prototype are dismissed when the CtrlProxy client disconnects.
  */
-const NO_DEVICE_STATE_TOOLS: ReadonlySet<string> = new Set([
-  "getAndroid",
-  "getApple",
-  "startDevice",
-  "provisionDevice",
-  "killDevice",
-  "deleteDevice",
-  "barrier",
-  "criticalSection",
-  "explore",
-  "navigateTo",
-]);
-
 const ORCHESTRATION_MUTATIONS: Readonly<
   Record<string, (args: Record<string, unknown>, platform?: Platform) => ToolMutation[]>
 > = {
@@ -91,9 +76,6 @@ export function orchestrationToolMutations(
   args: Record<string, unknown>,
   platform?: Platform,
 ): ToolMutation[] | undefined {
-  if (NO_DEVICE_STATE_TOOLS.has(name)) {
-    return [];
-  }
   return Object.hasOwn(ORCHESTRATION_MUTATIONS, name)
     ? ORCHESTRATION_MUTATIONS[name](args, platform)
     : undefined;

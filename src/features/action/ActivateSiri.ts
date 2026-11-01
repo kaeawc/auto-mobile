@@ -48,7 +48,7 @@ export class ActivateSiri extends BaseVisualChange {
     timer: Timer = defaultTimer,
     dependencies: ActivateSiriDependencies = {},
   ) {
-    super(device, adb, timer, undefined, dependencies);
+    super(device, { adb, timer, displayFence: dependencies });
     this.iosClientProvider = dependencies.iosClientProvider ?? iosCtrlProxyClientFor;
     this.servicePreflight = dependencies.servicePreflight ?? { assertEnabled: async () => {} };
   }

@@ -165,6 +165,11 @@ export interface ScreenIdentity {
 /**
  * Represents the result of observing the device state
  */
+/** Which backend produced an iOS observation or action (#5159). */
+export type ObservationBackend = "sdk" | "xctest";
+/** Why XCTest stood in for the SDK observation bridge (#5159). */
+export type ObservationFallbackReason = "unavailable" | "unsupported";
+
 export type ObserveResult = {
   /** Applies to all UI content in this payload, including raw trees and projected labels. */
   importedPrototypeContent?: import("./ImportedPrototypeContent").ImportedPrototypeContent;
@@ -355,6 +360,14 @@ export type ObserveResult = {
 
   /** Best-effort stable identity for the currently visible screen. */
   screenIdentity?: ScreenIdentity;
+
+  /**
+   * iOS only, when the app registered an SDK observation bridge (#5159): `sdk` when its nodes are
+   * merged under the app node, `xctest` when the bridge did not answer and only XCTest ran.
+   */
+  backend?: ObservationBackend;
+  /** Why XCTest stood in for a registered bridge. */
+  fallbackReason?: ObservationFallbackReason;
 
   /**
    * Categorized elements from the view hierarchy

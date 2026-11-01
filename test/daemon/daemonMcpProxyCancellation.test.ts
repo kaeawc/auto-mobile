@@ -31,14 +31,11 @@ function config(clientFactory: () => FakeDaemonClient, timer = new FakeTimer()) 
 async function setup() {
   const timer = new FakeTimer();
   const socket = new FakeSocket();
-  const daemonClient = new DaemonClient(
-    "/fake/socket",
-    1000,
-    timer,
-    ISOLATED_DAEMON_RECOVERY,
-    null,
-    { idGenerator: new FakeIdGenerator() },
-  );
+  const daemonClient = new DaemonClient("/fake/socket", 1000, timer, {
+    recoveryOptions: ISOLATED_DAEMON_RECOVERY,
+    clientIdentity: null,
+    idGenerator: new FakeIdGenerator(),
+  });
   daemonClient.testHooks.attachSocket(socket);
   const fake = new FakeDaemonClient();
   fake.callTool = daemonClient.callTool.bind(daemonClient);
@@ -101,7 +98,7 @@ describe("MCP proxy cancellation", () => {
         method: DAEMON_CANCEL_REQUEST_METHOD,
         params: { requestId: requests[0].id },
       });
-      const signal = call.mock.calls[0][4];
+      const signal = call.mock.calls[0][3]?.signal;
       expect(signal).toBeInstanceOf(AbortSignal);
       expect(signal?.aborted).toBe(true);
       respond(requests[0].id);
@@ -189,7 +186,7 @@ describe("MCP proxy cancellation", () => {
     const proxy = new DaemonMcpProxy(config(() => clients.shift()!));
     const controller = new AbortController();
     try {
-      const result = proxy.callTool("tapOn", {}, undefined, undefined, controller.signal).then(
+      const result = proxy.callTool("tapOn", {}, undefined, { signal: controller.signal }).then(
         () => undefined,
         (error: unknown) => error,
       );

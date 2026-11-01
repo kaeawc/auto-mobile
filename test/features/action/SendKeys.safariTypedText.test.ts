@@ -50,7 +50,10 @@ function safariObservation(
 }
 
 const read = (observation: ReturnType<typeof safariObservation>) =>
-  readIosTypedTextField({ execute: async () => observation }, new FakeTimer());
+  readIosTypedTextField({
+    observer: { execute: async () => observation },
+    timer: new FakeTimer(),
+  });
 
 test("captured Safari native URL change verifies typing despite unchanged focused web input", async () => {
   // The before state is derived from the captured after-state, changing only the native URL value.

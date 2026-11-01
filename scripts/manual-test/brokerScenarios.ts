@@ -1,3 +1,4 @@
+import { batchClientDevice } from "./brokerBatch";
 import {
   brokerDeviceScenarios,
   type BrokerDeviceScenarioOps,
@@ -320,9 +321,10 @@ async function retryableFailure(ctx: BrokerScenarioContext) {
   unknown.config = {
     ...unknown.config,
     device: {
-      ...unknown.config.device,
+      schemaVersion: 1,
       platform: "ios",
       hardware: { kind: "archetype", archetype: "duo" },
+      os: batchClientDevice(unknown.config).os,
     },
   };
   const refused = await prepare(ctx, unknown);

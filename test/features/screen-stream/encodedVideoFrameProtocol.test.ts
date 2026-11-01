@@ -54,12 +54,11 @@ function drain(
   const audio: DecodedAudio[] = [];
   const video: DecodedEncodedVideo[] = [];
   const malformed: MalformedFrameError[] = [];
-  decoder.push(
-    chunk,
-    (err) => malformed.push(err),
-    (a) => audio.push(a),
-    (v) => video.push(v),
-  );
+  decoder.push(chunk, {
+    onMalformed: (err) => malformed.push(err),
+    onAudio: (a) => audio.push(a),
+    onEncodedVideo: (v) => video.push(v),
+  });
   return { audio, video, malformed };
 }
 

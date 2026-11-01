@@ -1,0 +1,293 @@
+Packages:
+  Package [com.google.android.apps.maps] (d0729fb):
+    appId=10174
+    pccId=-1
+    sharedUser=SharedUserSetting{a33d11c com.google.android.apps.maps/10174}
+    pkg=Package{96ec125 com.google.android.apps.maps}
+    codePath=/product/app/Maps
+    resourcePath=/product/app/Maps
+    legacyNativeLibraryDir=/product/app/Maps/lib
+    extractNativeLibs=false
+    primaryCpuAbi=arm64-v8a
+    secondaryCpuAbi=null
+    cpuAbiOverride=null
+    versionCode=1068516954 minSdk=28 targetSdk=37
+    minExtensionVersions=[]
+    versionName=26.14.09.891313448
+    hiddenApiEnforcementPolicy=2
+    usesNonSdkApi=false
+    splits=[base]
+    apkSigningVersion=3
+    flags=[ SYSTEM HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP KILL_AFTER_RESTORE RESTORE_ANY_VERSION LARGE_HEAP ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE HAS_DOMAIN_URLS PARTIALLY_DIRECT_BOOT_AWARE PRODUCT PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    forceQueryable=false
+    pageSizeCompat=0
+    queriesPackages=[com.google.android.apps.stargate, com.google.android.gms, com.google.android.googlequicksearchbox, com.google.android.carassistant, com.google.android.apps.speechservices, com.google.android.projection.gearhead, com.waze, com.felicanetworks.mfc, com.google.android.apps.walletnfcrel, ch.sbb.mobile.android.b2c, com.google.android.apps.mapslite, com.google.earth, com.google.android.apps.immersiveviewxr, com.google.android.remotesearch, com.google.android.tts, com.google.android.apps.nbu.paisa.user, com.google.android.apps.books, com.google.android.music, com.google.android.apps.youtube.music, com.pandora.android, com.spotify.music, com.google.android.apps.safetyhub, at.austrosoft.t4me.MB_BerlinTZBEU, com.bitaksi.musteri, com.blablalines, com.cabify.rider, com.careem.acma, com.citymobil, com.comuto, com.codigo.comfort, com.cornermation.calltaxi, com.dena.automotive.taxibell, com.didiglobal.passenger, com.gettaxi.android, com.gojek.app, com.grabtaxi.passenger, com.jcdecaux.allbikesnow, com.jcdecaux.vls.seville, com.olacabs.customer, com.ridedott.rider, com.ridewith, com.sixt.reservation, com.taxis99, com.ubercab, com.waymo.carapp, com.winit.merucab, ee.mtakso.client, fr.chauffeurprive, gr.androiddev.taxibeat, jp.co.nikko_data.japantaxi, me.lyft.android, taxi.android.client, com.jbhunt.jbhunt360mobile, com.loves.finder, com.pilottravelcenters.mypilot, com.sixdays.truckerpath, com.tatravelcenters.trucksmart, net.trucktrax.android.geotrax, be.antwerpen.velo, cc.beryl.basis, ch.publibike.app, co.bird.android, co.ponybikes.mercury, co.reby.app, com.bcycle, com.biketownpdx, com.donkeyrepublic.bike.android, com.eightd.biximobile, com.eightd.nrm, com.escooterapp, com.gopoppy.app, com.helbiz.android, com.hhyu.neuron, com.jcdecaux.vls.bruxelles, com.jcdecaux.vls.lyon, com.jcdecaux.vls.nantes, com.limebike, com.motivateco.capitalbikeshare, com.motivateco.gobike, com.motivateco.hubway, com.pgt.veoride, com.roll_client, com.superpedestrian.link, com.tembici.ecobici, com.tier.app, com.transpole.mobi, com.urbansharing.citybike.milan, com.zaragoza.bizi, com.zeus.app, de.bahn.callabike, de.nextbike, de.regiorad.stuttgart, de.stadtrad.hamburg, de.stadtrad.lueneburg, de.tretty.app, fi.hsl.app, io.birota.zoov, io.voiapp.voi, jp.docomo_cycle.bikeshare, net.mibici.jalisco, nl.cykl.cykl_menu, no.urbaninfrastructure.bysykkel, pbsc.bikes, pbsc.cyclefinder.tembici, pm.spin, qickscooters.app, tw.com.sstc.youbike, tw.com.youbike.plus, uk.gov.tfl.cyclehire, zeuscroatia.app, zeusitaly.app, zeusnorway.app, zeussweden.app, com.google.android.apps.internal.betterbug, com.fitbit.FitbitMobile, com.google.android.glasses.core, com.google.android.projection.core, com.google.ambient.streaming, com.google.android.apps.maps, com.google.android.apps.chrome, com.whatsapp, jp.naver.line.android, com.facebook.orca, com.google.android.apps.messaging, com.samsung.android.messaging, org.telegram.messenger, com.viber.voip, com.instagram.android, com.teslamotors.tesla, com.kakao.talk, com.garmin.android.apps.connectmobile]
+    queriesIntents=[Intent { act=android.intent.action.SEND dat=content://*/... typ=*/* }, Intent { act=android.intent.action.SENDTO }, Intent { act=android.intent.action.GET_CONTENT }, Intent { act=android.intent.action.PICK }, Intent { act=android.intent.action.DIAL }, Intent { act=android.media.action.IMAGE_CAPTURE }, Intent { act=android.speech.RecognitionService }, Intent { act=android.intent.action.VIEW cat=[android.intent.category.BROWSABLE] dat=https:/... }, Intent { act=android.intent.action.BUG_REPORT }, Intent { act=androidx.window.extensions.layout.EngagementModeService }, Intent { act=com.android.setupwizard.action.PARTNER_CUSTOMIZATION }, Intent { act=com.google.android.setupcompat.restore.restoreprogress.RESTORE_PROGRESS_SERVICE_ACTION }]
+    scannedAsStoppedSystemApp=true
+    supportsScreens=[small, medium, large, xlarge, resizeable, anyDensity]
+    usesOptionalLibraries:
+      com.android.extensions.xr
+      android.ext.adservices
+      androidx.window.extensions
+      androidx.window.sidecar
+    usesOptionalNativeLibraries:
+      libOpenCL.so
+      libOpenCL-car.so
+      libOpenCL-pixel.so
+    usesLibraryFiles:
+      /system_ext/framework/androidx.window.extensions.jar
+      /system_ext/framework/androidx.window.sidecar.jar
+    timeStamp=2026-06-10 19:20:04
+    lastUpdateTime=2026-10-29 07:19:58
+    installerPackageName=null
+    installerPackageUid=-1
+    initiatingPackageName=null
+    originatingPackageName=null
+    packageSource=0
+    appMetadataFilePath=null
+    appMetadataSource=0
+    signatures=PackageSignatures{a9fb2fa version:3, signatures:[ef3d224c], past signatures:[]}
+    installPermissionsFixed=false
+    pkgFlags=[ SYSTEM HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP KILL_AFTER_RESTORE RESTORE_ANY_VERSION LARGE_HEAP ]
+    privatePkgFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PRIVATE_FLAG_REQUEST_LEGACY_EXTERNAL_STORAGE HAS_DOMAIN_URLS PARTIALLY_DIRECT_BOOT_AWARE PRODUCT PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    apexModuleName=null
+    declared permissions:
+      com.google.android.apps.maps.permission.TIMELINE_POST_VISIT_BADGE: prot=signature
+      com.google.android.apps.maps.permission.ASSISTANT_GRPC_SYNC: prot=normal
+      com.google.android.apps.maps.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: prot=signature
+    requested permissions:
+      android.permission.DOWNLOAD_WITHOUT_NOTIFICATION
+      com.google.android.googlequicksearchbox.permission.LENSVIEW_BROADCAST
+      android.permission.POST_NOTIFICATIONS
+      com.google.android.c2dm.permission.RECEIVE
+      android.permission.ACCESS_FINE_LOCATION
+      android.permission.USE_CREDENTIALS
+      com.google.android.providers.gsf.permission.READ_GSERVICES
+      android.permission.MANAGE_ACCOUNTS
+      com.google.android.apps.stargate.endpointservice.ACCESS_ENDPOINT_SERVICE
+      android.permission.DETECT_SCREEN_CAPTURE
+      android.permission.NFC
+      com.google.android.gms.permission.CAR_SPEED
+      android.permission.CHANGE_NETWORK_STATE
+      android.permission.FOREGROUND_SERVICE
+      android.permission.READ_MEDIA_VISUAL_USER_SELECTED
+      android.permission.WRITE_SYNC_SETTINGS
+      android.permission.RECEIVE_BOOT_COMPLETED
+      android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING
+      android.permission.FOREGROUND_SERVICE_LOCATION
+      android.permission.BLUETOOTH_CONNECT
+      com.google.android.googlequicksearchbox.permission.LAUNCH_FROM_GMM
+      android.permission.INTERNET
+      android.permission.READ_EXTERNAL_STORAGE
+      android.permission.GET_PACKAGE_SIZE
+      android.permission.ACCESS_COARSE_LOCATION
+      android.permission.BROADCAST_STICKY
+      android.permission.READ_MEDIA_IMAGES
+      android.permission.CHANGE_WIFI_STATE
+      android.permission.FOREGROUND_SERVICE_DATA_SYNC
+      android.permission.ACCESS_NETWORK_STATE
+      android.permission.DISABLE_KEYGUARD
+      android.permission.RUN_USER_INITIATED_JOBS
+      android.permission.CAMERA
+      com.google.android.gms.permission.ACTIVITY_RECOGNITION
+      android.permission.POST_PROMOTED_NOTIFICATIONS
+      android.permission.ACCESS_ADSERVICES_ATTRIBUTION
+      android.permission.READ_MEDIA_VIDEO
+      com.google.android.apps.maps.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+      android.permission.SCHEDULE_EXACT_ALARM
+      android.permission.READ_SYNC_SETTINGS
+      android.permission.WRITE_EXTERNAL_STORAGE
+      android.permission.VIBRATE
+      android.permission.ACCESS_WIFI_STATE
+      android.permission.ACTIVITY_RECOGNITION
+      com.android.launcher.permission.INSTALL_SHORTCUT
+      android.permission.RECORD_AUDIO
+      com.google.android.gms.permission.AD_ID
+      android.permission.WAKE_LOCK
+      android.permission.READ_CONTACTS
+      android.permission.ACCESS_BACKGROUND_LOCATION
+      android.permission.BLUETOOTH_SCAN
+      android.permission.ACCESS_MEDIA_LOCATION
+    install permissions:
+      android.permission.DOWNLOAD_WITHOUT_NOTIFICATION: granted=true
+      com.google.android.c2dm.permission.RECEIVE: granted=true
+      android.permission.USE_CREDENTIALS: granted=true
+      com.google.android.providers.gsf.permission.READ_GSERVICES: granted=true
+      android.permission.MANAGE_ACCOUNTS: granted=true
+      android.permission.DETECT_SCREEN_CAPTURE: granted=true
+      android.permission.NFC: granted=true
+      android.permission.CHANGE_NETWORK_STATE: granted=true
+      android.permission.FOREGROUND_SERVICE: granted=true
+      android.permission.WRITE_SYNC_SETTINGS: granted=true
+      android.permission.RECEIVE_BOOT_COMPLETED: granted=true
+      android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING: granted=true
+      android.permission.FOREGROUND_SERVICE_LOCATION: granted=true
+      com.google.android.googlequicksearchbox.permission.LAUNCH_FROM_GMM: granted=true
+      android.permission.INTERNET: granted=true
+      android.permission.GET_PACKAGE_SIZE: granted=true
+      android.permission.BROADCAST_STICKY: granted=true
+      android.permission.CHANGE_WIFI_STATE: granted=true
+      android.permission.FOREGROUND_SERVICE_DATA_SYNC: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.DISABLE_KEYGUARD: granted=true
+      android.permission.RUN_USER_INITIATED_JOBS: granted=true
+      com.google.android.gms.permission.ACTIVITY_RECOGNITION: granted=true
+      android.permission.POST_PROMOTED_NOTIFICATIONS: granted=true
+      android.permission.ACCESS_ADSERVICES_ATTRIBUTION: granted=true
+      com.google.android.apps.maps.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: granted=true
+      android.permission.READ_SYNC_SETTINGS: granted=true
+      android.permission.VIBRATE: granted=true
+      android.permission.ACCESS_WIFI_STATE: granted=true
+      com.android.launcher.permission.INSTALL_SHORTCUT: granted=true
+      com.google.android.gms.permission.AD_ID: granted=true
+      android.permission.WAKE_LOCK: granted=true
+    User 0: ceDataInode=549244 deDataInode=393651 pccCeDataInode=0 pccDeDataInode=0 installed=true hidden=false suspended=false appLockEnabled=false distractionFlags=0 stopped=true notLaunched=false enabled=1 instant=false virtual=false quarantined=false
+      installReason=0
+      dataDir=/data/user/0/com.google.android.apps.maps
+      firstInstallTime=2026-10-29 07:19:58
+      uninstallReason=0
+      overlay paths:
+        /product/overlay/EmulationPixel8/EmulationPixel8Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+      legacy overlay paths:
+        /product/overlay/EmulationPixel8/EmulationPixel8Overlay.apk
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+      lastDisabledCaller: com.google.android.partnersetup
+
+Queries:
+  system apps queryable: false
+  queries via forceQueryable:
+  queries via package name:
+    com.google.android.apps.messaging:
+      com.google.android.apps.maps
+    com.google.android.apps.wellbeing:
+      com.google.android.apps.maps
+    com.google.android.dialer:
+      com.google.android.apps.maps
+    com.google.android.settings.intelligence:
+      com.google.android.apps.maps
+    com.google.android.apps.safetyhub:
+      com.google.android.apps.maps
+    com.google.android.gms.supervision:
+      com.google.android.apps.maps
+    com.google.android.apps.youtube.music:
+      com.google.android.apps.maps
+    com.google.android.apps.photos:
+      com.google.android.apps.maps
+    com.google.android.gm:
+      com.google.android.apps.maps
+    com.google.android.apps.maps:
+      com.google.android.apps.messaging
+      com.google.android.glasses.core
+      com.google.android.googlequicksearchbox
+      com.google.android.projection.gearhead
+      com.google.android.apps.safetyhub
+      com.google.android.apps.youtube.music
+    com.google.android.deskclock:
+      com.google.android.apps.maps
+    com.google.android.youtube:
+      com.google.android.apps.maps
+    com.google.android.apps.docs:
+      com.google.android.apps.maps
+    com.google.android.contacts:
+      com.google.android.apps.maps
+  queries via component:
+    com.google.android.apps.messaging:
+      com.google.android.apps.maps
+    com.google.android.as.oss:
+      com.google.android.apps.maps
+    com.google.android.settings.intelligence:
+      com.google.android.apps.maps
+    com.google.android.apps.photos:
+      com.google.android.apps.maps
+    com.google.android.gm:
+      com.google.android.apps.maps
+    com.google.android.apps.maps:
+      com.google.android.bluetooth
+      com.google.android.apps.messaging
+      com.google.android.dialer
+      com.google.android.as
+      com.google.android.googlequicksearchbox
+      com.google.android.apps.restore
+      com.google.android.apps.bard
+      com.google.android.apps.photos
+      com.google.android.gm
+      com.google.android.youtube
+      com.google.android.apps.docs
+      com.android.chrome
+      com.android.camera2
+      com.google.android.feedback
+      com.google.android.apps.nexuslauncher
+      com.android.cts.priv.ctsshim
+      com.android.cts.ctsshim
+    com.google.android.youtube:
+      com.google.android.apps.maps
+    com.google.android.apps.docs:
+      com.google.android.apps.maps
+    com.google.android.contacts:
+      com.google.android.apps.maps
+    com.android.wallpaper:
+      com.google.android.apps.maps
+  queryable via interaction:
+    User 0:
+  queryable via uses-library:
+
+Shared users:
+  SharedUser [com.google.android.apps.maps] (a33d11c):
+    appId=10174
+    Packages
+      PackageSetting{d0729fb com.google.android.apps.maps/10174}
+    install permissions:
+      android.permission.DOWNLOAD_WITHOUT_NOTIFICATION: granted=true
+      com.google.android.c2dm.permission.RECEIVE: granted=true
+      android.permission.USE_CREDENTIALS: granted=true
+      com.google.android.providers.gsf.permission.READ_GSERVICES: granted=true
+      android.permission.MANAGE_ACCOUNTS: granted=true
+      android.permission.DETECT_SCREEN_CAPTURE: granted=true
+      android.permission.NFC: granted=true
+      android.permission.CHANGE_NETWORK_STATE: granted=true
+      android.permission.FOREGROUND_SERVICE: granted=true
+      android.permission.WRITE_SYNC_SETTINGS: granted=true
+      android.permission.RECEIVE_BOOT_COMPLETED: granted=true
+      android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING: granted=true
+      android.permission.FOREGROUND_SERVICE_LOCATION: granted=true
+      com.google.android.googlequicksearchbox.permission.LAUNCH_FROM_GMM: granted=true
+      android.permission.INTERNET: granted=true
+      android.permission.GET_PACKAGE_SIZE: granted=true
+      android.permission.BROADCAST_STICKY: granted=true
+      android.permission.CHANGE_WIFI_STATE: granted=true
+      android.permission.FOREGROUND_SERVICE_DATA_SYNC: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.DISABLE_KEYGUARD: granted=true
+      android.permission.RUN_USER_INITIATED_JOBS: granted=true
+      com.google.android.gms.permission.ACTIVITY_RECOGNITION: granted=true
+      android.permission.POST_PROMOTED_NOTIFICATIONS: granted=true
+      android.permission.ACCESS_ADSERVICES_ATTRIBUTION: granted=true
+      com.google.android.apps.maps.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: granted=true
+      android.permission.READ_SYNC_SETTINGS: granted=true
+      android.permission.VIBRATE: granted=true
+      android.permission.ACCESS_WIFI_STATE: granted=true
+      com.android.launcher.permission.INSTALL_SHORTCUT: granted=true
+      com.google.android.gms.permission.AD_ID: granted=true
+      android.permission.WAKE_LOCK: granted=true
+    User 0: 
+      gids=[3003]
+      runtime permissions:
+        android.permission.POST_NOTIFICATIONS: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.ACCESS_FINE_LOCATION: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_MEDIA_VISUAL_USER_SELECTED: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.BLUETOOTH_CONNECT: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_EXTERNAL_STORAGE: granted=false, flags=[ REVOKE_WHEN_REQUESTED|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.ACCESS_COARSE_LOCATION: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_MEDIA_IMAGES: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.CAMERA: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_MEDIA_VIDEO: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.WRITE_EXTERNAL_STORAGE: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.ACTIVITY_RECOGNITION: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.RECORD_AUDIO: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_CONTACTS: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.ACCESS_BACKGROUND_LOCATION: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.BLUETOOTH_SCAN: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.ACCESS_MEDIA_LOCATION: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+

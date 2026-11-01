@@ -8,6 +8,7 @@ import { ACCESSIBILITY_DISPLAY_FIELDS } from "../features/utility/AccessibilityD
 import type { DeviceSettingKey } from "../models/DeviceSettingDefaults";
 import type { Platform } from "../models";
 import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
+import { appLocaleJournalKey } from "../daemon/sessionBroker/appLocaleJournalKey";
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
@@ -17,10 +18,13 @@ import { interactionToolMutations } from "./deviceMutationInteractionAdapters";
 import { lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
 import { orchestrationToolMutations } from "./deviceMutationOrchestrationAdapters";
 import {
+  deviceConditionSkewsClock,
   deviceStateToolMutations,
   devicePowerMutations,
   deviceStateFallbackMutations,
 } from "./deviceMutationDeviceStateAdapters";
+import { normalizeAndroidPermissionName } from "../features/action/GrantAndroidPermissions";
+import type { AndroidPermissionTarget } from "./deviceMutationPermissionPriorReader";
 import { isReadOnlySqlQuery } from "../features/database/sqlQueryClassification";
 import {
   DEVICE_MUTATION_TOOL_COVERAGE,
@@ -74,20 +78,64 @@ function geometryKeys(args: Record<string, unknown>, platform?: Platform): strin
     : [];
 }
 
-function permissionMutations(args: Record<string, unknown>): ToolMutation[] {
+const ANDROID_SPECIFIC_PERMISSION_FIELDS = [
+  "notificationsEnabled",
+  "notificationPolicyAccess",
+  "scheduleExactAlarm",
+];
+
+/**
+ * The `runtime:<user>:<package>:<permission>` key the Android reset port reverts in place, for a
+ * permission (or a `notificationsEnabled` that toggles POST_NOTIFICATIONS) of a resolved target.
+ * Notification policy access and the exact-alarm app-op have no such key.
+ */
+function runtimePermissionKey(
+  appId: unknown,
+  key: unknown,
+  target: AndroidPermissionTarget | undefined,
+): string | undefined {
+  if (!target || typeof appId !== "string" || !/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*$/.test(appId)) {
+    return undefined;
+  }
+  const permission =
+    key === "notificationsEnabled"
+      ? target.notificationsAreRuntime
+        ? "android.permission.POST_NOTIFICATIONS"
+        : undefined
+      : typeof key === "string" && !ANDROID_SPECIFIC_PERMISSION_FIELDS.includes(key)
+        ? normalizeAndroidPermissionName(key)
+        : undefined;
+  return permission && /^[A-Za-z0-9_.]+$/.test(permission)
+    ? `runtime:${target.userId}:${appId}:${permission}`
+    : undefined;
+}
+
+function permissionMutations(
+  args: Record<string, unknown>,
+  target?: AndroidPermissionTarget,
+): ToolMutation[] {
   if (args.action === "reset") {
     return [mutation("permission", "device")];
   }
   const permissions = Array.isArray(args.permissions) ? args.permissions : [];
   const keys = [
     ...permissions,
-    ...["notificationsEnabled", "notificationPolicyAccess", "scheduleExactAlarm"].filter(
-      (key) => args[key] !== undefined,
-    ),
+    ...ANDROID_SPECIFIC_PERMISSION_FIELDS.filter((key) => args[key] !== undefined),
   ];
-  return keys.map((key) =>
-    mutation("permission", JSON.stringify([args.appId, args.userId ?? "default", key])),
+  const journalKeys = keys.map(
+    (key) =>
+      runtimePermissionKey(args.appId, key, target) ??
+      JSON.stringify([args.appId, args.userId ?? "default", key]),
   );
+  return [...new Set(journalKeys)].map((key) => mutation("permission", key));
+}
+
+/** setAppPermissions intents once the host resolved the Android user and notification path. */
+export function androidPermissionMutations(
+  args: Record<string, unknown>,
+  target: AndroidPermissionTarget,
+): ToolMutation[] {
+  return permissionMutations(args, target);
 }
 
 /**
@@ -108,7 +156,10 @@ function deviceStateMutations(args: Record<string, unknown>, platform?: Platform
     ["screenLock", "device-setting"],
   ];
   const mutations = entries
-    .filter(([field]) => args[field] !== undefined)
+    .filter(
+      ([field]) =>
+        args[field] !== undefined || (field === "clock" && deviceConditionSkewsClock(args)),
+    )
     .map(([field, kind]) => {
       const value = args[field];
       const key =
@@ -245,7 +296,12 @@ export function deviceToolMutations(
   args: Record<string, unknown>,
   platform?: Platform,
 ): ToolMutation[] {
-  if (mutationCallIsRead(name, args, platform) || mutationCallNotJournaled(name, args)) {
+  if (
+    DEVICE_MUTATION_TOOL_COVERAGE[name]?.status === "notJournaled" ||
+    mutationCallIsRead(name, args, platform) ||
+    mutationCallNotJournaled(name, args)
+  ) {
+    // A notJournaled tool changes no device state a later session could observe (#14359).
     return [];
   }
   const named = namedToolMutations(name, args);
@@ -316,7 +372,7 @@ function stateToolMutations(
             ? mutation("clock", "timezone")
             : mutation(
                 "device-setting",
-                key === "locale" && args.appId ? JSON.stringify(["app-locale", args.appId]) : key,
+                key === "locale" && args.appId ? appLocaleJournalKey(String(args.appId)) : key,
               ),
         );
     case "setDeviceState":

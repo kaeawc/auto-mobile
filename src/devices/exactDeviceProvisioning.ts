@@ -1,3 +1,4 @@
+import { enrichDeviceInfoList } from "../utils/android-cmdline-tools/avdDeviceInfoEnrichment";
 import type { SimulatorCreator } from "./SimulatorCreator";
 import type {
   ConfigurableDeviceResource,
@@ -23,7 +24,7 @@ import {
 } from "./FileAndroidAvdConfigWriter";
 import { DeviceAssignedToBindingError } from "../models/DeviceAssignedToBindingError";
 import type { DeviceInfo } from "../models";
-import { ActionableError } from "../models";
+import { ActionableError, requireAndroidOrIosPlatform } from "../models";
 import type { DeviceCreationGate } from "./deviceCreationGate";
 import type { PlatformDeviceManager } from "./deviceUtils";
 import type { AvdConfigReader } from "../utils/android-cmdline-tools/AvdConfigReader";
@@ -286,7 +287,10 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       return;
     }
     try {
-      await this.dependencies.assertAdoptable({ platform: existing.platform, stableId });
+      await this.dependencies.assertAdoptable({
+        platform: requireAndroidOrIosPlatform(existing.platform, "Adopting an existing device"),
+        stableId,
+      });
     } catch (error) {
       if (error instanceof DeviceAssignedToBindingError) {
         throw bindingProvisionError(
@@ -551,11 +555,17 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     }
     return {
       created: true,
-      device: {
-        name: request.name,
-        platform: "android",
-        isRunning: false,
-      },
+      device: (
+        await enrichDeviceInfoList(this.dependencies.androidConfigReader, [
+          {
+            name: request.name,
+            platform: "android",
+            isRunning: false,
+            deviceType: spec.deviceType,
+            runtimeId: spec.runtime,
+          },
+        ])
+      )[0],
       resolvedSpec: this.withResolvedDisplayCutout(spec, displayCutout),
     };
   }
@@ -635,16 +645,26 @@ function runtimeIncompatibleError(
   );
 }
 
-export function createDefaultExactDeviceProvisioner(
-  deviceManager: PlatformDeviceManager,
-  deviceCreationGate: DeviceCreationGate,
-  androidConfigWriter: AndroidAvdConfigWriter = new FileAndroidAvdConfigWriter(),
-  assertAdoptable?: ExactDeviceAdoptionGuard,
-  simulatorCreation?: SimulatorCreator,
+/** Optional seams for createDefaultExactDeviceProvisioner; absent ones use production defaults. */
+export interface DefaultExactDeviceProvisionerOptions {
+  androidConfigWriter?: AndroidAvdConfigWriter;
+  assertAdoptable?: ExactDeviceAdoptionGuard;
+  simulatorCreation?: SimulatorCreator;
   ios?: Pick<
     DefaultExactDeviceProvisionerDependencies,
     "iosSimulator" | "iosRuntimeCatalog" | "prebootProfile" | "timer" | "lifecycleCoordinator"
-  >,
+  >;
+}
+
+export function createDefaultExactDeviceProvisioner(
+  deviceManager: PlatformDeviceManager,
+  deviceCreationGate: DeviceCreationGate,
+  {
+    androidConfigWriter = new FileAndroidAvdConfigWriter(),
+    assertAdoptable,
+    simulatorCreation,
+    ios,
+  }: DefaultExactDeviceProvisionerOptions = {},
 ): ExactDeviceProvisioner {
   return new DefaultExactDeviceProvisioner({
     assertAdoptable,

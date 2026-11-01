@@ -33,7 +33,7 @@ describe("DeviceLockRepository device identity", () => {
 
   beforeEach(async () => {
     await db.deleteFrom("device_locks").execute();
-    repo = new DeviceLockRepository(db);
+    repo = new DeviceLockRepository({ db });
   });
 
   test("replays a credential on the device it was learned on", async () => {
@@ -166,7 +166,7 @@ describe("device_locks device_identity migration", () => {
       await deviceIdentityMigration.up(db as Kysely<unknown>);
       await deviceIdentityMigration.up(db as Kysely<unknown>);
 
-      const repo = new DeviceLockRepository(db);
+      const repo = new DeviceLockRepository({ db });
       expect(await repo.getCredential("emulator-5554", "avd-a")).toBeNull();
       await repo.rememberLock("emulator-5554", "pin", "1234", "avd-a");
       expect(await repo.getCredential("emulator-5554", "avd-a")).toBe("1234");

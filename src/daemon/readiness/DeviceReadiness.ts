@@ -33,12 +33,15 @@ import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import type { IosCtrlProxy } from "../../features/observe/ios/IOSCtrlProxyClient";
 import {
   ActionableError,
+  type AndroidOrIosPlatform,
   BootedDevice,
   DeviceInfo,
+  isAndroidOrIosPlatform,
   Platform,
   SomePlatform,
   toActionableError,
 } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models/Platform";
 import { DeviceOwnedByOtherDaemonError } from "../../models/deviceAcquisitionRefusals";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { trackProcess, waitForExit } from "../../utils/ChildProcessTracker";
@@ -204,10 +207,17 @@ export class DeviceReadiness implements DeviceReadinessContract {
         ),
       resumeAfterDeviceStart: (platform, deviceId) =>
         ctrlProxyClientLifecycle.resumeAfterDeviceStart(platform, deviceId),
-      resumeReadBootClient: (platform, deviceId) =>
-        ({ android: AndroidCtrlProxyClient, ios: IOSCtrlProxyClient })[
-          platform
-        ].resumeAfterDeviceStart(deviceId),
+      resumeReadBootClient: (platform, deviceId) => {
+        // A watch has no CtrlProxy client to resume.
+        if (!isAndroidOrIosPlatform(platform)) {
+          return;
+        }
+        const clients: Record<
+          AndroidOrIosPlatform,
+          typeof AndroidCtrlProxyClient | typeof IOSCtrlProxyClient
+        > = { android: AndroidCtrlProxyClient, ios: IOSCtrlProxyClient };
+        clients[platform].resumeAfterDeviceStart(deviceId);
+      },
       adbFactory: this.adbFactory,
       checkedAndroidOwnership: this.checkedAndroidOwnership,
       findOrStartDevice: (...args) => this.findOrStartDevice(...args),
@@ -252,8 +262,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
     simctl: Pick<DeviceClientSimctl, "bootSimulator">,
     device: { runtimeId?: string },
     udid: string,
-    signal: AbortSignal,
-    reason: "create" | "restart" = "restart",
+    { signal, reason = "restart" }: { signal: AbortSignal; reason?: "create" | "restart" },
   ): Promise<BootedDevice> {
     return await this.iosBootInstrumentation.run(
       {
@@ -405,10 +414,13 @@ export class DeviceReadiness implements DeviceReadinessContract {
     options?: DeviceReadyOptions,
     resolvedIdentity?: ResolvedDeviceIdentity,
   ): Promise<void> {
-    if (platform === "android") {
-      await this.verifyAndroidDevice(deviceId, options, resolvedIdentity);
-    } else {
-      await this.verifyIosDevice(deviceId, options);
+    // A watch has no CtrlProxy runner to verify; it must never reach the iOS check (#14908).
+    switch (requireAndroidOrIosPlatform(platform, "Device readiness verification")) {
+      case "android":
+        await this.verifyAndroidDevice(deviceId, options, resolvedIdentity);
+        return;
+      case "ios":
+        await this.verifyIosDevice(deviceId, options);
     }
   }
 
@@ -845,8 +857,7 @@ export class DeviceReadiness implements DeviceReadinessContract {
               this.simctl!,
               provisioned,
               provisioned.deviceId!,
-              signal,
-              "create",
+              { signal, reason: "create" },
             );
             perf.endOperation("bootSimulator");
             if (createdDevice.deviceId === provisioned.deviceId) {
@@ -939,12 +950,9 @@ export class DeviceReadiness implements DeviceReadinessContract {
       options,
       async (signal) => {
         perf.startOperation("bootSimulator");
-        const bootedDevice = await this.bootIosSimulatorAdmitted(
-          this.simctl!,
-          device,
-          deviceId,
+        const bootedDevice = await this.bootIosSimulatorAdmitted(this.simctl!, device, deviceId, {
           signal,
-        );
+        });
         perf.endOperation("bootSimulator");
         if (bootedDevice.deviceId === deviceId) {
           await this.simctl!.presentSimulatorAfterStart(deviceId, this.idGenerator.next(), signal);

@@ -37,6 +37,19 @@ class PrototypeRequestBindingsTest : PrototypeRequestTestSupport() {
   // ---- resolution ----
 
   @Test
+  fun `request text binds data and state in one pass`() {
+    val data = obj("""{"prefix":"{token}","id":"7"}""")
+    val state = { text: String -> text.replace("{token}", "SECRET").replace("{q}", "query") }
+    // A data value that holds {token} is sent as written, never interpolated as state (#14321).
+    assertEquals("Bearer {token}", PrototypeRequests.bindText("Bearer {data:/prefix}", data, state))
+    // Authored state placeholders around a data placeholder still resolve.
+    assertEquals(
+      "query/7/SECRET",
+      PrototypeRequests.bindText("{q}/{data:/id}/{token}", data, state),
+    )
+  }
+
+  @Test
   fun `resolves bindings, defaults the method and sets query values on the url`() {
     val request =
       resolved(

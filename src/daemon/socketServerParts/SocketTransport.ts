@@ -8,6 +8,7 @@ import {
   broadcastSessionDeviceRebound as fanOutSessionDeviceRebound,
   pushProgressNotification as fanOutProgress,
   type NotificationTransport,
+  type ProgressTick,
 } from "../socketServer/notificationFanOut";
 
 import { Socket } from "node:net";
@@ -151,7 +152,7 @@ export class SocketTransport {
       onOverflow: () => this.callbacks.rejectOversizedFrame(sessionId, socket),
       hasLiveRequest: () => this.callbacks.hasLiveSocketRequest(socket),
       trace: this.state.onFrameTrace
-        ? (event, extra) => this.callbacks.traceFrame(event, "*", undefined, undefined, extra)
+        ? (event, extra) => this.callbacks.traceFrame(event, "*", { details: extra })
         : undefined,
       onClose: () => {
         this.state.controlConnections.delete(socket);
@@ -193,10 +194,12 @@ export class SocketTransport {
       error: "Invalid request: frame too large",
       code: -32600,
     };
-    this.callbacks.writeFrame(socket, sessionId, errorResponse, () => {
-      if (!socket.destroyed) {
-        socket.destroy();
-      }
+    this.callbacks.writeFrame(socket, sessionId, errorResponse, {
+      onFlushed: () => {
+        if (!socket.destroyed) {
+          socket.destroy();
+        }
+      },
     });
   }
   hasLiveSocketRequest(socket: Socket): boolean {
@@ -223,7 +226,7 @@ export class SocketTransport {
       if (pending) {
         this.callbacks.writeTerminalSocketResponse(pending, response, deviceId);
       } else {
-        this.callbacks.writeFrame(socket, sessionId, response, undefined, deviceId);
+        this.callbacks.writeFrame(socket, sessionId, response, { deviceId });
       }
       answerWritten = true;
     };
@@ -262,10 +265,13 @@ export class SocketTransport {
       };
       pending = tracked;
       this.state.pendingSocketRequests.add(tracked);
-      this.announceResolvedBudget(socket, sessionId, request, context.totalTimeoutMs, controlFrame);
+      this.announceResolvedBudget(socket, sessionId, request, {
+        resolvedMs: context.totalTimeoutMs,
+        controlFrame,
+      });
       deviceId = this.state.onFrameTrace ? this.callbacks.frameDeviceId(request) : undefined;
       if (this.state.onFrameTrace) {
-        this.callbacks.traceFrame("frame_parsed", request.id, deviceId);
+        this.callbacks.traceFrame("frame_parsed", request.id, { deviceId });
       }
       const beginToolCall = (): void => {
         try {
@@ -282,17 +288,16 @@ export class SocketTransport {
         }
       };
       beginToolCall();
-      const response = await this.callbacks.handleRequest(
-        sessionId,
-        socket,
-        request,
+      const response = await this.callbacks.handleRequest(sessionId, socket, request, {
         receivedAtMs,
-        (deadline) => {
-          tracked.admitted = true;
-          tracked.idleDeadline = controlFrame ? undefined : deadline;
+        handling: {
+          onAdmitted: (deadline) => {
+            tracked.admitted = true;
+            tracked.idleDeadline = controlFrame ? undefined : deadline;
+          },
+          context,
         },
-        context,
-      );
+      });
       if (response) {
         writeAnswer(response);
       } else {
@@ -328,16 +333,13 @@ export class SocketTransport {
       return;
     }
     pending.terminal = true;
-    this.callbacks.writeFrame(
-      pending.socket,
-      pending.sessionId,
-      response,
-      () => {
+    this.callbacks.writeFrame(pending.socket, pending.sessionId, response, {
+      onFlushed: () => {
         this.state.pendingSocketRequests.delete(pending);
         this.state.controlConnections.get(pending.socket)?.responseFlushed();
       },
       deviceId,
-    );
+    });
   }
   /**
    * A `tools/call` with the device ids it names as the pool's canonical ids (#11618), before the
@@ -367,9 +369,11 @@ export class SocketTransport {
   traceFrame(
     event: SocketFrameTraceEvent["event"],
     requestId: string,
-    deviceId?: string,
-    error?: string,
-    details?: Partial<SocketFrameTraceEvent>,
+    {
+      deviceId,
+      error,
+      details,
+    }: { deviceId?: string; error?: string; details?: Partial<SocketFrameTraceEvent> } = {},
   ): void {
     if (this.state.onFrameTrace) {
       this.state.onFrameTrace({
@@ -520,7 +524,7 @@ export class SocketTransport {
       write: (sessionId, frame, onFlushed) => {
         const socket = this.state.clientSockets.get(sessionId);
         if (socket) {
-          this.callbacks.writeFrame(socket, sessionId, frame, onFlushed);
+          this.callbacks.writeFrame(socket, sessionId, frame, { onFlushed });
         }
       },
     };
@@ -573,21 +577,8 @@ export class SocketTransport {
     );
   }
   /** Pushes one progress tick to the single socket that requested it (#6205); see the fan-out. */
-  pushProgressNotification(
-    sessionId: string,
-    requestId: string,
-    progressToken: string | number,
-    progress: number,
-    total?: number,
-    message?: string,
-  ): void {
-    fanOutProgress(this.notificationTransport, sessionId, {
-      requestId,
-      progressToken,
-      progress,
-      total,
-      message,
-    });
+  pushProgressNotification(sessionId: string, tick: ProgressTick): void {
+    fanOutProgress(this.notificationTransport, sessionId, tick);
   }
   /**
    * The client sized its backstop from its own environment (#13797); an opted-in client is told how
@@ -597,8 +588,7 @@ export class SocketTransport {
     socket: Socket,
     sessionId: string,
     request: DaemonRequest,
-    resolvedMs: number,
-    controlFrame: boolean,
+    { resolvedMs, controlFrame }: { resolvedMs: number; controlFrame: boolean },
   ): void {
     if (
       controlFrame ||
@@ -620,50 +610,46 @@ export class SocketTransport {
     socket: Socket,
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
-    onFlushed?: () => void,
-    deviceId?: string,
+    { onFlushed, deviceId }: { onFlushed?: () => void; deviceId?: string } = {},
   ): void {
     if (this.state.onFrameTrace && frame.type === "mcp_response") {
-      this.callbacks.traceFrame("response_write_started", frame.id ?? "null", deviceId);
-      this.callbacks.writeFrameData(
-        socket,
-        sessionId,
-        frame,
-        (error) => {
-          this.callbacks.traceFrame(
-            "response_write_callback",
-            frame.id ?? "null",
+      this.callbacks.traceFrame("response_write_started", frame.id ?? "null", { deviceId });
+      this.callbacks.writeFrameData(socket, sessionId, frame, {
+        onFlushed: (error) => {
+          this.callbacks.traceFrame("response_write_callback", frame.id ?? "null", {
             deviceId,
-            error?.message,
-            {
+            error: error?.message,
+            details: {
               writableLengthInCallback: socket.writableLength,
             },
-          );
+          });
           onFlushed?.();
         },
-        (writableLengthAfterWrite, byteLength) => {
-          this.callbacks.traceFrame(
-            "response_write_returned",
-            frame.id ?? "null",
+        onWritten: (writableLengthAfterWrite, byteLength) => {
+          this.callbacks.traceFrame("response_write_returned", frame.id ?? "null", {
             deviceId,
-            undefined,
-            {
+            details: {
               byteLength,
               writableLengthAfterWrite,
             },
-          );
+          });
         },
-      );
+      });
       return;
     }
-    this.callbacks.writeFrameData(socket, sessionId, frame, onFlushed);
+    this.callbacks.writeFrameData(socket, sessionId, frame, { onFlushed });
   }
   writeFrameData(
     socket: Socket,
     sessionId: string,
     frame: DaemonResponse | DaemonNotification,
-    onFlushed?: (error?: Error | null) => void,
-    onWritten?: (writableLengthAfterWrite: number, byteLength: number) => void,
+    {
+      onFlushed,
+      onWritten,
+    }: {
+      onFlushed?: (error?: Error | null) => void;
+      onWritten?: (writableLengthAfterWrite: number, byteLength: number) => void;
+    },
   ): void {
     if (socket.destroyed) {
       onFlushed?.(new Error("socket destroyed"));

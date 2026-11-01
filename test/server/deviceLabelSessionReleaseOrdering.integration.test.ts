@@ -29,7 +29,7 @@ describe("releaseDeviceLabelSessions ordering", () => {
       const db = await createTestDatabase();
       // Constructing the Daemon initializes the global DaemonState; read the exact
       // collaborators releaseDeviceLabelSessions resolves through DaemonState.getInstance().
-      new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository(db) });
+      new Daemon({}, { deviceSessionRepository: new DeviceSessionRepository({ db }) });
       const sessionManager = DaemonState.getInstance().getSessionManager();
       const devicePool = DaemonState.getInstance().getDevicePool();
 

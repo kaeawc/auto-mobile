@@ -12,6 +12,109 @@ final class SdkHierarchyClientTests: XCTestCase {
         )
     }
 
+    func testObservationActionBudgetSetsRequestAndResourceTimeouts() async throws {
+        for budgetMs in [12000.0, 13000.0] {
+            let main = StubHTTPTransport([])
+            let action = StubHTTPTransport(status: 200)
+            let client = try SdkHierarchyClient(
+                baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
+                transport: main, healthTransport: main,
+                actionTransport: { configuration in
+                    XCTAssertEqual(configuration.timeoutIntervalForRequest, budgetMs / 1000)
+                    XCTAssertEqual(configuration.timeoutIntervalForResource, budgetMs / 1000)
+                    return action
+                }
+            )
+            let reply = await client.sendObservationRequest(
+                .observationAction,
+                body: Data("{}".utf8),
+                timeoutMs: budgetMs
+            )
+            XCTAssertEqual(reply, .reply(SdkBridgeReply(statusCode: 200, body: Data())))
+            XCTAssertEqual(action.recordedRequests.first?.timeoutInterval, budgetMs / 1000)
+            XCTAssertEqual(action.recordedRequests.first?.url?.path, SdkRoute.observationAction.path)
+            XCTAssertTrue(main.recordedRequests.isEmpty)
+        }
+    }
+
+    func testObservationWithoutBudgetKeepsDataTimeoutDefaultsAndTransport() async throws {
+        let configuration = SdkHierarchyClient.dataConfiguration()
+        XCTAssertEqual(configuration.timeoutIntervalForRequest, 2)
+        XCTAssertEqual(configuration.timeoutIntervalForResource, 5)
+        let main = StubHTTPTransport(status: 200)
+        let client = try makeClient(main)
+        let reply = await client.sendObservationRequest(.observationSnapshot, body: Data("{}".utf8))
+        XCTAssertEqual(reply, .reply(SdkBridgeReply(statusCode: 200, body: Data())))
+        XCTAssertEqual(main.recordedRequests.count, 1)
+    }
+
+    func testObservationTransportDeliveryClassification() async throws {
+        let cases: [(StubOutcome, SdkBridgeRequestResult)] = [
+            (.transportError, .notSent),
+            (.timedOut, .noReply),
+            (.connectionLost, .noReply),
+            (.nonHTTPResponse, .noReply),
+            (.respond(status: 503, body: Data()), .reply(SdkBridgeReply(statusCode: 503, body: Data()))),
+        ]
+        for (outcome, expected) in cases {
+            let client = try makeClient(StubHTTPTransport([outcome]))
+            let result = await client.sendObservationRequest(.observationSnapshot, body: Data("{}".utf8))
+            XCTAssertEqual(result, expected)
+        }
+    }
+
+    private struct FailingObservationTransport: HTTPRequesting {
+        let code: URLError.Code
+
+        func data(for _: URLRequest) async throws -> (Data, URLResponse) {
+            throw URLError(code)
+        }
+    }
+
+    func testObservationOnlyProvenNonDeliveryErrorsAreNotSent() async throws {
+        let cases: [(URLError.Code, SdkBridgeRequestResult)] = [
+            (.cannotConnectToHost, .notSent), (.cannotFindHost, .notSent),
+            (.dnsLookupFailed, .notSent), (.notConnectedToInternet, .notSent),
+            (.timedOut, .noReply), (.networkConnectionLost, .noReply),
+            (.cancelled, .noReply), (.badServerResponse, .noReply),
+        ]
+        for (code, expected) in cases {
+            let transport = FailingObservationTransport(code: code)
+            let client = try SdkHierarchyClient(
+                baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
+                transport: transport, healthTransport: transport
+            )
+            let result = await client.sendObservationRequest(.observationSnapshot, body: Data())
+            XCTAssertEqual(result, expected, "\(code)")
+        }
+    }
+
+    func testObservationResolverFailureIsNotSentButReplyIdentityFailureIsNoReply() async throws {
+        let udid = "ABCDEF00-1234-4567-89AB-000000000001"
+        let other = "ABCDEF00-1234-4567-89AB-000000000002"
+        let health = try StubHTTPTransport(
+            Array(repeating: .transportError, count: SdkSimulatorPort.probeCount)
+                + [.respond(status: 200, body: JSONEncoder().encode([
+                    "status": "ok", "bundleId": "test.app", "simulatorUdid": other,
+                ]))]
+        )
+        let main = StubHTTPTransport(status: 200)
+        let resolver = SdkEndpointResolver(environment: ["SIMULATOR_UDID": udid], healthTransport: health)
+        let client = try SdkHierarchyClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
+            transport: main, healthTransport: health, endpointResolver: resolver
+        )
+        let unsent = await client.sendObservationRequest(.observationSnapshot, body: Data())
+        XCTAssertEqual(unsent, .notSent)
+        XCTAssertTrue(main.recordedRequests.isEmpty)
+        let mismatch = try JSONEncoder().encode([
+            "error": "wrong_simulator", "expectedUdid": other, "actualUdid": udid,
+        ])
+        let sentClient = try makeClient(StubHTTPTransport(status: 409, body: mismatch))
+        let sent = await sentClient.sendObservationRequest(.observationSnapshot, body: Data())
+        XCTAssertEqual(sent, .noReply)
+    }
+
     func testMagicTapPostPreservesHandledFalseAndFailures() async throws {
         for handled in [true, false] {
             let transport = StubHTTPTransport(status: 200, body: Data("{\"handled\":\(handled)}".utf8))

@@ -21,10 +21,13 @@ export interface EmulatorHostProcessRow {
   command: string;
 }
 export interface EmulatorProcessTableSource {
-  read(options: {
-    signal?: AbortSignal;
-    deadlineMs?: number;
-  }): Promise<{ value?: EmulatorHostProcessRow[]; error?: string; failure?: ProcessTableFailure }>;
+  read(options: { signal?: AbortSignal; deadlineMs?: number }): Promise<{
+    value?: EmulatorHostProcessRow[];
+    /** Readable rows are a count floor, not a complete inventory. */
+    incomplete?: boolean;
+    error?: string;
+    failure?: ProcessTableFailure;
+  }>;
 }
 export type EmulatorGroupProbe =
   | { kind: "own-group"; pgid: number }
@@ -261,7 +264,7 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
       );
       return this.stillRunning(identity);
     }
-    return this.escalate(target, identity, stopOptions, token, group);
+    return this.escalate(target, identity, stopOptions, { token, group });
   }
 
   private async resolveOwnGroup(
@@ -326,8 +329,7 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     target: StopTarget,
     identity: Extract<EmulatorProcessIdentity, { kind: "match" }>,
     options: StopOptions,
-    token: string | undefined,
-    group?: number,
+    { token, group }: { token?: string; group?: number } = {},
   ): Promise<EmulatorProcessStopOutcome> {
     if (!this.hasKillWaitBudget(identity.pid, options.deadlineMs)) {
       return this.stillRunning(identity);

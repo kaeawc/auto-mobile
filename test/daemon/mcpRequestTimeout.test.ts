@@ -624,6 +624,42 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(resolved).toBeGreaterThanOrEqual(duration + TAP_ANY_LONG_PRESS_MCP_TIMEOUT_HEADROOM_MS);
   });
 
+  test("tapAny with omitted action and positive duration budgets the same as explicit longPress", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "tapAny", arguments: { duration: 60_000 } },
+    };
+    const explicitRequest: DaemonRequest = {
+      ...request,
+      params: { name: "tapAny", arguments: { action: "longPress", duration: 60_000 } },
+    };
+
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(resolveMcpRequestTimeoutMs(explicitRequest));
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(
+      60_000 + TAP_ANY_SEARCH_UNTIL_DEFAULT_MS + TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+    );
+  });
+
+  test.each(["tap", "doubleTap"])(
+    "tapAny explicit %s with positive duration keeps the ordinary-tap budget",
+    (action) => {
+      const request: DaemonRequest = {
+        id: "1",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "tapAny", arguments: { action, duration: 60_000 } },
+      };
+
+      expect(resolveMcpRequestTimeoutMs(request)).toBe(
+        TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
+          TAP_ANY_SEARCH_UNTIL_DEFAULT_MS +
+          TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+      );
+    },
+  );
+
   test("tapAny longPress with no searchUntil budgets the implicit default search window (#6248 review)", () => {
     const duration = 60_000;
     const request: DaemonRequest = {
@@ -842,23 +878,26 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(resolved).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
 
-  test("an omitted tapAny action (schema defaults to tap) gets the same ordinary-tap floor (#6276)", () => {
-    const request: DaemonRequest = {
-      id: "1",
-      type: "mcp_request",
-      method: "tools/call",
-      params: {
-        name: "tapAny",
-        arguments: {},
-      },
-    };
+  test.each([undefined, 0, -1, NaN, Infinity])(
+    "an omitted tapAny action with duration %s gets the ordinary-tap floor",
+    (duration) => {
+      const request: DaemonRequest = {
+        id: "1",
+        type: "mcp_request",
+        method: "tools/call",
+        params: {
+          name: "tapAny",
+          arguments: duration === undefined ? {} : { duration },
+        },
+      };
 
-    expect(resolveMcpRequestTimeoutMs(request)).toBe(
-      TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
-        TAP_ANY_SEARCH_UNTIL_DEFAULT_MS +
-        TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
-    );
-  });
+      expect(resolveMcpRequestTimeoutMs(request)).toBe(
+        TAP_ANY_ORDINARY_TAP_GESTURE_WORST_CASE_MS +
+          TAP_ANY_SEARCH_UNTIL_DEFAULT_MS +
+          TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS,
+      );
+    },
+  );
 
   test("tapAny doubleTap budgets the same ordinary-tap floor as a plain tap (#6276)", () => {
     const request: DaemonRequest = {
@@ -1306,6 +1345,11 @@ describe("tapOn long press outer budget", () => {
     ["longPress", 0, undefined, undefined, 30000],
     ["longPress", Infinity, undefined, undefined, 30000],
     ["tap", 17000, undefined, undefined, 30000],
+    ["doubleTap", 60000, undefined, undefined, 30000],
+    [undefined, 60000, undefined, undefined, 91500],
+    ["longPress", 60000, undefined, undefined, 91500],
+    ["tap", 60000, undefined, undefined, 30000],
+    [undefined, undefined, undefined, undefined, 30000],
   ])(
     "action %s duration %s search %s caller %s resolves %s",
     (action, duration, searchDuration, timeoutMs, expected) => {
@@ -1856,6 +1900,26 @@ describe("executePlan deadline derived from the plan's steps (#9882)", () => {
       ],
     });
     expect(resolvePlan(content)).toBe(2 * MIN_INSTALL_APP_MCP_TIMEOUT_MS + HEADROOM_MS);
+  });
+
+  test("duration-only tapOn steps get the same long-press budget as explicit actions", () => {
+    const steps = Array.from({ length: 7 }, () => ({
+      tool: "tapOn",
+      params: { selector: { text: "Target" }, duration: 60_000 },
+    }));
+    const inferredBudget = resolvePlan(planContent({ name: "p", steps }));
+    const explicitBudget = resolvePlan(
+      planContent({
+        name: "p",
+        steps: steps.map((step) => ({
+          ...step,
+          params: { ...step.params, action: "longPress" },
+        })),
+      }),
+    );
+    expect(inferredBudget).toBe(7 * 91_500 + HEADROOM_MS);
+    expect(inferredBudget).toBe(explicitBudget);
+    expect(inferredBudget).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
   });
 
   test("a short plan keeps the 600 s floor", () => {

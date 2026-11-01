@@ -138,8 +138,7 @@ describe("HeartbeatTaskLeaseKeepalive", () => {
           reaped.push(`${sessionId}:${reason}`);
           await manager?.releaseSession(sessionId, reason);
         },
-        timer,
-        { graceMs: HEARTBEAT_TIMEOUT_MS, checkIntervalMs: CHECK_INTERVAL_MS },
+        { timer, graceMs: HEARTBEAT_TIMEOUT_MS, checkIntervalMs: CHECK_INTERVAL_MS },
       );
       /** Run the monitor on schedule for `ms`, as the daemon's interval would. */
       const runFor = async (ms: number): Promise<void> => {

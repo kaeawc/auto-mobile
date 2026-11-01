@@ -123,14 +123,10 @@ describe("DevicePool", () => {
     };
 
     await expect(
-      devicePool.reserveDeviceForReadiness(
-        replacement.deviceId,
-        replacement,
-        recoveringImage.name,
-        undefined,
-        undefined,
-        true,
-      ),
+      devicePool.reserveDeviceForReadiness(replacement.deviceId, replacement, {
+        stableRuntimeName: recoveringImage.name,
+        enforceAndroidRecoveryExclusion: true,
+      }),
     ).rejects.toThrow("entered recovery while awaiting its readiness reservation");
   });
 
@@ -146,14 +142,10 @@ describe("DevicePool", () => {
       deviceId: "emulator-5556",
     };
 
-    const release = await devicePool.reserveDeviceForReadiness(
-      replacement.deviceId,
-      replacement,
-      replacement.name,
-      undefined,
-      undefined,
-      true,
-    );
+    const release = await devicePool.reserveDeviceForReadiness(replacement.deviceId, replacement, {
+      stableRuntimeName: replacement.name,
+      enforceAndroidRecoveryExclusion: true,
+    });
 
     await release();
   });
@@ -164,8 +156,9 @@ describe("DevicePool", () => {
     await bindAsMcpOwner("owner-session", device.deviceId, "owner-mcp-session");
 
     await expect(
-      devicePool.reserveDeviceForReadiness(device.deviceId, device, device.name, undefined, {
-        mcpSessionId: "other-mcp-session",
+      devicePool.reserveDeviceForReadiness(device.deviceId, device, {
+        stableRuntimeName: device.name,
+        autolockClient: { mcpSessionId: "other-mcp-session" },
       }),
     ).rejects.toMatchObject({
       // Typed so the JUnit held-device wait and the CLI hint recognize it (#11071).
@@ -173,13 +166,10 @@ describe("DevicePool", () => {
       message: expect.stringContaining("already assigned to another session"),
     });
 
-    const release = await devicePool.reserveDeviceForReadiness(
-      device.deviceId,
-      device,
-      device.name,
-      undefined,
-      { mcpSessionId: "owner-mcp-session" },
-    );
+    const release = await devicePool.reserveDeviceForReadiness(device.deviceId, device, {
+      stableRuntimeName: device.name,
+      autolockClient: { mcpSessionId: "owner-mcp-session" },
+    });
     await release();
   });
 

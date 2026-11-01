@@ -11,6 +11,7 @@ import type {
   SessionDeviceRequirement,
 } from "./types";
 import { normalizeOsSelector } from "./version";
+import { parseWatchSessionDeviceRequirement } from "./watch";
 import {
   MANUFACTURER_PROFILE_IDS,
   NON_EMULATABLE_CAPABILITY_IDS,
@@ -365,12 +366,15 @@ export function parseSessionDeviceRequirement(
   if (!isRecord(value)) {
     return failure("invalid_request", "Session device requirement must be an object.");
   }
-  // `deviceProfile` is Android-only; an iOS request naming it is an unexpected field.
+  // `deviceProfile` is Android-only; an iOS request naming it is an unexpected field. A watch
+  // request carries only its exact `spec`.
   const keys = hasOnlyKeys(
     value,
     value.platform === "android"
       ? ["schemaVersion", "platform", "hardware", "os", "deviceProfile"]
-      : ["schemaVersion", "platform", "hardware", "os"],
+      : value.platform === "watchos"
+        ? ["schemaVersion", "platform", "spec"]
+        : ["schemaVersion", "platform", "hardware", "os"],
   );
   if (!keys.ok) {
     return keys;
@@ -384,5 +388,10 @@ export function parseSessionDeviceRequirement(
   if (value.platform === "android") {
     return parseAndroidRequest(value);
   }
-  return failure("invalid_request", "platform must be ios or android.", { field: "platform" });
+  if (value.platform === "watchos") {
+    return parseWatchSessionDeviceRequirement(value);
+  }
+  return failure("invalid_request", "platform must be ios, android or watchos.", {
+    field: "platform",
+  });
 }

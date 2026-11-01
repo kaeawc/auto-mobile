@@ -54,14 +54,19 @@ export class GetEventReader implements GestureEmitter {
     } // already running
     this.starting = true;
     const generation = ++this.generation;
-    void this.startProcess(generation, this.opts.touchNode, this.opts.scaler, onGesture, onError);
+    void this.startProcess(generation, this.opts.touchNode, this.opts.scaler, {
+      onGesture,
+      onError,
+    });
     for (const { node, scaler } of this.opts.penNodes ?? []) {
-      void this.startProcess(generation, node, scaler, onGesture, (error) =>
-        logger.warn(
-          `[GetEventReader] pen node ${node.path} stopped; finger recording continues: ${error.message}`,
-          error,
-        ),
-      );
+      void this.startProcess(generation, node, scaler, {
+        onGesture,
+        onError: (error) =>
+          logger.warn(
+            `[GetEventReader] pen node ${node.path} stopped; finger recording continues: ${error.message}`,
+            error,
+          ),
+      });
     }
   }
 
@@ -69,14 +74,21 @@ export class GetEventReader implements GestureEmitter {
     generation: number,
     node: TouchInputNode,
     scaler: GestureScaler,
-    onGesture: (event: GestureEvent) => void,
-    onError?: (err: Error) => void,
+    {
+      onGesture,
+      onError,
+    }: { onGesture: (event: GestureEvent) => void; onError?: (err: Error) => void },
   ): Promise<void> {
     const reconstructor = new TouchFrameReconstructor({
       singleTouch: node.kind === "pen",
       onHover: onGesture,
     });
-    const classifier = new GestureClassifier(scaler, this.opts.density, pressureRangeOf(node));
+    const classifier = new GestureClassifier(
+      scaler,
+      this.opts.density,
+      pressureRangeOf(node),
+      node.tiltAxes,
+    );
 
     const args = ["shell", "getevent", "-lt", node.path];
 

@@ -31,11 +31,16 @@ export interface ImageUtils {
    * @param buffer Image buffer
    * @param width Crop width
    * @param height Crop height
-   * @param x X coordinate to start crop (default 0)
-   * @param y Y coordinate to start crop (default 0)
+   * @param options.x X coordinate to start crop (default 0)
+   * @param options.y Y coordinate to start crop (default 0)
    * @returns Promise with cropped buffer
    */
-  crop(buffer: Buffer, width: number, height: number, x?: number, y?: number): Promise<Buffer>;
+  crop(
+    buffer: Buffer,
+    width: number,
+    height: number,
+    options?: { x?: number; y?: number },
+  ): Promise<Buffer>;
 
   /**
    * Convert image to PNG format

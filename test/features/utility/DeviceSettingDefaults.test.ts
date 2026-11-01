@@ -166,7 +166,10 @@ describe("DeviceSettingDefaults (#11145)", () => {
       const settings = new GatedSettings({ nightMode: "light" });
       const timer = new FakeTimer();
       let holder: string | null = "session-b";
-      const defaults = new DeviceSettingDefaults(persistence, settings, () => holder, timer, 100);
+      const defaults = new DeviceSettingDefaults(persistence, settings, () => holder, {
+        timer,
+        resetWaitMs: 100,
+      });
       persistence.records.set(device.deviceId, {
         platform: "android",
         name: "Pixel",
@@ -212,7 +215,9 @@ describe("DeviceSettingDefaults (#11145)", () => {
       const persistence = new FakePersistence();
       const settings = new GatedSettings({ fontScale: 1, nightMode: "light" });
       const timer = new FakeTimer();
-      const defaults = new DeviceSettingDefaults(persistence, settings, () => "session-b", timer);
+      const defaults = new DeviceSettingDefaults(persistence, settings, () => "session-b", {
+        timer,
+      });
       persistence.records.set(device.deviceId, {
         platform: "android",
         name: "Pixel",

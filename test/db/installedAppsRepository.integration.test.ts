@@ -10,7 +10,7 @@ describe("InstalledAppsRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new InstalledAppsRepository(db);
+    repo = new InstalledAppsRepository({ db });
   });
 
   afterEach(async () => {
@@ -41,7 +41,10 @@ describe("InstalledAppsRepository", () => {
 
   test("upsertInstalledApp inserts a new package into an existing snapshot", async () => {
     await seed("device-1", 0, "com.other.app", false, 900);
-    await repo.upsertInstalledApp("device-1", 0, "com.example.app", false, 1000);
+    await repo.upsertInstalledApp("device-1", 0, "com.example.app", {
+      isSystem: false,
+      timestampMs: 1000,
+    });
 
     const apps = (await repo.listInstalledApps("device-1")).filter(
       (app) => app.package_name === "com.example.app",
@@ -56,15 +59,24 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("upsertInstalledApp is a no-op on a device with no snapshot (#10041)", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.example.app", false, 1000);
+    await repo.upsertInstalledApp("device-1", 0, "com.example.app", {
+      isSystem: false,
+      timestampMs: 1000,
+    });
 
     expect(await repo.listInstalledApps("device-1")).toHaveLength(0);
     expect(await repo.getCacheVerifiedAt("device-1")).toBeNull();
   });
 
   test("upsertInstalledApp does not seed a work profile's packages into an empty device", async () => {
-    await repo.upsertInstalledApp("device-1", 10, "com.work.app", false, 1000);
-    await repo.upsertInstalledApp("device-1", 10, "com.work.other", false, 1000);
+    await repo.upsertInstalledApp("device-1", 10, "com.work.app", {
+      isSystem: false,
+      timestampMs: 1000,
+    });
+    await repo.upsertInstalledApp("device-1", 10, "com.work.other", {
+      isSystem: false,
+      timestampMs: 1000,
+    });
 
     expect(await repo.listInstalledApps("device-1")).toHaveLength(0);
     expect(await repo.getProfileCacheVerifiedAt("device-1", 10)).toBeNull();
@@ -73,7 +85,10 @@ describe("InstalledAppsRepository", () => {
   test("upsertInstalledApp only considers its own device's snapshot (#10041)", async () => {
     await seed("device-2", 0, "com.app2", false, 1000);
 
-    await repo.upsertInstalledApp("device-1", 0, "com.example.app", false, 2000);
+    await repo.upsertInstalledApp("device-1", 0, "com.example.app", {
+      isSystem: false,
+      timestampMs: 2000,
+    });
 
     expect(await repo.listInstalledApps("device-1")).toHaveLength(0);
     expect(await repo.listInstalledApps("device-2")).toHaveLength(1);
@@ -98,11 +113,17 @@ describe("InstalledAppsRepository", () => {
         last_verified_at: 1000,
       },
     ]);
-    await repo.upsertInstalledApp("device-1", 0, "com.app3", false, 1500);
+    await repo.upsertInstalledApp("device-1", 0, "com.app3", {
+      isSystem: false,
+      timestampMs: 1500,
+    });
     expect(await repo.listInstalledApps("device-1")).toHaveLength(3);
 
     await repo.clearDeviceSession("device-1");
-    await repo.upsertInstalledApp("device-1", 0, "com.app4", false, 2000);
+    await repo.upsertInstalledApp("device-1", 0, "com.app4", {
+      isSystem: false,
+      timestampMs: 2000,
+    });
 
     expect(await repo.listInstalledApps("device-1")).toHaveLength(0);
     expect(await repo.getCacheVerifiedAt("device-1")).toBeNull();
@@ -112,14 +133,20 @@ describe("InstalledAppsRepository", () => {
     await seed("device-1", 0, "com.app1", false, 1000);
     await repo.markDeviceStale("device-1");
 
-    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 5000);
+    await repo.upsertInstalledApp("device-1", 0, "com.app2", {
+      isSystem: false,
+      timestampMs: 5000,
+    });
 
     expect(await repo.getCacheVerifiedAt("device-1")).toBe(0);
   });
 
   test("upsertInstalledApp updates existing entry on conflict", async () => {
     await seed("device-1", 0, "com.example.app", false, 1000);
-    await repo.upsertInstalledApp("device-1", 0, "com.example.app", true, 2000);
+    await repo.upsertInstalledApp("device-1", 0, "com.example.app", {
+      isSystem: true,
+      timestampMs: 2000,
+    });
 
     const apps = await repo.listInstalledApps("device-1");
     expect(apps).toHaveLength(1);
@@ -232,7 +259,10 @@ describe("InstalledAppsRepository", () => {
     ]);
 
     // One CtrlProxy package-added broadcast touches exactly one row, hours later.
-    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, rebuiltAt + 3_600_000);
+    await repo.upsertInstalledApp("device-1", 0, "com.app2", {
+      isSystem: false,
+      timestampMs: rebuiltAt + 3_600_000,
+    });
 
     // The other rows are still only verified as of the rebuild, so the device's
     // cache must not appear to have been verified an hour later (issue #6639).

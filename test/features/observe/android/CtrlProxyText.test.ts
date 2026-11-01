@@ -302,14 +302,9 @@ describe("Android CtrlProxyText", () => {
   test("clearField sends an empty commit with explicit protocol delivery", async () => {
     const timer = new FakeTimer();
     const harness = createIosDelegateHarness({ timer });
-    const result = new CtrlProxyText(harness.context).commitViaIme(
-      "",
-      undefined,
-      10_000,
-      undefined,
-      undefined,
-      "clearField",
-    );
+    const result = new CtrlProxyText(harness.context).commitViaIme("", undefined, 10_000, {
+      delivery: "clearField",
+    });
     await waitForSent(harness.sentMessages, 1);
     expect(harness.sentMessages[0]).toMatchObject({
       type: "request_commit_text",
@@ -405,13 +400,9 @@ describe("Android CtrlProxyText", () => {
       };
       const controller = new AbortController();
       let settled = false;
-      const promise = new CtrlProxyText(context).commitViaIme(
-        "text",
-        "prior",
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      const promise = new CtrlProxyText(context).commitViaIme("text", "prior", undefined, {
+        signal: controller.signal,
+      });
       void promise.then(() => {
         settled = true;
       });
@@ -610,14 +601,9 @@ describe("Android CtrlProxyText", () => {
         socket.sentMessages.length = 0;
       }
 
-      const eventPromise = textDelegate.commitViaIme(
-        "Ab!",
-        "prior-ime",
-        10000,
-        undefined,
-        undefined,
-        "keyEvents",
-      );
+      const eventPromise = textDelegate.commitViaIme("Ab!", "prior-ime", 10000, {
+        delivery: "keyEvents",
+      });
       const eventRequest = await waitForRequest(socket, "request_commit_text");
       expect(eventRequest.delivery).toBe("keyEvents");
       socket.simulateMessage(
@@ -656,13 +642,9 @@ describe("Android CtrlProxyText", () => {
 
       socket.sentMessages.length = 0;
       const controller = new AbortController();
-      const aborted = textDelegate.commitViaIme(
-        "text",
-        "prior-ime",
-        undefined,
-        undefined,
-        controller.signal,
-      );
+      const aborted = textDelegate.commitViaIme("text", "prior-ime", undefined, {
+        signal: controller.signal,
+      });
       const abortedRequest = await waitForRequest(socket, "request_commit_text");
       controller.abort();
       const cancelRequest = await waitForRequest(socket, "request_cancel_ime_commit");
@@ -824,8 +806,10 @@ test("sends expectedSuffix only when provided and resolves insert metadata", asy
   const delegate = new CtrlProxyText(context);
   for (const suffix of ["x", undefined, ""]) {
     socket.sentMessages.length = 0;
-    const resultPromise = delegate.requestInsertText("value", undefined, undefined, {
-      expectedSuffix: suffix,
+    const resultPromise = delegate.requestInsertText("value", {
+      options: {
+        expectedSuffix: suffix,
+      },
     });
     const request = await waitForRequest(socket, "request_insert_text");
     expect(request.acceptsCaretNotPlaced).toBe(true);
@@ -878,8 +862,10 @@ test("client insert_text_result projection preserves optional fields and old APK
       {},
     ]) {
       socket.sentMessages.length = 0;
-      const promise = client.requestInsertText("value", undefined, undefined, {
-        expectedSuffix: "x",
+      const promise = client.requestInsertText("value", {
+        options: {
+          expectedSuffix: "x",
+        },
       });
       const request = await waitForRequest(socket, "request_insert_text");
       expect(request.expectedSuffix).toBe("x");
@@ -925,12 +911,9 @@ test("insert caret-warning acceptance defaults on and can explicitly opt out for
   });
   for (const acceptsCaretNotPlaced of [undefined, true, false]) {
     socket.sentMessages.length = 0;
-    const pending = delegate.requestInsertText(
-      "é",
-      undefined,
-      undefined,
-      acceptsCaretNotPlaced === undefined ? undefined : { acceptsCaretNotPlaced },
-    );
+    const pending = delegate.requestInsertText("é", {
+      options: acceptsCaretNotPlaced === undefined ? undefined : { acceptsCaretNotPlaced },
+    });
     const request = await waitForRequest(socket, "request_insert_text");
     expect(request.acceptsCaretNotPlaced).toBe(acceptsCaretNotPlaced ?? true);
     const response =
@@ -997,9 +980,11 @@ test("pre-dispatch state read round-trips and insert baseline is optional", asyn
     expect(await promise).toEqual({ success: true, state });
     for (const precedingState of [state, undefined]) {
       socket.sentMessages.length = 0;
-      const insert = client.requestInsertText("😀", undefined, undefined, {
-        expectedSuffix: "x",
-        precedingState,
+      const insert = client.requestInsertText("😀", {
+        options: {
+          expectedSuffix: "x",
+          precedingState,
+        },
       });
       const wire = await waitForRequest(socket, "request_insert_text");
       if (precedingState) {
@@ -1050,11 +1035,14 @@ describe("Android non-idempotent text outcomes", () => {
   for (const operation of ["insert", "ime"] as const) {
     const start = (text: CtrlProxyText, signal?: AbortSignal, onDispatch?: () => void) =>
       operation === "insert"
-        ? text.requestInsertText("abc", 5000, undefined, undefined, {
-            abortSignal: signal,
-            onDispatch,
+        ? text.requestInsertText("abc", {
+            timeoutMs: 5000,
+            transport: {
+              abortSignal: signal,
+              onDispatch,
+            },
           })
-        : text.requestImeAction("send", 5000, undefined, signal, onDispatch);
+        : text.requestImeAction("send", 5000, undefined, { abortSignal: signal, onDispatch });
 
     test.each(["timeout", "disconnect", "abort"])(
       `${operation}: unconfirmed %s stops replay`,
@@ -1169,12 +1157,18 @@ test("Android client forwards appended transport controls for insert and IME", a
   const onDispatch = () => {};
   const transport = { abortSignal: signal, onDispatch, deadlineMs: timer.now() + 1234 };
   try {
-    await client.requestInsertText("abc", 1234, undefined, { expectedSuffix: "x" }, transport);
+    await client.requestInsertText("abc", {
+      timeoutMs: 1234,
+      options: { expectedSuffix: "x" },
+      transport,
+    });
     expect(insert.mock.calls).toEqual([
-      ["abc", 1234, undefined, { expectedSuffix: "x" }, transport],
+      ["abc", { timeoutMs: 1234, options: { expectedSuffix: "x" }, transport }],
     ]);
-    await client.requestImeAction("send", 1234, undefined, signal, onDispatch);
-    expect(ime.mock.calls).toEqual([["send", 1234, undefined, signal, onDispatch]]);
+    await client.requestImeAction("send", 1234, undefined, { abortSignal: signal, onDispatch });
+    expect(ime.mock.calls).toEqual([
+      ["send", 1234, undefined, { abortSignal: signal, onDispatch }],
+    ]);
   } finally {
     insert.mockRestore();
     ime.mockRestore();
@@ -1184,13 +1178,10 @@ test("Android client forwards appended transport controls for insert and IME", a
 
 test.each([0, 25])("insert respects caller deadline with %s ms remaining", async (remaining) => {
   const h = createIosDelegateHarness();
-  const pending = new CtrlProxyText(h.context).requestInsertText(
-    "abc",
-    5000,
-    undefined,
-    undefined,
-    { deadlineMs: h.timer.now() + remaining },
-  );
+  const pending = new CtrlProxyText(h.context).requestInsertText("abc", {
+    timeoutMs: 5000,
+    transport: { deadlineMs: h.timer.now() + remaining },
+  });
   await Promise.resolve();
   h.advanceTime(remaining);
   h.advanceTime(5000);
@@ -1208,15 +1199,11 @@ describe("semantic IME dispatch outcomes", () => {
     async (action) => {
       const h = createIosDelegateHarness();
       let dispatches = 0;
-      const pending = new CtrlProxyText(h.context).requestImeAction(
-        action,
-        5000,
-        undefined,
-        undefined,
-        () => {
+      const pending = new CtrlProxyText(h.context).requestImeAction(action, 5000, undefined, {
+        onDispatch: () => {
           dispatches++;
         },
-      );
+      });
       await Promise.resolve();
       h.advanceTime(5000);
       expect(await pending).toMatchObject({ success: false, action, retryable: false });
@@ -1265,15 +1252,7 @@ describe("IME commit trace wire response", () => {
         throw new Error("Expected fake socket");
       }
       await waitForSocketOpen(socket);
-      const promise = client.commitViaIme(
-        "value",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        optIn,
-      );
+      const promise = client.commitViaIme("value", undefined, undefined, { trace: optIn });
       const request = await waitForRequest(socket, "request_commit_text");
       expect("trace" in request).toBe(optIn === true);
       if (optIn) {

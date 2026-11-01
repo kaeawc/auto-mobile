@@ -191,7 +191,10 @@ for (const action of ["tap", "doubleTap"]) {
       talkBackStrategy: strategy,
       talkBackDriverFactory: { createDriver: () => new FakeTalkBackNavigationDriver() },
     });
-    await tap.executeAndroidTap(action, 540, 380, 0, row, { isTalkBackEnabled: true });
+    await tap.executeAndroidTap(action, { x: 540, y: 380 }, 0, {
+      element: row,
+      isTalkBackEnabled: true,
+    });
     expect(strategy.fallbackCalls).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(action === "tap" ? 1 : 2);
   });
@@ -229,7 +232,11 @@ test.each(["capability", "action"])(
         return true;
       };
     } else {
-      service.requestNodeAction = async (_action, _selector, _timeout, _perf, signal) => {
+      service.requestNodeAction = async (
+        _action,
+        _selector,
+        { timeoutMs: _timeout, perf: _perf, signal } = {},
+      ) => {
         received = signal;
         signal?.addEventListener("abort", finish, { once: true });
         await pending;

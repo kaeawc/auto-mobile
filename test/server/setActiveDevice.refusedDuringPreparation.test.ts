@@ -332,13 +332,9 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
       let inventoryReads = 0;
       const reserveDuringRead = async () => {
         if (++inventoryReads === 1) {
-          reservation = await h.pool.reserveDeviceForReadiness(
-            h.device.deviceId,
-            h.device,
-            undefined,
-            undefined,
-            { mcpSessionId: "client-a" },
-          );
+          reservation = await h.pool.reserveDeviceForReadiness(h.device.deviceId, h.device, {
+            autolockClient: { mcpSessionId: "client-a" },
+          });
         }
       };
       const select = createSetActiveDeviceHandler({
@@ -393,13 +389,9 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
         const calls: string[] = [];
         let reservation: DeviceReadinessReservation | undefined;
         const reserve = async () => {
-          reservation = await h.pool.reserveDeviceForReadiness(
-            h.device.deviceId,
-            h.device,
-            undefined,
-            undefined,
-            { mcpSessionId: "client-a" },
-          );
+          reservation = await h.pool.reserveDeviceForReadiness(h.device.deviceId, h.device, {
+            autolockClient: { mcpSessionId: "client-a" },
+          });
         };
         const select = createSetActiveDeviceHandler({
           resumeCtrlProxy: async () => {
@@ -477,13 +469,9 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
       let reservation: DeviceReadinessReservation | undefined;
       const select = createSetActiveDeviceHandler({
         resumeCtrlProxy: async () => {
-          reservation = await h.pool.reserveDeviceForReadiness(
-            h.device.deviceId,
-            h.device,
-            undefined,
-            undefined,
-            { mcpSessionId: "client-a" },
-          );
+          reservation = await h.pool.reserveDeviceForReadiness(h.device.deviceId, h.device, {
+            autolockClient: { mcpSessionId: "client-a" },
+          });
         },
       });
       try {
@@ -533,13 +521,9 @@ describe("setActiveDevice refuses a device another request is preparing (#11651)
       h.release();
       await first;
       const holder = h.pool.getDevice(h.device.deviceId)!.sessionId!;
-      const reservation = await h.pool.reserveDeviceForReadiness(
-        h.device.deviceId,
-        h.device,
-        undefined,
-        undefined,
-        { mcpSessionId: "client-a" },
-      );
+      const reservation = await h.pool.reserveDeviceForReadiness(h.device.deviceId, h.device, {
+        autolockClient: { mcpSessionId: "client-a" },
+      });
       const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
       try {
         await select({

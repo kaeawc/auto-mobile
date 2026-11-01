@@ -164,7 +164,7 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
       connectWebSocket: (perf, interest) => this.connectWebSocket(perf, interest),
       ensureConnected: () => this.ensureConnected(),
       requestHierarchySync: (perf, filter, signal, timeoutMs) =>
-        this.requestHierarchySync(perf, filter, signal, timeoutMs),
+        this.requestHierarchySync(perf, filter, signal, { timeoutMs }),
     }));
   }
   public async verifyServiceReady(
@@ -716,9 +716,11 @@ export class IOSCtrlProxyClient extends IosCtrlProxyTestHooksFacade implements I
   public static createForTesting(
     device: BootedDevice,
     port: number,
-    wsFactory: WebSocketFactory,
-    timer: Timer,
-    dependencies: IosCtrlProxyClientTestOptions = {},
+    {
+      wsFactory,
+      timer,
+      ...dependencies
+    }: IosCtrlProxyClientTestOptions & { wsFactory: WebSocketFactory; timer: Timer },
   ): IOSCtrlProxyClient {
     return new IOSCtrlProxyClient(
       device,

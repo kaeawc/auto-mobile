@@ -19,7 +19,12 @@ export interface DeviceClaimTables {
 }
 
 export class SqliteDeviceClaims implements DeviceClaims {
-  constructor(private readonly db: Kysely<DeviceClaimTables>) {}
+  constructor(
+    private readonly db: Kysely<DeviceClaimTables>,
+    private readonly write: <T>(
+      operation: (db: Kysely<DeviceClaimTables>) => Promise<T>,
+    ) => Promise<T> = (operation) => operation(db),
+  ) {}
 
   async upsert(claim: DeviceClaim): Promise<void> {
     const row = {
@@ -35,22 +40,24 @@ export class SqliteDeviceClaims implements DeviceClaims {
       claimed_at_ms: claim.claimedAtMs,
       updated_at_ms: claim.updatedAtMs,
     };
-    await this.db
-      .insertInto("device_claims")
-      .values(row)
-      .onConflict((conflict) =>
-        conflict
-          .columns(["platform", "device_id"])
-          .doUpdateSet({
-            ...row,
-            // Re-claiming by the same owner keeps when it first claimed.
-            claimed_at_ms: sql<number>`CASE WHEN device_claims.pid = excluded.pid
+    await this.write((db) =>
+      db
+        .insertInto("device_claims")
+        .values(row)
+        .onConflict((conflict) =>
+          conflict
+            .columns(["platform", "device_id"])
+            .doUpdateSet({
+              ...row,
+              // Re-claiming by the same owner keeps when it first claimed.
+              claimed_at_ms: sql<number>`CASE WHEN device_claims.pid = excluded.pid
               AND device_claims.owner_token = excluded.owner_token
               THEN device_claims.claimed_at_ms ELSE excluded.claimed_at_ms END`,
-          })
-          .where("device_claims.updated_at_ms", "<=", row.updated_at_ms),
-      )
-      .execute();
+            })
+            .where("device_claims.updated_at_ms", "<=", row.updated_at_ms),
+        )
+        .execute(),
+    );
   }
 
   async release(
@@ -58,21 +65,25 @@ export class SqliteDeviceClaims implements DeviceClaims {
     deviceId: string,
     owner: { pid: number; ownerToken: string },
   ): Promise<void> {
-    await this.db
-      .deleteFrom("device_claims")
-      .where("platform", "=", platform)
-      .where("device_id", "=", deviceId)
-      .where("pid", "=", owner.pid)
-      .where("owner_token", "=", owner.ownerToken)
-      .execute();
+    await this.write((db) =>
+      db
+        .deleteFrom("device_claims")
+        .where("platform", "=", platform)
+        .where("device_id", "=", deviceId)
+        .where("pid", "=", owner.pid)
+        .where("owner_token", "=", owner.ownerToken)
+        .execute(),
+    );
   }
 
   async releaseOwnedBy(owner: { pid: number; ownerToken: string }): Promise<void> {
-    await this.db
-      .deleteFrom("device_claims")
-      .where("pid", "=", owner.pid)
-      .where("owner_token", "=", owner.ownerToken)
-      .execute();
+    await this.write((db) =>
+      db
+        .deleteFrom("device_claims")
+        .where("pid", "=", owner.pid)
+        .where("owner_token", "=", owner.ownerToken)
+        .execute(),
+    );
   }
 
   async get(platform: Platform, deviceId: string): Promise<DeviceClaim | undefined> {

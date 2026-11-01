@@ -40,6 +40,8 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.dismiss
@@ -323,7 +325,7 @@ class DefaultPrototypeHost(
     var request: PrototypeRequest,
   ) {
     /** A floating window's screen position as its anchored root last placed it (#9316). */
-    var anchoredOrigin: IntOffset? = null
+    var anchoredOrigin: IntOffset? by mutableStateOf(null)
     val visible = androidx.compose.runtime.mutableStateOf(true)
     /** A new marker for every content revision, including in-place replacements. */
     var firstComposition = CompletableDeferred<Unit>()
@@ -428,6 +430,7 @@ class DefaultPrototypeHost(
         context,
         windowManager,
         navigationBarBottomPx = { navigationBarBottomPx(windowManager, sdkInt) },
+        systemBarTopPx = { systemBarTopPx(windowManager) },
         density = densityProvider,
       )
     } else {
@@ -470,6 +473,7 @@ class DefaultPrototypeHost(
           surfaceId = request.surfaceId,
           blurBehindRadiusPx = backdropBlurPx(request, target.density()),
         )
+      target.constrainDismissWindow(params, request)
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
       }
@@ -618,8 +622,15 @@ class DefaultPrototypeHost(
           ),
           request.motionActivity,
         ) {
-          PrototypeWindowContent(request, current.view.escapeState) {
-            prototypeInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+          val anchoredOriginYPx = current.anchoredOrigin?.y
+          PrototypeWindowContent(request, current.view.escapeState, anchoredOriginYPx) {
+            prototypeInsetFloor(
+              request.placement,
+              target.density(),
+              target.navigationBarBottomPx(),
+              target.systemBarTopPx(),
+              anchoredOriginYPx,
+            )
           }
         }
       }
@@ -655,6 +666,7 @@ class DefaultPrototypeHost(
       if (window !== current || current.anchoredOrigin != origin) return@post
       val params = copyParams(current.params)
       applyAnchoredOrigin(params, origin)
+      current.target.constrainDismissWindow(params, current.request)
       update(current, params)
     }
   }
@@ -680,6 +692,7 @@ class DefaultPrototypeHost(
         blurBehindRadiusPx = backdropBlurPx(current.request, current.target.density()),
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
+    current.target.constrainDismissWindow(params, current.request)
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     if (copyParams(current.params).copyFrom(params) == 0 && isViewAttached(current.view))
@@ -1239,11 +1252,12 @@ fun prototypeHostChrome(request: PrototypeRequest): PrototypeHostChrome {
 internal fun PrototypeWindowContent(
   request: PrototypeRequest,
   escapeState: PrototypeEscapeState = remember { PrototypeEscapeState() },
+  anchoredOriginYPx: Int? = null,
   insetFloor: () -> PrototypeInsetFloor,
 ) {
-  // Read again when the configuration changes (rotation), which is when the bar moves.
+  // Read again when the bar moves on rotation or an anchored window changes its screen origin.
   val configuration = LocalConfiguration.current
-  val floor = remember(request.placement, configuration) { insetFloor() }
+  val floor = remember(request.placement, configuration, anchoredOriginYPx) { insetFloor() }
   val chrome = prototypeHostChrome(request)
   val scope = rememberCoroutineScope()
   val shown = request.theme?.collectAsState()?.value
@@ -1257,6 +1271,22 @@ internal fun PrototypeWindowContent(
   }
   PrototypeHostTheme(shown) {
     PrototypeChrome(request, chrome, floor, scope, escapeState.revealed || touchExploration)
+  }
+}
+
+/** Only host dismiss chrome is inset; fullscreen authored content keeps its viewport. */
+@Composable
+private fun prototypeRoundDismissPadding(): PaddingValues {
+  val configuration = LocalConfiguration.current
+  if (!configuration.isScreenRound) return PaddingValues(0.dp)
+  val size = LocalWindowInfo.current.containerSize
+  val safe = prototypeRoundSafeArea(size.width, size.height, true)
+  return with(LocalDensity.current) {
+    PaddingValues(
+      start = safe.horizontal.toDp(),
+      top = safe.vertical.toDp(),
+      end = safe.horizontal.toDp(),
+    )
   }
 }
 
@@ -1280,9 +1310,11 @@ private fun PrototypeChrome(
           .background(dismissColors.background)
           .windowInsetsPadding(
             WindowInsets.systemBars
+              .union(floor.asComposeInsets())
               .union(WindowInsets.displayCutout)
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
-          ),
+          )
+          .padding(prototypeRoundDismissPadding()),
       ) {
         PrototypeCloseChip(
           onClick = { scope.launch { request.onHostDismiss() } },
@@ -1321,6 +1353,7 @@ private fun PrototypeChrome(
           Modifier.align(Alignment.TopEnd)
             .windowInsetsPadding(
               WindowInsets.systemBars
+                .union(floor.asComposeInsets())
                 .union(WindowInsets.displayCutout)
                 .only(WindowInsetsSides.Top + WindowInsetsSides.End),
             ),
@@ -1388,10 +1421,12 @@ private fun PrototypeChromelessContent(
         Modifier.align(Alignment.TopCenter)
           .windowInsetsPadding(
             WindowInsets.systemBars
+              .union(floor.asComposeInsets())
               .union(WindowInsets.displayCutout)
               .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
           )
-          .padding(top = ESCAPE_PILL_TOP_PADDING_DP.dp),
+          .padding(top = ESCAPE_PILL_TOP_PADDING_DP.dp)
+          .padding(prototypeRoundDismissPadding()),
       ) {
         val colors = prototypeCloseColors(MaterialTheme.colorScheme)
         TextButton(

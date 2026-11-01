@@ -16,6 +16,7 @@ import {
   Element,
   ObserveResult,
   ViewHierarchyResult,
+  requireAndroidOrIosPlatform,
 } from "../../models";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import {
@@ -169,12 +170,16 @@ export class DragAndDrop extends BaseVisualChange {
     timer: Timer = defaultTimer,
     deps: DragAndDropDeps = {},
   ) {
-    super(device, adb, timer, deps.renderedDisplayRevision, deps);
+    super(device, {
+      adb,
+      timer,
+      displayFence: deps,
+    });
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.selector =
       deps.selector ??
       new ResolverElementSelector(undefined, undefined, {
-        platform: device.platform,
+        platform: requireAndroidOrIosPlatform(device.platform, "dragAndDrop"),
         iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
       });
     this.hierarchyCapture =
@@ -263,8 +268,7 @@ export class DragAndDrop extends BaseVisualChange {
         this.adb,
         `draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${inputDurationArgument(duration)}`,
         target.displayId,
-        signal,
-        target.assertCurrent,
+        { signal, assertCurrent: target.assertCurrent },
       );
     }
     return {
@@ -284,8 +288,8 @@ export class DragAndDrop extends BaseVisualChange {
           this.device,
           options.display,
           this.observeScreen,
-          this.adb,
           {
+            adb: this.adb,
             lastRenderedObservation: this.lastRenderedObservation,
             signal,
             transitions: this.displayTransitionReader,
@@ -486,9 +490,12 @@ export class DragAndDrop extends BaseVisualChange {
             this.screenshotCapturer,
             viewHierarchy,
             searchCriteria,
-            this.visionConfig,
-            finalErrorMessage,
-            { signal, visionAnalyzer: this.visionAnalyzer },
+            {
+              visionConfig: this.visionConfig,
+              baseError: finalErrorMessage,
+              signal,
+              visionAnalyzer: this.visionAnalyzer,
+            },
           );
         }
       }

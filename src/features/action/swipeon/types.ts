@@ -1,6 +1,6 @@
 import type { AndroidCtrlProxyClient } from "../../observe/android";
 import type { TalkBackSwipeCtrlProxy } from "./TalkBackSwipeExecutor";
-import type { FencedGestureOptions } from "../ExecuteGesture";
+import type { FencedGestureOptions, SwipeLine } from "../ExecuteGesture";
 import type { ActionCall } from "../ActionCall";
 import type { Timer } from "../../../utils/SystemTimer";
 import {
@@ -16,11 +16,19 @@ import { SwipeResult } from "../../../models/SwipeResult";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../../ctrlProxy/accessibility/interfaces/AccessibilityDetector";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
-import type { DisplayFenceDependencies } from "../BaseVisualChange";
+import type { DisplayFenceDependencies, ProgressCallback } from "../BaseVisualChange";
 import type { RenderedObservationReader } from "../TargetDisplayAction";
 import type { AccessibilityHierarchyRequest } from "../../observe/hierarchyReadArgs";
 
 export type SwipeOnResolvedOptions = SwipeOnOptions & { direction: SwipeDirection };
+
+/** Call context for an element/container swipe; `selected` reuses an already-resolved target. */
+export interface ElementSwipeCall {
+  progress?: ProgressCallback;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  selected?: { element?: Element; observation: ObserveResult };
+}
 
 export type SwipeInterval = { start: number; end: number; length: number };
 
@@ -37,6 +45,11 @@ export type SwipeGestureRequest = {
   perf?: PerformanceTracker;
   boomerang?: BoomerangConfig;
   signal?: AbortSignal;
+  /**
+   * iOS: the observation the swipe was resolved against, so it can go through the SDK observation
+   * bridge (#5159). Omitted for edge swipes and scroll searches, which stay on XCTest.
+   */
+  sdkObservation?: Pick<ObserveResult, "viewHierarchy">;
 };
 
 export type BoomerangGestureRequest = Omit<
@@ -94,14 +107,7 @@ export interface OverlayAnalyzer {
 }
 
 export interface GestureExecutor {
-  swipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    options?: FencedGestureOptions,
-    call?: ActionCall,
-  ): Promise<SwipeResult>;
+  swipe(line: SwipeLine, options?: FencedGestureOptions, call?: ActionCall): Promise<SwipeResult>;
 }
 
 export interface ScrollAccessibilityService {
@@ -109,7 +115,7 @@ export interface ScrollAccessibilityService {
     action: string,
     resourceId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
+    options?: { perf?: PerformanceTracker },
   ): Promise<{ success: boolean; error?: string }>;
 
   getAccessibilityHierarchy(
@@ -153,6 +159,8 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   iosVoiceOverDetector?: IosVoiceOverDetector;
   featureFlags?: import("../../featureFlags/FeatureFlagService").FeatureFlagReader;
   voiceOverExecutor?: VoiceOverSwipeRunner;
+  /** Scrolls a WKWebView DOM element into view for `lookFor` (#5162); iOS only. */
+  webScrollIntoView?: import("./IosSdkWebScrollIntoView").IosSdkWebScrollIntoView;
   autoTargetSelector?: AutoTargetSelectorService;
   visionConfig?: import("../../../vision/VisionTypes").VisionFallbackConfig;
   screenshotCapturer?: import("../../navigation/SelectionStateTracker").ScreenshotCapturer;

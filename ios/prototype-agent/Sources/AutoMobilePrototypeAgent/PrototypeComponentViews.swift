@@ -419,6 +419,12 @@
                 value: node.containerLayoutSignature(state: model.state) { model.holds($0) }
             )
             .frame(minWidth: 0, alignment: .leading)
+            // A `fill` card spans its node, so the outline and fill follow the node's width, not the
+            // content's (the outline hugged the content before).
+            .frame(
+                maxWidth: PrototypeCardLayout.outlineSpansWidth(style?.width) ? .infinity : nil,
+                alignment: .topLeading
+            )
             // An authored gradient is painted behind the card, over the authored background, by the
             // node's own style; the card's fill would cover it.
             .background(shape.fill(
@@ -1016,11 +1022,10 @@
         }
     }
 
-    // MARK: Dialog, snackbar
+    // MARK: Dialogs, snackbars, menus, drawers, tooltips and bottom sheets
 
-    /// Open dialogs and snackbars, drawn above the whole author tree inside the prototype window, in
-    /// tree order. A dialog's scrim covers the window, intercepts every touch and closes it on tap; a
-    /// snackbar takes touches only on itself.
+    /// Open dialogs, snackbars, menus, drawers, tooltips and bottom sheets above the author tree in tree order.
+    /// Dialog scrims intercept window touches and close on tap; snackbars take touches only on themselves.
     @MainActor
     struct PrototypeModalLayer: View {
         @Environment(\.prototypePalette) private var palette
@@ -1029,8 +1034,41 @@
         let model: PrototypeModel
         @State private var retainedDrawers: [PrototypeNode] = []
 
+        /// A bottom sheet lays out against the placement's window frame, so its scrim and detents stay
+        /// inside a `sheet` or `floating` window (as Android's) and it rises above the keyboard.
+        @ViewBuilder
+        private func sheet(_ node: PrototypeNode, index: Int) -> some View {
+            let box = model.modalSheetContainer
+            let rendererHeight = Double(model.keyboardContainerFrame?.height ?? model.windowSize.height)
+            let motion = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            let duration = PrototypeKeyboardLift.animationDuration(
+                keyboardDuration: model.keyboardDuration, motion: motion
+            )
+            let content = NodeView(node: node, model: model, presentedAsModal: true)
+            let type = model.spec?.window.placement.type
+            if box.width > 0, box.height > 0, type == "sheet" || type == "floating" {
+                content
+                    .frame(width: CGFloat(box.width), height: CGFloat(box.height))
+                    .clipped()
+                    .reportFrame(key: "modal.\(index)", model: model)
+                    .position(x: CGFloat(box.x + box.width / 2), y: CGFloat(box.y + box.height / 2))
+                    .animation(duration.map { .easeInOut(duration: $0) }, value: box)
+            } else {
+                // Fullscreen windows do not move: the sheet's room ends at the keyboard.
+                content
+                    .reportFrame(key: "modal.\(index)", model: model)
+                    .padding(.bottom, box.height > 0 ? CGFloat(max(rendererHeight - box.height, 0)) : 0)
+                    .animation(duration.map { .easeInOut(duration: $0) }, value: box)
+            }
+        }
+
         var body: some View {
-            let modals = model.spec?.root.openModals(state: model.state, pages: model.pages, stacks: model.stacks) ?? []
+            let modals = model.spec?.root.openModals(
+                state: model.state,
+                pages: model.pages,
+                stacks: model.stacks,
+                data: model.spec?.data
+            ) ?? []
             let displayed = modals + retainedDrawers.filter { old in !modals.contains { $0 === old } }
             ZStack {
                 ForEach(Array(displayed.enumerated()), id: \.element.identity) { index, node in
@@ -1048,6 +1086,8 @@
                     } else if node.type == "menu" {
                         PrototypeMenuOverlay(node: node, model: model)
                             .reportFrame(key: "modal.\(index)", model: model)
+                    } else if node.type == "bottomSheet" {
+                        sheet(node, index: index)
                     } else if node.type == "dialog" {
                         ZStack {
                             colors.scrim
@@ -1080,7 +1120,12 @@
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay {
                 if let selected = model.expandedSelect,
-                   model.spec?.root.visibleSelect(selected, state: model.state, pages: model.pages) == true
+                   model.spec?.root.visibleSelect(
+                       selected,
+                       state: model.state,
+                       pages: model.pages,
+                       data: model.spec?.data
+                   ) == true
                 {
                     PrototypeSelectOverlay(node: selected, model: model)
                         .reportFrame(key: "modal.select", model: model)

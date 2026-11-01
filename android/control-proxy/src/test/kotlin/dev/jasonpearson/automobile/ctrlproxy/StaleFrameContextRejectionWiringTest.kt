@@ -49,7 +49,7 @@ class StaleFrameContextRejectionWiringTest {
         ),
       "GLOBAL_ACTION" to
         Regex(
-          """(?s)GlobalActionResult\(\s*timestamp\s*=\s*System\.currentTimeMillis\(\)\s*,\s*requestId\s*=\s*requestId\s*,\s*success\s*=\s*false\s*,.*?\berror\s*=\s*error\s*,""",
+          """(?s)GlobalActionResult\(\s*timestamp\s*=\s*timeProvider\.currentTimeMillis\(\)\s*,\s*requestId\s*=\s*requestId\s*,\s*success\s*=\s*false\s*,.*?\berror\s*=\s*error\s*,""",
         ),
     )
 
@@ -97,7 +97,7 @@ class StaleFrameContextRejectionWiringTest {
   }
 
   private fun rejectionSignature(source: String): String {
-    val start = source.indexOf("private fun rejectStaleFrameContext(")
+    val start = source.indexOf("fun rejectStaleFrameContext(")
     assertTrue("rejectStaleFrameContext not found in CtrlProxy.kt", start >= 0)
     val bodyOpen = source.indexOf('{', start)
     assertTrue("rejectStaleFrameContext body not found in CtrlProxy.kt", bodyOpen >= 0)
@@ -105,7 +105,7 @@ class StaleFrameContextRejectionWiringTest {
   }
 
   private fun rejectionBody(source: String): String {
-    val start = source.indexOf("private fun rejectStaleFrameContext(")
+    val start = source.indexOf("fun rejectStaleFrameContext(")
     assertTrue("rejectStaleFrameContext not found in CtrlProxy.kt", start >= 0)
     val bodyOpen = source.indexOf('{', start)
     assertTrue("rejectStaleFrameContext body not found in CtrlProxy.kt", bodyOpen >= 0)
@@ -144,16 +144,20 @@ class StaleFrameContextRejectionWiringTest {
 
   private fun typedActionCallSites(source: String): Set<String> =
     Regex(
-        """rejectStaleFrameContext\(\s*requestId\s*,\s*frameContext\s*,\s*StaleFrameContextAction\.([A-Z_]+)\s*\)""",
+        """rejectStaleFrameContext\(\s*requestId\s*,\s*frameContext\s*,\s*StaleFrameContextAction\.([A-Z_]+)\s*,?\s*\)""",
       )
       .findAll(source)
       .map { it.groupValues[1] }
       .toSet()
 
-  private fun readCtrlProxySource(): String = locateCtrlProxySource().readText()
+  // The call sites stay in the service; the rejection and its dispatch live in StaleFrameRejector.
+  private fun readCtrlProxySource(): String =
+    listOf("CtrlProxy.kt", "StaleFrameRejector.kt").joinToString("\n") {
+      locateCtrlProxySource(it).readText()
+    }
 
-  private fun locateCtrlProxySource(): File {
-    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+  private fun locateCtrlProxySource(fileName: String): File {
+    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
     val direct =
       listOf(File(rel), File("control-proxy/$rel"), File("android/control-proxy/$rel"))
         .firstOrNull { it.isFile }
@@ -171,7 +175,7 @@ class StaleFrameContextRejectionWiringTest {
       }
       dir = dir.parentFile
     }
-    fail("Could not locate CtrlProxy.kt from user.dir=${System.getProperty("user.dir")}")
+    fail("Could not locate $fileName from user.dir=${System.getProperty("user.dir")}")
     error("unreachable")
   }
 }

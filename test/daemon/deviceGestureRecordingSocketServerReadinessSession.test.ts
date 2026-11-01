@@ -107,9 +107,11 @@ function harness() {
     undefined,
     undefined,
     { authorize: () => {} },
-    { assertDeviceActionable: () => {} },
-    resolution,
-    async () => {},
+    {
+      admissionGate: { assertDeviceActionable: () => {} },
+      deviceResolution: resolution,
+      bindingGate: async () => {},
+    },
   );
   const nightModeWrites = () =>
     adb.getExecutedCommands().filter((command) => command.includes("cmd uimode night"));

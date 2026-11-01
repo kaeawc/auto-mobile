@@ -47,6 +47,14 @@ interface AndroidProtoViewerDependencies {
   tempFiles: ProtoViewerTempFiles;
 }
 
+/** One ProtoViewer intent: its extras, how long to wait for the result, and files to remove after. */
+interface ProtoViewerExchangeOptions {
+  extras: readonly string[];
+  timeoutMs: number;
+  signal?: AbortSignal;
+  cleanup: readonly string[];
+}
+
 /**
  * Talks to ProtoViewer only through adb: push into its app-scoped inbox, start its DUMP-guarded
  * MCP activity, and read back the one result file it writes atomically (no socket, no broadcast).
@@ -61,13 +69,9 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       currentUser: true,
       signal,
     });
-    const installed = await isPackageInstalledForUser(
-      this.deps.adb,
-      PROTOVIEWER_PACKAGE,
-      userId,
-      undefined,
+    const installed = await isPackageInstalledForUser(this.deps.adb, PROTOVIEWER_PACKAGE, userId, {
       signal,
-    );
+    });
     this.userId = installed ? userId : undefined;
     return installed;
   }
@@ -105,7 +109,8 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       timeoutMs - (this.deps.timer.now() - started),
       Math.min(timeoutMs, PROTOVIEWER_MIN_IMPORT_WAIT_MS),
     );
-    const result = await this.work(userId, request, PROTOVIEWER_MCP_IMPORT_ACTION, extras, {
+    const result = await this.work(userId, request, PROTOVIEWER_MCP_IMPORT_ACTION, {
+      extras,
       timeoutMs: remainingMs,
       signal,
       cleanup: [inbox],
@@ -130,7 +135,8 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
       `--es ${PROTOVIEWER_EXTRA_REQUEST} ${request}`,
       `--es ${PROTOVIEWER_EXTRA_LIBRARY_ID} ${shellQuote(libraryId)}`,
     ];
-    return await this.work(userId, request, PROTOVIEWER_MCP_OPEN_ACTION, extras, {
+    return await this.work(userId, request, PROTOVIEWER_MCP_OPEN_ACTION, {
+      extras,
       timeoutMs,
       signal,
       cleanup: [],
@@ -176,17 +182,12 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     await this.removeShellOwnedFolders(userId, signal);
     const request = this.requestId();
     try {
-      const prepared = await this.exchange(
-        userId,
-        request,
-        PROTOVIEWER_MCP_PREPARE_ACTION,
-        [`--es ${PROTOVIEWER_EXTRA_REQUEST} ${request}`],
-        {
-          timeoutMs: Math.min(timeoutMs, PROTOVIEWER_PREPARE_TIMEOUT_MS),
-          signal,
-          cleanup: [],
-        },
-      );
+      const prepared = await this.exchange(userId, request, PROTOVIEWER_MCP_PREPARE_ACTION, {
+        extras: [`--es ${PROTOVIEWER_EXTRA_REQUEST} ${request}`],
+        timeoutMs: Math.min(timeoutMs, PROTOVIEWER_PREPARE_TIMEOUT_MS),
+        signal,
+        cleanup: [],
+      });
       if (prepared.status !== "prepared") {
         throw new ActionableError(
           `ProtoViewer answered a prepare request with ${prepared.status}.`,
@@ -237,10 +238,9 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     userId: number,
     request: string,
     action: string,
-    extras: readonly string[],
-    options: { timeoutMs: number; signal?: AbortSignal; cleanup: readonly string[] },
+    options: ProtoViewerExchangeOptions,
   ): Promise<ProtoViewerResult> {
-    const result = await this.exchange(userId, request, action, extras, options);
+    const result = await this.exchange(userId, request, action, options);
     if (result.status === "prepared") {
       throw new ActionableError("ProtoViewer answered a request with a prepare result; retry.");
     }
@@ -260,8 +260,7 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
     userId: number,
     request: string,
     action: string,
-    extras: readonly string[],
-    options: { timeoutMs: number; signal?: AbortSignal; cleanup: readonly string[] },
+    { extras, ...options }: ProtoViewerExchangeOptions,
   ): Promise<ProtoViewerWireResult> {
     const resultPath = protoViewerResultPath(userId, request);
     try {
@@ -280,7 +279,7 @@ export class AndroidProtoViewer implements ProtoViewerDevice {
           ),
         this.deps.timer,
         options.timeoutMs,
-        options.signal,
+        { signal: options.signal },
       );
       if (result.request !== request) {
         throw new ActionableError(

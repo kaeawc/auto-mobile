@@ -30,13 +30,18 @@ export function resolveActionableHierarchyScreenSize(
   );
 }
 
+/** Runner capture metadata carried onto a normalized iOS hierarchy. */
+export interface IosHierarchyNormalization {
+  updatedAt?: number;
+  ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"];
+  frameContext?: string;
+  fresh?: boolean;
+}
+
 /** Normalizes an already-converted iOS hierarchy (see CtrlProxyHierarchy.convertToViewHierarchyResult). */
 export function normalizeIosHierarchy(
   hierarchy: ViewHierarchyResult,
-  updatedAt?: number,
-  ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"],
-  frameContext?: string,
-  fresh?: boolean,
+  { updatedAt, ctrlProxyReconnect, frameContext, fresh }: IosHierarchyNormalization = {},
 ): ViewHierarchyResult {
   const cleanedHierarchy = cleanupIosXCTestHierarchy(hierarchy);
   // Match the Android ingest invariant: generated path UUIDs must never be

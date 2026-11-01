@@ -165,12 +165,12 @@ describe("issue #6154: launchApp schema enforces its declared contract", () => {
 // the extracted resolution/validation helpers directly against a resolved
 // `BootedDevice`, independent of the raw (now-optional) `platform` param.
 describe("issue #6154 follow-up: handlers use the resolved platform, not the raw param", () => {
-  const iosDevice: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "sim-1" };
-  const androidDevice: BootedDevice = {
+  const iosDevice = { name: "iPhone", platform: "ios", deviceId: "sim-1" } satisfies BootedDevice;
+  const androidDevice = {
     name: "Pixel",
     platform: "android",
     deviceId: "emulator-5554",
-  };
+  } satisfies BootedDevice;
 
   describe("highlight (P1)", () => {
     test("resolves platform from the device when the request omitted it", () => {

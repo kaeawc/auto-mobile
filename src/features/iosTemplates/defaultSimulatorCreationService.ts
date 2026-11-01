@@ -53,7 +53,7 @@ export function getDefaultTemplateDependencies(
     history: gates.iosBootHistory,
   });
   const source = new IosSimFleetCostCollector(
-    new CommandFleetHostSource(new DefaultHostCommandExecutor(), timer, undefined, simctl),
+    new CommandFleetHostSource(new DefaultHostCommandExecutor(), timer, undefined, { simctl }),
     gates.iosBootHistory,
     timer,
   );

@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +23,7 @@ internal class NodeActionController(
   private val host: Host,
   private val perfProvider: PerfProvider,
   private val timeProvider: TimeProvider,
+  private val resultSender: ResultSender,
 ) {
   /** Service-side operations the controller cannot perform without the accessibility service. */
   interface Host {
@@ -43,15 +45,67 @@ internal class NodeActionController(
     suspend fun publishSettledHierarchy()
 
     fun forgetRememberedInsert()
-
-    suspend fun sendActionResult(outcome: NodeActionResult)
   }
 
   /** Settle and publish a fresh hierarchy before acknowledging a successful node action. */
   suspend fun refreshHierarchyAfterNodeAction() = host.publishSettledHierarchy()
 
+  /** The correlated `action_result` answering a node action, with the request's perf timing. */
+  private suspend fun sendActionResult(outcome: NodeActionResult) =
+    resultSender.send(outcome.requestId, "action_result") { perfTiming ->
+      ActionResult(
+        timestamp = timeProvider.currentTimeMillis(),
+        requestId = outcome.requestId,
+        success = outcome.success,
+        action = outcome.action,
+        totalTimeMs = outcome.totalTimeMs,
+        error = outcome.error,
+        perfTiming = perfTiming,
+        alreadySatisfied = outcome.alreadySatisfied,
+      )
+    }
+
   companion object {
     private const val TAG = "CtrlProxy"
+  }
+
+  /**
+   * Click the input-focused editable node and reply with a correlated `click` result. Like
+   * [performNodeAction], this stays on the inbound command queue until settling and replying.
+   */
+  // Any click failure must still answer the request instead of hanging the caller.
+  @Suppress("TooGenericExceptionCaught")
+  suspend fun clickFocusedInputRequest(requestId: String?) {
+    host.forgetRememberedInsert()
+    val startTime = timeProvider.currentTimeMillis()
+    val outcome =
+      try {
+        clickFocusedInput(
+          findFocusedInput = {
+            host.findNodeInDisplayWindows { root -> findFocusedEditableNode(root) }
+          },
+          click = { node ->
+            nodeActionFailure("click", node.actionList?.map { it.id }) == null &&
+              node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+          },
+          recycle = { node -> node.recycle() },
+          settleAfterClick = ::refreshHierarchyAfterNodeAction,
+        )
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        Log.e(TAG, "Focused input click failed", e)
+        FocusedInputClickOutcome(false, e.message ?: "Focused input click failed")
+      }
+    sendActionResult(
+      NodeActionResult(
+        requestId = requestId,
+        action = "click",
+        success = outcome.success,
+        error = outcome.error,
+        totalTimeMs = timeProvider.currentTimeMillis() - startTime,
+      ),
+    )
   }
 
   fun performAccessibilityLinkActivation(
@@ -64,7 +118,7 @@ internal class NodeActionController(
     val validationError = accessibilityLinkError(text, occurrence)
     if (validationError != null) {
       host.launchRequestScope(requestId) {
-        host.sendActionResult(
+        sendActionResult(
           NodeActionResult(
             requestId = requestId,
             action = "activate_accessibility_link",
@@ -96,7 +150,7 @@ internal class NodeActionController(
           else -> "No actionable semantic link matching '$text' at occurrence $occurrence"
         }
       host.launchRequestScope(requestId) {
-        host.sendActionResult(
+        sendActionResult(
           NodeActionResult(
             requestId = requestId,
             action = "activate_accessibility_link",
@@ -119,7 +173,7 @@ internal class NodeActionController(
   private fun reportLinkFailure(requestId: String?, startTime: Long, error: Exception) {
     Log.w(TAG, "Semantic accessibility link activation failed", error)
     host.launchRequestScope(requestId) {
-      host.sendActionResult(
+      sendActionResult(
         NodeActionResult(
           requestId = requestId,
           action = "activate_accessibility_link",
@@ -284,7 +338,7 @@ internal class NodeActionController(
       val totalTime = timeProvider.currentTimeMillis() - startTime
       Log.d(TAG, "Action total time: ${totalTime}ms")
 
-      host.sendActionResult(
+      sendActionResult(
         NodeActionResult(
           requestId = requestId,
           action = action,
@@ -300,7 +354,7 @@ internal class NodeActionController(
       perfProvider.end()
       val errorTime = timeProvider.currentTimeMillis()
       Log.e(TAG, "Error performing action", e)
-      host.sendActionResult(
+      sendActionResult(
         NodeActionResult(
           requestId = requestId,
           action = action,
@@ -314,7 +368,7 @@ internal class NodeActionController(
     private fun reportMissing(error: String, errorTime: Long) {
       Log.w(TAG, error)
       host.launchRequestScope(requestId) {
-        host.sendActionResult(
+        sendActionResult(
           NodeActionResult(
             requestId = requestId,
             action = action,

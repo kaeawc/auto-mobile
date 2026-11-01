@@ -76,7 +76,9 @@ describe("plan internal request inheritance", () => {
     const progress = async () => {};
     const setUIStateHandler = createSetUIStateHandler({
       setUIStateFactory: () => ({
-        execute: async (_options, inheritedProgress, _signal, deadlineMs, liveDeadline) => {
+        execute: async (_options, inheritedProgress, _signal, transport = {}) => {
+          const { transportDeadlineMs: deadlineMs, getLiveTransportDeadlineMs: liveDeadline } =
+            transport;
           snapshots.push(deadlineMs, liveDeadline?.(), inheritedProgress);
           return { success: true, fields: [], totalAttempts: 0 };
         },

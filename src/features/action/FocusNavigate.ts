@@ -12,6 +12,7 @@ import type { ElementBounds } from "../../models/ElementBounds";
 import { DefaultTextMatcher } from "../utility/TextMatcher";
 import { matchesCtrlProxyResourceId } from "../utility/SearchableNode";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { boundsEqual, intersectBounds } from "../../utils/bounds";
 import type { Timer } from "../../utils/SystemTimer";
 import type { InputKeyName } from "./InputKey";
 
@@ -22,7 +23,7 @@ export const FOCUS_NAVIGATE_DEFAULT_MAX_STEPS = 30;
 export const FOCUS_NAVIGATE_MAX_STEPS_LIMIT = 100;
 export const FOCUS_NAVIGATE_DEFAULT_SETTLE_MS = 200;
 export const FOCUS_NAVIGATE_MAX_SETTLE_MS = 5000;
-/** Consecutive presses that leave focus unchanged before the loop gives up. */
+/** Consecutive explicit-direction presses that leave focus unchanged before the loop gives up. */
 export const FOCUS_NAVIGATE_STUCK_PRESSES = 2;
 
 export const FOCUS_NAVIGATE_STATUSES = ["focused", "max_steps", "stuck"] as const;
@@ -53,6 +54,8 @@ export interface FocusKeyPresser {
 }
 
 export interface FocusPathEntry {
+  /** Label of a contained node; the identity fields and bounds still describe the focused parent. */
+  descendantLabel?: string;
   text?: string;
   contentDesc?: string;
   resourceId?: string;
@@ -129,8 +132,20 @@ export function directionToward(
   from: Element | null,
   matches: readonly Element[],
 ): FocusNavigateDirection {
+  return directionsToward(from, matches)[0];
+}
+
+/**
+ * Every D-pad direction that closes distance to the nearest match, best first: the dominant axis,
+ * then the other axis when the match is offset on it. Without a focused element or a match the
+ * only candidate is down.
+ */
+export function directionsToward(
+  from: Element | null,
+  matches: readonly Element[],
+): [FocusNavigateDirection, ...FocusNavigateDirection[]] {
   if (!from || matches.length === 0) {
-    return "down";
+    return ["down"];
   }
   const origin = center(from.bounds);
   const offsets = matches.map((match) => {
@@ -140,22 +155,63 @@ export function directionToward(
   const nearest = offsets.reduce((best, next) =>
     Math.hypot(next.dx, next.dy) < Math.hypot(best.dx, best.dy) ? next : best,
   );
-  if (Math.abs(nearest.dx) > Math.abs(nearest.dy)) {
-    return nearest.dx > 0 ? "right" : "left";
-  }
-  return nearest.dy < 0 ? "up" : "down";
+  const horizontal: FocusNavigateDirection[] =
+    nearest.dx === 0 ? [] : [nearest.dx > 0 ? "right" : "left"];
+  const vertical: FocusNavigateDirection[] =
+    nearest.dy === 0 ? [] : [nearest.dy < 0 ? "up" : "down"];
+  const ranked =
+    Math.abs(nearest.dx) > Math.abs(nearest.dy)
+      ? [...horizontal, ...vertical]
+      : [...vertical, ...horizontal];
+  const [best, ...rest] = ranked;
+  return best ? [best, ...rest] : ["down"];
 }
 
-function pathEntry(element: Element): FocusPathEntry {
+function pathEntry(element: Element, descendant?: Element): FocusPathEntry {
   const text = stringProp(element, "text");
   const contentDesc = stringProp(element, "content-desc");
   const resourceId = stringProp(element, "resource-id");
+  const descendantLabel =
+    descendant &&
+    (stringProp(descendant, "text") ||
+      stringProp(descendant, "content-desc") ||
+      stringProp(descendant, "resource-id"));
   return {
+    ...(descendantLabel ? { descendantLabel } : {}),
     ...(text ? { text } : {}),
     ...(contentDesc ? { contentDesc } : {}),
     ...(resourceId ? { resourceId } : {}),
     bounds: element.bounds,
   };
+}
+
+/** Match each contained node independently, preserving the focused container's identity. */
+function describeFocus(
+  screen: FocusScreen,
+  target: FocusNavigateTarget,
+): { focusedElement: FocusPathEntry | undefined; matches: boolean } {
+  const { focused } = screen;
+  // The observer supplies flattened nodes, so require full bounds containment, not overlap.
+  const contained = focused
+    ? screen.elements.filter((element) => {
+        if (element === focused) {
+          return false;
+        }
+        const intersection = intersectBounds(focused.bounds, element.bounds);
+        return intersection !== null && boundsEqual(intersection, element.bounds);
+      })
+    : [];
+  const matchingDescendant = contained.find((element) => elementMatchesTarget(element, target));
+  const matches = Boolean(focused && (elementMatchesTarget(focused, target) || matchingDescendant));
+  const label =
+    matchingDescendant ??
+    contained.find(
+      (element) =>
+        stringProp(element, "text") ||
+        stringProp(element, "content-desc") ||
+        stringProp(element, "resource-id"),
+    );
+  return { focusedElement: focused ? pathEntry(focused, label) : undefined, matches };
 }
 
 function focusKey(element: Element | null): string {
@@ -169,6 +225,48 @@ function focusKey(element: Element | null): string {
     stringProp(element, "content-desc"),
     `${left},${top},${right},${bottom}`,
   ].join("|");
+}
+
+/** Tracks whether the last press moved focus, and which directions failed on this element. */
+interface FocusProgress {
+  readonly unchanged: number;
+  /** Directions that did not move focus off this element during this navigation call. */
+  readonly blocked: ReadonlySet<FocusNavigateDirection>;
+  /** Records an observation; returns true when focus differs from the previous one. */
+  observe(key: string): boolean;
+  pressed(direction: FocusNavigateDirection): void;
+}
+
+function createFocusProgress(): FocusProgress {
+  const blockedByElement = new Map<string, Set<FocusNavigateDirection>>();
+  let blocked = new Set<FocusNavigateDirection>();
+  let unchanged = 0;
+  let previousKey: string | undefined;
+  let lastDirection: FocusNavigateDirection | undefined;
+  return {
+    get unchanged() {
+      return unchanged;
+    },
+    get blocked() {
+      return blocked;
+    },
+    observe(key) {
+      const didNotMove = previousKey !== undefined && key === previousKey;
+      const moved = key !== previousKey;
+      unchanged = didNotMove ? unchanged + 1 : 0;
+      if (!didNotMove) {
+        blocked = blockedByElement.get(key) ?? new Set<FocusNavigateDirection>();
+        blockedByElement.set(key, blocked);
+      } else if (lastDirection) {
+        blocked.add(lastDirection);
+      }
+      previousKey = key;
+      return moved;
+    },
+    pressed(direction) {
+      lastDirection = direction;
+    },
+  };
 }
 
 export class FocusNavigate {
@@ -189,65 +287,80 @@ export class FocusNavigate {
 
     const path: FocusPathEntry[] = [];
     let steps = 0;
-    let unchanged = 0;
-    let previousKey: string | undefined;
+    const progress = createFocusProgress();
 
     for (;;) {
       throwIfAborted(signal);
       const screen = await this.observer.read(signal);
       const { focused } = screen;
+      const { focusedElement, matches } = describeFocus(screen, options.until);
       const key = focusKey(focused);
-      if (focused && key !== previousKey) {
-        path.push(pathEntry(focused));
+      if (progress.observe(key) && focusedElement) {
+        path.push(focusedElement);
       }
-      unchanged = previousKey !== undefined && key === previousKey ? unchanged + 1 : 0;
-      previousKey = key;
+      const { unchanged, blocked } = progress;
 
-      const done = this.exitFor(options, focused, { steps, unchanged, maxSteps, path });
+      const direction = options.direction ?? this.nextDirection(screen, options, blocked);
+      const exhausted = options.direction ? unchanged >= FOCUS_NAVIGATE_STUCK_PRESSES : !direction;
+      const done = this.exitFor(focusedElement, matches, {
+        steps,
+        stuck: exhausted ? Math.max(1, unchanged, blocked.size) : 0,
+        maxSteps,
+        path,
+      });
       if (done) {
         return done;
       }
-      await this.pressToward(options, screen, signal);
+      if (!direction) {
+        throw new ActionableError("focusNavigate has no direction to press");
+      }
+      await this.press(direction, signal);
+      progress.pressed(direction);
       steps += 1;
       await this.timer.sleep(settleMs);
     }
   }
 
   private exitFor(
-    options: FocusNavigateOptions,
-    focused: Element | null,
-    progress: { steps: number; unchanged: number; maxSteps: number; path: FocusPathEntry[] },
+    focusedElement: FocusPathEntry | undefined,
+    matches: boolean,
+    progress: { steps: number; stuck: number; maxSteps: number; path: FocusPathEntry[] },
   ): FocusNavigateResult | undefined {
-    const { steps, unchanged, maxSteps, path } = progress;
-    if (focused && elementMatchesTarget(focused, options.until)) {
-      return { success: true, status: "focused", steps, path, focusedElement: pathEntry(focused) };
+    const { steps, stuck, maxSteps, path } = progress;
+    if (matches) {
+      return { success: true, status: "focused", steps, path, focusedElement };
     }
-    if (unchanged >= FOCUS_NAVIGATE_STUCK_PRESSES) {
-      return this.stopped(
-        "stuck",
-        steps,
-        path,
-        focused,
-        `Focus did not move after ${unchanged} presses`,
-      );
+    if (stuck > 0) {
+      return this.stopped("stuck", steps, path, {
+        focusedElement,
+        message: `Focus did not move after ${stuck} ${stuck === 1 ? "press" : "presses"}`,
+      });
     }
     if (steps >= maxSteps) {
-      return this.stopped("max_steps", steps, path, focused, `Reached maxSteps (${maxSteps})`);
+      return this.stopped("max_steps", steps, path, {
+        focusedElement,
+        message: `Reached maxSteps (${maxSteps})`,
+      });
     }
     return undefined;
   }
 
-  private async pressToward(
-    options: FocusNavigateOptions,
+  /** The best direction toward the target that has not already failed to move focus. */
+  private nextDirection(
     screen: FocusScreen,
+    options: FocusNavigateOptions,
+    blocked: ReadonlySet<FocusNavigateDirection>,
+  ): FocusNavigateDirection | undefined {
+    const matches = screen.elements.filter((element) =>
+      elementMatchesTarget(element, options.until),
+    );
+    return directionsToward(screen.focused, matches).find((direction) => !blocked.has(direction));
+  }
+
+  private async press(
+    direction: FocusNavigateDirection,
     signal: AbortSignal | undefined,
   ): Promise<void> {
-    const direction =
-      options.direction ??
-      directionToward(
-        screen.focused,
-        screen.elements.filter((element) => elementMatchesTarget(element, options.until)),
-      );
     const pressed = await this.keys.press(DIRECTION_KEYS[direction], signal);
     if (!pressed.success) {
       throw new ActionableError(pressed.error ?? `Failed to press D-pad ${direction}`);
@@ -258,15 +371,14 @@ export class FocusNavigate {
     status: "stuck" | "max_steps",
     steps: number,
     path: FocusPathEntry[],
-    focused: Element | null,
-    message: string,
+    { focusedElement, message }: { focusedElement: FocusPathEntry | undefined; message: string },
   ): FocusNavigateResult {
     return {
       success: false,
       status,
       steps,
       path,
-      ...(focused ? { focusedElement: pathEntry(focused) } : {}),
+      ...(focusedElement ? { focusedElement } : {}),
       message: `${message}; the target was not focused. Observe before retrying.`,
     };
   }

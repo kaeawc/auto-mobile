@@ -45,7 +45,7 @@ describe("behaviour-driving JSON columns are validated on read (#11859)", () => 
 
   test("an off-schema manifest object logs but stays listed for retention", async () => {
     await insertSnapshot("off-schema", JSON.stringify({ snapshotName: 42 }));
-    const repository = new DeviceSnapshotRepository(db);
+    const repository = new DeviceSnapshotRepository({ db });
 
     expect((await repository.getSnapshot("off-schema"))?.snapshotName).toBe("off-schema");
     expect((await repository.listSnapshots()).map((s) => s.snapshotName)).toEqual(["off-schema"]);
@@ -55,14 +55,14 @@ describe("behaviour-driving JSON columns are validated on read (#11859)", () => 
   test("a manifest that is not an object reads as null and logs", async () => {
     await insertSnapshot("scalar", JSON.stringify(42));
 
-    expect(await new DeviceSnapshotRepository(db).getSnapshot("scalar")).toBeNull();
+    expect(await new DeviceSnapshotRepository({ db }).getSnapshot("scalar")).toBeNull();
     expect(String(warn.mock.calls[0]?.[0])).toContain("failed validation");
   });
 
   test("failure group with wrong-shaped aggregates falls back and logs", async () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1000000);
-    const repo = new FailureAnalyticsRepository(db, timer);
+    const repo = new FailureAnalyticsRepository({ db, timer });
     await repo.recordFailure({
       type: "crash",
       signature: "sig",

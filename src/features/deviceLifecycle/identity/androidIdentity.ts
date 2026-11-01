@@ -109,8 +109,9 @@ export function resolveKillDeviceStableTarget(
   device: BootedDevice,
   devicePool: DevicePoolReads | undefined,
 ): StableDeviceTarget | undefined {
-  if (device.platform === "ios") {
-    return { platform: "ios", stableId: device.deviceId };
+  // A simulator UDID, including Apple Watch and Apple TV, is its own stable identity.
+  if (device.platform === "ios" || device.platform === "watchos" || device.platform === "tvos") {
+    return { platform: device.platform, stableId: device.deviceId };
   }
   if (!isVirtualAndroidDevice(device)) {
     return undefined;
@@ -340,9 +341,15 @@ export async function confirmPooledAvdIdentity(
   device: BootedDevice,
   capture: PooledAvdCapture,
   devicePool: DevicePool | undefined,
-  resolveRunningAvdName: DeviceToolsDependencies["resolveRunningAndroidAvdName"],
-  budget: PooledAvdNameProbeBudget,
-  force: boolean,
+  {
+    resolveRunningAvdName,
+    budget,
+    force,
+  }: {
+    budget: PooledAvdNameProbeBudget;
+    force: boolean;
+    resolveRunningAvdName: DeviceToolsDependencies["resolveRunningAndroidAvdName"];
+  },
 ): Promise<PooledAvdConfirmation> {
   const pooledAvdName = capture.avdName;
   const pooled = devicePool?.getDevice(device.deviceId);

@@ -1,0 +1,31 @@
+{
+  "id": "sensors-block-minimal",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "shakes": 0
+  },
+  "requires": {
+    "platform": ["sensors"]
+  },
+  "sensors": {
+    "shake": {}
+  },
+  "platform": {
+    "on": {
+      "sensors.shake": [
+        {
+          "type": "increment",
+          "key": "shakes"
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Shakes {shakes}"
+  }
+}

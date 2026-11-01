@@ -100,12 +100,14 @@ describe("recorded opaque intents", () => {
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, SCOPE),
     );
-    await recording.beforeToolCall("sendBroadcast", broadcast(), ANDROID, "broker");
+    await recording.beforeToolCall("sendBroadcast", broadcast(), ANDROID, {
+      sessionUuid: "broker",
+    });
     await recording.beforeToolCall(
       "backgroundWork",
       { appId: APP, action: { runJob: { jobId: 7 } } },
       ANDROID,
-      "broker",
+      { sessionUuid: "broker" },
     );
     const entries = await journal.list(SCOPE);
     expect(entries.map((entry) => entry.toolName)).toEqual(["sendBroadcast", "backgroundWork"]);

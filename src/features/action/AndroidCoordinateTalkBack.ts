@@ -65,12 +65,17 @@ export class AndroidCoordinateTalkBack {
     options: TapAtOptions,
     point: { x: number; y: number },
     frameContext: string | undefined,
-    signal: AbortSignal | undefined,
-    context: {
-      assertCurrent: () => void;
-      onTapDelivered: () => void;
-      onDispatched?: () => void;
-      onActivationWarnings?: (warnings?: string[]) => void;
+    {
+      signal,
+      context,
+    }: {
+      signal?: AbortSignal;
+      context: {
+        assertCurrent: () => void;
+        onTapDelivered: () => void;
+        onDispatched?: () => void;
+        onActivationWarnings?: (warnings?: string[]) => void;
+      };
     },
   ): Promise<void> {
     const fence: DisplayFence = {
@@ -100,14 +105,11 @@ export class AndroidCoordinateTalkBack {
           onDispatch?.();
         };
         const result = this.dependencies.useContextualFocusTap
-          ? await this.requestContextualTalkBackFocus(
-              { x, y },
-              duration,
-              frameContext,
+          ? await this.requestContextualTalkBackFocus({ x, y }, duration, frameContext, {
               signal,
               fence,
-              reportDispatch,
-            )
+              onDispatch: reportDispatch,
+            })
           : await driver.requestTapCoordinates({ x, y, duration, onDispatch: reportDispatch });
         if (result.success) {
           context.onTapDelivered();
@@ -133,12 +135,10 @@ export class AndroidCoordinateTalkBack {
     const result = await awaitWhileRequestIsLive(
       options.action === "longPress"
         ? this.dependencies.talkBackStrategy.executeCoordinateFallback(
-            point.x,
-            point.y,
+            { x: point.x, y: point.y },
             "longPress",
             tapDurationMs(options, "android"),
-            guardedDriver,
-            { displayFence: fence },
+            { driver: guardedDriver, fenceOptions: { displayFence: fence } },
           )
         : // A precise TalkBack activation already contains the double-tap gesture.
           this.dependencies.talkBackStrategy.executePreciseTap(
@@ -166,10 +166,9 @@ export class AndroidCoordinateTalkBack {
     point: { x: number; y: number },
     duration: number,
     frameContext: string | undefined,
-    signal: AbortSignal | undefined,
-    fence: DisplayFence,
-    onDispatch: () => void,
+    context: { signal: AbortSignal | undefined; fence: DisplayFence; onDispatch: () => void },
   ): Promise<{ success: boolean; error?: string }> {
+    const { signal, fence, onDispatch } = context;
     let dispatched = false;
     try {
       const result = await this.dependencies.androidClient.requestTapCoordinates({

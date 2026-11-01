@@ -42,7 +42,7 @@ export async function confirmAndroidPackageInstalledLive(
   const { adb, deviceId, packageName, userId, staleMarker, cacheListedPackage, signal } = request;
   let installed: boolean;
   try {
-    installed = await isPackageInstalledForUser(adb, packageName, userId, undefined, signal);
+    installed = await isPackageInstalledForUser(adb, packageName, userId, { signal });
   } catch (error) {
     signal?.throwIfAborted();
     throw toActionableError(error, `Could not determine whether ${packageName} is installed`);

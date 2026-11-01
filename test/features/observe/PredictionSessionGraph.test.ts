@@ -59,12 +59,10 @@ describe("prediction reads follow the device's bound session graph (#10197)", ()
   async function sessionManager(sessionId: string): Promise<NavigationGraphManager> {
     const db = await createTestDatabase();
     sessionDbs.push(db);
-    const manager = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
-      undefined,
-      sessionId,
-    );
+    const manager = NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+      testCoverageRepository: new TestCoverageRepository({ db }),
+      sessionUuid: sessionId,
+    });
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, manager);
     return manager;
   }
@@ -93,7 +91,7 @@ describe("prediction reads follow the device's bound session graph (#10197)", ()
     const parser = new FakeElementParser();
     parser.nextFlattenedElements = [{ element: interactable(buttonText), index: 0, depth: 0 }];
     return new PredictiveUIState(resolver, {
-      historyRepository: new PredictionHistoryRepository(harness.db),
+      historyRepository: new PredictionHistoryRepository({ db: harness.db }),
       elementParser: parser,
     });
   }
@@ -179,10 +177,11 @@ describe("prediction outcomes are recorded on the graph that produced the predic
     harness = await installInMemoryNavManager();
     sessionDb = await createTestDatabase();
     sessionGraph = NavigationGraphManager.createForTesting(
-      new NavigationRepository(sessionDb),
-      new TestCoverageRepository(sessionDb),
-      undefined,
-      "session-a",
+      new NavigationRepository({ db: sessionDb }),
+      {
+        testCoverageRepository: new TestCoverageRepository({ db: sessionDb }),
+        sessionUuid: "session-a",
+      },
     );
     NavigationGraphManager.setInstanceForSessionForTesting("session-a", sessionGraph);
     boundSessions.clear();

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import { DeviceBootService, DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
-import type { DeviceInfo } from "../../src/models";
+import type { AndroidOrIosPlatform, DeviceInfo } from "../../src/models";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-const images: DeviceInfo[] = [
+type BootableImage = DeviceInfo & { platform: AndroidOrIosPlatform };
+
+const images: BootableImage[] = [
   { name: "Pixel_9_API_35", platform: "android", isRunning: false, osVersion: "35" },
   {
     name: "iPhone 16",
@@ -17,14 +19,14 @@ const images: DeviceInfo[] = [
   },
 ];
 
-async function bootTimeout(image: DeviceInfo): Promise<unknown> {
+async function bootTimeout(image: BootableImage): Promise<unknown> {
   const devices = new FakeDeviceUtils();
   const matcher = new FakeDeviceMatcher();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   devices.setDeviceImages(image.platform, [image]);
   matcher.setImageResult(image);
-  devices.waitForDeviceReady = async (_device, _timeout, _handle, signal) =>
+  devices.waitForDeviceReady = async (_device, _timeout, _handle, { signal } = {}) =>
     new Promise((_resolve, reject) => {
       signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
     });

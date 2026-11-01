@@ -59,7 +59,7 @@ export async function executeIosTextInput(
   logger.debug(`[InputText] iOS begin textLength=${text.length} imeAction=${imeAction ?? "none"}`);
 
   const client = IOSCtrlProxyClient.getInstance(device);
-  const before = await readIosTypedTextField(observeScreen, timer, signal);
+  const before = await readIosTypedTextField({ observer: observeScreen, timer, signal });
   assertInputNotAborted(signal);
   const deadlineMs = getTextRequestDeadlineMs();
   const result = await client.requestSetText(text, {
@@ -90,7 +90,11 @@ export async function executeIosTextInput(
 
   logger.debug(`[InputText] iOS setText ok totalMs=${Date.now() - startMs}`);
 
-  const verification = await verifyIosTypedText(text, before, observeScreen, timer, signal);
+  const verification = await verifyIosTypedText(text, before, {
+    observer: observeScreen,
+    timer,
+    signal,
+  });
   if (!verification.success) {
     return { success: false, text, error: verification.error, method: "a11y" };
   }

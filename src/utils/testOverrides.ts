@@ -4,6 +4,7 @@ import type { GitMetadataClient } from "./GitMetadataClient";
 import type { PerformanceTracker } from "./PerformanceTracker";
 import type { ProxySetupResult } from "./interfaces/ProxyManager";
 import type { PortAvailabilityChecker } from "./PortManager";
+import type { EmulatorGrpcPortRegistry } from "./android-cmdline-tools/emulatorGrpc/EmulatorGrpcPortRegistry";
 
 /** The narrow readiness seam used by ToolExecutionContext. */
 export interface DeviceReadinessProxyDriver {
@@ -29,6 +30,8 @@ export const testOverrides: {
   /** In-process version metadata seam; never inherited by spawned children. */
   gitMetadataClient: GitMetadataClient | undefined;
   hostPortAvailabilityChecker: PortAvailabilityChecker | undefined;
+  /** Builds a fresh gRPC lease registry per reservation instance so unit tests never touch the lock directory. */
+  emulatorGrpcPortRegistry: (() => EmulatorGrpcPortRegistry) | undefined;
   deviceReadinessProxyDriverProvider: DeviceReadinessProxyDriverProvider | null;
   telemetryNoOpDefault: boolean;
   /** Directory read by auxiliary socket configs during in-process tests. */
@@ -43,6 +46,7 @@ export const testOverrides: {
   hostLoad: undefined,
   gitMetadataClient: undefined,
   hostPortAvailabilityChecker: undefined,
+  emulatorGrpcPortRegistry: undefined,
   deviceReadinessProxyDriverProvider: null,
   telemetryNoOpDefault: false,
   auxSocketDir: undefined,

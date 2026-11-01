@@ -71,17 +71,13 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     fakeTimer.enableAutoAdvance();
     const notifier = createCountingNotifier();
 
-    client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      (url) => new FakeWebSocket(url, "none", 0, fakeTimer),
-      fakeTimer,
-      {
-        serviceManagerFactory: undefined,
-        bootedDeviceLister: undefined,
-        deviceConnectionLostNotifier: notifier,
-      },
-    );
+    client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+      wsFactory: (url) => new FakeWebSocket(url, "none", 0, fakeTimer),
+      timer: fakeTimer,
+      serviceManagerFactory: undefined,
+      bootedDeviceLister: undefined,
+      deviceConnectionLostNotifier: notifier,
+    });
 
     // Establish a real (fake) socket so close() has a live socket to tear down.
     const connected = await client.ensureConnected();
@@ -104,20 +100,16 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     const notifier = createCountingNotifier();
 
     let socket: FakeWebSocket | null = null;
-    client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      (url) => {
+    client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+      wsFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
         return socket;
       },
-      fakeTimer,
-      {
-        serviceManagerFactory: undefined,
-        bootedDeviceLister: undefined,
-        deviceConnectionLostNotifier: notifier,
-      },
-    );
+      timer: fakeTimer,
+      serviceManagerFactory: undefined,
+      bootedDeviceLister: undefined,
+      deviceConnectionLostNotifier: notifier,
+    });
 
     const connected = await client.ensureConnected();
     expect(connected).toBe(true);
@@ -136,16 +128,14 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     fakeTimer.enableAutoAdvance();
     const sockets: FakeWebSocket[] = [];
 
-    client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      (url) => {
+    client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+      wsFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, fakeTimer);
         sockets.push(socket);
         return socket;
       },
-      fakeTimer,
-    );
+      timer: fakeTimer,
+    });
 
     expect(await client.ensureConnected()).toBe(true);
     const oldSocket = sockets[0];
@@ -166,16 +156,14 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     const fakeTimer = new FakeTimer();
     const sockets: FakeWebSocket[] = [];
 
-    client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      (url) => {
+    client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+      wsFactory: (url) => {
         const socket = new FakeWebSocket(url, "timeout", 60_000, fakeTimer);
         sockets.push(socket);
         return socket;
       },
-      fakeTimer,
-    );
+      timer: fakeTimer,
+    });
 
     const firstConnection = client.ensureConnected();
     await flushSetImmediate();
@@ -201,15 +189,13 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     fakeTimer.enableAutoAdvance();
     let socket: FakeWebSocket | null = null;
 
-    client = IOSCtrlProxyClient.createForTesting(
-      testDevice,
-      8765,
-      (url) => {
+    client = IOSCtrlProxyClient.createForTesting(testDevice, 8765, {
+      wsFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
         return socket;
       },
-      fakeTimer,
-    );
+      timer: fakeTimer,
+    });
 
     expect(await client.ensureConnected()).toBe(true);
     // A drag stays a plain rejecting request; swipe reports a closed socket as unconfirmed (#9972).

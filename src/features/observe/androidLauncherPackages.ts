@@ -200,9 +200,11 @@ export async function resolveConfiguredHomePackage(
   adb: AdbExecutor,
   deviceId: string,
   timer: Timer = defaultTimer,
-  incarnationToken?: string,
-  signal?: AbortSignal,
-  timeoutMs?: number,
+  {
+    incarnationToken,
+    signal,
+    timeoutMs,
+  }: { incarnationToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<string | null> {
   // Combine the caller's signal with the ambient request signal, then honor
   // cancellation BEFORE the warm-cache early return below: a hot cache would
@@ -296,21 +298,29 @@ export async function isForegroundLauncher(
   appId: string | null | undefined,
   adb: AdbExecutor,
   deviceId: string,
-  timer: Timer = defaultTimer,
-  options: { incarnationToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
+  {
+    timer = defaultTimer,
+    ...options
+  }: {
+    incarnationToken?: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    formFactor?: BootedDevice["formFactor"];
+  } & { timer?: Timer } = {},
 ): Promise<boolean> {
   if (!appId) {
     return false;
   }
   const { incarnationToken, signal, timeoutMs } = options;
-  const configuredHome = await resolveConfiguredHomePackage(
-    adb,
-    deviceId,
-    timer,
+  const configuredHome = await resolveConfiguredHomePackage(adb, deviceId, timer, {
     incarnationToken,
     signal,
     timeoutMs,
-  );
+  });
+  // AAOS embeds this map host in Home while the configured HOME package owns the shell.
+  if (options.formFactor === "automotive" && appId === "com.android.car.mapsplaceholder") {
+    return true;
+  }
   if (configuredHome) {
     return appId === configuredHome;
   }
@@ -362,12 +372,9 @@ export class QuietTreeStability {
     const controller = new AbortController();
     const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     // Lazy construction avoids starting a hierarchy service for ordinary gfxinfo callers.
-    const reader = (this.reader ??= new ViewHierarchy(
-      this.device,
-      this.adbFactory,
-      null,
-      this.timer,
-    ));
+    const reader = (this.reader ??= new ViewHierarchy(this.device, this.adbFactory, null, {
+      timer: this.timer,
+    }));
     const tree = await raceWithDeadline(
       () =>
         reader.getViewHierarchy(undefined, {

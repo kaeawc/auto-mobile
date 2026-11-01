@@ -20,12 +20,8 @@ function start(signal?: AbortSignal, undoOutcome: () => Promise<void> = async ()
   const undone: string[] = [];
   const delivered: string[] = [];
   const orphans: Promise<unknown>[] = [];
-  const caller = runOperationWithinDeadline<string>(
-    timer,
-    timer.now() + 1_000,
-    signal,
-    timeoutError,
-    async (_signal, undoIfUndelivered, onDelivered) => {
+  const caller = runOperationWithinDeadline<string>(timer, timer.now() + 1_000, signal, {
+    operation: async (_signal, undoIfUndelivered, onDelivered) => {
       onDelivered(() => delivered.push("session"));
       undoIfUndelivered(async (result) => {
         undone.push(result);
@@ -33,8 +29,9 @@ function start(signal?: AbortSignal, undoOutcome: () => Promise<void> = async ()
       });
       return await gate.promise;
     },
-    (pending) => orphans.push(pending),
-  ).then(
+    timeoutError,
+    onOrphan: (pending) => orphans.push(pending),
+  }).then(
     (result) => ({ result }),
     (error: unknown) => ({ error }),
   );

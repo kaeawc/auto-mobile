@@ -1,0 +1,76 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "scrub": 0
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "media": {
+      "players": {
+        "main": {
+          "kind": "video",
+          "source": {
+            "asset": "trailer"
+          }
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "videoPlayer",
+          "id": "hero",
+          "player": "main",
+          "poster": "trailerPoster",
+          "controls": "builtin",
+          "contentScale": "fit",
+          "autoplay": false,
+          "muted": false,
+          "positionKey": "scrub",
+          "contentDescription": "Trailer"
+        },
+        {
+          "type": "videoPlayer",
+          "id": "clip",
+          "source": {
+            "sample": "countdown"
+          },
+          "controls": "none",
+          "contentScale": "crop",
+          "autoplay": "whenVisible",
+          "muted": true,
+          "loop": true,
+          "startMs": -1
+        },
+        {
+          "type": "text",
+          "text": "{platform:/media/players/clip/positionMs}"
+        },
+        {
+          "type": "button",
+          "label": "Play clip",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.play",
+              "args": {
+                "player": {
+                  "value": "clip"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].startMs"
+}

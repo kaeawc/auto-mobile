@@ -216,8 +216,7 @@ function arrayError(
   name: string,
   value: unknown,
   path: string,
-  dynamic: boolean,
-  assets?: ReadonlySet<string>,
+  { dynamic, assets }: { dynamic: boolean; assets?: ReadonlySet<string> },
 ): PrototypePlatformError | undefined {
   if (!Array.isArray(value)) {
     return issue(path, "Expected share array");
@@ -243,15 +242,14 @@ function valueError(
   name: string,
   value: unknown,
   path: string,
-  dynamic: boolean,
-  assets?: ReadonlySet<string>,
+  { dynamic, assets }: { dynamic: boolean; assets?: ReadonlySet<string> },
 ): PrototypePlatformError | undefined {
   if (["text", "subject", "url"].includes(name)) {
     return stringError(name, value, path, dynamic);
   }
   return name === "contact"
     ? contactError(value, path, dynamic)
-    : arrayError(name, value, path, dynamic, assets);
+    : arrayError(name, value, path, { dynamic, assets });
 }
 
 /** Additional share semantics after the platform table has checked argument names and bindings.
@@ -276,8 +274,7 @@ export function prototypeShareArgumentsError(
       name,
       resolved ? args[name] : binding!.value,
       resolved ? at : `${at}.value`,
-      !resolved,
-      assets,
+      { dynamic: !resolved, assets },
     );
     if (error) {
       return error;

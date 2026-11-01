@@ -1,5 +1,6 @@
 import { holderOf, isIdle, type BindingFields } from "./deviceBinding";
 import { exponentialBackoff } from "../utils/Backoff";
+import { isAndroidOrIosPlatform, type Platform } from "../models/Platform";
 
 /** Pool bindings and startup leases both represent work the monitor must watch. */
 export function isHeldDisconnectDevice(
@@ -44,7 +45,7 @@ export function idleSweepInterval(
 export function idleSweepSignature(
   discoveredIds: Iterable<string>,
   pooledIds: Iterable<string>,
-  succeededPlatforms: ReadonlySet<"android" | "ios">,
+  succeededPlatforms: ReadonlySet<Platform>,
 ): string {
   return JSON.stringify([
     [...discoveredIds].sort(),
@@ -54,7 +55,7 @@ export function idleSweepSignature(
 }
 
 export function selectDisconnectScope(
-  platforms: readonly ("android" | "ios")[],
+  platforms: readonly Platform[],
   now: number,
   lastEitherSweepAt: number | undefined,
   idleIntervalMs: number,
@@ -62,8 +63,10 @@ export function selectDisconnectScope(
   if (lastEitherSweepAt === undefined || now - lastEitherSweepAt >= idleIntervalMs) {
     return "either";
   }
-  const platform = platforms[0];
-  return platform && platforms.every((value) => value === platform) ? platform : "either";
+  // Watch inventory is never scanned, so a tracked watch never narrows the scope.
+  const scoped = platforms.filter(isAndroidOrIosPlatform);
+  const platform = scoped[0];
+  return platform && scoped.every((value) => value === platform) ? platform : "either";
 }
 
 export interface DisconnectMonitorCadence {
@@ -108,7 +111,7 @@ export class DisconnectMonitorSchedule {
   }
 
   selectPlatform(
-    platforms: readonly ("android" | "ios")[],
+    platforms: readonly Platform[],
     now: number,
     planOnTracked: boolean,
   ): "android" | "ios" | "either" {
@@ -134,13 +137,23 @@ export class DisconnectMonitorSchedule {
   }
 }
 
-/** Back off only when discovery provides successful, complete absence-free evidence. */
+/**
+ * Back off only when discovery provides successful, complete absence-free evidence.
+ *
+ * @param succeededPlatforms - Platforms whose discovery succeeded this sweep
+ * @param missCount - Disconnect misses observed this sweep
+ * @param candidateDeviceIds - Devices that sessions hold
+ * @param inventory.bootedDeviceIds - Devices discovery listed as booted
+ * @param inventory.pooledDeviceIds - Devices in the pool
+ */
 export function eligibleIdleSweepSignature(
-  succeededPlatforms: ReadonlySet<"android" | "ios">,
+  succeededPlatforms: ReadonlySet<Platform>,
   missCount: number,
   candidateDeviceIds: Iterable<string>,
-  bootedDeviceIds: ReadonlySet<string>,
-  pooledDeviceIds: Iterable<string>,
+  {
+    bootedDeviceIds,
+    pooledDeviceIds,
+  }: { bootedDeviceIds: ReadonlySet<string>; pooledDeviceIds: Iterable<string> },
 ): string | undefined {
   if (
     succeededPlatforms.size === 0 ||

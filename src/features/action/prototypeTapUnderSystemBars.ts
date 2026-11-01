@@ -1,6 +1,9 @@
+import { intersectBounds } from "../../utils/bounds";
 import { ownPrototypeWindows } from "../observe/ownWindowFocus";
+import { iosWindowRoots, viewHierarchyLayerTree } from "../observe/layerTree";
 import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
 import type { ElementBounds } from "../../models/ElementBounds";
+import type { ObservationInsets } from "../../models/ObservationInsets";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 
 export type PrototypeBarTapDecision =
@@ -23,7 +26,7 @@ interface BarBands {
 }
 
 /**
- * Whether a captured node lives in one of CtrlProxy's own prototype windows. Node
+ * Whether a captured node lives in one of AutoMobile's own prototype windows. Node
  * identity is used (not geometry or ids) so an app control or system UI element
  * drawn at the same place is never mistaken for the prototype's.
  */
@@ -38,6 +41,13 @@ export function isOwnPrototypeNode(
   const prototypeRoots = ownPrototypeWindows(hierarchy)
     .filter((window) => window.hierarchy)
     .flatMap((window) => parser.extractWindowRootGroups({ hierarchy: {}, windows: [window] })[0]);
+  const iosRoots =
+    hierarchy.hierarchy.node && iosWindowRoots(viewHierarchyLayerTree, hierarchy.hierarchy.node);
+  for (const [root, prototype] of iosRoots ?? []) {
+    if (prototype) {
+      prototypeRoots.push(root);
+    }
+  }
   let found = false;
   for (const root of prototypeRoots) {
     parser.traverseNode(root, (candidate) => {
@@ -47,11 +57,26 @@ export function isOwnPrototypeNode(
   return found;
 }
 
+/** iOS reports a safe-area height and status-bar visibility, not Android's per-bar insets. */
+function iosBarBands(insets: ObservationInsets | undefined): BarBands | undefined {
+  if (insets?.source === "ios-sdk-safe-area" && insets.safeArea) {
+    const statusBar = insets.systemChrome?.statusBar;
+    return {
+      top: statusBar === "hidden" ? 0 : insets.safeArea.top,
+      // UIKit's bottom safe area is not evidence of a touch-consuming navigation bar.
+      bottom: 0,
+      visibilityKnown: statusBar === "visible" || statusBar === "hidden",
+    };
+  }
+  return undefined;
+}
+
 /** The bands bars occupy right now: visible insets when reported, else the legacy stable ones. */
-function barBands(hierarchy: ViewHierarchyResult): BarBands | undefined {
-  const typed = hierarchy.insets?.available === false ? undefined : hierarchy.insets?.systemBars;
-  if (typed) {
-    const tappable = hierarchy.insets?.tappableElement;
+function barBands(hierarchy: ViewHierarchyResult, warnIfUnknown = false): BarBands | undefined {
+  const insets = hierarchy.insets?.available === false ? undefined : hierarchy.insets;
+  if (insets?.systemBars) {
+    const typed = insets.systemBars;
+    const tappable = insets.tappableElement;
     return {
       top: typed.visible.top,
       bottom: typed.visible.bottom,
@@ -59,8 +84,35 @@ function barBands(hierarchy: ViewHierarchyResult): BarBands | undefined {
       ...(tappable ? { bottomConsumesTouches: tappable.bottom > 0 } : {}),
     };
   }
+  const ios = iosBarBands(insets);
+  if (ios) {
+    return ios;
+  }
   const legacy = hierarchy.systemInsets;
+  // A legacy zero is not proof that iOS's status bar is hidden.
+  if (warnIfUnknown && legacy?.top === 0) {
+    return undefined;
+  }
   return legacy ? { top: legacy.top, bottom: legacy.bottom, visibilityKnown: false } : undefined;
+}
+
+/** Restrict iOS prototype ownership checks only when the capture proves a visible status bar. */
+export function iosPrototypeBarSafeTapBounds(
+  hierarchy: ViewHierarchyResult,
+  ownedByPrototype: boolean,
+  bounds: ElementBounds,
+): ElementBounds | null {
+  const bands = barBands(hierarchy, true);
+  if (
+    !ownedByPrototype ||
+    !bands?.visibilityKnown ||
+    !hierarchy.screenHeight ||
+    hierarchy.screenHeight <= 0 ||
+    bands.top <= bounds.top
+  ) {
+    return bounds;
+  }
+  return intersectBounds(bounds, { ...bounds, top: Math.max(0, bands.top) });
 }
 
 const GESTURE_BAR_WARNING =
@@ -111,12 +163,25 @@ export function resolvePrototypeTapUnderSystemBar(input: {
   ownedByPrototype: boolean;
   bounds: ElementBounds;
   point: { x: number; y: number };
+  warnIfUnknown?: boolean;
 }): PrototypeBarTapDecision {
   const { hierarchy, ownedByPrototype, bounds, point } = input;
   const screenHeight = hierarchy?.screenHeight;
-  const bands = hierarchy && barBands(hierarchy);
-  if (!ownedByPrototype || !bands || !screenHeight || screenHeight <= 0) {
+  const bands = hierarchy && barBands(hierarchy, input.warnIfUnknown);
+  if (!ownedByPrototype) {
     return { kind: "proceed", point };
+  }
+  if (!bands || !screenHeight || screenHeight <= 0) {
+    return {
+      kind: "proceed",
+      point,
+      ...(input.warnIfUnknown
+        ? {
+            warning:
+              "The capture does not say whether the bars are showing or where the status bar ends, so the AutoMobile prototype control may not receive the touch.",
+          }
+        : {}),
+    };
   }
   const bottomStart = screenHeight - Math.max(0, bands.bottom);
   if (point.y >= Math.max(0, bands.top) && point.y < bottomStart) {

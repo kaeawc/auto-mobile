@@ -122,8 +122,8 @@ beforeEach(() => {
       return { success: true, totalTimeMs: 0 };
     },
     setPreference: async (...args) => {
-      if (typeof args[5] === "object") {
-        args[5].onDispatch?.();
+      if (typeof args[3] === "object") {
+        args[3].onDispatch?.();
       }
       deviceCalls.push("setPreference");
     },

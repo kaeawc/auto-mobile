@@ -77,8 +77,7 @@ async function harness(options: { maxUses?: number } = {}) {
           throw new ActionableError("Ownership lost");
         }
       },
-      SCOPE,
-      reuseCount,
+      { scope: SCOPE, reuseCount },
     );
   return { journal, calls, mutations, state, run, recordingGaps };
 }

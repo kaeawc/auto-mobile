@@ -330,6 +330,16 @@ data class PrototypeSpec(
   val channels: Map<String, PrototypeChannel>? = null,
   /** The fake identity provider's accounts (#14303); validated, not yet used by a runtime. */
   val auth: JsonObject? = null,
+  /** The fake store catalog (#14314); validated, not yet used by a runtime. */
+  val commerce: JsonObject? = null,
+  /** The foreground location subscription (#14324); validated, not yet used by a runtime. */
+  val location: JsonObject? = null,
+  /** The sensors the device listens to (#14327); validated, not yet used by a runtime. */
+  val sensors: JsonObject? = null,
+  /** Declared notification channels (#14280); validated, not yet used by a runtime. */
+  val notifications: JsonObject? = null,
+  /** Declared media players (#14253); contract only, no runtime plays them yet. */
+  val media: JsonObject? = null,
   val strings: JsonObject? = null,
 )
 

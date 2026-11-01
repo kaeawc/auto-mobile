@@ -83,7 +83,7 @@ function buildScreen(options: { display?: string; displays: string }) {
         androidRawClient: () => recorder.client,
       }),
     },
-    timer,
+    { timer },
   );
   return { screen, capture, ...recorder };
 }
@@ -123,7 +123,7 @@ describe("raw hierarchy display routing (#9981)", () => {
     expect(capture.requests[0]?.displayId).toBe(2);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.[1]).toBe(true);
-    expect(requests[0]?.[5]).toBe(2);
+    expect(requests[0]?.[3]?.displayId).toBe(2);
     expect(result.rawViewHierarchy?.json).toContain("raw");
     // A non-default display answers its caller only (#10106); the shared cache was never written.
     expect(invalidations()).toBe(0);
@@ -137,7 +137,7 @@ describe("raw hierarchy display routing (#9981)", () => {
     await screen.appendRawViewHierarchy(primary());
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.[5]).toBe(0);
+    expect(requests[0]?.[3]?.displayId).toBe(0);
   });
 
   test("the default display sends the unchanged request without a display id", async () => {
@@ -151,9 +151,9 @@ describe("raw hierarchy display routing (#9981)", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]?.[1]).toBe(true);
     expect(requests[0]?.[2]).toBe(signal);
-    expect(requests[0]?.[3]).toBeUndefined();
-    expect(requests[0]?.[4]).toBeUndefined();
-    expect(requests[0]?.[5]).toBeUndefined();
+    expect(requests[0]?.[3]?.timeoutMs).toBeUndefined();
+    expect(requests[0]?.[3]?.diagnostics).toBeUndefined();
+    expect(requests[0]?.[3]?.displayId).toBeUndefined();
   });
 
   test("a disconnected explicit panel is refused instead of reading another display", async () => {

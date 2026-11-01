@@ -374,13 +374,10 @@ describe("webrtcStreamManager", () => {
     ).toThrow(ActionableError);
     expect(getWebRtcStreamDescriptor(started.streamId)?.consumerCount).toBe(1);
     await expect(
-      waitForWebRtcStreamReadiness(
-        started.streamId,
-        "capture_ready",
-        100,
-        started.lease?.id,
-        "session-b",
-      ),
+      waitForWebRtcStreamReadiness(started.streamId, "capture_ready", 100, {
+        leaseId: started.lease?.id,
+        sessionUuid: "session-b",
+      }),
     ).rejects.toThrow(ActionableError);
     await expect(
       stopWebRtcStream(started.streamId, started.lease?.id, "session-b"),
@@ -503,7 +500,9 @@ describe("webrtcStreamManager", () => {
       ActionableError,
     );
     await expect(
-      waitForWebRtcStreamReadiness(started.streamId, "capture_ready", 100, "stale-lease"),
+      waitForWebRtcStreamReadiness(started.streamId, "capture_ready", 100, {
+        leaseId: "stale-lease",
+      }),
     ).rejects.toThrow(ActionableError);
     expect(getWebRtcStreamDescriptor(started.streamId)?.consumerCount).toBe(1);
   });
@@ -1310,8 +1309,11 @@ describe("webrtcStreamManager", () => {
       "capture_start_failed",
     );
     expect(
-      (await waitForWebRtcStreamReadiness(second.streamId, "capture_ready", 100, second.lease?.id))
-        .failure?.code,
+      (
+        await waitForWebRtcStreamReadiness(second.streamId, "capture_ready", 100, {
+          leaseId: second.lease?.id,
+        })
+      ).failure?.code,
     ).toBe("capture_start_failed");
     const retried = await startWebRtcStream({
       device: ANDROID,
@@ -1710,12 +1712,9 @@ describe("webrtcStreamManager", () => {
       device: ANDROID,
       overrides: { whipEndpoint: ENDPOINT },
     });
-    const timedOut = waitForWebRtcStreamReadiness(
-      started.streamId,
-      "publishing",
-      1,
-      started.lease?.id,
-    );
+    const timedOut = waitForWebRtcStreamReadiness(started.streamId, "publishing", 1, {
+      leaseId: started.lease?.id,
+    });
     await Promise.resolve();
     timer.advanceTime(1);
 
@@ -1749,7 +1748,7 @@ describe("webrtcStreamManager", () => {
       started.streamId,
       "publishing",
       WEBRTC_STREAM_LEASE_TTL_MS * 2,
-      started.lease?.id,
+      { leaseId: started.lease?.id },
     );
 
     for (let interval = 0; interval < 4; interval++) {
@@ -1813,12 +1812,9 @@ describe("webrtcStreamManager", () => {
       device: ANDROID,
       overrides: { whipEndpoint: ENDPOINT },
     });
-    const waiting = waitForWebRtcStreamReadiness(
-      started.streamId,
-      "publishing",
-      1_000,
-      started.lease?.id,
-    );
+    const waiting = waitForWebRtcStreamReadiness(started.streamId, "publishing", 1_000, {
+      leaseId: started.lease?.id,
+    });
     await Promise.resolve();
     await stopWebRtcStream(started.streamId);
 
@@ -1997,13 +1993,10 @@ describe("WebRTC own-lease and owner control regressions", () => {
       overrides: { whipEndpoint: ENDPOINT },
     });
     expect(typeof manager.stopWebRtcStreamAsOwner).toBe("function");
-    const waiting = waitForWebRtcStreamReadiness(
-      first.streamId,
-      "publishing",
-      1000,
-      first.lease?.id,
-      "a",
-    );
+    const waiting = waitForWebRtcStreamReadiness(first.streamId, "publishing", 1000, {
+      leaseId: first.lease?.id,
+      sessionUuid: "a",
+    });
     const ended = waiting.catch((error: unknown) => error);
     const stopped = await manager.stopWebRtcStreamAsOwner({
       streamId: first.streamId,

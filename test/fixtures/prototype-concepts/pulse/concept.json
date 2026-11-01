@@ -1,0 +1,15 @@
+{
+  "issue": 14225,
+  "name": "Pulse",
+  "capabilities": [
+    "prototype_chart_v1",
+    "prototype_checks_v1",
+    "prototype_content_transition_v1",
+    "prototype_data_model_v1",
+    "prototype_emit_context_v1",
+    "prototype_format_v1",
+    "prototype_semantics_v1",
+    "prototype_stack_v1",
+    "prototype_timers_v1"
+  ]
+}

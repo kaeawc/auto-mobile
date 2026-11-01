@@ -5,10 +5,14 @@ import { SETTINGS_TIMEOUT } from "./fixtures/androidResetLoadTimeouts";
 import { describe, expect, test } from "bun:test";
 import {
   androidBaselineCleanCovers,
+  androidUserFilesNamespaceCovered,
   cleanAndroidBaseline,
   sessionCreatedSettingMatcher,
 } from "../../../src/daemon/sessionBroker/androidKeepBootedCleanup";
-import type { DeviceMutationInput } from "../../../src/daemon/sessionBroker/mutations/types";
+import type {
+  DeviceBaseline,
+  DeviceMutationInput,
+} from "../../../src/daemon/sessionBroker/mutations/types";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
 import { AndroidKeepBootedReset } from "../../../src/daemon/sessionBroker/androidKeepBootedReset";
 import { shellQuote } from "../../../src/utils/shellQuote";
@@ -164,6 +168,26 @@ describe("Android unconditional keep-booted cleaning", () => {
     }
   });
 
+  test("displayConfig fontScale with a readable prior reverts in place and stays keep-booted", async () => {
+    let fallbacks = 0;
+    const { adb, journal, reset } = await rig([0], {
+      reset: async () => {
+        fallbacks++;
+        return { outcome: "clean", mode: "snapshot", phases: {} };
+      },
+    });
+    for (const row of deviceToolMutations("displayConfig", { fontScale: 1.3 }, "android")) {
+      await journal.record(SCOPE, {
+        ...row,
+        toolName: "displayConfig",
+        priorValue: { state: "present", value: "default" },
+      });
+    }
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(fallbacks).toBe(0);
+    expect(adb.getExecutedCommands()).toContain("shell settings --user 0 delete system font_scale");
+  });
+
   test.each([
     {
       tool: "displayConfig",
@@ -235,14 +259,16 @@ describe("Android unconditional keep-booted cleaning", () => {
         baseline,
         context,
         async (command) => (await adb.executeCommand(command)).stdout.trim(),
-        async (mutation) => {
-          reverted.push(mutation);
-          await port.revert(mutation, context);
-          if (verify && mutation.key.startsWith("display:")) {
-            reply("shell wm density", "Physical density: 420");
-            reply("shell wm size", "Physical size: 1080x1920");
-            reply("shell cmd uimode night", "Night mode: no");
-          }
+        {
+          revert: async (mutation) => {
+            reverted.push(mutation);
+            await port.revert(mutation, context);
+            if (verify && mutation.key.startsWith("display:")) {
+              reply("shell wm density", "Physical density: 420");
+              reply("shell wm size", "Physical size: 1080x1920");
+              reply("shell cmd uimode night", "Night mode: no");
+            }
+          },
         },
       );
     return { adb, reply, baseline, reverted, clean };
@@ -340,11 +366,11 @@ describe("Android unconditional keep-booted cleaning", () => {
     expect(commands).toContain("shell settings --user 0 list secure");
     expect(commands).toContain("shell cmd clipboard clear");
     expect(commands.some((command) => command.includes("pm clear"))).toBe(false);
-    expect(
-      commands.some(
-        (command) => command.includes("sha256sum") || command.includes("dumpsys account"),
-      ),
-    ).toBe(false);
+    expect(commands.some((command) => command.includes("sha256sum"))).toBe(false);
+    expect(commands).toContain("shell getprop persist.sys.timezone");
+    expect(commands).toContain("shell getprop persist.sys.locale");
+    expect(commands).toContain("shell dumpsys account");
+    expect(commands.some((command) => command.includes("set-timezone"))).toBe(false);
     expect(
       adb
         .getCommandCalls()
@@ -375,7 +401,11 @@ describe("Android unconditional keep-booted cleaning", () => {
       );
     }
     reply("shell pm uninstall", "Success");
-    await reset();
+    reply(
+      "shell dumpsys account",
+      [0, 10, 11].map((user) => `User UserInfo{${user}:Owner:c13}:\n  Accounts: 0`).join("\n"),
+    );
+    expect(await reset()).toMatchObject({ outcome: "clean" });
     const commands = adb.getExecutedCommands();
     for (const user of [0, 10, 11]) {
       expect(commands).toContain(`shell pm uninstall --user ${user} 'com.example.new'`);
@@ -676,6 +706,184 @@ describe("Android unconditional keep-booted cleaning", () => {
   });
 });
 
+describe("Android putAppFile baseline coverage", () => {
+  const SWEEP = `shell sh -c ${shellQuote("if [ -d '/sdcard/Download' ]; then find '/sdcard/Download' -type f -print; elif [ -e '/sdcard/Download' ]; then exit 1; fi")}`;
+  const DOWNLOAD_ENTRIES = `shell sh -c ${shellQuote("if [ -d '/sdcard/Download' ]; then find '/sdcard/Download' -mindepth 1 -maxdepth 1 -print; elif [ -e '/sdcard/Download' ]; then exit 1; fi")}`;
+  const userFiles = (userId?: number) =>
+    deviceToolMutations(
+      "putAppFile",
+      {
+        target: { domain: "user_files", namespace: " fixtures ", reset: true, indexMedia: true },
+        files: [{ destinationPath: "docs/a.pdf" }],
+        ...(userId === undefined ? {} : { userId }),
+      },
+      "android",
+    );
+
+  async function fallbackRig(
+    users: readonly number[] = [0],
+    configureBaseline?: (reply: (command: string, stdout: string) => void) => void,
+  ) {
+    const fallback = { count: 0 };
+    const result = await rig(
+      users,
+      {
+        reset: async () => {
+          fallback.count++;
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      },
+      configureBaseline,
+    );
+    return { ...result, fallback };
+  }
+
+  async function journalRows(
+    journal: FakeDeviceMutationJournal,
+    rows: readonly { kind: string; key: string }[],
+  ) {
+    for (const row of rows) {
+      await journal.record(SCOPE, {
+        ...row,
+        priorValue: { state: "unobservable" },
+        toolName: "putAppFile",
+      });
+    }
+  }
+
+  test("user 0 rows in a namespace absent from the baseline are swept, including the directory tree", async () => {
+    const { adb, reply, journal, reset, fallback } = await fallbackRig();
+    const rows = userFiles();
+    expect(rows.map((row) => row.kind)).toEqual(["shared-file", "shared-file", "media"]);
+    await journalRows(journal, rows);
+    reply(SWEEP, "/sdcard/Download/fixtures/docs/a.pdf");
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(fallback.count).toBe(0);
+    const commands = adb.getExecutedCommands();
+    expect(commands.some((command) => command.includes("rm -f") && command.includes("a.pdf"))).toBe(
+      true,
+    );
+    const rmdir = commands.filter((command) => command.includes("rmdir"));
+    expect(rmdir).toHaveLength(1);
+    expect(rmdir[0]).toContain("/sdcard/Download/fixtures");
+    expect(commands.indexOf(rmdir[0]!)).toBeGreaterThan(
+      commands.findIndex((command) => command.includes("rm -f") && command.includes("a.pdf")),
+    );
+  });
+
+  test("explicit user 0 is covered on a multi-user baseline, other users are not", async () => {
+    const covered = await fallbackRig([0, 10]);
+    await journalRows(covered.journal, userFiles(0));
+    expect(await covered.reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+
+    for (const rows of [userFiles(10), userFiles()]) {
+      const { journal, reset, fallback } = await fallbackRig([0, 10]);
+      await journalRows(journal, rows);
+      expect(await reset()).toMatchObject({
+        outcome: "fallback:snapshot",
+        fallbackReason: expect.stringContaining("user_files"),
+      });
+      expect(fallback.count).toBe(1);
+    }
+  });
+
+  test("a namespace path present in the baseline Downloads escalates", async () => {
+    const { adb, journal, reset, fallback } = await fallbackRig([0], (reply) =>
+      reply(DOWNLOAD_ENTRIES, "/sdcard/Download/fixtures\n/sdcard/Download/other.txt"),
+    );
+    await journalRows(journal, userFiles());
+    expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+    expect(fallback.count).toBe(1);
+    expect(adb.getExecutedCommands().some((command) => command.includes("rmdir"))).toBe(false);
+  });
+
+  test("a baseline without the Downloads entry inventory escalates", async () => {
+    const { journal, reset, fallback } = await fallbackRig();
+    const baseline = await journal.getBaseline(SCOPE);
+    if (!baseline) {
+      throw new Error("missing test baseline");
+    }
+    await journal.deleteResource(SESSION.resourceId);
+    await journal.captureBaseline(SCOPE, {
+      ...baseline,
+      observations: baseline.observations.filter((entry) => entry.key !== "download-entries"),
+    });
+    await journalRows(journal, userFiles(0));
+    expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+    expect(fallback.count).toBe(1);
+  });
+
+  test("an unremovable namespace tree fails cleaning closed", async () => {
+    const { adb, journal, reset, fallback } = await fallbackRig();
+    await journalRows(journal, userFiles());
+    adb.setCommandResponse("rmdir", createExecResult("", "rmdir: Directory not empty"));
+    expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+    expect(fallback.count).toBe(1);
+  });
+
+  test("namespace coverage rejects unsafe, mistyped or baseline-backed scopes", () => {
+    const baseline = {
+      completeKinds: [],
+      unobservable: [],
+      observations: [
+        { kind: "installed-app", key: "users:0", value: { state: "present", value: true } },
+        { kind: "shared-file", key: "download-entries", value: { state: "present", value: "[]" } },
+        {
+          kind: "shared-file",
+          key: "/sdcard/Download/kept/a.txt",
+          value: { state: "present", value: "hash" },
+        },
+      ],
+    } satisfies DeviceBaseline;
+    const key = (namespace: string, user: unknown = "default", path: string | null = "a") =>
+      JSON.stringify(["user_files", null, null, namespace, user, ...(path === null ? [] : [path])]);
+    expect(
+      androidUserFilesNamespaceCovered({ kind: "shared-file", key: key("ns") }, baseline),
+    ).toBe("/sdcard/Download/ns");
+    expect(
+      androidUserFilesNamespaceCovered({ kind: "media", key: key("ns", 0, null) }, baseline),
+    ).toBe("/sdcard/Download/ns");
+    for (const entry of [
+      { kind: "shared-file", key: key("kept") },
+      { kind: "shared-file", key: key("..") },
+      { kind: "shared-file", key: key("a/b") },
+      { kind: "shared-file", key: key("  ") },
+      { kind: "shared-file", key: key("ns", "0") },
+      { kind: "media", key: key("ns") },
+      { kind: "shared-file", key: key("ns", 0, null) },
+      { kind: "preference", key: key("ns") },
+      { kind: "shared-file", key: "/sdcard/Download/ns/a" },
+    ]) {
+      expect(androidUserFilesNamespaceCovered(entry, baseline)).toBeUndefined();
+    }
+    expect(androidUserFilesNamespaceCovered({ kind: "shared-file", key: key("ns") }, null)).toBe(
+      undefined,
+    );
+  });
+
+  test("app-container writes are covered only for apps absent from the baseline", async () => {
+    const write = (appId: string) =>
+      deviceToolMutations(
+        "putAppFile",
+        {
+          target: { domain: "app_containers", appId, container: "files" },
+          files: [{ destinationPath: "seed.json" }],
+        },
+        "android",
+      );
+    const covered = await fallbackRig();
+    await journalRows(covered.journal, write("com.example.session"));
+    expect(await covered.reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+
+    const held = await fallbackRig();
+    await journalRows(held.journal, write("com.example.probe"));
+    expect(await held.reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("com.example.probe"),
+    });
+  });
+});
+
 describe("cleaning adb under load", () => {
   test("captured secure settings timeout retries and cleaning stays clean", async () => {
     const { adb } = androidBaselineRig();
@@ -762,4 +970,166 @@ test("persistent non-critical restore failures escalate and name every still-dir
   expect(result.fallbackReason).toContain("global:dirty_a, global:dirty_b");
   expect(result.fallbackReason).not.toContain("now_clean");
   expect(fallbacks).toBe(1);
+});
+
+describe("Android keep-booted accounts, time zone and device locale (#14364)", () => {
+  const ACCOUNT = "    Account {name=user@example.com, type=com.example.auth}";
+
+  async function fallbackRig(
+    configureBaseline?: (reply: (command: string, stdout: string) => void) => void,
+  ) {
+    let fallbacks = 0;
+    const result = await rig(
+      [0],
+      {
+        reset: async () => {
+          fallbacks++;
+          return { outcome: "clean", mode: "snapshot", phases: {} };
+        },
+      },
+      configureBaseline,
+    );
+    return { ...result, fallbacks: () => fallbacks };
+  }
+
+  test.each([
+    ["added", undefined, `User UserInfo{0:Owner:c13}:\n  Accounts: 1\n${ACCOUNT}`],
+    [
+      "removed",
+      `User UserInfo{0:Owner:c13}:\n  Accounts: 1\n${ACCOUNT}`,
+      "User UserInfo{0:Owner:c13}:\n  Accounts: 0",
+    ],
+  ])("an account %s during the session escalates", async (_label, before, after) => {
+    const { reply, reset, fallbacks } = await fallbackRig((baselineReply) => {
+      if (before) {
+        baselineReply("shell dumpsys account", before);
+      }
+    });
+    reply("shell dumpsys account", after);
+    const result = await reset();
+    expect(result.outcome).toBe("fallback:snapshot");
+    expect(result.fallbackReason).toContain("changed accounts for user 0");
+    expect(result.fallbackReason).not.toContain("user@example.com");
+    expect(fallbacks()).toBe(1);
+  });
+
+  test("an unreadable account list at reset escalates", async () => {
+    const { reply, reset } = await fallbackRig();
+    reply("shell dumpsys account", "Can't find service: account");
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("account inventory is unreadable"),
+    });
+  });
+
+  test("accounts are read after uninstalling session apps, whose authenticator accounts go with them", async () => {
+    const { adb, reply, reset } = await rig();
+    reply(
+      "shell pm list packages -3 --user 0",
+      "package:com.example.probe\npackage:com.example.auth",
+    );
+    reply(
+      "shell pm list packages --user 0",
+      "package:android\npackage:com.example.probe\npackage:com.example.auth",
+    );
+    reply("shell pm uninstall", "Success");
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    const commands = adb.getExecutedCommands();
+    expect(commands.indexOf("shell dumpsys account")).toBeGreaterThan(
+      commands.indexOf("shell pm uninstall --user 0 'com.example.auth'"),
+    );
+  });
+
+  test("an out-of-band time zone change is restored in place and read back", async () => {
+    const { adb, reset } = await rig();
+    adb.setCommandResponseSequence("shell getprop persist.sys.timezone", [
+      createExecResult("Asia/Tokyo", ""),
+      createExecResult("America/Chicago", ""),
+    ]);
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(adb.getExecutedCommands()).toContain("shell cmd alarm set-timezone 'America/Chicago'");
+  });
+
+  test("a time zone that does not read back after restore escalates", async () => {
+    const { adb, reset } = await fallbackRig();
+    adb.setCommandResponse(
+      "shell getprop persist.sys.timezone",
+      createExecResult("Asia/Tokyo", ""),
+    );
+    expect(await reset()).toMatchObject({ outcome: "fallback:snapshot" });
+    expect(adb.getExecutedCommands()).toContain("shell cmd alarm set-timezone 'America/Chicago'");
+  });
+
+  test("a changed time zone escalates when the baseline had none", async () => {
+    const { adb, reply, reset } = await fallbackRig((baselineReply) =>
+      baselineReply("shell getprop persist.sys.timezone", ""),
+    );
+    reply("shell getprop persist.sys.timezone", "Asia/Tokyo");
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("time zone the baseline lacks"),
+    });
+    expect(adb.getExecutedCommands().some((command) => command.includes("set-timezone"))).toBe(
+      false,
+    );
+  });
+
+  test("a journaled changeLocalization time zone with a readable prior reverts in place", async () => {
+    const { adb, journal, reset } = await rig();
+    for (const row of deviceToolMutations(
+      "changeLocalization",
+      { timeZone: "Asia/Tokyo" },
+      "android",
+    )) {
+      await journal.record(SCOPE, {
+        ...row,
+        priorValue: { state: "present", value: "America/Chicago" },
+        toolName: "changeLocalization",
+      });
+    }
+    expect(await reset()).toMatchObject({ outcome: "clean", mode: "keep-booted" });
+    expect(adb.getExecutedCommands()).toContain("shell cmd alarm set-timezone 'America/Chicago'");
+  });
+
+  test("a journaled time zone with an unreadable prior escalates", async () => {
+    const { journal, reset } = await fallbackRig();
+    await journal.record(SCOPE, {
+      kind: "clock",
+      key: "timezone",
+      priorValue: { state: "unobservable" },
+      toolName: "changeLocalization",
+    });
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("clock:timezone (changeLocalization)"),
+    });
+  });
+
+  test("a journaled device-wide locale change never reports clean, even with a readable prior", async () => {
+    const { journal, reset } = await fallbackRig();
+    for (const row of deviceToolMutations("changeLocalization", { locale: "fr-FR" }, "android")) {
+      await journal.record(SCOPE, {
+        ...row,
+        priorValue: { state: "present", value: "en-US" },
+        toolName: "changeLocalization",
+      });
+    }
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("device-setting:locale (changeLocalization)"),
+    });
+  });
+
+  test("an out-of-band device locale change escalates even when the system_locales row is restored", async () => {
+    const { adb, reply, reset } = await fallbackRig();
+    reply("shell settings --user 0 list system", "font_scale=1.0\nsystem_locales=fr-FR");
+    reply("shell getprop persist.sys.locale", "fr-FR");
+    expect(await reset()).toMatchObject({
+      outcome: "fallback:snapshot",
+      fallbackReason: expect.stringContaining("changed device locale"),
+    });
+    expect(adb.getExecutedCommands()).toContain(
+      "shell settings --user 0 put system system_locales 'en-US'",
+    );
+  });
 });

@@ -378,7 +378,7 @@ function parseValueOptions(
       }
       continue;
     }
-    const consumed = parseScalarOption(view, at, log, options, video);
+    const consumed = parseScalarOption(view, at, log, { options, video });
     if (consumed !== undefined) {
       // Invalid scalar values still belong to their option; keep the existing
       // warning/default behavior rather than diagnosing them as stray commands.
@@ -410,14 +410,19 @@ const INLINE_LAUNCH_OPTIONS: ReadonlySet<string> = new Set([
   "--video-archive-size-mb",
 ]);
 
-/** The index of the last token the scalar option at `i` consumed, or undefined if none matched. */
+/**
+ * The index of the last token the scalar option at `i` consumed, or undefined if none matched.
+ *
+ * @param targets.options - Scalar option state the connection/accessibility/readiness parsers fill.
+ * @param targets.video - Video recording defaults the video parser fills.
+ */
 function parseScalarOption(
   args: string[],
   i: number,
   log: ParseLogger,
-  options: ScalarOptions,
-  video: ReturnType<typeof createVideoRecordingDefaults>,
+  targets: { options: ScalarOptions; video: ReturnType<typeof createVideoRecordingDefaults> },
 ): number | undefined {
+  const { options, video } = targets;
   const connection = parseConnectionOption(args, i, log, options);
   if (connection !== undefined) {
     return Math.max(connection, optionValueEnd(args, i));
@@ -633,36 +638,31 @@ function parseVideoOption(
   if (arg === "--video-quality" || arg === "--video-quality-preset") {
     applyQualityPreset(args[++i], "cli");
   } else if (arg === "--video-target-bitrate-kbps") {
-    applyVideoNumber(
-      videoRecordingDefaults,
-      args[++i],
-      "video target bitrate",
-      false,
-      "targetBitrateKbps",
-      log,
-    );
+    applyVideoNumber(videoRecordingDefaults, args[++i], log, {
+      label: "video target bitrate",
+      allowFloat: false,
+      key: "targetBitrateKbps",
+    });
   } else if (arg === "--video-max-throughput-mbps") {
-    applyVideoNumber(
-      videoRecordingDefaults,
-      args[++i],
-      "video max throughput",
-      true,
-      "maxThroughputMbps",
-      log,
-    );
+    applyVideoNumber(videoRecordingDefaults, args[++i], log, {
+      label: "video max throughput",
+      allowFloat: true,
+      key: "maxThroughputMbps",
+    });
   } else if (arg === "--video-fps") {
-    applyVideoNumber(videoRecordingDefaults, args[++i], "video fps", false, "fps", log);
+    applyVideoNumber(videoRecordingDefaults, args[++i], log, {
+      label: "video fps",
+      allowFloat: false,
+      key: "fps",
+    });
   } else if (arg === "--video-format") {
     applyFormat(args[++i], "cli");
   } else if (arg === "--video-archive-size-mb") {
-    applyVideoNumber(
-      videoRecordingDefaults,
-      args[++i],
-      "video max archive size",
-      true,
-      "maxArchiveSizeMb",
-      log,
-    );
+    applyVideoNumber(videoRecordingDefaults, args[++i], log, {
+      label: "video max archive size",
+      allowFloat: true,
+      key: "maxArchiveSizeMb",
+    });
   } else {
     return undefined;
   }
@@ -672,11 +672,10 @@ function parseVideoOption(
 function applyVideoNumber(
   defaults: CliVideoRecordingDefaults,
   raw: string | undefined,
-  label: string,
-  allowFloat: boolean,
-  key: CliVideoRecordingNumericKey,
   log: ParseLogger,
+  field: { label: string; allowFloat: boolean; key: CliVideoRecordingNumericKey },
 ): void {
+  const { label, allowFloat, key } = field;
   const value = parsePositiveNumber(raw, label, allowFloat, log);
   if (value !== undefined) {
     defaults[key] = value;

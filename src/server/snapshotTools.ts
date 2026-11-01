@@ -101,7 +101,11 @@ export function registerSnapshotTools() {
     "deviceSnapshot",
     "Capture or restore device snapshot. An Android VM restore in daemon mode returns the new deviceSessionUuid; the previous device-session UUID is superseded by the restore.",
     deviceSnapshotSchema,
-    deviceSnapshotHandler,
-    { defaultEnabled: false, outputSchema: deviceSnapshotResultSchema },
+    {
+      handler: deviceSnapshotHandler,
+      defaultEnabled: false,
+      outputSchema: deviceSnapshotResultSchema,
+      changesOpaquePersistentState: true,
+    },
   );
 }

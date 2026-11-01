@@ -97,7 +97,7 @@ describe("swipeOnHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ error: "VoiceOver scrolling is not supported" }),
     });
 
-    const response = await swipeOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await swipeOnHandler(fakeDevice, args, { deps: interactionDeps });
     expect(response.isError).toBe(true);
     expect(getStructuredField(response, "message")).toBe("VoiceOver scrolling is not supported");
     expect(getStructuredField(response, "success")).toBe(false);
@@ -108,7 +108,7 @@ describe("swipeOnHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ success: true, found: false }),
     });
 
-    const response = await swipeOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await swipeOnHandler(fakeDevice, args, { deps: interactionDeps });
     expect(response.isError).toBeUndefined();
     expect(getStructuredField(response, "message")).toBe("Swiped up");
   });
@@ -124,7 +124,7 @@ describe("swipeOnHandler (registered handler wiring)", () => {
         return fakeResult({ success: true });
       },
     });
-    await swipeOnHandler(fakeDevice, args, undefined, signal, interactionDeps);
+    await swipeOnHandler(fakeDevice, args, { signal, deps: interactionDeps });
     expect(options?.display).toBeUndefined();
     expect(options?.autoTarget).toBe(true);
     expect(options?.includeSystemInsets).toBe(false);

@@ -2,6 +2,27 @@
 import XCTest
 
 final class PrototypeBarScrollTests: XCTestCase {
+    func testNavigationSizingTracksLabelVisibility() {
+        for fraction in [0.0, 0.01, 1.0] {
+            let showsLabel = PrototypeBarScroll.showsNavigationLabel(behavior: "minimize", fraction: fraction)
+            let sizing = PrototypeBarScroll.navigationSizing(showsLabel: showsLabel)
+            XCTAssertEqual(sizing.itemMinHeight, fraction == 0 ? 64 : 56)
+            XCTAssertEqual(sizing.containerMinHeight, fraction == 0 ? 80 : 56)
+            XCTAssertEqual(sizing.topPadding, fraction == 0 ? 12 : 0)
+            XCTAssertEqual(sizing.bottomPadding, fraction == 0 ? 4 : 0)
+            XCTAssertEqual(sizing.itemMinHeight + sizing.topPadding + sizing.bottomPadding, sizing.containerMinHeight)
+        }
+    }
+
+    func testMinimizedNavigationHidesLabelsAtAnyPositiveFraction() {
+        XCTAssertTrue(PrototypeBarScroll.showsNavigationLabel(behavior: "minimize", fraction: 0))
+        XCTAssertFalse(PrototypeBarScroll.showsNavigationLabel(behavior: "minimize", fraction: 0.01))
+        XCTAssertFalse(PrototypeBarScroll.showsNavigationLabel(behavior: "minimize", fraction: 1))
+        for behavior in [nil, "none", "pinned", "hide", "enterAlways", "exitUntilCollapsed"] {
+            XCTAssertTrue(PrototypeBarScroll.showsNavigationLabel(behavior: behavior, fraction: 1))
+        }
+    }
+
     func testExitUntilCollapsedAndPinned() {
         var state = PrototypeBarScrollState()
         state.update(offset: 200)

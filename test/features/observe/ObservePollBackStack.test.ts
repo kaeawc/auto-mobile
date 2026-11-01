@@ -104,7 +104,7 @@ function createHarness(
       screenshotRecorder: new FakeScreenshotRecorder(),
       ...noopObserveAudits(),
     },
-    timer,
+    { timer },
   );
   return { screen, state, cache, timer, order, captures: () => captures, device };
 }

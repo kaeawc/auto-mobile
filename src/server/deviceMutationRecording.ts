@@ -5,8 +5,18 @@ import { ActionableError } from "../models/ActionableError";
 import type { MutationRecorder } from "../daemon/sessionBroker/mutations/recorder";
 import type { MutationValue } from "../daemon/sessionBroker/mutations/types";
 import { logger } from "../utils/logger";
-import { deviceToolMutations, type ToolMutation } from "./deviceMutationAdapters";
+import {
+  androidPermissionMutations,
+  deviceToolMutations,
+  type ToolMutation,
+} from "./deviceMutationAdapters";
 import { withoutSessionCoveredFallbacks } from "./deviceMutationAppFallback";
+import {
+  readAndroidPermissionTarget,
+  withoutBaselineCoveredPermissions,
+  type AndroidPermissionTarget,
+  type AndroidPermissionTargetAdb,
+} from "./deviceMutationPermissionPriorReader";
 import {
   DefaultMutationPriorReader,
   type MutationObservationReaders,
@@ -57,17 +67,11 @@ export function createRecording(
         ? { recorder: baseRecorder, ownerSessionUuid: base }
         : undefined;
     },
-    new DefaultMutationPriorReader(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      observationReaders,
-    ),
-    undefined,
-    undefined,
-    (uuid, reason) => context.sessionBrokerService()?.markMutationUnrecorded(uuid, reason),
+    {
+      reader: new DefaultMutationPriorReader({ observationReaders }),
+      markUnrecorded: (uuid, reason) =>
+        context.sessionBrokerService()?.markMutationUnrecorded(uuid, reason),
+    },
   );
 }
 
@@ -90,6 +94,15 @@ export interface MutationArtifactReader {
     args: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<string | undefined>;
+  /**
+   * The user and notification path an Android `setAppPermissions` call acts on, or undefined
+   * when it is not certain; without it the call journals rows that escalate.
+   */
+  androidPermissionTarget?(
+    device: BootedDevice,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<AndroidPermissionTarget | undefined>;
 }
 
 export function createDefaultMutationArtifactReader(
@@ -108,8 +121,26 @@ export function createDefaultMutationArtifactReader(
       () => undefined,
       async () => undefined,
     ),
+  permissionAdbFor: (device: BootedDevice) => AndroidPermissionTargetAdb = (device) =>
+    defaultAdbClientFactory.create(device),
 ): MutationArtifactReader {
   return {
+    async androidPermissionTarget(device, args, signal) {
+      signal?.throwIfAborted();
+      if (device.platform !== "android") {
+        return undefined;
+      }
+      try {
+        return await readAndroidPermissionTarget(permissionAdbFor(device), args, signal);
+      } catch (error) {
+        signal?.throwIfAborted();
+        logger.warn(
+          "Cannot resolve the setAppPermissions target; recording escalating permission intents",
+          error,
+        );
+        return undefined;
+      }
+    },
     async appId(
       device: BootedDevice,
       args: Record<string, unknown>,
@@ -143,8 +174,7 @@ export interface DeviceMutationRecording {
     name: string,
     args: Record<string, unknown>,
     device: BootedDevice,
-    sessionUuid?: string,
-    signal?: AbortSignal,
+    options?: { sessionUuid?: string; signal?: AbortSignal },
   ): Promise<void>;
 }
 
@@ -157,28 +187,59 @@ type ResolvedMutationRecorder =
       ownerSessionUuid: string;
     };
 
+function assertRecorderScope(
+  recorder: MutationRecorder,
+  ownerSessionUuid: string,
+  device: BootedDevice,
+): void {
+  if (
+    recorder.scope.sessionUuid !== ownerSessionUuid ||
+    recorder.scope.deviceId !== device.deviceId
+  ) {
+    throw new ActionableError(
+      "Device mutation recorder must match the admitted broker session and device",
+    );
+  }
+}
+
 /**
  * Captures intent and trustworthy priors for best-effort reverts, not keep-booted admission.
  * Unobservable priors remain journaled; keep-booted cleaning runs unconditionally.
  */
 export class SessionDeviceMutationRecording implements DeviceMutationRecording {
+  private readonly reader: MutationPriorReader;
+  private readonly artifactReader: MutationArtifactReader;
+  private readonly specReader: MutationSpecReader;
+  private readonly markUnrecorded?: (sessionUuid: string, reason: string) => void;
+
   constructor(
     private readonly recorderFor: (
       sessionUuid: string,
       device: BootedDevice,
     ) => ResolvedMutationRecorder | undefined | Promise<ResolvedMutationRecorder | undefined>,
-    private readonly reader: MutationPriorReader = new DefaultMutationPriorReader(),
-    private readonly artifactReader: MutationArtifactReader = createDefaultMutationArtifactReader(),
-    private readonly specReader: MutationSpecReader = readJsonSpecFile,
-    private readonly markUnrecorded?: (sessionUuid: string, reason: string) => void,
-  ) {}
+    {
+      reader = new DefaultMutationPriorReader(),
+      artifactReader = createDefaultMutationArtifactReader(),
+      specReader = readJsonSpecFile,
+      markUnrecorded,
+    }: {
+      reader?: MutationPriorReader;
+      artifactReader?: MutationArtifactReader;
+      specReader?: MutationSpecReader;
+      markUnrecorded?: (sessionUuid: string, reason: string) => void;
+    } = {},
+  ) {
+    this.reader = reader;
+    this.artifactReader = artifactReader;
+    this.specReader = specReader;
+    this.markUnrecorded = markUnrecorded;
+  }
 
   async beforeToolCall(
     name: string,
     args: Record<string, unknown>,
     device: BootedDevice,
-    sessionUuid?: string,
-    signal: AbortSignal | undefined = getAbortSignal(),
+    { sessionUuid, signal = getAbortSignal() }: { sessionUuid?: string; signal?: AbortSignal } = {},
   ): Promise<void> {
     let mutations = deviceToolMutations(name, args, device.platform);
     if (mutations.length === 0) {
@@ -200,17 +261,10 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
       const { recorder, ownerSessionUuid: owner } =
         "recorder" in resolved ? resolved : { recorder: resolved, ownerSessionUuid: sessionUuid };
       ownerSessionUuid = owner;
-      if (
-        recorder.scope.sessionUuid !== ownerSessionUuid ||
-        recorder.scope.deviceId !== device.deviceId
-      ) {
-        throw new ActionableError(
-          "Device mutation recorder must match the admitted broker session and device",
-        );
-      }
+      assertRecorderScope(recorder, ownerSessionUuid, device);
       matchingRecorder = recorder;
-      mutations = await this.resolveMutations(name, args, device, mutations, signal);
-      await this.recordMutations(name, device, recorder, mutations, signal);
+      mutations = await this.resolveMutations(name, args, device, { mutations, signal });
+      await this.recordMutations(name, device, recorder, { mutations, signal });
     } catch (error) {
       signal?.throwIfAborted();
       await this.recordingFailed(name, ownerSessionUuid, matchingRecorder, error);
@@ -241,14 +295,20 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     name: string,
     args: Record<string, unknown>,
     device: BootedDevice,
-    mutations: ToolMutation[],
-    signal?: AbortSignal,
+    { mutations, signal }: { mutations: ToolMutation[]; signal?: AbortSignal },
   ): Promise<ToolMutation[]> {
     if (name === "installApp") {
       const appId = await runWithAbortSignal(signal, () =>
         this.artifactReader.appId(device, args, signal),
       );
       return deviceToolMutations(name, { ...args, appId }, device.platform);
+    }
+    if (name === "setAppPermissions" && device.platform === "android") {
+      const resolve = this.artifactReader.androidPermissionTarget?.bind(this.artifactReader);
+      const target = resolve
+        ? await runWithAbortSignal(signal, () => resolve(device, args, signal))
+        : undefined;
+      return target ? androidPermissionMutations(args, target) : mutations;
     }
     if (name === "prototype" && args.spec === undefined && typeof args.specPath === "string") {
       const spec = await this.specReader(args.specPath, signal);
@@ -263,18 +323,21 @@ export class SessionDeviceMutationRecording implements DeviceMutationRecording {
     name: string,
     device: BootedDevice,
     recorder: MutationRecorder,
-    mutations: readonly ToolMutation[],
-    signal?: AbortSignal,
+    { mutations, signal }: { mutations: readonly ToolMutation[]; signal?: AbortSignal },
   ): Promise<void> {
     signal?.throwIfAborted();
-    const missing = await withoutSessionCoveredFallbacks(
+    const baseline = async () => (await recorder.readBaseline?.()) ?? null;
+    const uncovered = await withoutSessionCoveredFallbacks(
       await recorder.missingMutations(mutations),
       {
         sessionInstalled: async (appId) =>
           (await recorder.missingMutations([{ kind: "installed-app", key: appId }])).length === 0,
-        baseline: async () => (await recorder.readBaseline?.()) ?? null,
+        baseline,
       },
     );
+    const missing = uncovered.some((mutation) => mutation.kind === "permission")
+      ? withoutBaselineCoveredPermissions(uncovered, await baseline())
+      : uncovered;
     signal?.throwIfAborted();
     if (missing.length === 0) {
       signal?.throwIfAborted();

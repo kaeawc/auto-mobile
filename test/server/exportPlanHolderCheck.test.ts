@@ -74,11 +74,8 @@ describe("exportPlan from a connection that does not hold the recording's device
 
   /** Starts a recording through the real manager with a fake recorder that counts its stops. */
   const record = (device: BootedDevice, idPrefix: string, ownerSessionUuid?: string) =>
-    startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator(idPrefix),
-      () => ({
+    startDeviceGestureRecording(device, timer, new CountingIdGenerator(idPrefix), {
+      recorderFactory: () => ({
         stepCount: 1,
         start: async () => undefined,
         stop: async () => {
@@ -87,7 +84,7 @@ describe("exportPlan from a connection that does not hold the recording's device
         },
       }),
       ownerSessionUuid,
-    );
+    });
 
   beforeAll(async () => {
     // Pay the server module's cold import outside any test's budget.

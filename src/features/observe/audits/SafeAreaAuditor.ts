@@ -120,7 +120,8 @@ export class SafeAreaAuditor {
     }
     return {
       edges,
-      typesForSides: (sides) => insetTypes(bars, cutout, "systemBars", "displayCutout", sides),
+      typesForSides: (sides) =>
+        insetTypes(bars, cutout, "systemBars", { secondType: "displayCutout", sides }),
     };
   }
 
@@ -204,13 +205,17 @@ export class SafeAreaAuditor {
     ) {
       return;
     }
-    this.inspectContent(node, sourceNode, ancestors, bounds, categories, {
+    this.inspectContent(node, sourceNode, ancestors, {
+      bounds,
+      categories,
       screen: screen,
       content: content,
       foregroundPackage: foregroundPackage,
       warnings: warnings,
     });
-    this.inspectGestureRegion(node, sourceNode, ancestors, bounds, categories, {
+    this.inspectGestureRegion(node, sourceNode, ancestors, {
+      bounds,
+      categories,
       screen: screen,
       systemGestures: systemGestures,
       mandatorySystemGestures: mandatorySystemGestures,
@@ -222,19 +227,20 @@ export class SafeAreaAuditor {
     node: Node,
     sourceNode: Node,
     ancestors: Node[],
-    bounds: ObservationEdgeInsets,
-    categories: LayoutWarning["categories"],
     {
+      bounds,
+      categories,
       screen,
       content,
       foregroundPackage,
       warnings,
     }: {
+      categories: LayoutWarning["categories"];
       screen: { width: number; height: number };
       content: ContentInsets | null;
       foregroundPackage: string | undefined;
       warnings: WarningCandidate[];
-    },
+    } & { bounds: ObservationEdgeInsets },
   ): void {
     if (!content) {
       return;
@@ -246,15 +252,14 @@ export class SafeAreaAuditor {
       return;
     }
     warnings.push({
-      warning: this.warning(node, bounds, categories, content.typesForSides(sides), sides, {
+      warning: this.warning(node, bounds, categories, {
+        insetTypes: content.typesForSides(sides),
+        sides,
         type: "important-content-under-inset",
-        severity: this.contentSeverity(
-          sourceNode,
-          bounds,
-          screen,
-          content.edges,
+        severity: this.contentSeverity(sourceNode, bounds, screen, {
+          insets: content.edges,
           foregroundPackage,
-        ),
+        }),
         screen: screen,
         insets: content.edges,
       }),
@@ -267,8 +272,7 @@ export class SafeAreaAuditor {
     node: Node,
     bounds: ObservationEdgeInsets,
     screen: { width: number; height: number },
-    insets: ObservationEdgeInsets,
-    foregroundPackage: string | undefined,
+    { insets, foregroundPackage }: { insets: ObservationEdgeInsets; foregroundPackage?: string },
   ): LayoutWarning["severity"] {
     const overlap = overlapPercent(bounds, screen, insets);
     if (
@@ -315,19 +319,20 @@ export class SafeAreaAuditor {
     node: Node,
     sourceNode: Node,
     ancestors: Node[],
-    bounds: ObservationEdgeInsets,
-    categories: LayoutWarning["categories"],
     {
+      bounds,
+      categories,
       screen,
       systemGestures,
       mandatorySystemGestures,
       warnings,
     }: {
+      categories: LayoutWarning["categories"];
       screen: { width: number; height: number };
       systemGestures: ObservationEdgeInsets | undefined;
       mandatorySystemGestures: ObservationEdgeInsets | undefined;
       warnings: WarningCandidate[];
-    },
+    } & { bounds: ObservationEdgeInsets },
   ): void {
     if (!categories.includes("interaction")) {
       return;
@@ -339,25 +344,17 @@ export class SafeAreaAuditor {
     const sides = intersectingSides(bounds, screen, gesture);
     if (sides.length > 0) {
       warnings.push({
-        warning: this.warning(
-          node,
-          bounds,
-          ["interaction"],
-          insetTypes(
-            systemGestures,
-            mandatorySystemGestures,
-            "systemGestures",
-            "mandatorySystemGestures",
+        warning: this.warning(node, bounds, ["interaction"], {
+          insetTypes: insetTypes(systemGestures, mandatorySystemGestures, "systemGestures", {
+            secondType: "mandatorySystemGestures",
             sides,
-          ),
+          }),
           sides,
-          {
-            type: "interaction-in-system-gesture-region",
-            severity: "info",
-            screen: screen,
-            insets: gesture,
-          },
-        ),
+          type: "interaction-in-system-gesture-region",
+          severity: "info",
+          screen: screen,
+          insets: gesture,
+        }),
         node: sourceNode,
         ancestors: [...ancestors],
       });
@@ -368,19 +365,20 @@ export class SafeAreaAuditor {
     node: Node,
     bounds: ObservationEdgeInsets,
     categories: LayoutWarning["categories"],
-    insetTypes: LayoutWarning["insetTypes"],
-    sides: Side[],
     {
+      insetTypes,
+      sides,
       type,
       severity,
       screen,
       insets,
     }: {
+      sides: Side[];
       type: LayoutWarning["type"];
       severity: LayoutWarning["severity"];
       screen: { width: number; height: number };
       insets: ObservationEdgeInsets;
-    },
+    } & { insetTypes: LayoutWarning["insetTypes"] },
   ): LayoutWarning {
     return {
       type,
@@ -663,8 +661,7 @@ function insetTypes<
   first: ObservationEdgeInsets | undefined | null,
   second: ObservationEdgeInsets | undefined | null,
   firstType: A,
-  secondType: B,
-  sides: Side[],
+  { secondType, sides }: { secondType: B; sides: Side[] },
 ): Array<A | B> {
   return [
     ...(hasInsetOnSides(first, sides) ? [firstType] : []),

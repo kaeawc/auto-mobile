@@ -21,7 +21,10 @@ function createClients(timer: FakeTimer) {
       webSocketFactory: factory,
       timer,
     }),
-    IOSCtrlProxyClient.createForTesting({ ...device, platform: "ios" }, 8765, factory, timer),
+    IOSCtrlProxyClient.createForTesting({ ...device, platform: "ios" }, 8765, {
+      wsFactory: factory,
+      timer,
+    }),
   ] as const;
 }
 
@@ -127,13 +130,11 @@ describe("DeviceServiceClient shared methods", () => {
     }
     const exhausted = budget.snapshot();
     expect(exhausted.state).toBe("exhausted");
-    const client = IOSCtrlProxyClient.createForTesting(
-      { ...device, platform: "ios" },
-      8765,
-      createInstantFailureWebSocketFactory(timer),
+    const client = IOSCtrlProxyClient.createForTesting({ ...device, platform: "ios" }, 8765, {
+      wsFactory: createInstantFailureWebSocketFactory(timer),
       timer,
-      { serviceManagerFactory: () => manager },
-    );
+      serviceManagerFactory: () => manager,
+    });
     try {
       client.bindSession("shared-methods-session-a");
       client.bindSession("shared-methods-session-a");

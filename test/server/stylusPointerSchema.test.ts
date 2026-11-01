@@ -61,9 +61,7 @@ describe("handlers forward the pointer to the action (#13081)", () => {
     await tapAtHandler(
       device,
       { x: 1, y: 2, pointer: { toolType: "stylus" } },
-      undefined,
-      undefined,
-      interactionDeps,
+      { deps: interactionDeps },
     );
     expect(seen).toEqual([{ toolType: "stylus" }]);
   });

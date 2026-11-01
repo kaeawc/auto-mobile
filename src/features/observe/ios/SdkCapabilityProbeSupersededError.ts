@@ -18,7 +18,7 @@ export type IosSdkCapability =
  */
 export class SdkCapabilityProbeSupersededError extends ActionableError {
   constructor(
-    readonly capability: IosSdkCapability,
+    readonly capability: IosSdkCapability | "observation_bridge",
     readonly probeGeneration: number,
     readonly currentGeneration: number,
   ) {

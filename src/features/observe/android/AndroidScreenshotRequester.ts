@@ -22,6 +22,16 @@ import {
 } from "./ctrlProxyProtocol";
 import type { ScreenshotResult } from "./types";
 
+/** Per-capture controls for {@link AndroidScreenshotRequester.requestScreenshot}. */
+export interface AndroidScreenshotRequestOptions {
+  /** Keep this capture out of the observation stream. Defaults to false. */
+  suppressObservationStreamPush?: boolean;
+  signal?: AbortSignal;
+  displayId?: number;
+  /** Ask the device to hide its prototype for this capture. Defaults to false. */
+  hidePrototypes?: boolean;
+}
+
 /** Client-backed accessors resolve live state on every use, including after awaits. */
 export interface AndroidScreenshotRequesterContext {
   readonly timer: Pick<Timer, "now">;
@@ -49,11 +59,14 @@ export class AndroidScreenshotRequester {
   async requestScreenshot(
     timeoutMs: number,
     perf: PerformanceTracker,
-    suppressObservationStreamPush: boolean,
-    signal?: AbortSignal,
-    displayId?: number,
-    hidePrototypes: boolean = false,
+    options: AndroidScreenshotRequestOptions = {},
   ): Promise<ScreenshotResult> {
+    const {
+      suppressObservationStreamPush = false,
+      signal,
+      displayId,
+      hidePrototypes = false,
+    } = options;
     const { context } = this;
     const startTime = context.timer.now();
     let suppressedRequestId: string | undefined;
@@ -83,10 +96,12 @@ export class AndroidScreenshotRequester {
         sentRequestId,
         "screenshot",
         timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          error: `Screenshot timeout after ${timeout}ms`,
-        }),
+        {
+          timeoutErrorFactory: (_id, _type, timeout) => ({
+            success: false,
+            error: `Screenshot timeout after ${timeout}ms`,
+          }),
+        },
       );
 
       await perf.track("sendRequest", () =>

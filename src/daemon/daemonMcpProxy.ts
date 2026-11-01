@@ -385,11 +385,12 @@ export class DaemonMcpProxy {
     name: string,
     args: Record<string, unknown>,
     progressToken?: string | number,
-    onProgress?: DaemonProxyProgressCallback,
-    callerSignal?: AbortSignal,
-    options: DaemonProxyToolCallOptions = {},
+    {
+      onProgress,
+      ...options
+    }: DaemonProxyToolCallOptions & { onProgress?: DaemonProxyProgressCallback } = {},
   ): Promise<any> {
-    return this.toolCalls.callTool(name, args, progressToken, onProgress, callerSignal, options);
+    return this.toolCalls.callTool(name, args, progressToken, { onProgress, ...options });
   }
 
   /**

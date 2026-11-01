@@ -3,6 +3,7 @@ import { getDatabase } from "./database";
 import { nowIso } from "./nowIso";
 import type { Database } from "./types";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /** One tool's enable/disable decision inside a batch write. */
 export interface SessionToolSelectionEntry {
@@ -28,10 +29,17 @@ export interface SessionToolSelectionRepository {
 }
 
 export class SqliteSessionToolSelectionRepository implements SessionToolSelectionRepository {
-  constructor(
-    private readonly resolveDatabase: () => Kysely<Database> = getDatabase,
-    private readonly timer: Timer = defaultTimer,
-  ) {}
+  private readonly resolveDatabase: () => Kysely<Database>;
+  private readonly timer: Timer;
+
+  /** `resolveDatabase` is called per query, so construction never opens the default database. */
+  constructor({
+    resolveDatabase = getDatabase,
+    timer = defaultTimer,
+  }: Pick<RepositoryDeps, "timer"> & { resolveDatabase?: () => Kysely<Database> } = {}) {
+    this.resolveDatabase = resolveDatabase;
+    this.timer = timer;
+  }
 
   async list(sessionUuid: string): Promise<Map<string, boolean>> {
     const rows = await this.resolveDatabase()

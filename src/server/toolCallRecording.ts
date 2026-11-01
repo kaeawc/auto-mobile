@@ -80,8 +80,13 @@ export async function runRecordedToolCall<T>(
   repository: Pick<ToolCallRepository, "recordToolCall">,
   timer: Timer,
   name: string,
-  sessionUuid: string | undefined,
-  handler: (recording: ToolCallRecordingState, startMs: number) => Promise<T>,
+  {
+    sessionUuid,
+    handler,
+  }: {
+    sessionUuid?: string;
+    handler: (recording: ToolCallRecordingState, startMs: number) => Promise<T>;
+  },
 ): Promise<T> {
   const startMs = timer.now();
   const timestamp = new Date().toISOString();

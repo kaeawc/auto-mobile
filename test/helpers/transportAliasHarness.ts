@@ -148,16 +148,13 @@ export async function transportAliasHarness(
     z.object({}).passthrough(),
     async () => ({ success: true }),
   );
-  ToolRegistry.registerDeviceAware(
-    "readProbe",
-    "Read probe",
-    z.object({}).passthrough(),
-    async (device: BootedDevice) => {
+  ToolRegistry.registerDeviceAware("readProbe", "Read probe", z.object({}).passthrough(), {
+    handler: async (device: BootedDevice) => {
       reads.push(device.deviceId);
       return { success: true };
     },
-    { deviceReadOnly: true },
-  );
+    deviceReadOnly: true,
+  });
   if (options.held) {
     await pool.bindOrReuseDeviceSession({
       sessionId: HOLDER,

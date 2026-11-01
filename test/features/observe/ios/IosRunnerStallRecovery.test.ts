@@ -47,10 +47,8 @@ describe("iOS stalled command recovery", () => {
       // Model the process manager replacing the runner and its old socket.
       sockets.at(-1)?.terminate();
     };
-    client = IOSCtrlProxyClient.createForTesting(
-      device,
-      8765,
-      (url) => {
+    client = IOSCtrlProxyClient.createForTesting(device, 8765, {
+      wsFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, timer);
         sockets.push(socket);
         socket.send = (wire) => {
@@ -101,16 +99,13 @@ describe("iOS stalled command recovery", () => {
         return socket;
       },
       timer,
-      { serviceManagerFactory: () => manager },
-    );
+      serviceManagerFactory: () => manager,
+    });
     const instanceSpy = spyOnIosClientInstance(client);
     restoreInstance = () => instanceSpy.mockRestore();
-    subject = new ViewHierarchy(
-      device,
-      new FakeAdbClientFactory(),
-      {} as AndroidCtrlProxyClient,
+    subject = new ViewHierarchy(device, new FakeAdbClientFactory(), {} as AndroidCtrlProxyClient, {
       timer,
-    );
+    });
     expect(await client.ensureConnected()).toBe(true);
     // Finish the original socket's stability window before testing recovery.
     await timer.advanceTimeAsync(2000);

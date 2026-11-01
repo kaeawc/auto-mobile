@@ -147,7 +147,7 @@ The `simulator-tests` job runs the complement of `automobile-tests` with
 ## Caching strategy
 
 The `ios-xctest-runner-simulator-tests` job (`.github/workflows/xctestrunner-simulator-tests.yml`,
-run on PRs labelled `run-ios-sim`; its nightly run is the CircleCI `xctestrunner-simulator-tests`
+run on PRs labelled `run-ios-sim` and on PRs that touch an iOS SDK contract input; its nightly run is the CircleCI `xctestrunner-simulator-tests`
 job in `.circleci/continue_config.yml`, #11010) restores two cache layers before its
 `build-for-testing` invocation. It resolves the CtrlProxy package after restore, so a manifest
 change still fetches any newly introduced dependency before the cached DerivedData is reused:

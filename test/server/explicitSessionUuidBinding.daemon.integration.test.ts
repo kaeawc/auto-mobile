@@ -84,7 +84,7 @@ beforeEach(async () => {
   ]) {
     await migrate(db as Kysely<unknown>);
   }
-  const repository = new DeviceSessionRepository(db);
+  const repository = new DeviceSessionRepository({ db });
   timer = new FakeTimer();
   manager = new SessionManager(timer, repository);
   const utils = new FakeDeviceUtils();
@@ -183,21 +183,26 @@ function registerTools(): void {
       sessionUuid: z.string().optional(),
       keepScreenAwake: z.boolean().optional(),
     }),
-    async (device) => {
-      received.push(device.deviceId);
-      return { content: [{ type: "text" as const, text: device.deviceId }] };
+    {
+      handler: async (device) => {
+        received.push(device.deviceId);
+        return { content: [{ type: "text" as const, text: device.deviceId }] };
+      },
+      deviceReadiness: "booted",
     },
-    { deviceReadiness: "booted" },
   );
   ToolRegistry.registerDeviceAware(
     "watchProbe",
     "watchProbe",
     z.object({ deviceId: z.string().optional(), sessionUuid: z.string().optional() }),
-    async (device) => {
-      received.push(device.deviceId);
-      return { content: [{ type: "text" as const, text: device.deviceId }] };
+    {
+      handler: async (device) => {
+        received.push(device.deviceId);
+        return { content: [{ type: "text" as const, text: device.deviceId }] };
+      },
+      deviceReadiness: "booted",
+      deviceReadOnly: true,
     },
-    { deviceReadiness: "booted", deviceReadOnly: true },
   );
 }
 
@@ -235,7 +240,10 @@ function connect(socket: UnixSocketServer, socketSessionId: string): DaemonMcpPr
       { name, arguments: forwarded },
       { timeout: 20_000 },
     );
-    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, true, result);
+    socket.testHooks.recordBoundMcpClientKey(request, socketSessionId, route, {
+      sessionWasActiveBeforeForward: true,
+      response: result,
+    });
     return result;
   };
   const daemon = new FakeDaemonManager();

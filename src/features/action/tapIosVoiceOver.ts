@@ -63,7 +63,6 @@ export async function tapViaVoiceOver({
     label,
     voiceOverAction,
     resolveVoiceOverActivateCtrlProxyTimeoutMs(voiceOverAction, durationMs),
-    undefined,
     {
       bounds: element.bounds,
       duration: action === "longPress" ? durationMs : undefined,

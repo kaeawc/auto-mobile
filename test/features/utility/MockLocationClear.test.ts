@@ -59,11 +59,8 @@ function harness(simctl = new FakeSimctl()) {
     pending,
     unbound,
     release: (sessionId: string, deviceId = ios.deviceId) =>
-      release(
-        sessionId,
-        deviceId,
-        "test",
-        {
+      release(sessionId, deviceId, "test", {
+        snapshot: {
           sessionId,
           deviceId,
           releaseReason: "test",
@@ -71,8 +68,7 @@ function harness(simctl = new FakeSimctl()) {
           terminal: true,
           heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1000, ageMs: 0 },
         },
-        {},
-      ),
+      }),
   };
 }
 
@@ -101,9 +97,7 @@ describe("session mock location clear", () => {
         { latitude: 0, longitude: 0 },
         { latitude: 1, longitude: 1 },
       ],
-      1000,
-      500,
-      true,
+      { durationMs: 1000, updateIntervalMs: 500, loop: true },
       async (_point, options) => {
         signal = options.signal;
         calls.push("emit");

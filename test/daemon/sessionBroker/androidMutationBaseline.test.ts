@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { AndroidDeviceMutationResetPort } from "../../../src/daemon/sessionBroker/androidDeviceMutationResetPort";
-import { ANDROID_CERTIFIABLE_KINDS } from "../../../src/daemon/sessionBroker/androidMutationBaseline";
+import {
+  ANDROID_CERTIFIABLE_KINDS,
+  androidAccountDigest,
+  parseAndroidAccountDigests,
+} from "../../../src/daemon/sessionBroker/androidMutationBaseline";
 import {
   DEVICE_MUTATION_KINDS,
   type DeviceBaseline,
@@ -8,6 +12,7 @@ import {
 import { diffDeviceBaseline } from "../../../src/daemon/sessionBroker/mutations/baseline";
 import { planDeviceMutationRevert } from "../../../src/daemon/sessionBroker/mutations/revertPlanner";
 import { readFileSync } from "node:fs";
+import { shellQuote } from "../../../src/utils/shellQuote";
 import { androidBaselineRig, androidPackageDump } from "./fixtures/androidMutationBaseline";
 
 function rig(users: readonly number[] = [0]) {
@@ -20,6 +25,10 @@ function rig(users: readonly number[] = [0]) {
   };
   return { adb, reply, port, context };
 }
+
+const DOWNLOAD_ENTRIES = `shell sh -c ${shellQuote(
+  "if [ -d '/sdcard/Download' ]; then find '/sdcard/Download' -mindepth 1 -maxdepth 1 -print; elif [ -e '/sdcard/Download' ]; then exit 1; fi",
+)}`;
 
 const observation = (snapshot: DeviceBaseline, kind: string, key: string) =>
   snapshot.observations.find((entry) => entry.kind === kind && entry.key === key)?.value;
@@ -328,16 +337,40 @@ describe("Android mutation baseline capture", () => {
     );
     const current = await port.capture(context);
     expect(JSON.stringify(current)).not.toContain("private@example.com");
-    expect(observation(current, "account", "inventory")).toMatchObject({
+    expect(observation(current, "account", "user:10")).toMatchObject({
       state: "present",
       value: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     const changes = diffDeviceBaseline(baseline, current).changes;
     expect(changes).toHaveLength(1);
-    expect(changes[0]?.kind).toBe("account");
+    expect(changes[0]).toMatchObject({ kind: "account", key: "user:10" });
     expect(planDeviceMutationRevert([], { dirty: [], changes }, port).status).toBe(
       "non_revertible",
     );
+  });
+
+  test("account digests ignore dumpsys noise and row order, but not the account set", () => {
+    const dump = (rows: string, noise: string) =>
+      `User UserInfo{0:Owner:c13}:\n  Accounts: 2\n${rows}\n\n  Accounts History\n  ${noise}\n  Active Sessions: 0`;
+    const a = "    Account {name=a@example.com, type=com.google}";
+    const b = "    Account {name=b@example.com, type=com.example}";
+    const first = parseAndroidAccountDigests(dump(`${a}\n${b}`, "12:00 add"), [0]);
+    expect(parseAndroidAccountDigests(dump(`${b}\n${a}`, "12:05 remove"), [0])).toEqual(first);
+    expect(
+      parseAndroidAccountDigests(dump(`${a}\n${b.replace("b@", "c@")}`, ""), [0]).get(0),
+    ).not.toBe(first.get(0));
+    expect(
+      parseAndroidAccountDigests("User UserInfo{0:Owner:c13}:\n  Accounts: 0", [0]).get(0),
+    ).toBe(androidAccountDigest([]));
+  });
+
+  test.each([
+    ["missing user section", "User UserInfo{10:Work:c13}:\n  Accounts: 0"],
+    ["missing count", "User UserInfo{0:Owner:c13}:\n  Active Sessions: 0"],
+    ["short row list", "User UserInfo{0:Owner:c13}:\n  Accounts: 2\n    Account {name=a, type=t}"],
+    ["non-account row", "User UserInfo{0:Owner:c13}:\n  Accounts: 1\n  Active Sessions: 0"],
+  ])("an unreadable account list (%s) throws", (_label, output) => {
+    expect(() => parseAndroidAccountDigests(output, [0])).toThrow("Android account inventory");
   });
 
   test("hashes file contents and literal filenames rather than silently accepting overwritten baseline files", async () => {
@@ -384,6 +417,22 @@ describe("Android mutation baseline capture", () => {
     ]);
   });
 
+  test("records every direct Downloads entry so user_files namespaces can be proven new", async () => {
+    const { port, context, reply } = rig();
+    reply(
+      DOWNLOAD_ENTRIES,
+      "/sdcard/Download/z.txt\n/sdcard/Download/fixtures\n/sdcard/Download/.hidden",
+    );
+    expect(observation(await port.capture(context), "shared-file", "download-entries")).toEqual({
+      state: "present",
+      value: JSON.stringify([
+        "/sdcard/Download/.hidden",
+        "/sdcard/Download/fixtures",
+        "/sdcard/Download/z.txt",
+      ]),
+    });
+  });
+
   test.each([
     ["shell pm list users", "Users:\nUserInfo{0:Owner:c13} running\nError: denied"],
     ["shell pm list users", "Users:\nUserInfo{0:Owner:c13}\nUserInfo{0:Owner:c13}"],
@@ -396,6 +445,9 @@ describe("Android mutation baseline capture", () => {
     ["shell settings --user 0 list global", "key=1\nkey=2"],
     ["shell settings --user 0 list global", "--user=value"],
     ["shell find /sdcard/ -mindepth 1 -maxdepth 1 -print", "/sdcard/../data"],
+    [DOWNLOAD_ENTRIES, "/sdcard/Download/a/b"],
+    [DOWNLOAD_ENTRIES, "/sdcard/Downloads/a"],
+    [DOWNLOAD_ENTRIES, "/sdcard/Download/a\n/sdcard/Download/a"],
     ["shell dumpsys account", "Accounts: 0"],
     ["shell wm density", "unknown density"],
     ["shell wm size", "Physical size: 1080x1920\nOverride size: bogus"],

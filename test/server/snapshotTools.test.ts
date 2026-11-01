@@ -1,7 +1,11 @@
 import { parseJsonSchemaNode } from "../helpers/jsonSchemaNode";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
+import {
+  type BootedDevice,
+  type DeviceSnapshotManifest,
+  requireAndroidOrIosPlatform,
+} from "../../src/models";
 import type { RestoreSnapshotResult } from "../../src/features/action/RestoreSnapshot";
 import {
   deviceSnapshotSchema,
@@ -66,7 +70,7 @@ describe("snapshot tool", () => {
             timestamp,
             deviceId: device.deviceId,
             deviceName: device.name,
-            platform: device.platform,
+            platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
             snapshotType: "app_data",
             includeAppData: args.includeAppData ?? true,
             includeSettings: false,
@@ -193,7 +197,7 @@ describe("snapshot tool", () => {
       timestamp: new Date(fakeTimer.now()).toISOString(),
       deviceId: device.deviceId,
       deviceName: device.name,
-      platform: device.platform,
+      platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
       snapshotType: "app_data",
       includeAppData: true,
       includeSettings: false,
@@ -203,7 +207,7 @@ describe("snapshot tool", () => {
       snapshotName: "snapshot-restore",
       deviceId: device.deviceId,
       deviceName: device.name,
-      platform: device.platform,
+      platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
       snapshotType: "app_data",
       includeAppData: true,
       includeSettings: false,
@@ -275,7 +279,7 @@ describe("snapshot tool", () => {
       timestamp,
       deviceId: device.deviceId,
       deviceName: device.name,
-      platform: device.platform,
+      platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
       snapshotType: "vm",
       includeAppData: true,
       includeSettings: true,
@@ -320,7 +324,7 @@ describe("snapshot tool", () => {
       timestamp,
       deviceId: device.deviceId,
       deviceName: device.name,
-      platform: device.platform,
+      platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
       snapshotType: "app_data",
       includeAppData: true,
       includeSettings: false,
@@ -329,7 +333,7 @@ describe("snapshot tool", () => {
       snapshotName,
       deviceId: device.deviceId,
       deviceName: device.name,
-      platform: device.platform,
+      platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
       snapshotType: "app_data",
       includeAppData: true,
       includeSettings: false,

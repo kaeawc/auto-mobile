@@ -36,6 +36,14 @@ type TimeoutErrorFactory<T> = (requestId: string, type: string, timeoutMs: numbe
  */
 type ResponseErrorFactory<T> = (error: string, totalTimeMs: number) => T;
 
+/** The result factories a registered request uses when it does not complete normally. */
+export interface RequestErrorFactories<T> {
+  /** Builds the result a timed-out request resolves with. */
+  timeoutErrorFactory: TimeoutErrorFactory<T>;
+  /** Builds the result for a response that fails before the expected result type arrives. */
+  responseErrorFactory?: ResponseErrorFactory<T>;
+}
+
 /**
  * Manages pending requests with automatic timeout handling.
  *
@@ -84,15 +92,15 @@ export class RequestManager {
    * @param id - Unique request ID
    * @param type - Request type for logging
    * @param timeoutMs - Timeout in milliseconds
-   * @param timeoutErrorFactory - Factory to create error result on timeout
+   * @param options.timeoutErrorFactory - Factory to create error result on timeout
+   * @param options.responseErrorFactory - Factory to create error result for a failed response
    * @returns Promise that resolves with the response or times out
    */
   register<T>(
     id: string,
     type: string,
     timeoutMs: number,
-    timeoutErrorFactory: TimeoutErrorFactory<T>,
-    responseErrorFactory?: ResponseErrorFactory<T>,
+    { timeoutErrorFactory, responseErrorFactory }: RequestErrorFactories<T>,
   ): Promise<T> {
     const promise = new Promise<T>((resolve, reject) => {
       // Set up timeout

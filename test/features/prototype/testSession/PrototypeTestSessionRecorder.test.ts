@@ -22,13 +22,9 @@ function fixture() {
     deadTapsEnabled: () => false,
   });
   const client = new FakeCtrlProxy(timer);
-  const events = new PrototypeEventCoordinator(
-    timer,
-    new InMemoryPrototypeStatusStore(timer),
-    undefined,
-    undefined,
+  const events = new PrototypeEventCoordinator(timer, new InMemoryPrototypeStatusStore(timer), {
     recorder,
-  );
+  });
   events.show(scope, "panel", client);
   return { timer, store, recorder, client, events };
 }

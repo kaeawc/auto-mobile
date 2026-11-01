@@ -28,6 +28,8 @@ import {
   type SessionLogProvider,
   type SessionLogSimctl,
   type ResetAppLogsRequest,
+  type SessionLogReadBounds,
+  type UnifiedLogReadBounds,
 } from "./DefaultSessionLogService";
 import { SessionLogTimeoutError } from "./SessionLogTimeoutError";
 import {
@@ -70,22 +72,33 @@ function readOutcomeForError(path: string, target: string, error: unknown): Sess
 export class IosSimulatorSessionLogProvider implements SessionLogProvider {
   readonly platform = "ios" as const;
 
+  private readonly unifiedLogTimeoutMs: number;
+  private readonly ownership: SimulatorContainerOwnershipOptions;
+
   constructor(
     private readonly simctlFactory: (device: BootedDevice) => SessionLogSimctl,
     private readonly fileSystem: AppFileFileSystem,
     private readonly timer: Timer,
-    private readonly unifiedLogTimeoutMs: number,
-    private readonly ownership: SimulatorContainerOwnershipOptions = {},
-  ) {}
+    {
+      unifiedLogTimeoutMs,
+      ownership = {},
+    }: { unifiedLogTimeoutMs: number; ownership?: SimulatorContainerOwnershipOptions },
+  ) {
+    this.unifiedLogTimeoutMs = unifiedLogTimeoutMs;
+    this.ownership = ownership;
+  }
 
   async readAppLogs(
     device: BootedDevice,
     appId: string,
     request: SessionLogFilesRequest,
-    maxBytes: number,
+    { maxBytes }: SessionLogReadBounds,
   ): Promise<SessionLogFilesResult> {
-    const root = await this.resolveContainerRoot(device, appId, request.container, "read", {
-      container: "data",
+    const root = await this.resolveContainerRoot(device, appId, request.container, {
+      operation: "read",
+      choice: {
+        container: "data",
+      },
     });
     const containerRoot = join(
       root,
@@ -100,8 +113,11 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
 
   async resetAppLogs(request: ResetAppLogsRequest): Promise<ResetAppLogsPathOutcome[]> {
     const { device, appId, container } = request;
-    const root = await this.resolveContainerRoot(device, appId, container, "reset", {
-      container: "data",
+    const root = await this.resolveContainerRoot(device, appId, container, {
+      operation: "reset",
+      choice: {
+        container: "data",
+      },
     });
     const containerRoot = join(
       root,
@@ -122,11 +138,14 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: SessionLogAppGroupRequest,
-    maxBytes: number,
+    { maxBytes }: SessionLogReadBounds,
   ): Promise<SessionLogAppGroupResult> {
-    const root = await this.resolveContainerRoot(device, appId, request.groupId, "read", {
-      container: "group",
-      groupId: request.groupId,
+    const root = await this.resolveContainerRoot(device, appId, request.groupId, {
+      operation: "read",
+      choice: {
+        container: "group",
+        groupId: request.groupId,
+      },
     });
     const files: LocalFileListEntry[] = await listLocalFiles(root, this.fileSystem);
     const entries: SessionLogFileOutcome[] = [];
@@ -140,15 +159,13 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: UnifiedLogWindowRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
-    retain: "head" | "tail" = "head",
+    { maxBytes, signal, retain = "head" }: UnifiedLogReadBounds,
   ): Promise<UnifiedLogWindowResult> {
     this.requireSimulator(device, "collect the unified log");
     const predicate = unifiedLogPredicate(appId, request.processName);
     const args = ["spawn", device.deviceId, "log", ...logShowArgs(request, predicate)];
     const startedAt = this.timer.now();
-    const stdout = await this.runBounded(device, args, maxBytes, retain, signal);
+    const stdout = await this.runBounded(device, args, maxBytes, { retain, callerSignal: signal });
     return streamedUnifiedLogWindowResult(request, stdout, {
       predicate,
       mechanism: "simctl-log-show",
@@ -166,8 +183,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     args: string[],
     maxBytes: number,
-    retain: "head" | "tail",
-    callerSignal?: AbortSignal,
+    { retain, callerSignal }: { retain: "head" | "tail"; callerSignal?: AbortSignal },
   ): Promise<BoundedStdout> {
     const simctl = this.simctlFactory(device);
     const controller = new AbortController();
@@ -207,8 +223,7 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     containerLabel: string,
-    operation: string,
-    choice: SimulatorContainerChoice,
+    { operation, choice }: { operation: string; choice: SimulatorContainerChoice },
   ): Promise<string> {
     this.requireSimulator(device, `${operation} ${containerLabel} logs for ${appId}`);
     let root: string;

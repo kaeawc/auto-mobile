@@ -40,7 +40,10 @@ export class AdbAndroidFoldPostureRestore implements AndroidFoldPostureRestore {
       const adb = this.adb.create(device);
       const operation = { signal, assertCurrent: () => signal.throwIfAborted() };
       // Clear rear-display overrides as well as restoring the emulator posture.
-      const fallback = await setEmulatorPosture(adb, "opened", undefined, true, operation);
+      const fallback = await setEmulatorPosture(adb, "opened", undefined, {
+        supportsRearDisplay: true,
+        operation,
+      });
       if (fallback) {
         throw new ActionableError(
           "Emulator refused unfolded posture; cannot prove opened baseline",
@@ -63,11 +66,13 @@ export class AdbAndroidFoldPostureRestore implements AndroidFoldPostureRestore {
         adb,
         "opened",
         { states },
-        this.timer,
-        () => {
-          throw new ActionableError("The device exposes no committed posture state to read back");
+        {
+          timer: this.timer,
+          observe: () => {
+            throw new ActionableError("The device exposes no committed posture state to read back");
+          },
+          operation,
         },
-        operation,
       );
       signal.throwIfAborted();
     } catch (error) {

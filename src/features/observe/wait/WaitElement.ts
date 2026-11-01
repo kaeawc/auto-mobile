@@ -6,7 +6,7 @@ import {
   isScopedWaitResolutionError,
   waitResolutionFailure,
 } from "../ConditionPredicates";
-import { BootedDevice, Element, ViewHierarchyResult } from "../../../models";
+import type { AndroidOrIosPlatform, Element, ViewHierarchyResult } from "../../../models";
 import { isMissingContainerError, type MatchMode } from "../../utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import {
@@ -41,8 +41,7 @@ function retryCompoundText<T>(
   waitFor: ObserveWaitForOptions,
   negative: boolean,
   predicates: ResolverSelector[],
-  sets: T[][],
-  resolve: (selector: ResolverSelector) => T[],
+  { sets, resolve }: { sets: T[][]; resolve: (selector: ResolverSelector) => T[] },
 ): void {
   if (!shouldRetryCompoundText(waitFor, negative, sets)) {
     return;
@@ -62,11 +61,13 @@ function isWaitSourceVisible(
 interface WaitForElementOptions extends ScreenSizeForOffscreenCheckOptions {
   negative?: boolean;
   evaluation?: ConditionEvaluation;
+  /** Per-wait selector match modes, carried across polls; a fresh map when omitted. */
+  modes?: Map<string, MatchMode>;
 }
 
 function resolveWaitForElementOptions(
   options: boolean | WaitForElementOptions,
-  context: { hierarchy: ViewHierarchyResult; platform?: BootedDevice["platform"] },
+  context: { hierarchy: ViewHierarchyResult; platform?: AndroidOrIosPlatform },
 ): { negative: boolean; screenSize: ScreenSize | undefined } {
   const resolved = typeof options === "boolean" ? { negative: options } : options;
   return {
@@ -169,8 +170,7 @@ function chooseWaitElement(
   finder: ConditionResolver,
   eligible: SearchableEntry[],
   waitFor: ObserveWaitForOptions,
-  negative: boolean,
-  evaluation: ConditionEvaluation,
+  { negative, evaluation }: { negative: boolean; evaluation: ConditionEvaluation },
 ): Element | null {
   if (!usesScopedWait(waitFor)) {
     return eligible[0]?.element ?? null;
@@ -195,11 +195,14 @@ export const findWaitForElement = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult,
-  platform?: BootedDevice["platform"],
-  modes = new Map<string, MatchMode>(),
-  options: boolean | WaitForElementOptions = false,
+  {
+    platform,
+    options = false,
+  }: { platform?: AndroidOrIosPlatform; options?: boolean | WaitForElementOptions } = {},
 ): Element | null => {
   const evaluation = waitElementEvaluation(options);
+  const modes =
+    typeof options === "boolean" ? new Map<string, MatchMode>() : (options.modes ?? new Map());
   const scoped = usesScopedWait(waitFor);
   const selectionFinder = finder;
   if (scoped) {
@@ -304,7 +307,7 @@ export const findWaitForElement = (
     }
     return candidates;
   });
-  retryCompoundText(waitFor, negative, predicates, sets, resolve);
+  retryCompoundText(waitFor, negative, predicates, { sets, resolve });
   const candidates = [...new Set(sets.flat())].sort(
     (a, b) => a.windowRank - b.windowRank || a.index - b.index,
   );
@@ -313,7 +316,7 @@ export const findWaitForElement = (
       ? sets.some((set) => set.includes(candidate))
       : sets.every((set) => set.includes(candidate)),
   );
-  return chooseWaitElement(selectionFinder, eligible, waitFor, negative, evaluation);
+  return chooseWaitElement(selectionFinder, eligible, waitFor, { negative, evaluation });
 };
 
 export const hasElementPredicate = (

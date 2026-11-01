@@ -48,7 +48,7 @@ describe("explicit release of a session with a call in flight", () => {
         params: { sessionId: SESSION, requireKnown: true },
       },
       state,
-      tracker,
+      { executions: tracker },
     );
 
     expect(reply.success).toBe(true);
@@ -89,9 +89,7 @@ describe("explicit release of a session with a call in flight", () => {
         params: { sessionId, requireKnown: true },
       },
       state,
-      tracker,
-      signal,
-      { socketSessionId: REQUESTER },
+      { executions: tracker, signal, context: { socketSessionId: REQUESTER } },
     );
   }
 
@@ -107,7 +105,9 @@ describe("explicit release of a session with a call in flight", () => {
       const execution =
         binding === "resolved"
           ? tracker.startExecution("tapOn", "conn-1")
-          : tracker.startExecution("tapOn", "conn-1", undefined, undefined, "conn-1");
+          : tracker.startExecution("tapOn", "conn-1", undefined, {
+              unresolvedAutolockMcpSessionId: "conn-1",
+            });
       if (binding === "resolved") {
         tracker.setResolvedAutolockSessionUuid(execution.id, SESSION);
       }

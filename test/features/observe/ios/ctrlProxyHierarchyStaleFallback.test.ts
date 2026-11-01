@@ -102,7 +102,9 @@ describe("iOS CtrlProxyHierarchy stale fallback", () => {
       fresh: false,
     } as CtrlProxyCachedHierarchy);
 
-    const result = await harness.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    const result = await harness.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+    });
 
     expect(result.hierarchy).not.toBeNull();
     expect((result.hierarchy as XCTestHierarchy).hierarchy.text).toBe("pushed");
@@ -123,7 +125,9 @@ describe("iOS CtrlProxyHierarchy stale fallback", () => {
       fresh: false,
     } as CtrlProxyCachedHierarchy);
 
-    const result = await harness.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    const result = await harness.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+    });
 
     expect((result.hierarchy as XCTestHierarchy).hierarchy.text).toBe("invalidated");
     expect(result.fresh).toBe(false);
@@ -146,7 +150,9 @@ describe("iOS CtrlProxyHierarchy stale fallback", () => {
       fresh: false,
     } as CtrlProxyCachedHierarchy);
 
-    const result = await harness.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    const result = await harness.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+    });
 
     expect((result.hierarchy as XCTestHierarchy).hierarchy.text).toBe("sdk-enriched");
     expect(result.fresh).toBe(true);

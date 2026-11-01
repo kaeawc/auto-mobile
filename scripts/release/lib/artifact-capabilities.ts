@@ -72,6 +72,8 @@ export const UNIMPLEMENTED_BY_ARTIFACT: Record<ArtifactId, Record<string, string
       "AGSL shaders are Android-only by owner decision; the iOS agent and ProtoViewer refuse them (#15131)",
     prototype_motion_v3: "Expressive, press and layout animate are Android only until #14684",
     prototype_window_motion_v1: "Android window and repeat motion; iOS does not implement it",
+    prototype_hide_keyboard_v1:
+      "hideKeyboard has a validated contract only; the iOS agent does not run it yet (#14320)",
     prototype_platform_window_controls_v1:
       "Window controls have a validated contract only; the iOS agent does not apply them yet (#14320)",
     prototype_motion_v2:
@@ -124,8 +126,15 @@ function matchAll(source: string, pattern: RegExp): string[] {
 
 /** `add("name")` flags in WebSocketServer.supportedCommands(), conditional ones included. */
 export function parseAndroidAdvertised(kotlinSource: string): string[] {
+  // `addAll(listOf("a_v1", "b_v1"))` advertises each literal in the collection (#15816).
+  const collectionLiterals = [
+    ...kotlinSource.matchAll(
+      /\baddAll\(\s*(?:listOf|setOf|arrayOf|mutableListOf|mutableSetOf)\(([^()]*)\)\s*,?\s*\)/g,
+    ),
+  ].flatMap((call) => matchAll(call[1], new RegExp(`"(${CAPABILITY_NAME})"`, "g")));
   return uniqueSorted([
     ...matchAll(kotlinSource, new RegExp(`\\badd\\("(${CAPABILITY_NAME})"\\)`, "g")),
+    ...collectionLiterals,
     // SystemGlobalActions: `flagFor("lock_screen")` expands to `global_action_lock_screen_v1`.
     ...matchAll(kotlinSource, /\bflagFor\("([a-z][a-z0-9_]*)"\)/g).map(
       (name) => `global_action_${name}_v1`,

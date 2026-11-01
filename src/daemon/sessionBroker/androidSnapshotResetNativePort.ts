@@ -356,9 +356,7 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
       device.name,
       step.timeoutMs,
       launch.process,
-      device.deviceId,
-      step.signal,
-      { freshProvision: true },
+      { targetDeviceId: device.deviceId, signal: step.signal, options: { freshProvision: true } },
     );
   }
 
@@ -373,14 +371,11 @@ export class NativeAndroidSnapshotResetPort implements AndroidSnapshotResetPort 
       // waiting out the whole step budget (#15177); the watch ends the wait on process death.
       await raceWithDeadline(
         [
-          this.dependencies.emulator.waitForEmulatorReady(
-            device.name,
-            step.timeoutMs,
-            null,
-            device.deviceId,
+          this.dependencies.emulator.waitForEmulatorReady(device.name, step.timeoutMs, null, {
+            targetDeviceId: device.deviceId,
             signal,
-            { skipWakeAndUnlock: true },
-          ),
+            options: { skipWakeAndUnlock: true },
+          }),
           watchEmulatorProcessDeath(
             { serial: device.deviceId, avdName: device.name },
             { stopper: processStopper, timer, signal, deadlineMs, assertOwned: step.assertOwned },

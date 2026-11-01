@@ -12,6 +12,7 @@ import {
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { recoveryCoordinatorHarness } from "../helpers/recoveryCoordinatorHarness";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
 
 const booted: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 
@@ -32,7 +33,7 @@ function harness(
   const timer = new FakeTimer();
   const devices = new Map<string, PooledDevice>();
   const starts = new Map<string, number>();
-  const misses = new Map<string, number>();
+  const misses = new DeviceLossMisses();
   const settled = new Map<string, { incarnation: number; refreshGeneration: number }>();
   const intentional = new Map<string, number>();
   const calls: string[] = [];
@@ -255,12 +256,9 @@ describe("DevicePoolRefresh", () => {
         recovery.coordinator.liftUnconfirmedRecoveringAndroidImages(discovery, generation),
       );
       recovery.coordinator.setRecoveringAndroidImage("Pixel", image);
-      recovery.coordinator.finishAndroidRecoveryAttempt(
-        "Pixel",
-        new Set([booted.deviceId]),
-        true,
-        Symbol("attempt"),
-      );
+      recovery.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set([booted.deviceId]), true, {
+        replacementHandoffOwner: Symbol("attempt"),
+      });
       return { ...h, recovery };
     };
     const fenceRejectedKill = (h: ReturnType<typeof wired>, device: BootedDevice) => {

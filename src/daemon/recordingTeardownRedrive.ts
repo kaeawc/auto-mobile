@@ -116,11 +116,11 @@ export async function redriveUnconfirmedCaptureTeardowns(
         // Host identities can be confirmed before the device is added to the pool.
         manager.registerPendingDeviceCleanup(
           deviceId,
-          confirmReleasedCaptures(manager, deviceId, records, deps, hookDriven),
+          confirmReleasedCaptures(manager, deviceId, records, { deps, hookDriven }),
           INCOMPLETE_MARK_GRACE_MS,
         );
       } else {
-        markOrphanedCaptures(manager, deviceId, records, deps, hookDriven);
+        markOrphanedCaptures(manager, deviceId, records, { deps, hookDriven });
       }
     }
   };
@@ -205,7 +205,10 @@ function createStartupOrphanCaptures(
         (row) => !recordingId || row.recordingId === recordingId,
       );
       try {
-        await retryOrphanedCaptures(deviceId, records, deps, false, false, options?.mode ?? "user");
+        await retryOrphanedCaptures(deviceId, records, deps, {
+          waitForExpiry: false,
+          mode: options?.mode ?? "user",
+        });
       } finally {
         // A disposer belongs to a whole registered batch, not to an individual row.
         const batches = new Set(records.map((row) => row.withdrawRetry));
@@ -247,8 +250,7 @@ function markOrphanedCaptures(
   manager: RedriveManager,
   deviceId: string,
   records: RetainedCaptureRow[],
-  deps: RecordingTeardownRedriveDeps,
-  hookDriven = false,
+  { deps, hookDriven = false }: { deps: RecordingTeardownRedriveDeps; hookDriven?: boolean },
 ): void {
   records = records.filter((row) => row.captureTeardown);
   if (records.length === 0) {
@@ -260,7 +262,7 @@ function markOrphanedCaptures(
   });
   const withdrawRetry = manager.markDeviceNeedsRecorderTeardown(
     deviceId,
-    () => retryOrphanedCaptures(deviceId, records, deps, true, hookDriven),
+    () => retryOrphanedCaptures(deviceId, records, deps, { waitForExpiry: true, hookDriven }),
     Math.max(INCOMPLETE_MARK_GRACE_MS, ...remainingMs.map((ms) => ms + INCOMPLETE_MARK_GRACE_MS)),
   );
   for (const row of records) {
@@ -299,11 +301,11 @@ function subscribePendingRedrive(
     }
     manager.registerPendingDeviceCleanup(
       deviceId,
-      confirmReleasedCaptures(manager, deviceId, records, deps, hookDriven),
+      confirmReleasedCaptures(manager, deviceId, records, { deps, hookDriven }),
       INCOMPLETE_MARK_GRACE_MS,
     );
   };
-  manager.onSessionRelease((_sessionId, deviceId, _reason, _snapshot, options) => {
+  manager.onSessionRelease((_sessionId, deviceId, _reason, options) => {
     if (!options?.upgradeOnly) {
       consume(deviceId, options?.deviceIdentityReplaced);
     }
@@ -336,12 +338,11 @@ async function confirmReleasedCaptures(
   manager: RedriveManager,
   deviceId: string,
   records: RetainedCaptureRow[],
-  deps: RecordingTeardownRedriveDeps,
-  hookDriven: boolean,
+  { deps, hookDriven }: { deps: RecordingTeardownRedriveDeps; hookDriven: boolean },
 ): Promise<void> {
   try {
     await raceWithDeadline(
-      () => retryOrphanedCaptures(deviceId, records, deps, false, hookDriven),
+      () => retryOrphanedCaptures(deviceId, records, deps, { waitForExpiry: false, hookDriven }),
       {
         timer: deps.timer,
         timeoutMs: INCOMPLETE_MARK_GRACE_MS,
@@ -354,7 +355,7 @@ async function confirmReleasedCaptures(
       error,
     );
     // Mark synchronously before this pending cleanup settles, so allocation stays fenced.
-    markOrphanedCaptures(manager, deviceId, records, deps, hookDriven);
+    markOrphanedCaptures(manager, deviceId, records, { deps, hookDriven });
   }
 }
 
@@ -362,9 +363,11 @@ async function retryOrphanedCaptures(
   deviceId: string,
   records: RetainedCaptureRow[],
   deps: RecordingTeardownRedriveDeps,
-  waitForExpiry: boolean,
-  hookDriven = false,
-  mode: "user" | "background" = "background",
+  {
+    waitForExpiry,
+    hookDriven = false,
+    mode = "background",
+  }: { waitForExpiry: boolean; hookDriven?: boolean; mode?: "user" | "background" },
 ): Promise<void> {
   const unconfirmed: string[] = [];
   const failures: unknown[] = [];
@@ -373,7 +376,7 @@ async function retryOrphanedCaptures(
       continue;
     }
     try {
-      await confirmRetainedCapture(row, deps, waitForExpiry, hookDriven, mode);
+      await confirmRetainedCapture(row, deps, waitForExpiry, { hookDriven, mode });
     } catch (error) {
       logger.warn(
         `[RecordingTeardownRedrive] Teardown unconfirmed for ${row.recordingId} on ${deviceId}`,
@@ -399,8 +402,7 @@ async function confirmRetainedCapture(
   row: RetainedCaptureRow,
   deps: RecordingTeardownRedriveDeps,
   waitForExpiry: boolean,
-  hookDriven: boolean,
-  mode: "user" | "background",
+  { hookDriven, mode }: { hookDriven: boolean; mode: "user" | "background" },
 ): Promise<void> {
   // A caller preflight never joins a health retry waiting for a pid-less hard limit.
   if (!waitForExpiry && !hasConfirmableIdentity(row.captureTeardown) && row.captureTeardown) {

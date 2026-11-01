@@ -72,6 +72,12 @@ interface CollectMetricsOptions {
   skipTouchLatency?: boolean;
 }
 
+/** Where (and whether) `measureTouchLatency` places its synthetic touch. */
+export type TouchLatencyTarget = Pick<
+  CollectMetricsOptions,
+  "windowBounds" | "touchPoint" | "skipTouchLatency"
+>;
+
 // Max time a single touch-latency measurement waits for its frame.
 const TOUCH_LATENCY_MAX_WAIT_MS = 200;
 // Time-to-interactive: how often frame stats are sampled, how long they must stay
@@ -148,14 +154,11 @@ export class PerformanceAudit {
     ]);
 
     // Touch latency requires sequential execution after other metrics
-    const touchLatency = await this.measureTouchLatency(
-      packageName,
-      screenSize,
-      perf,
-      opts.windowBounds,
-      opts.touchPoint,
-      opts.skipTouchLatency,
-    );
+    const touchLatency = await this.measureTouchLatency(packageName, screenSize, perf, {
+      windowBounds: opts.windowBounds,
+      touchPoint: opts.touchPoint,
+      skipTouchLatency: opts.skipTouchLatency,
+    });
 
     // Optional TTFF/TTI measurement (these are heavier operations)
     let ttffMs: number | null = null;
@@ -413,10 +416,9 @@ export class PerformanceAudit {
     packageName: string,
     screenSize: ScreenSize | undefined,
     perf: PerformanceTracker,
-    windowBounds?: ElementBounds,
-    touchPoint?: { x: number; y: number },
-    skipTouchLatency?: boolean,
+    target: TouchLatencyTarget = {},
   ): Promise<number | null> {
+    const { windowBounds, touchPoint, skipTouchLatency } = target;
     // The caller found no point known not to overlap an interactive element
     // (no app window bounds, or every scanned candidate was obstructed) -
     // skip the measurement entirely rather than let a synthetic tap land on

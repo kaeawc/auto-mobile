@@ -20,24 +20,25 @@ export function createSendKeysTextClient(
       },
       replace: async (text) => client.requestSetText(text),
       insert: async (text, options) =>
-        client.requestInsertText(
-          text,
-          options?.timeoutMs,
-          undefined,
-          {
+        client.requestInsertText(text, {
+          timeoutMs: options?.timeoutMs,
+          options: {
             ...options,
             acceptsCaretNotPlaced: true,
           },
-          {
+          transport: {
             abortSignal: options?.abortSignal,
             onDispatch: options?.onDispatch,
             deadlineMs: options?.deadlineMs,
           },
-        ),
+        }),
       clear: async () => client.requestClearText(),
       ime: async (action, signal, onDispatch) =>
         withImeActionApproximationWarning(
-          await client.requestImeAction(action, 5000, undefined, signal, onDispatch),
+          await client.requestImeAction(action, 5000, undefined, {
+            abortSignal: signal,
+            onDispatch,
+          }),
         ),
       supportsImeCommit: async () =>
         (await client.supportsCommand("request_commit_text")) &&
@@ -49,16 +50,12 @@ export function createSendKeysTextClient(
       supportsImeTrace: async () => client.supportsCommand("ime_commit_trace_v1"),
       supportsKeyboardProfiles: async () => client.supportsCommand("request_set_keyboard_profile"),
       setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
-      commitViaIme: async (text, priorImeId, signal, delivery, trace) => {
-        const result = await client.commitViaIme(
-          text,
-          priorImeId ?? undefined,
-          undefined,
-          undefined,
+      commitViaIme: async (text, priorImeId, signal, { delivery, trace } = {}) => {
+        const result = await client.commitViaIme(text, priorImeId ?? undefined, undefined, {
           signal,
           delivery,
           trace,
-        );
+        });
         return {
           success: result.success,
           ...(result.error ? { error: result.error } : {}),
@@ -85,7 +82,6 @@ export function createSendKeysTextClient(
         text,
         options?.timeoutMs ?? resolveTextCtrlProxyTimeoutMs(text),
         undefined,
-        undefined,
         {
           abortSignal: options?.abortSignal,
           ...(options?.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
@@ -99,7 +95,7 @@ export function createSendKeysTextClient(
       });
     },
     ime: async (action, signal, onDispatch) =>
-      client.requestImeAction(action, 5000, undefined, signal, onDispatch),
+      client.requestImeAction(action, 5000, undefined, { abortSignal: signal, onDispatch }),
     supportsImeCommit: async () => false,
     supportsImeKeyEvents: async () => false,
     supportsImeClearField: async () => false,

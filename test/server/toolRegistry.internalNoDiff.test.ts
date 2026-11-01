@@ -174,9 +174,11 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       baseSchema.extend({
         commands: z.array(z.object({ action: z.string(), key: z.string().optional() })),
       }),
-      async () =>
-        createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) }),
-      SKELETON_OBSERVATION,
+      {
+        handler: async () =>
+          createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) }),
+        ...SKELETON_OBSERVATION,
+      },
     );
   }
 

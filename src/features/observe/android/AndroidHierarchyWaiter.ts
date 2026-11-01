@@ -12,6 +12,17 @@ export interface PendingHierarchyReply {
   resolve: (hierarchy: CachedHierarchy) => void;
 }
 /** Owns correlated hierarchy waits and their connection-scoped freshness evidence. */
+/** Correlation and staleness rules for {@link AndroidHierarchyWaiter.waitForFreshData}. */
+export interface FreshDataWaitOptions {
+  /** The dispatched request's id; a correlated runner error frame fails the wait fast. */
+  requestId?: string;
+  dispatchSocket?: CtrlSocket | null;
+  allowStaleResponse: boolean;
+  observerMode?: boolean;
+  displayId?: number;
+  diagnostics?: HierarchySyncDiagnostics;
+}
+
 export class AndroidHierarchyWaiter {
   constructor(
     private readonly context: HierarchyDelegateContext,
@@ -76,10 +87,17 @@ export class AndroidHierarchyWaiter {
 
   private matchesHierarchyRequest(
     hierarchy: CachedHierarchy,
-    requestId?: string,
-    staleRequestId?: string | null,
-    allowStaleResponse = true,
-    observerMode = false,
+    {
+      requestId,
+      staleRequestId,
+      allowStaleResponse = true,
+      observerMode = false,
+    }: {
+      requestId?: string;
+      staleRequestId?: string | null;
+      allowStaleResponse?: boolean;
+      observerMode?: boolean;
+    } = {},
   ): boolean {
     if (observerMode && requestId) {
       return hierarchy.requestId === requestId;
@@ -117,13 +135,12 @@ export class AndroidHierarchyWaiter {
     return (
       this.matchesRequestedDisplay(hierarchy, request.displayId) &&
       this.evaluateMinTimestamp(hierarchy, minTimestamp, useDeviceTimestamp).isFresh &&
-      this.matchesHierarchyRequest(
-        hierarchy,
-        request.requestId,
-        request.staleRequestId,
-        request.allowStaleResponse,
-        request.observerMode,
-      )
+      this.matchesHierarchyRequest(hierarchy, {
+        requestId: request.requestId,
+        staleRequestId: request.staleRequestId,
+        allowStaleResponse: request.allowStaleResponse,
+        observerMode: request.observerMode,
+      })
     );
   }
 
@@ -143,19 +160,14 @@ export class AndroidHierarchyWaiter {
     timeout: number,
     minTimestamp: number,
     useDeviceTimestamp: boolean,
-    signal?: AbortSignal,
-    requestId?: string,
-    options: {
-      dispatchSocket?: CtrlSocket | null;
-      allowStaleResponse: boolean;
-      observerMode?: boolean;
-      displayId?: number;
-      diagnostics?: HierarchySyncDiagnostics;
-    } = {
-      allowStaleResponse: true,
-    },
+    {
+      signal,
+      options = {
+        allowStaleResponse: true,
+      },
+    }: { signal?: AbortSignal; options?: FreshDataWaitOptions } = {},
   ): Promise<CachedHierarchy | null> {
-    const { dispatchSocket, allowStaleResponse, observerMode, displayId } = options;
+    const { requestId, dispatchSocket, allowStaleResponse, observerMode, displayId } = options;
     const diagnostics = options.diagnostics ?? {};
     const combinedSignal = combineWithAmbientAbort(signal);
     // Reject dispatch on a socket that closed or was replaced during ADB fallback.

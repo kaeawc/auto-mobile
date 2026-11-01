@@ -322,6 +322,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       { type: "startTimer", id: "tick", afterMs: 100, actions: [{ type: "emit", name: "tick" }] },
     ],
   }),
+  prototype_hide_keyboard_v1: fixture({ ...label, onTap: [{ type: "hideKeyboard" }] }),
   prototype_chat_scroll_v1: fixture({
     type: "scroll",
     id: "label",
@@ -555,7 +556,78 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
     with: ["prototype_platform_v1"],
   },
+  prototype_platform_mediaLibrary_query_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["mediaLibrary"],
+        permissions: [{ name: "photos", purpose: "Show recent photos" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "mediaLibrary.query",
+                args: { media: { value: "images" } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_mediaLibrary_v1"],
+  },
+  prototype_platform_mediaLibrary_save_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["mediaLibrary"],
+        permissions: [{ name: "photosAdd", purpose: "Save a ticket" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "mediaLibrary.save", args: { media: { value: {} } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_mediaLibrary_v1"],
+  },
   prototype_platform_camera_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["camera"],
+        permissions: [{ name: "camera", purpose: "Take a photo" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "camera.takePhoto", args: { preview: { value: "vf" } } },
+            ],
+          },
+          { type: "cameraPreview", id: "vf" },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_camera_capture_v1: {
     minimalSpec: {
       ...base,
       requires: { platform: ["camera"] },
@@ -569,6 +641,150 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
             ],
           },
         ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_camera_v1"],
+  },
+  prototype_platform_camera_video_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["camera"],
+        permissions: [{ name: "camera", purpose: "Record a clip" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "camera.startRecording",
+                args: { preview: { value: "vf" } },
+              },
+            ],
+          },
+          { type: "cameraPreview", id: "vf" },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_camera_v1"],
+  },
+  prototype_platform_audioRecorder_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["audioRecorder"],
+        permissions: [{ name: "microphone", purpose: "Record a voice note" }],
+      },
+      root: {
+        ...base.root,
+        children: [
+          { ...label, onTap: [{ type: "platform", call: "audioRecorder.start", args: {} }] },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_notifications_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["notifications"] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              { type: "platform", call: "notifications.cancel", args: { all: { value: true } } },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_notifications_scheduled_v1: {
+    minimalSpec: {
+      ...base,
+      requires: {
+        platform: ["notifications"],
+        permissions: [{ name: "notifications", purpose: "Remind you" }],
+      },
+      notifications: { channels: [{ id: "reminders", name: "Reminders", importance: "default" }] },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "notifications.schedule",
+                args: {
+                  id: { value: "eta" },
+                  channel: { value: "reminders" },
+                  title: { value: "Soon" },
+                  delaySeconds: { value: 60 },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_notifications_v1"],
+  },
+  prototype_platform_media_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["media"] },
+      media: { players: { main: { kind: "audio", source: { sample: "tone440" } } } },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "media.play", args: { player: { value: "main" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_media_queue_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["media"] },
+      data: { episodes: [{ id: "ep1", title: "Pilot", source: { sample: "tone440" } }] },
+      media: { players: { main: { kind: "audio", queue: "/data/episodes" } } },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [{ type: "platform", call: "media.next", args: { player: { value: "main" } } }],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1", "prototype_platform_media_v1", "prototype_data_model_v1"],
+  },
+  prototype_platform_cast_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["cast"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, onTap: [{ type: "platform", call: "cast.stop", args: {} }] }],
       },
     },
     ops: [],
@@ -586,6 +802,18 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
             onTap: [{ type: "platform", call: "contacts.pick", args: {} }],
           },
         ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_secureStorage_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["secureStorage"] },
+      root: {
+        ...base.root,
+        children: [{ ...label, visibleWhen: { platform: "/secureStorage/locked", equals: true } }],
       },
     },
     ops: [],
@@ -617,6 +845,65 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
       root: {
         ...base.root,
         children: [{ ...label, onTap: [{ type: "platform", call: "location.request", args: {} }] }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_commerce_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["commerce"] },
+      commerce: {
+        backend: "fake",
+        products: [
+          {
+            id: "coins_100",
+            title: "100 coins",
+            kind: "consumable",
+            price: { amount: "0.99", currency: "USD" },
+          },
+        ],
+      },
+      root: {
+        ...base.root,
+        children: [
+          {
+            ...label,
+            onTap: [
+              {
+                type: "platform",
+                call: "commerce.purchase",
+                args: { productId: { value: "coins_100" } },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_map_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["map"] },
+      root: {
+        ...base.root,
+        children: [{ type: "map", camera: { lat: 0, lng: 0, zoom: 2 } }],
+      },
+    },
+    ops: [],
+    with: ["prototype_platform_v1"],
+  },
+  prototype_platform_sensors_v1: {
+    minimalSpec: {
+      ...base,
+      requires: { platform: ["sensors"] },
+      sensors: { proximity: {} },
+      root: {
+        ...base.root,
+        children: [{ ...label, text: "{platform:/sensors/proximityNear}" }],
       },
     },
     ops: [],

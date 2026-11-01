@@ -11,7 +11,11 @@ import {
   PlatformDeviceManager,
 } from "../../src/devices/deviceUtils";
 import type { AndroidEmulatorLaunchOutcome } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import { discoverySourceFor, type DiscoverySource } from "../../src/utils/discoverySource";
+import {
+  discoverySourceFor,
+  sourcesForPlatform,
+  type DiscoverySource,
+} from "../../src/utils/discoverySource";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 
 export class FakeDeviceManager implements PlatformDeviceManager {
@@ -149,8 +153,7 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     const sourceFailed = (source: DiscoverySource, p: Platform): boolean =>
       this.failedPlatforms.has(p) || this.failedSources.has(source);
     for (const p of requested) {
-      const platformSources: DiscoverySource[] =
-        p === "android" ? ["android"] : ["ios-simulator", "ios-physical"];
+      const platformSources = sourcesForPlatform(p);
       for (const source of platformSources) {
         const failed = sourceFailed(source, p);
         if (failed && source === "ios-physical") {
@@ -180,7 +183,7 @@ export class FakeDeviceManager implements PlatformDeviceManager {
       }
       // Mirrors production: the platform aggregate tracks the simulator source
       // for iOS, so platform-level consumers keep their pre-#5683 meaning.
-      const platformSucceeded = !sourceFailed(p === "android" ? "android" : "ios-simulator", p);
+      const platformSucceeded = !sourceFailed(platformSources[0]!, p);
       if (platformSucceeded) {
         succeededPlatforms.add(p);
       } else {

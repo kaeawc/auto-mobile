@@ -1,5 +1,7 @@
+import { bootCapacityOwnershipNote } from "../../../devices/bootAdmission/BootAdmissionGate";
 import type { BootSlotReservation } from "../../../devices/bootAdmission/BootSlotReservation";
 import { withVerifiedBootCapacity } from "../../../devices/bootAdmission/VerifiedBootCapacity";
+import { bootGatePlatform } from "../../../features/bootAdmission/sharedBootAdmissionGates";
 import {
   BindingJournalRemovalRegistryTimeout,
   type BindingJournal,
@@ -20,7 +22,9 @@ import {
   bindingMatches,
   type BindingAssignmentRecord,
   type BindingJournalEntry,
+  type BindingPlatform,
 } from "../registry/bindingRegistry";
+import { bindingReadinessLabel } from "./bindingReadiness";
 import { deviceStableId } from "../registry/deviceIdentity";
 import { provisionableSpec } from "./DefaultManagedSpecResolver";
 import { ReconcileAbort, type BindingReconcileFailure } from "./ReconcileAbort";
@@ -77,7 +81,8 @@ export interface BindingDeviceCreationDependencies {
 /** Publishing and session ownership remain with the reconciler. */
 export interface BindingDeviceCreationHost {
   checkBudget(request: BindingReconcileRequest): void;
-  isAutomationReady(provisioned: BindingProvisionedDevice): boolean;
+  /** Automation readiness on Android and iOS; booted with a session on watchOS. */
+  isBindingReady(platform: BindingPlatform, provisioned: BindingProvisionedDevice): boolean;
   releaseSession(sessionUuid: string): Promise<void>;
   readyOrReleaseOnBusy(
     provisioned: BindingProvisionedDevice,
@@ -87,19 +92,19 @@ export interface BindingDeviceCreationHost {
     context: ReconcileContext,
     disposition: BindingDisposition,
     assignment: BindingAssignmentRecord,
-    provisioned: BindingProvisionedDevice,
-    reservation: string | undefined,
+    options: { provisioned: BindingProvisionedDevice; reservation?: string },
   ): Promise<ReadyResult>;
 }
 
 /**
  * Whether the device counts toward its platform's boot limit, by the gates' own definition: a
- * simulator that is booting or shutting down holds its binding although it is not listed as running.
+ * simulator (iPhone or Apple Watch, both counted by the simulator gate) that is booting or shutting
+ * down holds its binding although it is not listed as running.
  */
 function holdsBootBinding(device: DeviceInfo): boolean {
   return (
     device.isRunning ||
-    (device.platform === "ios" &&
+    (device.platform !== "android" &&
       device.state !== undefined &&
       OCCUPYING_SIMULATOR_STATES.has(device.state))
   );
@@ -122,8 +127,10 @@ export class BindingDeviceCreation {
     context: ReconcileContext,
     assignment: BindingAssignmentRecord,
     disposition: "created" | "replaced",
-    replacing?: BindingJournalEntry,
-    options: { bootReservation?: BootSlotReservation } = {},
+    {
+      replacing,
+      ...options
+    }: { bootReservation?: BootSlotReservation } & { replacing?: BindingJournalEntry } = {},
   ): Promise<ReadyResult> {
     const { request } = context;
     let capacityVerifiedAtMs: number | undefined;
@@ -177,45 +184,51 @@ export class BindingDeviceCreation {
             deadlineMs: request.deadlineMs,
             signal: request.signal,
           });
+        const platform = request.platform;
         const provision = () =>
-          withVerifiedBootCapacity(
-            {
-              platform: request.platform,
-              name,
-              spec: {
-                runtime: request.requestedSpec.runtime,
-                deviceType: context.resolvedSpec.deviceType,
-              },
-            },
-            capacityVerifiedAtMs,
-            this.deps.timer,
-            provisionDevice,
-          );
+          platform === "watchos"
+            ? // Only the Android/iOS exact provisioner consumes a pre-create capacity proof; a
+              // watch's boot is admitted (or refused at the limit) by the simulator boot gate.
+              provisionDevice()
+            : withVerifiedBootCapacity(
+                {
+                  platform,
+                  name,
+                  spec: {
+                    runtime: request.requestedSpec.runtime,
+                    deviceType: context.resolvedSpec.deviceType,
+                  },
+                },
+                capacityVerifiedAtMs,
+                this.deps.timer,
+                provisionDevice,
+              );
         provisioned = options.bootReservation
           ? await options.bootReservation.run(provision)
           : await provision();
       } catch (error) {
-        return await this.failedCreate(context, assignment, entry, replacing === undefined, error);
+        return await this.failedCreate(context, assignment, entry, {
+          fresh: replacing === undefined,
+          error,
+        });
       }
+      const ready = this.host.isBindingReady(request.platform, provisioned);
       return await this.host.readyOrReleaseOnBusy(provisioned, async (release) => {
-        if (provisioned.created && !this.host.isAutomationReady(provisioned)) {
+        if (provisioned.created && !ready) {
           this.deps.journal.markRemovalIntended(entry);
         }
-        entry = await this.recordCreated(
-          context,
-          entry,
-          provisioned.device,
+        entry = await this.recordCreated(context, entry, provisioned.device, {
           release,
-          provisioned.created && !this.host.isAutomationReady(provisioned),
-        );
-        if (!this.host.isAutomationReady(provisioned)) {
-          return await this.discardUncommitted(
-            context,
-            provisioned,
-            entry,
+          removalRequested: provisioned.created && !ready,
+        });
+        if (!ready) {
+          return await this.discardUncommitted(context, provisioned, entry, {
             release,
-            failure("readiness_incomplete", `Device '${name}' did not reach automation readiness.`),
-          );
+            reason: failure(
+              "readiness_incomplete",
+              `Device '${name}' did not reach ${bindingReadinessLabel(request.platform)}.`,
+            ),
+          });
         }
         const committed = await this.deps.journal.advance(entry, {
           expectedPhase: "created",
@@ -241,22 +254,15 @@ export class BindingDeviceCreation {
           );
         }
         if (committed.kind !== "advanced") {
-          return await this.discardUncommitted(
-            context,
-            provisioned,
-            entry,
+          return await this.discardUncommitted(context, provisioned, entry, {
             release,
-            claimFailure(committed, "create commit"),
-          );
+            reason: claimFailure(committed, "create commit"),
+          });
         }
         this.noteJournal(context, committed.entry);
-        return await this.host.claimAndReady(
-          context,
-          disposition,
-          committed.assignment!,
+        return await this.host.claimAndReady(context, disposition, committed.assignment!, {
           provisioned,
-          undefined,
-        );
+        });
       });
     } finally {
       this.deps.journal.inFlight.delete(entry.id);
@@ -314,8 +320,7 @@ export class BindingDeviceCreation {
     context: ReconcileContext,
     assignment: BindingAssignmentRecord,
     entry: BindingJournalEntry,
-    fresh: boolean,
-    error: unknown,
+    { fresh, error }: { fresh: boolean; error: unknown },
   ): Promise<never> {
     const { request } = context;
     if (
@@ -356,8 +361,10 @@ export class BindingDeviceCreation {
     context: ReconcileContext,
     entry: BindingJournalEntry,
     device: Pick<BindingProvisionedDevice["device"], "stableId" | "name">,
-    release?: () => Promise<void>,
-    removalRequested = false,
+    {
+      release,
+      removalRequested = false,
+    }: { release?: () => Promise<void>; removalRequested?: boolean } = {},
   ): Promise<BindingJournalEntry> {
     const recorded = await this.deps.journal
       .advance(entry, {
@@ -501,8 +508,7 @@ export class BindingDeviceCreation {
     context: ReconcileContext,
     provisioned: BindingProvisionedDevice,
     entry: BindingJournalEntry,
-    release: () => Promise<void>,
-    reason: BindingReconcileFailure,
+    { release, reason }: { release: () => Promise<void>; reason: BindingReconcileFailure },
   ): Promise<never> {
     try {
       if (provisioned.created) {
@@ -752,7 +758,8 @@ export class BindingDeviceCreation {
     } finally {
       this.deps.journal.inFlight.delete(entry.id);
     }
-    return await this.createAndCommit(context, emptied, "replaced", deletedEntry, {
+    return await this.createAndCommit(context, emptied, "replaced", {
+      replacing: deletedEntry,
       bootReservation: reservation,
     });
   }
@@ -829,7 +836,11 @@ export class BindingDeviceCreation {
     if (!this.deps.capacity) {
       return undefined;
     }
-    const freesSlot = assignment.platform === request.platform && holdsBootBinding(device);
+    // The old device frees a slot on the gate the new boot uses: an iPhone and an Apple Watch share
+    // the simulator gate, so switching a binding between them reserves against the old simulator.
+    const freesSlot =
+      bootGatePlatform(assignment.platform) === bootGatePlatform(request.platform) &&
+      holdsBootBinding(device);
     this.host.checkBudget(request);
     const check = await this.deps.capacity.reserve(request.platform, {
       replacingDeviceId: freesSlot ? device.deviceId : undefined,
@@ -902,7 +913,7 @@ export class BindingDeviceCreation {
       throw new ReconcileAbort(
         failure(
           "capacity_exhausted",
-          `${check.booted} ${request.platform} device(s) booted; limit is ${check.limit}.`,
+          `${check.booted} ${request.platform} device(s) booted; limit is ${check.limit}.${bootCapacityOwnershipNote(check)}`,
           {
             capacity: {
               limit: check.limit,

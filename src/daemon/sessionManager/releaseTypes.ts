@@ -55,12 +55,16 @@ export interface SessionReleaseOptions {
   upgradeOnly?: boolean;
 }
 
+/** What a release listener receives beyond the released session's identity and reason. */
+export interface SessionReleaseNotice extends SessionReleaseOptions {
+  snapshot: SessionReleaseSnapshot;
+}
+
 export type SessionReleaseCallback = (
   sessionId: string,
   deviceId: string,
   releaseReason: string,
-  snapshot: SessionReleaseSnapshot,
-  options: SessionReleaseOptions,
+  notice: SessionReleaseNotice,
 ) => void;
 
 export type ReleaseDeviceHold =

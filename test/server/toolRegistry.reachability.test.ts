@@ -24,16 +24,13 @@ describe("ToolRegistry reachability", () => {
     for (const entry of cases) {
       ToolRegistry.clearTools();
       let calls = 0;
-      ToolRegistry.register(
-        entry.name,
-        "Reachability probe",
-        z.object({}),
-        async () => {
+      ToolRegistry.register(entry.name, "Reachability probe", z.object({}), {
+        handler: async () => {
           calls++;
           return { content: [{ type: "text", text: "called" }] };
         },
-        entry.options,
-      );
+        ...entry.options,
+      });
       if (entry.planOnly) {
         const registered = ToolRegistry.getRegisteredTool(entry.name);
         if (!registered) {

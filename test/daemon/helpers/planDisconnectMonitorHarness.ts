@@ -6,6 +6,7 @@ import {
 } from "./DaemonDisconnectHarness";
 import { createFakeSession } from "./inputSocketHarness";
 import type { VideoRecordingRecord } from "../../../src/db/videoRecordingRepository";
+import { requireAndroidOrIosPlatform } from "../../../src/models";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../../src/features/video";
 import { FakeDeviceManager } from "../../fakes/FakeDeviceManager";
 import { InMemoryAdbTransportRestartRegistry } from "../../../src/utils/android-cmdline-tools/AdbTransportRestartRegistry";
@@ -19,7 +20,7 @@ function recordingsFor(
     {
       recordingId: "plan-recording",
       deviceId: device.id,
-      platform: device.platform,
+      platform: requireAndroidOrIosPlatform(device.platform, "Video recording"),
       status: "recording",
       fileName: "plan-recording.mp4",
       filePath: "plan-recording.mp4",

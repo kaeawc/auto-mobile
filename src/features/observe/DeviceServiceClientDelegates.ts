@@ -8,7 +8,7 @@ import {
   forwardHierarchyToObservationStream,
 } from "./deviceServiceObservationStream";
 import {
-  DefaultScreenshotBackoffScheduler,
+  type ScreenshotBackoffConfigInput,
   type ScreenshotBackoffScheduler,
   type ScreenshotCaptureResult,
 } from "./ScreenshotBackoffScheduler";
@@ -122,14 +122,13 @@ export abstract class DeviceServiceClientDelegates {
   protected createScreenshotBackoffScheduler(
     capture: () => Promise<ScreenshotCaptureResult>,
     emit: (result: ScreenshotCaptureResult) => void,
-    options: ConstructorParameters<typeof DefaultScreenshotBackoffScheduler>[2],
+    options: ScreenshotBackoffConfigInput,
   ): ScreenshotBackoffScheduler {
     return (this.screenshotBackoffScheduler ??= buildScreenshotBackoffScheduler(
       this.device.deviceId,
       this.timer,
       capture,
-      emit,
-      options,
+      { emit, options },
     ));
   }
 }

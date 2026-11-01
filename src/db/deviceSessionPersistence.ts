@@ -196,7 +196,6 @@ export interface DeviceSessionPersistence {
     sessionUuid: string,
     status: DeviceSessionStatus,
     releasedAtMs: number,
-    reason: string,
-    options?: MarkReleasedOptions,
+    options: MarkReleasedOptions & { reason: string },
   ): Promise<void>;
 }

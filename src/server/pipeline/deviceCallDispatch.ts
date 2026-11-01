@@ -9,7 +9,7 @@ import {
   DeviceReadiness,
   type ConnectedPlatformScan,
 } from "../../daemon/readiness/DeviceReadiness";
-import { BootedDevice, SomePlatform } from "../../models";
+import { BootedDevice, type Platform, SomePlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
@@ -42,6 +42,10 @@ import {
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { executionTracker } from "../../daemon/executionTracker";
 import { deviceActionClock } from "./deviceActionClock";
+import {
+  assertRequestedPlatformSupported,
+  assertToolSupportsDevicePlatform,
+} from "../applePlatformToolSupport";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
 import type {
   ProgressCallback,
@@ -65,7 +69,7 @@ export function journaledDeviceHandler(
       typeof args.sessionUuid === "string"
         ? args.sessionUuid
         : getToolSelectionContext()?.routingSessionUuid;
-    await recording.beforeToolCall(name, args, device, sessionUuid, signal);
+    await recording.beforeToolCall(name, args, device, { sessionUuid, signal });
     signal?.throwIfAborted();
     return handler(device, args, progress, signal);
   };
@@ -130,6 +134,8 @@ export function deviceAwareHandlerArgs(
   context: ReturnType<typeof getToolSelectionContext>,
   name: string,
 ): Record<string, unknown> {
+  // Before resolution, which would replace a requested platform with the session's (#15886).
+  assertRequestedPlatformSupported(name, args);
   const routingSession =
     options.sessionlessDeviceRead &&
     context?.explicitObserveDeviceRead &&
@@ -166,8 +172,7 @@ export function assertSessionDeviceRouting(
   toolName: string,
   providedDeviceId: string | undefined,
   sessionUuid: string,
-  sessionDeviceId: string | undefined,
-  sessionPlatform: string | undefined,
+  { sessionDeviceId, sessionPlatform }: { sessionDeviceId?: string; sessionPlatform?: string } = {},
 ): void {
   if (providedDeviceId && sessionDeviceId && providedDeviceId !== sessionDeviceId) {
     // The same refusal a pinned connection gets for a foreign device (#11351), typed so clients
@@ -196,13 +201,10 @@ export function refuseControlCallBeforeAdmission(
   sessionUuid: string,
 ): void {
   const session = defaultDaemonContext.sessionManager()?.getSession(sessionUuid);
-  assertSessionDeviceRouting(
-    toolName,
-    providedDeviceId,
-    sessionUuid,
-    session?.assignedDevice,
-    session?.platform,
-  );
+  assertSessionDeviceRouting(toolName, providedDeviceId, sessionUuid, {
+    sessionDeviceId: session?.assignedDevice,
+    sessionPlatform: session?.platform,
+  });
   defaultDaemonContext.devicePool()?.assertSessionReadyForAutomation(sessionUuid);
 }
 
@@ -226,7 +228,9 @@ export async function unidentifiedToolTargetRow(
     return undefined;
   }
   const knownDevice = input.device ?? pool.getDevice(input.deviceId);
-  if (input.platform === "ios" || knownDevice?.platform === "ios") {
+  // Only an Android transport id needs a synthetic row. A watch is skipped only when the pool
+  // knows the device is one; a caller's "watchos" label alone must never bypass the identity check.
+  if (input.platform === "ios" || (knownDevice && knownDevice.platform !== "android")) {
     return undefined;
   }
   const synthetic: BootedDevice = {
@@ -300,17 +304,12 @@ export async function assertToolControlTargetIdentity(
     return;
   }
   const sessionManager = defaultDaemonContext.requireSessionManager();
-  await assertFrameTargetIdentityProven(
-    defaultDaemonContext.devicePool(),
-    device,
-    input.toolName,
-    Boolean(sessionManager.getSessionForDevice(device.deviceId)),
-    {
-      sessions: frameHeldSessionsFrom(sessionManager),
-      requesterSessionUuid: input.sessionUuid,
-      sessionManager,
-    },
-  );
+  await assertFrameTargetIdentityProven(defaultDaemonContext.devicePool(), device, input.toolName, {
+    heldBySession: Boolean(sessionManager.getSessionForDevice(device.deviceId)),
+    sessions: frameHeldSessionsFrom(sessionManager),
+    requesterSessionUuid: input.sessionUuid,
+    sessionManager,
+  });
 }
 
 /**
@@ -323,8 +322,7 @@ export function assertToolCallerHoldsDevice(
   toolName: string,
   readOnly: boolean,
   deviceId: string | undefined,
-  sessionUuid: string | undefined,
-  autolockEnabled: boolean,
+  { sessionUuid, autolockEnabled }: { sessionUuid?: string; autolockEnabled: boolean },
 ): void {
   const devicePool = defaultDaemonContext.devicePool();
   const sessionManager = defaultDaemonContext.sessionManager();
@@ -490,15 +488,21 @@ export function assertInternalCallWithinBrokerGrant(
   }
 }
 
-/** The platforms a target may be on: the pool's record, else the call's platform, else both. */
+/**
+ * The platforms a target may be on: the pool's record, else the call's platform, else Android and
+ * iOS. A call names watchOS to reach a watch at all, so an unpooled watch it names is judged
+ * against watch ownership (#14908); a call naming no platform never lands on a watch.
+ */
 export function bindingPlatformsFor(
-  pooledPlatform: "android" | "ios" | undefined,
+  pooledPlatform: Platform | undefined,
   requestedPlatform: unknown,
-): Array<"android" | "ios"> {
+): Platform[] {
   if (pooledPlatform) {
     return [pooledPlatform];
   }
-  return requestedPlatform === "android" || requestedPlatform === "ios"
+  return requestedPlatform === "android" ||
+    requestedPlatform === "ios" ||
+    requestedPlatform === "watchos"
     ? [requestedPlatform]
     : ["android", "ios"];
 }
@@ -590,6 +594,8 @@ export async function invokeResolvedDeviceHandler(input: {
   isResponseFailure: (response: unknown) => boolean;
 }): Promise<any> {
   const { target, name, args, handler, progress, signal, navigationRecorder, traits } = input;
+  // Fail closed: a watch never reaches a tool that has not opted in (#14899).
+  assertToolSupportsDevicePlatform(name, target.device);
   if (target.deviceRead) {
     // A read-only device read is not this caller's use of the device: no navigation recording
     // and no audit run on a device the caller may not hold (#10830).
@@ -600,7 +606,10 @@ export async function invokeResolvedDeviceHandler(input: {
     internalExecutionStartTime(args),
     target.device.deviceId,
   );
-  const withdraw = navigationRecorder.record(name, args, target.device, target.sessionUuid, traits);
+  const withdraw = navigationRecorder.record(name, args, target.device, {
+    sessionUuid: target.sessionUuid,
+    traits,
+  });
   const onAbort = () => withdraw?.();
   signal?.addEventListener("abort", onAbort, { once: true });
   let succeeded = false;
@@ -608,13 +617,10 @@ export async function invokeResolvedDeviceHandler(input: {
     // The dispatch boundary: a call cancelled since admission (for instance because another
     // session acquired its device, #10829) never reaches the device. `finally` withdraws it.
     signal?.throwIfAborted();
-    await input.mutationRecording.beforeToolCall(
-      name,
-      args,
-      target.device,
-      target.sessionUuid,
+    await input.mutationRecording.beforeToolCall(name, args, target.device, {
+      sessionUuid: target.sessionUuid,
       signal,
-    );
+    });
     signal?.throwIfAborted();
     // The action reports when its gesture goes out, so a tool that waited for its target
     // is attributed from the dispatch, not from the start (#10196).

@@ -186,15 +186,17 @@ export class FakeDaemonClient implements DaemonClientLike {
     toolName: string,
     params: Record<string, any>,
     progressToken?: string | number,
-    onRequestId?: (requestId: string) => void,
-    signal?: AbortSignal,
     options?: DaemonToolCallOptions,
   ): Promise<any> {
+    const onRequestId = options?.onRequestId;
+    const signal = options?.signal;
     signal?.throwIfAborted();
     this.assertReachable();
     const abortReason = (reason: unknown) => reason as Error;
     this.callToolSignals.push(signal);
-    this.callToolOptions.push(options);
+    // Recorded without the signal (captured above), so a call without a task relay records none.
+    const tasks = options?.tasks;
+    this.callToolOptions.push(tasks ? { tasks } : undefined);
     const requestId = this.requestIdGenerator.next();
     this.callToolRequestIds.push(requestId);
     onRequestId?.(requestId);
@@ -209,9 +211,9 @@ export class FakeDaemonClient implements DaemonClientLike {
     if (perToolResult !== undefined || this.scriptedToolResult || !this.daemon) {
       return perToolResult ?? this.toolResult;
     }
-    return options
-      ? await this.daemon.callTool(toolName, params, progressToken, undefined, signal, options)
-      : await this.daemon.callTool(toolName, params, progressToken, undefined, signal);
+    // The request id was already reported for this hop; the daemon hop must not report another.
+    const forwarded = options === undefined ? undefined : { ...options, onRequestId: undefined };
+    return await this.daemon.callTool(toolName, params, progressToken, forwarded);
   }
 
   async relayTaskMethod(

@@ -1,0 +1,2132 @@
+{
+  "id": "photogram-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "derive": {
+    "likes_p1": {
+      "of": {
+        "data": "/posts/0/likes"
+      },
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "locale": "en-US"
+    },
+    "likes_p2": {
+      "of": {
+        "data": "/posts/1/likes"
+      },
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "locale": "en-US"
+    },
+    "likes_p3": {
+      "of": {
+        "data": "/posts/2/likes"
+      },
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "locale": "en-US"
+    },
+    "postCount": {
+      "of": {
+        "data": "/profile/posts"
+      },
+      "format": {
+        "number": {}
+      },
+      "locale": "en-US"
+    },
+    "followers": {
+      "of": {
+        "data": "/profile/followers"
+      },
+      "format": {
+        "compact": {
+          "style": "short"
+        }
+      },
+      "locale": "en-US"
+    }
+  },
+  "state": {
+    "refreshing": false,
+    "muted": true,
+    "storyPage": 0,
+    "linkText": "",
+    "viewerLabel": "",
+    "dmName": "",
+    "dmDraft": "",
+    "uploadCaption": "",
+    "liked_p1": false,
+    "liked_p2": false,
+    "liked_p3": false,
+    "burst_p1": 0,
+    "burst_p2": 0,
+    "burst_p3": 0
+  },
+  "data": {
+    "posts": [
+      {
+        "id": "p1",
+        "likes": 1284
+      },
+      {
+        "id": "p2",
+        "likes": 312
+      },
+      {
+        "id": "p3",
+        "likes": 97
+      }
+    ],
+    "stories": [
+      {
+        "id": "s1",
+        "name": "ana.makes",
+        "caption": "Morning market"
+      },
+      {
+        "id": "s2",
+        "name": "bo.cooks",
+        "caption": "Proofing"
+      },
+      {
+        "id": "s3",
+        "name": "mia.climbs",
+        "caption": "Chalk up"
+      }
+    ],
+    "profile": {
+      "posts": 12,
+      "followers": 2480
+    },
+    "grid": [
+      {
+        "id": "g1",
+        "label": "Photo 1"
+      },
+      {
+        "id": "g2",
+        "label": "Photo 2"
+      },
+      {
+        "id": "g3",
+        "label": "Photo 3"
+      },
+      {
+        "id": "g4",
+        "label": "Photo 4"
+      },
+      {
+        "id": "g5",
+        "label": "Photo 5"
+      },
+      {
+        "id": "g6",
+        "label": "Photo 6"
+      },
+      {
+        "id": "g7",
+        "label": "Photo 7"
+      },
+      {
+        "id": "g8",
+        "label": "Photo 8"
+      },
+      {
+        "id": "g9",
+        "label": "Photo 9"
+      },
+      {
+        "id": "g10",
+        "label": "Photo 10"
+      },
+      {
+        "id": "g11",
+        "label": "Photo 11"
+      },
+      {
+        "id": "g12",
+        "label": "Photo 12"
+      }
+    ],
+    "threads": [
+      {
+        "id": "t1",
+        "name": "bo.cooks",
+        "last": "Loved your tiles post!"
+      },
+      {
+        "id": "t2",
+        "name": "mia.climbs",
+        "last": "Climb Saturday?"
+      }
+    ],
+    "pending": {
+      "text": ""
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "style": {
+      "width": "fill",
+      "height": "fill",
+      "background": "surface"
+    },
+    "screens": {
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "pager",
+            "id": "tabs",
+            "style": {
+              "weight": 1
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "feed_bar",
+                    "title": "Photogram",
+                    "actions": [
+                      {
+                        "icon": "add_box",
+                        "label": "New post",
+                        "onTap": [
+                          {
+                            "type": "push",
+                            "stack": "nav",
+                            "screen": "upload"
+                          }
+                        ]
+                      },
+                      {
+                        "icon": "send",
+                        "label": "Messages",
+                        "onTap": [
+                          {
+                            "type": "push",
+                            "stack": "nav",
+                            "screen": "inbox"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "scroll",
+                    "testTag": "feed_scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "refresh": {
+                      "stateKey": "refreshing",
+                      "onRefresh": [
+                        {
+                          "type": "setState",
+                          "key": "refreshing",
+                          "value": false
+                        }
+                      ]
+                    },
+                    "child": {
+                      "type": "column",
+                      "children": [
+                        {
+                          "type": "row",
+                          "testTag": "story_tray",
+                          "style": {
+                            "spacing": 12,
+                            "padding": {
+                              "start": 16,
+                              "end": 16,
+                              "top": 8,
+                              "bottom": 8
+                            }
+                          },
+                          "repeat": {
+                            "items": {
+                              "path": "/stories"
+                            },
+                            "as": "story",
+                            "key": "id"
+                          },
+                          "children": [
+                            {
+                              "type": "column",
+                              "testTag": "story_ring",
+                              "contentDescription": "Open story",
+                              "style": {
+                                "alignment": "center",
+                                "spacing": 4,
+                                "minWidth": 64
+                              },
+                              "onTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "storyPage",
+                                  "value": "{index}"
+                                },
+                                {
+                                  "type": "push",
+                                  "stack": "nav",
+                                  "screen": "stories"
+                                },
+                                {
+                                  "type": "startTimer",
+                                  "id": "story",
+                                  "afterMs": 5000,
+                                  "everyMs": 5000,
+                                  "maxRuns": 2,
+                                  "actions": [
+                                    {
+                                      "type": "increment",
+                                      "key": "storyPage"
+                                    }
+                                  ]
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "name": "account_circle",
+                                  "contentDescription": "Story",
+                                  "style": {
+                                    "color": "primary"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{story.name}",
+                                  "style": {
+                                    "textStyle": "labelSmall",
+                                    "maxLines": 1,
+                                    "overflow": "ellipsis"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "divider"
+                        },
+                        {
+                          "type": "column",
+                          "testTag": "post_p1",
+                          "style": {
+                            "spacing": 8,
+                            "padding": {
+                              "start": 0,
+                              "end": 0,
+                              "top": 8,
+                              "bottom": 8
+                            }
+                          },
+                          "children": [
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8,
+                                "alignment": "center",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              },
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "name": "account_circle",
+                                  "contentDescription": "Profile picture"
+                                },
+                                {
+                                  "type": "column",
+                                  "style": {
+                                    "weight": 1
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "text": "ana.makes",
+                                      "style": {
+                                        "textStyle": "titleSmall"
+                                      }
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "Lisbon",
+                                      "style": {
+                                        "textStyle": "labelSmall"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "box",
+                              "testTag": "post_media",
+                              "contentDescription": "Photo, double tap to like",
+                              "onDoubleTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "liked_p1",
+                                  "value": true
+                                },
+                                {
+                                  "type": "increment",
+                                  "key": "burst_p1"
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "type": "carousel",
+                                  "testTag": "post_carousel",
+                                  "itemWidth": 320,
+                                  "itemSpacing": 4,
+                                  "variant": "uncontained",
+                                  "children": [
+                                    {
+                                      "type": "box",
+                                      "testTag": "post_slide",
+                                      "style": {
+                                        "width": {
+                                          "dp": 320
+                                        },
+                                        "height": {
+                                          "dp": 320
+                                        },
+                                        "background": "primaryContainer",
+                                        "cornerRadius": "small",
+                                        "alignment": "center"
+                                      },
+                                      "children": [
+                                        {
+                                          "type": "text",
+                                          "text": "1 / 3",
+                                          "style": {
+                                            "textStyle": "labelLarge"
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "box",
+                                      "testTag": "post_slide",
+                                      "style": {
+                                        "width": {
+                                          "dp": 320
+                                        },
+                                        "height": {
+                                          "dp": 320
+                                        },
+                                        "background": "secondaryContainer",
+                                        "cornerRadius": "small",
+                                        "alignment": "center"
+                                      },
+                                      "children": [
+                                        {
+                                          "type": "text",
+                                          "text": "2 / 3",
+                                          "style": {
+                                            "textStyle": "labelLarge"
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "box",
+                                      "testTag": "post_slide",
+                                      "style": {
+                                        "width": {
+                                          "dp": 320
+                                        },
+                                        "height": {
+                                          "dp": 320
+                                        },
+                                        "background": "tertiaryContainer",
+                                        "cornerRadius": "small",
+                                        "alignment": "center"
+                                      },
+                                      "children": [
+                                        {
+                                          "type": "text",
+                                          "text": "3 / 3",
+                                          "style": {
+                                            "textStyle": "labelLarge"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "box",
+                                  "style": {
+                                    "width": "fill",
+                                    "height": {
+                                      "dp": 320
+                                    },
+                                    "alignment": "center"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "testTag": "heart_burst",
+                                      "name": "favorite",
+                                      "variant": "filled",
+                                      "contentDescription": "Double tap to like",
+                                      "style": {
+                                        "color": "error",
+                                        "alpha": 0
+                                      },
+                                      "styleWhen": [
+                                        {
+                                          "when": {
+                                            "key": "liked_p1",
+                                            "equals": true
+                                          },
+                                          "style": {
+                                            "alpha": 1
+                                          }
+                                        }
+                                      ],
+                                      "keyframes": {
+                                        "trigger": {
+                                          "key": "burst_p1"
+                                        },
+                                        "durationMs": 700,
+                                        "tracks": {
+                                          "scale": [
+                                            [0, 1],
+                                            [0.3, 1.6],
+                                            [1, 1]
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 4,
+                                "alignment": "center",
+                                "padding": {
+                                  "start": 8,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              },
+                              "children": [
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "like_button",
+                                  "icon": "favorite_border",
+                                  "contentDescription": "Like",
+                                  "visibleWhen": {
+                                    "key": "liked_p1",
+                                    "equals": false
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "liked_p1"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "unlike_button",
+                                  "icon": "favorite",
+                                  "contentDescription": "Unlike",
+                                  "visibleWhen": {
+                                    "key": "liked_p1",
+                                    "equals": true
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "liked_p1"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "comments_button",
+                                  "icon": "chat_bubble_outline",
+                                  "contentDescription": "Comments",
+                                  "onTap": [
+                                    {
+                                      "type": "emit",
+                                      "name": "comments_opened",
+                                      "context": {
+                                        "post": {
+                                          "value": "p1"
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "share_button",
+                                  "icon": "send",
+                                  "contentDescription": "Share",
+                                  "onTap": [
+                                    {
+                                      "type": "emit",
+                                      "name": "share_requested",
+                                      "context": {
+                                        "post": {
+                                          "value": "p1"
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "like_count",
+                              "text": "{derived:likes_p1} likes",
+                              "style": {
+                                "textStyle": "titleSmall",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "caption",
+                              "text": "ana.makes Tiles for days #travel with @bo",
+                              "linkify": {
+                                "kinds": ["mention", "hashtag"],
+                                "style": {
+                                  "color": "primary"
+                                },
+                                "onTap": [
+                                  {
+                                    "type": "setState",
+                                    "key": "linkText",
+                                    "value": {
+                                      "match": "text"
+                                    }
+                                  },
+                                  {
+                                    "type": "push",
+                                    "stack": "nav",
+                                    "screen": "link"
+                                  }
+                                ]
+                              },
+                              "style": {
+                                "textStyle": "bodyMedium",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "View all 32 comments",
+                              "style": {
+                                "textStyle": "bodySmall",
+                                "color": "onSurfaceVariant",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "column",
+                          "testTag": "post_p2",
+                          "style": {
+                            "spacing": 8,
+                            "padding": {
+                              "start": 0,
+                              "end": 0,
+                              "top": 8,
+                              "bottom": 8
+                            }
+                          },
+                          "children": [
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8,
+                                "alignment": "center",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              },
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "name": "account_circle",
+                                  "contentDescription": "Profile picture"
+                                },
+                                {
+                                  "type": "column",
+                                  "style": {
+                                    "weight": 1
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "text": "bo.cooks",
+                                      "style": {
+                                        "textStyle": "titleSmall"
+                                      }
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "Home",
+                                      "style": {
+                                        "textStyle": "labelSmall"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "box",
+                              "testTag": "post_media",
+                              "contentDescription": "Photo, double tap to like",
+                              "onDoubleTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "liked_p2",
+                                  "value": true
+                                },
+                                {
+                                  "type": "increment",
+                                  "key": "burst_p2"
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "type": "carousel",
+                                  "testTag": "post_carousel",
+                                  "itemWidth": 320,
+                                  "itemSpacing": 4,
+                                  "variant": "uncontained",
+                                  "children": [
+                                    {
+                                      "type": "box",
+                                      "testTag": "post_slide",
+                                      "style": {
+                                        "width": {
+                                          "dp": 320
+                                        },
+                                        "height": {
+                                          "dp": 320
+                                        },
+                                        "background": "primaryContainer",
+                                        "cornerRadius": "small",
+                                        "alignment": "center"
+                                      },
+                                      "children": [
+                                        {
+                                          "type": "text",
+                                          "text": "1 / 2",
+                                          "style": {
+                                            "textStyle": "labelLarge"
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "box",
+                                      "testTag": "post_slide",
+                                      "style": {
+                                        "width": {
+                                          "dp": 320
+                                        },
+                                        "height": {
+                                          "dp": 320
+                                        },
+                                        "background": "secondaryContainer",
+                                        "cornerRadius": "small",
+                                        "alignment": "center"
+                                      },
+                                      "children": [
+                                        {
+                                          "type": "text",
+                                          "text": "2 / 2",
+                                          "style": {
+                                            "textStyle": "labelLarge"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "box",
+                                  "style": {
+                                    "width": "fill",
+                                    "height": {
+                                      "dp": 320
+                                    },
+                                    "alignment": "center"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "testTag": "heart_burst",
+                                      "name": "favorite",
+                                      "variant": "filled",
+                                      "contentDescription": "Double tap to like",
+                                      "style": {
+                                        "color": "error",
+                                        "alpha": 0
+                                      },
+                                      "styleWhen": [
+                                        {
+                                          "when": {
+                                            "key": "liked_p2",
+                                            "equals": true
+                                          },
+                                          "style": {
+                                            "alpha": 1
+                                          }
+                                        }
+                                      ],
+                                      "keyframes": {
+                                        "trigger": {
+                                          "key": "burst_p2"
+                                        },
+                                        "durationMs": 700,
+                                        "tracks": {
+                                          "scale": [
+                                            [0, 1],
+                                            [0.3, 1.6],
+                                            [1, 1]
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 4,
+                                "alignment": "center",
+                                "padding": {
+                                  "start": 8,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              },
+                              "children": [
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "like_button",
+                                  "icon": "favorite_border",
+                                  "contentDescription": "Like",
+                                  "visibleWhen": {
+                                    "key": "liked_p2",
+                                    "equals": false
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "liked_p2"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "unlike_button",
+                                  "icon": "favorite",
+                                  "contentDescription": "Unlike",
+                                  "visibleWhen": {
+                                    "key": "liked_p2",
+                                    "equals": true
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "liked_p2"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "comments_button",
+                                  "icon": "chat_bubble_outline",
+                                  "contentDescription": "Comments",
+                                  "onTap": [
+                                    {
+                                      "type": "emit",
+                                      "name": "comments_opened",
+                                      "context": {
+                                        "post": {
+                                          "value": "p2"
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "share_button",
+                                  "icon": "send",
+                                  "contentDescription": "Share",
+                                  "onTap": [
+                                    {
+                                      "type": "emit",
+                                      "name": "share_requested",
+                                      "context": {
+                                        "post": {
+                                          "value": "p2"
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "like_count",
+                              "text": "{derived:likes_p2} likes",
+                              "style": {
+                                "textStyle": "titleSmall",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "caption",
+                              "text": "bo.cooks Sunday bread, attempt 4 #sourdough",
+                              "linkify": {
+                                "kinds": ["mention", "hashtag"],
+                                "style": {
+                                  "color": "primary"
+                                },
+                                "onTap": [
+                                  {
+                                    "type": "setState",
+                                    "key": "linkText",
+                                    "value": {
+                                      "match": "text"
+                                    }
+                                  },
+                                  {
+                                    "type": "push",
+                                    "stack": "nav",
+                                    "screen": "link"
+                                  }
+                                ]
+                              },
+                              "style": {
+                                "textStyle": "bodyMedium",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "View all 18 comments",
+                              "style": {
+                                "textStyle": "bodySmall",
+                                "color": "onSurfaceVariant",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "column",
+                          "testTag": "post_p3",
+                          "style": {
+                            "spacing": 8,
+                            "padding": {
+                              "start": 0,
+                              "end": 0,
+                              "top": 8,
+                              "bottom": 8
+                            }
+                          },
+                          "children": [
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8,
+                                "alignment": "center",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              },
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "name": "account_circle",
+                                  "contentDescription": "Profile picture"
+                                },
+                                {
+                                  "type": "column",
+                                  "style": {
+                                    "weight": 1
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "text": "mia.climbs",
+                                      "style": {
+                                        "textStyle": "titleSmall"
+                                      }
+                                    },
+                                    {
+                                      "type": "text",
+                                      "text": "Dock Rd gym",
+                                      "style": {
+                                        "textStyle": "labelSmall"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "box",
+                              "testTag": "post_media",
+                              "contentDescription": "Photo, double tap to like",
+                              "onDoubleTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "liked_p3",
+                                  "value": true
+                                },
+                                {
+                                  "type": "increment",
+                                  "key": "burst_p3"
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "type": "box",
+                                  "testTag": "post_slide",
+                                  "style": {
+                                    "width": {
+                                      "dp": 320
+                                    },
+                                    "height": {
+                                      "dp": 320
+                                    },
+                                    "background": "primaryContainer",
+                                    "cornerRadius": "small",
+                                    "alignment": "center"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "text": "1 / 1",
+                                      "style": {
+                                        "textStyle": "labelLarge"
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "box",
+                                  "style": {
+                                    "width": "fill",
+                                    "height": {
+                                      "dp": 320
+                                    },
+                                    "alignment": "center"
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "testTag": "heart_burst",
+                                      "name": "favorite",
+                                      "variant": "filled",
+                                      "contentDescription": "Double tap to like",
+                                      "style": {
+                                        "color": "error",
+                                        "alpha": 0
+                                      },
+                                      "styleWhen": [
+                                        {
+                                          "when": {
+                                            "key": "liked_p3",
+                                            "equals": true
+                                          },
+                                          "style": {
+                                            "alpha": 1
+                                          }
+                                        }
+                                      ],
+                                      "keyframes": {
+                                        "trigger": {
+                                          "key": "burst_p3"
+                                        },
+                                        "durationMs": 700,
+                                        "tracks": {
+                                          "scale": [
+                                            [0, 1],
+                                            [0.3, 1.6],
+                                            [1, 1]
+                                          ]
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 4,
+                                "alignment": "center",
+                                "padding": {
+                                  "start": 8,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              },
+                              "children": [
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "like_button",
+                                  "icon": "favorite_border",
+                                  "contentDescription": "Like",
+                                  "visibleWhen": {
+                                    "key": "liked_p3",
+                                    "equals": false
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "liked_p3"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "unlike_button",
+                                  "icon": "favorite",
+                                  "contentDescription": "Unlike",
+                                  "visibleWhen": {
+                                    "key": "liked_p3",
+                                    "equals": true
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "liked_p3"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "comments_button",
+                                  "icon": "chat_bubble_outline",
+                                  "contentDescription": "Comments",
+                                  "onTap": [
+                                    {
+                                      "type": "emit",
+                                      "name": "comments_opened",
+                                      "context": {
+                                        "post": {
+                                          "value": "p3"
+                                        }
+                                      }
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "iconButton",
+                                  "testTag": "share_button",
+                                  "icon": "send",
+                                  "contentDescription": "Share",
+                                  "onTap": [
+                                    {
+                                      "type": "emit",
+                                      "name": "share_requested",
+                                      "context": {
+                                        "post": {
+                                          "value": "p3"
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "like_count",
+                              "text": "{derived:likes_p3} likes",
+                              "style": {
+                                "textStyle": "titleSmall",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "caption",
+                              "text": "mia.climbs Finally sent the blue route",
+                              "linkify": {
+                                "kinds": ["mention", "hashtag"],
+                                "style": {
+                                  "color": "primary"
+                                },
+                                "onTap": [
+                                  {
+                                    "type": "setState",
+                                    "key": "linkText",
+                                    "value": {
+                                      "match": "text"
+                                    }
+                                  },
+                                  {
+                                    "type": "push",
+                                    "stack": "nav",
+                                    "screen": "link"
+                                  }
+                                ]
+                              },
+                              "style": {
+                                "textStyle": "bodyMedium",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "View all 4 comments",
+                              "style": {
+                                "textStyle": "bodySmall",
+                                "color": "onSurfaceVariant",
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 0,
+                                  "bottom": 0
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "pager",
+                    "id": "reels",
+                    "testTag": "reels_pager",
+                    "axis": "vertical",
+                    "style": {
+                      "weight": 1
+                    },
+                    "children": [
+                      {
+                        "type": "column",
+                        "style": {
+                          "background": "inverseSurface",
+                          "alignment": "bottomStart",
+                          "padding": {
+                            "start": 16,
+                            "end": 16,
+                            "top": 16,
+                            "bottom": 16
+                          },
+                          "spacing": 8
+                        },
+                        "children": [
+                          {
+                            "type": "spacer",
+                            "style": {
+                              "weight": 1
+                            }
+                          },
+                          {
+                            "type": "icon",
+                            "name": "play_circle",
+                            "contentDescription": "Reel",
+                            "style": {
+                              "color": "inverseOnSurface"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "text": "jun.draws",
+                            "style": {
+                              "textStyle": "titleSmall",
+                              "color": "inverseOnSurface"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "text": "Speed sketch, 30 seconds",
+                            "style": {
+                              "textStyle": "bodyMedium",
+                              "color": "inverseOnSurface"
+                            }
+                          },
+                          {
+                            "type": "iconButton",
+                            "testTag": "mute_toggle",
+                            "icon": "volume_off",
+                            "contentDescription": "Muted, tap to unmute",
+                            "onTap": [
+                              {
+                                "type": "toggle",
+                                "key": "muted"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "column",
+                        "style": {
+                          "background": "inverseSurface",
+                          "alignment": "bottomStart",
+                          "padding": {
+                            "start": 16,
+                            "end": 16,
+                            "top": 16,
+                            "bottom": 16
+                          },
+                          "spacing": 8
+                        },
+                        "children": [
+                          {
+                            "type": "spacer",
+                            "style": {
+                              "weight": 1
+                            }
+                          },
+                          {
+                            "type": "icon",
+                            "name": "play_circle",
+                            "contentDescription": "Reel",
+                            "style": {
+                              "color": "inverseOnSurface"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "text": "leo.runs",
+                            "style": {
+                              "textStyle": "titleSmall",
+                              "color": "inverseOnSurface"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "text": "Hill repeats",
+                            "style": {
+                              "textStyle": "bodyMedium",
+                              "color": "inverseOnSurface"
+                            }
+                          },
+                          {
+                            "type": "iconButton",
+                            "testTag": "mute_toggle",
+                            "icon": "volume_off",
+                            "contentDescription": "Muted, tap to unmute",
+                            "onTap": [
+                              {
+                                "type": "toggle",
+                                "key": "muted"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "profile_bar",
+                    "title": "you.photos"
+                  },
+                  {
+                    "type": "scroll",
+                    "style": {
+                      "weight": 1
+                    },
+                    "child": {
+                      "type": "column",
+                      "style": {
+                        "spacing": 12
+                      },
+                      "children": [
+                        {
+                          "type": "row",
+                          "style": {
+                            "padding": {
+                              "start": 16,
+                              "end": 16,
+                              "top": 16,
+                              "bottom": 16
+                            },
+                            "spacing": 24,
+                            "alignment": "center"
+                          },
+                          "children": [
+                            {
+                              "type": "icon",
+                              "name": "account_circle",
+                              "contentDescription": "Your profile picture"
+                            },
+                            {
+                              "type": "text",
+                              "text": "{derived:postCount} posts",
+                              "style": {
+                                "textStyle": "titleSmall"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": "{derived:followers} followers",
+                              "style": {
+                                "textStyle": "titleSmall"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "grid",
+                          "columns": 3,
+                          "style": {
+                            "spacing": 2
+                          },
+                          "repeat": {
+                            "items": {
+                              "path": "/grid"
+                            },
+                            "as": "photo",
+                            "key": "id"
+                          },
+                          "children": [
+                            {
+                              "type": "box",
+                              "testTag": "grid_photo",
+                              "contentDescription": "Open photo",
+                              "style": {
+                                "aspectRatio": 1,
+                                "background": "surfaceVariant",
+                                "alignment": "center"
+                              },
+                              "onTap": [
+                                {
+                                  "type": "setState",
+                                  "key": "viewerLabel",
+                                  "value": "{photo.label}"
+                                },
+                                {
+                                  "type": "push",
+                                  "stack": "nav",
+                                  "screen": "viewer"
+                                }
+                              ],
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "text": "{photo.label}",
+                                  "style": {
+                                    "textStyle": "labelSmall"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "bottomNav",
+            "testTag": "bottom_nav",
+            "pager": "tabs",
+            "items": [
+              {
+                "label": "Home",
+                "icon": "home"
+              },
+              {
+                "label": "Reels",
+                "icon": "local_movies"
+              },
+              {
+                "label": "Profile",
+                "icon": "person"
+              }
+            ]
+          }
+        ]
+      },
+      "stories": {
+        "type": "column",
+        "style": {
+          "background": "inverseSurface"
+        },
+        "children": [
+          {
+            "type": "row",
+            "testTag": "story_progress",
+            "style": {
+              "padding": {
+                "start": 8,
+                "end": 8,
+                "top": 8,
+                "bottom": 8
+              },
+              "spacing": 4
+            },
+            "children": [
+              {
+                "type": "box",
+                "style": {
+                  "weight": 1,
+                  "height": {
+                    "dp": 3
+                  },
+                  "cornerRadius": "full",
+                  "background": "outline"
+                },
+                "styleWhen": [
+                  {
+                    "when": {
+                      "key": "storyPage",
+                      "gt": -1
+                    },
+                    "style": {
+                      "background": "inverseOnSurface"
+                    }
+                  }
+                ],
+                "children": []
+              },
+              {
+                "type": "box",
+                "style": {
+                  "weight": 1,
+                  "height": {
+                    "dp": 3
+                  },
+                  "cornerRadius": "full",
+                  "background": "outline"
+                },
+                "styleWhen": [
+                  {
+                    "when": {
+                      "key": "storyPage",
+                      "gt": 0
+                    },
+                    "style": {
+                      "background": "inverseOnSurface"
+                    }
+                  }
+                ],
+                "children": []
+              },
+              {
+                "type": "box",
+                "style": {
+                  "weight": 1,
+                  "height": {
+                    "dp": 3
+                  },
+                  "cornerRadius": "full",
+                  "background": "outline"
+                },
+                "styleWhen": [
+                  {
+                    "when": {
+                      "key": "storyPage",
+                      "gt": 1
+                    },
+                    "style": {
+                      "background": "inverseOnSurface"
+                    }
+                  }
+                ],
+                "children": []
+              }
+            ]
+          },
+          {
+            "type": "pager",
+            "id": "storyPager",
+            "testTag": "story_pager",
+            "stateKey": "storyPage",
+            "style": {
+              "weight": 1
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "background": "primaryContainer",
+                  "alignment": "center",
+                  "arrangement": "center",
+                  "spacing": 8
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "ana.makes",
+                    "semantics": {
+                      "heading": true
+                    },
+                    "style": {
+                      "textStyle": "titleMedium"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": "Morning market",
+                    "style": {
+                      "textStyle": "headlineSmall"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "background": "secondaryContainer",
+                  "alignment": "center",
+                  "arrangement": "center",
+                  "spacing": 8
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "bo.cooks",
+                    "semantics": {
+                      "heading": true
+                    },
+                    "style": {
+                      "textStyle": "titleMedium"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": "Proofing",
+                    "style": {
+                      "textStyle": "headlineSmall"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "background": "tertiaryContainer",
+                  "alignment": "center",
+                  "arrangement": "center",
+                  "spacing": 8
+                },
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "mia.climbs",
+                    "semantics": {
+                      "heading": true
+                    },
+                    "style": {
+                      "textStyle": "titleMedium"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": "Chalk up",
+                    "style": {
+                      "textStyle": "headlineSmall"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "testTag": "close_story",
+            "label": "Close",
+            "variant": "text",
+            "onTap": [
+              {
+                "type": "cancelTimer",
+                "id": "story"
+              },
+              {
+                "type": "pop",
+                "stack": "nav"
+              }
+            ]
+          }
+        ]
+      },
+      "viewer": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "viewer_bar",
+            "title": "{viewerLabel}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "box",
+            "testTag": "viewer_photo",
+            "contentDescription": "Photo",
+            "style": {
+              "weight": 1,
+              "width": "fill",
+              "background": "surfaceVariant",
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "{viewerLabel}",
+                "style": {
+                  "textStyle": "headlineMedium"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "inbox": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "inbox_bar",
+            "title": "Messages",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "repeat": {
+              "items": {
+                "path": "/threads"
+              },
+              "as": "thread",
+              "key": "id"
+            },
+            "children": [
+              {
+                "type": "listItem",
+                "testTag": "dm_row",
+                "headline": "{thread.name}",
+                "supporting": "{thread.last}",
+                "leadingIcon": "account_circle",
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "dmName",
+                    "value": "{thread.name}"
+                  },
+                  {
+                    "type": "push",
+                    "stack": "nav",
+                    "screen": "dm"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "dm": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "dm_bar",
+            "title": "{dmName}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "weight": 1,
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 8
+            },
+            "children": [
+              {
+                "type": "text",
+                "text": "Loved your tiles post!",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              },
+              {
+                "type": "text",
+                "testTag": "dm_sent",
+                "visibleWhen": {
+                  "data": "/pending/text",
+                  "empty": false
+                },
+                "text": "You: {data:/pending/text}",
+                "style": {
+                  "textStyle": "bodyLarge",
+                  "color": "primary"
+                }
+              }
+            ]
+          },
+          {
+            "type": "row",
+            "safeAreaPadding": {
+              "edges": ["bottom"],
+              "types": ["ime", "systemBars"]
+            },
+            "style": {
+              "padding": {
+                "start": 8,
+                "end": 8,
+                "top": 4,
+                "bottom": 4
+              },
+              "spacing": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "textField",
+                "testTag": "dm_composer",
+                "stateKey": "dmDraft",
+                "checks": [
+                  {
+                    "message": "Type a message first",
+                    "required": true
+                  }
+                ],
+                "validateOn": "submit",
+                "placeholder": "Message",
+                "imeAction": "send",
+                "style": {
+                  "weight": 1
+                },
+                "onSubmit": [
+                  {
+                    "type": "setData",
+                    "path": "/data/pending/text",
+                    "value": {
+                      "state": "dmDraft"
+                    }
+                  },
+                  {
+                    "type": "emit",
+                    "name": "dm_sent",
+                    "requireValid": ["dmDraft"],
+                    "context": {
+                      "to": {
+                        "state": "dmName"
+                      },
+                      "text": {
+                        "state": "dmDraft"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "dmDraft",
+                    "value": ""
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "dm_send",
+                "icon": "send",
+                "contentDescription": "Send",
+                "enabledWhen": {
+                  "key": "dmDraft",
+                  "lengthGt": 0
+                },
+                "onTap": [
+                  {
+                    "type": "setData",
+                    "path": "/data/pending/text",
+                    "value": {
+                      "state": "dmDraft"
+                    }
+                  },
+                  {
+                    "type": "emit",
+                    "name": "dm_sent",
+                    "requireValid": ["dmDraft"],
+                    "context": {
+                      "to": {
+                        "state": "dmName"
+                      },
+                      "text": {
+                        "state": "dmDraft"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "dmDraft",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "upload": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "upload_bar",
+            "title": "New post",
+            "navigationIcon": {
+              "icon": "close",
+              "label": "Discard",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            },
+            "children": [
+              {
+                "type": "box",
+                "testTag": "upload_preview",
+                "contentDescription": "Picked photo",
+                "style": {
+                  "width": "fill",
+                  "aspectRatio": 1,
+                  "background": "surfaceVariant",
+                  "alignment": "center"
+                },
+                "children": [
+                  {
+                    "type": "icon",
+                    "name": "add_photo_alternate",
+                    "contentDescription": "Pick a photo"
+                  }
+                ]
+              },
+              {
+                "type": "textField",
+                "testTag": "caption_field",
+                "stateKey": "uploadCaption",
+                "label": "Write a caption",
+                "multiline": true,
+                "maxLines": 4,
+                "maxLength": 2200
+              },
+              {
+                "type": "button",
+                "testTag": "share_post",
+                "label": "Share",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "post_shared",
+                    "context": {
+                      "caption": {
+                        "state": "uploadCaption"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "uploadCaption",
+                    "value": ""
+                  },
+                  {
+                    "type": "pop",
+                    "stack": "nav"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "link": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "link_bar",
+            "title": "{linkText}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "text": "Posts and people for {linkText}",
+            "style": {
+              "textStyle": "bodyLarge",
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

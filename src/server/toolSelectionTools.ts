@@ -237,14 +237,20 @@ export async function applyToolSelection(
  * a freshly minted session (provisionDevice) carries no override of its own.
  * Derived `${base}:${label}` device-label sessions stay a discovery-only
  * refinement: readback mirrors `tools/list`'s independent label routes.
- * @param baseSessionUuid The resolved base profile for device-label routes.
+ * @param options.baseSessionUuid The resolved base profile for device-label routes.
  */
 export async function listEnabledToolNames(
   service: ToolSelectionServiceLike,
   sessionUuids: ReadonlyArray<string | undefined>,
-  connectionProfileUuid?: string,
-  labelSessionUuids: readonly string[] = [],
-  baseSessionUuid?: string,
+  {
+    connectionProfileUuid,
+    labelSessionUuids = [],
+    baseSessionUuid,
+  }: {
+    connectionProfileUuid?: string;
+    labelSessionUuids?: readonly string[];
+    baseSessionUuid?: string;
+  } = {},
 ): Promise<string[]> {
   const resolved = service ?? getSessionToolSelectionService();
   const names = await Promise.all(
@@ -261,8 +267,7 @@ export async function listEnabledToolNames(
           tool.name,
           tool.defaultEnabled ?? true,
           candidateRoutes,
-          resolved,
-          connectionProfileUuid,
+          { sessionToolSelectionService: resolved, connectionProfileUuid },
         ))
           ? tool.name
           : undefined;
@@ -280,9 +285,11 @@ async function getEnabledToolsResponse(
       enabledTools: await listEnabledToolNames(
         context?.sessionToolSelectionService,
         [sessionUuid, context?.routingSessionUuid],
-        context?.toolSelectionProfileUuid,
-        context?.labelSessionUuids ?? [],
-        context?.routingBaseSessionUuid,
+        {
+          connectionProfileUuid: context?.toolSelectionProfileUuid,
+          labelSessionUuids: context?.labelSessionUuids ?? [],
+          baseSessionUuid: context?.routingBaseSessionUuid,
+        },
       ),
     };
   } catch (error) {
@@ -299,43 +306,46 @@ export function registerToolSelectionTools(): void {
     SET_TOOL_ENABLED_TOOL_NAME,
     "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call, including default-off tools such as pinchOn and prototype that tools/list never shows until enabled; read the automobile:tools resource for every tool's name and default discovery state. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
     setToolEnabledSchema,
-    async (args) => {
-      const context = getToolSelectionContext();
-      const sessionUuid = resolveSelectionSessionUuid(
-        args.sessionUuid,
-        context?.toolSelectionProfileUuid,
-        context?.routingSessionUuid,
-      );
-      const scope = selectionScopeForSessionUuid(
-        sessionUuid,
-        context?.toolSelectionProfileUuid,
-        context?.routingSessionUuid,
-      );
-      const enabled = args.enabled ?? true;
-      const selection = await applyToolSelection(
-        context?.sessionToolSelectionService,
-        sessionUuid,
-        requestedToolNamesFromSetToolEnabledArgs(args),
-        enabled,
-      );
-      if (selection.requested.length > 0) {
-        ToolRegistry.notifyToolListChanged();
-      }
-      const response = {
-        sessionUuid,
-        scope,
-        // The single-name request keeps its original `toolName` echo; a batch
-        // echoes the applied `toolNames` instead (#6869).
-        ...(args.toolNames ? { toolNames: selection.requested } : { toolName: args.toolName }),
-        enabled,
-        ...(selection.skipped.length > 0 ? { skipped: selection.skipped } : {}),
-      };
-      return createStructuredToolResponse({
-        ...response,
-        ...(await getEnabledToolsResponse(sessionUuid, context)),
-      });
+    {
+      handler: async (args) => {
+        const context = getToolSelectionContext();
+        const sessionUuid = resolveSelectionSessionUuid(
+          args.sessionUuid,
+          context?.toolSelectionProfileUuid,
+          context?.routingSessionUuid,
+        );
+        const scope = selectionScopeForSessionUuid(
+          sessionUuid,
+          context?.toolSelectionProfileUuid,
+          context?.routingSessionUuid,
+        );
+        const enabled = args.enabled ?? true;
+        const selection = await applyToolSelection(
+          context?.sessionToolSelectionService,
+          sessionUuid,
+          requestedToolNamesFromSetToolEnabledArgs(args),
+          enabled,
+        );
+        if (selection.requested.length > 0) {
+          ToolRegistry.notifyToolListChanged();
+        }
+        const response = {
+          sessionUuid,
+          scope,
+          // The single-name request keeps its original `toolName` echo; a batch
+          // echoes the applied `toolNames` instead (#6869).
+          ...(args.toolNames ? { toolNames: selection.requested } : { toolName: args.toolName }),
+          enabled,
+          ...(selection.skipped.length > 0 ? { skipped: selection.skipped } : {}),
+        };
+        return createStructuredToolResponse({
+          ...response,
+          ...(await getEnabledToolsResponse(sessionUuid, context)),
+        });
+      },
+      defaultEnabled: true,
+      outputSchema: setToolEnabledResultSchema,
     },
-    { defaultEnabled: true, outputSchema: setToolEnabledResultSchema },
   );
 }
 

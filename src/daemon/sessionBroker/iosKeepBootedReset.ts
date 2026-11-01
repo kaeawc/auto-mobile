@@ -103,11 +103,14 @@ export class IosKeepBootedReset {
     device: BootedDevice,
     profile: IosResetProfile,
     assertOwned: () => Promise<void>,
-    scope: DeviceMutationScope,
-    reuseCount: number,
-    options: { signal?: AbortSignal; runResetBoot?: ResetBootRunner } = {},
+    {
+      scope,
+      ...options
+    }: { reuseCount: number; signal?: AbortSignal; runResetBoot?: ResetBootRunner } & {
+      scope: DeviceMutationScope;
+    },
   ): Promise<ResetOutcome> {
-    const { signal, runResetBoot } = options;
+    const { reuseCount, signal, runResetBoot } = options;
     this.assertInput(device, profile, scope, reuseCount);
     const phases: Record<string, number> = {};
     const owned = async () => {
@@ -133,19 +136,17 @@ export class IosKeepBootedReset {
         },
       };
       const step = <Result>(phase: string, operation: () => Promise<Result>) =>
-        this.cleaningStep(context, signal, phase, phases, operation);
+        this.cleaningStep(context, signal, phase, { phases, operation });
       const entries = await this.loadJournal(context, step, phases);
       try {
         this.assertCompleteRecording(scope.sessionUuid);
         await step("inventory", () =>
-          readExpectedIosResetTarget(
-            this.dependencies.simctl,
-            device.deviceId,
-            profile,
-            "Booted",
-            "start keep-booted reset",
-            { signal: context.signal, timeoutMs: this.innerReadTimeoutMs() },
-          ),
+          readExpectedIosResetTarget(this.dependencies.simctl, device.deviceId, profile, {
+            state: "Booted",
+            action: "start keep-booted reset",
+            signal: context.signal,
+            timeoutMs: this.innerReadTimeoutMs(),
+          }),
         );
         if (!context.baseline?.completeKinds.includes("installed-app")) {
           throw new ActionableError("iOS reset requires a captured app baseline; erase required");
@@ -165,7 +166,7 @@ export class IosKeepBootedReset {
         await this.replayJournal(entries, context, step);
         await step("sanitize", () => this.dependencies.mutations.sanitize(context));
         await owned();
-        await this.checkHealth(device, profile, context, phases, signal);
+        await this.checkHealth(device, profile, context, { phases, signal });
       } catch (error) {
         logger.warn(`iOS keep-booted cleaning failed: ${errorMessage(error)}`, error);
         await owned();
@@ -359,8 +360,7 @@ export class IosKeepBootedReset {
     context: DeviceMutationResetContext,
     callerSignal: AbortSignal | undefined,
     phase: string,
-    phases: Record<string, number>,
-    operation: () => Promise<Result>,
+    { phases, operation }: { phases: Record<string, number>; operation: () => Promise<Result> },
   ): Promise<Result> {
     const first = loadScaledBudget(
       {
@@ -370,7 +370,9 @@ export class IosKeepBootedReset {
       this.dependencies.hostLoad ?? defaultHostLoadReader(),
     );
     try {
-      return await this.cleaningAttempt(context, callerSignal, phase, phases, operation, {
+      return await this.cleaningAttempt(context, callerSignal, phase, {
+        phases,
+        operation,
         first,
         timeoutMs: first.budgetMs,
       });
@@ -385,7 +387,9 @@ export class IosKeepBootedReset {
         error,
         callerSignal,
       );
-      return this.cleaningAttempt(context, callerSignal, phase, phases, operation, {
+      return this.cleaningAttempt(context, callerSignal, phase, {
+        phases,
+        operation,
         first,
         timeoutMs: retryBudget(first),
       });
@@ -396,9 +400,14 @@ export class IosKeepBootedReset {
     context: DeviceMutationResetContext,
     callerSignal: AbortSignal | undefined,
     phase: string,
-    phases: Record<string, number>,
-    operation: () => Promise<Result>,
-    { first, timeoutMs }: { first: LoadScaledBudget; timeoutMs: number },
+    {
+      phases,
+      operation,
+      first,
+      timeoutMs,
+    }: { operation: () => Promise<Result>; first: LoadScaledBudget; timeoutMs: number } & {
+      phases: Record<string, number>;
+    },
   ): Promise<Result> {
     const controller = new AbortController();
     context.signal = combineAbortSignals(controller.signal, callerSignal) ?? controller.signal;
@@ -447,24 +456,24 @@ export class IosKeepBootedReset {
     device: BootedDevice,
     profile: IosResetProfile,
     context: DeviceMutationResetContext,
-    phases: Record<string, number>,
-    signal?: AbortSignal,
+    { phases, signal }: { phases: Record<string, number>; signal?: AbortSignal },
   ): Promise<void> {
     const started = this.dependencies.timer.now();
     try {
-      await this.cleaningStep(context, signal, "health-probe", phases, async () => {
-        await readExpectedIosResetTarget(
-          this.dependencies.simctl,
-          device.deviceId,
-          profile,
-          "Booted",
-          "confirm keep-booted health",
-          { signal: context.signal, timeoutMs: this.innerReadTimeoutMs() },
-        );
-        await context.assertOwned();
-        if (!(await this.dependencies.health.probe(device, context.signal))) {
-          throw new ActionableError("iOS keep-booted automation server is unhealthy");
-        }
+      await this.cleaningStep(context, signal, "health-probe", {
+        phases,
+        operation: async () => {
+          await readExpectedIosResetTarget(this.dependencies.simctl, device.deviceId, profile, {
+            state: "Booted",
+            action: "confirm keep-booted health",
+            signal: context.signal,
+            timeoutMs: this.innerReadTimeoutMs(),
+          });
+          await context.assertOwned();
+          if (!(await this.dependencies.health.probe(device, context.signal))) {
+            throw new ActionableError("iOS keep-booted automation server is unhealthy");
+          }
+        },
       });
     } finally {
       phases.health = (phases.health ?? 0) + this.dependencies.timer.now() - started;

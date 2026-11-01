@@ -18,7 +18,8 @@ export function isAlreadyStoppedDeviceError(
       isAdbMissingDeviceError(error, deviceId)
     );
   }
-  if (platform === "ios") {
+  // An Apple Watch simulator stops through the same simctl shutdown as an iPhone one.
+  if (platform === "ios" || platform === "watchos" || platform === "tvos") {
     return isIosSimulatorAlreadyStoppedError(error);
   }
   return false;
@@ -41,8 +42,13 @@ export async function resumeCtrlProxyAfterUnconfirmedFailure(
   device: BootedDevice,
   error: unknown,
   requestAbortSignal: AbortSignal | undefined,
-  daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">,
-  shutdownWasConfirmed = false,
+  {
+    daemonState,
+    shutdownWasConfirmed = false,
+  }: {
+    daemonState: Pick<DaemonStateLike, "isInitialized" | "getDevicePool">;
+    shutdownWasConfirmed?: boolean;
+  },
 ): Promise<void> {
   if (
     !shutdownWasConfirmed &&

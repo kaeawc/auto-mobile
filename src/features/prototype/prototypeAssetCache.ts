@@ -51,13 +51,30 @@ function referencedBytes(entries: Entry[]): number {
 /** Per-device content-addressed cache; callers receive I/O failures without poisoning the queue. */
 export class FilePrototypeAssetCache implements PrototypeAssetCache {
   private pending: Promise<void> = Promise.resolve();
+  private readonly rootDir: () => string;
+  private readonly now: () => number;
+  private readonly maxBytes: number;
+  private readonly idGenerator: IdGenerator;
+
   constructor(
     private readonly files: MirrorFileSystem = disk,
-    private readonly rootDir: () => string = () => getTempDir("prototype-asset-cache"),
-    private readonly now: () => number = Date.now,
-    private readonly maxBytes = DEFAULT_PROTOTYPE_ASSET_CACHE_MAX_BYTES,
-    private readonly idGenerator: IdGenerator = defaultIdGenerator,
-  ) {}
+    {
+      rootDir = () => getTempDir("prototype-asset-cache"),
+      now = Date.now,
+      maxBytes = DEFAULT_PROTOTYPE_ASSET_CACHE_MAX_BYTES,
+      idGenerator = defaultIdGenerator,
+    }: {
+      rootDir?: () => string;
+      now?: () => number;
+      maxBytes?: number;
+      idGenerator?: IdGenerator;
+    } = {},
+  ) {
+    this.rootDir = rootDir;
+    this.now = now;
+    this.maxBytes = maxBytes;
+    this.idGenerator = idGenerator;
+  }
   private serialize<T>(work: () => Promise<T>): Promise<T> {
     const next = this.pending.then(work);
     // The caller receives the rejection; subsequent operations can still run.

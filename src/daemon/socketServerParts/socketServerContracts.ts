@@ -20,7 +20,10 @@ import {
 import { isProcessRunning, readPidFileDataSync } from "../daemonFiles";
 import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../utils/fileLock";
 
-import { type AppendKeyEventValidator } from "../../features/action/InputText";
+import {
+  type AppendKeyEventValidator,
+  type AppendTextOptions,
+} from "../../features/action/InputText";
 
 import { DaemonStateAccess } from "../daemonRequestHandlers";
 
@@ -31,7 +34,7 @@ import { type FrameDeviceIdentityPool } from "../frameDeviceIdentity";
 
 import type { AndroidCtrlProxy } from "../../features/observe/android";
 
-import type { AppendTextFailureSource, BootedDevice } from "../../models";
+import type { AppendTextFailureSource, BootedDevice, ImeAction } from "../../models";
 
 import { ClientRequestCancellation } from "./ClientRequestCancellation";
 export /** Slack after the handler's settlement wait for it to finish rollback and build its result. */
@@ -227,10 +230,7 @@ function resolveSocketBindGuard(
 export interface AppendTextInput {
   appendText(
     text: string,
-    timeoutMs?: number,
-    beforeKeyEvent?: AppendKeyEventValidator,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options?: AppendTextOptions,
   ): Promise<{
     success: boolean;
     error?: string;
@@ -375,6 +375,36 @@ export interface ProfileReaffirmForwardRouteOptions {
   toolSelectionProfileUuid: string | undefined;
   scopedKey: string | undefined;
   boundRoute: McpForwardRoute | undefined;
+}
+/** Per-request options for `SocketTextInput.executeInputTypeText`, after the target and text. */
+export interface InputTypeTextExecutionOptions {
+  imeAction?: ImeAction;
+  timeoutMs: number;
+  append?: boolean;
+  frameContext?: string;
+  onConfirmedAppendCharsSent?: (charsSent: number) => void;
+  signal?: AbortSignal;
+  dispatching?: () => void;
+}
+/** Shared result of one append-text attempt. */
+export type AppendTextAttemptResult = Awaited<ReturnType<AppendTextInput["appendText"]>>;
+/** How `retryAppendTextWithRebuiltHelper` re-runs the append within the original budget. */
+export interface AppendTextRetry {
+  deadline: number;
+  beforeKeyEvent: AppendKeyEventValidator | undefined;
+  run: (
+    input: AppendTextInput,
+    pending: string,
+    timeoutMs: number,
+    validate: AppendKeyEventValidator | undefined,
+  ) => Promise<AppendTextAttemptResult>;
+}
+/** The budget and attribution `runInputOperationWithTimeout` reports a timeout against. */
+export interface InputOperationBudget {
+  toolName: string;
+  origin: string;
+  totalTimeoutMs: number;
+  remainingTimeoutMs: number;
 }
 export interface AndroidAppendTextOptions {
   onDispatch?: () => void;

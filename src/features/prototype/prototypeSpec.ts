@@ -1,6 +1,9 @@
 import { buildAdaptiveSchema, adaptiveChildren, type AdaptiveSlots } from "./prototypeAdaptive";
 import { prototypeChannelsSchema } from "./prototypeChannelSchema";
-import { prototypeAuthSchema } from "./prototypeAuthSchema";
+import { prototypeRootBlockFields } from "./prototypeRootBlockSchemas";
+import { prototypeBadgeShape, prototypeDividerShape } from "./prototypeLeafNodeShapes";
+import { prototypeMapSchema } from "./prototypeMapSchema";
+import { prototypeMediaNodeSchemas, prototypeMediaSchema } from "./prototypeMediaSchema";
 import { prototypePressSchema } from "./prototypePressSchema";
 export { PROTOTYPE_COLOR_ROLES } from "./prototypePresentationSchemas";
 import { buildRouteSchema, setStackActionSchema } from "./prototypeRouteSchema";
@@ -140,6 +143,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
+  z.object({ type: z.enum(["hideKeyboard"]) }).strict(),
   z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
   appendDataActionSchema,
   upsertDataActionSchema,
@@ -526,16 +530,8 @@ const topAppBarBaseSchema = z
     actions: z.array(appBarActionSchema).min(1).max(3).optional(),
   })
   .strict();
-const dividerBaseSchema = z
-  .object({
-    ...commonNodeShape,
-    type: z.enum(["divider"]),
-    orientation: z.enum(["horizontal", "vertical"]).optional(),
-  })
-  .strict();
-const badgeBaseSchema = z
-  .object({ ...commonNodeShape, type: z.enum(["badge"]), text: z.string().min(1).optional() })
-  .strict();
+const dividerBaseSchema = z.object({ ...commonNodeShape, ...prototypeDividerShape }).strict();
+const badgeBaseSchema = z.object({ ...commonNodeShape, ...prototypeBadgeShape }).strict();
 const progressBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -546,6 +542,8 @@ const progressBaseSchema = z
   })
   .strict();
 const chartBaseSchema = z.object({ ...commonNodeShape, ...prototypeChartShape }).strict();
+const mapBaseSchema = prototypeMapSchema(commonNodeShape, actionListSchema);
+const mediaNodeSchemas = prototypeMediaNodeSchemas(commonNodeShape);
 const dialogBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -738,6 +736,8 @@ export type PrototypeNode =
   | z.infer<typeof dividerBaseSchema>
   | z.infer<typeof badgeBaseSchema>
   | z.infer<typeof progressBaseSchema>
+  | z.infer<typeof mapBaseSchema>
+  | z.infer<(typeof mediaNodeSchemas)[number]>
   | z.infer<typeof chartBaseSchema>
   | (z.infer<typeof dialogBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof tooltipBaseSchema>
@@ -820,6 +820,8 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       dividerBaseSchema,
       badgeBaseSchema,
       progressBaseSchema,
+      mapBaseSchema,
+      ...mediaNodeSchemas,
       chartBaseSchema,
       dialogBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       tooltipBaseSchema,
@@ -931,7 +933,8 @@ const specSchema = z
     requires: prototypeRequiresSchema.optional(),
     platform: prototypePlatformHandlersSchema.optional(),
     channels: prototypeChannelsSchema(() => actionSchema).optional(),
-    auth: prototypeAuthSchema().optional(),
+    ...prototypeRootBlockFields(),
+    media: prototypeMediaSchema.optional(),
     derive: prototypeDeriveSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
@@ -952,6 +955,7 @@ export const PROTOTYPE_ACTION_TYPES = [
   "increment",
   "decrement",
   "dismiss",
+  "hideKeyboard",
   "setData",
   "appendData",
   "upsertData",

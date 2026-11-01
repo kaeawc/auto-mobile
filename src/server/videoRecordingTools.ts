@@ -1,7 +1,12 @@
 import { OrphanRecorderActiveError } from "../daemon/orphanRecorderRefusal";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
-import { ActionableError, type BootedDevice, type VideoRecordingConfigInput } from "../models";
+import {
+  ActionableError,
+  type BootedDevice,
+  requireAndroidOrIosPlatform,
+  type VideoRecordingConfigInput,
+} from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { videoRecordingResultSchema } from "./videoRecordingToolOutputSchemas";
 import {
@@ -14,6 +19,7 @@ import {
 } from "../daemon/videoRecordingManager";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
+import { assertAudioFitsOneSegment } from "../features/video/AudioTrackVideoCaptureBackend";
 import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
 import { logger } from "../utils/logger";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
@@ -226,6 +232,7 @@ function createVideoStartResponse(output: {
   });
 }
 
+/** Segmented Android recordings (over 180 s) have no audio track: it would need stitching. */
 async function startDeviceRecordings(
   ctx: RecordingToolContext,
   device: BootedDevice,
@@ -253,6 +260,7 @@ async function startDeviceRecordings(
       // Android `screenrecord` is hard-capped at 180s. For longer Android
       // recordings, transparently produce ordered segments (<outputName>,
       // <outputName>-seg1, ...) via a timer-driven segmented session.
+      assertAudioFitsOneSegment(target.platform, maxDurationSeconds, args.audio);
       if (target.platform === "android" && maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS) {
         const started: { handle?: string } = {};
         const session: AndroidSegmentedPlanVideoSession = new AndroidSegmentedPlanVideoSession({
@@ -314,6 +322,7 @@ async function startDeviceRecordings(
         ownerSessionUuid,
         abortSignal: signal,
         display: args.display,
+        audio: args.audio,
       });
 
       recordings.push({
@@ -445,8 +454,7 @@ async function stopStartupOrphansForDevice(
   ctx: RecordingToolContext,
   target: BootedDevice,
   args: VideoRecordingArgs,
-  latest: VideoRecordingRecord | undefined,
-  singleTarget: boolean,
+  { latest, singleTarget }: { latest?: VideoRecordingRecord; singleTarget: boolean },
 ) {
   const orphans = (getStartupOrphanCaptures()?.list(target.deviceId) ?? []).filter(
     (orphan) => heldVideoRecordingOwner(orphan.recordingId) === undefined,
@@ -512,16 +520,15 @@ async function stopResolvedDeviceRecordings(
     // so finalizing it replaces the single-recording stop for this device.
     const deviceSessions = segmentedSessions.forDevice(target);
     if (deviceSessions.length === 0) {
-      activeRecords ??= await listActiveVideoRecordings({ platform: device.platform });
+      activeRecords ??= await listActiveVideoRecordings({
+        platform: requireAndroidOrIosPlatform(device.platform, "videoRecording stop"),
+      });
       const matches = activeRecords.filter((record) => record.deviceId === target.deviceId);
       const latest = matches.length > 0 ? selectLatestRecording(matches) : undefined;
-      const stoppedOrphans = await stopStartupOrphansForDevice(
-        ctx,
-        target,
-        args,
+      const stoppedOrphans = await stopStartupOrphansForDevice(ctx, target, args, {
         latest,
-        targetDevices.length === 1,
-      );
+        singleTarget: targetDevices.length === 1,
+      });
       if (stoppedOrphans) {
         results.push(...stoppedOrphans.results);
         failures.push(...stoppedOrphans.failures);
@@ -638,8 +645,8 @@ export function registerVideoRecordingTools(
     "videoRecording",
     "Start or stop device video recording. resourceLink on stop links its full result; required fields stay inline, bounded.",
     videoRecordingSchema,
-    videoRecordingHandler,
     {
+      handler: videoRecordingHandler,
       defaultEnabled: false,
       shouldEnsureDevice: (args) => !(args.action === "stop" && args.recordingId),
       deviceReadiness: (args) =>

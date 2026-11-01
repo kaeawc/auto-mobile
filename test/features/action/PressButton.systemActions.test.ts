@@ -59,7 +59,7 @@ class FakeSystemClient implements SystemClient {
     ...args: Parameters<SystemClient["requestGlobalAction"]>
   ): Promise<GlobalActionResult> {
     this.sentActions.push(args[0]);
-    args[5]?.();
+    args[3]?.onDispatch?.();
     return this.reply(args[0]);
   }
 }
@@ -67,9 +67,7 @@ class FakeSystemClient implements SystemClient {
 function pressButton(device: BootedDevice, client: SystemClient, adb = new FakeAdbExecutor()) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const press = new PressButton(device, adb, timer, undefined, undefined, {
-    systemActionClient: client,
-  });
+  const press = new PressButton(device, adb, timer, { systemActionClient: client });
   return { press, adb };
 }
 
@@ -120,13 +118,13 @@ describe("PressButton Android system actions (#14095)", () => {
       override async requestGlobalAction(
         ...args: Parameters<SystemClient["requestGlobalAction"]>
       ): Promise<GlobalActionResult> {
-        frameContexts.push(args[3]);
+        frameContexts.push(args[3]?.frameContext);
         return super.requestGlobalAction(...args);
       }
     }
     const client = new FrameRecordingClient(new Set(["global_action_lock_screen_v1"]));
     const { press } = pressButton(androidDevice, client);
-    await press.press("lock", undefined, "frame-3");
+    await press.press("lock", { frameContext: "frame-3" });
     expect(frameContexts).toEqual(["frame-3"]);
   });
 

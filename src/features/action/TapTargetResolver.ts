@@ -9,7 +9,7 @@ import {
   type StableTapTargetResult,
 } from "./androidStableTapTarget";
 import { pollSearchUntil } from "./searchUntilPoller";
-import { FocusVerifier } from "./tapFocusVerifier";
+import { FocusVerifier, type FocusVerificationHints } from "./tapFocusVerifier";
 import { readFreshPlatformHierarchy, returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
 import { POST_TAP_EFFECT_POLL_MS } from "./tapPostTapSettler";
 import { resolveSearchUntilDuration } from "./tapSharedHelpers";
@@ -230,13 +230,9 @@ export class TapTargetResolver {
     options: TapOnElementOptions,
     target: Element,
     observation?: ObserveResult,
-    labelText?: string,
-    selectedIndex?: number,
-    preTapHierarchy?: ViewHierarchyResult,
+    hints: FocusVerificationHints = {},
   ): boolean {
-    return this.host
-      .focusVerifier()
-      .verify(options, target, observation, labelText, selectedIndex, preTapHierarchy);
+    return this.host.focusVerifier().verify(options, target, observation, hints);
   }
 
   invisibleMatchFailure(
@@ -406,9 +402,14 @@ export class TapTargetResolver {
       this.host.device(),
       this.host.adb(),
       captured.displayId,
-      signal,
-      { panelUniqueId: captured.panelUniqueId, panelFingerprint: captured.panelFingerprint },
-      false,
+      {
+        signal,
+        identity: {
+          panelUniqueId: captured.panelUniqueId,
+          panelFingerprint: captured.panelFingerprint,
+        },
+        allowProbe: false,
+      },
     );
     const resolved = await displayCache.resolve(this.host.device(), this.host.adb(), signal);
     const panel =
@@ -453,8 +454,7 @@ export class TapTargetResolver {
     options: TapVerificationOptions,
     observeResult: Partial<Pick<ObserveResult, "viewHierarchy" | "screenSize">>,
     action: TapOnElementOptions["action"],
-    requireResourceId: boolean,
-    signal?: AbortSignal,
+    { requireResourceId, signal }: { requireResourceId: boolean; signal?: AbortSignal },
   ): Promise<StableTapTargetResult> {
     return resolveAndroidStableTapTarget(
       {
@@ -577,7 +577,9 @@ export class TapTargetResolver {
     );
     let selection = initialSearch.selection;
     const invisibleError = () =>
-      this.host.invisibleMatchFailure(selection, options, latestViewHierarchy, latestScreenSize);
+      this.host.invisibleMatchFailure(selection, options, latestViewHierarchy, {
+        screenSize: latestScreenSize,
+      });
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
     if (!element && selection.matchedElement) {
@@ -763,10 +765,17 @@ export class TapTargetResolver {
 
   async handleElementNotFound(
     options: TapOnElementOptions,
-    observeResult?: ObserveResult,
-    containerFound: boolean = true,
-    signal?: AbortSignal,
-    selection?: ElementSelectionResult,
+    {
+      observeResult,
+      containerFound = true,
+      signal,
+      selection,
+    }: {
+      observeResult?: ObserveResult;
+      containerFound?: boolean;
+      signal?: AbortSignal;
+      selection?: ElementSelectionResult;
+    } = {},
   ): Promise<never> {
     this.assertContainerFound(options, containerFound);
     const containerHint = this.containerHint(options);
@@ -790,9 +799,12 @@ export class TapTargetResolver {
           resourceId: options.elementId,
           description: `Interactive element for tapping (action: ${options.action})`,
         },
-        this.host.visionConfig(),
-        baseError,
-        { signal, visionAnalyzer: this.host.visionAnalyzer() },
+        {
+          visionConfig: this.host.visionConfig(),
+          baseError,
+          signal,
+          visionAnalyzer: this.host.visionAnalyzer(),
+        },
       );
       throw new TapTargetUnavailableError(enrichedMsg, "not-found");
     }

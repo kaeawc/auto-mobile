@@ -316,8 +316,7 @@ class WebSocketServer(
     // PointerInstrumentation injects a stylus (tool type, pressure, tilt, buttons) through
     // UiAutomation, which accessibility dispatchGesture cannot, and hover enter/move/exit (#13097).
     // Hosts require the flag before sending either. Only where `am instrument --no-restart` exists
-    // (see PointerInjectionSupport); device-unverified until the probe in the design note runs, so
-    // releases stay gated by the manual test.
+    // (see PointerInjectionSupport).
     if (PointerInjectionSupport.advertised(options.sdkInt())) {
       add("stylus_input_v1")
       add("hover_input_v1")

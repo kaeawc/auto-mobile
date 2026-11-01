@@ -46,7 +46,7 @@ describe("DeviceSessionRepository", () => {
     clearAutolockEnv();
     db = await createTestDatabase();
     timer = new FakeTimer();
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -76,22 +76,21 @@ describe("DeviceSessionRepository", () => {
         hasReceivedHeartbeat: false,
       });
       if (reason !== "active") {
-        await store.markReleased(
-          id,
-          reason === "daemon-restart" ? "expired" : "released",
-          1_100,
+        await store.markReleased(id, reason === "daemon-restart" ? "expired" : "released", 1_100, {
           reason,
-        );
+        });
       }
       const before = await store.getSession(id);
-      const write = store.markReleased(id, "released", 1_200, "plan-auto-release", {
+      const write = store.markReleased(id, "released", 1_200, {
+        reason: "plan-auto-release",
         expectedRowGeneration: generation,
         unlessDaemonShutdown: true,
       });
       if (reason === "daemon-shutdown") {
         await expect(write).rejects.toBeInstanceOf(DeviceSessionRowNotReleasableError);
         expect(await store.getSession(id)).toEqual(before);
-        await store.markReleased(id, "released", 1_300, "explicit-release", {
+        await store.markReleased(id, "released", 1_300, {
+          reason: "explicit-release",
           expectedRowGeneration: generation,
         });
         expect(await store.getSession(id)).toMatchObject({ release_reason: "explicit-release" });
@@ -124,7 +123,7 @@ describe("DeviceSessionRepository", () => {
       if (status !== "missing") {
         await repo.upsertActiveSession(record);
         if (status !== "active") {
-          await repo.markReleased(record.sessionUuid, status, 1_000, "daemon-shutdown");
+          await repo.markReleased(record.sessionUuid, status, 1_000, { reason: "daemon-shutdown" });
         }
       }
       const before = await repo.getSession(record.sessionUuid);
@@ -177,7 +176,7 @@ describe("DeviceSessionRepository", () => {
       hasReceivedHeartbeat: true,
     });
     await repo.recordLivenessOwnership("session-1", "owner-token");
-    await repo.markReleased("session-1", "released", 4000, "explicit-release");
+    await repo.markReleased("session-1", "released", 4000, { reason: "explicit-release" });
 
     const row = await repo.getSession("session-1");
     expect(row).toBeDefined();
@@ -211,7 +210,7 @@ describe("DeviceSessionRepository", () => {
     });
     await repo.recordLivenessOwnership("recoverable-session", "current-owner");
 
-    await repo.markReleased("recoverable-session", "released", 4000, "daemon-shutdown");
+    await repo.markReleased("recoverable-session", "released", 4000, { reason: "daemon-shutdown" });
 
     expect(await repo.getSession("recoverable-session")).toMatchObject({
       release_reason: "daemon-shutdown",
@@ -237,7 +236,7 @@ describe("DeviceSessionRepository", () => {
         heartbeatTimeoutMs: 10_000,
         hasReceivedHeartbeat: false,
       });
-      await repo.markReleased(sessionUuid, "expired", 4000, reason);
+      await repo.markReleased(sessionUuid, "expired", 4000, { reason });
     }
     await repo.upsertActiveSession({
       sessionUuid: "active-without-release",
@@ -272,7 +271,7 @@ describe("DeviceSessionRepository", () => {
         heartbeatTimeoutMs: 10_000,
         hasReceivedHeartbeat: false,
       });
-      await repo.markReleased(sessionUuid, "released", 1, "daemon-shutdown");
+      await repo.markReleased(sessionUuid, "released", 1, { reason: "daemon-shutdown" });
     }
 
     const originalMarkReleased = repo.markReleased.bind(repo);
@@ -290,18 +289,13 @@ describe("DeviceSessionRepository", () => {
       expect(warnSpy.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
         "failing-expired",
       );
-      expect(markReleasedSpy).toHaveBeenCalledWith(
-        "remaining-expired",
-        "expired",
-        10_000,
-        "expired",
-        {
-          expectedRowGeneration: 0,
-          onlyIfRecoverable: true,
-          onlyIfExpiredAtMs: 10_000,
-          unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: [] },
-        },
-      );
+      expect(markReleasedSpy).toHaveBeenCalledWith("remaining-expired", "expired", 10_000, {
+        reason: "expired",
+        expectedRowGeneration: 0,
+        onlyIfRecoverable: true,
+        onlyIfExpiredAtMs: 10_000,
+        unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: [] },
+      });
       expect(await repo.getSession("remaining-expired")).toMatchObject({ status: "expired" });
     } finally {
       markReleasedSpy.mockRestore();
@@ -384,7 +378,7 @@ describe("DeviceSessionRepository", () => {
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: false,
     });
-    await repo.markReleased("past-retention", "released", 0, "daemon-restart");
+    await repo.markReleased("past-retention", "released", 0, { reason: "daemon-restart" });
     await repo.upsertActiveSession({
       sessionUuid: "spent-session",
       deviceId: "emulator-5556",
@@ -396,7 +390,7 @@ describe("DeviceSessionRepository", () => {
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: false,
     });
-    await repo.markReleased("spent-session", "released", 1, "daemon-shutdown");
+    await repo.markReleased("spent-session", "released", 1, { reason: "daemon-shutdown" });
 
     await timer.advanceTimeAsync(sevenDaysMs + 1_000);
 
@@ -421,12 +415,9 @@ describe("DeviceSessionRepository", () => {
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: false,
     });
-    await repo.markReleased(
-      "past-retention-expired",
-      "released",
-      nowMs - eightDaysMs,
-      "daemon-restart",
-    );
+    await repo.markReleased("past-retention-expired", "released", nowMs - eightDaysMs, {
+      reason: "daemon-restart",
+    });
 
     await repo.listRecoverableSessions();
 
@@ -448,12 +439,9 @@ describe("DeviceSessionRepository", () => {
       heartbeatTimeoutMs: 10_000,
       hasReceivedHeartbeat: false,
     });
-    await repo.markReleased(
-      "in-retention-expired",
-      "released",
-      nowMs - yesterdayMs,
-      "daemon-restart",
-    );
+    await repo.markReleased("in-retention-expired", "released", nowMs - yesterdayMs, {
+      reason: "daemon-restart",
+    });
 
     await repo.listRecoverableSessions();
 
@@ -706,7 +694,7 @@ describe("DeviceSessionRepository", () => {
         heartbeatTimeoutMs: 60_000,
         hasReceivedHeartbeat: true,
       });
-      await repo.markReleased(sessionUuid, "released", 2000, "daemon-shutdown");
+      await repo.markReleased(sessionUuid, "released", 2000, { reason: "daemon-shutdown" });
       return (await repo.getSession(sessionUuid))!;
     };
 
@@ -785,7 +773,7 @@ describe("DeviceSessionRepository", () => {
         { rowGeneration: claimed! + 1, daemonSessionId: "dead-daemon" },
         "daemon-b",
       );
-      await repo.markReleased("s4", "released", 3000, "explicit-release");
+      await repo.markReleased("s4", "released", 3000, { reason: "explicit-release" });
       expect(
         await repo.releaseRecoverableSessionClaim(
           "s4",
@@ -819,7 +807,8 @@ describe("DeviceSessionRepository", () => {
         hasReceivedHeartbeat: true,
       };
       const claimedRow = { rowGeneration: claimed!, daemonSessionId: "daemon-a" };
-      await repo.markReleased("s5", "released", 2500, "explicit-release", {
+      await repo.markReleased("s5", "released", 2500, {
+        reason: "explicit-release",
         expectedRowGeneration: claimed!,
       });
 
@@ -1024,7 +1013,9 @@ describe("DeviceSessionRepository", () => {
           expiresAtMs: 63_000,
         }),
       );
-      await repo.markReleased("cancelled-autolock", status, 2000, "session-creation-cancelled");
+      await repo.markReleased("cancelled-autolock", status, 2000, {
+        reason: "session-creation-cancelled",
+      });
       const released = await repo.getSession("cancelled-autolock");
       pendingMetadata.resolve();
       await lateWrite;
@@ -1049,13 +1040,10 @@ describe("DeviceSessionRepository", () => {
     };
     await repo.upsertActiveSession(base);
     await repo.upsertActiveSession({ ...base, sessionUuid: "plain-released" });
-    await repo.markReleased(
-      "restarting",
-      "released",
-      10_000,
-      deviceRestartReleaseReason("Pixel_8_API_35"),
-    );
-    await repo.markReleased("plain-released", "released", 10_000, "explicit-release");
+    await repo.markReleased("restarting", "released", 10_000, {
+      reason: deviceRestartReleaseReason("Pixel_8_API_35"),
+    });
+    await repo.markReleased("plain-released", "released", 10_000, { reason: "explicit-release" });
 
     await repo.recordRestartRecoveryActivity("restarting", 60_000);
     expect((await repo.getSession("restarting"))?.expires_at_ms).toBe(180_000);
@@ -1085,7 +1073,7 @@ describe("DeviceSessionRepository", () => {
       heartbeatTimeoutMs: 60_000,
       hasReceivedHeartbeat: false,
     });
-    await repo.markReleased("session-1", "released", 2000, "explicit-release");
+    await repo.markReleased("session-1", "released", 2000, { reason: "explicit-release" });
 
     // Zero rows matched: a failure, not a silent success the dedupe would remember (#11129).
     await expect(
@@ -1167,12 +1155,14 @@ describe("DeviceSessionRepository", () => {
     const reacquired = await repo.upsertActiveSession({ ...record, lastUsedAtMs: 2000 });
     expect(reacquired).toBe(released + 1);
 
-    await repo.markReleased("session-1", "released", 1500, "daemon-shutdown", {
+    await repo.markReleased("session-1", "released", 1500, {
+      reason: "daemon-shutdown",
       expectedRowGeneration: released,
     });
     expect((await repo.getSession("session-1"))!.status).toBe("active");
 
-    await repo.markReleased("session-1", "released", 3000, "daemon-shutdown", {
+    await repo.markReleased("session-1", "released", 3000, {
+      reason: "daemon-shutdown",
       expectedRowGeneration: reacquired,
     });
     expect((await repo.getSession("session-1"))!.release_reason).toBe("daemon-shutdown");
@@ -1186,7 +1176,7 @@ describe("DeviceSessionRepository", () => {
       override async markReleased(
         ...args: Parameters<DeviceSessionRepository["markReleased"]>
       ): Promise<void> {
-        if (args[3] === "daemon-shutdown" && releaseGate === undefined) {
+        if (args[3].reason === "daemon-shutdown" && releaseGate === undefined) {
           lateWrite = new Promise<void>((resolve) => {
             releaseGate = resolve;
           }).then(() => super.markReleased(...args));
@@ -1195,7 +1185,7 @@ describe("DeviceSessionRepository", () => {
         await super.markReleased(...args);
       }
     }
-    const delayed = new DelayedReleaseRepository(db, timer);
+    const delayed = new DelayedReleaseRepository({ db, timer });
     const sessionManager = new SessionManager(timer, delayed);
     try {
       await sessionManager.createSession("session-1", "emulator-5554", "android", {
@@ -1247,7 +1237,7 @@ describe("DeviceSessionRepository", () => {
         heartbeatTimeoutMs: 60_000,
       });
       // A peer daemon judged this daemon dead and expired the row.
-      await repo.markReleased("session-1", "expired", 500, "daemon-restart");
+      await repo.markReleased("session-1", "expired", 500, { reason: "daemon-restart" });
       timer.advanceTime(1000);
       await sessionManager.getOrCreateSession("session-1");
 
@@ -1268,7 +1258,7 @@ describe("DeviceSessionRepository", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 60_000,
       });
-      await repo.markReleased("session-1", "released", 500, "explicit-release");
+      await repo.markReleased("session-1", "released", 500, { reason: "explicit-release" });
       timer.advanceTime(1000);
       // The row's terminal release ends the live session with the typed refusal (#11498).
       await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow(
@@ -1296,7 +1286,7 @@ describe("DeviceSessionRepository", () => {
       heartbeatTimeoutMs: 60_000,
       hasReceivedHeartbeat: true,
     });
-    await repo.markReleased("recoverable", "expired", 1000, "daemon-restart");
+    await repo.markReleased("recoverable", "expired", 1000, { reason: "daemon-restart" });
     // The wall timer reads past the expiry; the session-clock instant the caller passes does not.
     timer.setCurrentTime(121_000);
 
@@ -1320,7 +1310,7 @@ describe("DeviceSessionRepository", () => {
         return await super.listRecoverableSessions(nowMs);
       }
     }
-    const sessionManager = new SessionManager(timer, new ClockRecordingRepository(db, timer));
+    const sessionManager = new SessionManager(timer, new ClockRecordingRepository({ db, timer }));
     try {
       const sessionClock = sessionManager.sessionNow();
       // A backward wall step: the session clock holds, the wall timer falls an hour behind.
@@ -1705,7 +1695,7 @@ describe("DeviceSessionRepository", () => {
 
     test("uses current time when rebinding a session created before the retention window", async () => {
       await repo.upsertActiveSession(makeRecord({ sessionUuid: "old" }));
-      await repo.markReleased("old", "released", oneDayMs, "explicit-release");
+      await repo.markReleased("old", "released", oneDayMs, { reason: "explicit-release" });
       timer.advanceTime(10 * oneDayMs);
       await repo.upsertActiveSession(makeRecord({ sessionUuid: "rebound", createdAtMs: 0 }));
       expect(await repo.getSession("old")).toBeUndefined();
@@ -1720,10 +1710,14 @@ describe("DeviceSessionRepository", () => {
 
     test("upsertActiveSession prunes terminal-state rows past the retention window", async () => {
       await repo.upsertActiveSession(makeRecord({ sessionUuid: "old-released" }));
-      await repo.markReleased("old-released", "released", 1 * oneDayMs, "explicit-release");
+      await repo.markReleased("old-released", "released", 1 * oneDayMs, {
+        reason: "explicit-release",
+      });
 
       await repo.upsertActiveSession(makeRecord({ sessionUuid: "recent-released" }));
-      await repo.markReleased("recent-released", "released", 9 * oneDayMs, "explicit-release");
+      await repo.markReleased("recent-released", "released", 9 * oneDayMs, {
+        reason: "explicit-release",
+      });
 
       // A new session starting at day 10 triggers the prune — runs an unconditional
       // delete-before-write prune. Cutoff = day 10 - 7 days = day 3, so the
@@ -1745,7 +1739,9 @@ describe("DeviceSessionRepository", () => {
 
     test("keeps terminal-state rows when none are old enough", async () => {
       await repo.upsertActiveSession(makeRecord({ sessionUuid: "session-1" }));
-      await repo.markReleased("session-1", "released", 2 * oneDayMs, "explicit-release");
+      await repo.markReleased("session-1", "released", 2 * oneDayMs, {
+        reason: "explicit-release",
+      });
 
       // Cutoff = day 3 - 7 days = negative: nothing is old enough to prune.
       timer.advanceTime(3 * oneDayMs);

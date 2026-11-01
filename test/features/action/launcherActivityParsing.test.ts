@@ -146,6 +146,18 @@ describe("package dump launcher filters", () => {
     ]);
   });
 
+  test("accepts MAIN plus LEANBACK_LAUNCHER in the existing package-dump parser", () => {
+    expect(
+      parseLauncherActivitiesFromPackageDump(
+        playground.replaceAll(
+          'Category: "android.intent.category.LAUNCHER"',
+          'Category: "android.intent.category.LEANBACK_LAUNCHER"',
+        ),
+        playgroundPackage,
+      ),
+    ).toEqual([".MainActivity"]);
+  });
+
   test("real egg dump rejects MAIN activities without LAUNCHER", () => {
     expect(parseLauncherActivities(egg, "com.android.egg")[0]).toBe(".landroid.MainActivity");
     expect(parseLauncherActivitiesFromPackageDump(egg, "com.android.egg")).toEqual([]);

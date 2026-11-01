@@ -4,7 +4,7 @@ import { notifyDeviceIdentityReplaced } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
 import { displayTransitions } from "../../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../../features/observe/cache/ObserveCacheRegistry";
-import { ActionableError, BootedDevice, DeviceInfo } from "../../models";
+import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../../models";
 import { PlatformDeviceManager } from "../../devices/deviceUtils";
 import { Timer } from "../../utils/SystemTimer";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -68,7 +68,7 @@ export interface MembershipOperations {
   notifyDeviceReady(deviceId: string): void;
   notifyDeviceStateChanged(device: Pick<PooledDevice, "id" | "platform">): void;
   notifyDeviceFramesInvalidated(deviceId: string): void;
-  notifyDeviceRemoved(deviceId: string, platform: "android" | "ios"): void;
+  notifyDeviceRemoved(deviceId: string, platform: Platform): void;
   addDevice(
     device: BootedDevice,
     sourceImage?: DeviceInfo,
@@ -333,7 +333,7 @@ export class DevicePoolMembership {
   }
 
   /** Notify consumers that a device has been removed from the pool. */
-  notifyDeviceRemoved(deviceId: string, platform: "android" | "ios"): void {
+  notifyDeviceRemoved(deviceId: string, platform: Platform): void {
     try {
       this.state.onDeviceRemoved?.(deviceId, platform);
     } catch (error) {
@@ -400,7 +400,7 @@ export class DevicePoolMembership {
       this.notifyDeviceIncarnationAssigned(device.deviceId);
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
       this.state.deviceSessionStarts.set(device.deviceId, now);
-      this.state.refreshMissingDeviceMisses.delete(device.deviceId);
+      this.state.refreshMissingDeviceMisses.reset(device.deviceId);
       const sessionTracking = this.callbacks.setDeviceSessionTracking(device.deviceId, now);
       if (awaitSessionTracking) {
         await sessionTracking;
@@ -545,7 +545,7 @@ export class DevicePoolMembership {
     this.state.deferredDeviceReleases.delete(deviceId);
     this.notifyDeviceRemoved(deviceId, device.platform);
     this.state.deviceSessionStarts.delete(deviceId);
-    this.state.refreshMissingDeviceMisses.delete(deviceId);
+    this.state.refreshMissingDeviceMisses.reset(deviceId);
     this.dropTrackedProcessOnRemoval(deviceId, options);
     for (const [capturedSessionId, capture] of this.state.releasedDeviceCaptures) {
       if (capture.deviceId === deviceId) {

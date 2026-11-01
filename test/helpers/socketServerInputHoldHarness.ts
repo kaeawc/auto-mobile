@@ -1,7 +1,7 @@
 import { expect, spyOn } from "bun:test";
 import type { Socket } from "node:net";
 import type { UnixSocketServer } from "../../src/daemon/socketServer";
-import type { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
+import type { SocketRequestHandling } from "../../src/daemon/socketServerParts/SocketAdmission";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
@@ -110,10 +110,13 @@ export class InputHoldServer extends UnixSocketServerHarness {
     sessionId: string,
     socket: Socket,
     request: DaemonRequest,
-    receivedAtMs: number,
-    onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
+    options?: { receivedAtMs?: number; handling?: SocketRequestHandling },
   ): Promise<DaemonResponse | undefined> {
-    const result = super.handleRequest(sessionId, socket, request, receivedAtMs, onAdmitted);
+    // Forwards only the admission hook, as before: the request context is rebuilt at receipt.
+    const result = super.handleRequest(sessionId, socket, request, {
+      receivedAtMs: options?.receivedAtMs,
+      handling: { onAdmitted: options?.handling?.onAdmitted },
+    });
     this.handled.push(result);
     return result;
   }
@@ -143,11 +146,13 @@ export class InputHoldServer extends UnixSocketServerHarness {
     toolName: string,
     targetDevice: BootedDevice,
     operation: (signal?: AbortSignal, dispatching?: () => void) => Promise<T>,
-    ownerSignal?: AbortSignal,
-    requester?: () => string | undefined,
+    {
+      ownerSignal,
+      requester,
+    }: { ownerSignal?: AbortSignal; requester?: () => string | undefined } = {},
   ): Promise<T> {
     return this.realTracking
-      ? super.runTrackedDeviceInput(toolName, targetDevice, operation, ownerSignal, requester)
+      ? super.runTrackedDeviceInput(toolName, targetDevice, operation, { ownerSignal, requester })
       : this.trackedInput(toolName, targetDevice, operation, ownerSignal);
   }
 

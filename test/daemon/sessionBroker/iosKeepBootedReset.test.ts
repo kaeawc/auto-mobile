@@ -155,7 +155,12 @@ async function harness(
     timer,
     health,
     run: (count = 0, signal?: AbortSignal, runResetBoot?: ResetBootRunner) =>
-      reset.resetWithTiming(DEVICE, PROFILE, owned, SCOPE, count, { signal, runResetBoot }),
+      reset.resetWithTiming(DEVICE, PROFILE, owned, {
+        scope: SCOPE,
+        reuseCount: count,
+        signal,
+        runResetBoot,
+      }),
   };
 }
 

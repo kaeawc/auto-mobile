@@ -35,7 +35,7 @@ function gateWithFailingPs(os: HostOsInfo): IosSimCapacityGate {
     new FakeHostCommandExecutor(), // empty ps output => the process read fails
     new FakeTimer(),
     os,
-    new FakeSimctl(),
+    { simctl: new FakeSimctl() },
   );
   const timer = new FakeTimer();
   return new IosSimCapacityGate(

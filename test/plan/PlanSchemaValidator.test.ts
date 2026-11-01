@@ -75,6 +75,9 @@ ${condition}
       "        faults:\n          killApp: unset\n          trimMemory: unset",
       "        faults:\n          corruptAppFile:\n            package: com.example.app\n            path: databases/app.db\n            mode: overwrite",
       "        faults:\n          corruptAppFile: unset",
+      "        faults:\n          clockSkew:\n            offsetSeconds: 86400",
+      "        faults:\n          clockSkew:\n            offsetSeconds: -3600",
+      "        faults:\n          clockSkew: unset",
     ]) {
       const result = validator.validateYaml(plan(accepts));
       expect(result.errors ?? []).toEqual([]);
@@ -95,6 +98,10 @@ ${condition}
       "        faults:\n          trimMemory:\n            package: com.example.app\n            level: LOW",
       "        faults:\n          trimMemory:\n            package: com.example.app",
       "        faults:\n          clearPackageData:\n            package: nodots",
+      "        faults:\n          clockSkew:\n            offsetSeconds: 0",
+      "        faults:\n          clockSkew:\n            offsetSeconds: 2",
+      "        faults:\n          clockSkew:\n            offsetSeconds: 315360001",
+      "        faults:\n          clockSkew: on",
       "        faults:\n          revokePermission:\n            package: com.example.app",
       "        faults:\n          revokePermission:\n            package: nodots\n            permission: CAMERA",
       "        faults:\n          revokePermission:\n            package: com.example.app\n            permission: CAMERA\n            user: 10",

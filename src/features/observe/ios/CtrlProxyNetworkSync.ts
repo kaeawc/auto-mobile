@@ -198,7 +198,13 @@ export class CtrlProxyNetworkSync {
         requestId,
         "set_network_mock_rules_result",
         timeoutMs,
-        (_id, _type, timeoutMs) => ({ success: false, timedOut: true, totalTimeMs: timeoutMs }),
+        {
+          timeoutErrorFactory: (_id, _type, timeoutMs) => ({
+            success: false,
+            timedOut: true,
+            totalTimeMs: timeoutMs,
+          }),
+        },
       );
       // sendMessage returns false (and logs) when the socket is not open.
       if (

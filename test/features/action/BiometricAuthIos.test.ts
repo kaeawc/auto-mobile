@@ -40,7 +40,10 @@ describe("BiometricAuth - iOS Simulator", () => {
   });
 
   test("match + fingerprint preserves enrollment then posts fingerTouch.match", async () => {
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "match", modality: "fingerprint" });
 
     expect(result.success).toBe(true);
@@ -53,7 +56,10 @@ describe("BiometricAuth - iOS Simulator", () => {
   });
 
   test("match + face posts pearl.match", async () => {
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "match", modality: "face" });
 
     expect(result.success).toBe(true);
@@ -62,7 +68,10 @@ describe("BiometricAuth - iOS Simulator", () => {
   });
 
   test("match + any posts BOTH fingerTouch and pearl match (works on either biometry)", async () => {
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "match" });
 
     expect(result.success).toBe(true);
@@ -72,7 +81,10 @@ describe("BiometricAuth - iOS Simulator", () => {
   });
 
   test("fail + fingerprint posts fingerTouch.nomatch", async () => {
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "fail", modality: "fingerprint" });
 
     expect(result.success).toBe(true);
@@ -80,14 +92,20 @@ describe("BiometricAuth - iOS Simulator", () => {
   });
 
   test("fail + face posts pearl.nomatch", async () => {
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     await auth.execute({ action: "fail", modality: "face" });
     expect(commands()).toContain(`spawn ${SIM_UDID} notifyutil -p ${PEARL_NOMATCH}`);
   });
 
   test("enroll explicitly sets and verifies iOS Simulator enrollment", async () => {
     simctl.setCommandResult(ENROLL_COMMAND, `${ENROLL} 1\n${ENROLL}\n`);
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
 
     const result = await auth.execute({ action: "enroll" });
 
@@ -98,7 +116,10 @@ describe("BiometricAuth - iOS Simulator", () => {
 
   test("unenroll explicitly clears and verifies iOS Simulator enrollment", async () => {
     simctl.setCommandResult(UNENROLL_COMMAND, `${ENROLL} 0\n${ENROLL}\n`);
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
 
     const result = await auth.execute({ action: "unenroll" });
 
@@ -116,7 +137,10 @@ describe("BiometricAuth - iOS Simulator", () => {
       state,
     );
     try {
-      const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+      const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+        simctl,
+        iosSdkTriggers: () => noSdk,
+      });
       const result = await auth.execute({
         action: "enroll",
         modality: "face",
@@ -143,7 +167,10 @@ describe("BiometricAuth - iOS Simulator", () => {
   });
 
   test("physical iOS device is unsupported (no public injection API)", async () => {
-    const auth = new BiometricAuth(makeDevice(PHYSICAL_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(PHYSICAL_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "match", modality: "face" });
 
     expect(result.success).toBe(false);
@@ -153,7 +180,10 @@ describe("BiometricAuth - iOS Simulator", () => {
   });
 
   test("cancel is partial on iOS (no simctl equivalent)", async () => {
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "cancel" });
 
     expect(result.success).toBe(false);
@@ -162,7 +192,10 @@ describe("BiometricAuth - iOS Simulator", () => {
   });
 
   test("error is partial on iOS (no simctl equivalent)", async () => {
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "error", errorCode: 7 });
 
     expect(result.success).toBe(false);
@@ -175,7 +208,10 @@ describe("BiometricAuth - iOS Simulator", () => {
       "",
       "notifyutil: command not found",
     );
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "match", modality: "fingerprint" });
 
     expect(result.success).toBe(false);
@@ -185,7 +221,10 @@ describe("BiometricAuth - iOS Simulator", () => {
 
   test("enrollment read failure surfaces before posting biometric event", async () => {
     simctl.setCommandResult(ENROLL_GET_COMMAND, "", "notifyutil: enrollment unavailable");
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "match", modality: "fingerprint" });
 
     expect(result.success).toBe(false);
@@ -196,7 +235,10 @@ describe("BiometricAuth - iOS Simulator", () => {
 
   test("unenrolled state prevents match without silently enrolling", async () => {
     simctl.setCommandResult(ENROLL_GET_COMMAND, `${ENROLL} 0\n`);
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "match", modality: "fingerprint" });
 
     expect(result.success).toBe(false);
@@ -207,7 +249,10 @@ describe("BiometricAuth - iOS Simulator", () => {
 
   test("thrown simctl error is caught and reported", async () => {
     simctl.setCommandError(ENROLL_GET_COMMAND, new Error("simctl unavailable"));
-    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl, () => noSdk);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, {
+      simctl,
+      iosSdkTriggers: () => noSdk,
+    });
     const result = await auth.execute({ action: "match", modality: "fingerprint" });
 
     expect(result.success).toBe(false);
@@ -223,7 +268,10 @@ describe("BiometricAuth - iOS in-app SDK trigger route (#1580)", () => {
   const makeDevice = (deviceId: string): BootedDevice =>
     ({ deviceId, platform: "ios" }) as BootedDevice;
   const makeAuth = (deviceId: string = SIM_UDID) =>
-    new BiometricAuth(makeDevice(deviceId), null, timer, simctl, () => sdk);
+    new BiometricAuth(makeDevice(deviceId), null, timer, {
+      simctl,
+      iosSdkTriggers: () => sdk,
+    });
   const commands = (): string[] =>
     simctl.getMethodCalls("executeCommand").map((c) => String(c.command));
 

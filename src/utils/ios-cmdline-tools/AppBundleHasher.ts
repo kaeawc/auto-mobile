@@ -54,8 +54,7 @@ const collectPaths = async (
   root: string,
   current: string,
   deps: AppBundleHasherDependencies,
-  output: BundleEntry[],
-  options: AppBundleHasherOptions,
+  { output, options }: { output: BundleEntry[]; options: AppBundleHasherOptions },
 ): Promise<void> => {
   const entries = await deps.readDir(current);
   entries.sort();
@@ -72,7 +71,7 @@ const collectPaths = async (
       type = "symlink";
     } else if (stats.isDirectory()) {
       type = "directory";
-      await collectPaths(root, fullPath, deps, output, options);
+      await collectPaths(root, fullPath, deps, { output, options });
     } else if (stats.isFile()) {
       type = "file";
     }
@@ -95,7 +94,7 @@ export const hashAppBundle = async (
   }
   const hash = createHash("sha256");
   const entries: BundleEntry[] = [];
-  await collectPaths(bundlePath, bundlePath, deps, entries, options);
+  await collectPaths(bundlePath, bundlePath, deps, { output: entries, options });
   entries.sort((a, b) =>
     a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0,
   );

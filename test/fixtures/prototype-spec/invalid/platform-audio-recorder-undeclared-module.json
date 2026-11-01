@@ -1,0 +1,73 @@
+{
+  "spec": {
+    "id": "r",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "draft": {
+        "voiceNote": {}
+      }
+    },
+    "state": {
+      "recStatus": ""
+    },
+    "requires": {
+      "platform": ["haptics"],
+      "permissions": [
+        {
+          "name": "microphone",
+          "purpose": "Record a voice note"
+        }
+      ]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Hold to record",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "audioRecorder.start",
+              "args": {
+                "maxDurationMs": {
+                  "value": 60000
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "audioRecorder.stop",
+              "args": {},
+              "into": "/data/draft/voiceNote",
+              "statusKey": "recStatus"
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Discard",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "audioRecorder.cancel",
+              "args": {}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].call",
+  "expectedMessage": "Platform module audioRecorder is not declared in requires.platform"
+}

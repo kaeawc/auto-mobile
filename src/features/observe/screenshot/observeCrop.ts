@@ -114,8 +114,10 @@ export async function createObserveCrop(
   crop: ObserveCrop,
   observation: ObserveResult,
   platform: "android" | "ios",
-  dependencies: ObserveCropDependencies = {},
-  selectorObservation: ObserveResult = observation,
+  {
+    dependencies = {},
+    selectorObservation = observation,
+  }: { dependencies?: ObserveCropDependencies; selectorObservation?: ObserveResult } = {},
 ): Promise<ObserveCropResult> {
   const { screenshotPath, hierarchy } = requireCropCapture(observation);
   const bounds = requestedBounds(crop, selectorObservation);
@@ -130,8 +132,7 @@ export async function createObserveCrop(
       nativeScale: hierarchy.nativeScale,
       rasterOrientation: observation.screenshotOrientation,
     },
-    dependencies.imageBackend ?? resolveImageBackend(),
-    "observe crop",
+    { backend: dependencies.imageBackend ?? resolveImageBackend(), label: "observe crop" },
   );
   const cropPath = path.join(
     dependencies.outputDirectory?.() ?? ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS),

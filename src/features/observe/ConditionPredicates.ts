@@ -234,8 +234,7 @@ function idWaitCandidates(
   resolver: ConditionResolver,
   observation: ObserveResult,
   selector: ConditionSelector,
-  result: ElementResolution | undefined,
-  fallback: Element[],
+  { result, fallback }: { result?: ElementResolution; fallback: Element[] },
 ): Element[] {
   if (result?.chosen || selector.elementId === undefined) {
     return fallback;
@@ -308,13 +307,10 @@ export function appear(
       result?.matches
         .flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])
         .filter((node) => ownsSelectorText(node, selector.text)) ?? [];
-    const candidates = idWaitCandidates(
-      resolver,
-      observation,
-      selector,
+    const candidates = idWaitCandidates(resolver, observation, selector, {
       result,
-      sources.flatMap((node) => (node.element ? [node.element] : [])),
-    );
+      fallback: sources.flatMap((node) => (node.element ? [node.element] : [])),
+    });
     const source = boundedMatchedSource(result, selector);
     return {
       matched: Boolean(source),
@@ -373,7 +369,10 @@ export function clickable(
     const source = result?.matches.find(({ node }) => node === result.chosen)?.sourceNodes?.[0];
     const selected = source ?? result?.chosen;
     const actionable = isClickableWaitTarget(selected, selector);
-    const candidates = idWaitCandidates(resolver, observation, selector, result, elements(result));
+    const candidates = idWaitCandidates(resolver, observation, selector, {
+      result,
+      fallback: elements(result),
+    });
     return {
       matched: actionable,
       matchedElement: actionable ? selected?.element : undefined,

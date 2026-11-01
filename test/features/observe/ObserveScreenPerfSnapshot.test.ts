@@ -44,7 +44,7 @@ function createObserveScreen(): RealObserveScreen {
       deviceStateCollector: new FakeDeviceStateCollector(),
       ...noopObserveAudits(),
     },
-    fakeTimer,
+    { timer: fakeTimer },
   );
 }
 

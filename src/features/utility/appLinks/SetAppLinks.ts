@@ -260,12 +260,14 @@ async function runChange(
               [...before.verification].filter(([domain]) => writable.includes(domain)),
             ),
           },
-          RECORD_SCOPE.approve(userId),
-          deps.owner,
+          { scope: RECORD_SCOPE.approve(userId), owner: deps.owner },
         );
         await appLinks.setVerificationState(request.appId, "approved", writable, options);
       } else if (deps.owner !== undefined && deps.registry.get(device.deviceId, request.appId)) {
-        deps.registry.record(device, request.appId, before, { verification: false }, deps.owner);
+        deps.registry.record(device, request.appId, before, {
+          scope: { verification: false },
+          owner: deps.owner,
+        });
       }
       break;
     }
@@ -276,13 +278,10 @@ async function runChange(
       await appLinks.reverify(request.appId, options);
       break;
     case "userSelection":
-      await appLinks.setUserSelection(
-        request.appId,
-        userId,
-        request.enabled === true,
+      await appLinks.setUserSelection(request.appId, userId, request.enabled === true, {
         domains,
-        options,
-      );
+        ...options,
+      });
       break;
   }
   return skipped;
@@ -369,8 +368,7 @@ function forgetSettledRecord(
   registry: AppLinksRestoreRegistry,
   device: BootedDevice,
   appId: string,
-  userId: number,
-  after: AppLinksSnapshot,
+  { userId, after }: { userId: number; after: AppLinksSnapshot },
 ): void {
   const entry = registry.get(device.deviceId, appId);
   if (!entry) {
@@ -412,13 +410,13 @@ export async function setAppLinks(
   } else {
     if (request.action !== "approve") {
       const scope = RECORD_SCOPE[request.action](userId);
-      registry.record(device, request.appId, before, scope, deps.owner);
+      registry.record(device, request.appId, before, { scope, owner: deps.owner });
     }
     skipped = await runChange(request.action, request, deps, { userId, before, device });
   }
 
   const after = await readSnapshot(target, request.appId, userId, signal);
-  forgetSettledRecord(registry, device, request.appId, userId, after);
+  forgetSettledRecord(registry, device, request.appId, { userId, after });
   const unapplied = unappliedDomains(request, after, skipped);
   const actionMessage = actionNote(request, after, hadRecord);
   const receipt = appLinksRestoreReceipt(registry.get(device.deviceId, request.appId));

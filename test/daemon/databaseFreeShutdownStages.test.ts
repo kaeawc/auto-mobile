@@ -177,8 +177,7 @@ async function relayWithLiveCapture(timer: FakeTimer, source: RecordingSource): 
     },
     "/unused/database-free-probe.sock",
     timer,
-    allowAll,
-    { assertDeviceActionable: () => {} },
+    { authenticator: allowAll, admissionGate: { assertDeviceActionable: () => {} } },
   );
   const bind = spyOn(BaseSocketServer.prototype, "start").mockResolvedValue(undefined);
   try {

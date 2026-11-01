@@ -1,4 +1,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { Database as Sqlite } from "bun:sqlite";
+import { Kysely } from "kysely";
+import { Migrator } from "kysely/migration";
+import { BunSqliteDialect } from "../../../src/db/bunSqliteDialect";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import { ManagedDevicePort } from "../../../src/daemon/sessionBroker/managedDevicePort";
 import { BrokerDeviceAcquisition } from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
@@ -8,16 +12,14 @@ import {
   DefaultManagedSpecResolver,
 } from "../../../src/daemon/sessionBroker/provisioning/reconciler";
 import { BindingJournal } from "../../../src/daemon/sessionBroker/registry/bindingJournal";
-import { BINDING_REGISTRY_MIGRATIONS } from "../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
+import { bindingRegistryMigrationProvider } from "../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import {
   SqliteBindingRegistry,
   type BindingRegistryDatabase,
 } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { TeardownDeviceArgs } from "../../../src/server/deviceTools";
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
-import type { Kysely } from "kysely";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { createTestDatabase } from "../../db/testDbHelper";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   androidCatalog,
@@ -42,9 +44,6 @@ const config = (requestId: string, platform: Platform): SessionConfig => ({
   device: { schemaVersion: 1, platform, hardware: { kind: "omitted" }, os: { kind: "omitted" } },
 });
 
-/** `BindingRegistryDatabase` as a type literal, which `withTables` requires of its table map. */
-type BindingRegistryTables = { [K in keyof BindingRegistryDatabase]: BindingRegistryDatabase[K] };
-
 describe("legacy product inventory through broker lifecycle", () => {
   let registry: SqliteBindingRegistry;
   let timer: FakeTimer;
@@ -61,11 +60,15 @@ describe("legacy product inventory through broker lifecycle", () => {
   beforeAll(async () => {
     // Prepare one independent clone per case outside the 15ms lifecycle budget.
     for (let index = 0; index < 3; index++) {
-      const db = await createTestDatabase();
-      for (const migration of Object.values(BINDING_REGISTRY_MIGRATIONS)) {
-        await migration.up(db);
-      }
-      databases.push(db.withTables<BindingRegistryTables>());
+      const db = new Kysely<BindingRegistryDatabase>({
+        dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),
+      });
+      const { error } = await new Migrator({
+        db,
+        provider: bindingRegistryMigrationProvider,
+      }).migrateToLatest();
+      expect(error).toBeUndefined();
+      databases.push(db);
     }
   });
 

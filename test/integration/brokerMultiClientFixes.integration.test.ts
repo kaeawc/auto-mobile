@@ -257,7 +257,7 @@ test("stale expectedOwner cannot release a successor incarnation or leak control
   const successor = await manager.createSession(a.sessionUuid, deviceId, "ios");
   manager.bindAcquiredLivenessOwnerToken(a.sessionUuid, A.token);
   const seen: Array<{ uuid: string; options: SessionReleaseOptions }> = [];
-  manager.onSessionRelease((uuid, _device, _reason, _snapshot, options) => {
+  manager.onSessionRelease((uuid, _device, _reason, { snapshot: _snapshot, ...options }) => {
     seen.push({ uuid, options });
   });
   expect(

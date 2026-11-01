@@ -41,6 +41,7 @@ const PROTOTYPE_ARGS = {
 
 const CLASSIFICATION: Classification = {
   read: [
+    "captureAudio",
     "compareScreenshot",
     "getAppPermissions",
     "getDataStore",
@@ -153,6 +154,9 @@ const CLASSIFICATION: Classification = {
     "performanceTrace",
     // Starts and stops an on-device Perfetto recorder from typed categories; heapDump makes the app write a dump.
     "captureTrace",
+    // Feeds, then stops feeding, audio into the emulator microphone.
+    "injectAudioInput",
+    "stopAudioInput",
     "heapDump",
     "phoneCall",
     "pinchOn",
@@ -162,6 +166,7 @@ const CLASSIFICATION: Classification = {
     "putAppFile",
     "recentApps",
     "rotaryScroll",
+    "rotateCrown",
     "reconcileDeviceResources",
     "recordDeviceGestures",
     "removeKeyValue",
@@ -356,15 +361,10 @@ describe("device-aware tool read/control classification (#10965)", () => {
 
     test("an unclassified hidden device tool in a scratch registry fails (#11353)", () => {
       const scratch = new ToolRegistryClass();
-      scratch.registerDeviceAware(
-        "hiddenNewTool",
-        "x",
-        z.object({}),
-        async () => ({ content: [] }),
-        {
-          hidden: true,
-        },
-      );
+      scratch.registerDeviceAware("hiddenNewTool", "x", z.object({}), {
+        handler: async () => ({ content: [] }),
+        hidden: true,
+      });
       const tools = registeredTools(scratch).filter((tool) => tool.requiresDevice);
       expect(tools.map((tool) => tool.name)).toEqual(["hiddenNewTool"]);
       expect(classificationViolations(tools, { read: [], perArgs: {}, control: [] })).toEqual([

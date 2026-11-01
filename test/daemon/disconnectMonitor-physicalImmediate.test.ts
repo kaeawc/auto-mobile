@@ -5,6 +5,7 @@ import {
 } from "../../src/daemon/disconnectMonitor";
 import type { Platform } from "../../src/models";
 import { isPhysicalAndroidUsbSerial } from "../../src/utils/androidSerial";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
 
 const PHONE = "57281FDCH00462";
 const EMULATOR = "emulator-5554";
@@ -33,36 +34,47 @@ describe("isPhysicalAndroidUsbSerial", () => {
 describe("selectImmediateDisconnectCandidates", () => {
   test("selects only absent, non-offline physical USB Android candidates", () => {
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), new Set()),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), {
+        listedNonDeviceIds: new Set(),
+      }),
     ).toEqual(new Set([PHONE]));
   });
 
   test("selects nothing for a present or ADB-offline phone", () => {
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set([PHONE]), new Set()),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set([PHONE]), {
+        listedNonDeviceIds: new Set(),
+      }),
     ).toEqual(new Set());
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), new Set([PHONE])),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), {
+        listedNonDeviceIds: new Set([PHONE]),
+      }),
     ).toEqual(new Set());
   });
 
   test("skips a phone whose adbd AutoMobile is restarting", () => {
     const restarting = { isRestarting: (id: string) => id === PHONE };
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), new Set(), restarting),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), {
+        listedNonDeviceIds: new Set(),
+        transportRestarts: restarting,
+      }),
     ).toEqual(new Set());
   });
 
   test("selects nothing when the offline probe result is unknown", () => {
     expect(
-      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), undefined),
+      selectImmediateDisconnectCandidates(candidates, platforms, new Set(), {
+        listedNonDeviceIds: undefined,
+      }),
     ).toEqual(new Set());
   });
 });
 
 describe("evaluateDeviceDisconnects with immediate candidates", () => {
   const evaluate = (
-    misses: Map<string, number>,
+    misses: DeviceLossMisses,
     succeededPlatforms: Set<Platform>,
     immediate: Set<string>,
   ) =>
@@ -77,7 +89,7 @@ describe("evaluateDeviceDisconnects with immediate candidates", () => {
     });
 
   test("one miss disconnects the phone while the emulator only counts a miss", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const result = evaluate(misses, new Set(["android"]), new Set([PHONE]));
     expect(result.disconnected).toEqual([PHONE]);
     expect(misses.get(PHONE)).toBe(3);
@@ -85,7 +97,7 @@ describe("evaluateDeviceDisconnects with immediate candidates", () => {
   });
 
   test("a failed Android listing never fast-paths the phone", () => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const result = evaluate(misses, new Set(["ios"]), new Set([PHONE]));
     expect(result.disconnected).toEqual([]);
     expect(misses.has(PHONE)).toBe(false);

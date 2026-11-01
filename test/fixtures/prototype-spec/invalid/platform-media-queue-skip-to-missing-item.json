@@ -1,0 +1,199 @@
+{
+  "spec": {
+    "id": "v",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "podcast": {
+        "episodes": [
+          {
+            "id": "ep1",
+            "title": "Pilot",
+            "artist": "Host",
+            "album": "Season 1",
+            "artwork": "ep1Art",
+            "source": {
+              "sample": "tone440"
+            },
+            "durationMs": 60000
+          },
+          {
+            "id": "ep2",
+            "title": "Follow-up",
+            "source": {
+              "sample": "silence"
+            }
+          }
+        ]
+      }
+    },
+    "requires": {
+      "platform": ["media"]
+    },
+    "media": {
+      "players": {
+        "pod": {
+          "kind": "audio",
+          "queue": "/data/podcast/episodes"
+        }
+      }
+    },
+    "platform": {
+      "on": {
+        "media.itemChanged": [
+          {
+            "type": "emit",
+            "name": "item_changed"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{platform:/media/players/pod/currentItemId} {platform:/media/players/pod/rate} {platform:/media/players/pod/repeat}"
+        },
+        {
+          "type": "button",
+          "label": "Next",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.next",
+              "args": {
+                "player": {
+                  "value": "pod"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Previous",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.previous",
+              "args": {
+                "player": {
+                  "value": "pod"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Episode 2",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.skipTo",
+              "args": {
+                "player": {
+                  "value": "pod"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Shuffle",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setShuffle",
+              "args": {
+                "player": {
+                  "value": "pod"
+                },
+                "shuffle": {
+                  "value": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Repeat",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setRepeat",
+              "args": {
+                "player": {
+                  "value": "pod"
+                },
+                "repeat": {
+                  "value": "all"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "1.5x",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setRate",
+              "args": {
+                "player": {
+                  "value": "pod"
+                },
+                "rate": {
+                  "value": 1.5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Sleep",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "media.setSleepTimer",
+              "args": {
+                "player": {
+                  "value": "pod"
+                },
+                "timer": {
+                  "value": {
+                    "ms": 900000
+                  }
+                }
+              }
+            },
+            {
+              "type": "platform",
+              "call": "media.setSleepTimer",
+              "args": {
+                "player": {
+                  "value": "pod"
+                },
+                "timer": {
+                  "value": {
+                    "endOfItem": true
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[3].onTap[0].args.itemId",
+  "expectedMessage": "Required argument"
+}

@@ -29,7 +29,7 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
     const plan = { commands: [buildAndroidInputTextCommand("abcd")], textLength: 4 };
     // The host client exits at 150 ms, but the app is still consuming events until 300 ms.
     adb.setTypingDuration(timer, 300, 150);
-    const input = new InputText(android, adb, undefined, timer);
+    const input = new InputText(android, adb, { timer });
     const executor = new DefaultSendKeysCommandExecutor(
       android,
       new FakeAdbClientFactory(adb),
@@ -45,7 +45,7 @@ test.each(["InputText", "SendKeys eventAll", "SendKeys plan"] as const)(
       { getDeadlineMs: () => undefined, textState: state },
       async () =>
         await (path === "InputText"
-          ? input.testHooks.executeKeyEventPlan(plan, undefined, true, undefined, controller.signal)
+          ? input.testHooks.executeKeyEventPlan(plan, { noRetry: true, signal: controller.signal })
           : path === "SendKeys plan"
             ? executor.testHooks.executeKeyEventPlan(plan, controller.signal)
             : executor.type({ action: "type", text: "abcd", mode: "eventAll" }, controller.signal)),

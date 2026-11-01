@@ -42,7 +42,7 @@ export class RecentApps extends BaseVisualChange {
     timer: Timer = defaultTimer,
     collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer, undefined, collaborators);
+    super(device, { adb, timer, displayFence: collaborators });
     this.pressButton = new PressButton(device, adb);
   }
 
@@ -186,7 +186,8 @@ export class RecentApps extends BaseVisualChange {
     if (overview?.visibleToUser !== true) {
       return false;
     }
-    return isForegroundLauncher(packageName, this.adb, this.device.deviceId, this.timer, {
+    return isForegroundLauncher(packageName, this.adb, this.device.deviceId, {
+      timer: this.timer,
       incarnationToken: deviceIncarnationToken(this.device.deviceId),
       signal,
       timeoutMs: 3000,
@@ -210,8 +211,11 @@ export class RecentApps extends BaseVisualChange {
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
       throwIfAborted(signal);
       const result = await awaitWhileRequestIsLive(
-        client.requestGlobalAction("recent", 3000, undefined, undefined, signal, () => {
-          dispatched = true;
+        client.requestGlobalAction("recent", 3000, undefined, {
+          signal,
+          onDispatch: () => {
+            dispatched = true;
+          },
         }),
         signal,
       );
@@ -239,7 +243,7 @@ export class RecentApps extends BaseVisualChange {
   private async executeIosRecentApps(signal?: AbortSignal): Promise<RecentAppsResult> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
     throwIfAborted(signal);
-    const result = await client.requestRecentApps(undefined, undefined, undefined, signal);
+    const result = await client.requestRecentApps(undefined, undefined, { signal });
     if (!result.success && result.dispatched && result.acknowledged === false) {
       // Preserve the uncertain dispatch before post-action reads can replace it with cancellation.
       throw new ActionableError(

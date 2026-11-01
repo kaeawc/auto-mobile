@@ -433,13 +433,21 @@ export interface SimCtl {
   ): Promise<{ success: boolean; error?: string }>;
 }
 
-export const execAsync = async (
+/** Per-call process options for {@link SimctlExecAsync}. */
+export interface SimctlExecOptions {
+  maxBuffer?: number;
+  signal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
+}
+
+/** Runs a host command (usually `xcrun`) and resolves with its output. */
+export type SimctlExecAsync = (
   file: string,
   args: string[],
-  maxBuffer?: number,
-  signal?: AbortSignal,
-  env?: NodeJS.ProcessEnv,
-): Promise<ExecResult> => {
+  options?: SimctlExecOptions,
+) => Promise<ExecResult>;
+
+export const execAsync: SimctlExecAsync = async (file, args, { maxBuffer, signal, env } = {}) => {
   return runExecSeam(
     (execOptions) => sharedExecFileAsync(file, args, execOptions),
     { maxBuffer, signal, env },

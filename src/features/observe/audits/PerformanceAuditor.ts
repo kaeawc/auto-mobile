@@ -486,7 +486,8 @@ export class PerformanceAuditor {
     }
 
     // Only run on Android for now
-    if (this.device.platform !== "android") {
+    const platform = this.device.platform;
+    if (platform !== "android") {
       logger.debug("[PerformanceAudit] Skipping audit, only Android is supported");
       return;
     }
@@ -577,7 +578,7 @@ export class PerformanceAuditor {
         getPerformanceMonitor().startMonitoring(
           this.device.deviceId,
           result.activeWindow!.appId,
-          this.device.platform,
+          platform,
         );
       });
     } catch (error) {

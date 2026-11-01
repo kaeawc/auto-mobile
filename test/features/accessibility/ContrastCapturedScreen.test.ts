@@ -63,9 +63,7 @@ describe("real dark-theme Playground capture", () => {
     const result = await audit.audit(
       appElements,
       { node: [] },
-      screenshot,
-      "playground",
-      config,
+      { screenshotPath: screenshot, packageName: "playground", config },
       480,
     );
     expect(result.violations.filter((v) => v.type === "insufficient-contrast")).toEqual([]);
@@ -92,9 +90,7 @@ describe("captured Gboard hints and keys", () => {
     const result = await audit.audit(
       imeElements,
       capture.hierarchy,
-      screenshot,
-      "playground",
-      config,
+      { screenshotPath: screenshot, packageName: "playground", config },
       {
         density: 480,
         windows: capture.windows,
@@ -108,9 +104,7 @@ describe("captured Gboard hints and keys", () => {
     const result = await audit.audit(
       imeElements,
       capture.hierarchy,
-      undefined,
-      "playground",
-      config,
+      { packageName: "playground", config },
       {
         density: 480,
         windows: [
@@ -127,9 +121,7 @@ describe("captured Gboard hints and keys", () => {
     const result = await audit.audit(
       imeElements,
       capture.hierarchy,
-      screenshot,
-      "playground",
-      config,
+      { screenshotPath: screenshot, packageName: "playground", config },
       {
         density: 480,
         windows: [{ type: 2, packageName: "com.google.android.inputmethod.latin" }],
@@ -142,9 +134,7 @@ describe("captured Gboard hints and keys", () => {
     const result = await audit.audit(
       imeElements,
       capture.hierarchy,
-      undefined,
-      "playground",
-      config,
+      { packageName: "playground", config },
       480,
     );
     expect(result.violations.some((v) => v.type === "touch-target-too-small")).toBe(true);

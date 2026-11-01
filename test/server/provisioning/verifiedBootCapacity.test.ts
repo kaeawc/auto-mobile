@@ -41,8 +41,8 @@ function harness() {
         },
       },
       createPerformanceTracker(false, timer),
-      timer,
       {
+        timer,
         totalDeadlineMs: timer.now() + 60_000,
         markDeviceCreationStarted: () => {},
         lifecycleLease: {

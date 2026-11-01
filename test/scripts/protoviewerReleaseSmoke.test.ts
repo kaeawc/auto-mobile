@@ -1,3 +1,12 @@
+import {
+  runDuoSmoke,
+  validateDuoOptions,
+  type DuoScreens,
+  type PostureSetter,
+  type DuoArtifacts,
+} from "../../scripts/release/lib/protoviewer-smoke/duoFlow";
+import { parseSimulatorDisplays } from "../../src/utils/ios-cmdline-tools/SimulatorDisplays";
+import { loadDuoEnumerate } from "../fixtures/loadDuoEnumerate";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readPrototypeBundle } from "../../src/features/prototype/prototypeBundle";
 import type { ProtoViewerDevice } from "../../src/features/prototype/protoViewer/protoViewerDevice";
@@ -8,6 +17,9 @@ import {
   parseInstalledApp,
 } from "../../scripts/release/lib/protoviewer-smoke/androidDriver";
 import { smokeBundles } from "../../scripts/release/lib/protoviewer-smoke/bundles";
+import { createIosDriver } from "../../scripts/release/lib/protoviewer-smoke/iosDriver";
+import type { ToolRunner } from "../../scripts/release/lib/artifact-policy/toolRunner";
+import { PROTOVIEWER_PACKAGE } from "../../src/features/prototype/protoViewer/protoViewerContract";
 import {
   LICENSES_ERROR_TEXT,
   LICENSES_LINK_TEXT,
@@ -92,6 +104,102 @@ const bundle = { label: "kept", bytes: new Uint8Array([1]) };
 const artifacts = { previous: "n.apk", candidate: "n1.apk" };
 const statuses = (checks: { name: string; status: string }[]) =>
   Object.fromEntries(checks.map((check) => [check.name, check.status]));
+
+class FakeIosRunner implements ToolRunner {
+  readonly calls: { command: string; args: readonly string[] }[] = [];
+  terminationError?: Error;
+  private version = 0;
+  async run(command: string, args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
+    this.calls.push({ command, args });
+    if (args[1] === "install") {
+      this.version++;
+    }
+    if (args[1] === "terminate" && this.terminationError) {
+      throw this.terminationError;
+    }
+    return { stdout: command === "plutil" ? String(this.version) : "/data", stderr: "" };
+  }
+}
+
+describe("iOS smoke launch state", () => {
+  test("terminates only ProtoViewer on the supplied udid", async () => {
+    const runner = new FakeIosRunner();
+    const driver = createIosDriver("fake-udid", runner);
+    await driver.prepareForUrlOpen?.();
+    expect(runner.calls).toEqual([
+      { command: "xcrun", args: ["simctl", "terminate", "fake-udid", PROTOVIEWER_PACKAGE] },
+    ]);
+  });
+
+  test("already not running is a successful start state", async () => {
+    const runner = new FakeIosRunner();
+    runner.terminationError = Object.assign(new Error("Application is not running"), { code: 3 });
+    await createIosDriver("fake-udid", runner).prepareForUrlOpen?.();
+    expect(runner.calls).toHaveLength(1);
+  });
+
+  test("unexpected terminate errors propagate", async () => {
+    const runner = new FakeIosRunner();
+    runner.terminationError = Object.assign(new Error("Simulator unavailable"), { code: 149 });
+    const driver = createIosDriver("fake-udid", runner);
+    await expect(driver.prepareForUrlOpen?.()).rejects.toThrow("Simulator unavailable");
+  });
+
+  for (const mode of ["smoke", "upgrade"] as const) {
+    test(`${mode} terminates before every import and open, using only fakes`, async () => {
+      const runner = new FakeIosRunner();
+      const driver = createIosDriver("fake-udid", runner);
+      const viewer = new FakeViewer();
+      const events: string[] = [];
+      // Substitute the viewer as well: no real simctl, files, timers or simulator are used.
+      const fake: SmokeDriver = {
+        ...driver,
+        viewer: {
+          installed: () => viewer.installed(),
+          async importBundle(bytes, label) {
+            expect(runner.calls.at(-1)?.args[1]).toBe("terminate");
+            events.push("import");
+            runner.calls.length = 0;
+            return viewer.importBundle(bytes, label);
+          },
+          async open(libraryId) {
+            expect(runner.calls.at(-1)?.args[1]).toBe("terminate");
+            events.push("open");
+            runner.calls.length = 0;
+            return viewer.open(libraryId);
+          },
+        },
+      };
+      const checks =
+        mode === "smoke"
+          ? await runMinifiedSmoke(fake, "candidate.app", { bundled: bundle, imported: bundle })
+          : await runUpgradeInPlace(
+              fake,
+              { previous: "old.app", candidate: "candidate.app" },
+              bundle,
+            );
+      expect(events).toEqual(
+        mode === "smoke" ? ["import", "open", "import", "open"] : ["import", "open"],
+      );
+      expect(checks.find((check) => check.name.startsWith("import"))?.status).toBe("pass");
+      expect(summarize(checks).failed).toBe(false);
+    });
+  }
+
+  test("a failed launch-state step fails the check without importing", async () => {
+    const runner = new FakeIosRunner();
+    runner.terminationError = new Error("terminate failed");
+    const viewer = new FakeViewer();
+    const driver: SmokeDriver = { ...createIosDriver("fake-udid", runner), viewer };
+    const checks = await runMinifiedSmoke(driver, "candidate.app", {
+      bundled: bundle,
+      imported: bundle,
+    });
+    expect(viewer.library.size).toBe(0);
+    expect(statuses(checks)["import kept"]).toBe("fail");
+    expect(summarize(checks).text).toContain("terminate failed");
+  });
+});
 
 describe("ProtoViewer upgrade in place", () => {
   test("keeps the saved entry, installs over without uninstalling and skips settings", async () => {
@@ -199,5 +307,106 @@ describe("smoke bundles", () => {
     for (const entry of [built.bundled, built.imported]) {
       expect(readPrototypeBundle(entry.bytes).ok).toBe(true);
     }
+  });
+});
+
+const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+class FakeDuo implements PostureSetter, DuoScreens, DuoArtifacts {
+  readonly postures: string[] = [];
+  readonly captures: string[] = [];
+  readonly saved: string[] = [];
+  displays = parseSimulatorDisplays(loadDuoEnumerate());
+  failPosture?: "closed" | "opened";
+  image = PNG;
+  written = PNG;
+  async set(posture: "closed" | "opened"): Promise<void> {
+    this.postures.push(posture);
+    if (this.failPosture === posture) {
+      throw new Error("posture unavailable");
+    }
+  }
+  async enumerate() {
+    return this.displays;
+  }
+  async screenshot(display: string) {
+    this.captures.push(display);
+    return this.image;
+  }
+  async save(name: string, _bytes: Uint8Array) {
+    this.saved.push(name);
+    return this.written;
+  }
+}
+const duoRun = (fake: FakeDuo) =>
+  runDuoSmoke(new FakeDriver({}), bundle, {
+    posture: fake,
+    screens: fake,
+    artifacts: fake,
+  });
+describe("Duo release smoke", () => {
+  test("screenshots explicitly select the cover then inner display and fold back", async () => {
+    const fake = new FakeDuo();
+    expect(summarize(await duoRun(fake)).failed).toBe(false);
+    expect(fake.captures).toEqual(["primary", "primary-1"]);
+    expect(fake.postures).toEqual(["closed", "opened", "closed"]);
+    expect(fake.saved).toEqual(["closed.png", "opened.png"]);
+  });
+  test("a missing display fails with the available names", async () => {
+    const fake = new FakeDuo();
+    fake.displays = fake.displays.filter((display) => display.name !== "primary-1");
+    const result = summarize(await duoRun(fake));
+    expect(result.failed).toBe(true);
+    expect(result.text).toContain("missing display primary-1; available displays: primary");
+    expect(fake.captures).toEqual(["primary"]);
+    expect(fake.postures.at(-1)).toBe("closed");
+  });
+  for (const posture of ["closed", "opened"] as const) {
+    test(`a failing ${posture} command fails the check and still folds back`, async () => {
+      const fake = new FakeDuo();
+      fake.failPosture = posture;
+      const result = summarize(await duoRun(fake));
+      expect(result.failed).toBe(true);
+      expect(result.text).toContain("posture unavailable");
+      expect(fake.postures.at(-1)).toBe("closed");
+      expect(fake.postures.filter((value) => value === "closed")).toHaveLength(2);
+    });
+  }
+  test("validates the written PNG, including an empty or corrupt file", async () => {
+    for (const written of [new Uint8Array(), new Uint8Array([1, 2, 3])]) {
+      const fake = new FakeDuo();
+      fake.written = written;
+      expect(summarize(await duoRun(fake)).failed).toBe(true);
+      expect(fake.postures.at(-1)).toBe("closed");
+    }
+  });
+  test("Duo usage errors are pure and mapped to exit 2 by the CLI", () => {
+    expect(validateDuoOptions({ duo: true, platform: "ios" })).toBe(
+      "--duo requires --posture-command",
+    );
+    expect(validateDuoOptions({ duo: true, platform: "android", postureCommand: "posture" })).toBe(
+      "--duo requires platform ios",
+    );
+    expect(
+      validateDuoOptions({ duo: true, platform: "ios", postureCommand: "posture" }),
+    ).toBeUndefined();
+    expect(validateDuoOptions({ platform: "android" })).toBeUndefined();
+  });
+  test("non-Duo minified smoke summary remains unchanged", async () => {
+    const checks = await runMinifiedSmoke(new FakeDriver({}), "min.apk", {
+      bundled: bundle,
+      imported: bundle,
+    });
+    expect(summarize(checks)).toEqual({
+      failed: false,
+      text: [
+        "PASS    install release artifact: min.apk",
+        "PASS    import kept: libraryId 11111111-1111-4111-8111-111111111100",
+        "PASS    open kept: opened 11111111-1111-4111-8111-111111111100",
+        "PASS    import kept: libraryId 11111111-1111-4111-8111-111111111101",
+        "PASS    open kept: opened 11111111-1111-4111-8111-111111111101",
+        "SKIPPED settings screen: no android UI driver in this script; check Settings and Open-source licenses by hand",
+        "SKIPPED licenses screen: same",
+      ].join("\n"),
+    });
   });
 });

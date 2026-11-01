@@ -165,14 +165,11 @@ export class TakeScreenshot implements ScreenshotService {
             return this.captureScreenshotBase64(finalPath, options, captureSignal, true);
           }
           const capture = await this.captureIosObserverScreenshot(captureSignal);
-          return this.writeiOSScreenshot(
-            finalPath,
-            capture,
-            startedAt,
+          return this.writeiOSScreenshot(finalPath, capture, startedAt, {
             options,
-            captureSignal,
-            false,
-          );
+            signal: captureSignal,
+            pushToStream: false,
+          });
         },
         {
           timer: this.timer,
@@ -540,7 +537,7 @@ export class TakeScreenshot implements ScreenshotService {
       // (re)connection completes, burning the shared screenshot rate limit and
       // pushing a late observation-stream frame (#6605).
       const result = await awaitWhileRequestIsLive(
-        client.requestScreenshot(10000, undefined, false, signal, displayId, hidePrototypes),
+        client.requestScreenshot(10000, undefined, { signal, displayId, hidePrototypes }),
         signal,
       );
       return signal?.aborted ? null : result;
@@ -670,7 +667,11 @@ export class TakeScreenshot implements ScreenshotService {
           signal,
         );
       const result = await this.requestiOSScreenshot(request, options);
-      const written = await this.writeiOSScreenshot(finalPath, result, startTime, options, signal);
+      const written = await this.writeiOSScreenshot(finalPath, result, startTime, {
+        options,
+        signal,
+        pushToStream: true,
+      });
       return options.hidePrototypes === true && written.success
         ? { ...written, prototypesHidden: true }
         : written;
@@ -727,9 +728,11 @@ export class TakeScreenshot implements ScreenshotService {
     finalPath: string,
     result: CtrlProxyScreenshotResult,
     startTime: number,
-    options: ScreenshotOptions,
-    signal?: AbortSignal,
-    pushToStream = true,
+    {
+      options,
+      signal,
+      pushToStream,
+    }: { options: ScreenshotOptions; signal?: AbortSignal; pushToStream: boolean },
   ): Promise<ScreenshotResult> {
     if (signal?.aborted) {
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
@@ -760,14 +763,12 @@ export class TakeScreenshot implements ScreenshotService {
     logger.info(`[SCREENSHOT] iOS screenshot captured in ${durationMs}ms, saved to ${finalPath}`);
 
     const screenshotImageSize = readImageHeaderDimensions(encoded) ?? undefined;
-    this.pushiOSScreenshotIfAllowed(
-      result,
-      imageBuffer,
-      encoded,
-      format,
-      pushToStream,
-      screenshotImageSize,
-    );
+    if (pushToStream) {
+      this.pushiOSScreenshot(result, imageBuffer, encoded, {
+        format,
+        dimensions: screenshotImageSize,
+      });
+    }
 
     return {
       success: true,
@@ -777,15 +778,16 @@ export class TakeScreenshot implements ScreenshotService {
     };
   }
 
-  private pushiOSScreenshotIfAllowed(
+  private pushiOSScreenshot(
     result: CtrlProxyScreenshotResult,
     original: Buffer,
     encoded: Buffer,
-    format: "png" | "jpeg" | "webp",
-    allowed: boolean,
-    dimensions: { width: number; height: number } | undefined,
+    {
+      format,
+      dimensions,
+    }: { format: "png" | "jpeg" | "webp"; dimensions?: { width: number; height: number } },
   ): void {
-    if (allowed && result.data) {
+    if (result.data) {
       this.pushScreenshotToStream(
         encoded === original ? result.data : encoded.toString("base64"),
         encoded,
@@ -814,19 +816,17 @@ export class TakeScreenshot implements ScreenshotService {
     }
 
     try {
-      server.pushScreenshotUpdate(
-        this.device.deviceId,
-        base64Data,
-        dimensions?.width,
-        dimensions?.height,
-        metadataForScreenshotFormat(
+      server.pushScreenshotUpdate(this.device.deviceId, base64Data, {
+        screenWidth: dimensions?.width,
+        screenHeight: dimensions?.height,
+        metadata: metadataForScreenshotFormat(
           this.device.platform === "ios"
             ? IOS_CTRLPROXY_SCREENSHOT_METADATA
             : ANDROID_ADB_SCREENSHOT_METADATA,
           format,
         ),
-        { decodedImage: imageBuffer },
-      );
+        options: { decodedImage: imageBuffer },
+      });
     } catch (error) {
       // The observation stream is an optional side channel; screenshot capture already succeeded.
       logger.debug(`[SCREENSHOT] Failed to push screenshot to observation stream: ${error}`);

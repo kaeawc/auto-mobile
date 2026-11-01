@@ -66,12 +66,10 @@ export const DEFAULT_CTRL_PROXY_FORWARD_LEASE_IDLE_MS = 60_000;
 export const CTRL_PROXY_FORWARD_LEASE_IDLE_MS_ENV = ENV.CTRL_PROXY_LEASE_IDLE_MS.name;
 
 export function resolveCtrlProxyForwardLeaseIdleMs(env: NodeJS.ProcessEnv = process.env): number {
-  return readEnvPositiveInteger(
-    CTRL_PROXY_FORWARD_LEASE_IDLE_MS_ENV,
-    undefined,
-    { fallback: DEFAULT_CTRL_PROXY_FORWARD_LEASE_IDLE_MS },
+  return readEnvPositiveInteger(CTRL_PROXY_FORWARD_LEASE_IDLE_MS_ENV, undefined, {
+    fallback: DEFAULT_CTRL_PROXY_FORWARD_LEASE_IDLE_MS,
     env,
-  );
+  });
 }
 
 /** What a lease owner reports about one device over `daemon/deviceLeaseStatus`. */

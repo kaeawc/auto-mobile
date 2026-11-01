@@ -81,9 +81,8 @@ test.each(
     _action: unknown,
     _timeout: unknown,
     _perf: unknown,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ) => first.send(signal, onDispatch);
+    { abortSignal, onDispatch }: { abortSignal?: AbortSignal; onDispatch?: () => void } = {},
+  ) => first.send(abortSignal, onDispatch);
   if (platform === "android") {
     const client = createAndroidTestClient(holdDevice("android"));
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
@@ -93,8 +92,8 @@ test.each(
     const client = createIosTestClient(holdDevice("ios"));
     spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
     spyOn(client, "requestSetText").mockImplementation(set);
-    spyOn(client, "requestAppendText").mockImplementation(
-      (text, _timeout, _perf, _context, options) => set(text, options),
+    spyOn(client, "requestAppendText").mockImplementation((text, _timeout, _perf, options) =>
+      set(text, options),
     );
     spyOn(client, "requestImeAction").mockImplementation(imeAction);
   }
@@ -110,7 +109,7 @@ test.each(
     return createExecResult("", "");
   });
   spyOn(InputKey.prototype, "press").mockImplementation(
-    async (_key, _timeout, _context, _args, routing) => {
+    async (_key, _timeout, _context, routing) => {
       routing?.onDispatch?.();
       secondDispatches.push("key");
       return { success: true, key: "enter", keyCode: "KEYCODE_ENTER" };
@@ -560,12 +559,10 @@ test("abort during submit holds only the remaining caller budget", async () => {
     }
     return { success: true, totalTimeMs: 0 };
   });
-  spyOn(client, "requestImeAction").mockImplementation(
-    (_action, timeout, _perf, signal, dispatch) => {
-      actionBudget = timeout;
-      return first.send(signal, dispatch);
-    },
-  );
+  spyOn(client, "requestImeAction").mockImplementation((_action, timeout, _perf, options) => {
+    actionBudget = timeout;
+    return first.send(options?.abortSignal, options?.onDispatch);
+  });
   const owner = new AbortController();
   const a = handler.handleInputTypeText(frame("ios", "A", false, true), undefined, {
     signal: owner.signal,
@@ -603,8 +600,8 @@ test("dispatched append session release carries confirmed charsSent without muta
     commands++;
     return createExecResult("", "");
   });
-  spyOn(f.client, "requestImeAction").mockImplementation(
-    (_action, _timeout, _perf, signal, dispatch) => first.send(signal, dispatch),
+  spyOn(f.client, "requestImeAction").mockImplementation((_action, _timeout, _perf, options) =>
+    first.send(options?.abortSignal, options?.onDispatch),
   );
   const request = frame("android", "A", true, true);
   const a = f.server.answeringSessionRelease({ cancelReason: release }, () =>

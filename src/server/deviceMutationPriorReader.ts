@@ -122,29 +122,41 @@ export interface MutationObservationReaders {
   deviceStateReader?: MutationPriorReader;
 }
 
+/** The device readers a {@link DefaultMutationPriorReader} reads priors through; each defaults to the real one. */
+export interface DefaultMutationPriorReaderDependencies {
+  settingsAccess?: Pick<DeviceSettingsAccess, "read">;
+  clipboardFor?: (device: BootedDevice) => Pick<Clipboard, "execute">;
+  biometricsFor?: (device: BootedDevice) => Pick<DeviceState, "getBiometricEnrollmentState">;
+  stateFor?: (device: BootedDevice) => Pick<DeviceState, "getState">;
+  rotationFor?: (device: BootedDevice) => Pick<Rotate, "getRestoreState">;
+  observationReaders?: Partial<MutationObservationReaders>;
+}
+
 export class DefaultMutationPriorReader implements MutationPriorReader {
   private readonly observationReaders: MutationObservationReaders;
   private readonly dataReader: MutationPriorReader;
   private readonly deviceStateReader: MutationPriorReader;
+  private readonly settingsAccess: Pick<DeviceSettingsAccess, "read">;
+  private readonly clipboardFor: (device: BootedDevice) => Pick<Clipboard, "execute">;
+  private readonly biometricsFor: (
+    device: BootedDevice,
+  ) => Pick<DeviceState, "getBiometricEnrollmentState">;
+  private readonly stateFor: (device: BootedDevice) => Pick<DeviceState, "getState">;
+  private readonly rotationFor: (device: BootedDevice) => Pick<Rotate, "getRestoreState">;
 
-  constructor(
-    private readonly settingsAccess: Pick<
-      DeviceSettingsAccess,
-      "read"
-    > = new DefaultDeviceSettingsAccess(),
-    private readonly clipboardFor: (device: BootedDevice) => Pick<Clipboard, "execute"> = (
-      device,
-    ) => new Clipboard(device),
-    private readonly biometricsFor: (
-      device: BootedDevice,
-    ) => Pick<DeviceState, "getBiometricEnrollmentState"> = (device) => new DeviceState(device),
-    private readonly stateFor: (device: BootedDevice) => Pick<DeviceState, "getState"> = (device) =>
-      new DeviceState(device),
-    private readonly rotationFor: (device: BootedDevice) => Pick<Rotate, "getRestoreState"> = (
-      device,
-    ) => new Rotate(device),
-    observationReaders: Partial<MutationObservationReaders> = {},
-  ) {
+  constructor({
+    settingsAccess = new DefaultDeviceSettingsAccess(),
+    clipboardFor = (device) => new Clipboard(device),
+    biometricsFor = (device) => new DeviceState(device),
+    stateFor = (device) => new DeviceState(device),
+    rotationFor = (device) => new Rotate(device),
+    observationReaders = {},
+  }: DefaultMutationPriorReaderDependencies = {}) {
+    this.settingsAccess = settingsAccess;
+    this.clipboardFor = clipboardFor;
+    this.biometricsFor = biometricsFor;
+    this.stateFor = stateFor;
+    this.rotationFor = rotationFor;
     this.dataReader = observationReaders.dataReader ?? new FamilyMutationPriorReader();
     this.deviceStateReader =
       observationReaders.deviceStateReader ?? new DeviceStateMutationPriorReader();

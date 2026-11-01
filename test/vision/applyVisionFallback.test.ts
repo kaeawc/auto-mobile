@@ -28,9 +28,11 @@ describe("getVisionEnrichedError", () => {
       capturer,
       null,
       { text: "Login" },
-      disabledConfig,
-      "Element not found",
-      { visionAnalyzer: analyzer },
+      {
+        visionConfig: disabledConfig,
+        baseError: "Element not found",
+        visionAnalyzer: analyzer,
+      },
     );
 
     expect(result).toBe("Element not found");
@@ -46,9 +48,11 @@ describe("getVisionEnrichedError", () => {
       capturer,
       null,
       { text: "Login" },
-      enabledConfig,
-      "Element not found",
-      { visionAnalyzer: analyzer },
+      {
+        visionConfig: enabledConfig,
+        baseError: "Element not found",
+        visionAnalyzer: analyzer,
+      },
     );
 
     expect(result).toBe("Element not found");
@@ -76,9 +80,7 @@ describe("getVisionEnrichedError", () => {
       capturer,
       { hierarchy: {} },
       { text: "Login" },
-      enabledConfig,
-      "Element not found",
-      { visionAnalyzer: analyzer },
+      { visionConfig: enabledConfig, baseError: "Element not found", visionAnalyzer: analyzer },
     );
 
     expect(result).toContain("AI suggests these steps");
@@ -112,9 +114,11 @@ describe("getVisionEnrichedError", () => {
       capturer,
       null,
       { text: "Login" },
-      enabledConfig,
-      "Element not found",
-      { visionAnalyzer: analyzer },
+      {
+        visionConfig: enabledConfig,
+        baseError: "Element not found",
+        visionAnalyzer: analyzer,
+      },
     );
 
     expect(result).toContain("AI suggests trying");
@@ -140,9 +144,11 @@ describe("getVisionEnrichedError", () => {
       capturer,
       null,
       { text: "Login" },
-      enabledConfig,
-      "Element not found",
-      { visionAnalyzer: analyzer },
+      {
+        visionConfig: enabledConfig,
+        baseError: "Element not found",
+        visionAnalyzer: analyzer,
+      },
     );
 
     expect(result).toContain("Element not found");
@@ -163,9 +169,11 @@ describe("getVisionEnrichedError", () => {
       capturer,
       null,
       { text: "Login" },
-      enabledConfig,
-      "Element not found",
-      { visionAnalyzer: analyzer },
+      {
+        visionConfig: enabledConfig,
+        baseError: "Element not found",
+        visionAnalyzer: analyzer,
+      },
     );
 
     expect(result).toBe("Element not found");
@@ -182,7 +190,9 @@ describe("getVisionEnrichedError", () => {
       description: "Submit button",
     };
 
-    await getVisionEnrichedError(capturer, hierarchy, criteria, enabledConfig, "base error", {
+    await getVisionEnrichedError(capturer, hierarchy, criteria, {
+      visionConfig: enabledConfig,
+      baseError: "base error",
       visionAnalyzer: analyzer,
     });
 
@@ -210,9 +220,11 @@ describe("getVisionEnrichedError", () => {
       capturer,
       null,
       { text: "Button" },
-      enabledConfig,
-      "Not found error",
-      { visionAnalyzer: analyzer },
+      {
+        visionConfig: enabledConfig,
+        baseError: "Not found error",
+        visionAnalyzer: analyzer,
+      },
     );
 
     expect(result).toContain("No clear path found.");

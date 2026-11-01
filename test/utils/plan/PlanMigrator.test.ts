@@ -315,6 +315,39 @@ describe("PlanMigrator", () => {
         expect(plan.steps[0].params.action).toBe("tap");
       });
 
+      test.each([
+        [750, "longPress", "Defaulted tapOn.action to longPress because duration is set."],
+        [0, "tap", "Defaulted tapOn.action to tap."],
+        [-1, "tap", "Defaulted tapOn.action to tap."],
+        [Infinity, "tap", "Defaulted tapOn.action to tap."],
+        [NaN, "tap", "Defaulted tapOn.action to tap."],
+        ["750", "tap", "Defaulted tapOn.action to tap."],
+      ])("defaults tapOn with duration %s to %s", (duration, action, warning) => {
+        const { plan, report } = migratePlan({
+          steps: [{ tool: "tapOn", params: { selector: { text: "Target" }, duration } }],
+        });
+
+        expect(plan.steps[0].params.action).toBe(action);
+        expect(plan.steps[0].params.duration).toBe(duration);
+        expect(report.warnings.some((entry) => entry.message === warning)).toBe(true);
+      });
+
+      test.each(["tap", "doubleTap", "longPress"])(
+        "preserves explicit tapOn action %s with duration",
+        (action) => {
+          const { plan, report } = migratePlan({
+            steps: [
+              { tool: "tapOn", params: { selector: { text: "Target" }, action, duration: 750 } },
+            ],
+          });
+
+          expect(plan.steps[0].params.action).toBe(action);
+          expect(
+            report.warnings.some((entry) => entry.message.startsWith("Defaulted tapOn.action")),
+          ).toBe(false);
+        },
+      );
+
       test("renames id to elementId for tapOn (wrapped into selector)", () => {
         const { plan } = migratePlan({
           name: "Plan",

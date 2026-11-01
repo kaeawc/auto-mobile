@@ -14,14 +14,13 @@ export interface StrokeClient {
     gestureId: string,
     x: number,
     y: number,
-    timeoutMs?: number,
+    options?: { timeoutMs?: number },
   ): Promise<A11ySwipeResult>;
   requestGestureEnd(
     gestureId: string,
     x: number,
     y: number,
-    cancel?: boolean,
-    timeoutMs?: number,
+    options?: { timeoutMs?: number; cancel?: boolean },
   ): Promise<A11ySwipeResult>;
 }
 
@@ -101,7 +100,7 @@ export async function runDragPathStroke(
       last = step;
     }
     await sleepWhileLive(timer, plan.releaseHoldMs, signal);
-    const ended = await client.requestGestureEnd(gestureId, last.x, last.y, false);
+    const ended = await client.requestGestureEnd(gestureId, last.x, last.y, { cancel: false });
     if (!ended.success) {
       return {
         success: false,
@@ -126,7 +125,7 @@ async function liftFinger(
   at: { x: number; y: number },
 ): Promise<void> {
   try {
-    await client.requestGestureEnd(gestureId, at.x, at.y, true);
+    await client.requestGestureEnd(gestureId, at.x, at.y, { cancel: true });
   } catch (error) {
     logger.warn(
       `[dragPath] cancelling stroke ${gestureId} failed; the runner may still hold the finger down: ${errorMessage(error)}`,

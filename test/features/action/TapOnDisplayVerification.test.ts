@@ -655,7 +655,7 @@ describe("tapOn display verification", () => {
       const h = harness(ctrlProxy, { productionCapture: true });
       const requests: Array<number | undefined> = [];
       const sync = spyOn(h.client, "requestHierarchySync").mockImplementation(async (...args) => {
-        requests.push(args[5]);
+        requests.push(args[3]?.displayId);
         return {
           hierarchy: { updatedAt: h.timer.now(), packageName: "app", hierarchy: { node: {} } },
         };
@@ -1098,7 +1098,7 @@ describe("tapOn targeted display resolution", () => {
       { observation: { ...h.observation(), viewHierarchy: before } },
     );
     const points: Array<{ x: number; y: number }> = [];
-    h.action.executeAndroidTap = async (_action, x, y) => {
+    h.action.executeAndroidTap = async (_action, { x, y }) => {
       points.push({ x, y });
     };
     h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
@@ -1135,7 +1135,7 @@ describe("tapOn targeted display resolution", () => {
       { observation: { ...h.observation(), viewHierarchy: before } },
     );
     const points: Array<{ x: number; y: number }> = [];
-    h.action.executeAndroidTap = async (_action, x, y) => {
+    h.action.executeAndroidTap = async (_action, { x, y }) => {
       points.push({ x, y });
     };
     h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({

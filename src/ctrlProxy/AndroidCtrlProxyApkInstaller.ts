@@ -1,9 +1,10 @@
 import { getAbortSignal } from "../utils/AbortContext";
 import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import { errorMessage } from "../utils/describeUnknownError";
-import { toActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../utils/logger";
+import { grantRecordAudioPermission } from "./grantRecordAudioPermission";
 import { grantLocalNetworkPermission } from "./grantLocalNetworkPermission";
 import { VerifiedArtifactCache } from "../utils/VerifiedArtifactCache";
 import { isPathInside } from "../utils/filesystem/pathContainment";
@@ -25,9 +26,30 @@ import { DeviceOwnedByOtherDaemonError } from "../models/deviceAcquisitionRefusa
 import { CtrlProxyForwardOwnershipUnreadableError } from "../models/CtrlProxyForwardOwnershipUnreadableError";
 import { CtrlProxyApkStageError } from "./CtrlProxyApkStageError";
 import type { InstalledApkSha256Result } from "./AndroidCtrlProxyManagerTypes";
+import { adbFailureOutput } from "../utils/android-cmdline-tools/adbFailureOutput";
+import { sequenceBackoff, type BackoffPolicy } from "../utils/Backoff";
+import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import {
+  createAdbAndroidInstallSettleProbe,
+  AndroidInstallSettleGate,
+  type AndroidInstallSettleProbe,
+} from "./AndroidInstallSettleGate";
+import { CtrlProxyApkInstallError } from "./CtrlProxyApkInstallError";
+import {
+  extractInstallFailureCode,
+  isTransientInstallFailureCode,
+  isEmptyStreamedInstallFailure,
+  RetryableCtrlProxyInstallFailure,
+} from "./androidInstallFailure";
 
 const CTRL_PROXY_INSTALL_TIMEOUT_MS = 120_000;
 const CTRL_PROXY_PULL_TIMEOUT_MS = 120_000;
+const CTRL_PROXY_INSTALL_ATTEMPTS = 3;
+
+interface InstallReadinessOptions {
+  settleProbe?: AndroidInstallSettleProbe;
+  installBackoff?: BackoffPolicy;
+}
 
 /** Live manager dependencies; callbacks preserve manager overrides and test spies. */
 export interface AndroidCtrlProxyApkInstallerHost {
@@ -43,6 +65,7 @@ export interface AndroidCtrlProxyApkInstallerHost {
   clearAvailabilityCache(): void;
   readonly timer: Timer;
   executeApkStage(command: string, stage: string): Promise<ExecResult>;
+  grantPostInstallPermissions(): Promise<void>;
   grantLocalNetworkAfterInstall(): Promise<void>;
   statusInspectionDeviceError(error: unknown): Error | undefined;
   getApiLevel(): Promise<[number | null, boolean]>;
@@ -55,7 +78,10 @@ export interface AndroidCtrlProxyApkInstallerHost {
 export class AndroidCtrlProxyApkInstaller {
   /** Package name used before the rename to CtrlProxy — uninstalled opportunistically on device setup */
   private static readonly LEGACY_PACKAGE = "dev.jasonpearson.automobile.accessibilityservice";
-  constructor(private readonly host: AndroidCtrlProxyApkInstallerHost) {}
+  constructor(
+    private readonly host: AndroidCtrlProxyApkInstallerHost,
+    private readonly installReadiness: InstallReadinessOptions = {},
+  ) {}
 
   /**
    * Download APK
@@ -296,10 +322,10 @@ export class AndroidCtrlProxyApkInstaller {
     try {
       logger.info("Installing APK", { path: apkPath });
 
-      const result = await this.host.executeApkStage(
-        `install "${apkPath}"`,
-        "CtrlProxy APK install",
-      );
+      const result =
+        this.host.device.formFactor === "automotive" || this.host.device.formFactor === "watch"
+          ? await this.installWhenSettled(apkPath)
+          : await this.installWithoutSettling(apkPath);
       const resultString = result.toString().toLowerCase();
 
       if (resultString.includes("failure") || resultString.includes("error")) {
@@ -312,7 +338,7 @@ export class AndroidCtrlProxyApkInstaller {
 
       logger.info("APK installed successfully");
       this.host.clearAvailabilityCache();
-      await this.host.grantLocalNetworkAfterInstall();
+      await this.host.grantPostInstallPermissions();
     } catch (error) {
       // A failed adb install can still have changed package state before the
       // command reported an error.
@@ -326,6 +352,160 @@ export class AndroidCtrlProxyApkInstaller {
       }
       throw toActionableError(error, "Failed to install APK");
     }
+  }
+
+  private async installWhenSettled(apkPath: string): Promise<ExecResult> {
+    const signal = getAbortSignal();
+    const gate = new AndroidInstallSettleGate(
+      this.installReadiness.settleProbe ??
+        createAdbAndroidInstallSettleProbe(this.host.adb, this.host.device),
+      this.host.timer,
+    );
+    return new DefaultRetryExecutor(this.host.timer).executeOrThrow(
+      async (attempt) => {
+        // The initial fresh install and every retry get their own bounded settle check.
+        await gate.wait(this.host.device.formFactor, signal);
+        signal?.throwIfAborted();
+        await this.host.assertNotDrivenByOtherDaemon(signal);
+        signal?.throwIfAborted();
+        let output: ExecResult | undefined;
+        try {
+          output = await this.host.executeApkStage(`install "${apkPath}"`, "CtrlProxy APK install");
+          signal?.throwIfAborted();
+          if (!/failure|error|failed to install/i.test(`${output.stdout}\n${output.stderr}`)) {
+            return output;
+          }
+          throw new ActionableError("adb install reported a failure");
+        } catch (error) {
+          signal?.throwIfAborted();
+          this.host.clearAvailabilityCache();
+          if (
+            error instanceof CtrlProxyApkStageError ||
+            error instanceof CtrlProxyApkInstallError
+          ) {
+            throw error;
+          }
+          const deviceError = this.host.statusInspectionDeviceError(error);
+          if (deviceError) {
+            throw deviceError;
+          }
+          const { stdout, stderr } = output ?? adbFailureOutput(error);
+          const message = errorMessage(error);
+          const failureCode = extractInstallFailureCode(`${stdout}\n${stderr}\n${message}`);
+          const detail = `CtrlProxy APK install failed (attempt ${attempt}/${CTRL_PROXY_INSTALL_ATTEMPTS}): ${message}\nstdout: ${stdout}\nstderr: ${stderr}`;
+          if (!isTransientInstallFailureCode(failureCode)) {
+            throw new ActionableError(detail, { cause: error });
+          }
+          throw new RetryableCtrlProxyInstallFailure(detail, { cause: error });
+        }
+      },
+      {
+        maxAttempts: CTRL_PROXY_INSTALL_ATTEMPTS,
+        delays: this.installReadiness.installBackoff ?? sequenceBackoff([500, 1500]),
+        signal,
+        shouldRetry: (error) => error instanceof RetryableCtrlProxyInstallFailure,
+      },
+    );
+  }
+
+  private async installAttemptWithoutSettling(
+    apkPath: string,
+    attempt: number,
+    signal: AbortSignal | undefined,
+  ): Promise<ExecResult> {
+    if (attempt > 1) {
+      signal?.throwIfAborted();
+      await this.host.assertNotDrivenByOtherDaemon(signal);
+      signal?.throwIfAborted();
+    }
+    let output: ExecResult | undefined;
+    try {
+      output = await this.host.executeApkStage(`install "${apkPath}"`, "CtrlProxy APK install");
+      if (
+        !isEmptyStreamedInstallFailure(output.stdout, output.stderr, "", this.host.device.deviceId)
+      ) {
+        return output;
+      }
+      throw new ActionableError("adb install reported a failure");
+    } catch (error) {
+      // Preserve every existing phone failure for install() to classify and wrap.
+      if (error instanceof CtrlProxyApkStageError) {
+        throw error;
+      }
+      throw this.retryableInstallFailureFor(error, output, attempt);
+    }
+  }
+
+  private retryableInstallFailureFor(
+    error: unknown,
+    output: ExecResult | undefined,
+    attempt: number,
+  ): unknown {
+    const { stdout, stderr } = output ?? adbFailureOutput(error);
+    const message = errorMessage(error);
+    if (!isEmptyStreamedInstallFailure(stdout, stderr, message, this.host.device.deviceId)) {
+      return error;
+    }
+    const deviceError = this.host.statusInspectionDeviceError(error);
+    if (deviceError) {
+      return deviceError;
+    }
+    this.host.clearAvailabilityCache();
+    const exitCode =
+      error instanceof Error && "code" in error && typeof error.code === "number"
+        ? `\nexit code: ${error.code}`
+        : "";
+    return new RetryableCtrlProxyInstallFailure(
+      `Failed to install APK (attempt ${attempt}/${CTRL_PROXY_INSTALL_ATTEMPTS}): ${message}${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`,
+      { cause: error },
+    );
+  }
+
+  private async installWithoutSettling(apkPath: string): Promise<ExecResult> {
+    const signal = getAbortSignal();
+
+    // The first attempt retains the direct phone path, including stage cancellation errors.
+    let initialFailure: RetryableCtrlProxyInstallFailure;
+    try {
+      return await this.installAttemptWithoutSettling(apkPath, 1, signal);
+    } catch (error) {
+      if (!(error instanceof RetryableCtrlProxyInstallFailure)) {
+        throw error;
+      }
+      initialFailure = error;
+    }
+
+    // Return terminal errors as values so retry cancellation cannot replace a stage error.
+    const result = await new DefaultRetryExecutor(this.host.timer).executeOrThrow(
+      async (attempt) => {
+        if (attempt === 1) {
+          throw initialFailure;
+        }
+        try {
+          return { output: await this.installAttemptWithoutSettling(apkPath, attempt, signal) };
+        } catch (error) {
+          if (error instanceof RetryableCtrlProxyInstallFailure) {
+            throw error;
+          }
+          return { error };
+        }
+      },
+      {
+        maxAttempts: CTRL_PROXY_INSTALL_ATTEMPTS,
+        delays: this.installReadiness.installBackoff ?? sequenceBackoff([500, 1500]),
+        signal,
+        shouldRetry: (error) => error instanceof RetryableCtrlProxyInstallFailure,
+      },
+    );
+    if ("error" in result) {
+      throw result.error;
+    }
+    return result.output;
+  }
+
+  async grantPostInstallPermissions(): Promise<void> {
+    await grantRecordAudioPermission(this.host.adb, await this.host.setupUser());
+    await this.host.grantLocalNetworkAfterInstall();
   }
 
   async grantLocalNetworkAfterInstall(): Promise<void> {

@@ -54,8 +54,7 @@ export const defaultTargetFocuserFactory: TextInputTargetFocuserFactory = (devic
   focus: async (selector, signal) => {
     const result = await new TapOnElement(device).execute(
       { ...selector, action: "focus" },
-      undefined,
-      signal,
+      { signal },
     );
     return {
       success: result.success,

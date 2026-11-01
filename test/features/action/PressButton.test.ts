@@ -68,25 +68,19 @@ describe("PressButton", () => {
     const invalidated: string[] = [];
     const launches: string[][] = [];
     try {
-      const pressButton = new PressButton(
-        iosSimulator,
-        null,
-        timer,
-        {
+      const pressButton = new PressButton(iosSimulator, null, timer, {
+        simctl: {
           executeCommandArgs: async (args) => {
             launches.push(args);
             return createExecResult("", "");
           },
         },
-        undefined,
-        {
-          iosLockStateInvalidator: {
-            invalidate: (id) => {
-              invalidated.push(id);
-            },
+        iosLockStateInvalidator: {
+          invalidate: (id) => {
+            invalidated.push(id);
           },
         },
-      );
+      });
 
       const result = await pressButton.press("home");
       expect(result.success).toBe(true);
@@ -108,17 +102,14 @@ describe("PressButton", () => {
     const reads = spyOn(client, "requestHierarchySync").mockImplementation(() => hierarchy.promise);
     let launches = 0;
     let marks = 0;
-    const action = new PressButton(
-      iosSimulator,
-      null,
-      timer,
-      {
+    const action = new PressButton(iosSimulator, null, timer, {
+      simctl: {
         executeCommandArgs: async () => {
           launches++;
           return createExecResult("", "");
         },
       },
-      (signal, timeoutMs, send, onDispatch) =>
+      holdRequest: (signal, timeoutMs, send, onDispatch) =>
         holdDispatchedRequest({
           timer,
           signal,
@@ -127,10 +118,10 @@ describe("PressButton", () => {
           send,
           onDispatch,
         }),
-    );
+    });
     let answered = false;
     const pending = action
-      .press("home", 500, undefined, controller.signal, () => marks++)
+      .press("home", { timeoutMs: 500, signal: controller.signal, onDispatch: () => marks++ })
       .finally(() => {
         answered = true;
       });
@@ -182,17 +173,14 @@ describe("PressButton", () => {
       const reads = spyOn(client, "requestHierarchySync");
       let sent = false;
       let marks = 0;
-      const action = new PressButton(
-        iosSimulator,
-        null,
-        timer,
-        {
+      const action = new PressButton(iosSimulator, null, timer, {
+        simctl: {
           executeCommandArgs: () => {
             sent = true;
             return launch.promise;
           },
         },
-        (signal, timeoutMs, send, onDispatch) =>
+        holdRequest: (signal, timeoutMs, send, onDispatch) =>
           holdDispatchedRequest({
             timer,
             signal,
@@ -201,10 +189,10 @@ describe("PressButton", () => {
             send,
             onDispatch,
           }),
-      );
+      });
       let answered = false;
       const pending = action
-        .press("home", 500, undefined, controller.signal, () => marks++)
+        .press("home", { timeoutMs: 500, signal: controller.signal, onDispatch: () => marks++ })
         .finally(() => {
           answered = true;
         });
@@ -251,13 +239,15 @@ describe("PressButton", () => {
     const timeouts: number[] = [];
     try {
       const action = new PressButton(iosSimulator, null, timer, {
-        executeCommandArgs: async (_args, timeoutMs = 0) => {
-          timeouts.push(timeoutMs);
-          if (timeouts.length === 1) {
-            await timer.sleep(timeoutMs);
-            throw new SimctlCommandTimeoutError("busy host launch timed out");
-          }
-          return createExecResult("", "");
+        simctl: {
+          executeCommandArgs: async (_args, timeoutMs = 0) => {
+            timeouts.push(timeoutMs);
+            if (timeouts.length === 1) {
+              await timer.sleep(timeoutMs);
+              throw new SimctlCommandTimeoutError("busy host launch timed out");
+            }
+            return createExecResult("", "");
+          },
         },
       });
       expect((await action.press("home")).success).toBe(true);
@@ -283,19 +273,25 @@ describe("PressButton", () => {
     let marks = 0;
     let launches = 0;
     const action = new PressButton(iosSimulator, null, timer, {
-      executeCommandArgs: async () => {
-        expect(marks).toBe(1);
-        launches++;
-        return createExecResult("", "");
+      simctl: {
+        executeCommandArgs: async () => {
+          expect(marks).toBe(1);
+          launches++;
+          return createExecResult("", "");
+        },
       },
     });
     try {
       if (aborted) {
         controller.abort();
       }
-      const pending = action.press("home", 500, undefined, controller.signal, () => {
-        expect(launches).toBe(0);
-        marks++;
+      const pending = action.press("home", {
+        timeoutMs: 500,
+        signal: controller.signal,
+        onDispatch: () => {
+          expect(launches).toBe(0);
+          marks++;
+        },
       });
       if (aborted) {
         await expect(pending).rejects.toThrow();
@@ -316,7 +312,12 @@ describe("PressButton", () => {
       let marks = 0;
       const request = async (...args: unknown[]) => {
         expect(marks).toBe(0);
-        const hook = args.at(-1);
+        // Navigation presses take the hook last; requestPressButton takes it in its options.
+        const last = args.at(-1);
+        const hook =
+          typeof last === "object" && last !== null && "onDispatch" in last
+            ? last.onDispatch
+            : last;
         expect(typeof hook).toBe("function");
         if (typeof hook === "function") {
           hook();
@@ -333,13 +334,10 @@ describe("PressButton", () => {
       try {
         expect(
           (
-            await new PressButton(iosDevice, null, new FakeTimer()).press(
-              button,
-              500,
-              undefined,
-              undefined,
-              () => marks++,
-            )
+            await new PressButton(iosDevice, null, new FakeTimer()).press(button, {
+              timeoutMs: 500,
+              onDispatch: () => marks++,
+            })
           ).success,
         ).toBe(true);
         expect(marks).toBe(1);
@@ -407,7 +405,7 @@ describe("PressButton", () => {
     });
 
     try {
-      const pressButton = new PressButton(iosDevice, null, undefined, undefined, undefined, {
+      const pressButton = new PressButton(iosDevice, null, undefined, {
         observeScreen: new ThrowingObserveScreen(),
       });
 
@@ -424,35 +422,47 @@ describe("PressButton", () => {
   test("ios button presses retain their desktop frame context through the runner request", async () => {
     const contexts: string[] = [];
     const getInstanceSpy = spyOnIosClientInstance({
-      requestPressBack: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
-        contexts.push(frameContext ?? "");
+      requestPressBack: async (
+        _timeoutMs?: number,
+        _perf?: unknown,
+        options?: { frameContext?: string },
+      ) => {
+        contexts.push(options?.frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
       },
-      requestPressHome: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
-        contexts.push(frameContext ?? "");
+      requestPressHome: async (
+        _timeoutMs?: number,
+        _perf?: unknown,
+        options?: { frameContext?: string },
+      ) => {
+        contexts.push(options?.frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
       },
-      requestRecentApps: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
-        contexts.push(frameContext ?? "");
+      requestRecentApps: async (
+        _timeoutMs?: number,
+        _perf?: unknown,
+        options?: { frameContext?: string },
+      ) => {
+        contexts.push(options?.frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
       },
       requestPressButton: async (
         _button: string,
         _timeoutMs?: number,
         _perf?: unknown,
-        frameContext?: string,
+        options?: { frameContext?: string },
       ) => {
-        contexts.push(frameContext ?? "");
+        contexts.push(options?.frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
       },
     });
 
     try {
       const pressButton = new PressButton(iosDevice);
-      await pressButton.press("home", undefined, "desktop-frame");
-      await pressButton.press("back", undefined, "desktop-frame");
-      await pressButton.press("recent", undefined, "desktop-frame");
-      await pressButton.press("volume_up", undefined, "desktop-frame");
+      await pressButton.press("home", { frameContext: "desktop-frame" });
+      await pressButton.press("back", { frameContext: "desktop-frame" });
+      await pressButton.press("recent", { frameContext: "desktop-frame" });
+      await pressButton.press("volume_up", { frameContext: "desktop-frame" });
 
       expect(contexts).toEqual([
         "desktop-frame",
@@ -477,7 +487,7 @@ describe("PressButton", () => {
 
     // "menu" is not a global-action button, so it goes straight to the ADB keyevent path.
     const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
-    const result = await pressButton.press("menu", 500);
+    const result = await pressButton.press("menu", { timeoutMs: 500 });
 
     expect(result.success).toBe(true);
     expect(fakeAdb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([500]);
@@ -521,12 +531,10 @@ describe("PressButton", () => {
 
     const fakeAdb = new FakeAdbExecutor();
 
-    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
-      globalActionClient,
-    });
+    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, { globalActionClient });
 
     // "back" is a global-action button, so this exercises the two-call path.
-    const result = await pressButton.press("back", 500);
+    const result = await pressButton.press("back", { timeoutMs: 500 });
 
     expect(result.success).toBe(true);
     // Global action capped at min(3000, 500).
@@ -551,7 +559,7 @@ describe("PressButton", () => {
         ...args: Parameters<AndroidCtrlProxyClient["requestGlobalAction"]>
       ) => {
         const [action, timeoutMs = 5000] = args;
-        args[5]?.();
+        args[3]?.onDispatch?.();
         // Consume the entire budget after the request was sent.
         fakeTimer.advanceTime(timeoutMs);
         return {
@@ -566,11 +574,9 @@ describe("PressButton", () => {
 
     const fakeAdb = new FakeAdbExecutor();
 
-    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
-      globalActionClient,
-    });
+    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, { globalActionClient });
 
-    const result = await pressButton.press("back", 500);
+    const result = await pressButton.press("back", { timeoutMs: 500 });
 
     // A lost reply after dispatch is indeterminate even when the deadline is exhausted.
     expect(result.success).toBe(false);
@@ -804,8 +810,8 @@ describe("PressButton", () => {
     try {
       const pressButton = new PressButton(iosDevice);
 
-      await pressButton.press("home", 500);
-      await pressButton.press("volume_up", 750);
+      await pressButton.press("home", { timeoutMs: 500 });
+      await pressButton.press("volume_up", { timeoutMs: 750 });
 
       expect(homeTimeouts).toEqual([500]);
       expect(buttonTimeouts).toEqual([750]);
@@ -962,20 +968,13 @@ for (const platform of ["ios", "android"] as const) {
   test(`${platform} press invalidates iOS lock state only for iOS, including failures`, async () => {
     const invalidated: string[] = [];
     const device: BootedDevice = { platform, deviceId: "fake-device", name: "fake" };
-    const press = new PressButton(
-      device,
-      new FakeAdbExecutor(),
-      new FakeTimer(),
-      undefined,
-      undefined,
-      {
-        iosLockStateInvalidator: {
-          invalidate: (id) => {
-            invalidated.push(id);
-          },
+    const press = new PressButton(device, new FakeAdbExecutor(), new FakeTimer(), {
+      iosLockStateInvalidator: {
+        invalidate: (id) => {
+          invalidated.push(id);
         },
       },
-    );
+    });
     // Unsupported input completes without touching a transport on either platform.
     await press.press("unsupported");
     expect(invalidated).toEqual(platform === "ios" ? [device.deviceId] : []);

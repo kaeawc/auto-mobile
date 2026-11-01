@@ -186,14 +186,12 @@ function delayedConnection() {
     },
     cancelScreenshotBackoff: () => {},
   };
-  const client = IOSCtrlProxyClient.createForTesting(
-    ios,
-    8765,
-    () => {
+  const client = IOSCtrlProxyClient.createForTesting(ios, 8765, {
+    wsFactory: () => {
       throw new Error("Unexpected socket connection");
     },
     timer,
-  );
+  });
   const instance = spyOnIosClientInstance(client);
   restores.push(
     () => instance.mockRestore(),
@@ -284,7 +282,12 @@ test("physical iOS openLink forwards cancellation to devicectl", async () => {
   );
   restores.push(() => launch.mockRestore());
   interactionDeps.openUrlFactory = () =>
-    new UnobservedOpenURL(ios, new FakeAdbExecutor(), null, launcher, timer);
+    new UnobservedOpenURL(ios, {
+      adb: new FakeAdbExecutor(),
+      simctl: null,
+      devicectl: launcher,
+      timer,
+    });
   await expect(
     handler("openLink")(ios, { url: "https://example.com" }, undefined, controller.signal),
   ).rejects.toThrow("Operation cancelled");

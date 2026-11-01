@@ -41,13 +41,10 @@ describe("bounded broker reads and tombstone lifetime", () => {
     queries = [];
     timer = new FakeTimer();
     timer.setCurrentTime(10_000);
-    store = new SqliteSessionBrokerStore(
-      db,
-      "scope",
-      () => true,
-      new CountingIdGenerator("new"),
-      timer,
-    );
+    store = new SqliteSessionBrokerStore(db, "scope", () => true, {
+      ids: new CountingIdGenerator("new"),
+      clock: timer,
+    });
   });
 
   afterAll(async () => {

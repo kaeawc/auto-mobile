@@ -1,4 +1,5 @@
 import { BootedDevice, DeviceInfo, Platform } from "../models";
+import { matchesPlatformSelector } from "../models/Platform";
 import type { PooledDevice } from "./devicePool";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
 
@@ -59,14 +60,14 @@ export class DeviceCriteriaMatcher {
    * Filter pooled devices down to those matching the criteria.
    *
    * Applies platform, simulator type, and iOS version constraints. An undefined
-   * criteria field matches any value.
+   * criteria field matches any value, except platform: no platform means Android or iOS.
    */
   filterDevices(devices: PooledDevice[], criteria?: DeviceAllocationCriteria): PooledDevice[] {
     const normalizedType = this.normalizeValue(criteria?.simulatorType);
     const normalizedVersion = this.normalizeValue(criteria?.iosVersion);
 
     return devices.filter((device) => {
-      if (criteria?.platform && device.platform !== criteria.platform) {
+      if (!matchesPlatformSelector(device.platform, criteria?.platform)) {
         return false;
       }
 
@@ -94,7 +95,7 @@ export class DeviceCriteriaMatcher {
    * Whether a startable device image satisfies the criteria.
    */
   deviceImageMatchesCriteria(image: DeviceInfo, criteria?: DeviceAllocationCriteria): boolean {
-    if (criteria?.platform && image.platform !== criteria.platform) {
+    if (!matchesPlatformSelector(image.platform, criteria?.platform)) {
       return false;
     }
 

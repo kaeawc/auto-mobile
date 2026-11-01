@@ -22,13 +22,16 @@ struct PrototypeTransitionForm: Decodable {
 
 /// How a `visibleWhen` node enters and leaves, after the spec's `motion`, the node's `transition`
 /// and the system's reduce-motion setting are applied.
-enum PrototypeVisibilityTransition: Equatable {
-    case instant
+enum PrototypeVisibilityTransition: String, Equatable {
+    case instant = "none"
     /// The default when `transition` is absent: fade plus expand.
     case standard
     case fade
     case expand
     case slide
+    case slideStart
+    case slideEnd
+    case scale
 }
 
 enum PrototypeMotionProfile: Equatable {
@@ -92,13 +95,27 @@ struct PrototypeMotion: Equatable {
         let transition = nodeType == "stack" ? nil : transition
         if transition == "none" { return shared ? .fade : .instant }
         if fadeOnly { return .fade }
-        switch transition {
-        case "none": return .instant
-        case "fade": return .fade
-        case "expand": return .expand
-        case "slide": return .slide
-        default: return .standard
-        }
+        return PrototypeVisibilityTransition(rawValue: transition ?? "") ?? .standard
+    }
+}
+
+/// Image-local zoom math, matching Android's PrototypeZoom. Interaction updates never animate.
+struct PrototypeImageZoom {
+    private(set) var scale: CGFloat = 1
+    private(set) var pan: CGSize = .zero
+
+    func toggledScale(maxScale: Double) -> CGFloat { scale > 1 ? 1 : min(2, CGFloat(maxScale)) }
+    func zoomInScale(maxScale: Double) -> CGFloat { min(scale * 1.5, CGFloat(maxScale)) }
+    var zoomOutScale: CGFloat { max(1, scale / 1.5) }
+
+    mutating func update(scale requestedScale: CGFloat, pan requestedPan: CGSize, size: CGSize, maxScale: Double) {
+        scale = min(max(1, requestedScale), CGFloat(maxScale))
+        let overflowX = max(0, size.width * (scale - 1) / 2)
+        let overflowY = max(0, size.height * (scale - 1) / 2)
+        pan = CGSize(
+            width: min(max(requestedPan.width, -overflowX), overflowX),
+            height: min(max(requestedPan.height, -overflowY), overflowY)
+        )
     }
 }
 
@@ -120,14 +137,10 @@ extension PrototypeMotion {
 }
 
 extension PrototypeNode {
-    /// Whether the node takes a slot in its parent's stack: not hidden by `visibleWhen`, not drawn
-    /// elsewhere (an anchored node is drawn by the anchor layer, a dialog or snackbar by the modal
-    /// layer) and not a closed `bottomSheet`. A stack puts its spacing around every child it is
-    /// given, even an empty one, so a parent leaves these out (#10912).
+    /// Hidden, anchored and modal nodes take no stack slot; even an empty slot adds spacing (#10912).
     func drawsInPlace(holds: (Condition) -> Bool) -> Bool {
         if let visibleWhen, !holds(visibleWhen) { return false }
         if anchor != nil || prototypeModalTypes.contains(type) { return false }
-        if type == "bottomSheet", !(openWhen.map(holds) ?? false) { return false }
         return true
     }
 
@@ -186,7 +199,7 @@ protocol PrototypeTimerHandle: AnyObject {
 }
 
 /// Wall-clock timers behind an interface so snackbar timeouts run without real time in tests.
-protocol PrototypeClock {
+protocol PrototypeClock: PrototypeMonotonicClock {
     var nowMilliseconds: Int { get }
     func schedule(afterMilliseconds: Int, _ fire: @escaping () -> Void) -> PrototypeTimerHandle
 }

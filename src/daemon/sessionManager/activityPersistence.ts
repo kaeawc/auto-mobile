@@ -23,6 +23,7 @@ import {
   type SessionLifecycleSlots,
 } from "./internalContracts";
 import { SessionActivityPersistenceError } from "./SessionActivityPersistenceError";
+import type { RefusedRowWriteRelease } from "./supersededRows";
 
 export interface SessionActivityPersistenceHost {
   readonly rowWriter: Pick<
@@ -35,14 +36,10 @@ export interface SessionActivityPersistenceHost {
     error: DeviceSessionRowNotRewritableError | DeviceSessionRowNotReleasableError,
     sessionId: string,
     guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
-    write: (
-      guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
-    ) => Promise<T>,
-    releaseReason?: string,
-    releaseOptions?: {
-      unlessDaemonShutdown?: boolean;
-      resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
-      incarnation?: Session;
+    release: RefusedRowWriteRelease & {
+      write: (
+        guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
+      ) => Promise<T>;
     },
   ): Promise<T>;
   isAdmittedForAutomation(session: Session): boolean;
@@ -161,9 +158,9 @@ export class SessionActivityPersistence {
       ) {
         throw error;
       }
-      await this.host.retryRefusedRowWrite(error, session.sessionId, guard, (next) =>
-        write({ ...upsertOptions, rewriteOverSupersededRelease: next }),
-      );
+      await this.host.retryRefusedRowWrite(error, session.sessionId, guard, {
+        write: (next) => write({ ...upsertOptions, rewriteOverSupersededRelease: next }),
+      });
     }
     await this.host.rowWriter.replaceLiveOwnership(
       session.sessionId,

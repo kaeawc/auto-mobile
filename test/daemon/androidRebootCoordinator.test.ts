@@ -85,18 +85,22 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
     _avdName: string,
     _recoveryDeviceIds: ReadonlySet<string>,
     retainRecoveryImage: boolean,
-    _replacementHandoffOwner: symbol,
-    lateShutdownSettled?: Promise<unknown>,
+    {
+      replacementHandoffOwner: _replacementHandoffOwner,
+      lateShutdownSettled,
+    }: { replacementHandoffOwner: symbol; lateShutdownSettled?: Promise<unknown> },
   ): void {
     this.calls.push("finish");
     this.finishes.push({ retainRecoveryImage, lateShutdownSettled });
   }
+  readonly stopSignals: Array<AbortSignal | undefined> = [];
   async stopAndroidEmulatorForRecovery(
-    _device: PooledDevice,
-    _avdName: string,
-    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+    ...[, , retainLeaseUntil, , , , , signal]: Parameters<
+      AndroidRebootCoordinatorPoolPort["stopAndroidEmulatorForRecovery"]
+    >
   ): Promise<"stopped"> {
     this.calls.push("stop");
+    this.stopSignals.push(signal);
     this.onStop?.(retainLeaseUntil);
     return "stopped";
   }
@@ -220,8 +224,7 @@ async function run(
     oldDevice,
     "incident",
     options,
-    new AbortController().signal,
-    () => {},
+    { signal: new AbortController().signal, retainLeaseUntil: () => {} },
   );
 }
 
@@ -247,6 +250,19 @@ describe("AndroidRebootCoordinator", () => {
     expect(port.calls.slice(-3)).toEqual(["bind:none", "clear-owner", "finish"]);
   });
 
+  test("threads its recovery signal into the emulator stop (#15671)", async () => {
+    const { coordinator, port } = setup(async () => null);
+    const signal = new AbortController().signal;
+    await coordinator.rebootDisconnectedAndroidDeviceCoordinated(
+      oldDevice,
+      "incident",
+      {},
+      { signal, retainLeaseUntil: () => {} },
+    );
+    expect(port.stopSignals.length).toBe(1);
+    expect(port.stopSignals[0]).toBe(signal);
+  });
+
   test("settles cancellation during a failed launch without a registered replacement", async () => {
     const controller = new AbortController();
     const { coordinator, port, outcomes, attempts } = setup(async () => {
@@ -258,8 +274,7 @@ describe("AndroidRebootCoordinator", () => {
         oldDevice,
         "incident",
         {},
-        controller.signal,
-        () => {},
+        { signal: controller.signal, retainLeaseUntil: () => {} },
       ),
     ).toBe(false);
     expect(port.calls.slice(-2)).toEqual(["stop-process", "finish"]);
@@ -278,8 +293,7 @@ describe("AndroidRebootCoordinator", () => {
         oldDevice,
         "incident",
         {},
-        controller.signal,
-        () => {},
+        { signal: controller.signal, retainLeaseUntil: () => {} },
       ),
     ).toBe(false);
     expect(port.stoppedProcesses).toEqual([spawned]);
@@ -300,9 +314,11 @@ describe("AndroidRebootCoordinator", () => {
           oldDevice,
           "incident",
           {},
-          controller.signal,
-          (settlement) => {
-            leaseSettlements.push(settlement);
+          {
+            signal: controller.signal,
+            retainLeaseUntil: (settlement) => {
+              leaseSettlements.push(settlement);
+            },
           },
         );
       return { ...harnessed, spawned, exited, leaseSettlements, cancelledRun };
@@ -408,8 +424,7 @@ describe("AndroidRebootCoordinator", () => {
         oldDevice,
         "incident",
         {},
-        controller.signal,
-        () => {},
+        { signal: controller.signal, retainLeaseUntil: () => {} },
       );
       if (cleanupFails) {
         await expect(result).rejects.toBe(failure);

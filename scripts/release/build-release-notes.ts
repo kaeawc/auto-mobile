@@ -22,6 +22,7 @@ interface ReleaseNotesInput {
   changelog: string | null;
   checksums: {
     apk: string;
+    protoViewerApk: string;
     ipa: string;
     videoJar: string;
     screenCaptureHelper: string;
@@ -56,6 +57,7 @@ export function buildReleaseNotes(input: ReleaseNotesInput): string {
   const changelogPart = section.lines.join("\n") || `Release v${version.replace(/^v/, "")}`;
   const tail =
     `\n\n## CtrlProxy APK\n\n**SHA256 Checksum:** \`${checksums.apk}\`\n\nDownload the APK from the release assets below.` +
+    `\n\n## ProtoViewer Android APK\n\n**SHA256 Checksum:** \`${checksums.protoViewerApk}\`\n\nDownload \`automobile-protoviewer-<version>.apk\` and its \`.sha256\` file from the release assets below, verify with \`sha256sum -c\`, then install with \`adb install -r\`.` +
     `\n\n## CtrlProxy iOS IPA\n\n**SHA256 Checksum:** \`${checksums.ipa}\`\n\nDownload the IPA from the release assets below.` +
     `\n\n## video-server jar\n\n**SHA256 Checksum:** \`${checksums.videoJar}\`\n\nDownload automobile-video.jar from the release assets below.` +
     `\n\n## macOS screen-capture-helper\n\n**SHA256 Checksum:** \`${checksums.screenCaptureHelper}\`\n\nDownload screen-capture-helper-macos-universal.zip from the release assets below.` +
@@ -109,6 +111,7 @@ if (import.meta.main) {
   const repository = requiredEnv("GITHUB_REPOSITORY");
   const checksums = {
     apk: requiredEnv("APK_CHECKSUM"),
+    protoViewerApk: requiredEnv("PROTOVIEWER_APK_CHECKSUM"),
     ipa: requiredEnv("IPA_CHECKSUM"),
     videoJar: requiredEnv("VIDEO_JAR_CHECKSUM"),
     screenCaptureHelper: requiredEnv("SCREEN_CAPTURE_HELPER_CHECKSUM"),

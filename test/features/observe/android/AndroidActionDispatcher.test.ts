@@ -63,7 +63,7 @@ describe("AndroidActionDispatcher", () => {
       "click-1",
       "action",
       1000,
-      () => ({ success: false, error: "timeout" }),
+      { timeoutErrorFactory: () => ({ success: false, error: "timeout" }) },
     );
     pendingFocusedInputClickIds.add("click-1");
     dispatcher.settleUnattributedFocusedClickRejection(

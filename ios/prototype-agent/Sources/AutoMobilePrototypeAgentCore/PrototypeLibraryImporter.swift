@@ -52,6 +52,15 @@ struct PrototypeLibraryImporter {
                 )
             }
             try checkImages(bundle)
+            // A timed-out host may retry with a new request id. Preserve the original entry and
+            // label for the same spec and resources, after validating the incoming bundle in full.
+            let digest = bundle.specSha256
+            let identity = bundle.importIdentity
+            for existing in try store.list().entries where existing.specSha256 == digest {
+                // Corrupt/unreadable candidates cannot prove identity; leave them intact and keep looking.
+                guard let content = try? store.load(existing.libraryId) else { continue }
+                if content.bundle.importIdentity == identity { return existing }
+            }
             let fields = try JSONDecoder().decode(
                 [String: JSONValue].self,
                 from: PrototypeStrictJSON.prepare(bundle.spec)

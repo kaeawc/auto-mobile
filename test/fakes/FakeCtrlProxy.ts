@@ -1,5 +1,8 @@
 import type { PinchRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
-import type { TwoFingerSwipeRequest } from "../../src/features/observe/android/types";
+import type {
+  LatestHierarchyOptions,
+  TwoFingerSwipeRequest,
+} from "../../src/features/observe/android/types";
 import type { TapCoordinatesRequest } from "../../src/features/observe/shared/SharedGestureDelegate";
 import type {
   AndroidAccessibilityActionRequest,
@@ -31,6 +34,7 @@ import type { PrototypeChannelHost } from "../../src/features/prototype/prototyp
 import type { PrototypeRequestHost } from "../../src/features/prototype/prototypeRequestHandler";
 import type { PrototypeAssetUpload } from "../../src/features/prototype/prototypeAssets";
 import type { PrototypeAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyPrototypes";
+import type { AndroidScreenshotRequestOptions } from "../../src/features/observe/android/AndroidScreenshotRequester";
 import type {
   PrototypeAppearanceOverride,
   PrototypeAssetResult,
@@ -291,12 +295,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     spec: PrototypeSpec,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
+    overrides: PrototypeShowOverrides = {},
   ): Promise<PrototypeResult> {
     this.checkFailure("requestShowPrototype");
-    const overrides = typeof appearance === "string" ? { appearance } : appearance;
+    const { displayId, reset } = overrides;
     this.prototypeHistory.push({
       method: "show",
       spec,
@@ -304,9 +306,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       ...(displayId === undefined ? {} : { displayId }),
       ...(reset === undefined ? {} : { reset }),
-      ...(overrides?.locale === undefined ? {} : { locale: overrides.locale }),
-      ...(overrides?.appearance === undefined ? {} : { appearance: overrides.appearance }),
-      ...(overrides?.replaceOthers === false ? { replaceOthers: false } : {}),
+      ...(overrides.locale === undefined ? {} : { locale: overrides.locale }),
+      ...(overrides.appearance === undefined ? {} : { appearance: overrides.appearance }),
+      ...(overrides.replaceOthers === false ? { replaceOthers: false } : {}),
     });
     const hold = this.showHold;
     this.showHold = undefined;
@@ -829,8 +831,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     waitForFresh: boolean = false,
     timeout: number = 100,
     perf?: PerformanceTracker,
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
+    {
+      skipWaitForFresh = false,
+      ..._options
+    }: LatestHierarchyOptions & { skipWaitForFresh?: boolean } = {},
   ): Promise<AccessibilityHierarchyResponse> {
     this.hierarchyRequestCount++;
     await this.applyDelay("getLatestHierarchy");
@@ -855,7 +859,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number,
+    { timeoutMs }: { timeoutMs?: number } = {},
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     this.hierarchyRequestCount++;
     this.lastRequestHierarchySyncArgs = { disableAllFiltering, timeoutMs };
@@ -1038,10 +1042,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   async requestInsertText(
     text: string,
-    _timeoutMs?: number,
-    _perf?: PerformanceTracker,
-    _options?: Parameters<AndroidCtrlProxy["requestInsertText"]>[3],
-    _transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
+    _options?: Parameters<AndroidCtrlProxy["requestInsertText"]>[1],
   ): Promise<A11ySetTextResult> {
     return this.requestSetText(text);
   }
@@ -1072,8 +1073,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     action: "done" | "next" | "search" | "send" | "go" | "previous",
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    _abortSignal?: AbortSignal,
-    _onDispatch?: () => void,
+    {
+      abortSignal: _abortSignal,
+      onDispatch: _onDispatch,
+    }: { abortSignal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<A11yImeActionResult> {
     await this.applyDelay("imeAction");
 
@@ -1129,6 +1132,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    _options?: AndroidScreenshotRequestOptions,
   ): Promise<ScreenshotResult> {
     this.screenshotRequestCount++;
     await this.applyDelay("screenshot");
@@ -1153,7 +1157,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     action: string,
     resourceId?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
+    _options?: Parameters<AndroidCtrlProxy["requestAction"]>[3],
   ): Promise<A11yActionResult> {
     await this.applyDelay("requestAction");
     this.checkFailure("requestAction");
@@ -1185,9 +1189,11 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    {
+      timeoutMs = 5000,
+      perf,
+      signal,
+    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<A11yActionResult> {
     await this.applyDelay("requestNodeAction");
     this.checkFailure("requestNodeAction");

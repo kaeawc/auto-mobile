@@ -170,7 +170,7 @@ export interface NativeFrameMetrics {
  *       binaryPath,
  *       target: { kind: "simulator", windowID: 12345 },
  *     });
- *     helper.on("frame", frame => …);
+ *     helper.on("encodedVideo", video => …);
  *     helper.start();
  *     …
  *     await helper.stop();
@@ -243,12 +243,11 @@ export class IosScreenCaptureHelper extends EventEmitter {
 
     proc.stdout.on("data", (chunk) => {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      this.decoder.push(
-        buf,
-        (err) => this.emit("malformed", err),
-        (audio) => this.emit("audio", audio),
-        (video) => this.emit("encodedVideo", video),
-      );
+      this.decoder.push(buf, {
+        onMalformed: (err) => this.emit("malformed", err),
+        onAudio: (audio) => this.emit("audio", audio),
+        onEncodedVideo: (video) => this.emit("encodedVideo", video),
+      });
     });
 
     proc.stderr.on("data", (chunk) => {

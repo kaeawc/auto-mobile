@@ -72,8 +72,10 @@ export function newestScreenshotPathKeys(
   files: readonly ScreenshotCacheFile[],
   keepPerDevice: number,
   touched: (file: ScreenshotCacheFile) => number,
-  incomingDevice?: string,
-  key: (path: string) => string = screenshotPathKey,
+  {
+    incomingDevice,
+    key = screenshotPathKey,
+  }: { incomingDevice?: string; key?: (path: string) => string } = {},
 ): Set<string> {
   const counts = new Map<string, number>();
   if (incomingDevice) {
@@ -103,6 +105,13 @@ export interface ScreenshotEvictionPlan {
   skippedReferenced: number;
 }
 
+export interface ScreenshotEvictionGuards {
+  /** A file still referenced by a live cache entry is skipped and counted in `skippedReferenced`. */
+  isReferenced?: (path: string) => boolean;
+  /** A protected file is never selected. */
+  isProtected?: (path: string) => boolean;
+}
+
 /**
  * Pure selector for size-based screenshot eviction. Plans oldest-first deletion
  * until under `maxSizeBytes`, but never selects a file younger than `minAgeMs`
@@ -112,9 +121,11 @@ export function selectScreenshotsToEvict(
   files: ScreenshotCacheFile[],
   maxSizeBytes: number,
   minAgeMs: number,
-  nowMs: number,
-  isReferenced: (path: string) => boolean = () => false,
-  isProtected: (path: string) => boolean = () => false,
+  {
+    nowMs,
+    isReferenced = () => false,
+    isProtected = () => false,
+  }: ScreenshotEvictionGuards & { nowMs: number },
 ): ScreenshotEvictionPlan {
   const total = files.reduce((sum, f) => sum + f.size, 0);
   if (total <= maxSizeBytes) {

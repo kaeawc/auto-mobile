@@ -58,6 +58,11 @@ describe("disconnect monitor cadence decisions", () => {
     expect(selectDisconnectScope([], 10_000, 5_000, 30_000)).toBe("either");
     expect(selectDisconnectScope(["ios"], 35_000, 5_000, 30_000)).toBe("either");
   });
+
+  test("a tracked watch never narrows the disconnect scope", () => {
+    expect(selectDisconnectScope(["ios", "watchos"], 10_000, 5_000, 30_000)).toBe("ios");
+    expect(selectDisconnectScope(["watchos"], 10_000, 5_000, 30_000)).toBe("either");
+  });
 });
 
 describe("disconnect monitor schedule", () => {
@@ -199,24 +204,50 @@ describe("idle signature eligibility", () => {
   test("successful discovery with no misses and all candidates booted yields a signature", () => {
     const platforms = new Set<"android" | "ios">(["ios"]);
     const booted = new Set(["sim-1", "sim-2"]);
-    expect(eligibleIdleSweepSignature(platforms, 0, ["sim-1"], booted, ["sim-1"])).toBe(
-      idleSweepSignature(booted, ["sim-1"], platforms),
-    );
+    expect(
+      eligibleIdleSweepSignature(platforms, 0, ["sim-1"], {
+        bootedDeviceIds: booted,
+        pooledDeviceIds: ["sim-1"],
+      }),
+    ).toBe(idleSweepSignature(booted, ["sim-1"], platforms));
   });
 
   test("no successful platforms, outstanding misses or an absent candidate prevents backoff", () => {
     const platforms = new Set<"android" | "ios">(["ios"]);
     const booted = new Set(["sim-1"]);
-    expect(eligibleIdleSweepSignature(new Set(), 0, ["sim-1"], booted, [])).toBeUndefined();
-    expect(eligibleIdleSweepSignature(platforms, 1, ["sim-1"], booted, [])).toBeUndefined();
-    expect(eligibleIdleSweepSignature(platforms, 0, ["sim-2"], booted, [])).toBeUndefined();
+    expect(
+      eligibleIdleSweepSignature(new Set(), 0, ["sim-1"], {
+        bootedDeviceIds: booted,
+        pooledDeviceIds: [],
+      }),
+    ).toBeUndefined();
+    expect(
+      eligibleIdleSweepSignature(platforms, 1, ["sim-1"], {
+        bootedDeviceIds: booted,
+        pooledDeviceIds: [],
+      }),
+    ).toBeUndefined();
+    expect(
+      eligibleIdleSweepSignature(platforms, 0, ["sim-2"], {
+        bootedDeviceIds: booted,
+        pooledDeviceIds: [],
+      }),
+    ).toBeUndefined();
   });
 
   test("an empty pool and candidate set can back off after successful discovery", () => {
     const platforms = new Set<"android" | "ios">(["android"]);
-    expect(eligibleIdleSweepSignature(platforms, 0, [], new Set(), [])).toBe(
-      idleSweepSignature([], [], platforms),
-    );
-    expect(eligibleIdleSweepSignature(new Set(), 0, [], new Set(), [])).toBeUndefined();
+    expect(
+      eligibleIdleSweepSignature(platforms, 0, [], {
+        bootedDeviceIds: new Set(),
+        pooledDeviceIds: [],
+      }),
+    ).toBe(idleSweepSignature([], [], platforms));
+    expect(
+      eligibleIdleSweepSignature(new Set(), 0, [], {
+        bootedDeviceIds: new Set(),
+        pooledDeviceIds: [],
+      }),
+    ).toBeUndefined();
   });
 });

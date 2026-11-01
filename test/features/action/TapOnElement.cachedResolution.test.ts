@@ -105,7 +105,7 @@ function harness(
   tap.awaitIdle = new FakeAwaitIdle();
   tap.window = new FakeWindow();
   const points: { x: number; y: number }[] = [];
-  tap.executeAndroidTap = async (_action, x, y) => {
+  tap.executeAndroidTap = async (_action, { x, y }) => {
     points.push({ x, y });
   };
   tap.deriveTapEffectAfterPostTapObservation = async (before, current) => {
@@ -150,11 +150,16 @@ describe("tapOn cached element resolution", () => {
     screen.execute = (options) =>
       execute({ ...options, skipScreenshot: true, skipBackStack: true });
     h.tap.observeScreen = screen;
-    const launch = new LaunchApp(device, h.adb, null, h.timer, {
-      installedAppsProvider: new FakeInstalledAppsProvider(h.timer, {
-        installedApps: ["com.example.app"],
-      }),
-      targetUserDetector: new FakeTargetUserDetector(h.timer),
+    const launch = new LaunchApp(device, {
+      adb: h.adb,
+      simctl: null,
+      timer: h.timer,
+      dependencies: {
+        installedAppsProvider: new FakeInstalledAppsProvider(h.timer, {
+          installedApps: ["com.example.app"],
+        }),
+        targetUserDetector: new FakeTargetUserDetector(h.timer),
+      },
     });
     launch.observeScreen = screen;
     launch.awaitIdle = new FakeAwaitIdle();
@@ -671,15 +676,8 @@ describe("TalkBack focus verification authority", () => {
     h.strategy.setAccessibilityServiceEnabled(true);
     h.tap.refreshViewHierarchy = async () => fresh.viewHierarchy!;
     let authority: ObserveResult["viewHierarchy"];
-    h.tap["verifyFocusedInputTarget"] = (
-      _options,
-      _target,
-      _observation,
-      _label,
-      _index,
-      before,
-    ) => {
-      authority = before;
+    h.tap["verifyFocusedInputTarget"] = (_options, _target, _observation, hints) => {
+      authority = hints?.preTapHierarchy;
       return true;
     };
     const result = await h.tap.execute({ text: "Search", action: "focus", retryIfNoChange: false });

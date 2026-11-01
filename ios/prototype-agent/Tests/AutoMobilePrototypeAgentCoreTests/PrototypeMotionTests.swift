@@ -323,7 +323,7 @@ final class PrototypeMotionTests: XCTestCase {
             column.drawnChildren { $0.holds(state) }.map(\.offset)
         }
         XCTAssertEqual(offsets([:]), [0])
-        XCTAssertEqual(offsets(["on": .bool(true)]), [0, 1, 4])
+        XCTAssertEqual(offsets(["on": .bool(true)]), [0, 1])
         XCTAssertEqual(offsets(["on": .bool(false)]), [0, 5])
     }
 

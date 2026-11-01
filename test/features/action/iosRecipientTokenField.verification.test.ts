@@ -106,7 +106,7 @@ describe("bounded settle wait", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const { observer, state } = observerOf(token, token, trailing);
-    const result = await verifyIosTypedText("ab", read(token), observer, timer);
+    const result = await verifyIosTypedText("ab", read(token), { observer, timer });
     expect(result).toEqual({ success: true });
     expect(state.reads).toBe(3);
   });
@@ -115,7 +115,7 @@ describe("bounded settle wait", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const { observer, state } = observerOf(token);
-    const result = await verifyIosTypedText("ab", read(token), observer, timer);
+    const result = await verifyIosTypedText("ab", read(token), { observer, timer });
     expect(result.success).toBe(false);
     expect(timer.getSleepHistory().reduce((sum, ms) => sum + ms, 0)).toBeLessThanOrEqual(
       IOS_TOKEN_SETTLE_MAX_MS,
@@ -127,7 +127,7 @@ describe("bounded settle wait", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const { observer, state } = observerOf(empty);
-    await verifyIosTypedText("ab", read(empty), observer, timer);
+    await verifyIosTypedText("ab", read(empty), { observer, timer });
     expect(state.reads).toBe(1);
     expect(timer.getSleepCallCount()).toBe(0);
   });

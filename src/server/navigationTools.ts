@@ -5,7 +5,7 @@ import {
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { ActionableError, BootedDevice } from "../models";
+import { ActionableError, BootedDevice, requireAndroidOrIosPlatform } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
 import {
   NavigationGraphManager,
@@ -14,20 +14,26 @@ import {
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
 import { DEFAULT_MAX_INTERACTIONS, Explore, ExploreOptions } from "../features/navigation/Explore";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import {
-  throwIfAborted,
-  createJSONToolResponse,
-  createStructuredToolResponse,
-} from "../utils/toolUtils";
+import { throwIfAborted, createStructuredToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "../utils/schemaHelpers";
 
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
 import {
+  exploreResultSchema,
   getNavigationGraphResultSchema,
   navigateToResultSchema,
 } from "./navigationToolOutputSchemas";
+import {
+  prototypeDiffArgsShape,
+  prototypeDiffForGraph,
+  type PrototypeDiffArgs,
+} from "./navigationPrototypeDiff";
+import {
+  nodePrototypeAssetFileReader,
+  type PrototypeAssetFileReader,
+} from "../features/prototype/prototypeAssetUploader";
 
 // Schema definitions
 // #6712: `.strict()` on each of these — the advertised schemas already said
@@ -51,6 +57,7 @@ export const getNavigationGraphSchema = addDeviceTargetingToSchema(
         .string()
         .optional()
         .describe("Scope the graph to this app id instead of the device's current foreground app"),
+      ...prototypeDiffArgsShape(),
     })
     .strict(),
 );
@@ -96,7 +103,7 @@ export interface NavigateToArgs {
   sessionUuid?: string;
 }
 
-export interface GetNavigationGraphArgs {
+export interface GetNavigationGraphArgs extends PrototypeDiffArgs {
   platform?: Platform;
   appId?: string;
   sessionUuid?: string;
@@ -159,7 +166,7 @@ export function createNavigateToHandler({
           ? { [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: args[INTERNAL_MCP_REQUEST_DEADLINE_PARAM] }
           : {}),
         targetScreen: args.targetScreen,
-        platform: args.platform || device.platform,
+        platform: requireAndroidOrIosPlatform(args.platform || device.platform, "navigateTo"),
         sessionUuid: args.sessionUuid,
       };
       const result = await navigateTo.execute(options, progress, signal);
@@ -192,6 +199,8 @@ export const navigateToHandler = createNavigateToHandler();
 
 // Register navigation tools
 export interface NavigationToolDependencies extends NavigateToHandlerDependencies {
+  /** Reads prototypeSpecPath and screenMappingPath for the getNavigationGraph diff. */
+  prototypeFileReader?: PrototypeAssetFileReader;
   installedAppsFactory?: (
     device: BootedDevice,
   ) => Pick<ListInstalledApps, "executeDetailedResult" | "executeIosDetailedResult">;
@@ -200,6 +209,7 @@ export interface NavigationToolDependencies extends NavigateToHandlerDependencie
 export function registerNavigationTools({
   navigateToFactory,
   navigationManagerFactory = getNavigationManager,
+  prototypeFileReader = nodePrototypeAssetFileReader,
   installedAppsFactory = (device) =>
     new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
 }: NavigationToolDependencies = {}) {
@@ -218,6 +228,7 @@ export function registerNavigationTools({
       const appId = requestedAppId ?? observedAppId;
       const stats = await manager.getStatsForApp(appId);
       const graph = await manager.exportGraphForApp(appId);
+      const prototypeDiff = await prototypeDiffForGraph(args, graph, prototypeFileReader);
 
       return createStructuredToolResponse({
         message: `Navigation graph for app: ${appId || "none"}`,
@@ -241,6 +252,7 @@ export function registerNavigationTools({
           args: e.interaction?.args,
           uiState: e.uiState,
         })),
+        ...(prototypeDiff ? { prototypeDiff } : {}),
       });
     } catch (error) {
       throw toActionableError(error, `Failed to get navigation graph`);
@@ -252,8 +264,8 @@ export function registerNavigationTools({
     "navigateTo",
     "Navigate to screen using navigation graph",
     navigateToSchema,
-    createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
     {
+      handler: createNavigateToHandler({ navigateToFactory, navigationManagerFactory }),
       defaultEnabled: false,
       supportsProgress: true,
       embeddedSdkOnly: true,
@@ -265,9 +277,9 @@ export function registerNavigationTools({
     "getNavigationGraph",
     "Get navigation graph for debugging",
     getNavigationGraphSchema,
-    getNavigationGraphHandler,
-    // Reads only; read-only access never requires a session (#10965).
     {
+      handler: getNavigationGraphHandler,
+      // Reads only; read-only access never requires a session (#10965).
       defaultEnabled: false,
       embeddedSdkOnly: true,
       deviceReadOnly: true,
@@ -310,13 +322,10 @@ export function registerNavigationTools({
               );
         }
       }
-      const explore = new Explore(
-        device,
-        null,
-        undefined,
-        navigationManagerFactory(args.sessionUuid),
-        args.sessionUuid,
-      );
+      const explore = new Explore(device, null, undefined, {
+        navigationManager: navigationManagerFactory(args.sessionUuid),
+        sessionUuid: args.sessionUuid,
+      });
       const options: ExploreOptions = {
         maxInteractions: args.maxInteractions,
         timeoutMs: args.timeoutMs,
@@ -330,7 +339,7 @@ export function registerNavigationTools({
       const result = await explore.execute(options, progress, signal);
 
       if ("dryRun" in result) {
-        return createJSONToolResponse({
+        return createStructuredToolResponse({
           message: `Exploration dry run completed: ${result.plannedInteractions.length} planned interactions`,
           ...result,
         });
@@ -339,7 +348,7 @@ export function registerNavigationTools({
       const completion = result.stopReason?.startsWith("Left target app (")
         ? `Exploration stopped: ${result.stopReason}.`
         : "Exploration completed:";
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: `${completion} ${result.interactionsPerformed} interactions, ${result.screensDiscovered} new screens discovered, ${result.coverage.percentage}% coverage`,
         ...result,
       });
@@ -352,7 +361,12 @@ export function registerNavigationTools({
     "explore",
     "Automatically explore app to build navigation graph",
     exploreSchema,
-    exploreHandler,
-    { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
+    {
+      handler: exploreHandler,
+      defaultEnabled: false,
+      supportsProgress: true,
+      embeddedSdkOnly: true,
+      outputSchema: exploreResultSchema,
+    },
   );
 }

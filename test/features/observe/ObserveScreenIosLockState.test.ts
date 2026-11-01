@@ -38,7 +38,7 @@ function screenFor(
       cacheStore: new FakeObserveCacheStore(timer),
       screenshotStateStore: new FakeScreenshotStateStore(timer),
     },
-    timer,
+    { timer },
   );
 }
 
@@ -152,7 +152,7 @@ for (const hierarchyOnly of [false, true]) {
           cacheStore: new FakeObserveCacheStore(timer),
           screenshotStateStore: new FakeScreenshotStateStore(timer),
         },
-        timer,
+        { timer },
       );
       const result = screen.execute({
         skipScreenshot: true,

@@ -1,4 +1,6 @@
 @testable import AutoMobilePrototypeAgentCore
+import Observation
+import Synchronization
 import XCTest
 
 final class PrototypeHitRectsTests: XCTestCase {
@@ -6,8 +8,48 @@ final class PrototypeHitRectsTests: XCTestCase {
     private let sheet = CGRect(x: 0, y: 600, width: 400, height: 200)
     private let floating = CGRect(x: 200, y: 300, width: 100, height: 100)
 
+    func testContentFrameChangesInvalidateObservation() {
+        let rects = PrototypeHitRects()
+        let owner = PrototypeHitRectOwner()
+        func assertInvalidates(_ change: () -> Void, line: UInt = #line) {
+            let changed = Mutex(false)
+            withObservationTracking {
+                _ = rects.rect(key: "content")
+            } onChange: {
+                changed.withLock { $0 = true }
+            }
+            change()
+            XCTAssertTrue(changed.withLock { $0 }, "Content geometry must invalidate modal layout", line: line)
+        }
+        assertInvalidates { rects.report(floating, key: "content", owner: owner) }
+        assertInvalidates { rects.report(sheet, key: "content", owner: owner) }
+        assertInvalidates { rects.withdraw(key: "content", owner: owner) }
+        rects.report(floating, key: "content", owner: owner)
+        assertInvalidates { rects.report(nil, key: "content", owner: owner) }
+        rects.report(floating, key: "content", owner: owner)
+        assertInvalidates { rects.removeAll() }
+    }
+
+    func testUnchangedContentAndTouchOnlyReportsDoNotInvalidateLayout() {
+        let rects = PrototypeHitRects()
+        let owner = PrototypeHitRectOwner()
+        rects.report(floating, key: "content", owner: owner)
+        let changed = Mutex(false)
+        withObservationTracking {
+            _ = rects.rect(key: "content")
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+        rects.report(floating, key: "content", owner: owner)
+        rects.withdraw(key: "content", owner: PrototypeHitRectOwner())
+        rects.report(sheet, key: "modal.0", owner: owner)
+        rects.withdraw(key: "modal.0", owner: owner)
+        XCTAssertFalse(changed.withLock { $0 })
+        XCTAssertEqual(rects.rect(key: "content"), floating)
+    }
+
     func testPlacementSwapKeepsIncomingRectAfterOutgoingWithdrawal() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let outgoing = PrototypeHitRectOwner()
         let incoming = PrototypeHitRectOwner()
         rects.report(fullscreen, key: "content", owner: outgoing)
@@ -18,7 +60,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testPlacementSwapKeepsIncomingRectWhenOutgoingWithdrawsFirst() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let outgoing = PrototypeHitRectOwner()
         let incoming = PrototypeHitRectOwner()
         rects.report(fullscreen, key: "content", owner: outgoing)
@@ -29,7 +71,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testLateOutgoingReportCannotTakeOverIncomingRect() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let outgoing = PrototypeHitRectOwner()
         let incoming = PrototypeHitRectOwner()
         rects.report(fullscreen, key: "content", owner: outgoing)
@@ -42,7 +84,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testBothOwnersHoldContentUntilTheirOwnWithdrawal() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let outgoing = PrototypeHitRectOwner()
         let incoming = PrototypeHitRectOwner()
         rects.report(floating, key: "content", owner: outgoing)
@@ -62,7 +104,7 @@ final class PrototypeHitRectsTests: XCTestCase {
 
     func testTopLayerWinsOverPageAndOutsidePassesThrough() {
         for key in ["modal.0", "dismiss"] {
-            var rects = PrototypeHitRects()
+            let rects = PrototypeHitRects()
             rects.report(fullscreen, key: "content", owner: PrototypeHitRectOwner())
             rects.report(floating, key: key, owner: PrototypeHitRectOwner())
             let overlap = CGPoint(x: 250, y: 350)
@@ -76,7 +118,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testOwnerCanReportAgainAfterBeingDisabled() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let owner = PrototypeHitRectOwner()
         rects.report(sheet, key: "content", owner: owner)
         rects.report(nil, key: "content", owner: owner)
@@ -88,7 +130,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testRapidReplacementsIgnoreEachLateOutgoingWithdrawal() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let owners = (0 ..< 4).map { _ in PrototypeHitRectOwner() }
         let frames = [fullscreen, sheet, floating, fullscreen]
         rects.report(frames[0], key: "content", owner: owners[0])
@@ -104,7 +146,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testRapidReplacementsIgnoreTwoStaleWithdrawalsArrivingTogether() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let owners = (0 ..< 4).map { _ in PrototypeHitRectOwner() }
         rects.report(fullscreen, key: "content", owner: owners[0])
         rects.report(sheet, key: "content", owner: owners[1])
@@ -120,7 +162,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testDismissChipSurvivesBarBranchWithdrawalAndBelongsToTopLayer() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let bar = PrototypeHitRectOwner()
         let chip = PrototypeHitRectOwner()
         let chipRect = CGRect(x: 350, y: 40, width: 44, height: 44)
@@ -136,7 +178,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testModalReplacementIgnoresOutgoingBranchWithdrawal() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let dialog = PrototypeHitRectOwner()
         let snackbar = PrototypeHitRectOwner()
         rects.report(fullscreen, key: "modal.0", owner: dialog)
@@ -150,7 +192,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testOwnerWithdrawalClearsItsOwnKey() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let owner = PrototypeHitRectOwner()
         rects.report(sheet, key: "content", owner: owner)
         rects.withdraw(key: "content", owner: owner)
@@ -160,7 +202,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testNilReportFromOwnerClearsItsOwnKey() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let owner = PrototypeHitRectOwner()
         rects.report(sheet, key: "content", owner: owner)
         rects.report(nil, key: "content", owner: owner)
@@ -170,7 +212,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testNonOwnerNilReportAndWithdrawalLeaveRectUntouched() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let owner = PrototypeHitRectOwner()
         let stale = PrototypeHitRectOwner()
         rects.report(sheet, key: "content", owner: owner)
@@ -181,7 +223,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testLaterReportFromSameOwnerReplacesRect() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let owner = PrototypeHitRectOwner()
         rects.report(fullscreen, key: "content", owner: owner)
         rects.report(sheet, key: "content", owner: owner)
@@ -190,7 +232,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testRemoveAllClearsAllKeysAndStaleWithdrawalCannotClearNewReport() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let stale = PrototypeHitRectOwner()
         rects.report(fullscreen, key: "content", owner: stale)
         rects.report(floating, key: "dismiss", owner: PrototypeHitRectOwner())
@@ -206,7 +248,7 @@ final class PrototypeHitRectsTests: XCTestCase {
     }
 
     func testChangingKeyWithdrawsOldKeyWithoutClearingAnotherReporter() {
-        var rects = PrototypeHitRects()
+        let rects = PrototypeHitRects()
         let owner = PrototypeHitRectOwner()
         let replacement = PrototypeHitRectOwner()
         rects.report(fullscreen, key: "anchor.old", owner: owner)

@@ -202,7 +202,9 @@ export class MemoryThresholdManager {
         const adaptiveThresholds = this.createThresholdsFromBaseline(baseline);
 
         // Store these thresholds for future use
-        await this.storeThresholdsWith(executor, deviceId, packageName, adaptiveThresholds);
+        await this.storeThresholdsWith(executor, deviceId, packageName, {
+          thresholds: adaptiveThresholds,
+        });
 
         return adaptiveThresholds;
       }
@@ -212,7 +214,9 @@ export class MemoryThresholdManager {
       const defaultThresholds = DEFAULT_THRESHOLDS[profile];
 
       // Store defaults for future weight adjustment
-      await this.storeThresholdsWith(executor, deviceId, packageName, defaultThresholds);
+      await this.storeThresholdsWith(executor, deviceId, packageName, {
+        thresholds: defaultThresholds,
+      });
 
       return defaultThresholds;
     };
@@ -237,25 +241,34 @@ export class MemoryThresholdManager {
       gcDurationThresholdMs: number;
       unreachableObjectsThreshold: number;
     },
-    weight: number = 1.0,
-    ttlHours: number = 24,
+    { weight = 1.0, ttlHours = 24 }: { weight?: number; ttlHours?: number } = {},
   ): Promise<void> {
-    await this.storeThresholdsWith(this.db, deviceId, packageName, thresholds, weight, ttlHours);
+    await this.storeThresholdsWith(this.db, deviceId, packageName, {
+      thresholds,
+      weight,
+      ttlHours,
+    });
   }
 
   private async storeThresholdsWith(
     db: Kysely<Database>,
     deviceId: string,
     packageName: string,
-    thresholds: {
-      heapGrowthThresholdMb: number;
-      nativeHeapGrowthThresholdMb: number;
-      gcCountThreshold: number;
-      gcDurationThresholdMs: number;
-      unreachableObjectsThreshold: number;
+    {
+      thresholds,
+      weight = 1.0,
+      ttlHours = 24,
+    }: {
+      thresholds: {
+        heapGrowthThresholdMb: number;
+        nativeHeapGrowthThresholdMb: number;
+        gcCountThreshold: number;
+        gcDurationThresholdMs: number;
+        unreachableObjectsThreshold: number;
+      };
+      weight?: number;
+      ttlHours?: number;
     },
-    weight: number = 1.0,
-    ttlHours: number = 24,
   ): Promise<void> {
     const newThresholds: NewMemoryThresholds = {
       device_id: deviceId,

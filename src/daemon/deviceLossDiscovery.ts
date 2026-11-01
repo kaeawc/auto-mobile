@@ -1,5 +1,5 @@
 import { didSourceSucceedForDevice, discoverySourceFor } from "../utils/discoverySource";
-import type { BootedDevice } from "../models";
+import type { BootedDevice, Platform } from "../models";
 import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
@@ -26,7 +26,7 @@ import {
   selectTransitionalDeviceIds,
 } from "./disconnectMonitor";
 import type { DevicePool, PooledDevice } from "./devicePool";
-import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
+import { MISSING_DEVICE_MISS_THRESHOLD, type DeviceLossMisses } from "./deviceLossMisses";
 
 /**
  * The stateless half of the device-disconnect monitor, split out of daemon.ts (#11808): discovery
@@ -72,6 +72,16 @@ function needsFreshTransitionalSimulatorRead(
   return iosDeviceListMaxAgeMs !== undefined && (discovery.transitionalSimulators?.length ?? 0) > 0;
 }
 
+/**
+ * Pooled watches need their own sweep on an "either" loss read, first read and confirmation re-read
+ * alike (#14908). Other reads carry no watch option, so their options are unchanged.
+ */
+function watchSweepOption(
+  platform: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0],
+): { includeWatchOs?: true } {
+  return platform === "either" ? { includeWatchOs: true } : {};
+}
+
 export async function discoverAndReconcile(
   devicePool: DeviceLossDiscoveryPool,
   deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
@@ -84,7 +94,7 @@ export async function discoverAndReconcile(
   }: {
     iosDeviceListMaxAgeMs?: number;
     isPlanDevice?: (deviceId: string) => boolean;
-    heldDevices?: readonly { platform: "android" | "ios"; assignedDevice: string }[];
+    heldDevices?: readonly { platform: Platform; assignedDevice: string }[];
     platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
     bypassAndroidDeviceListCache?: boolean;
   },
@@ -96,6 +106,7 @@ export async function discoverAndReconcile(
   const options = {
     bypassAndroidDeviceListCache,
     skipAndroidProfileEnrichment: true,
+    ...watchSweepOption(platform),
     // An unpooled held device still needs liveness evidence from its own source.
     skipPhysicalIosDiscovery: !trackedDevices.some(
       (device) => discoverySourceFor(device.platform, device.id) === "ios-physical",
@@ -228,7 +239,7 @@ export async function getAndroidOfflineCanonicalIds(
 function findMissingAndroidCandidates(
   candidateDeviceIds: Set<string>,
   bootedDeviceIds: Set<string>,
-  candidatePlatforms: Map<string, "android" | "ios">,
+  candidatePlatforms: Map<string, Platform>,
 ): Set<string> {
   return new Set(
     [...candidateDeviceIds].filter(
@@ -243,6 +254,13 @@ export interface ListedAndroidStates {
   offlineTransportIds?: Map<string, Set<string>>;
   transitionalAdbDeviceIds?: Set<string>;
   listedNonDeviceIds?: Set<string>;
+}
+
+/** The disconnect candidates a listed-state probe asks about, and what discovery already booted. */
+export interface ListedAndroidCandidates {
+  candidateDeviceIds: Set<string>;
+  bootedDeviceIds: Set<string>;
+  candidatePlatforms: Map<string, Platform>;
 }
 
 /**
@@ -260,9 +278,7 @@ export async function probeListedAndroidStates(
   devicePool: Pick<DevicePool, "getAndroidTransportAliases">,
   deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidListedDeviceStates">,
   planActive: boolean,
-  candidateDeviceIds: Set<string>,
-  bootedDeviceIds: Set<string>,
-  candidatePlatforms: Map<string, "android" | "ios">,
+  { candidateDeviceIds, bootedDeviceIds, candidatePlatforms }: ListedAndroidCandidates,
 ): Promise<ListedAndroidStates> {
   if (planActive) {
     return {};
@@ -346,7 +362,7 @@ export function collectDisconnectCandidates(
   activeRecordings: ActiveRecordings,
 ) {
   const candidateDeviceIds = new Set<string>();
-  const candidatePlatforms = new Map<string, "android" | "ios">();
+  const candidatePlatforms = new Map<string, Platform>();
   const candidateIncarnations = recordingCandidateIncarnations(activeRecordings);
   for (const recording of activeRecordings) {
     candidateDeviceIds.add(recording.deviceId);
@@ -394,7 +410,7 @@ export function collectDisconnectedRecordings<Device extends { id: string }>(
 }
 
 export function logDisconnectMisses(
-  deviceDisconnectMisses: Map<string, number>,
+  deviceDisconnectMisses: DeviceLossMisses,
   disconnectResult: Pick<DisconnectMonitorEvaluation, "missed" | "transitional">,
   planDeviceIds: ReadonlySet<string>,
   bootedDeviceIds: Set<string>,

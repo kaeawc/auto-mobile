@@ -388,8 +388,10 @@ export class DeviceRecoveryCoordinator {
     avdName: string,
     recoveryDeviceIds: ReadonlySet<string>,
     retainRecoveryImage: boolean,
-    replacementHandoffOwner: symbol,
-    lateShutdownSettled?: Promise<unknown>,
+    {
+      replacementHandoffOwner,
+      lateShutdownSettled,
+    }: { replacementHandoffOwner: symbol; lateShutdownSettled?: Promise<unknown> },
   ): void {
     for (const [deviceId, owner] of this.androidRecoveryHandoffOwners) {
       if (owner === replacementHandoffOwner) {

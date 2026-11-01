@@ -3,6 +3,7 @@ import {
   BootedDevice,
   ClipboardResult,
   OpenURLResult,
+  requireAndroidOrIosPlatform,
   type ObserveResult,
   type TapOnElementResult,
 } from "../models";
@@ -96,9 +97,15 @@ export interface KeyboardProfileRecordOptions {
 export async function setKeyboardProfileForTool(
   device: BootedDevice,
   profile: KeyboardArgs["profile"],
-  client?: KeyboardProfileWriteClient,
-  signal?: AbortSignal,
-  record: KeyboardProfileRecordOptions = {},
+  {
+    client,
+    signal,
+    record = {},
+  }: {
+    client?: KeyboardProfileWriteClient;
+    signal?: AbortSignal;
+    record?: KeyboardProfileRecordOptions;
+  } = {},
 ): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
   if (!profile) {
     throw new ActionableError(
@@ -106,9 +113,12 @@ export async function setKeyboardProfileForTool(
     );
   }
   const registry = record.registry ?? defaultKeyboardProfileRestoreRegistry;
-  return setKeyboardProfileRecorded(device, profile, client, signal, {
-    owner: record.owner,
-    registry,
+  return setKeyboardProfileRecorded(device, profile, client, {
+    signal,
+    record: {
+      owner: record.owner,
+      registry,
+    },
   });
 }
 
@@ -216,9 +226,11 @@ export async function selectAndroidOpenLinkChooser(
   device: BootedDevice,
   packageName: string,
   opened: OpenURLResult,
-  url?: string,
-  chooser: Pick<HandleIntentChooser, "execute"> = new HandleIntentChooser(device),
-  signal?: AbortSignal,
+  {
+    url,
+    chooser = new HandleIntentChooser(device),
+    signal,
+  }: { url?: string; chooser?: Pick<HandleIntentChooser, "execute">; signal?: AbortSignal },
 ): Promise<OpenURLResult> {
   if (device.platform !== "android") {
     throw new ActionableError("chooserAppPackage is supported only on Android.");
@@ -498,8 +510,7 @@ async function resolveIosOpenAlert(
   initialHierarchy: ObserveResult["viewHierarchy"] | undefined,
   refreshHierarchy: OpenAlertHierarchyRefresh | undefined,
   tapSystemAlert: SystemAlertTap | undefined,
-  signal: AbortSignal | undefined,
-  timing: OpenAlertTiming,
+  { signal, timing }: { signal?: AbortSignal; timing: OpenAlertTiming },
 ): Promise<OpenAlertResolution> {
   if (isIosAppOpenAlertHierarchy(initialHierarchy) && !tapSystemAlert) {
     return initialHierarchy ? { hierarchy: initialHierarchy } : null;
@@ -542,9 +553,15 @@ function systemAlertTapResult(text: string): TapOnElementResult {
 export async function acceptIosAppOpenAlert(
   device: BootedDevice,
   observation: ObserveResult | undefined,
-  progress?: ProgressCallback,
-  signal?: AbortSignal,
-  options: AcceptIosAppOpenAlertOptions = {},
+  {
+    progress,
+    signal,
+    options = {},
+  }: {
+    progress?: ProgressCallback;
+    signal?: AbortSignal;
+    options?: AcceptIosAppOpenAlertOptions;
+  } = {},
 ): Promise<TapOnElementResult | null> {
   const { refreshHierarchy, tapSystemAlert, tapOnElementFactory } = options;
   if (device.platform !== "ios") {
@@ -560,8 +577,7 @@ export async function acceptIosAppOpenAlert(
     observation?.viewHierarchy,
     refreshHierarchy,
     tapSystemAlert,
-    signal,
-    timing,
+    { signal, timing },
   );
   if (!resolution) {
     return null;
@@ -690,25 +706,18 @@ function buildIosOpenAlertOptions(
     tapOnElementFactory,
     refreshHierarchy: iosClient
       ? async () => {
-          const refreshed = await iosClient.requestHierarchySync(
-            undefined,
-            true,
-            signal,
-            IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
-          );
+          const refreshed = await iosClient.requestHierarchySync(undefined, true, signal, {
+            timeoutMs: IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
+          });
           return refreshed ? iosClient.convertToViewHierarchyResult(refreshed.hierarchy) : null;
         }
       : undefined,
     tapSystemAlert: iosClient
       ? () =>
-          iosClient.requestAction(
-            "system_alert_accept",
-            undefined,
-            undefined,
-            IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
-            undefined,
-            { abortSignal: signal },
-          )
+          iosClient.requestAction("system_alert_accept", undefined, undefined, {
+            timeoutMs: IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
+            abortSignal: signal,
+          })
       : undefined,
   };
 }
@@ -735,23 +744,27 @@ export const createSendKeysHandler =
     await assertSendKeysRunnerCompatible(device);
     RecompositionTracker.getInstance().recordInteraction(device.deviceId);
     const sendKeys = (deps.sendKeysFactory ?? defaultSendKeysFactory)(device);
-    const result = await sendKeys.execute(
-      args.commands,
-      args.selector,
+    const result = await sendKeys.execute(args.commands, args.selector, {
       progress,
       signal,
-      args.display,
-      { container: args.container, selectionStrategy: args.selectionStrategy, layer: args.layer },
-    );
+      display: args.display,
+      focus: {
+        container: args.container,
+        selectionStrategy: args.selectionStrategy,
+        layer: args.layer,
+      },
+    });
     const dismissal = await dismissKeyboardAfterSendKeys(
       device,
       serverConfig.isDismissKeyboardAfterInputEnabled(),
       result.success,
-      async (closeSignal) =>
-        (deps.keyboardFactory ?? defaultKeyboardFactory)(device).execute("close", {
-          signal: closeSignal,
-        }),
-      signal,
+      {
+        close: async (closeSignal) =>
+          (deps.keyboardFactory ?? defaultKeyboardFactory)(device).execute("close", {
+            signal: closeSignal,
+          }),
+        signal,
+      },
     );
     const response = createStructuredToolResponse({
       message: result.success
@@ -804,7 +817,10 @@ export const createOpenLinkHandler =
     // iOS-rejects-activityName check (raw request platform) can be skipped
     // entirely when the caller omitted it. Re-validate against the resolved
     // `device.platform` before opening the URL.
-    assertActiveWindowWaitForSupportedOnPlatform(device.platform, args.waitFor);
+    assertActiveWindowWaitForSupportedOnPlatform(
+      requireAndroidOrIosPlatform(device.platform, "openLink"),
+      args.waitFor,
+    );
     if (args.chooserAppPackage && device.platform !== "android") {
       throw new ActionableError("chooserAppPackage is supported only on Android.");
     }
@@ -813,26 +829,21 @@ export const createOpenLinkHandler =
     const opened = await openUrl.execute(args.url, { signal });
     throwIfAborted(signal);
     const result = args.chooserAppPackage
-      ? await selectAndroidOpenLinkChooser(
-          device,
-          args.chooserAppPackage,
-          opened,
-          opened.url,
-          (deps.openLinkChooserFactory ?? defaultOpenLinkChooserFactory)(device),
+      ? await selectAndroidOpenLinkChooser(device, args.chooserAppPackage, opened, {
+          url: opened.url,
+          chooser: (deps.openLinkChooserFactory ?? defaultOpenLinkChooserFactory)(device),
           signal,
-        )
+        })
       : opened;
     throwIfAborted(signal);
     const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;
     const acceptedOpenAlert =
       args.acceptOpenAlert && result.success
-        ? await acceptIosAppOpenAlert(
-            device,
-            result.observation,
+        ? await acceptIosAppOpenAlert(device, result.observation, {
             progress,
             signal,
-            buildIosOpenAlertOptions(iosClient, signal, deps.tapOnElementFactory),
-          )
+            options: buildIosOpenAlertOptions(iosClient, signal, deps.tapOnElementFactory),
+          })
         : null;
     const effectiveResult: OpenURLResult & { openAlertAccepted?: true } = acceptedOpenAlert
       ? {
@@ -912,9 +923,13 @@ function setKeyboardProfileInSession(
     args.sessionUuid,
     device.deviceId,
     (owner) =>
-      setKeyboardProfileForTool(device, args.profile, profileDeps.clientFor?.(device), signal, {
-        owner,
-        registry: profileDeps.registry,
+      setKeyboardProfileForTool(device, args.profile, {
+        client: profileDeps.clientFor?.(device),
+        signal,
+        record: {
+          owner,
+          registry: profileDeps.registry,
+        },
       }),
   );
 }

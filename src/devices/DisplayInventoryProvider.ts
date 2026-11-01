@@ -9,6 +9,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { awaitWhileRequestIsLive } from "../utils/toolUtils";
+import { runWithDeviceExecutionBinding } from "../utils/deviceExecutionBinding";
 
 export interface DisplayInventoryProvider {
   hydrate(device: BootedDevice, identityToken: string, signal?: AbortSignal): Promise<BootedDevice>;
@@ -41,13 +42,23 @@ function hasReadInventory(entry: InventoryEntry): boolean {
 export class CachingDisplayInventoryProvider implements DisplayInventoryProvider {
   private readonly entries = new Map<string, InventoryEntry>();
 
+  private readonly timer: Pick<Timer, "now">;
+  private readonly degradedRetryMs: number;
+  private readonly failureRetryMs: number;
+
   constructor(
     private readonly androidSource: DisplayInventorySource,
     private readonly iosSource: DisplayInventorySource,
-    private readonly timer: Pick<Timer, "now"> = defaultTimer,
-    private readonly degradedRetryMs = 5_000,
-    private readonly failureRetryMs = 30_000,
-  ) {}
+    {
+      timer = defaultTimer,
+      degradedRetryMs = 5_000,
+      failureRetryMs = 30_000,
+    }: { timer?: Pick<Timer, "now">; degradedRetryMs?: number; failureRetryMs?: number } = {},
+  ) {
+    this.timer = timer;
+    this.degradedRetryMs = degradedRetryMs;
+    this.failureRetryMs = failureRetryMs;
+  }
 
   async hydrate(
     device: BootedDevice,
@@ -118,7 +129,8 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
       await Promise.resolve();
       const source = device.platform === "android" ? this.androidSource : this.iosSource;
       // The shared read has its own bounded source timeout, not a caller's signal.
-      const result = await source.read(device);
+      // Shared inventory reads may outlive their caller and must not bind its execution.
+      const result = await runWithDeviceExecutionBinding(undefined, () => source.read(device));
       // Record even when invalidation replaced the entry: an orphaned entry is only seen by the
       // callers already awaiting it, which use it as their last-read fallback.
       this.recordRead(entry, result);
@@ -173,7 +185,7 @@ export function createDisplayInventoryProvider(
         degraded: false,
       }),
     },
-    timer,
+    { timer },
   );
 }
 

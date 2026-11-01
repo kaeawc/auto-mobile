@@ -358,7 +358,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
         hasReceivedHeartbeat: false,
       });
       readiness.mockImplementationOnce(
-        async (sessionId, _manager, _pool, _options, { admittedSession: admitted } = {}) => {
+        async (sessionId, _manager, _pool, { admittedSession: admitted } = {}) => {
           expect(admitted).toBeUndefined();
           await pool.bindOrReuseDeviceSession({
             sessionId: sessionId!,
@@ -375,7 +375,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
       expect(readiness).toHaveBeenCalledTimes(1);
       expect(manager.getSessionForDevice(unheld.deviceId)).toBe("recovering");
       expect(start).toHaveBeenCalledTimes(1);
-      expect(start.mock.calls[0]?.[4]).toBe("recovering");
+      expect(start.mock.calls[0]?.[3]?.ownerSessionUuid).toBe("recovering");
     },
   );
 
@@ -434,7 +434,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expect(JSON.stringify(response)).toContain("fake-recording");
     expect(readiness).toHaveBeenCalledTimes(1);
     expect(start).toHaveBeenCalledTimes(1);
-    expect(start.mock.calls[0]?.[4]).toBe("holder");
+    expect(start.mock.calls[0]?.[3]?.ownerSessionUuid).toBe("holder");
   });
 
   arranged("the acquiring MCP connection's deviceId-only start works as the holder", async () => {
@@ -445,7 +445,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expect(JSON.stringify(response)).toContain("fake-recording");
     expect(readiness).toHaveBeenCalledTimes(1);
     expect(start).toHaveBeenCalledTimes(1);
-    expect(start.mock.calls[0]?.[4]).toBe("holder");
+    expect(start.mock.calls[0]?.[3]?.ownerSessionUuid).toBe("holder");
   });
 
   arranged("an idle binding device keeps its existing refusal before readiness", async () => {

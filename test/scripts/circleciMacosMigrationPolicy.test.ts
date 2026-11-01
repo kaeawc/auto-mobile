@@ -17,6 +17,13 @@ const SETUP = ".circleci/config.yml";
 const CONTINUE = ".circleci/continue_config.yml";
 const MAIN_MAPPING = ".circleci/main-macos-paths.txt";
 
+function assertContractAfterNavigation(names: string[]): void {
+  expect(names.indexOf("Run iOS navigation graph Simulator workflow")).toBeGreaterThanOrEqual(0);
+  expect(names.indexOf("Run iOS SDK contract suite")).toBeGreaterThan(
+    names.indexOf("Run iOS navigation graph Simulator workflow"),
+  );
+}
+
 type CircleStep = string | Record<string, Record<string, unknown> | undefined>;
 type CircleInvocation = string | Record<string, Record<string, unknown> | undefined>;
 
@@ -33,6 +40,7 @@ interface CircleJob {
 
 interface CircleConfig {
   parameters?: Record<string, unknown>;
+  commands?: Record<string, { steps?: CircleStep[] }>;
   executors?: Record<string, { environment?: Record<string, string> }>;
   jobs?: Record<string, CircleJob>;
   workflows?: Record<string, CircleWorkflow>;
@@ -130,6 +138,35 @@ function workflowsGatedBy(parameters: string[]): CircleWorkflow[] {
 }
 
 describe("CircleCI macOS policy (#10887, #11010)", () => {
+  test("SwiftPM cache keys include local SDK sources and tests without a fallback", () => {
+    const config = loadCircle(CONTINUE);
+    const steps = config.commands?.restore_spm_cache?.steps ?? [];
+    const compute = steps.find(
+      (step) => typeof step !== "string" && step.run?.name === "Compute SwiftPM cache key",
+    );
+    expect(compute).toBeDefined();
+    const command = runCommand(compute!);
+    expect(command).toContain("Package.swift");
+    expect(command).toContain("/tmp/spm-lock.txt");
+    for (const packageName of ["sdk-wire", "auto-mobile-sdk"]) {
+      for (const directory of ["Sources", "Tests"]) {
+        expect(command).toContain(`${packageName}/${directory}`);
+      }
+    }
+    const restore = steps.find((step) => typeof step !== "string" && step.restore_cache);
+    const keys = typeof restore === "string" ? undefined : restore?.restore_cache?.keys;
+    expect(keys).toEqual(['spm-v2-{{ checksum "/tmp/spm-lock.txt" }}']);
+    const saveKeys = Object.values(config.jobs ?? {}).flatMap((job) =>
+      (job.steps ?? []).flatMap((step) =>
+        typeof step !== "string" && step.save_cache ? [step.save_cache.key] : [],
+      ),
+    );
+    expect(saveKeys.length).toBeGreaterThan(0);
+    for (const key of saveKeys) {
+      expect(key).toBe(Array.isArray(keys) ? keys[0] : undefined);
+    }
+  });
+
   test("pull requests schedule only the advisory Playground simulator job", () => {
     const prJobs = workflowsGatedBy(PR_PARAMETERS).flatMap((workflow) =>
       invocations(workflow).map(([key]) => key),
@@ -308,6 +345,35 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
       "saved-prototype-smoke-advisory.sh",
     );
     expect(runStep("xctestrunner-simulator-tests", name)?.no_output_timeout).toBe("12m");
+  });
+
+  test("contract ordering rejects a missing navigation step", () => {
+    expect(() => assertContractAfterNavigation(["Run iOS SDK contract suite"])).toThrow();
+  });
+
+  test("iOS SDK contract suite runs after navigation in both CI systems (#5164)", () => {
+    const name = "Run iOS SDK contract suite";
+    const githubNames = loadJobSteps(
+      XCTESTRUNNER_WORKFLOW,
+      "ios-xctest-runner-simulator-tests",
+    ).map((step) => step.name ?? "");
+    const circleNames = (
+      loadCircle(CONTINUE).jobs?.["xctestrunner-simulator-tests"]?.steps ?? []
+    ).map((step) =>
+      typeof step === "string"
+        ? step
+        : String((step.run as { name?: string } | undefined)?.name ?? ""),
+    );
+    for (const names of [githubNames, circleNames]) {
+      expect(names.filter((stepName) => stepName === name)).toHaveLength(1);
+      assertContractAfterNavigation(names);
+      expect(names.indexOf(name)).toBeLessThan(
+        names.indexOf("Stop AutoMobile daemon before odd-width boot"),
+      );
+    }
+    expect(runStep("xctestrunner-simulator-tests", name)?.command).toContain(
+      "sdk-contract-integration.sh",
+    );
   });
 
   test("nightly Thread Sanitizer stays simulator-free and bounded", () => {

@@ -1,4 +1,6 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { withHostOnlySavedPrototypes } from "../../src/features/prototype/savedPrototypeMirror";
+import { FakeSavedPrototypeMirror } from "../fakes/FakeSavedPrototypeMirror";
 import {
   PROTOTYPE_SAVED_CAPABILITY,
   SAVED_PROTOTYPE_ERROR_CODES,
@@ -20,6 +22,7 @@ import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCache
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { capturedLauncherHierarchy } from "../helpers/capturedLauncherHierarchy";
 import { pinDialogTree } from "../helpers/pinDialogTree";
 import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import type { ViewHierarchyResult } from "../../src/models";
@@ -39,6 +42,7 @@ const png = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   Buffer.alloc(4),
 ]);
+const home = await capturedLauncherHierarchy("android-launcher-home/api34-page2-uiautomator.xml");
 const saved = { id: "demo", slug: "demo", replaced: false };
 
 describe("prototype saved actions", () => {
@@ -154,6 +158,7 @@ describe("prototype saved actions", () => {
       "",
     );
     beforeEach(() => {
+      dialog = home;
       proxy.setPinResult({ success: true, pin: { id: "demo", status: "already_pinned" } });
     });
     test("restarts the resolved launcher once when the shortcut is not showing", async () => {
@@ -170,9 +175,8 @@ describe("prototype saved actions", () => {
       ]);
     });
     test("does not restart when the shortcut label is already visible", async () => {
-      dialog = pinDialogTree(["demo"]);
       adb.setCommandResponse(resolveHome, pixelHome);
-      const output = await save({ pin: true });
+      const output = await save({ pin: true, label: "VQ Pin One" });
       expect(output).toMatchObject({ launcherRestarted: false, shortcutVisible: true });
       expect(adb.getExecutedCommands().filter((c) => c.includes("force-stop"))).toEqual([]);
     });
@@ -465,12 +469,23 @@ describe("prototype saved actions", () => {
     expect(output.warning).toContain("Other saved prototypes remain");
     expect(adb.getExecutedCommands()).toEqual([]);
   });
-  test("removeIcon never clears when the saved list is absent", async () => {
+  test("removeIcon never clears when the saved list is absent through an empty host mirror", async () => {
     proxy.setListSavedResult({ success: true });
-    const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
-    expect(output).toMatchObject({ success: true });
-    expect(output.warning).toContain("Could not confirm");
-    expect(adb.getExecutedCommands()).toEqual([]);
+    const listSaved = proxy.requestListSavedPrototypes.bind(proxy);
+    const mirror = new FakeSavedPrototypeMirror();
+    const list = spyOn(proxy, "requestListSavedPrototypes").mockImplementation(async () =>
+      withHostOnlySavedPrototypes(await listSaved(), { serial: android.deviceId, mirror }),
+    );
+    try {
+      const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
+      expect(output).toMatchObject({ success: true });
+      expect(output.warning).toContain("Could not confirm");
+      expect(proxy.deleteRequests).toEqual(["demo"]);
+      expect(list).toHaveBeenCalledTimes(1);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    } finally {
+      list.mockRestore();
+    }
   });
   test("removeIcon keeps delete success when the list probe throws", async () => {
     proxy.setFailureMode("requestListSavedPrototypes", new Error("probe timed out"));

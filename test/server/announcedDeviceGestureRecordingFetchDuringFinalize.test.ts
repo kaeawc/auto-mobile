@@ -49,11 +49,8 @@ class FakeSessionManager implements CleanupManager {
   }
   release(sessionId: string, deviceId: string): void {
     for (const callback of this.releaseCallbacks) {
-      callback(
-        sessionId,
-        deviceId,
-        "idle-timeout",
-        {
+      callback(sessionId, deviceId, "idle-timeout", {
+        snapshot: {
           sessionId,
           deviceId,
           releaseReason: "idle-timeout",
@@ -61,8 +58,7 @@ class FakeSessionManager implements CleanupManager {
           terminal: true,
           heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
         },
-        {},
-      );
+      });
     }
   }
 }
@@ -104,11 +100,8 @@ describe("the previous owner fetches the announced device gesture recording whil
       finishStop = resolve;
     });
     let stopBegan = false;
-    await startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator("recording"),
-      () => ({
+    await startDeviceGestureRecording(device, timer, new CountingIdGenerator("recording"), {
+      recorderFactory: () => ({
         stepCount: 0,
         start: async () => undefined,
         stop: async () => {
@@ -117,8 +110,8 @@ describe("the previous owner fetches the announced device gesture recording whil
           return { steps: [step], stepCount: 1 };
         },
       }),
-      OWNER,
-    );
+      ownerSessionUuid: OWNER,
+    });
     const manager = new FakeSessionManager();
     registerRecordingSessionCleanup(manager, {
       ...defaultRecordingSessionCleanupDeps,
@@ -187,18 +180,20 @@ describe("the previous owner fetches the announced device gesture recording whil
       device,
       timer,
       new CountingIdGenerator("join"),
-      () => ({
-        stepCount: 1,
-        start: async () => undefined,
-        stop: async () => {
-          await gate;
-          if (rejectStop) {
-            throw new Error("fake recorder stop failed");
-          }
-          return { steps: [step], stepCount: 1 };
-        },
-      }),
-      OWNER,
+      {
+        recorderFactory: () => ({
+          stepCount: 1,
+          start: async () => undefined,
+          stop: async () => {
+            await gate;
+            if (rejectStop) {
+              throw new Error("fake recorder stop failed");
+            }
+            return { steps: [step], stepCount: 1 };
+          },
+        }),
+        ownerSessionUuid: OWNER,
+      },
     );
     const stopped = stopDeviceGestureRecording(started.recordingId, undefined, timer);
     // Observe rejection immediately while the requester joins the same stop.

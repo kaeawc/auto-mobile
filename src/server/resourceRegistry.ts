@@ -88,6 +88,22 @@ interface ResourceTemplateMetadata {
   paginationParamNames: string[];
 }
 
+// What a caller supplies when registering a resource template, beyond its URI
+// template and name. `paginationParams` names the query params that scope a
+// page rather than the resource's identity (see `paginationParamNames`).
+interface TemplateRegistration<Handler> {
+  description: string;
+  mimeType: string;
+  handler: Handler;
+  paginationParams?: string[];
+}
+
+// What a caller supplies when registering a fixed-URI resource, beyond its URI and name.
+type ResourceRegistration = Omit<TemplateRegistration<ResourceHandler>, "paginationParams">;
+type ResourceTemplateRegistration = TemplateRegistration<ResourceTemplateHandler>;
+type ContextualResourceTemplateRegistration =
+  TemplateRegistration<ContextualResourceTemplateHandler>;
+
 const requestedResourceUri = Symbol("requestedResourceUri");
 
 // Collapse a URI to its *page-independent* subscription identity by dropping
@@ -301,13 +317,17 @@ class ResourceRegistryClass {
     }
   }
 
-  // Register a new resource
+  /**
+   * Register a new resource.
+   *
+   * @param registration.description - Description shown in resources/list.
+   * @param registration.mimeType - MIME type of the resource contents.
+   * @param registration.handler - Reads the resource.
+   */
   register(
     uri: string,
     name: string,
-    description: string,
-    mimeType: string,
-    handler: ResourceHandler,
+    { description, mimeType, handler }: ResourceRegistration,
   ): void {
     ListChangedBroadcaster.invalidate("resources");
     this.resources.set(uri, { uri, name, description, mimeType, handler });
@@ -317,10 +337,7 @@ class ResourceRegistryClass {
   registerTemplate(
     uriTemplate: string,
     name: string,
-    description: string,
-    mimeType: string,
-    handler: ResourceTemplateHandler,
-    paginationParams: string[] = [],
+    { description, mimeType, handler, paginationParams = [] }: ResourceTemplateRegistration,
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     ListChangedBroadcaster.invalidate("resources");
@@ -340,10 +357,12 @@ class ResourceRegistryClass {
   registerTemplateWithReadContext(
     uriTemplate: string,
     name: string,
-    description: string,
-    mimeType: string,
-    handlerWithReadContext: ContextualResourceTemplateHandler,
-    paginationParams: string[] = [],
+    {
+      description,
+      mimeType,
+      handler: handlerWithReadContext,
+      paginationParams = [],
+    }: ContextualResourceTemplateRegistration,
   ): void {
     const { regex, paramNames, queryParamNames } = compileUriTemplate(uriTemplate);
     ListChangedBroadcaster.invalidate("resources");

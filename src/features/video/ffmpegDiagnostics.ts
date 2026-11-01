@@ -22,8 +22,7 @@ export function buildFfmpegFailureMessage(
   binaryPath: string,
   summary: string,
   args: string[],
-  tracker: FfmpegDiagnosticsTracker,
-  outputPath?: string,
+  { tracker, outputPath }: { tracker: FfmpegDiagnosticsTracker; outputPath?: string },
 ): string {
   const details = [
     summary,
@@ -41,8 +40,7 @@ export function buildProcessFailureMessage(
   summary: string,
   command: string,
   args: string[],
-  tracker: ProcessDiagnosticsTracker,
-  outputPath?: string,
+  { tracker, outputPath }: { tracker: ProcessDiagnosticsTracker; outputPath?: string },
 ): string {
   const details = [
     summary,
@@ -72,31 +70,27 @@ export async function assertFfmpegOutputReady(
   outputPath: string,
   args: string[],
   tracker: FfmpegDiagnosticsTracker,
-  recordingFileProbe: RecordingFileProbe,
-  binaryPath: string,
+  {
+    recordingFileProbe,
+    binaryPath,
+  }: { recordingFileProbe: RecordingFileProbe; binaryPath: string },
 ): Promise<void> {
   const sizeBytes = await recordingFileProbe.size(outputPath);
   if (sizeBytes === null) {
     throw new ActionableError(
-      buildFfmpegFailureMessage(
-        binaryPath,
-        "FFmpeg output file missing",
-        args,
+      buildFfmpegFailureMessage(binaryPath, "FFmpeg output file missing", args, {
         tracker,
         outputPath,
-      ),
+      }),
     );
   }
 
   if (!sizeBytes) {
     throw new ActionableError(
-      buildFfmpegFailureMessage(
-        binaryPath,
-        "FFmpeg output file is empty",
-        args,
+      buildFfmpegFailureMessage(binaryPath, "FFmpeg output file is empty", args, {
         tracker,
         outputPath,
-      ),
+      }),
     );
   }
 }

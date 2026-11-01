@@ -10,7 +10,8 @@ public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, Sendabl
     private let active = OSAllocatedUnfairLock(initialState: false)
 
     public var isActive: Bool {
-        active.withLock { $0 && NavigationAdapterHub.shared.isActive(owner: "swiftui") }
+        let started = active.withLock { $0 }
+        return started && NavigationAdapterHub.shared.isActive(owner: "swiftui")
     }
 
     private init() {}

@@ -21,6 +21,16 @@ import {
   resolveComponentActivity,
 } from "./launcherActivityParsing";
 
+const LAUNCHER_CATEGORY = "android.intent.category.LAUNCHER";
+/** Launcher categories in resolution order; TV-only apps declare only the leanback one. */
+const LAUNCHER_CATEGORIES = [LAUNCHER_CATEGORY, "android.intent.category.LEANBACK_LAUNCHER"];
+
+/** The abort signal and optional explicit intent for one Android launch. */
+export interface AndroidPerformLaunchOptions {
+  signal?: AbortSignal;
+  intent?: AndroidLaunchIntent;
+}
+
 /** Budget for the Android a11y service to answer a launch-intent request. */
 const A11Y_LAUNCH_INTENT_TIMEOUT_MS = 3_000;
 export function amStartReportedFailure(stdout: string, stderr: string): boolean {
@@ -66,7 +76,7 @@ export class AndroidLaunchActivity {
       for (let i = 0; i < approaches.length; i++) {
         this.assertLaunchNotAborted(signal);
         activities.push(
-          ...(await this.runActivityApproach(approaches[i], i, packageName, perf, signal)),
+          ...(await this.runActivityApproach(approaches[i], i, packageName, { perf, signal })),
         );
         if (activities.length > 0) {
           break;
@@ -112,24 +122,25 @@ export class AndroidLaunchActivity {
     } catch (error) {
       rethrowDeviceTransportUnavailable(error);
       this.assertLaunchNotAborted(signal);
+      // A missing CtrlProxy launch intent can still be resolved through PackageManager over ADB.
       logger.debug(`[LaunchApp] a11y launch intent failed, falling back to ADB: ${error}`);
     }
     return undefined;
   }
 
   private buildActivityApproachCommands(packageName: string, userId: number): string[] {
-    return [
-      // Ask PackageManager for MAIN/LAUNCHER activities before parsing a full dump.
-      `shell cmd package query-activities --brief --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep ${shellQuote(packageName)}`,
-    ];
+    // Keep handheld resolution first; TV-only apps may expose only Leanback (#15957).
+    return LAUNCHER_CATEGORIES.map(
+      (category) =>
+        `shell cmd package query-activities --brief --user ${userId} -a android.intent.action.MAIN -c ${category} | grep ${shellQuote(packageName)}`,
+    );
   }
 
   private async runActivityApproach(
     command: string,
     index: number,
     packageName: string,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    { perf, signal }: { perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<string[]> {
     try {
       logger.info(`[LaunchApp] Trying approach ${index + 1}: ${command}`);
@@ -184,12 +195,36 @@ export class AndroidLaunchActivity {
     return [];
   }
 
-  private async resolveAndroidLauncherComponent(
+  /**
+   * The package's launcher component and the category that resolved it. A TV-only app declares
+   * only LEANBACK_LAUNCHER (#15957), so that category is tried when LAUNCHER resolves nothing.
+   */
+  private async resolveAndroidLauncherTarget(
     packageName: string,
     userId: number,
     signal?: AbortSignal,
+  ): Promise<{ component: string; category: string } | undefined> {
+    for (const category of LAUNCHER_CATEGORIES) {
+      const component = await this.resolveAndroidLauncherComponent(
+        packageName,
+        userId,
+        category,
+        signal,
+      );
+      if (component) {
+        return { component, category };
+      }
+    }
+    return undefined;
+  }
+
+  private async resolveAndroidLauncherComponent(
+    packageName: string,
+    userId: number,
+    category: string,
+    signal?: AbortSignal,
   ): Promise<string | undefined> {
-    const command = `shell cmd package resolve-activity --brief --user ${userId} -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
+    const command = `shell cmd package resolve-activity --brief --user ${userId} -c ${category} ${shellQuote(packageName)}`;
     try {
       const result = await this.deps.adb.executeCommand(command);
       this.assertLaunchNotAborted(signal);
@@ -221,10 +256,13 @@ export class AndroidLaunchActivity {
   ): Promise<{ success: boolean; amReportedError?: boolean }> {
     logger.info(`[LaunchApp] Trying am start with intent for user ${userId}`);
     try {
-      const component = await this.resolveAndroidLauncherComponent(packageName, userId, signal);
+      const resolved = await this.resolveAndroidLauncherTarget(packageName, userId, signal);
       this.assertLaunchNotAborted(signal);
-      const launcherTarget = component ? `-n ${shellQuote(component)}` : shellQuote(packageName);
-      const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${launcherTarget}`;
+      const launcherTarget = resolved
+        ? `-n ${shellQuote(resolved.component)}`
+        : shellQuote(packageName);
+      const category = resolved?.category ?? LAUNCHER_CATEGORY;
+      const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c ${category} ${launcherTarget}`;
       logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
       const result = await this.deps.adb.executeCommand(intentCmd);
       this.assertLaunchNotAborted(signal);
@@ -347,10 +385,9 @@ export class AndroidLaunchActivity {
     packageName: string,
     activityName: string | undefined,
     userId: number,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
-    intent?: AndroidLaunchIntent,
+    { perf, options = {} }: { perf: PerformanceTracker; options?: AndroidPerformLaunchOptions },
   ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
+    const { signal, intent } = options;
     this.assertLaunchNotAborted(signal);
     if (intent) {
       const launched = await perf.track("explicitIntentLaunch", () =>
@@ -359,6 +396,16 @@ export class AndroidLaunchActivity {
       perf.end();
       return launched;
     }
+    return this.performDiscoveredLaunch(packageName, activityName, userId, { perf, signal });
+  }
+
+  /** Launch without an explicit intent: intent, monkey, then launcher-activity discovery. */
+  private async performDiscoveredLaunch(
+    packageName: string,
+    activityName: string | undefined,
+    userId: number,
+    { perf, signal }: { perf: PerformanceTracker; signal?: AbortSignal },
+  ): Promise<{ success: boolean; packageName: string; activityName?: string; userId: number }> {
     let targetActivity = activityName;
 
     // Try am start with intent first (alternative to monkey)
@@ -434,7 +481,8 @@ export class AndroidLaunchActivity {
             } catch (error) {
               rethrowDeviceTransportUnavailable(error);
               this.assertLaunchNotAborted(signal);
-              logger.info(`[LaunchApp] Pattern ${pattern} failed: ${error}`);
+              // A missing conventional activity name does not rule out the next candidate.
+              logger.debug(`[LaunchApp] Pattern ${pattern} failed: ${error}`);
             }
           }
           return { success: false, pattern: null };

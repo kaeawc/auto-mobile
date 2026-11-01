@@ -1,170 +1,13 @@
 import { describe, expect, spyOn, test, afterEach, mock, beforeEach } from "bun:test";
-import fs from "fs/promises";
-import path from "path";
 import { PNG } from "pngjs";
-import { YamlPlanSerializer } from "../../src/utils/plan/PlanSerializer";
 import { summarizeObserveResultForFailure } from "../../src/utils/plan/summarizeFailureObservation";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { ScreenshotComparator } from "../../src/utils/screenshot/ScreenshotComparator";
 import { processTimingData, type TimingData } from "../../src/utils/PerformanceTracker";
-import { getMcpServerVersion, releaseVersion } from "../../src/utils/mcpVersion";
-import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeImageBackend } from "../fakes/FakeImageBackend";
 
 afterEach(() => mock.restore());
-
-// These spies cover the UTF-8 overloads used by PlanSerializer.
-const logFileSystem: {
-  readdir(path: string): Promise<string[]>;
-  readFile(path: string, encoding: BufferEncoding): Promise<string>;
-} = fs;
-
-const createdAt = "2026-01-01T00:00:00.000Z";
-const version = releaseVersion(getMcpServerVersion());
-const logPaths = {
-  a: path.join("/logs", "a.json"),
-  b: path.join("/logs", "b.json"),
-  c: path.join("/logs", "c.json"),
-};
-
-function logEntry(tool: string, timestamp: number, optional?: boolean): string {
-  return JSON.stringify({
-    timestamp: new Date(timestamp).toISOString(),
-    tool,
-    params: { text: tool },
-    optional,
-    result: { success: true },
-  });
-}
-
-describe("Plan export characterization", () => {
-  test("log fixture paths match Windows joins without changing the native path module", () => {
-    const windowsPaths = ["a.json", "b.json", "c.json"].map((file) =>
-      path.win32.join("/logs", file),
-    );
-    expect(Object.values(logPaths).map((file) => path.win32.normalize(file))).toEqual(windowsPaths);
-    expect(windowsPaths[0]).toBe("\\logs\\a.json");
-    expect(windowsPaths[0]).not.toBe(path.posix.join("/logs", "a.json"));
-  });
-
-  test("exports exact YAML after ordered parsing, failures, omissions and last-observe selection", async () => {
-    const logs = new Map([
-      [
-        logPaths.a,
-        `${logEntry("observe", 1)}\ninvalid\nnull\n${JSON.stringify({ result: { success: false } })}\n${logEntry("tapOn", 3, true)}\n`,
-      ],
-      [
-        logPaths.c,
-        `${logEntry("observe", 5, false)}\n${logEntry("inputText", 2, false)}\n${logEntry("listDevices", 4)}\n`,
-      ],
-    ]);
-    const listing = spyOn(logFileSystem, "readdir").mockResolvedValue([
-      "c.json",
-      "ignored.txt",
-      "b.json",
-      "a.json",
-    ]);
-    const reading = spyOn(logFileSystem, "readFile").mockImplementation(async (file) => {
-      const content = logs.get(String(file));
-      if (content === undefined) {
-        throw new Error("unreadable");
-      }
-      return content;
-    });
-    const writing = spyOn(fs, "writeFile").mockResolvedValue(undefined);
-    const date = spyOn(Date.prototype, "toISOString").mockReturnValue(createdAt);
-    const warning = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      const content = `name: Export\ndescription: Exported plan with 3 steps\nsteps:\n  - tool: inputText\n    params:\n      text: inputText\n  - tool: tapOn\n    params:\n      text: tapOn\n    optional: true\n  - tool: observe\n    params:\n      text: observe\nmcpVersion: ${version}\nmetadata:\n  createdAt: '${createdAt}'\n  version: 1.0.0\n`;
-      expect(
-        await new YamlPlanSerializer().exportPlanFromLogs("/logs", "Export", "/out.yaml"),
-      ).toEqual({
-        success: true,
-        planPath: "/out.yaml",
-        planContent: content,
-        stepCount: 3,
-      });
-      expect(reading.mock.calls.map(([file]) => file)).toEqual([
-        logPaths.a,
-        logPaths.b,
-        logPaths.c,
-      ]);
-      expect(writing.mock.calls).toEqual([["/out.yaml", content, "utf-8"]]);
-      expect(warning.mock.calls.map(([message]) => String(message).split(":")[0])).toEqual([
-        "Failed to parse line in a.json",
-        "Failed to parse line in a.json",
-        "Failed to read log file b.json",
-      ]);
-    } finally {
-      listing.mockRestore();
-      reading.mockRestore();
-      writing.mockRestore();
-      date.mockRestore();
-      warning.mockRestore();
-    }
-  });
-
-  test.each([
-    {
-      files: ["ignored.txt"],
-      content: "",
-      expected: { success: false, error: "No log files found" },
-    },
-    {
-      files: ["a.json"],
-      content: ' \n{}\n{"result":{"success":false}}\n',
-      expected: { success: false, error: "No successful tool calls found in logs" },
-    },
-    { files: ["a.json"], content: logEntry("killDevice", 0), expected: { success: true } },
-  ])("handles empty and omitted calls: $files $content", async ({ files, content, expected }) => {
-    const listing = spyOn(logFileSystem, "readdir").mockResolvedValue([...files]);
-    const reading = spyOn(logFileSystem, "readFile").mockResolvedValue(content);
-    const writing = spyOn(fs, "writeFile").mockResolvedValue(undefined);
-    const date = spyOn(Date.prototype, "toISOString").mockReturnValue(createdAt);
-    try {
-      const result = await new YamlPlanSerializer().exportPlanFromLogs(
-        "/logs",
-        "Empty",
-        "/out.yaml",
-      );
-      if (!expected.success) {
-        expect(result).toEqual(expected);
-        expect(writing).not.toHaveBeenCalled();
-      } else {
-        expect(result).toEqual({
-          success: true,
-          planPath: "/out.yaml",
-          stepCount: 0,
-          planContent: `name: Empty\ndescription: Exported plan with 0 steps\nsteps: []\nmcpVersion: ${version}\nmetadata:\n  createdAt: '${createdAt}'\n  version: 1.0.0\n`,
-        });
-      }
-    } finally {
-      listing.mockRestore();
-      reading.mockRestore();
-      writing.mockRestore();
-      date.mockRestore();
-    }
-  });
-
-  test.each(["readdir", "writeFile"] as const)("preserves %s errors", async (method) => {
-    const listing = spyOn(logFileSystem, "readdir").mockResolvedValue(["a.json"]);
-    const reading = spyOn(logFileSystem, "readFile").mockResolvedValue(logEntry("tapOn", 0));
-    const writing = spyOn(fs, "writeFile").mockResolvedValue(undefined);
-    const errorLog = spyOn(logger, "error").mockImplementation(() => {});
-    (method === "readdir" ? listing : writing).mockRejectedValue(new Error("denied"));
-    try {
-      expect(
-        await new YamlPlanSerializer().exportPlanFromLogs("/logs", "Failure", "/out.yaml"),
-      ).toEqual({ success: false, error: "Error: denied" });
-    } finally {
-      listing.mockRestore();
-      reading.mockRestore();
-      writing.mockRestore();
-      errorLog.mockRestore();
-    }
-  });
-});
 
 function expectSummary(raw: Record<string, unknown>, texts: string[], ids: string[]): void {
   const expected = {
@@ -523,14 +366,11 @@ describe("Screenshot comparison characterization", () => {
     async ({ fast, threshold, value, difference }) => {
       const backend = new FakeImageBackend();
       expect(
-        await ScreenshotComparator.compareImages(
-          solidPng(2, 2, 0),
-          solidPng(2, 2, value),
+        await ScreenshotComparator.compareImages(solidPng(2, 2, 0), solidPng(2, 2, value), {
           threshold,
-          fast,
-          new FakeTimer(),
-          backend,
-        ),
+          fastMode: fast,
+          deps: { timer: new FakeTimer(), backend },
+        }),
       ).toEqual({
         compared: true,
         similarity: difference === 0 ? 100 : 0,
@@ -556,14 +396,14 @@ describe("Screenshot comparison characterization", () => {
     try {
       const input = Buffer.from("not-png");
       expect(
-        await ScreenshotComparator.compareImages(
-          input,
-          resized,
-          0.1,
-          fast,
-          new FakeTimer(),
-          backend,
-        ),
+        await ScreenshotComparator.compareImages(input, resized, {
+          threshold: 0.1,
+          fastMode: fast,
+          deps: {
+            timer: new FakeTimer(),
+            backend,
+          },
+        }),
       ).toEqual({ compared: true, similarity: 100, pixelDifference: 0, totalPixels: 2 });
       expect(backend.executeCalls).toEqual([
         { source: input, pipeline: { operations: [], encoding: { mime: "image/png" } } },
@@ -595,14 +435,14 @@ describe("Screenshot comparison characterization", () => {
       second.writeUInt32BE(900, 16);
       second.writeUInt32BE(650, 20);
       expect(
-        await ScreenshotComparator.compareImages(
-          first,
-          second,
-          0.1,
-          fast,
-          new FakeTimer(),
-          backend,
-        ),
+        await ScreenshotComparator.compareImages(first, second, {
+          threshold: 0.1,
+          fastMode: fast,
+          deps: {
+            timer: new FakeTimer(),
+            backend,
+          },
+        }),
       ).toEqual({ compared: true, similarity: 100, pixelDifference: 0, totalPixels: 1 });
       expect(backend.executeCalls.map(({ pipeline }) => pipeline)).toEqual(
         [0, 1].map(() => ({
@@ -628,10 +468,7 @@ describe("Screenshot comparison characterization", () => {
     const result = await ScreenshotComparator.compareImages(
       Buffer.from("bad"),
       Buffer.from("other"),
-      0.1,
-      false,
-      new FakeTimer(),
-      backend,
+      { threshold: 0.1, fastMode: false, deps: { timer: new FakeTimer(), backend } },
     );
     expect(result.compared).toBe(false);
     expect(result).toEqual({ compared: false, error: expect.any(String) });

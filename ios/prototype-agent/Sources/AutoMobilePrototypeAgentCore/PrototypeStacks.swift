@@ -94,33 +94,34 @@ enum PrototypeStacks {
     }
 
     /// Pure Android Back policy: visit parents before children (nested wins), and siblings in
-    /// document order (last eligible wins). Visible modal bodies take priority over inline stacks,
-    /// including bottomSheet, which iOS draws inline. Hidden screens never compete for Back.
+    /// document order (last eligible wins). Visible modal bodies, including bottomSheet, take
+    /// priority over inline stacks. Hidden screens never compete for Back.
     static func popTarget(
         root: PrototypeNode, state: [String: JSONValue], pages: [String: Int],
-        stacks: [String: PrototypeStackSnapshot]
+        stacks: [String: PrototypeStackSnapshot], data: [String: JSONValue]?
     )
         -> String?
     {
-        if root.openModals(state: state, pages: pages, stacks: stacks).contains(where: { $0.type == "drawer" }) {
+        if root.openModals(state: state, pages: pages, stacks: stacks, data: data)
+            .contains(where: { $0.type == "drawer" })
+        {
             return nil
         }
-        let modalTypes = prototypeModalTypes.union(["bottomSheet"])
         var target: String?
         var modals: [PrototypeNode] = []
         func shown(_ node: PrototypeNode) -> Bool {
             (node.visibleWhen?.holds(state) ?? true) &&
-                (!modalTypes.contains(node.type) || (node.openWhen?.holds(state) ?? false))
+                (!prototypeModalTypes.contains(node.type) || (node.openWhen?.holds(state) ?? false))
         }
         func collectModals(_ node: PrototypeNode) {
             guard shown(node) else { return }
-            if modalTypes.contains(node.type) { modals.append(node) }
+            if prototypeModalTypes.contains(node.type) { modals.append(node) }
             for entry in node.currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) {
                 collectModals(entry.node)
             }
         }
         func visit(_ node: PrototypeNode) {
-            guard shown(node), !modalTypes.contains(node.type) else { return }
+            guard shown(node), !prototypeModalTypes.contains(node.type) else { return }
             if node.type == "stack", let id = node.id, (stacks[id]?.depth ?? 1) > 1 { target = id }
             for entry in node
                 .currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) { visit(entry.node) }

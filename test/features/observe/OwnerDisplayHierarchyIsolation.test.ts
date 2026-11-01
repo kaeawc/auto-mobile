@@ -140,14 +140,10 @@ test("an owner read of a non-default display answers its caller without touching
     const scaleBefore = client.getScreenScaleMetadata();
     expect(scaleBefore).toEqual({ nativeScale: 1, pixelWidth: 1080, pixelHeight: 2400 });
 
-    const pending = client.requestHierarchySync(
-      new NoOpPerformanceTracker(),
-      false,
-      undefined,
-      1000,
-      undefined,
-      2,
-    );
+    const pending = client.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, {
+      timeoutMs: 1000,
+      displayId: 2,
+    });
     const { requestId, displayId } = await sentHierarchyRequest(socket);
     expect(displayId).toBe(2);
     socket.simulateMessage(frame("external", SECOND_DISPLAY, 2, 2, requestId));
@@ -174,14 +170,10 @@ test.each([undefined, 0])(
       `owner-default-display-${String(displayId)}`,
     );
     try {
-      const pending = client.requestHierarchySync(
-        new NoOpPerformanceTracker(),
-        false,
-        undefined,
-        1000,
-        undefined,
+      const pending = client.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, {
+        timeoutMs: 1000,
         displayId,
-      );
+      });
       const { requestId } = await sentHierarchyRequest(socket);
       socket.simulateMessage(frame("default refreshed", SECOND_DISPLAY, 0, 2, requestId));
       expect((await pending)?.hierarchy.hierarchy.text).toBe("default refreshed");
@@ -204,14 +196,10 @@ test.each([undefined, 0])(
 test("an unanswered explicit display read keeps its marker so the late reply stays isolated", async () => {
   const { client, socket, stream, backoff, timer } = await connectedClient("owner-display-timeout");
   try {
-    const pending = client.requestHierarchySync(
-      new NoOpPerformanceTracker(),
-      false,
-      undefined,
-      100,
-      undefined,
-      2,
-    );
+    const pending = client.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, {
+      timeoutMs: 100,
+      displayId: 2,
+    });
     const { requestId } = await sentHierarchyRequest(socket);
     expect(markerCount(client)).toBe(1);
     timer.advanceTime(100);
@@ -246,9 +234,7 @@ test("an aborted explicit display read keeps its marker until the late reply is 
       new NoOpPerformanceTracker(),
       false,
       controller.signal,
-      1000,
-      undefined,
-      2,
+      { timeoutMs: 1000, displayId: 2 },
     );
     const { requestId } = await sentHierarchyRequest(socket);
     controller.abort();
@@ -270,14 +256,10 @@ test("retained markers are cleared on socket close and capped for an unresponsiv
   const { client, socket, timer } = await connectedClient("owner-display-marker-cap");
   try {
     for (let i = 0; i < 70; i++) {
-      const pending = client.requestHierarchySync(
-        new NoOpPerformanceTracker(),
-        false,
-        undefined,
-        100,
-        undefined,
-        2,
-      );
+      const pending = client.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, {
+        timeoutMs: 100,
+        displayId: 2,
+      });
       await sentHierarchyRequest(socket);
       timer.advanceTime(100);
       expect(await pending).toBeNull();
@@ -293,14 +275,10 @@ test("retained markers are cleared on socket close and capped for an unresponsiv
 test("a runner error for an explicit display read releases its marker", async () => {
   const { client, socket } = await connectedClient("owner-display-runner-error");
   try {
-    const pending = client.requestHierarchySync(
-      new NoOpPerformanceTracker(),
-      false,
-      undefined,
-      1000,
-      undefined,
-      2,
-    );
+    const pending = client.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, {
+      timeoutMs: 1000,
+      displayId: 2,
+    });
     const { requestId } = await sentHierarchyRequest(socket);
     socket.simulateMessage(JSON.stringify({ type: "error", requestId, error: "capture failed" }));
     await pending.catch(() => null);
@@ -315,14 +293,10 @@ test("a legacy id-less frame from another display does not answer an explicit di
   try {
     // Model a legacy APK: it never advertised or echoed a request id on this connection.
     (Reflect.get(client, "hierarchy") as CtrlProxyHierarchy).resetConnectionScopedState();
-    const pending = client.requestHierarchySync(
-      new NoOpPerformanceTracker(),
-      false,
-      undefined,
-      200,
-      undefined,
-      2,
-    );
+    const pending = client.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, {
+      timeoutMs: 200,
+      displayId: 2,
+    });
     await sentHierarchyRequest(socket);
     // A legacy APK echoes no request id: this is the default display's push, not display 2's.
     socket.simulateMessage(frame("default push", DEFAULT_DISPLAY, 0, 5));
@@ -338,14 +312,10 @@ test("a legacy id-less frame for the requested display still answers the read", 
   const { client, socket, timer } = await connectedClient("owner-display-legacy-match");
   try {
     (Reflect.get(client, "hierarchy") as CtrlProxyHierarchy).resetConnectionScopedState();
-    const pending = client.requestHierarchySync(
-      new NoOpPerformanceTracker(),
-      false,
-      undefined,
-      200,
-      undefined,
-      2,
-    );
+    const pending = client.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, {
+      timeoutMs: 200,
+      displayId: 2,
+    });
     await sentHierarchyRequest(socket);
     socket.simulateMessage(frame("external legacy", SECOND_DISPLAY, 2, 5));
     timer.advanceTime(50);

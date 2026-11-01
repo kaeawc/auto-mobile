@@ -66,7 +66,10 @@ class LifecycleInputServer extends UnixSocketServerHarness {
     ownerSignal?: AbortSignal,
     requester?: () => string | undefined,
   ): Promise<T> {
-    return this.runTrackedDeviceInput(toolName, targetDevice, operation, ownerSignal, requester);
+    return this.runTrackedDeviceInput(toolName, targetDevice, operation, {
+      ownerSignal,
+      requester,
+    });
   }
 }
 
@@ -224,7 +227,7 @@ describe("(a) input/gestureStart that leaves while waiting on the device key (#1
 
     // Registry saw the dead socket at ack time: one cancelling end, nothing recorded.
     expect(pending("gestureEnd")).toHaveLength(1);
-    expect(pending("gestureEnd")[0].args).toEqual(["g1", 0, 0, true, 5000]);
+    expect(pending("gestureEnd")[0].args).toEqual(["g1", 0, 0, { cancel: true, timeoutMs: 5000 }]);
     expect(server.ownedGestureOwnerCount).toBe(0);
     pending("gestureEnd")[0].release({ success: true });
     await drain();

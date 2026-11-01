@@ -6,6 +6,7 @@ import {
   type DeviceSnapshotConfig,
   type DeviceSnapshotManifest,
   type DeviceSnapshotType,
+  requireAndroidOrIosPlatform,
 } from "../../src/models";
 import {
   captureDeviceSnapshot,
@@ -187,7 +188,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
             timestamp,
             deviceId: device.deviceId,
             deviceName: device.name,
-            platform: device.platform,
+            platform: requireAndroidOrIosPlatform(device.platform, "Snapshot capture"),
             snapshotType: "adb",
             includeAppData: true,
             includeSettings: false,
@@ -303,13 +304,11 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
   test("notifies archive subscribers when a dispatched VM save persists a pending reclaim", async () => {
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server);
-    ResourceRegistry.register(
-      DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE,
-      "Device Snapshot Archive",
-      "Snapshot archive test resource",
-      "application/json",
-      async () => ({ uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE, text: "{}" }),
-    );
+    ResourceRegistry.register(DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE, "Device Snapshot Archive", {
+      description: "Snapshot archive test resource",
+      mimeType: "application/json",
+      handler: async () => ({ uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE, text: "{}" }),
+    });
     const subscribe = server.server.handlersBySchema.get("resources/subscribe");
     expect(subscribe).toBeDefined();
     await subscribe!({ params: { uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE } });

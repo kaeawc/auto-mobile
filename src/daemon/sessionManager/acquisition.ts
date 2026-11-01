@@ -15,10 +15,12 @@ import {
 } from "../sessionManager";
 import { SessionSlotShadowProbe } from "../sessionSlotShadowProbe";
 import {
+  type GetOrCreateSessionOptions,
   type RecoveryAssignmentWait,
   type ResolvedSessionAcquisition,
   type SessionAcquisitionOptions,
   type SessionLifecycleSlots,
+  type PersistedSessionRecovery,
   type SharedSessionAssignment,
   isDeviceRestartReleasedRow,
 } from "./internalContracts";
@@ -44,14 +46,7 @@ export interface SessionAcquisitionHost {
     sessionId: string,
     devicePool?: SessionDeviceAssigner,
     platform?: Platform,
-    execution?: SessionExecutionMetadata, // #6069: when true, a NEW session (no live in-memory session) may only be
-    // minted for an id this daemon already issued — i.e. a persisted, non-terminal
-    // row (live-during-restart recovery). This is set on the device-tool path so a
-    // fabricated/never-issued sessionUuid can never be auto-assigned a pooled
-    // device just because a device pool is in scope. Internal fresh mints
-    // (device-label derived sessions) leave it false and keep minting.
-    requireIssuedSession?: boolean,
-    accessOptions?: SessionAccess | SessionAcquisitionOptions,
+    options?: GetOrCreateSessionOptions,
   ): Promise<Session>;
   readonly slotShadowProbe: SessionSlotShadowProbe<Session>;
   readonly timer: Timer;
@@ -86,9 +81,7 @@ export interface SessionAcquisitionHost {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
-    listed: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    recovery: PersistedSessionRecovery & { listed?: DeviceSession },
   ): Promise<Session>;
 }
 
@@ -129,17 +122,10 @@ export class SessionAcquisition {
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
-    requireIssuedSession: boolean,
-    acquisition: ResolvedSessionAcquisition,
+    acquisition: ResolvedSessionAcquisition & { requireIssuedSession: boolean },
   ): Promise<Session> {
     try {
-      return await this.joinOrStartUnseenAssignment(
-        sessionId,
-        devicePool,
-        platform,
-        requireIssuedSession,
-        acquisition,
-      );
+      return await this.joinOrStartUnseenAssignment(sessionId, devicePool, platform, acquisition);
     } catch (error) {
       this.creditControlCallFailedOnRestartRecovery(sessionId, acquisition.access);
       throw error;
@@ -150,8 +136,12 @@ export class SessionAcquisition {
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
-    requireIssuedSession: boolean,
-    { access, requestDeadlineMs, signal }: ResolvedSessionAcquisition,
+    {
+      requireIssuedSession,
+      access,
+      requestDeadlineMs,
+      signal,
+    }: ResolvedSessionAcquisition & { requireIssuedSession: boolean },
   ): Promise<Session> {
     const pendingAssignment = this.host.sessionSlots.getAssignment(sessionId);
     if (pendingAssignment) {
@@ -162,14 +152,12 @@ export class SessionAcquisition {
       const shared = this.host.sessionSlots.getShared(sessionId);
       if (shared?.controller.signal.aborted) {
         await this.waitForAbortedAssignment(pendingAssignment, shared, requestDeadlineMs, signal);
-        return await this.host.getOrCreateSession(
-          sessionId,
-          devicePool,
-          platform,
-          undefined,
+        return await this.host.getOrCreateSession(sessionId, devicePool, platform, {
           requireIssuedSession,
-          { access, requestDeadlineMs, signal },
-        );
+          access,
+          requestDeadlineMs,
+          signal,
+        });
       }
       const joined = await this.waitForSharedAssignment(
         sessionId,
@@ -191,13 +179,10 @@ export class SessionAcquisition {
     }
 
     const shared = this.newSharedAssignment(sessionId);
-    const assignment = this.createUnseenSession(
-      sessionId,
-      devicePool,
-      platform,
+    const assignment = this.createUnseenSession(sessionId, devicePool, platform, {
       requireIssuedSession,
       shared,
-    ).finally(() => {
+    }).finally(() => {
       shared.recoveryWait.resolve(undefined);
       if (this.host.sessionSlots.getAssignment(sessionId) === assignment) {
         this.host.sessionSlots.deleteAssignment(sessionId);
@@ -333,14 +318,10 @@ export class SessionAcquisition {
           return undefined;
         }
       }
-      return await this.host.getOrCreateSession(
-        sessionId,
-        undefined,
-        undefined,
+      return await this.host.getOrCreateSession(sessionId, undefined, undefined, {
+        ...options,
         execution,
-        false,
-        options,
-      );
+      });
     } catch (error) {
       if (!(error instanceof UnissuedSessionError)) {
         throw error;
@@ -404,8 +385,10 @@ export class SessionAcquisition {
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
-    requireIssuedSession: boolean,
-    shared: SharedSessionAssignment,
+    {
+      requireIssuedSession,
+      shared,
+    }: { requireIssuedSession: boolean; shared: SharedSessionAssignment },
   ): Promise<Session> {
     let persisted = await this.host.readPersistedSession(sessionId);
     this.host.refusePlanLabelSessionOutsideItsRun(sessionId, persisted);
@@ -449,13 +432,10 @@ export class SessionAcquisition {
     if (persisted && isDeviceRestartReleasedRow(persisted)) {
       this.host.recordRestartRecoveryActivity(sessionId);
     }
-    return await this.host.recoverPersistedSession(
-      sessionId,
-      devicePool,
-      platform,
-      persisted,
-      "owned",
+    return await this.host.recoverPersistedSession(sessionId, devicePool, platform, {
+      listed: persisted,
+      initialOwnership: "owned",
       shared,
-    );
+    });
   }
 }

@@ -187,13 +187,12 @@ export class DeepLinkManager implements DeepLinkManager {
     this.appBundleMetadata = dependencies.appBundleMetadata ?? new AppBundleMetadataClient();
     this.deviceApps = dependencies.deviceApps ?? new DeviceAppManager();
     this.physicalCache = dependencies.physicalDeepLinkCache ?? PHYSICAL_DEEP_LINK_CACHE;
-    this.chooser = new IntentChooserHandler(
-      device,
-      this.adbFactory,
+    this.chooser = new IntentChooserHandler(device, {
+      adbFactory: this.adbFactory,
       dependencies,
-      (hierarchy) => this.detectIntentChooser(hierarchy),
-      this.adbUtils,
-    );
+      detectChooser: (hierarchy) => this.detectIntentChooser(hierarchy),
+      executor: this.adbUtils,
+    });
   }
 
   /**
@@ -560,7 +559,7 @@ export class DeepLinkManager implements DeepLinkManager {
           continue;
         }
 
-        this.parseSchemeEntry(line, lines, i, schemes, hosts);
+        this.parseSchemeEntry(line, lines, i, { schemes, hosts });
       }
 
       // Process intent filter details
@@ -576,7 +575,7 @@ export class DeepLinkManager implements DeepLinkManager {
       if (!inIntentFilterSection) {
         continue;
       }
-      this.parseIntentFilterData(line, currentFilter, schemes, hosts, supportedMimeTypes);
+      this.parseIntentFilterData(line, currentFilter, schemes, { hosts, supportedMimeTypes });
 
       // End of current intent filter
       if (!this.isIntentFilterEnd(line) || !currentFilter.action) {
@@ -612,8 +611,7 @@ export class DeepLinkManager implements DeepLinkManager {
     line: string,
     lines: string[],
     index: number,
-    schemes: Set<string>,
-    hosts: Set<string>,
+    { schemes, hosts }: { schemes: Set<string>; hosts: Set<string> },
   ): void {
     const schemeMatch = line.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):$/);
     if (!schemeMatch) {
@@ -651,8 +649,7 @@ export class DeepLinkManager implements DeepLinkManager {
     line: string,
     currentFilter: Partial<IntentFilter>,
     schemes: Set<string>,
-    hosts: Set<string>,
-    supportedMimeTypes: Set<string>,
+    { hosts, supportedMimeTypes }: { hosts: Set<string>; supportedMimeTypes: Set<string> },
   ): void {
     if (line.startsWith("Category:")) {
       const category = line.replace("Category:", "").trim().replace(/"/g, "");

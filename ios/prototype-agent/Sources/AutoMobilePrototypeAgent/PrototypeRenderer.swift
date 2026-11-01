@@ -165,7 +165,7 @@
     struct NodeView: View {
         let node: PrototypeNode
         let model: PrototypeModel
-        /// Dialogs and snackbars draw nothing in place; `PrototypeModalLayer` draws them with this set.
+        /// Modals, including bottom sheets, draw nothing in place; `PrototypeModalLayer` draws them with this set.
         var presentedAsModal = false
         /// Anchored nodes draw nothing in place; `PrototypeAnchorLayer` draws them with this set (#10803).
         var anchorPlaced = false
@@ -175,6 +175,8 @@
         var inStackSlot = false
         /// The main axis of the row or column laying this node out, so a `weight` knows what it fills.
         var stackAxis: PrototypeAxis?
+        /// An unweighted row offers each child only the width earlier siblings left.
+        var constrainsWidth = false
         @Environment(\.prototypeSharedNamespace) private var sharedNamespace
         @Environment(\.prototypeGlassNamespace) private var glassNamespace
         @FocusState private var controlFocused: Bool
@@ -402,8 +404,10 @@
                 if hasWeightedChild {
                     weightedStack(axis: .horizontal)
                 } else {
-                    HStack(alignment: .center, spacing: style?.spacing ?? 0) { arranged(horizontal: true) }
-                        .animation(sizeAnimation, value: layoutSignature)
+                    PrototypeRowLayout(spacing: style?.spacing ?? 0) {
+                        arranged(horizontal: true)
+                    }
+                    .animation(sizeAnimation, value: layoutSignature)
                 }
             case "column":
                 if hasWeightedChild {
@@ -469,8 +473,11 @@
                 PrototypeZoomStackHost(node: node, model: model)
             case "pager":
                 PagerView(node: node, model: model)
-            case "tabBar", "bottomNav":
+            case "tabBar":
                 navBar
+                    .modifier(PrototypeBarClip(fraction: node.onScroll == "hide" ? barFraction : 0))
+            case "bottomNav":
+                bottomNavBar
                     .modifier(PrototypeBarClip(fraction: node.onScroll == "hide" ? barFraction : 0))
             case "bottomSheet":
                 sheet
@@ -564,16 +571,25 @@
         /// Start/center/end come from the frame alignment; only the space* modes need spacers, so a
         /// wrap-sized row or column does not grow to fill its parent.
         @ViewBuilder
-        private func arranged(horizontal _: Bool) -> some View {
+        private func arranged(horizontal: Bool) -> some View {
             let nodes = node.drawnChildren(holds: model.holds, stacks: model.stacks)
             let mode = style?.arrangement ?? "start"
             let outer = mode == "spaceAround" || mode == "spaceEvenly"
-            if outer { Spacer(minLength: 0) }
+            if outer { Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1) }
             ForEach(Array(nodes.enumerated()), id: \.element.offset) { index, entry in
-                if index > 0, mode.hasPrefix("space") { Spacer(minLength: 0) }
-                NodeView(node: entry.node, model: model, inStackSlot: true)
+                if index > 0, mode.hasPrefix("space") {
+                    Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1)
+                }
+                NodeView(node: entry.node, model: model, inStackSlot: true, constrainsWidth: horizontal)
+                    .layoutValue(
+                        key: PrototypeWeightKey.self,
+                        value: horizontal ? PrototypeSizeRules(
+                            style: entry.node.resolvedStyle(state: model.state),
+                            fillsByDefault: entry.node.type == "spacer"
+                        ).unweightedRowWeight : nil
+                    )
             }
-            if outer { Spacer(minLength: 0) }
+            if outer { Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1) }
         }
 
         private var pagerPosition: PagerPosition? {
@@ -868,6 +884,45 @@
             return 0
         }
 
+        private var bottomNavBar: some View {
+            let items = node.items ?? []
+            let showsLabel = PrototypeBarScroll.showsNavigationLabel(behavior: node.onScroll, fraction: barFraction)
+            let sizing = PrototypeBarScroll.navigationSizing(showsLabel: showsLabel)
+            return HStack(spacing: 8) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    let selected = index == navSelection
+                    Button {
+                        model.select(index: index, pager: node.pager, key: node.stateKey, then: node.onTap ?? [])
+                    } label: {
+                        VStack(spacing: 4) {
+                            navVisual(item)
+                                .frame(width: 64, height: 32)
+                                .background(
+                                    Capsule().fill(selected ? palette.navIndicator.map { Color($0) } ?? .clear : .clear)
+                                )
+                            if showsLabel {
+                                Text(item.label)
+                                    .font(.caption.weight(selected ? .semibold : .medium))
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: sizing.itemMinHeight)
+                        .foregroundColor(navForeground(selected: selected))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel(item.label)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, sizing.topPadding)
+            .padding(.bottom, sizing.bottomPadding)
+            .frame(maxWidth: .infinity, minHeight: sizing.containerMinHeight)
+            .background(palette.navContainer.map { Color($0) } ?? Color(uiColor: .secondarySystemBackground))
+        }
+
         private var navBar: some View {
             let items = node.items ?? []
             return HStack(spacing: 0) {
@@ -938,8 +993,7 @@
         /// A card draws the authored uniform radius (a theme token resolves to one); without it,
         /// Material's 12 pt (#15445).
         private var cardCornerRadius: Double {
-            if case let .uniform(radius)? = style?.cornerRadius.map(shapes.resolve) { return radius }
-            return 12
+            PrototypeStyleCorners.cardRadius(style?.cornerRadius, shapes: shapes)
         }
 
         private var cornerShape: PrototypeStyleShape {
@@ -974,13 +1028,20 @@
                         style: style,
                         coverSize: coverSize.map { (Double($0.width), Double($0.height)) },
                         weightedAxis: stackAxis,
-                        fillsByDefault: node.type == "spacer"
+                        fillsByDefault: node.type == "spacer",
+                        constrainsWidth: constrainsWidth
                     ),
                     alignment: contentAlignment,
                     animation: styleAnimation
                 ))
+                .modifier(PrototypeImageZoomModifier(
+                    options: node.type == "image" ? node.zoomable : nil,
+                    enabled: model.isEnabled(node),
+                    consumeDeadTap: { model.consumeDeadTap() }
+                ))
                 .modifier(PrototypeStylePaintModifier(
                     style: style, shape: shape, palette: palette,
+                    clipsContent: PrototypeStyleCorners.clipsContent(nodeType: node.type),
                     styleAnimation: styleAnimation,
                     shimmerAnimated: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
                         .spatial,
@@ -1000,7 +1061,6 @@
                     activity: model.keyframeActivity
                 ))
                 .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
-                .modifier(PrototypeHandledTapModifier(node: node, model: model))
                 .modifier(TapModifier(
                     actions: handlesOwnTap ? nil : node.onTap,
                     longPress: handlesOwnTap ? nil : node.onLongPress,
@@ -1009,6 +1069,9 @@
                     model: model,
                     style: style
                 ))
+                // Keep dead-tap consumption outermost so its simultaneous gesture accompanies
+                // the node's tap handlers instead of winning inner-first gesture arbitration.
+                .modifier(PrototypeHandledTapModifier(node: node, model: model))
                 .modifier(IdentifierModifier(
                     // The search bar's editable field owns the node identifier.
                     identifier: node.type == "searchBar" ? nil : node.testTag,
@@ -1269,10 +1332,12 @@
             let gestures = plan.layers.reduce(AnyView(content)) { view, layer in
                 switch layer {
                 case .longPress:
-                    AnyView(view.onLongPressGesture {
-                        guard model.isEnabled(node) else { return }
-                        model.run(longPress ?? [])
-                    })
+                    AnyView(view.simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.5, maximumDistance: 10).onEnded { _ in
+                            guard model.isEnabled(node) else { return }
+                            model.run(longPress ?? [])
+                        }
+                    ))
                 case .doubleTap:
                     AnyView(view.onTapGesture(count: 2) {
                         guard model.isEnabled(node) else { return }
@@ -1491,13 +1556,21 @@
             }
         }
 
+        /// Page dots are laid out after the pages (a row below a horizontal pager, a column beside a
+        /// vertical one), so they never cover a page. They stay out of the accessibility tree.
         var body: some View {
-            content.overlay(alignment: layout.vertical ? .trailing : .bottom) {
-                if PrototypeCarousel.showsIndicator(node) { indicator }
+            if PrototypeCarousel.showsIndicator(node) {
+                switch PrototypeCarousel.indicatorSide(vertical: layout.vertical) {
+                case .below:
+                    VStack(spacing: 0) { content; indicator }
+                case .beside:
+                    HStack(spacing: 0) { content; indicator }
+                }
+            } else {
+                content
             }
         }
 
-        /// Page dots are decoration: they draw over the pages and stay out of the accessibility tree.
         @ViewBuilder private var indicator: some View {
             let dots = PrototypeCarousel.indicatorDots(count: pages.count, selected: selection.wrappedValue)
             let layoutDots = layout.vertical
@@ -1547,6 +1620,97 @@
         }
     }
 
+    /// Applied after image sizing so zoom clips to the same viewport the image occupies at 1x.
+    /// Simultaneous double taps leave the outer node's authored single-tap action reachable.
+    private struct PrototypeImageZoomModifier: ViewModifier {
+        let options: PrototypeImageZoomable?
+        let enabled: Bool
+        let consumeDeadTap: () -> Void
+        @State private var zoom = PrototypeImageZoom()
+        @State private var viewport: CGSize = .zero
+        @State private var pinchStart: CGFloat?
+        @State private var dragStart: CGSize?
+        @GestureState private var pinching = false
+        @GestureState private var dragging = false
+
+        @ViewBuilder
+        func body(content: Content) -> some View {
+            if let options {
+                content
+                    .scaleEffect(zoom.scale)
+                    .offset(zoom.pan)
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.onChange(of: geometry.size, initial: true) { _, size in
+                                viewport = size
+                                update(scale: zoom.scale, pan: zoom.pan)
+                            }
+                        }
+                    }
+                    .simultaneousGesture(
+                        MagnifyGesture()
+                            .updating($pinching) { _, active, _ in active = true }
+                            .onChanged { value in
+                                guard enabled else { return }
+                                if pinchStart == nil { pinchStart = zoom.scale }
+                                update(scale: (pinchStart ?? 1) * value.magnification, pan: zoom.pan)
+                            }
+                            .onEnded { _ in pinchStart = nil },
+                        including: enabled ? .all : .none
+                    )
+                    .simultaneousGesture(
+                        DragGesture()
+                            .updating($dragging) { _, active, _ in active = true }
+                            .onChanged { value in
+                                guard enabled else { return }
+                                if dragStart == nil { dragStart = zoom.pan }
+                                let start = dragStart ?? .zero
+                                update(scale: zoom.scale, pan: CGSize(
+                                    width: start.width + value.translation.width,
+                                    height: start.height + value.translation.height
+                                ))
+                            }
+                            .onEnded { _ in dragStart = nil },
+                        // A resting image leaves one-finger scrolling to its parent.
+                        including: enabled && zoom.scale > 1 ? .all : .none
+                    )
+                    .simultaneousGesture(
+                        TapGesture(count: 2).onEnded {
+                            guard enabled else { return }
+                            consumeDeadTap()
+                            update(scale: zoom.toggledScale(maxScale: options.maxScale), pan: zoom.pan)
+                        },
+                        including: enabled ? .all : .none
+                    )
+                    .accessibilityAction(named: Text("Zoom in")) {
+                        guard enabled else { return }
+                        update(scale: zoom.zoomInScale(maxScale: options.maxScale), pan: zoom.pan)
+                    }
+                    .accessibilityAction(named: Text("Zoom out")) {
+                        guard enabled else { return }
+                        update(scale: zoom.zoomOutScale, pan: zoom.pan)
+                    }
+                    .onChange(of: options.maxScale) { _, _ in update(scale: zoom.scale, pan: zoom.pan) }
+                    // GestureState also resets on cancellation, when onEnded is not delivered.
+                    .onChange(of: pinching) { _, active in if !active { pinchStart = nil } }
+                    .onChange(of: dragging) { _, active in if !active { dragStart = nil } }
+            } else {
+                content
+            }
+        }
+
+        private func update(scale: CGFloat, pan: CGSize) {
+            guard let options else { return }
+            var next = zoom
+            next.update(scale: scale, pan: pan, size: viewport, maxScale: options.maxScale)
+            // Pinch, pan, accessibility steps and double-tap always settle immediately, including
+            // motion:none and the injected accessibility seam's reduced profile.
+            withTransaction(Transaction(animation: nil)) { zoom = next }
+        }
+    }
+
     extension PrototypeVisibilityTransition {
         /// The SwiftUI insertion/removal for a `visibleWhen` node; `expand` grows from the top edge.
         var swiftUITransition: AnyTransition {
@@ -1555,6 +1719,9 @@
             case .fade: .opacity
             case .expand: .scale(scale: 0.01, anchor: .top).combined(with: .opacity)
             case .slide: .move(edge: .top).combined(with: .opacity)
+            case .slideStart: .move(edge: .leading)
+            case .slideEnd: .move(edge: .trailing)
+            case .scale: .scale.combined(with: .opacity)
             case .standard: .scale(scale: 0.01, anchor: .top).combined(with: .opacity)
             }
         }

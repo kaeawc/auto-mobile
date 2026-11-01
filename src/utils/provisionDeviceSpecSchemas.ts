@@ -154,3 +154,29 @@ export const iosBindingSpecSchema = z
   })
   .strict()
   .superRefine(refineIosSpec);
+
+/**
+ * An exact Apple Watch simulator spec (#15882): a watchOS CoreSimulator runtime and an Apple Watch
+ * CoreSimulator device type, both required. It is provisionDevice's watch spec and, unchanged, a
+ * broker watch binding's requested spec: a watch binding has no "any model" default, no family and
+ * no cutout preference.
+ */
+export const watchProvisionDeviceSpecSchema = z
+  .object({
+    runtime: z.string().min(1).describe("watchOS CoreSimulator runtime identifier"),
+    deviceType: z.string().min(1).describe("Apple Watch CoreSimulator device-type identifier"),
+  })
+  .strict();
+
+/** A broker binding's requested Apple Watch spec: exactly the provisionDevice watch spec. */
+export const watchBindingSpecSchema = watchProvisionDeviceSpecSchema;
+
+export type WatchBindingSpec = z.output<typeof watchBindingSpecSchema>;
+
+/** Exact identifiers from the host's Apple TV catalog. */
+export const appleTvProvisionDeviceSpecSchema = z
+  .object({
+    runtime: z.string().min(1).describe("tvOS CoreSimulator runtime identifier"),
+    deviceType: z.string().min(1).describe("Apple TV CoreSimulator device-type identifier"),
+  })
+  .strict();

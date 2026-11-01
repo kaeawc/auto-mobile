@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { BindingRegistrySchemaUnsupportedError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
@@ -549,6 +550,35 @@ describe("BindingReconciler", () => {
       const retry = expectReady(await reconciler.reconcile(request()));
       expect(retry.disposition).toBe("created");
       expect(retry.assignment.generation).toBe(1);
+    });
+
+    test("capacity refusal names external and held devices before creating", async () => {
+      capacity.result = {
+        kind: "exhausted",
+        limit: 2,
+        booted: 2,
+        retryAfterMs: 5_000,
+        externalDevices: ["Pixel_9_API_35", "Pixel_Tablet_API_35"],
+        heldDevices: ["C847F160-13DF-4B67-81E0-A4E8CFC36219"],
+      };
+
+      const result = expectFailed(await reconciler.reconcile(request()));
+
+      expect(result.failure).toEqual({
+        code: "capacity_exhausted",
+        retryable: true,
+        message:
+          "2 ios device(s) booted; limit is 2. 2 of them have no AutoMobile owner but still count toward the limit: Pixel_9_API_35, Pixel_Tablet_API_35. 1 of them are held by AutoMobile: C847F160-13DF-4B67-81E0-A4E8CFC36219.",
+        nextAction: "Shut down a device or raise the boot limit, then retry.",
+        capacity: {
+          limit: 2,
+          booted: 2,
+          retryAfterMs: 5_000,
+          externalDevices: ["Pixel_9_API_35", "Pixel_Tablet_API_35"],
+          heldDevices: ["C847F160-13DF-4B67-81E0-A4E8CFC36219"],
+        },
+      });
+      expect(provisioner.calls).toHaveLength(0);
     });
 
     test("unknown boot capacity removes the never-bound binding before creating", async () => {
@@ -1742,6 +1772,59 @@ describe("BindingReconciler", () => {
   });
 
   describe("compare-and-set races", () => {
+    test.each(["updateBindingState", "claimExecution"] as const)(
+      "a schema refusal during reuse %s releases the unpublished session",
+      async (stage) => {
+        await seedAssigned();
+        const error = new BindingRegistrySchemaUnsupportedError("slots.sqlite", ["future"]);
+        provisioner.beforeReturn = async () => {
+          registry[stage] = async () => {
+            throw error;
+          };
+        };
+
+        await expect(
+          reconciler.reconcile(
+            request(SPEC_18, {
+              owner: { daemonId: "daemon-a", pid: 4242 },
+            }),
+          ),
+        ).rejects.toBe(error);
+
+        expect(provisioner.released).toEqual(["session-2"]);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
+
+    test.each(["commit", "claim"] as const)(
+      "a schema refusal during creation %s releases the unpublished session",
+      async (stage) => {
+        const error = new BindingRegistrySchemaUnsupportedError("slots.sqlite", ["future"]);
+        const advance = registry.advanceBindingJournal.bind(registry);
+        provisioner.beforeReturn = async () => {
+          if (stage === "commit") {
+            registry.advanceBindingJournal = async (id, input) => {
+              if (input.phase === "committed") {
+                throw error;
+              }
+              return advance(id, input);
+            };
+          } else {
+            registry.claimExecution = async () => {
+              throw error;
+            };
+          }
+        };
+
+        await expect(
+          reconciler.reconcile(request(SPEC_18, { owner: { daemonId: "daemon-a", pid: 4242 } })),
+        ).rejects.toBe(error);
+
+        expect(provisioner.released).toEqual(["session-1"]);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
+
     test("a concurrent commit during create loses cleanly: session released, created device removed", async () => {
       provisioner.beforeReturn = async () => {
         // Another process binds the binding while this one is still provisioning.

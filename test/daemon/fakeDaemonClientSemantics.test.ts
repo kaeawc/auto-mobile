@@ -9,7 +9,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // hermetically through testHooks.attachSocket + FakeSocket (no real socket, pid file or daemon).
 
 function realClient(): { client: DaemonClient; hangUp: () => void } {
-  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {}, null, {
+  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {
+    recoveryOptions: {},
+    clientIdentity: null,
     idGenerator: new FakeIdGenerator(["p"]),
     platformOverride: "darwin",
     maxInboundFrameBytes: 64,
@@ -68,7 +70,7 @@ describe("FakeDaemonClient abort (client.ts rechecks signal.aborted after listen
         return new Promise<void>(() => {});
       },
     });
-    const call = fake.callTool("observe", {}, undefined, undefined, controller.signal);
+    const call = fake.callTool("observe", {}, undefined, { signal: controller.signal });
     expect(await call.catch((error: unknown) => error)).toBe(reason);
   });
 

@@ -1,8 +1,8 @@
 import type { PlanStep } from "../../../models";
 import type { GestureEvent } from "./types";
 
-const ERASER_SKIPPED_WARNING =
-  "a pen gesture made with the eraser end was not exported: replay can inject a stylus but not an eraser, and replaying it as a finger or stylus would be wrong";
+const ERASER_REPLAY_WARNING =
+  "a pen gesture made with the eraser end was exported as an eraser step; replay injects an eraser only on a root adb shell with a uinput tool and refuses that step elsewhere";
 
 const PEN_PATH_UNKNOWN_WARNING =
   "a pen gesture without a known position or path was not exported: replaying it as a finger would be wrong";
@@ -14,9 +14,10 @@ const STYLUS_DOUBLE_TAP_WARNING =
   "a stylus double tap was exported, but replay refuses stylus double taps, so that step will fail when run";
 
 /**
- * The stop-result warning for a pen gesture the exported plan cannot reproduce, or undefined when
- * it exports cleanly (or is not a pen gesture): one that produced no step (an eraser, or no known
- * position or path), or a stylus double tap, which replay refuses.
+ * The stop-result warning for a pen gesture the exported plan may not reproduce, or undefined when
+ * it exports cleanly (or is not a pen gesture): one that produced no step (no known position or
+ * path), a stylus double tap, which replay refuses, or an eraser step, which replays only where an
+ * eraser can be injected.
  */
 export function exportLossWarning(
   gesture: GestureEvent,
@@ -29,11 +30,12 @@ export function exportLossWarning(
     return HOVER_DROPPED_WARNING;
   }
   if (!step) {
-    return gesture.toolType === "eraser" ? ERASER_SKIPPED_WARNING : PEN_PATH_UNKNOWN_WARNING;
+    return PEN_PATH_UNKNOWN_WARNING;
   }
-  return step.params.pointer !== undefined && step.params.action === "doubleTap"
-    ? STYLUS_DOUBLE_TAP_WARNING
-    : undefined;
+  if (step.params.pointer !== undefined && step.params.action === "doubleTap") {
+    return STYLUS_DOUBLE_TAP_WARNING;
+  }
+  return gesture.toolType === "eraser" ? ERASER_REPLAY_WARNING : undefined;
 }
 
 /** Adds the warning for a pen gesture the plan cannot reproduce, if there is one, to `warnings`. */

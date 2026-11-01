@@ -17,13 +17,39 @@ import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaust
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
 import { shutdownTimeoutError } from "../../src/server/deviceToolsShutdown";
+import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionBroker/provisioning/refusal";
+
+test.each(["getApple", "getAndroid"] as const)(
+  "strict registry refusal is shaped for %s",
+  (toolName) => {
+    const error = new BindingRegistrySchemaUnsupportedError(
+      "/registry/slots.sqlite",
+      ["2099_01_01_016_future_schema"],
+      { "2099_01_01_016_future_schema": "2.0.0" },
+    );
+    const result = shapeToolCallError(error, { toolName, source: "MCP" });
+    const payload: Record<string, unknown> = JSON.parse(result.content[0].text);
+
+    expect(payload).toMatchObject({
+      code: "registry_schema_unsupported",
+      retryable: false,
+      dbPath: "/registry/slots.sqlite",
+      unknownMigrations: ["2099_01_01_016_future_schema"],
+      writerVersions: { "2099_01_01_016_future_schema": "2.0.0" },
+    });
+    expect(payload).not.toHaveProperty("retryAfterMs");
+  },
+);
 
 // #11548: boot and shutdown timeouts are the retryable `timeout`, the same on the MCP result and
 // the socket frame as provisionDevice's.
 test("boot and shutdown timeouts agree on the socket frame and the MCP result", () => {
   const device = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" } as const;
   const errors = [
-    new DeviceBootTimeoutError("startDevice", "starting the device", 5, 10, "Pixel 8"),
+    new DeviceBootTimeoutError("startDevice", "starting the device", 5, {
+      budgetMs: 10,
+      device: "Pixel 8",
+    }),
     shutdownTimeoutError(device, "still listed"),
   ];
   for (const error of errors) {

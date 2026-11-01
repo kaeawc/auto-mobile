@@ -36,17 +36,20 @@ export class AndroidHierarchySyncRunner {
     perf: PerformanceTracker,
     disableAllFiltering: boolean,
     signal: AbortSignal,
-    effectiveTimeoutMs: number,
-    diagnostics: HierarchySyncDiagnostics,
-    request: {
+    {
+      effectiveTimeoutMs,
+      ...request
+    }: {
       startTime: number;
       displayId?: number;
       observerMode: boolean;
       onRequestId?: (requestId: string) => void;
       preserveDisplayState: boolean;
-    },
+      /** Caller-owned out-parameter for the failure detail. */
+      diagnostics: HierarchySyncDiagnostics;
+    } & { effectiveTimeoutMs: number },
   ): Promise<HierarchySyncResult> {
-    const { startTime, displayId, observerMode, preserveDisplayState } = request;
+    const { startTime, displayId, observerMode, preserveDisplayState, diagnostics } = request;
     try {
       logger.debug("[CTRL_PROXY] Requesting hierarchy sync via WebSocket");
 
@@ -116,13 +119,10 @@ export class AndroidHierarchySyncRunner {
       const freshData = await this.hooks.awaitSyncReply(
         () =>
           perf.track("waitForPush", () =>
-            this.hooks.waitForFreshData(
-              effectiveTimeoutMs,
-              startTime,
-              false,
+            this.hooks.waitForFreshData(effectiveTimeoutMs, startTime, false, {
               signal,
-              correlationRequestId,
-              {
+              options: {
+                requestId: correlationRequestId,
                 dispatchSocket,
                 // A stale nudge has a separate id and stream push; it cannot finish a suppressed
                 // caller and release the primary response's token before that response arrives.
@@ -135,7 +135,7 @@ export class AndroidHierarchySyncRunner {
                 displayId,
                 diagnostics,
               },
-            ),
+            }),
           ),
         correlationRequestId,
         observerMode,

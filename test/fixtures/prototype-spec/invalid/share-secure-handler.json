@@ -7,7 +7,7 @@
       }
     },
     "requires": {
-      "platform": ["share", "test"]
+      "platform": ["share", "notifications"]
     },
     "root": {
       "type": "column",
@@ -24,7 +24,7 @@
     },
     "platform": {
       "on": {
-        "test.tick": [
+        "notifications.opened": [
           {
             "type": "platform",
             "call": "share.open",
@@ -38,7 +38,7 @@
       }
     }
   },
-  "expectedPath": "platform.on[\"test.tick\"][0].args.text.value",
+  "expectedPath": "platform.on[\"notifications.opened\"][0].args.text.value",
   "expectedMessage": "Secure value cannot be bound into an action payload",
   "options": {
     "library": true

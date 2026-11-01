@@ -29,6 +29,22 @@ struct PrototypeContractValidator {
         return contract.platformModules
     }
 
+    struct PlatformRateLimit: Equatable {
+        let calls: Int
+        let windowMs: Int
+    }
+
+    static func platformRateLimit(_ module: String) -> PlatformRateLimit? {
+        guard let raw = platformModules[module]?.objectFields?["rateLimit"] else { return nil }
+        guard let fields = raw.objectFields,
+              let callsValue = fields["calls"]?.numberValue, let calls = Int(exactly: callsValue), calls > 0,
+              let windowValue = fields["windowMs"]?.numberValue, let windowMs = Int(exactly: windowValue), windowMs > 0
+        else {
+            preconditionFailure("Embedded rate limit is invalid for \(module)")
+        }
+        return PlatformRateLimit(calls: calls, windowMs: windowMs)
+    }
+
     private static let patterns = contract?.patterns.compactMapValues { try? NSRegularExpression(pattern: $0) } ?? [:]
 
     static func matches(_ name: String, _ text: String) -> Bool {

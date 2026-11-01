@@ -80,7 +80,6 @@ aux_dir=""
 daemon_started=0
 session_uuid=""
 inflight_dir="$(mktemp -d "${log_dir}/inflight.XXXXXX")"
-export AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="${inflight_dir}/pgid"
 terminate() {
   trap - INT TERM
   local record command_pid watcher_pid _caller_pid
@@ -202,7 +201,7 @@ export AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA="${log_dir}/derived-data"
 export AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true
 # Build the existing fixture and service, without creating another target or simulator.
 set +e
-run_with_timeout 600 xcodebuild build-for-testing \
+AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="${inflight_dir}/pgid" run_with_timeout 600 xcodebuild build-for-testing \
   -project ios/control-proxy/CtrlProxy.xcodeproj -scheme CtrlProxyWatch \
   -destination "platform=watchOS Simulator,id=${udid}" \
   -derivedDataPath "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA}" CODE_SIGNING_ALLOWED=NO

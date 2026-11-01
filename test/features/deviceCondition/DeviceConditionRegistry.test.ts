@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceConditionRegistry } from "../../../src/features/deviceCondition/DeviceConditionRegistry";
 import type {
@@ -115,6 +116,22 @@ describe("DeviceConditionRegistry (#14050)", () => {
     expect(outcomes).toEqual([true, true]);
     expect(a.resetCount).toBe(1);
     expect(b.resetCount).toBe(1);
+  });
+
+  test("a restore that leaves a condition dirty warns with its key and reason (#14069)", async () => {
+    const { registry, injector } = makeRegistry();
+    await registry.apply(owner, applyA);
+    // The reset runs but the device still reads dirty: the failure has no thrown error to log.
+    injector.isClean = () => Promise.resolve(false);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await registry.restore(owner)).toBe(false);
+      expect(warn.mock.calls.map(([message]) => String(message))).toEqual([
+        "[deviceCondition] explicit restore for emulator-5554 left 1 condition(s) unrestored: faults.battery (reset ran but the device did not read clean)",
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("restoring an owner with nothing applied is a no-op success", async () => {

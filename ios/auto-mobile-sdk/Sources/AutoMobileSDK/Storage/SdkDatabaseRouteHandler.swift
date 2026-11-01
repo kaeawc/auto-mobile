@@ -213,7 +213,7 @@
                 return error(statusCode: 503, code: "db_inspection_disabled")
             }
             guard let request = try? JSONDecoder().decode(CoreDataQueryRequest.self, from: body),
-                  request.limit.map { $0 > 0 } ?? true
+                  request.limit.map({ $0 > 0 }) ?? true
             else {
                 return error(statusCode: 400, code: "bad_request")
             }

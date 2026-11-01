@@ -7,7 +7,7 @@ import {
   watchStartDeviceParametersSchema,
   type DeviceToolsDependencies,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
@@ -61,10 +61,11 @@ export async function startAppleTvDevice(
       operationName: "startDevice",
       operation: async (deadlineMs, requestSignal, stage) =>
         await runWithAbortSignal(requestSignal, async () => {
-          const find = async () => {
+          const find = async (signal: AbortSignal) => {
+            signal.throwIfAborted();
             stage.current = "resolving the Apple TV simulator";
             const matches = (
-              await deps.deviceManagerFactory().listDeviceImages("tvos", requestSignal)
+              await deps.deviceManagerFactory().listDeviceImages("tvos", signal)
             ).filter(
               (tv) =>
                 tv.platform === "tvos" &&
@@ -80,7 +81,7 @@ export async function startAppleTvDevice(
             }
             return { ...tv, deviceId: tv.deviceId };
           };
-          const tv = await find();
+          const tv = await find(requestSignal);
           const lease = await reserveStableDeviceLifecycle(
             { platform: "tvos", stableId: tv.deviceId },
             { platform: "tvos", name: tv.name, deviceId: tv.deviceId },
@@ -93,8 +94,10 @@ export async function startAppleTvDevice(
             },
           );
           try {
+            const lifecycleSignal =
+              combineAbortSignals(requestSignal, lease.signal) ?? lease.signal;
             // A shutdown may have completed while this request waited for the lease.
-            const fresh = await find();
+            const fresh = await find(lifecycleSignal);
             if (fresh.deviceId !== tv.deviceId) {
               throw new ActionableError("Apple TV simulator identity changed; retry with deviceId");
             }
@@ -105,20 +108,22 @@ export async function startAppleTvDevice(
                   tv.deviceId,
                 );
             assertTvUnclaimed(tv.deviceId, deps, lease, reusableSessionId);
+            lifecycleSignal.throwIfAborted();
             stage.current = "booting the Apple TV simulator";
             const boot = await (deps.appleTvSimulatorBootFactory ?? defaultAppleTvBoot)().boot(
               fresh,
               {
                 timeoutMs: Math.max(1, deadlineMs - deps.timer.now()),
-                signal: requestSignal,
+                signal: lifecycleSignal,
               },
             );
+            lifecycleSignal.throwIfAborted();
             stage.current = "binding the device session";
             const sessionId = await bindBootedSimulatorSession(
               { device: fresh, boot, rawArgs, operation: "startDevice" },
               bindSession,
               deps.timer,
-              { deadlineMs, signal: requestSignal },
+              { deadlineMs, signal: lifecycleSignal },
             );
             return createStructuredToolResponse({
               message: `tvos '${boot.device.name}' is booted`,

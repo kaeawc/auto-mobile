@@ -311,9 +311,10 @@ describe("provisionDevice on an Apple TV simulator", () => {
 
   test("setActiveDevice selects a TV only when tvos is named and skips runner preparation", async () => {
     const tv = tvDevice({ name: NAME, state: "Booted" });
-    const { sessions, timer } = await arrange([tv]);
-    const provisioned = toolJson(await provision({ device: TV }));
-    const { sessionId } = sessionSchema.parse(provisioned);
+    const { pool, sessions, timer } = await arrange([tv]);
+    const sessionId = "tv-selection";
+    expect(sessions.getSession(sessionId)).toBeNull();
+    expect(pool.getDevice(tv.udid)?.sessionId).toBeNull();
     const handler = createSetActiveDeviceHandler({
       resumeCtrlProxy: async () => {
         throw new Error("a TV must not resume CtrlProxy");
@@ -324,6 +325,8 @@ describe("provisionDevice on an Apple TV simulator", () => {
     );
     await handler({ deviceId: tv.udid, platform: "tvos", sessionUuid: sessionId });
     expect(sessions.getSession(sessionId)?.platform).toBe("tvos");
+    expect(sessions.getSession(sessionId)?.assignedDevice).toBe(tv.udid);
+    expect(pool.getDevice(tv.udid)?.sessionId).toBe(sessionId);
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
@@ -496,6 +499,46 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(outcome).toBe("refused");
     expect(seen).toEqual([false, true]);
     expect(simctl.commands.filter((cmd) => cmd.startsWith("delete "))).toHaveLength(1);
+  });
+
+  test("a start preempted while its boot waits for admission neither boots nor binds", async () => {
+    const tv = tvDevice({ name: NAME, state: "Shutdown" });
+    const reachedAdmission = Promise.withResolvers<AbortSignal | undefined>();
+    const releaseAdmission = Promise.withResolvers<void>();
+    const { simctl, pool, sessions, timer, lifecycleCoordinator } = await arrange([tv], {
+      admission: {
+        run: async (request, boot) => {
+          reachedAdmission.resolve(request.signal);
+          await releaseAdmission.promise;
+          request.signal?.throwIfAborted();
+          return await boot(request.timeoutMs);
+        },
+      },
+    });
+    const pending = failure(
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "tvos",
+        deviceId: tv.udid,
+        __mcpSessionId: "client-a",
+      }),
+    );
+    const admissionSignal = await reachedAdmission.promise;
+    const teardown = lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "tvos", stableId: tv.udid },
+      { operation: "teardown", deadlineMs: timer.now() + 60_000 },
+    );
+    releaseAdmission.resolve();
+    const error = await pending;
+    const lease = await teardown;
+    lease.release();
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(String(error)).toContain("preempted by teardown");
+    expect(admissionSignal?.aborted).toBe(true);
+    expect(simctl.commands).toEqual([]);
+    expect(sessions.getAllSessions()).toEqual([]);
+    expect(pool.getDevice(tv.udid)).toBeNull();
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 
   test("boot false adopts the existing TV and binds nothing", async () => {

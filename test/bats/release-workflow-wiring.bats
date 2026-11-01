@@ -473,12 +473,14 @@
   [[ "$retry_count" -eq 3 ]]
 }
 
-@test "pull_request.yml runs cross-platform TypeScript lint with bash and larger heap" {
-  lint_block="$(sed -n '/name: "Run Lint"/,/name: "Run Build"/p' ".github/workflows/pull_request.yml")"
+@test "pull_request.yml lints on Ubuntu with a larger heap and not in the Windows job (#11577)" {
+  windows_job="$(sed -n '/^  mcp-build-and-test:$/,/^  ts-build-and-test:$/p' ".github/workflows/pull_request.yml")"
+  ubuntu_job="$(sed -n '/^  ts-build-and-test:$/,/^  [a-z0-9-]*:$/p' ".github/workflows/pull_request.yml")"
 
-  [[ "$lint_block" == *"shell: bash"* ]]
-  [[ "$lint_block" == *"NODE_OPTIONS: \"--max-old-space-size=4096\""* ]]
-  [[ "$lint_block" == *"ci-logs/bun-lint-\${{ matrix.os }}.log"* ]]
+  [[ "$windows_job" == *"windows-latest"* ]]
+  [[ "$windows_job" != *"turbo run lint"* ]]
+  [[ "$ubuntu_job" == *"turbo run lint"* ]]
+  [[ "$ubuntu_job" == *"NODE_OPTIONS: \"--max-old-space-size=4096\""* ]]
 }
 
 @test "prepare-release.yml runs the release-integrity gate" {

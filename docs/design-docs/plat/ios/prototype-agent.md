@@ -193,7 +193,29 @@ Sizing details (not device-verified): a `weight` takes exactly its share of a `r
 and beats that axis's size and bounds (ignored outside a row/column); `min` wins when it exceeds `max`;
 content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew
 (`wrapContentWidth()`/`wrapContentHeight()`), while explicit `width`/`height`/`fill` keeps alignment;
-weighted stacks mirror under RTL via SwiftUI Layout; sizes are fractional points.
+weighted stacks mirror under RTL via SwiftUI Layout; sizes are fractional points. Rows reserve
+all children's minimum widths, including fills, nested rows' children and gaps, and allocate
+non-filling content least-flexible first (ideal minus minimum), with direct buttons prioritized.
+Fills, unsized horizontal dividers, spacers and controls expanding beyond their ideal width under an infinite proposal
+share the remainder with the flexible slots inserted for `space*` arrangements, retain their probed
+minimum widths and redistribute unused max-bounded width; fixed/wrap spacers remain content. Native
+arrangement spacers expand horizontally only. Rows report
+only the width used. Size wrappers preserve greedy probes unless a finite maximum or explicit size caps
+the axis. Nested rows and weighted stacks report infinity for an infinite main-axis probe when a child
+shares the remainder; nil proposals still measure ideal content. In weighted rows, unweighted greedy
+children are sized before weights, reserving all probed minimums; weights divide only what remains
+in proportion to their authored values. An unweighted greedy child may therefore leave weights zero.
+Row-filling components include sliders, text fields, radio groups, list items, segmented buttons,
+top app bars, snackbars and linear or indeterminate progress indicators. Unlike iOS's least-flexible-first
+allocation and equal sharing in unweighted rows, Android's ordinary Row measures in
+authored order: an early fill-width control can consume the remainder before later labels or controls.
+Overfull controls retain their minimums and overflow at the trailing end
+instead of overlapping. Weighted columns likewise preserve unweighted authored minimum heights,
+overflowing rather than collapsing a fixed-height child at a zero share; weights still take zero
+when no room remains.
+Zero-size probes preserve authored dp sizes and min bounds, deriving aspect-ratio dimensions from
+an explicit dp width or height. Nil-proposal rows retain their measured ideal widths during placement,
+including fill children, rather than redistributing them.
 
 ## Style effects
 

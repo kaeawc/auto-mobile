@@ -561,10 +561,12 @@
         /// A row or column whose children share the main axis by `weight` (Android's `Modifier.weight`):
         /// see `PrototypeWeightedStack`. It adds no arrangement spacers: a weight takes the free space.
         private func weightedStack(axis: PrototypeAxis) -> some View {
+            // Button priority applies to direct children only, not buttons wrapped in boxes.
             PrototypeWeightedStackLayout(axis: axis, spacing: style?.spacing ?? 0) {
                 ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
                     NodeView(node: entry.node, model: model, inStackSlot: true, stackAxis: axis)
                         .layoutValue(key: PrototypeWeightKey.self, value: weight(of: entry.node))
+                        .layoutPriority(axis == .horizontal && entry.node.type == "button" ? 1 : 0)
                 }
             }
             .animation(sizeAnimation, value: layoutSignature)
@@ -583,6 +585,8 @@
                     Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1)
                 }
                 NodeView(node: entry.node, model: model, inStackSlot: true, constrainsWidth: horizontal)
+                    .layoutValue(key: PrototypeRowFillKey.self, value: horizontal && fillsRow(entry.node))
+                    .layoutPriority(horizontal && entry.node.type == "button" ? 1 : 0)
                     .layoutValue(
                         key: PrototypeWeightKey.self,
                         value: horizontal ? PrototypeSizeRules(
@@ -592,6 +596,13 @@
                     )
             }
             if outer { Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1) }
+        }
+
+        private func fillsRow(_ child: PrototypeNode) -> Bool {
+            let width = child.resolvedStyle(state: model.state)?.width
+            return width == .fill || (width == nil && (
+                child.type == "spacer" || (child.type == "divider" && child.orientation != "vertical")
+            ))
         }
 
         private var pagerPosition: PagerPosition? {

@@ -1929,7 +1929,6 @@ test/server/proxyTasksRelay.test.ts
 test/server/queryParamValidation.property.test.ts
 test/server/queryParamValidation.test.ts
 test/server/recordingTeardownRedrivePeerRecorder.test.ts
-test/server/registerAllTools.test.ts
 test/server/releaseCallerOrderingPreservedSession.test.ts
 test/server/requestLogTypedTextRedaction.test.ts
 test/server/resourceNotifySlowSibling.test.ts

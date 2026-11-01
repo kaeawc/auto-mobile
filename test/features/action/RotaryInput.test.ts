@@ -38,14 +38,29 @@ function traitsOf(formFactor: "automotive" | null): DeviceTraits {
 
 describe("rotary commands (#14920)", () => {
   test.each([
-    ["rotary_nudge_up", ["input", "keyevent", "280"]],
-    ["rotary_nudge_down", ["input", "keyevent", "281"]],
-    ["rotary_nudge_left", ["input", "keyevent", "282"]],
-    ["rotary_nudge_right", ["input", "keyevent", "283"]],
+    ["rotary_nudge_up", ["cmd", "car_service", "inject-key", "280"]],
+    ["rotary_nudge_down", ["cmd", "car_service", "inject-key", "281"]],
+    ["rotary_nudge_left", ["cmd", "car_service", "inject-key", "282"]],
+    ["rotary_nudge_right", ["cmd", "car_service", "inject-key", "283"]],
     ["rotary_select", ["input", "keyevent", "23"]],
     ["rotary_rotate_cw", ["cmd", "car_service", "inject-rotary", "-c", "true"]],
   ] as const)("%s builds its command", (button, expected) => {
     expect(rotaryCommand(button, 1)).toEqual([...expected]);
+  });
+
+  test("all nudge directions use car-service injection while select uses input keyevent", () => {
+    expect([
+      rotaryCommand("rotary_nudge_up", 1),
+      rotaryCommand("rotary_nudge_down", 1),
+      rotaryCommand("rotary_nudge_left", 1),
+      rotaryCommand("rotary_nudge_right", 1),
+    ]).toEqual([
+      ["cmd", "car_service", "inject-key", "280"],
+      ["cmd", "car_service", "inject-key", "281"],
+      ["cmd", "car_service", "inject-key", "282"],
+      ["cmd", "car_service", "inject-key", "283"],
+    ]);
+    expect(rotaryCommand("rotary_select", 1)).toEqual(["input", "keyevent", "23"]);
   });
 
   test("rotation repeats one detent per step in the requested direction", () => {
@@ -75,6 +90,21 @@ describe("rotary commands (#14920)", () => {
 });
 
 describe("RotaryInput", () => {
+  test.each([
+    ["rotary_nudge_up", 280],
+    ["rotary_nudge_down", 281],
+    ["rotary_nudge_left", 282],
+    ["rotary_nudge_right", 283],
+  ] as const)(
+    "%s injects its car key and preserves the result keyCode",
+    async (button, keyCode) => {
+      const adb = new FakeAdbExecutor();
+      const result = await new RotaryInput(device, adb, traitsOf("automotive")).press(button, 1);
+      expect(result).toEqual({ success: true, button, keyCode });
+      expect(adb.getExecutedCommands()).toEqual([`shell cmd car_service inject-key ${keyCode}`]);
+    },
+  );
+
   test("runs the command on an automotive device", async () => {
     const adb = new FakeAdbExecutor();
     const rotary = new RotaryInput(device, adb, traitsOf("automotive"));

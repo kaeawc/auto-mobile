@@ -1395,6 +1395,7 @@ extension PrototypeSession {
             job: job, action: action, eventData: platformEventData,
             nodeId: PrototypeNode.owningNodeId(of: action, in: spec.root)
         )
+        if failure == nil { failure = PrototypePlatformDriver.invalidArguments(call) }
         if failure == nil, let refusal = platformRateLimiter.refusal(for: call.call) {
             return events + finishPlatform(pending, refusal, durationMs: 0)
         }

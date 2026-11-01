@@ -1,3 +1,5 @@
+import AutoMobileSdkWire
+@testable import CtrlProxy
 import Foundation
 import XCTest
 
@@ -12,6 +14,24 @@ final class SdkDatabaseModelParityTests: XCTestCase {
     ) {
         JSONGolden.assertReencodePreservesWire(
             reencode, input: input, stripTimestamp: stripTimestamp, label, file: file, line: line
+        )
+    }
+
+    func testCoreDataWireParity() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        assertReencode({ data in
+            try encoder.encode(JSONDecoder().decode(CoreDataQueryRequest.self, from: data))
+        }, #"{"store":"Main","entity":"Item","limit":2}"#, "CoreDataQueryRequest")
+        assertReencode({ data in
+            try encoder.encode(JSONDecoder().decode(CoreDataQueryResult.self, from: data))
+        }, #"{"columns":["name"],"rows":[[null]],"truncated":true}"#, "CoreDataQueryResult")
+        assertReencode(
+            { data in
+                try encoder.encode(JSONDecoder().decode(RequestQueryCoreData.self, from: data))
+            },
+            #"{"requestId":"r1","appId":"com.example.app","store":"Main","entity":"Item","limit":2}"#,
+            "RequestQueryCoreData"
         )
     }
 

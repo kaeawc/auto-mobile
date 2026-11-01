@@ -135,3 +135,29 @@ public struct KeychainCapability: Codable, Equatable, Sendable {
         self.deletionScopes = deletionScopes
     }
 }
+
+/// Bounded entity fetch in a registered Core Data store; never contains SQL or mutation authorization.
+public struct CoreDataQueryRequest: Codable, Equatable, Sendable {
+    public let store: String
+    public let entity: String
+    public let limit: Int?
+
+    public init(store: String, entity: String, limit: Int? = nil) {
+        self.store = store
+        self.entity = entity
+        self.limit = limit
+    }
+}
+
+/// Attribute columns and scalar values from a read-only entity fetch.
+public struct CoreDataQueryResult: Codable, Equatable, Sendable {
+    public let columns: [String]
+    public let rows: [[String?]]
+    public let truncated: Bool
+
+    public init(columns: [String], rows: [[String?]], truncated: Bool = false) {
+        self.columns = columns
+        self.rows = rows
+        self.truncated = truncated
+    }
+}

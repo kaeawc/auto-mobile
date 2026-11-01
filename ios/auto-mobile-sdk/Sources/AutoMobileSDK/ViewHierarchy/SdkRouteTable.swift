@@ -56,6 +56,9 @@
                 let receivedAt = SdkDatabaseBudget.now()
                 return { server.databaseRouteHandler.handleExecuteSql(body: $0, receivedAt: receivedAt) }
             }),
+            Entry(route: .dbCoreDataQuery, handler: .bodyThenStorage { server in
+                { server.databaseRouteHandler.handleCoreDataQuery(body: $0) }
+            }),
             Entry(route: .dbList, handler: .storageQueue { $0.databaseRouteHandler.handleListDatabases() }),
             Entry(route: .dbCapabilities, handler: .storageQueue { $0.databaseRouteHandler.handleCapabilities() }),
             Entry(route: .dbTables, handler: .bodyThenStorage { server in

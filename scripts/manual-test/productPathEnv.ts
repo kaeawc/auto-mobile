@@ -70,6 +70,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   },
   { name: "AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH", kind: "input", reason: "Read-only IPA artifact." },
   {
+    name: "AUTOMOBILE_TVOS_RUNNER_XCTESTRUN",
+    kind: "input",
+    reason: "Read-only prebuilt tvOS runner artifact.",
+  },
+  {
     name: "AUTOMOBILE_WATCH_RUNNER_XCTESTRUN",
     kind: "input",
     reason: "Read-only prebuilt watchOS runner artifact.",

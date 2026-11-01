@@ -50,7 +50,10 @@ class MainActivity : ComponentActivity() {
     }
     // Enable storage and database inspection in debug builds
     if (BuildConfig.DEBUG) {
-      KeystoreTestState.declareScope("fixture", setOf("automobile.fixture"))
+      KeystoreTestState.declareScope(
+        "fixture",
+        setOf("automobile.fixture", "automobile.fixture.certificate"),
+      )
       KeystoreTestState.setEnabled(true)
     }
     SharedPreferencesInspector.setEnabled(true)

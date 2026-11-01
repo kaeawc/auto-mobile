@@ -135,16 +135,3 @@ export const PROTOVIEWER_IOS_DELIVERY = "file-inbox-v1";
 export type ProtoViewerIosRequest =
   | { action: "import"; label?: string }
   | { action: "open"; libraryId: string };
-/** Query values use percent encoding (including apostrophes), never shell interpolation. */
-function queryValue(value: string): string {
-  return encodeURIComponent(value).replace(
-    /[!'()*]/g,
-    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
-  );
-}
-export function protoViewerIosImportUrl(request: string, label?: string): string {
-  return `${PROTOVIEWER_IOS_SCHEME}://import?request=${queryValue(request)}${label === undefined ? "" : `&label=${queryValue(label)}`}`;
-}
-export function protoViewerIosOpenUrl(request: string, libraryId: string): string {
-  return `${PROTOVIEWER_IOS_SCHEME}://open?request=${queryValue(request)}&id=${queryValue(libraryId)}`;
-}

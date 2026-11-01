@@ -18,6 +18,21 @@ describe("pressButtonPolicy", () => {
   });
 
   test.each([
+    ["up", false],
+    ["down", false],
+    ["left", false],
+    ["right", false],
+    ["select", true],
+    ["playPause", false],
+  ] as const)("classifies remote %s without adding an Android keycode", (button, navigation) => {
+    for (const value of [button, button.toUpperCase()]) {
+      expect(isNavigationPressButton(value)).toBe(navigation);
+      expect(isInPlacePressButton(value)).toBe(!navigation);
+      expect(resolveAndroidKeyCode(value)).toBeUndefined();
+    }
+  });
+
+  test.each([
     "lock",
     "power_dialog",
     "quick_settings",

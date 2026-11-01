@@ -9,6 +9,7 @@ import {
   createTeardownResponse,
   type TeardownToolResponse,
 } from "../features/deviceLifecycle/teardown/teardownContracts";
+import { getTvosRunnerLifecycle } from "../features/tvos/TvosRunnerLifecycle";
 import { ActionableError, type BootedDevice } from "../models";
 import { DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -107,6 +108,7 @@ async function runAppleTvDelete(
       await steps.assertCaller(device);
       await steps.stop(device, signal);
     }
+    (deps.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)().stop(udid);
     return createTeardownResponse(
       args,
       "already_absent",
@@ -197,6 +199,7 @@ async function destroyUnderLease(
       );
     }
     signal.throwIfAborted();
+    (deps.tvosRunnerLifecycleFactory ?? getTvosRunnerLifecycle)().stop(device.deviceId);
     await provisioner.deleteAndConfirmAbsent(device.deviceId, signal);
   } finally {
     lease.release();

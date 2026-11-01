@@ -1,3 +1,4 @@
+import { rejectTvosTouch } from "../tvos/TvosActions";
 import { rejectWatchAction } from "../watch/WatchActions";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { logger } from "../../utils/logger";
@@ -82,6 +83,7 @@ export class MultiTouchGesture extends BaseVisualChange {
       timer: dependencies.timer,
       displayFence: dependencies,
     });
+    rejectTvosTouch(device.platform, "multi-touch");
     this.clients = {
       android: dependencies.clients?.android ?? ((request) => this.dispatchAndroid(request)),
       ios: dependencies.clients?.ios ?? ((request) => this.dispatchIos(request)),
@@ -129,6 +131,7 @@ export class MultiTouchGesture extends BaseVisualChange {
 
   async execute(options: MultiTouchOptions, call: ActionCall = {}): Promise<MultiTouchResult> {
     rejectWatchAction(this.device.platform, "multi-touch");
+    rejectTvosTouch(this.device.platform, "multi-touch");
     const { progress, signal } = resolveActionCall(call);
     const perf = createGlobalPerformanceTracker();
     perf.serial(TOOL_NAME);

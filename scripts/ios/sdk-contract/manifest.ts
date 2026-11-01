@@ -106,7 +106,6 @@ const sdkContractManifestSchema = z.object({
 export type ExpectedNetworkEvent = z.infer<typeof expectedNetworkEventSchema>;
 export type FaultCaseObservation = z.infer<typeof faultCaseObservationSchema>;
 export type TransportDescriptor = z.infer<typeof transportDescriptorSchema>;
-export type CapabilityObservation = z.infer<typeof capabilityObservationSchema>;
 export type ObservationHostAction = z.infer<typeof observationHostActionSchema>;
 export type ObservationHostLog = z.infer<typeof observationHostLogSchema>;
 export type StorageRegistration = z.infer<typeof storageRegistrationSchema>;

@@ -1,23 +1,5 @@
 import { z } from "zod";
 
-/**
- * `style.effects` (#15128): a closed list of named, paint-only looks with typed, bounded
- * parameters, so the spec stays data-only (no shader source). The structural contract is
- * `definitions.effect` in `schemas/prototype-spec-contract.json`; this is its Zod twin.
- */
-export const PROTOTYPE_EFFECT_TYPES = [
-  "noise",
-  "gradientMesh",
-  "shimmer",
-  "glow",
-  "vignette",
-  "blur",
-  "pixelate",
-  "chromaticAberration",
-  "wave",
-  "ripple",
-] as const;
-
 const unit = z.number().finite().min(0).max(1);
 const angle = z.number().finite().min(-360).max(360);
 const range = (min: number, max: number) => z.number().finite().min(min).max(max);

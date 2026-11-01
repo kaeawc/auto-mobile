@@ -8,10 +8,10 @@ export const WATCH_HIERARCHY_UNAVAILABLE_MESSAGE =
 
 export type AppleScreenshotOnlyPlatform = "watchos" | "tvos";
 
-export const TVOS_HIERARCHY_UNAVAILABLE_MESSAGE = WATCH_HIERARCHY_UNAVAILABLE_MESSAGE.replace(
-  "watchOS",
-  "tvOS",
-);
+export const TVOS_HIERARCHY_UNAVAILABLE_MESSAGE =
+  "No tvOS runner is connected: this observation carries only a screenshot. " +
+  "Call startDevice to prepare the runner for hierarchy and focus navigation. " +
+  "Absent hierarchy fields do not mean the screen is empty; read the screenshot instead.";
 
 export interface WatchHierarchyUnavailable<
   P extends AppleScreenshotOnlyPlatform = AppleScreenshotOnlyPlatform,

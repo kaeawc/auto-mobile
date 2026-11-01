@@ -38,9 +38,6 @@ import {
  * compound fault, not a side effect to hide. Android only and root-free.
  */
 
-/** Keys this module owns, under the `faults.` prefix of the deviceCondition surface. */
-export const PERMISSION_FAULT_KEYS = ["faults.revokePermission"] as const;
-
 const paramsSchema = z
   .object({
     package: z.string().regex(ANDROID_PACKAGE_NAME_PATTERN),

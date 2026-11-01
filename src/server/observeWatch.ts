@@ -1,4 +1,7 @@
-/** Apple simulator observation: a retained screenshot, plus a connected watchOS runner's hierarchy. */
+/** Apple simulator observation: a retained screenshot, plus a connected watchOS or tvOS runner's hierarchy. */
+import { findFocusedElement } from "../features/observe/HierarchyFocus";
+import { normalizeTvosHierarchy } from "../features/tvos/TvosHierarchy";
+import { tvosRunners } from "../features/tvos/TvosRunnerRegistry";
 import { ObserveElementsBuilder } from "../features/observe/ObserveElementsBuilder";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../models";
 import type { WatchRunnerClient } from "../features/watch/WatchRunnerClient";
@@ -103,17 +106,17 @@ export function assertWatchObserveOptions(
   platform: AppleScreenshotOnlyPlatform = "watchos",
   hierarchyAvailable = false,
 ): void {
-  const hasWatchHierarchy = platform === "watchos" && hierarchyAvailable;
+  const hasRunnerHierarchy = hierarchyAvailable;
   const refused = WATCH_UNSUPPORTED_OPTIONS.filter(
-    ([name, isSet]) => isSet(args) && !(hasWatchHierarchy && name === "project"),
+    ([name, isSet]) => isSet(args) && !(hasRunnerHierarchy && name === "project"),
   ).map(([name]) => name);
   if (args.display !== undefined && args.display !== "active" && args.display !== displayKey) {
     refused.push(`display: "${args.display}"`);
   }
   if (refused.length > 0) {
     throw new ActionableError(
-      (hasWatchHierarchy
-        ? "observe with the watchOS runner "
+      (hasRunnerHierarchy
+        ? `observe with the ${platform === "tvos" ? "tvOS" : "watchOS"} runner `
         : `observe on ${platform === "tvos" ? "tvOS" : "watchOS"} returns only a screenshot (the view hierarchy is not available yet) `) +
         `and does not support: ${refused.join(", ")}. Remove these options and observe again.`,
     );
@@ -151,13 +154,18 @@ async function watchHierarchyForObserve(
   injectedRunner?: WatchRunnerClient,
 ): Promise<ViewHierarchyResult | undefined> {
   const platform = device.platform === "tvos" ? "tvos" : "watchos";
+  if (platform === "tvos") {
+    const runner = tvosRunners.get(device.deviceId);
+    assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
+    return runner ? normalizeTvosHierarchy(await runner.hierarchy(signal)) : undefined;
+  }
   const runner =
     platform === "watchos" ? (injectedRunner ?? watchRunners.get(device.deviceId)) : undefined;
   assertWatchObserveOptions(args, watchDisplay(device).ref.key, platform, runner !== undefined);
   return runner ? normalizeWatchHierarchy(await runner.hierarchy(signal)) : undefined;
 }
 
-/** Capture an Apple simulator screenshot, adding hierarchy only for a connected watchOS runner. */
+/** Capture an Apple simulator screenshot, adding hierarchy for a connected watchOS or tvOS runner. */
 export async function observeWatch(
   device: BootedDevice,
   args: ObserveArgs,
@@ -177,7 +185,7 @@ export async function observeWatch(
   const { png, width, height } = await captureWatchPng(
     device,
     display.captureKey,
-    dependencies.screenshots ?? simctlWatchScreenshotSource,
+    dependencies.screenshots ?? defaultWatchScreenshotSource(device),
     signal,
   );
   // A cancelled call must not leave a retained screenshot nobody will read.
@@ -234,6 +242,9 @@ function watchObservationPayload(
   return {
     ...capture,
     viewHierarchy,
+    ...(platform === "tvos"
+      ? { focusedElement: findFocusedElement(viewHierarchy) ?? undefined }
+      : {}),
     elements: new ObserveElementsBuilder().build(viewHierarchy, "ios"),
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     screenSize: {
@@ -243,6 +254,24 @@ function watchObservationPayload(
     },
   };
 }
+
+function defaultWatchScreenshotSource(device: BootedDevice): WatchScreenshotSource {
+  return device.platform === "tvos" && tvosRunners.get(device.deviceId)
+    ? runnerTvosScreenshotSource
+    : simctlWatchScreenshotSource;
+}
+
+const runnerTvosScreenshotSource: WatchScreenshotSource = {
+  capture: async (device, _display, signal) => {
+    const data = await tvosRunners
+      .require(device.deviceId)
+      .request({ type: "request_screenshot" }, signal);
+    if (typeof data !== "string") {
+      throw new ActionableError("Invalid tvOS screenshot; reconnect the runner.");
+    }
+    return Buffer.from(data, "base64");
+  },
+};
 
 export type TvosScreenshotSource = WatchScreenshotSource;
 export type TvosObserveDependencies = WatchObserveDependencies;

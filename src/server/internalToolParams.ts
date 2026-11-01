@@ -8,9 +8,6 @@ export {
   internalMcpSessionId,
   internalOneShotCli,
   internalLiveDeadlineKey,
-  internalRequesterSessionUuid,
-  internalMcpRequestDeadlineMs,
-  internalOptionalOneShotCli,
 } from "../daemon/wire/internalToolParams";
 import type { SwipeAtRecordingContext } from "../models/SwipeAtOptions";
 import type { TapAtPlanContext } from "../models/TapAtGeometry";

@@ -26,9 +26,6 @@ import { rejectValue, shell, unsupported } from "./injectorSupport";
  * enum-valued surface yet.
  */
 
-/** Keys this module owns, under the `faults.` prefix of the deviceCondition surface. */
-export const LIFECYCLE_FAULT_KEYS = ["faults.dontKeepActivities"] as const;
-
 /** The Developer options "Don't keep activities" switch. */
 const ALWAYS_FINISH_ACTIVITIES = "always_finish_activities";
 

@@ -1,3 +1,4 @@
+import { rejectTvosTouch } from "../tvos/TvosActions";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, GestureOptions } from "../../models";
@@ -45,6 +46,7 @@ export class SwipeOnElement extends BaseVisualChange {
     options: GestureOptions = {},
     { progress, signal }: ActionCall = {},
   ): Promise<SwipeResult> {
+    rejectTvosTouch(this.device.platform, "swipeOn");
     const perf = createGlobalPerformanceTracker();
     perf.serial("swipeOnElement");
 

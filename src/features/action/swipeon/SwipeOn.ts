@@ -1,3 +1,4 @@
+import { rejectTvosTouch } from "../../tvos/TvosActions";
 import { watchSwipeOn } from "../../watch/WatchActions";
 import { iosWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { androidCtrlProxyClientForPlatform } from "../../observe/android/androidCtrlProxyClientFor";
@@ -171,6 +172,7 @@ export class SwipeOn extends BaseVisualChange {
       timer: dependencies.timer,
       displayFence: dependencies,
     });
+    rejectTvosTouch(device.platform, "swipeOn");
     this.skipCallerDisplayFence = dependencies.skipCallerDisplayFence ?? false;
     this.stopAfterIosGestureFailure = dependencies.stopAfterIosGestureFailure ?? false;
     this.iosLockScreenSwipe = dependencies.iosLockScreenSwipe;
@@ -373,6 +375,7 @@ export class SwipeOn extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<SwipeOnResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
+    rejectTvosTouch(this.device.platform, "swipeOn");
     if (this.device.platform === "watchos") {
       return watchSwipeOn(this.device.deviceId, options, signal);
     }

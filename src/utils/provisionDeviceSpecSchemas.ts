@@ -114,11 +114,6 @@ export const androidProvisionDeviceSpecFields = {
   configuration: androidAvdConfigurationSchema.optional(),
 };
 
-export const androidProvisionDeviceSpecSchema = z
-  .object(androidProvisionDeviceSpecFields)
-  .strict()
-  .superRefine(refineAndroidSpec);
-
 export const iosProvisionDeviceSpecSchema = z
   .object({
     runtime: iosRuntimeSchema,

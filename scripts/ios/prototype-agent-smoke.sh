@@ -30,6 +30,7 @@
 #   PROTOTYPE_SMOKE_DRIVER             host driver command (default: bun prototype-agent-demo.ts)
 #   PROTOTYPE_SMOKE_DEVICE_TYPE        simulator device type identifier (default: newest iPhone the
 #                                    runtime supports)
+#   PROTOTYPE_SMOKE_PORT               TCP port (default: a free random port in 20000-59999)
 #   PROTOTYPE_SMOKE_BOOT_TIMEOUT       seconds for bootstatus (default 600)
 #   PROTOTYPE_SMOKE_CONNECT_ATTEMPTS   agent status polls after launch (default 20)
 #   PROTOTYPE_SMOKE_SETTLE_SECONDS     pause before each screenshot and between polls (default 2)
@@ -62,6 +63,40 @@ settle="${PROTOTYPE_SMOKE_SETTLE_SECONDS:-2}"
 hold_timeout="${PROTOTYPE_SMOKE_HOLD_TIMEOUT:-30}"
 build_script="${PROTOTYPE_SMOKE_BUILD_SCRIPT:-${script_dir}/prototype-agent-build.sh}"
 read -r -a driver <<< "${PROTOTYPE_SMOKE_DRIVER:-bun ${script_dir}/prototype-agent-demo.ts}"
+
+# Check before any build or simctl call. A probe cannot reserve the port; a later
+# handshake rejection still needs to fail clearly if another launch wins the race.
+if ! command -v lsof > /dev/null 2>&1; then
+  echo "prototype-agent-smoke: FAIL: lsof is required to check the agent port" >&2
+  exit 1
+fi
+port="${PROTOTYPE_SMOKE_PORT-}"
+if [[ -n ${PROTOTYPE_SMOKE_PORT+x} ]]; then
+  if [[ ! ${port} =~ ^[0-9]{1,5}$ ]] || ((10#${port} < 1 || 10#${port} > 65535)); then
+    echo "prototype-agent-smoke: PROTOTYPE_SMOKE_PORT must be a TCP port in 1-65535" >&2
+    exit 2
+  fi
+  port=$((10#${port}))
+  if listeners="$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN)"; then
+    echo "prototype-agent-smoke: FAIL: port ${port} already has a listener:" >&2
+    printf '%s\n' "${listeners}" >&2
+    echo "prototype-agent-smoke: pass another port or omit PROTOTYPE_SMOKE_PORT" >&2
+    exit 1
+  fi
+else
+  for ((probe = 1; probe <= 20; probe++)); do
+    port=$((20000 + (RANDOM * 32768 + RANDOM) % 40000))
+    if ! lsof -nP -iTCP:"${port}" -sTCP:LISTEN > /dev/null; then
+      break
+    fi
+    port=""
+  done
+  if [[ -z ${port} ]]; then
+    echo "prototype-agent-smoke: FAIL: no free agent port found in 20000-59999 after 20 probes; pass PROTOTYPE_SMOKE_PORT" >&2
+    exit 1
+  fi
+fi
+export AUTOMOBILE_PROTOTYPE_PORT="${port}"
 
 # Pick the newest installed iOS runtime matching the request ("26" matches 26.x).
 runtimes_json="$(xcrun simctl list runtimes available iOS --json)"
@@ -191,9 +226,13 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
     connected=true
     break
   fi
+  status_error="$(sed '/^[[:space:]]*Bun v/d' "${log_dir}/status-initial.err")"
+  if [[ ${status_error} == *"closed the connection during the handshake"* ]]; then
+    fail "agent handshake was rejected on port ${port}: ${status_error}"
+  fi
   sleep "${settle}"
 done
-[[ ${connected} == true ]] || fail "agent never answered get_prototype_status ($(tail -n 1 "${log_dir}/status-initial.err"))"
+[[ ${connected} == true ]] || fail "agent never answered get_prototype_status on port ${port}: ${status_error:-no driver stderr}"
 keep_reply "${log_dir}/status-initial.json"
 [[ "$(jq -r '.type' "${log_dir}/status-initial.json")" == prototype_result ]] || fail "unexpected status reply"
 [[ "$(jq -r '.status.shown' "${log_dir}/status-initial.json")" == false ]] || fail "prototype shown before show_prototype"

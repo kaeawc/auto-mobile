@@ -35,6 +35,56 @@ function discovery(
 }
 
 describe("IdleDeviceReaper", () => {
+  test("idle tvOS needs fresh presence from its own completed source", async () => {
+    const device = { ...pooledDevice(), platform: "tvos" as const };
+    let result: BootedDeviceDiscovery = {
+      devices: [],
+      succeededPlatforms: new Set(["tvos"]),
+      succeededSources: new Set(["tvos-simulator"]),
+      freshDeviceIds: new Set(),
+    };
+    const requested: unknown[] = [];
+    const reaper = new IdleDeviceReaper(
+      {
+        getDevice: () => device,
+        removeDevice: async () => {},
+        withAssignmentLock: async (run) => await run(),
+      },
+      {
+        getBootedDevicesDetailed: async (platform) => {
+          requested.push(platform);
+          return result;
+        },
+      },
+    );
+    expect(
+      reaper.getIdleDeviceLivenessStatus(
+        device,
+        await reaper.getIosLivenessSnapshot({ platform: "tvos" }),
+      ),
+    ).toBe("stale");
+    result = {
+      ...result,
+      devices: [{ deviceId: device.id, name: "TV", platform: "tvos" }],
+      succeededPlatforms: new Set(),
+      succeededSources: new Set(),
+    };
+    expect(
+      reaper.getIdleDeviceLivenessStatus(
+        device,
+        await reaper.getIosLivenessSnapshot({ platform: "tvos" }),
+      ),
+    ).toBe("unknown");
+    result = { ...result, freshDeviceIds: new Set([device.id]) };
+    expect(
+      reaper.getIdleDeviceLivenessStatus(
+        device,
+        await reaper.getIosLivenessSnapshot({ platform: "tvos" }),
+      ),
+    ).toBe("assignable");
+    expect(requested).toEqual(["tvos", "tvos", "tvos"]);
+  });
+
   test("removes a stale idle simulator under the assignment lock", async () => {
     const device = pooledDevice();
     const devices = new Map([[device.id, device]]);

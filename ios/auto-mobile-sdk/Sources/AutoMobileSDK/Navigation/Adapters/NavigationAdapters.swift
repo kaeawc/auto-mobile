@@ -26,11 +26,27 @@ public final class NavigationAdapterHub: Sendable {
         }
     }
 
+    /// Start an owner without changing the installed redaction policy.
+    public func start(owner: String = "default") {
+        activate(owner: owner, redactor: nil)
+    }
+
+    /// Start an owner with an explicit policy. Calls that omit redactor use start(owner:),
+    /// preserving the installed policy. The initial factory uses NoOp.
     public func start(owner: String = "default", redactor: any NavigationDataRedacting = NoOpNavigationRedactor()) {
-        state.withLock { state in
-            state.factory = NavigationEventFactory(redactor: redactor)
+        activate(owner: owner, redactor: redactor)
+    }
+
+    private func activate(owner: String, redactor: (any NavigationDataRedacting)?) {
+        let replacement = redactor.map { NavigationEventFactory(redactor: $0) }
+        let previous = state.withLock { state in
+            let previous = state.factory
+            if let replacement { state.factory = replacement }
             state.activeOwners.insert(owner)
+            return previous
         }
+        // A host redactor's deinitializer may reenter the hub.
+        withExtendedLifetime(previous) {}
     }
 
     public func stop(owner: String = "default") {

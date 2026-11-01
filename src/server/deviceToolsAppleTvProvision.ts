@@ -1,3 +1,8 @@
+import { requestAcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import { holderOf } from "../daemon/deviceBinding";
+import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 import { describeDevice, projectProvisionedDevice } from "../daemon/deviceDescription";
 import {
   getDeviceToolsDependencies,
@@ -19,6 +24,7 @@ import {
 import {
   AppleTvSimulatorProvisioner,
   type AppleTvProvisionRequest,
+  type AppleTvDiscardResult,
 } from "../utils/ios-cmdline-tools/AppleTvSimulatorProvisioner";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
@@ -26,7 +32,11 @@ import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import type { BindBootedSession } from "./deviceToolsWatchOs";
 import { bootAdmissionServices } from "../devices/bootAdmissionServices";
 import { formatToolParamError } from "./toolParamError";
-import { stripInternalToolParams } from "./internalToolParams";
+import {
+  internalMcpSessionId,
+  internalOneShotCli,
+  stripInternalToolParams,
+} from "./internalToolParams";
 
 type AppleTvProvisioner = ReturnType<
   NonNullable<DeviceToolsDependencies["appleTvSimulatorProvisionerFactory"]>
@@ -70,6 +80,7 @@ export async function provisionAppleTvDevice(
             { kind: "selector", platform: "tvos", selector: request.deviceId ?? request.name },
             { operation: "provision", deadlineMs, signal: requestSignal },
           );
+          let leaseReleased = false;
           try {
             stage.current = "resolving or creating the Apple TV simulator";
             const provisioner = (
@@ -79,32 +90,74 @@ export async function provisionAppleTvDevice(
               // provisionDevice is an explicit creation request, as on Android and iOS.
               allowCreate: deps.deviceCreationGateFactory().isCreationAllowed(true),
               signal: requestSignal,
+              discardUnconfirmed: (tv) => discardUnclaimedCreatedTv(tv, provisioner, deps, lease),
             });
-            await lease.bindCanonicalIdentity(
-              { platform: "tvos", stableId: resolved.tv.deviceId },
-              // After waiting on another lifecycle (a shutdown, say) the TV is read again, and
-              // that fresh snapshot is the one booted below.
-              async () => {
-                const again = await provisioner.provision(request, {
-                  allowCreate: false,
-                  signal: requestSignal,
-                });
-                resolved = { tv: again.tv, created: resolved.created };
-                return { platform: "tvos", stableId: again.tv.deviceId };
-              },
-            );
+            const createdTv = resolved.tv;
+            let cleanupNeeded = resolved.created;
+            const discardCreated = async (): Promise<AppleTvDiscardResult> => {
+              if (!cleanupNeeded) {
+                return { deleted: true };
+              }
+              const result = await discardUnclaimedCreatedTv(
+                createdTv,
+                provisioner,
+                deps,
+                leaseReleased ? undefined : lease,
+              );
+              if (result.deleted) {
+                cleanupNeeded = false;
+              }
+              return result;
+            };
+            const receipt = requestAcquisitionReceipt();
+            if (resolved.created && receipt && !receipt.started) {
+              receipt.started = {
+                rollBack: async () => {
+                  const discarded = await discardCreated();
+                  if (!discarded.deleted) {
+                    throw new ActionableError(
+                      `Could not undo created Apple TV simulator ${createdTv.deviceId}: ${discarded.error}; delete it with deleteDevice`,
+                    );
+                  }
+                },
+              };
+            }
+            try {
+              await lease.bindCanonicalIdentity(
+                { platform: "tvos", stableId: resolved.tv.deviceId },
+                // After waiting on another lifecycle (a shutdown, say) the TV is read again, and
+                // that fresh snapshot is the one booted below.
+                async () => {
+                  const again = await provisioner.provision(request, {
+                    allowCreate: false,
+                    signal: requestSignal,
+                  });
+                  resolved = { tv: again.tv, created: resolved.created };
+                  return { platform: "tvos", stableId: again.tv.deviceId };
+                },
+              );
+            } catch (error) {
+              const discarded = resolved.created ? await discardCreated() : undefined;
+              throw new ActionableError(
+                `Could not bind Apple TV simulator ${createdTv.deviceId} to its lifecycle` +
+                  (discarded ? `; ${discardMessage(discarded)}` : "") +
+                  `: ${errorMessage(error)}`,
+                { cause: error },
+              );
+            }
             const { tv, created } = resolved;
             if (args.boot === false) {
               return tvProvisionResponse(args, tv, created, undefined);
             }
             const booted = await bootAndBind(
-              { rawArgs, tv, created, provisioner, bindSession },
+              { rawArgs, tv, created, lease, discardCreated, bindSession },
               deps,
               deadlineMs,
               { signal: requestSignal, stage },
             );
             return tvProvisionResponse(args, tv, created, booted);
           } finally {
+            leaseReleased = true;
             lease.release();
           }
         }),
@@ -117,14 +170,16 @@ async function bootAndBind(
     rawArgs,
     tv,
     created,
-    provisioner,
+    lease,
+    discardCreated,
     bindSession,
   }: {
     /** The request as received: the binder reads the caller's connection from its internal params. */
     rawArgs: object;
     tv: ListedAppleTv;
     created: boolean;
-    provisioner: AppleTvProvisioner;
+    lease: VirtualDeviceLifecycleLease;
+    discardCreated: () => Promise<AppleTvDiscardResult>;
     bindSession: BindBootedSession;
   },
   deps: DeviceToolsDependencies,
@@ -132,6 +187,13 @@ async function bootAndBind(
   { signal, stage }: { signal: AbortSignal; stage: { current: string } },
 ): Promise<{ boot: AppleTvBootResult; sessionId: string }> {
   try {
+    const reusableSessionId = internalOneShotCli(rawArgs)
+      ? undefined
+      : initializedDevicePool()?.resolveOwnedDeviceSessionForMcpSession(
+          internalMcpSessionId(rawArgs),
+          tv.deviceId,
+        );
+    assertTvUnclaimed(tv.deviceId, deps, lease, reusableSessionId);
     stage.current = "booting the Apple TV simulator";
     const lifecycle = (deps.appleTvSimulatorBootFactory ?? defaultAppleTvBoot)();
     const boot = await lifecycle.boot(tv, {
@@ -149,15 +211,75 @@ async function bootAndBind(
     if (!created) {
       throw toActionableError(error, `Could not start Apple TV simulator ${tv.deviceId}`);
     }
-    const discarded = await provisioner.discardCreated(tv);
-    throw toActionableError(
-      error,
+    const discarded = await discardCreated();
+    throw new ActionableError(
       `provisionDevice created Apple TV simulator ${tv.deviceId} but could not start it; ` +
-        (discarded.deleted
-          ? "the TV was deleted again"
-          : `deleting it again failed (${discarded.error}); delete it with deleteDevice`),
+        `${discardMessage(discarded)}: ${errorMessage(error)}`,
+      { cause: error },
     );
   }
+}
+
+/** The canonical lease owns the UDID; only boot may reuse the caller's own pool holder. */
+function assertTvUnclaimed(
+  udid: string,
+  deps: DeviceToolsDependencies,
+  lease?: VirtualDeviceLifecycleLease,
+  reusableSessionId?: string,
+): void {
+  const held = holderOf(initializedDevicePool()?.getDevice(udid));
+  const ownsIdentity =
+    lease?.identity.kind === "stable" &&
+    lease.identity.platform === "tvos" &&
+    lease.identity.stableId === udid;
+  if (
+    (held && held !== reusableSessionId) ||
+    (!ownsIdentity &&
+      deps.lifecycleCoordinator.isReserved({
+        kind: "stable",
+        platform: "tvos",
+        stableId: udid,
+      }))
+  ) {
+    throw new ActionableError(
+      `Apple TV simulator ${udid} is held by ${held ? `session ${held}` : "another lifecycle"}; retry after it is released`,
+    );
+  }
+}
+
+/** Cleanup requires an unclaimed pool entry and the canonical lifecycle lease. */
+async function discardUnclaimedCreatedTv(
+  tv: Pick<ListedAppleTv, "deviceId">,
+  provisioner: AppleTvProvisioner,
+  deps: DeviceToolsDependencies,
+  lease?: VirtualDeviceLifecycleLease,
+): Promise<AppleTvDiscardResult> {
+  let cleanupLease: VirtualDeviceLifecycleLease | undefined;
+  try {
+    assertTvUnclaimed(tv.deviceId, deps, lease);
+    if (lease?.identity.kind !== "stable" || lease.identity.stableId !== tv.deviceId) {
+      cleanupLease = await deps.lifecycleCoordinator.reserve(
+        { kind: "stable", platform: "tvos", stableId: tv.deviceId },
+        { operation: "start", deadlineMs: deps.timer.now() + 30_000 },
+      );
+    }
+    assertTvUnclaimed(tv.deviceId, deps, cleanupLease ?? lease);
+    return await provisioner.discardCreated(tv);
+  } catch (error) {
+    logger.warn(
+      `[tvOS] Leaving created Apple TV simulator ${tv.deviceId}: ${errorMessage(error)}`,
+      error,
+    );
+    return { deleted: false, error: errorMessage(error) };
+  } finally {
+    cleanupLease?.release();
+  }
+}
+
+function discardMessage(discarded: AppleTvDiscardResult): string {
+  return discarded.deleted
+    ? "the TV was deleted again"
+    : `deleting it again failed (${discarded.error}); delete it with deleteDevice`;
 }
 
 function tvProvisionResponse(

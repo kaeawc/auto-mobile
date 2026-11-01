@@ -169,9 +169,6 @@ public final class AutoMobileSDK: @unchecked Sendable {
         UserDefaultsInspector.shared.initialize(buffer: buffer)
         DatabaseInspector.shared.initialize()
 
-        // Start navigation adapter
-        SwiftUINavigationAdapter.shared.start()
-
         // Session tracking
         let tracker = SessionTracker()
         lock.lock()
@@ -368,6 +365,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         // subsystem that was never initialized (per configuration flags) so
         // shutdown() does not clobber host-app handlers we never replaced.
         SwiftUINavigationAdapter.shared.stop()
+        AutoMobileNavigation.shared.reset()
         if config?.enableCrashReporting ?? true {
             AutoMobileCrashes.shared.reset()
         }

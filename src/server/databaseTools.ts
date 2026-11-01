@@ -6,7 +6,7 @@ import { ActionableError, BootedDevice } from "../models";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { sqlQueryResultSchema } from "./databaseToolOutputSchemas";
-import { iosSqlErrorMessage } from "../utils/storageSdkErrors";
+import { iosSqlErrorMessage, mapStorageSdkError } from "../utils/storageSdkErrors";
 import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -217,16 +217,27 @@ async function queryCoreDataForDevice(
       "Core Data queries require an iOS app with a registered store and entity. Use databasePath and query for Android SQLite databases.",
     );
   }
-  const result = await iosClient(device).queryCoreDataForIos(
-    args.appId,
-    args.store,
-    args.entity,
-    args.limit,
-  );
-  return createStructuredToolResponse({
-    message: `Query returned ${result.rows?.length ?? 0} row(s)`,
-    ...result,
-  });
+  try {
+    const result = await iosClient(device).queryCoreDataForIos(
+      args.appId,
+      args.store,
+      args.entity,
+      args.limit,
+    );
+    return createStructuredToolResponse({
+      message: `Query returned ${result.rows?.length ?? 0} row(s)`,
+      ...result,
+    });
+  } catch (error) {
+    if (error instanceof SdkCapabilityQueryError) {
+      throw error;
+    }
+    const message = mapStorageSdkError(error, { operation: "database" });
+    if (message) {
+      throw new ActionableError(message, { cause: error });
+    }
+    throw error;
+  }
 }
 
 function sqliteQueryArgs(

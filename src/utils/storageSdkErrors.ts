@@ -45,6 +45,10 @@ type StorageSdkErrorCode =
   | "db_inspection_disabled"
   | "bad_request"
   | "unknown_database_path"
+  | "unknown_core_data_store"
+  | "unknown_core_data_entity"
+  | "core_data_query_unavailable"
+  | "core_data_fetch_failed"
   | "unknown_table"
   | "multiple_statements_not_supported"
   | "invalid_store_name"
@@ -62,6 +66,14 @@ const SDK_ERROR_MESSAGES: Record<StorageSdkErrorCode, (context: StorageSdkErrorC
       "The iOS SDK rejected the SQL request as bad_request. Check the database path and SQL query.",
     unknown_database_path: ({ databasePath }) =>
       `No registered database at ${JSON.stringify(databasePath ?? "unknown path")}. Use the absolute path reported by the app. List registered paths with the App Databases resource (automobile:devices/{deviceId}/databases?appId={appId}).`,
+    unknown_core_data_store: () =>
+      "The requested Core Data store is not registered by the app (unknown_core_data_store). List registered stores in databases.stores in the storage capabilities resource (automobile:devices/{deviceId}/storage/capabilities?appId={appId}).",
+    unknown_core_data_entity: () =>
+      "The requested Core Data entity is not registered for this store (unknown_core_data_entity). The entity must be one of the store's registered entities.",
+    core_data_query_unavailable: () =>
+      "The app registered this Core Data store without a CoreDataReadOnlyFetching fetcher (core_data_query_unavailable). Only metadata is available; ask the app developer to enable read access for this store.",
+    core_data_fetch_failed: () =>
+      "The Core Data fetch threw an error inside the app (core_data_fetch_failed). Check the app logs.",
     unknown_table: () => "The requested database table was not found (unknown_table).",
     multiple_statements_not_supported: () => "The iOS SDK accepts one SQL statement per call.",
     mutation_not_authorized: ({ operation }) => {
@@ -175,9 +187,9 @@ function mapIosSqlError(error: unknown, databasePath: string): string {
   const prefix = `${SDK_UNAVAILABLE_PREFIX}: `;
   if (message.startsWith(prefix)) {
     const detail = message.slice(prefix.length);
-    const code = sdkErrorCode(detail);
-    if (code) {
-      return SDK_ERROR_MESSAGES[code]({ operation: "database", databasePath });
+    const mapped = mapStorageSdkError(error, { operation: "database", databasePath });
+    if (mapped) {
+      return mapped;
     }
     if (/^HTTP \d{3}$/.test(detail) || !UNKNOWN_SDK_ERROR_CODE_PATTERN.test(detail)) {
       return iosSdkSetupAdvice();

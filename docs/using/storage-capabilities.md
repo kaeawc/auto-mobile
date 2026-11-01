@@ -66,9 +66,10 @@ response was shortened to meet the app's row or byte limit. Sensitive attributes
 are redacted. These reads never require storage mutation authorization.
 
 Core Data queries require iOS and the app's Debug storage inspection support.
-For `unknown_core_data_store` or `unknown_core_data_entity`, check the store identifier
-and registered entity names. For `core_data_query_unavailable`, ask the app developer
-to enable read access for that store. `db_inspection_disabled` requires enabling
-inspection in the app. `core_data_fetch_failed` requires checking the app's store
-availability; `response_too_large` means even the column metadata exceeds the app's
-response limit. Invalid or mixed parameter pairs are rejected before execution.
+For `unknown_core_data_store`, use a store identifier listed in `databases.stores` in
+the storage capabilities resource. For `unknown_core_data_entity`, use one of that
+store's registered entity names. For `core_data_query_unavailable`, the app registered
+only metadata for that store; ask the app developer to enable read access.
+`db_inspection_disabled` requires enabling inspection in the app.
+`core_data_fetch_failed` means the fetch threw inside the app; check the app logs.
+`response_too_large` means even the column metadata exceeds the app's response limit. Invalid or mixed parameter pairs are rejected before execution.

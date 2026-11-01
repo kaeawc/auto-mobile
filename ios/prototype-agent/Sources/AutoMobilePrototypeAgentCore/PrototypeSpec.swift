@@ -402,8 +402,9 @@ struct WindowSpec: Decodable {
     let chrome: String?
     let deadTaps: Bool?
     let backdrop: BackdropSpec?
+    let layoutDirection: PrototypeLayoutDirection?
 
-    private enum CodingKeys: String, CodingKey { case placement, opacity, chrome, deadTaps, backdrop }
+    private enum CodingKeys: String, CodingKey { case placement, opacity, chrome, deadTaps, backdrop, layoutDirection }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -412,6 +413,7 @@ struct WindowSpec: Decodable {
         deadTaps = try container.decodeIfPresent(Bool.self, forKey: .deadTaps)
         chrome = try container.decodeIfPresent(String.self, forKey: .chrome)
         backdrop = try container.decodeIfPresent(BackdropSpec.self, forKey: .backdrop)
+        layoutDirection = try container.decodeIfPresent(PrototypeLayoutDirection.self, forKey: .layoutDirection)
         if let chrome, chrome != "none", chrome != "bar" {
             throw DecodingError.dataCorruptedError(
                 forKey: .chrome,

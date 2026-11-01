@@ -37568,6 +37568,11 @@
                 "deadTaps": {
                   "type": "boolean"
                 },
+                "layoutDirection": {
+                  "type": "string",
+                  "enum": ["ltr", "rtl"],
+                  "description": "Prototype layout direction; absent follows the host. Needs prototype_layout_direction_v1"
+                },
                 "keepScreenOn": {
                   "type": "boolean",
                   "description": "Keep the screen awake while shown; needs prototype_platform_window_controls_v1"

@@ -592,7 +592,7 @@ struct Mixed: Codable, Equatable, Sendable {
     const spec = {
       id: "models",
       state: { enabled: true },
-      window: { placement: fixture.placementFullscreen, opacity: 100 },
+      window: { ...fixture.windowLayoutDirection, opacity: 100 },
       root: {
         type: "column",
         children: [
@@ -661,4 +661,23 @@ test("selected bounded records generate native number maps", () => {
   );
   expect(sources.kotlin).toContain("Map<String, Double>?");
   expect(sources.swift).toContain("[String: Double]?");
+});
+
+test("window layout direction accepts explicit directions and rejects auto", () => {
+  for (const layoutDirection of ["ltr", "rtl"]) {
+    expect(
+      validatePrototypeSpec({
+        id: "direction",
+        window: { placement: { type: "fullscreen" }, layoutDirection },
+        root: { type: "text", text: "First" },
+      }).success,
+    ).toBe(true);
+  }
+  expect(
+    validatePrototypeSpec({
+      id: "direction",
+      window: { placement: { type: "fullscreen" }, layoutDirection: "auto" },
+      root: { type: "text", text: "First" },
+    }).success,
+  ).toBe(false);
 });

@@ -864,6 +864,12 @@ const windowSchema = z
         "Fullscreen only: none (default on a device advertising prototype_window_chrome_v1) removes the host dismiss bar; a two-finger long press (about 1 s) reveals a dismiss pill for 5 s. Device persistence defaults to bar. An older device keeps the bar and refuses explicit none; lastResult.chrome reports what it draws",
       ),
     deadTaps: z.boolean().optional(),
+    layoutDirection: z
+      .enum(["ltr", "rtl"])
+      .optional()
+      .describe(
+        "Prototype layout direction; absent follows the host. Needs prototype_layout_direction_v1",
+      ),
     keepScreenOn: z
       .boolean()
       .optional()

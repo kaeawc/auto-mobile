@@ -119,6 +119,14 @@ the Viewer/file loader keeps its existing behavior.
 - Element anchors still need host resolution to bounds (three valid fixtures keep that loader
   diagnostic). Validation does not imply the renderer advertises every capability.
 
+## Prototype layout direction
+
+`window.layoutDirection` accepts `ltr` or `rtl` and requires the advertised
+`prototype_layout_direction_v1` capability. Both page and top rendering layers receive the explicit
+SwiftUI direction; UIKit hosting roots receive matching semantic content attributes. Rows and logical
+start/end alignment follow that direction. Omission inherits the host. Each show replaces the override,
+and none of these settings changes the system locale or the host app's language.
+
 ## Dead taps (window.deadTaps, prototype_dead_tap_v1)
 
 `window.deadTaps: true` enables ordinary `emit` events named `prototype_dead_tap` in the

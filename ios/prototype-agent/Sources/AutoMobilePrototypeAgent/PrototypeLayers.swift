@@ -78,6 +78,14 @@
         }
 
         override func viewWillLayoutSubviews() {
+            let semantic: UISemanticContentAttribute = switch model.spec?.window.layoutDirection {
+            case .rtl: .forceRightToLeft
+            case .ltr: .forceLeftToRight
+            case nil: .unspecified
+            }
+            for root in [view, page.view, top.view] where root?.semanticContentAttribute != semantic {
+                root?.semanticContentAttribute = semantic
+            }
             syncDeviceState()
             super.viewWillLayoutSubviews()
         }
@@ -183,6 +191,14 @@
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
         @Environment(\.layoutDirection) private var layoutDirection
+        private var resolvedLayoutDirection: LayoutDirection {
+            let direction = PrototypeLayoutDirection.resolve(
+                model.spec?.window.layoutDirection,
+                host: layoutDirection == .rightToLeft ? .rtl : .ltr
+            )
+            return direction == .rtl ? .rightToLeft : .leftToRight
+        }
+
         @Namespace private var sharedNamespace
         @State private var swipe = PrototypeStackSwipeState()
         @GestureState private var swipeActive = false
@@ -262,6 +278,7 @@
                     }
                 }
             }
+            .environment(\.layoutDirection, resolvedLayoutDirection)
             // Scheme-aware system controls (text fields, buttons) follow the theme's light or dark.
             .environment(\.colorScheme, palette.dark ? .dark : .light)
             .environment(\.prototypeSharedNamespace, sharedNamespace)
@@ -287,7 +304,7 @@
             .onDisappear { cancelEdgeSwipe() }
         }
 
-        private var swipeRTL: Bool { layoutDirection == .rightToLeft }
+        private var swipeRTL: Bool { resolvedLayoutDirection == .rightToLeft }
 
         private func swipeAnimation(_ target: String) -> PrototypeStackAnimation {
             switch model.stackTransition(target) {

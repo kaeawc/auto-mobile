@@ -365,6 +365,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     minimalSpec: { ...base, window: { ...base.window, backdrop: { material: "thin" } } },
     ops: [],
   },
+  prototype_layout_direction_v1: {
+    minimalSpec: { ...base, window: { ...base.window, layoutDirection: "rtl" } },
+    ops: [],
+  },
   prototype_platform_window_controls_v1: {
     minimalSpec: { ...base, window: { ...base.window, keepScreenOn: true } },
     ops: [],

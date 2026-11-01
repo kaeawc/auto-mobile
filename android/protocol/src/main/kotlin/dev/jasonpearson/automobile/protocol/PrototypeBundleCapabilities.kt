@@ -51,16 +51,7 @@ internal object PrototypeBundleCapabilities {
     }
     if (text(spec["motion"]) == "expressive") caps.add(PrototypeMotionV3.CAPABILITY)
     if (text(spec["motion"]) == "reduced") caps.add("prototype_reduced_motion_v1")
-    if ((spec["window"] as? JsonObject)?.get("transition") != null)
-      caps.add("prototype_window_motion_v1")
-    if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
-      caps.add("prototype_backdrop_v1")
-    if (
-      PrototypeEnvelopeFeatures.WINDOW_CONTROLS.any {
-        (spec["window"] as? JsonObject)?.containsKey(it) == true
-      }
-    )
-      caps.add("prototype_platform_window_controls_v1")
+    windowCapabilities(spec["window"] as? JsonObject, caps)
     if (text((spec["theme"] as? JsonObject)?.get("design")) == "platform") {
       caps.add("prototype_design_platform_v1")
     }
@@ -71,6 +62,14 @@ internal object PrototypeBundleCapabilities {
         PrototypeBundleNodeCapabilities.themed(scrim)
     )
       caps.add("prototype_theme_modes_v1")
+  }
+
+  private fun windowCapabilities(window: JsonObject?, caps: MutableSet<String>) {
+    if (window?.get("transition") != null) caps.add("prototype_window_motion_v1")
+    if (window?.get("backdrop") != null) caps.add("prototype_backdrop_v1")
+    if (window?.get("layoutDirection") != null) caps.add("prototype_layout_direction_v1")
+    if (PrototypeEnvelopeFeatures.WINDOW_CONTROLS.any { window?.containsKey(it) == true })
+      caps.add("prototype_platform_window_controls_v1")
   }
 
   private fun request(action: JsonObject, caps: MutableSet<String>) {

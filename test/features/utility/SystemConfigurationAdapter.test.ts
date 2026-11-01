@@ -1117,7 +1117,7 @@ describe("SystemConfigurationAdapter", () => {
       const result = await adapter.setTextDirection(true, {});
       expect(result.success).toBe(false);
       expect(result.rtl).toBe(true);
-      expect(result.error).toContain("Text direction is not supported on iOS");
+      expect(result.error).toContain('window.layoutDirection: "rtl"');
     });
 
     it("broadcastLocaleChange is a no-op on iOS (returns false)", async () => {

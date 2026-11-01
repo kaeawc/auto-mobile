@@ -1,0 +1,22 @@
+{
+  "id": "layout-direction",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    },
+    "layoutDirection": "rtl"
+  },
+  "root": {
+    "type": "row",
+    "children": [
+      {
+        "type": "text",
+        "text": "FIRST"
+      },
+      {
+        "type": "text",
+        "text": "SECOND"
+      }
+    ]
+  }
+}

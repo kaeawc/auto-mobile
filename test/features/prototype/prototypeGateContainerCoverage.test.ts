@@ -409,6 +409,7 @@ const containers: {
 // Gates on a root-level spec field, not a node: no container can hold them, so they get a
 // dedicated test below instead of a container fixture.
 const ROOT_LEVEL_GATES = [
+  "prototype_layout_direction_v1",
   "prototype_platform_realtime_device_v1",
   "prototype_storage_v1",
   "prototype_backdrop_v1",
@@ -684,3 +685,18 @@ for (const container of containers) {
     );
   });
 }
+
+test("layout direction is an independent root window gate", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_layout_direction_v1",
+  )!;
+  for (const layoutDirection of ["rtl", "ltr"]) {
+    expect(gate.fields({ window: { layoutDirection }, root: label })).toEqual([
+      "window.layoutDirection",
+    ]);
+  }
+  expect(gate.fields({ root: label, state: { layoutDirection: "rtl" } })).toEqual([]);
+  expect(gate.unsupportedMessage(["window.layoutDirection"], "ios")).toContain(
+    "window.layoutDirection",
+  );
+});

@@ -763,6 +763,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  private val appDiscovery by lazy {
+    AppDiscoveryController(
+      source =
+        object : AppDiscoveryController.Source {
+          override fun keystore(packageName: String) =
+            dev.jasonpearson.automobile.ctrlproxy.storage.discoverKeystore(
+              this@CtrlProxy,
+              packageName,
+            )
+
+          override fun sdkCapabilities(packageName: String, userId: Int?) =
+            dev.jasonpearson.automobile.ctrlproxy.storage.discoverSdkCapabilities(
+              this@CtrlProxy,
+              packageName,
+              userId,
+            )
+        },
+      asyncActionRunner = asyncActionRunner,
+      resultSender = resultSender,
+      timeProvider = timeProvider,
+    )
+  }
   private val clipboardController by lazy {
     ClipboardController(
       clipboardManager = { clipboardManager },
@@ -2322,37 +2344,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     storageController.handleGetPreferences(requestId, packageName, fileName)
 
-  override suspend fun discoverKeystore(requestId: String?, packageName: String) {
-    asyncActionRunner.launch(requestId, "discover_keystore") {
-      val state =
-        dev.jasonpearson.automobile.ctrlproxy.storage.discoverKeystore(this@CtrlProxy, packageName)
-      resultSender.send(requestId, "keystore_discovery", attachPerf = false) { _ ->
-        dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          state = state,
-        )
-      }
-    }
-  }
+  override suspend fun discoverKeystore(requestId: String?, packageName: String) =
+    appDiscovery.discoverKeystore(requestId, packageName)
 
-  override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) {
-    asyncActionRunner.launch(requestId, "get_sdk_capabilities") {
-      val state =
-        dev.jasonpearson.automobile.ctrlproxy.storage.discoverSdkCapabilities(
-          this@CtrlProxy,
-          packageName,
-          userId,
-        )
-      resultSender.send(requestId, "sdk_capabilities", attachPerf = false) { _ ->
-        dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult(
-          timestamp = timeProvider.currentTimeMillis(),
-          requestId = requestId,
-          state = state,
-        )
-      }
-    }
-  }
+  override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) =
+    appDiscovery.discoverSdkCapabilities(requestId, packageName, userId)
 
   override suspend fun listDataStores(
     requestId: String?,

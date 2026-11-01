@@ -31,7 +31,6 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitRequest
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
-import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
@@ -87,26 +86,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUn
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.GlobalActionResult
-import dev.jasonpearson.automobile.protocol.NodeSelector
-import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
-import dev.jasonpearson.automobile.protocol.PrototypeSpec
-import dev.jasonpearson.automobile.protocol.RequestCommitText
-import dev.jasonpearson.automobile.protocol.RequestDrag
-import dev.jasonpearson.automobile.protocol.RequestGestureEnd
-import dev.jasonpearson.automobile.protocol.RequestGestureStart
-import dev.jasonpearson.automobile.protocol.RequestGlobalAction
-import dev.jasonpearson.automobile.protocol.RequestHierarchy
-import dev.jasonpearson.automobile.protocol.RequestImeAction
-import dev.jasonpearson.automobile.protocol.RequestInsertText
-import dev.jasonpearson.automobile.protocol.RequestPinch
-import dev.jasonpearson.automobile.protocol.RequestScreenshot
-import dev.jasonpearson.automobile.protocol.RequestSetText
-import dev.jasonpearson.automobile.protocol.RequestSwipe
-import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
-import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
-import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.io.File
@@ -125,9 +106,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 
 // AccessibilityEvent constants are inlined on every API level; preserve the subscribed values.
@@ -169,7 +148,7 @@ internal fun findNodeByResourceIdOnRootDisplay(
  * Main AutoMobile Accessibility Service that provides view hierarchy extraction capabilities for
  * automated testing and UI interaction.
  */
-class CtrlProxy : AccessibilityService(), CtrlProxyActions {
+class CtrlProxy : AccessibilityService() {
 
   companion object {
     private const val TAG = "CtrlProxy"
@@ -335,7 +314,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Launches request-correlated raw work with [RequestIdContext] attached so [serviceScopeGuard]
    * can emit a correlated error frame if the launch throws before a guarded result helper runs.
    */
-  private fun launchRequestScope(
+  internal fun launchRequestScope(
     requestId: String?,
     block: suspend CoroutineScope.() -> Unit,
   ): Job =
@@ -496,7 +475,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
   }
-  private lateinit var prototypeController: PrototypeController
+  internal lateinit var prototypeController: PrototypeController
 
   /** `via: "host"` prototype requests: sent over the socket to the latest connected host. */
   private val hostPrototypeHttp =
@@ -572,7 +551,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       CoroutinePrototypeScheduler(serviceScope),
     )
   }
-  private val savedPrototypeController by lazy {
+  internal val savedPrototypeController by lazy {
     SavedPrototypeController(
       SavedPrototypeStores.inDirectory(File(filesDir, "saved-prototypes")),
       prototypeAssets,
@@ -586,7 +565,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
   }
-  private val prototypeAssetController by lazy {
+  internal val prototypeAssetController by lazy {
     PrototypeAssetController(
       prototypeAssets,
       prototypeResultSink,
@@ -595,7 +574,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
   private lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
-  private val globalActionController by lazy {
+  internal val globalActionController by lazy {
     GlobalActionController(
       host =
         object : GlobalActionController.Host {
@@ -611,7 +590,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       timeProvider = timeProvider,
     )
   }
-  private val screenshotRequests by lazy {
+  internal val screenshotRequests by lazy {
     ScreenshotRequestHandler(
       host =
         object : ScreenshotRequestHandler.Host {
@@ -682,7 +661,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
   }
-  private val permissionController by lazy {
+  internal val permissionController by lazy {
     PermissionController(
       permissions = { permission, request ->
         permissionManager.getPermissionState(permission, request)
@@ -702,7 +681,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val deviceAdminComponent by lazy {
     ComponentName(this, AutoMobileDeviceAdminReceiver::class.java)
   }
-  private val caCertificateController by lazy {
+  internal val caCertificateController by lazy {
     CaCertificateController(
       dependencies =
         CaCertificateDependencies(
@@ -730,7 +709,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       resultSender = resultSender,
     )
   }
-  private val settingsController by lazy {
+  internal val settingsController by lazy {
     SettingsController(
       contentResolver = { contentResolver },
       perfProvider = perfProvider,
@@ -738,7 +717,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       resultSender = resultSender,
     )
   }
-  private val packageController by lazy {
+  internal val packageController by lazy {
     PackageController(
       packageManager = { packageManager },
       currentUserId = CurrentUserId::current,
@@ -746,7 +725,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       resultSender = resultSender,
     )
   }
-  private val storageController by lazy {
+  internal val storageController by lazy {
     StorageController(
       manager = { storageSubscriptionManager },
       asyncActionRunner = asyncActionRunner,
@@ -764,7 +743,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
-  private val appDiscovery by lazy {
+  internal val appDiscovery by lazy {
     AppDiscoveryController(
       source =
         object : AppDiscoveryController.Source {
@@ -794,7 +773,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       timeProvider = timeProvider,
     )
   }
-  private val clipboardController by lazy {
+  internal val clipboardController by lazy {
     ClipboardController(
       clipboardManager = { clipboardManager },
       activeWindowRoot = { rootInActiveWindow },
@@ -825,7 +804,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
-  private val deviceInfoController by lazy {
+  internal val deviceInfoController by lazy {
     DeviceInfoController(
       context = this,
       serviceInfo = { serviceInfo },
@@ -949,7 +928,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       jsonCompact = jsonCompact,
     )
   }
-  private val nodeActionController by lazy {
+  internal val nodeActionController by lazy {
     NodeActionController(
       host =
         object : NodeActionController.Host {
@@ -982,7 +961,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       resultSender = resultSender,
     )
   }
-  private val focusController by lazy {
+  internal val focusController by lazy {
     FocusController(
       host =
         object : FocusController.Host {
@@ -1032,7 +1011,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Set text, insert text, IME actions and select all. Constructed eagerly (not `by lazy`) because
    * gesture, event and command paths invalidate its remembered insert caret from the first event.
    */
-  private val textInputController =
+  internal val textInputController =
     TextInputController(
       host =
         object : TextInputController.Host {
@@ -1072,7 +1051,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         ),
     )
   /** CtrlProxyIme commitText, its cancellation tombstones, and the keyboard profile requests. */
-  private val imeController by lazy {
+  internal val imeController by lazy {
     ImeController(
       host =
         object : ImeController.Host {
@@ -1107,7 +1086,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   /** Recomposition tracking, network mock rules and error simulation broadcasts to the app. */
-  private val sdkControlController by lazy {
+  internal val sdkControlController by lazy {
     SdkControlController(
       host =
         object : SdkControlController.Host {
@@ -1137,7 +1116,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Tap, swipe, multi-finger, pinch, drag and streamed gestures plus their result frames, and the
    * dedicated gesture thread their callbacks run on.
    */
-  private val gestureController =
+  internal val gestureController =
     GestureController(
       host =
         object : GestureController.Host {
@@ -1174,7 +1153,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       gestureThreadFactory = { gestureThreadFactory() },
     )
   @Volatile private var lastWindowClassName: String? = null
-  private val frameContextGate =
+  internal val frameContextGate =
     FrameContextGate(
       epoch = UUID.randomUUID().toString(),
       asyncActionRunner = asyncActionRunner,
@@ -1182,7 +1161,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       broadcast = { webSocketServer.broadcast(it) },
     )
 
-  private val staleFrames =
+  internal val staleFrames =
     StaleFrameRejector(
       isStale = frameContextGate::isStale,
       host =
@@ -1277,7 +1256,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun currentFrameContext(): String = frameContextGate.current()
 
-  private val accessibilityFlags =
+  internal val accessibilityFlags =
     AccessibilityFlagsController(
       object : AccessibilityFlagsController.Host {
         override fun updateServiceFlags(compute: (currentFlags: Int) -> Int?): Boolean {
@@ -1853,14 +1832,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     Log.d(TAG, "AutoMobile Accessibility Service destroyed")
   }
 
-  // ===========================================================================
-  // CtrlProxyActions — inbound WebSocket commands dispatched by CtrlProxyMessageHandler.
-  // Each method delegates to the corresponding perform*/handle* implementation below.
-  // ===========================================================================
+  /** The inbound WebSocket commands, dispatched by [CtrlProxyMessageHandler]. */
+  internal val actions: CtrlProxyActions = CtrlProxyActionRouter(this)
 
   internal fun queuedMessageHandler(
     delegate: WebSocketMessageHandler =
-      CtrlProxyMessageHandler(actions = this, log = { Log.w(TAG, it) }),
+      CtrlProxyMessageHandler(actions = actions, log = { Log.w(TAG, it) }),
     scope: CoroutineScope = serviceScope,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
     capacity: Int = INBOUND_COMMAND_CAPACITY,
@@ -1913,456 +1890,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       webSocketServer.broadcast(response)
     }
   }
-
-  override suspend fun requestHierarchy(request: RequestHierarchy) =
-    hierarchyController.requestHierarchy(request)
-
-  override suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
-    hierarchyController.requestHierarchyIfStale(sinceTimestamp, requestId)
-
-  override suspend fun setHierarchyInterval(intervalMs: Long?) =
-    hierarchyController.setHierarchyInterval(intervalMs)
-
-  override suspend fun requestScreenshot(request: RequestScreenshot) {
-    val requestId = request.requestId
-    val displayId = request.displayId
-    val hidePrototypes = request.hidePrototypes
-
-    screenshotRequests.broadcastScreenshot(requestId, displayId, hidePrototypes)
-  }
-
-  override suspend fun requestDoubleTapCoordinates(
-    requestId: String?,
-    x: Double,
-    y: Double,
-    frameContext: String?,
-    displayId: Int?,
-  ) {
-    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP))
-      return
-    gestureController.performTapCoordinates(
-      RequestTapCoordinates(
-        requestId = requestId,
-        x = x,
-        y = y,
-        duration = 50L,
-        frameContext = frameContext,
-        displayId = displayId,
-        doubleTap = true,
-      ),
-    )
-  }
-
-  override suspend fun requestTapCoordinates(request: RequestTapCoordinates) {
-    val requestId = request.requestId
-    val frameContext = request.frameContext
-    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP))
-      return
-    // A plain tap request is never a double tap; that arrives as its own request.
-    gestureController.performTapCoordinates(request.copy(doubleTap = false))
-  }
-
-  override suspend fun requestSwipe(request: RequestSwipe) {
-    val requestId = request.requestId
-    val frameContext = request.frameContext
-    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE))
-      return
-    gestureController.performSwipe(request)
-  }
-
-  override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) =
-    gestureController.performTwoFingerSwipe(request)
-
-  override suspend fun requestDrag(request: RequestDrag) {
-    val requestId = request.requestId
-    val frameContext = request.frameContext
-    if (staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG))
-      return
-    // The drag reads the resolved durations, so the legacy holdTime/duration fields need no copy.
-    gestureController.performDrag(request)
-  }
-
-  override suspend fun requestPinch(request: RequestPinch) = gestureController.performPinch(request)
-
-  override suspend fun requestGestureStart(request: RequestGestureStart) =
-    gestureController.startStream(request, requester = CommandOriginContext.currentClient())
-
-  override suspend fun requestGestureMove(
-    requestId: String?,
-    gestureId: String,
-    x: Double,
-    y: Double,
-  ) {
-    gestureController.moveStream(requestId, gestureId, x, y)
-  }
-
-  override suspend fun requestGestureEnd(
-    requestId: String?,
-    gestureId: String,
-    x: Double,
-    y: Double,
-    cancel: Boolean,
-  ) {
-    gestureController.endStream(
-      RequestGestureEnd(
-        requestId = requestId,
-        gestureId = gestureId,
-        x = x,
-        y = y,
-        cancel = cancel,
-      ),
-      requester = CommandOriginContext.currentClient(),
-    )
-  }
-
-  override suspend fun requestSetText(request: RequestSetText) {
-    val requestId = request.requestId
-    val text = request.text
-    val resourceId = request.resourceId
-    val dismissKeyboard = request.dismissKeyboard
-    val frameContext = request.frameContext
-
-    if (
-      staleFrames.rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)
-    )
-      return
-    textInputController.performSetText(requestId, text, resourceId, dismissKeyboard)
-  }
-
-  override suspend fun requestInsertTextState(requestId: String?) =
-    textInputController.handleInsertTextState(requestId)
-
-  override suspend fun requestInsertText(request: RequestInsertText) {
-    val requestId = request.requestId
-    val text = request.text
-    val expectedSuffix = request.expectedSuffix
-    val acceptsCaretNotPlaced = request.acceptsCaretNotPlaced
-    val precedingState = request.precedingState
-
-    textInputController.performInsertText(
-      requestId,
-      text,
-      expectedSuffix,
-      acceptsCaretNotPlaced,
-      precedingState,
-    )
-  }
-
-  override suspend fun requestCommitText(request: RequestCommitText) =
-    imeController.requestCommitText(request)
-
-  override suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
-    imeController.requestCancelImeCommit(requestId, targetRequestId)
-
-  override suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String) =
-    imeController.requestSetKeyboardProfile(requestId, profileId)
-
-  override suspend fun requestListKeyboardProfiles(
-    requestId: String?,
-    supportedCatalogVersions: List<Int>,
-  ) = imeController.requestListKeyboardProfiles(requestId, supportedCatalogVersions)
-
-  override suspend fun requestImeAction(request: RequestImeAction) {
-    val requestId = request.requestId
-    val action = request.action
-    val frameContext = request.frameContext
-
-    if (
-      staleFrames.rejectStaleFrameContext(
-        requestId,
-        frameContext,
-        StaleFrameContextAction.IME_ACTION,
-      )
-    )
-      return
-    textInputController.performImeAction(requestId, action)
-  }
-
-  override suspend fun requestSelectAll(requestId: String?) =
-    textInputController.performSelectAll(requestId)
-
-  override suspend fun requestClickFocusedInput(requestId: String?) =
-    nodeActionController.clickFocusedInputRequest(requestId)
-
-  override suspend fun requestAction(
-    requestId: String?,
-    action: String,
-    resourceId: String?,
-    selector: NodeSelector?,
-    arguments: NodeActionArguments,
-  ) = nodeActionController.performNodeAction(requestId, action, resourceId, selector, arguments)
-
-  override suspend fun requestActivateAccessibilityLink(
-    requestId: String?,
-    text: String,
-    occurrence: Int,
-    selector: NodeSelector?,
-  ) = nodeActionController.performAccessibilityLinkActivation(requestId, text, occurrence, selector)
-
-  override suspend fun requestClipboard(requestId: String?, action: String, text: String?) =
-    clipboardController.performClipboard(requestId, action, text)
-
-  override suspend fun installCaCert(requestId: String?, certificate: String) =
-    caCertificateController.performInstallCaCertificate(requestId, certificate)
-
-  override suspend fun installCaCertFromPath(requestId: String?, devicePath: String) =
-    caCertificateController.performInstallCaCertificateFromPath(requestId, devicePath)
-
-  override suspend fun removeCaCert(requestId: String?, alias: String?, certificate: String?) =
-    caCertificateController.performRemoveCaCertificate(requestId, alias, certificate)
-
-  override suspend fun requestGlobalAction(request: RequestGlobalAction) {
-    val requestId = request.requestId
-    val action = request.action
-    val frameContext = request.frameContext
-
-    if (
-      staleFrames.rejectStaleFrameContext(
-        requestId,
-        frameContext,
-        StaleFrameContextAction.GLOBAL_ACTION,
-      )
-    )
-      return
-    globalActionController.performGlobalActionRequest(requestId, action)
-  }
-
-  override suspend fun validateFrameContext(requestId: String?, frameContext: String) =
-    frameContextGate.validate(requestId, frameContext)
-
-  override suspend fun requestDeviceInfo(requestId: String?) =
-    deviceInfoController.performDeviceInfoRequest(requestId)
-
-  override suspend fun getDeviceOwnerStatus(requestId: String?) =
-    caCertificateController.performGetDeviceOwnerStatus(requestId)
-
-  override suspend fun getPermission(
-    requestId: String?,
-    permission: String?,
-    requestPermission: Boolean?,
-  ) = permissionController.getPermission(requestId, permission, requestPermission)
-
-  override suspend fun setRecompositionTracking(enabled: Boolean) =
-    sdkControlController.setRecompositionTrackingEnabled(enabled)
-
-  override suspend fun setAccessibilityFlags(
-    includeNotImportantViews: Boolean,
-    reportViewIds: Boolean,
-    retrieveInteractiveWindows: Boolean,
-    occlusionEnabled: Boolean,
-  ) {
-    accessibilityFlags.apply(
-      includeNotImportantViews = includeNotImportantViews,
-      reportViewIds = reportViewIds,
-      retrieveInteractiveWindows = retrieveInteractiveWindows,
-      occlusionEnabled = occlusionEnabled,
-    )
-  }
-
-  override suspend fun setNetworkMockRules(requestId: String?, rulesJson: String) =
-    sdkControlController.broadcastNetworkMockRules(requestId, rulesJson)
-
-  override suspend fun setNetworkErrorSimulation(
-    enabled: Boolean,
-    errorType: String?,
-    limit: Int?,
-    expiresAtEpochMs: Long?,
-    remainingMs: Long?,
-  ) =
-    sdkControlController.broadcastNetworkErrorSimulation(
-      enabled,
-      errorType,
-      limit,
-      expiresAtEpochMs,
-      remainingMs,
-    )
-
-  override suspend fun getCurrentFocus(requestId: String?) =
-    focusController.handleGetCurrentFocus(requestId)
-
-  override suspend fun getTraversalOrder(requestId: String?) =
-    focusController.handleGetTraversalOrder(requestId)
-
-  override suspend fun addHighlight(
-    requestId: String?,
-    highlightId: String?,
-    shape: HighlightShape?,
-  ) = focusController.handleAddHighlight(requestId, highlightId, shape)
-
-  override suspend fun showPrototype(
-    requestId: String?,
-    spec: PrototypeSpec,
-    displayId: Int?,
-    reset: Boolean,
-    appearance: PrototypeAppearanceOverride?,
-    replaceOthers: Boolean,
-    locale: String?,
-  ) {
-    launchRequestScope(requestId) {
-      prototypeController.show(requestId, spec, displayId, reset, appearance, replaceOthers, locale)
-    }
-  }
-
-  override suspend fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
-    launchRequestScope(requestId) { prototypeController.dismiss(requestId, id, all) }
-  }
-
-  override suspend fun savePrototype(
-    requestId: String?,
-    spec: PrototypeSpec,
-    label: String,
-    icon: String?,
-  ) {
-    launchRequestScope(requestId) { savedPrototypeController.save(requestId, spec, label, icon) }
-  }
-
-  override suspend fun pinSavedPrototype(requestId: String?, id: String, icon: String?) {
-    launchRequestScope(requestId) { savedPrototypeController.pin(requestId, id, icon) }
-  }
-
-  override suspend fun listSavedPrototypes(requestId: String?) {
-    launchRequestScope(requestId) { savedPrototypeController.list(requestId) }
-  }
-
-  override suspend fun deleteSavedPrototype(requestId: String?, id: String) {
-    launchRequestScope(requestId) { savedPrototypeController.delete(requestId, id) }
-  }
-
-  override suspend fun advancePrototypeClock(requestId: String?, id: String, advanceTimeMs: Int) {
-    launchRequestScope(requestId) { prototypeController.advanceClock(requestId, id, advanceTimeMs) }
-  }
-
-  override suspend fun clearPrototypeStorage(requestId: String?, id: String) {
-    launchRequestScope(requestId) { prototypeController.clearStorage(requestId, id) }
-  }
-
-  override suspend fun patchPrototype(
-    requestId: String?,
-    id: String,
-    baseRevision: Long?,
-    ops: JsonArray,
-  ) {
-    launchRequestScope(requestId) { prototypeController.patch(requestId, id, baseRevision, ops) }
-  }
-
-  override suspend fun inspectPrototypes(requestId: String?) {
-    launchRequestScope(requestId) { prototypeController.inspect(requestId) }
-  }
-
-  override suspend fun putPrototypeAsset(
-    requestId: String?,
-    id: String,
-    mimeType: String,
-    dataBase64: String,
-  ) {
-    launchRequestScope(requestId) {
-      prototypeAssetController.put(requestId, id, mimeType, dataBase64)
-    }
-  }
-
-  override suspend fun removePrototypeAsset(requestId: String?, id: String) {
-    launchRequestScope(requestId) { prototypeAssetController.remove(requestId, id) }
-  }
-
-  override suspend fun listPreferenceFiles(requestId: String?, packageName: String) =
-    storageController.handleListPreferenceFiles(requestId, packageName)
-
-  override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
-    storageController.handleGetPreferences(requestId, packageName, fileName)
-
-  override suspend fun resetKeystore(
-    requestId: String?,
-    packageName: String,
-    scope: String?,
-    alias: String?,
-  ) = appDiscovery.resetKeystore(requestId, packageName, scope, alias)
-
-  override suspend fun discoverKeystore(requestId: String?, packageName: String) =
-    appDiscovery.discoverKeystore(requestId, packageName)
-
-  override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) =
-    appDiscovery.discoverSdkCapabilities(requestId, packageName, userId)
-
-  override suspend fun listDataStores(
-    requestId: String?,
-    packageName: String,
-    adapterName: String,
-  ) = storageController.handleListDataStores(requestId, packageName, adapterName)
-
-  override suspend fun getDataStore(
-    requestId: String?,
-    packageName: String,
-    adapterName: String,
-    storeName: String,
-  ) = storageController.handleGetDataStore(requestId, packageName, adapterName, storeName)
-
-  override suspend fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
-    storageController.handleSubscribeStorage(requestId, packageName, fileName)
-
-  override suspend fun unsubscribeStorage(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-  ) = storageController.handleUnsubscribeStorage(requestId, packageName, fileName)
-
-  override suspend fun getPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-  ) = storageController.handleGetPreference(requestId, packageName, fileName, key)
-
-  override suspend fun setPreference(request: SetPreference) =
-    storageController.handleSetPreference(request)
-
-  override suspend fun removePreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-  ) = storageController.handleRemovePreference(requestId, packageName, fileName, key)
-
-  override suspend fun clearPreferences(requestId: String?, packageName: String, fileName: String) =
-    storageController.handleClearPreferences(requestId, packageName, fileName)
-
-  override suspend fun startRecording() {
-    // Accepted for wire compatibility; currently has no effect on the device.
-    Log.d(TAG, "Recording started")
-  }
-
-  override suspend fun stopRecording() {
-    // Accepted for wire compatibility; currently has no effect on the device.
-    Log.d(TAG, "Recording stopped")
-  }
-
-  override suspend fun requestSettingsGet(requestId: String?, namespace: String, key: String) =
-    settingsController.performSettingsRead(requestId, namespace, key)
-
-  override suspend fun requestSettingsPut(
-    requestId: String?,
-    namespace: String,
-    key: String,
-    value: String?,
-    valueType: String,
-  ) = settingsController.performSettingsWrite(requestId, namespace, key, value, valueType)
-
-  override suspend fun requestSettingsList(requestId: String?, namespace: String) =
-    settingsController.performSettingsList(requestId, namespace)
-
-  override suspend fun requestInstalledPackages(
-    requestId: String?,
-    includeSystem: Boolean,
-    userId: Int?,
-  ) = packageController.performInstalledPackages(requestId, includeSystem, userId)
-
-  override suspend fun requestPackageInfo(
-    requestId: String?,
-    packageName: String,
-    includePermissions: Boolean,
-  ) = packageController.performPackageInfo(requestId, packageName, includePermissions)
-
-  override suspend fun requestLaunchIntent(requestId: String?, packageName: String) =
-    packageController.performLaunchIntent(requestId, packageName)
 
   /** The application in front, from the accessibility windows; null when none qualifies. */
   private fun currentForegroundApp(): String? =

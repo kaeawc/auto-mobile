@@ -199,6 +199,7 @@ class AsyncActionRunnerWiringTest {
   private fun readCtrlProxySource(): String =
     listOf(
         "CtrlProxy.kt",
+        "CtrlProxyActionRouter.kt",
         "StorageController.kt",
         "DeviceInfoController.kt",
         "PermissionController.kt",

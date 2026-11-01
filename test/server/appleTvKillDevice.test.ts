@@ -10,6 +10,8 @@ import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { restartStopHarness } from "../helpers/restartStopHarness";
 import { toolJson } from "../helpers/toolResponse";
 import {
+  DEVICE_SHUTDOWN_TIMEOUT_MS,
+  isShutdownTimeoutError,
   resolveKillDeviceStableTarget,
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
@@ -46,7 +48,7 @@ function host(ios: DeviceInfo[] = []) {
     createFakeAndroidEmulator(),
     { timer },
   ).withAppleTvSimulators(new AppleTvSimulatorInventory(tv, "arm64"));
-  return { tv, killed, reads, manager, timer };
+  return { tv, killed, reads, manager, timer, simctl };
 }
 
 describe("Apple TV killDevice routing", () => {
@@ -121,6 +123,36 @@ describe("Apple TV killDevice routing", () => {
     );
     await expect(manager.killDevice(labelledIos)).rejects.toBeInstanceOf(ActionableError);
     expect(killed).toEqual([]);
+  });
+  test("a hung iOS listing times out within the shutdown budget", async () => {
+    const h = host();
+    const signals: (AbortSignal | undefined)[] = [];
+    h.simctl.listSimulatorImages = (_options, operationOptions) => {
+      signals.push(operationOptions?.signal);
+      return new Promise<DeviceInfo[]>(() => {});
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => h.manager,
+      timer: h.timer,
+    });
+    const pending = createLifecycleHandlers().killDeviceHandler({ device: labelledIos });
+    const failure = pending.catch((error: unknown) => error);
+    await Promise.resolve();
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(false);
+    expect(h.timer.getPendingTimeouts()).toEqual([DEVICE_SHUTDOWN_TIMEOUT_MS]);
+
+    h.timer.advanceTime(DEVICE_SHUTDOWN_TIMEOUT_MS);
+
+    const error = await failure;
+    expect(error).toBeInstanceOf(Error);
+    expect(isShutdownTimeoutError(error)).toBe(true);
+    if (!(error instanceof Error)) {
+      throw new TypeError("Expected a shutdown timeout error");
+    }
+    expect(error.message).toContain("to resolve platform");
+    expect(signals[0]?.aborted).toBe(true);
+    expect(h.killed).toEqual([]);
   });
   test("the handler admits, shuts down and labels a mislabelled Apple TV as tvos", async () => {
     const h = host();

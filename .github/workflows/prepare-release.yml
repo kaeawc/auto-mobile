@@ -222,6 +222,22 @@ jobs:
       APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
       APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
 
+  build-candidate-audio-loopback-helper:
+    needs: prepare-version
+    uses: ./.github/workflows/build-audio-loopback-helper.yml
+    with:
+      checkout-ref: ${{ needs.prepare-version.outputs.release_commit }}
+      upload-artifact: true
+      artifact-retention-days: 90
+    secrets:
+      MACOS_DEVELOPER_ID_CERT_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 }}
+      MACOS_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERT_PASSWORD }}
+      MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      MACOS_DEVELOPER_ID_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+
   # Ad-hoc-signed universal iOS simulator prototype agent; needs no secrets.
   build-candidate-prototype-agent:
     needs: prepare-version
@@ -306,6 +322,7 @@ jobs:
         build-candidate-protoviewer-apk,
         build-candidate-video-server-jar,
         build-candidate-screen-capture-helper,
+        build-candidate-audio-loopback-helper,
         build-candidate-prototype-agent,
         build-candidate-prototype-viewer,
         build-candidate-network-filter-identity-probe,
@@ -337,6 +354,7 @@ jobs:
           IOS_CTRL_PROXY_RUNNER_SHA256: ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
           VIDEO_JAR_SHA256: ${{ needs.build-candidate-video-server-jar.outputs.sha256 }}
           SCREEN_CAPTURE_HELPER_SHA256: ${{ needs.build-candidate-screen-capture-helper.outputs.sha256 }}
+          AUDIO_LOOPBACK_HELPER_SHA256: ${{ needs.build-candidate-audio-loopback-helper.outputs.sha256 }}
           PROTOTYPE_AGENT_SHA256: ${{ needs.build-candidate-prototype-agent.outputs.sha256 }}
           PROTOTYPE_VIEWER_SHA256: ${{ needs.build-candidate-prototype-viewer.outputs.sha256 }}
           NETWORK_FILTER_SHA256: ${{ needs.build-candidate-network-filter-identity-probe.outputs.sha256 }}
@@ -414,6 +432,7 @@ jobs:
         build-candidate-protoviewer-apk,
         build-candidate-video-server-jar,
         build-candidate-screen-capture-helper,
+        build-candidate-audio-loopback-helper,
         build-candidate-prototype-agent,
         build-candidate-prototype-viewer,
         build-candidate-protoviewer-artifact-policy,
@@ -468,6 +487,12 @@ jobs:
           name: screen-capture-helper
           path: /tmp
 
+      - name: "Download audio-loopback-helper"
+        uses: actions/download-artifact@v7
+        with:
+          name: audio-loopback-helper
+          path: /tmp
+
       - name: "Download prototype-agent"
         uses: actions/download-artifact@v7
         with:
@@ -514,6 +539,7 @@ jobs:
           bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy.ipa ios
           bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-video.jar videojar
           bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/audio-loopback-helper-macos-universal.zip audioloopbackhelper
           bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobilePrototypeAgent.dylib prototypeagent
           bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobilePrototypeViewer.zip prototypeviewer
           # Structural prototype-agent checks (lipo/vtool/codesign) run in the macOS builder
@@ -569,7 +595,7 @@ jobs:
             --arg tag_sha "$TAG_SHA" \
             --arg prepare_run_id "$PREPARE_RUN_ID" \
             '{tag: $tag, tag_sha: $tag_sha, prepare_run_id: $prepare_run_id,
-              artifacts: ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
+              artifacts: ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "audio-loopback-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
             > /tmp/release-artifact-provenance.json
 
       - name: Upload release artifact provenance

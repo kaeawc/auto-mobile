@@ -188,7 +188,7 @@ jobs:
             '.tag == $tag
               and .tag_sha == $tag_sha
               and .prepare_run_id == $prepare_run_id
-              and .artifacts == ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]' \
+              and .artifacts == ["control-proxy-apk", "protoviewer-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "audio-loopback-helper", "prototype-agent", "prototype-viewer", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]' \
             /tmp/release-artifact-provenance.json >/dev/null
 
       - name: "Download CtrlProxy APK"
@@ -231,6 +231,15 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: screen-capture-helper
+          path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
+
+      - name: "Download audio-loopback-helper"
+        uses: actions/download-artifact@v7
+        with:
+          name: audio-loopback-helper
           path: /tmp
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
@@ -326,6 +335,7 @@ jobs:
               ipa: entry.ipaSha256,
               video_jar: entry.videoJarSha256,
               screen_capture_helper: entry.screenCaptureHelperSha256,
+              audio_loopback_helper: entry.audioLoopbackHelperSha256,
               prototype_agent: entry.prototypeAgentSha256,
               prototype_viewer: entry.prototypeViewerSha256,
               network_filter: entry.networkFilterSha256,
@@ -425,6 +435,7 @@ jobs:
             /tmp/control-proxy.ipa
             /tmp/automobile-video.jar
             /tmp/screen-capture-helper-macos-universal.zip
+            /tmp/audio-loopback-helper-macos-universal.zip
             /tmp/AutoMobilePrototypeAgent.dylib
             /tmp/AutoMobilePrototypeViewer.zip
             /tmp/automobile-network-filter-macos-universal.zip

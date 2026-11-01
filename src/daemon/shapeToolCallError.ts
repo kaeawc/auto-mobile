@@ -43,6 +43,7 @@ import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import { SdkTooOldError } from "../models/SdkTooOldError";
 import { AppNotRunningError } from "../models/AppNotRunningError";
+import { SnapshotFixtureRefusedError } from "../models/SnapshotFixtureRefusedError";
 import { InputDeviceOwnedError } from "./inputDeviceOwnership";
 import { DeviceGestureRecordingStartUnheldError } from "./deviceGestureRecordingStartAdmission";
 import { DeviceOutsideBrokerGrantError } from "./sessionBroker/connectionRefusal";
@@ -185,6 +186,7 @@ function hasSelfDescribedRefusalPayload(
   | DeviceGestureRecordingStartUnheldError
   | OrphanRecorderActiveError
   | AppNotRunningError
+  | SnapshotFixtureRefusedError
   | DirectSessionNotActiveError
   | SdkTooOldError
   | BindingRegistrySchemaUnsupportedError
@@ -209,6 +211,7 @@ function hasSelfDescribedRefusalPayload(
     DeviceGestureRecordingStartUnheldError,
     OrphanRecorderActiveError,
     AppNotRunningError,
+    SnapshotFixtureRefusedError,
     DirectSessionNotActiveError,
     SdkTooOldError,
     BindingRegistrySchemaUnsupportedError,

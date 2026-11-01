@@ -2905,6 +2905,10 @@
             "type": "string"
           }
         },
+        "fixture": {
+          "description": "Android emulator VM snapshots only. On capture, record the AVD, system image, config, emulator version and userdata image the snapshot depends on. On restore, require a fixture; a fixture whose identity changed is refused with its reasons either way",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios", "tvos"]

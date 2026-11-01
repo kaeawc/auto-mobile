@@ -66,6 +66,7 @@ export function registerSnapshotTools() {
           snapshotName: args.snapshotName,
           useVmSnapshot: args.useVmSnapshot,
           vmSnapshotTimeoutMs: args.vmSnapshotTimeoutMs,
+          fixture: args.fixture,
         });
         const failures = result.failures ?? [];
         const success = result.success !== false && failures.length === 0;

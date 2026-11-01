@@ -1,3 +1,5 @@
+import type { FixtureIdentity } from "./FixtureIdentity";
+
 export type DeviceSnapshotType = "vm" | "adb" | "simctl" | "app_data";
 
 /**
@@ -65,6 +67,11 @@ export interface DeviceSnapshotManifest {
      */
     bundleStatuses?: IosBundleCaptureStatus[];
   };
+  /**
+   * Present on a snapshot captured as a fixture (#14065): what the emulator VM snapshot depends
+   * on, checked before every reload.
+   */
+  fixture?: FixtureIdentity;
 }
 
 export interface DeviceSnapshotConfig {

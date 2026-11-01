@@ -129,6 +129,42 @@ stays valid. If you subscribed to the old device-session UUID, you receive
 `reason: "superseded-by-restore"`, followed by `device_session_started`; subscribe
 again with the new UUID. Settings-only restores omit this field.
 
+### Fixtures
+
+Capture with `fixture: true` to keep an Android emulator VM snapshot as a
+reusable fixture, for example a device state that took a long setup to reach.
+The snapshot then records what it depends on: the AVD, its system image and
+hardware config, the emulator version, and its userdata image. A fixture must
+be an emulator VM snapshot: on a physical device, an iOS simulator, or with
+`useVmSnapshot: false`, the capture is refused with
+`fixture_requires_vm_snapshot` and nothing is saved.
+
+Every restore of a fixture checks those inputs first. If any changed, the
+restore is refused and the device is left as it was:
+
+```json
+{
+  "success": false,
+  "code": "fixture_invalidated",
+  "snapshotName": "signed-in",
+  "retryable": false,
+  "reasons": ["userdata-wiped"]
+}
+```
+
+| Reason                     | What changed                                                   |
+| -------------------------- | -------------------------------------------------------------- |
+| `system-image-changed`     | The AVD's system image package or its installed revision       |
+| `avd-config-changed`       | The AVD's hardware config                                      |
+| `emulator-version-changed` | The installed emulator                                         |
+| `userdata-wiped`           | The userdata image was re-created, for example by `-wipe-data` |
+| `avd-changed`              | The AVD itself                                                 |
+
+Capture the fixture again with `fixture: true` to replace it. Pass
+`fixture: true` on restore to require a fixture: a snapshot captured without it
+is refused with `snapshot_not_a_fixture`, and `useVmSnapshot: false` with
+`fixture_requires_vm_snapshot`.
+
 ### Archive size, eviction, and reclaim
 
 The archive resource `automobile:deviceSnapshots/archive` reports what the

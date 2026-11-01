@@ -68,11 +68,27 @@ function matches(element: Element, options: TapOnElementOptions): boolean {
   );
 }
 
+interface TargetIdentity {
+  key: string;
+  ordinal: number;
+  count: number;
+}
+
+function identityKey(element: Element): string {
+  return JSON.stringify([
+    element["resource-id"],
+    element["view-id"],
+    element.text,
+    element.className,
+  ]);
+}
+
 async function readFocusAndTarget(
   client: TvosRunnerClient,
   options: TapOnElementOptions,
   signal?: AbortSignal,
-): Promise<{ focus: Element; target: Element }> {
+  identity?: TargetIdentity,
+): Promise<{ focus: Element; target: Element; identity: TargetIdentity }> {
   const hierarchy = normalizeTvosHierarchy(await client.hierarchy(signal));
   signal?.throwIfAborted();
   const all = new DefaultElementParser()
@@ -90,15 +106,23 @@ async function readFocusAndTarget(
       matches(element, options)
     );
   });
-  const target = candidates
-    .map((element, order) => ({
-      element,
-      windowRank: 0,
-      area: boundsArea(element.bounds),
-      order,
-      interactive: false,
-    }))
-    .sort(compareSelectionRank)[options.index ?? 0]?.element;
+  const peers = identity ? all.filter((element) => identityKey(element) === identity.key) : [];
+  if (identity && peers.length !== identity.count) {
+    throw new ActionableError(
+      "The tvOS tapOn target disappeared or became ambiguous; observe and retry with its current identifier or exact text.",
+    );
+  }
+  const target = identity
+    ? peers[identity.ordinal]
+    : candidates
+        .map((element, order) => ({
+          element,
+          windowRank: 0,
+          area: boundsArea(element.bounds),
+          order,
+          interactive: false,
+        }))
+        .sort(compareSelectionRank)[options.index ?? 0]?.element;
   if (!target) {
     throw new ActionableError(
       "No tvOS element matched; observe and check the identifier, exact text or index.",
@@ -110,7 +134,18 @@ async function readFocusAndTarget(
       "Nothing is focused on tvOS; use pressButton to establish focus and observe before retrying tapOn.",
     );
   }
-  return { focus, target };
+  // Bounds and focus change during navigation; identical peers retain hierarchy order.
+  const key = identityKey(target);
+  const targetPeers = all.filter((element) => identityKey(element) === key);
+  return {
+    focus,
+    target,
+    identity: identity ?? {
+      key,
+      ordinal: targetPeers.indexOf(target),
+      count: targetPeers.length,
+    },
+  };
 }
 
 function describe(element: Element): string {
@@ -129,9 +164,12 @@ export async function tvosTapOn(
   const client = tvosRunners.require(deviceId);
   const blocked = new Map<string, Set<Direction>>();
   let previous: { key: string; direction: Direction } | undefined;
+  let identity: TargetIdentity | undefined;
   for (let moves = 0; ; moves++) {
     signal?.throwIfAborted();
-    const { focus, target } = await readFocusAndTarget(client, options, signal);
+    const state = await readFocusAndTarget(client, options, signal, identity);
+    const { focus, target } = state;
+    identity = state.identity;
     if (sameBounds(focus, target)) {
       await client.request({ type: "request_press_button", action: "select" }, signal);
       return { success: true, action: "tap", element: target };

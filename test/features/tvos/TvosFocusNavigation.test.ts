@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { FakeTvosRunnerClient } from "../../fakes/FakeTvosRunnerClient";
 import { tvosTapOn } from "../../../src/features/tvos/TvosFocusNavigation";
 import { tvosRunners } from "../../../src/features/tvos/TvosRunnerRegistry";
 import type { TvosCommand, TVRemoteButton } from "../../../src/features/tvos/TvosRunnerClient";
@@ -15,6 +19,74 @@ beforeEach(() => {
 afterEach(() => unregister());
 const hierarchy: TvosCommand = { type: "request_hierarchy" };
 const press = (action: TVRemoteButton): TvosCommand => ({ type: "request_press_button", action });
+
+interface ReplayNode {
+  "resource-id"?: string;
+  text?: string;
+  focused?: string;
+  node?: ReplayNode[];
+}
+
+class CaptureReplayClient extends FakeTvosRunnerClient {
+  private reads = 0;
+  private readonly snapshots;
+
+  constructor(vanish = false) {
+    const snapshots = ["focus-field", "focus-b01"].map((name, index) => {
+      const capture: { data: { hierarchy: ReplayNode } } = JSON.parse(
+        readFileSync(
+          path.join(
+            import.meta.dir,
+            "../../fixtures/tvos-xcuitest",
+            `tvos-runner-hierarchy-${name}.json`,
+          ),
+          "utf8",
+        ),
+      );
+      const adapt = (node: ReplayNode): void => {
+        if (["B01", "B02"].includes(node["resource-id"] ?? "")) {
+          node.text = "Repeated";
+        }
+        if (vanish && index === 1) {
+          if (node["resource-id"] === "B02") {
+            node.focused = "true";
+          }
+          node.node = node.node?.filter((child) => child["resource-id"] !== "B01");
+        }
+        node.node?.forEach(adapt);
+      };
+      adapt(capture.data.hierarchy);
+      return new FakeTvosRunnerClient(capture.data).tree;
+    });
+    super(snapshots[0]);
+    this.snapshots = snapshots;
+  }
+
+  override async hierarchy(signal?: AbortSignal) {
+    await super.hierarchy(signal);
+    return this.snapshots[Math.min(this.reads++, this.snapshots.length - 1)];
+  }
+}
+
+test("keeps the ranked target when focus enlarges it in captured hierarchies", async () => {
+  unregister();
+  const replay = new CaptureReplayClient();
+  unregister = tvosRunners.register(deviceId, replay);
+  const result = await tvosTapOn(deviceId, { action: "tap", text: "Repeated", index: 0 });
+  expect(replay.commands).toEqual([hierarchy, press("down"), hierarchy, press("select")]);
+  expect(result.element?.["resource-id"]).toBe("B01");
+  expect(result.element?.bounds).toEqual({ left: 901, top: 490, right: 1020, bottom: 564 });
+});
+
+test("fails instead of retargeting when the captured target disappears", async () => {
+  unregister();
+  const replay = new CaptureReplayClient(true);
+  unregister = tvosRunners.register(deviceId, replay);
+  const result = tvosTapOn(deviceId, { action: "tap", text: "Repeated", index: 0 });
+  await expect(result).rejects.toBeInstanceOf(ActionableError);
+  await expect(result).rejects.toThrow("target disappeared or became ambiguous");
+  expect(replay.commands).toEqual([hierarchy, press("down"), hierarchy]);
+});
 
 test.each([
   ["B02", ["right"]],

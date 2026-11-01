@@ -27,7 +27,7 @@ function validateEnsureCheckedSchema(
   value: Pick<TapOnArgs, "ensureChecked" | "action" | "selectionStrategy">,
   ctx: z.RefinementCtx,
 ): void {
-  if (value.ensureChecked !== undefined && value.action !== "tap") {
+  if (value.ensureChecked !== undefined && (value.action ?? "tap") !== "tap") {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'ensureChecked requires action "tap"',
@@ -61,8 +61,8 @@ export const tapOnSchema = withJsonSchemaOverride(
           ),
         action: z
           .enum(["tap", "doubleTap", "longPress", "focus"])
-          .default("tap")
-          .describe("Action type (default: tap)"),
+          .optional()
+          .describe("Action type (default: longPress with positive duration, otherwise tap)"),
         selectionStrategy: resolverSelectionStrategySchema
           .optional()
           .describe(
@@ -86,7 +86,7 @@ export const tapOnSchema = withJsonSchemaOverride(
           .max(LONG_PRESS_HARD_MAX_MS, `longPress duration must be <= ${LONG_PRESS_HARD_MAX_MS} ms`)
           .optional()
           .describe(
-            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom; 0 or omitted uses the platform default)`,
+            `Long press duration (ms; maximum ${LONG_PRESS_HARD_MAX_MS}; must fit the remaining request budget including 2000 ms dispatch headroom). Positive duration without action means longPress; positive duration with action tap is refused. For longPress, 0 or omitted uses the platform default.`,
           ),
         subtext: z
           .object({
@@ -165,9 +165,11 @@ export const tapOnSchema = withJsonSchemaOverride(
       "accessibilityLink and subtext cannot be used together",
       ["subtext"],
     );
-    addIssue(value.action !== "tap", "semantic link activation supports only the tap action", [
-      "action",
-    ]);
+    addIssue(
+      (value.action ?? "tap") !== "tap",
+      "semantic link activation supports only the tap action",
+      ["action"],
+    );
     addIssue(value.sibling, "semantic link activation cannot use sibling", ["sibling"]);
     addIssue(
       value.retryIfNoChange || value.ensureTap,

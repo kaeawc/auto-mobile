@@ -9,4 +9,3 @@ export {
   adaptWatchSessionDeviceCatalog,
   readWatchSessionDeviceCatalog,
 } from "./watchCatalogAdapter";
-export type { WatchNativeCatalogReader } from "./watchCatalogAdapter";

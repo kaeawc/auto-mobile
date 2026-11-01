@@ -9,7 +9,6 @@ import { iosDeviceResourceCatalog } from "./iosDeviceResourceCatalog";
 
 export type {
   DisabledIosDeviceResource,
-  ImpactConfidence,
   ImpactItem,
   IosDeviceResourceImpact,
 } from "../models/DeviceResourceImpact";

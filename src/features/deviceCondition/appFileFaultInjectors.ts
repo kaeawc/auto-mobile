@@ -39,9 +39,6 @@ import {
  * directory. Both steps force-stop the app, so it does not hold the file open or write it back.
  */
 
-/** Keys this module owns, under the `faults.` prefix of the deviceCondition surface. */
-export const APP_FILE_FAULT_KEYS = ["faults.corruptAppFile"] as const;
-
 export const CORRUPT_MODES = ["overwrite", "truncate"] as const;
 
 /** Bytes zeroed at the start of the file by `overwrite`, enough to destroy a SQLite header. */

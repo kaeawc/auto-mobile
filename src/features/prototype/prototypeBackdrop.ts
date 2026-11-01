@@ -27,7 +27,6 @@ export const PROTOTYPE_BACKDROP_MATERIALS = [
   "thick",
   "glass",
 ] as const;
-export type PrototypeBackdropMaterial = (typeof PROTOTYPE_BACKDROP_MATERIALS)[number];
 
 export const MAX_PROTOTYPE_BACKDROP_BLUR_DP = 150;
 

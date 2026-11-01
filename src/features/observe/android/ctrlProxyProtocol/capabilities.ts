@@ -517,7 +517,5 @@ export const PROTOTYPE_SEMANTICS_CAPABILITY = "prototype_semantics_v1";
 
 export const PROTOTYPE_FORMAT_CAPABILITY = "prototype_format_v1";
 
-export const PROTOTYPE_PLATFORM_CLIPBOARD_CAPABILITY = "prototype_platform_clipboard_v1";
-
 /** Native adaptive pane and navigation layouts. */
 export const PROTOTYPE_ADAPTIVE_CAPABILITY = "prototype_adaptive_v1";

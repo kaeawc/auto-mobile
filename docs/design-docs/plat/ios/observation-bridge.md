@@ -145,8 +145,10 @@ and the keyboard stay observable. Each visible bridge node maps onto the existin
 shared selector schema and resolver match it unchanged. XCTest leaves with the same bounds and the
 same label or id as a bridge node are removed as duplicates. Bridge nodes carry `sdk.source:
 sdkBridge` in `extras`. The result reports `backend: sdk`, or `backend: xctest` with
-`fallbackReason: unavailable` when a registered bridge did not answer. A failed discovery probe
-reports neither.
+`fallbackReason: unavailable` when a registered bridge did not answer or reported a
+`coordinateSpace` other than `screen`. Window- or view-relative bounds would put a bridge node at
+the wrong screen point for a tap that falls back to XCTest, so such a snapshot is not merged and the
+XCTest hierarchy is left unchanged. A failed discovery probe reports neither.
 
 **Observe: web views.** When the projected hierarchy contains exactly one outermost `WKWebView`,
 the collector also reads the app's opted-in web views with one unnamed snapshot read (2 s budget),

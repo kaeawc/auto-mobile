@@ -106,7 +106,6 @@ export {
 export {
   MAX_ANDROID_DENSITY_DPI,
   MIN_ANDROID_DENSITY_DPI,
-  type DensityBucket,
   type DensityInput,
 } from "./androidDensityCommand";
 

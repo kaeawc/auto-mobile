@@ -5,7 +5,6 @@ export {
   type DecodedEncodedVideo,
   type MalformedFrameError,
 } from "./frameProtocol";
-export { type FrameQueueMetrics } from "./LatestFrameQueue";
 export {
   IosScreenCaptureHelper,
   parseCaptureIdleMarker,

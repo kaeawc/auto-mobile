@@ -183,7 +183,9 @@ export function mergeIosSdkObservation(
   observation: IosSdkObservation,
 ): IosSdkMergeSummary | null {
   const appNode = hierarchy.hierarchy?.node;
-  if (!appNode || !observation.root) {
+  // Window- or view-relative bounds copied into this screen-space tree would make a tap that falls
+  // back to XCTest hit the wrong point, so only screen-space observations merge (#15819).
+  if (!appNode || !observation.root || observation.coordinateSpace !== "screen") {
     return null;
   }
   const bridgeRoot = convertNode(observation.root, observation.captureIdentity);

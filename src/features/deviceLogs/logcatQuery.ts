@@ -11,8 +11,6 @@ export type LogcatPriority = (typeof LOGCAT_PRIORITIES)[number];
 export const LOGCAT_BUFFERS = ["main", "system", "crash", "events"] as const;
 export type LogcatBuffer = (typeof LOGCAT_BUFFERS)[number];
 
-export const DEFAULT_LOGCAT_BUFFERS: readonly LogcatBuffer[] = ["main", "crash"];
-
 export interface LogLine {
   /** `MM-DD HH:MM:SS.mmm` as logcat prints it, in the device's time zone. */
   timestamp: string;

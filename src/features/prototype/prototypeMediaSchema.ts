@@ -17,7 +17,6 @@ export const prototypeMediaSourceSchema = z.union([
   z.object({ data: pointerSchema }).strict(),
   z.object({ sample: z.enum(PROTOTYPE_MEDIA_SAMPLES) }).strict(),
 ]);
-export type PrototypeMediaSource = z.infer<typeof prototypeMediaSourceSchema>;
 
 export const prototypeMediaSchema = z
   .object({
@@ -40,7 +39,6 @@ export const prototypeMediaSchema = z
       ),
   })
   .strict();
-export type PrototypeMedia = z.infer<typeof prototypeMediaSchema>;
 
 /** A nonblank string kept as authored: trimming would change ids after their semantic checks. */
 const nonblank = (max: number) =>

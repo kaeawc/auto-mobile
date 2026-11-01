@@ -92,5 +92,3 @@ export function registerElicitationRecorder(recorder: ElicitationRecorder): void
 export const defaultElicitationRecorder: ElicitationRecorder = {
   record: (record) => registered.record(record),
 };
-
-export const noopElicitationRecorder: ElicitationRecorder = { record: () => {} };

@@ -19,7 +19,7 @@ export const IOS_SDK_WEB_SOURCE = "sdkWebBridge";
 export const WEB_VIEW_ID_ATTRIBUTE = "web-view-id";
 export { WEB_SNAPSHOT_ID_ATTRIBUTE };
 export const WEB_ELEMENT_ID_ATTRIBUTE = "web-element-id";
-export const WEB_ORIGIN_ATTRIBUTE = "web-origin";
+const WEB_ORIGIN_ATTRIBUTE = "web-origin";
 /** The page document the element's snapshot came from; element ids are unique only within one. */
 export const WEB_DOCUMENT_ID_ATTRIBUTE = "web-document-id";
 /** The element's DOM role (its ARIA role, else its tag), kept where a replaced leaf's class wins. */

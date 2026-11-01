@@ -33,7 +33,6 @@ export const REBIND_BIND_WAIT_BUDGET_MS = 8_000;
  * request signal may already have aborted, so they need a cap of their own.
  */
 export const REBIND_MUTATION_COMMAND_TIMEOUT_MS = 5_000;
-export const REBIND_MUTATION_COMMAND_TIMEOUT_MAX_MS = 30_000;
 type RebindFlightKind = "check" | "force";
 interface RebindPlan {
   withoutCtrlProxy: string;

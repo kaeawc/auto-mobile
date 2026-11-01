@@ -94,7 +94,6 @@ export const prototypeRequiresSchema = z
     background: z.array(z.enum(backgroundNames)).min(1).max(8).optional(),
   })
   .strict();
-export type PrototypeRequires = z.infer<typeof prototypeRequiresSchema>;
 
 export const prototypePlatformHandlersSchema = z
   .object({

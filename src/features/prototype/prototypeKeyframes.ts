@@ -1,11 +1,8 @@
 import { z } from "zod";
-import contract from "../../../schemas/prototype-spec-contract.json";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { record, type Raw } from "./prototypeTemplate";
 import { isPrototypeDataPointer, resolvePrototypeDataPointer } from "./prototypeData";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
-
-export const MAX_PROTOTYPE_KEYFRAME_NODES = contract.limits.MAX_PROTOTYPE_KEYFRAME_NODES;
 
 export const PROTOTYPE_KEYFRAME_REST = {
   scale: 1,

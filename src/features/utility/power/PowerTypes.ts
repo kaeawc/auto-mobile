@@ -41,8 +41,6 @@ const batteryInputSchema = z
     message: "power.battery.reset cannot be combined with level or charging",
   });
 
-export const THERMAL_STATUS_VALUES = [0, 1, 2, 3, 4, 5, 6] as const;
-
 /** `setDeviceState.power` (#14084): the power-constraint state production bugs hide behind. */
 export const powerInputSchema = z
   .object({

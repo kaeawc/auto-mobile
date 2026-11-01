@@ -1,5 +1,5 @@
 import { sessionBrokerHostLock, type SessionBrokerHostLock } from "./serviceHostLock";
-export { sessionBrokerHostLock, type SessionBrokerHostLock } from "./serviceHostLock";
+export { type SessionBrokerHostLock } from "./serviceHostLock";
 import { nativeCatalogReader } from "./serviceCatalog";
 import {
   resolveAvdSnapshotCleanupPorts,

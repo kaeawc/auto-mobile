@@ -25,9 +25,6 @@ import { createSerializer, rejectValue, shell, unsupported } from "./injectorSup
  * they are not part of this enum-valued surface yet.
  */
 
-/** Keys this module owns, under the `faults.` prefix of the deviceCondition surface. */
-export const STORAGE_FAULT_KEYS = ["faults.storage"] as const;
-
 const MIB = 1024 * 1024;
 
 /** Free space left on `/data` for each value. `full` leaves just enough for the system to keep running. */

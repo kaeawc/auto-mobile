@@ -291,7 +291,6 @@ const captureAudioTool = defineDeviceTool({
 });
 
 export const injectAudioInputSchema = injectAudioInputTool.schema;
-export const stopAudioInputSchema = stopAudioInputTool.schema;
 export const captureAudioSchema = captureAudioTool.schema;
 
 export function registerAudioTools(deps: AudioToolDependencies = {}): void {

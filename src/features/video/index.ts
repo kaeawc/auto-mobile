@@ -10,5 +10,4 @@ export type {
   ActiveVideoRecording,
 } from "./VideoRecorderService";
 export { DEFAULT_VIDEO_RECORDING_CONFIG, parseVideoRecordingConfig } from "./VideoRecorderService";
-export { HybridVideoCaptureBackend } from "./HybridVideoCaptureBackend";
 export { createRecordingCaptureBackend } from "./defaultAudioTrackDependencies";

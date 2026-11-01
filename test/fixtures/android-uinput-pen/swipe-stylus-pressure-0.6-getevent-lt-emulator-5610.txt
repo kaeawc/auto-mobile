@@ -1,0 +1,138 @@
+add device 1: /dev/input/event11
+  name:     "virtio_input_multi_touch_11"
+add device 2: /dev/input/event10
+  name:     "virtio_input_multi_touch_10"
+add device 3: /dev/input/event9
+  name:     "virtio_input_multi_touch_9"
+add device 4: /dev/input/event8
+  name:     "virtio_input_multi_touch_8"
+add device 5: /dev/input/event7
+  name:     "virtio_input_multi_touch_7"
+add device 6: /dev/input/event6
+  name:     "virtio_input_multi_touch_6"
+add device 7: /dev/input/event5
+  name:     "virtio_input_multi_touch_5"
+add device 8: /dev/input/event4
+  name:     "virtio_input_multi_touch_4"
+add device 9: /dev/input/event3
+  name:     "virtio_input_multi_touch_3"
+add device 10: /dev/input/event2
+  name:     "virtio_input_multi_touch_2"
+add device 11: /dev/input/event1
+  name:     "virtio_input_multi_touch_1"
+add device 12: /dev/input/event0
+  name:     "gpio-keys"
+add device 13: /dev/input/event12
+  name:     "automobile-pen"
+[     137.572713] /dev/input/event12: EV_KEY       BTN_DIGI             DOWN                
+[     137.572713] /dev/input/event12: EV_KEY       BTN_TOUCH            DOWN                
+[     137.572713] /dev/input/event12: EV_ABS       ABS_X                0000012c            
+[     137.572713] /dev/input/event12: EV_ABS       ABS_Y                00000578            
+[     137.572713] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000999            
+[     137.572713] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.591242] /dev/input/event12: EV_ABS       ABS_Y                0000056e            
+[     137.591242] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.605521] /dev/input/event12: EV_ABS       ABS_Y                00000564            
+[     137.605521] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.622510] /dev/input/event12: EV_ABS       ABS_Y                0000055a            
+[     137.622510] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.638583] /dev/input/event12: EV_ABS       ABS_Y                00000550            
+[     137.638583] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.654500] /dev/input/event12: EV_ABS       ABS_Y                00000546            
+[     137.654500] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.671446] /dev/input/event12: EV_ABS       ABS_Y                0000053c            
+[     137.671446] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.687419] /dev/input/event12: EV_ABS       ABS_Y                00000532            
+[     137.687419] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.703641] /dev/input/event12: EV_ABS       ABS_Y                00000528            
+[     137.703641] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.718173] /dev/input/event12: EV_ABS       ABS_Y                0000051e            
+[     137.718173] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.733700] /dev/input/event12: EV_ABS       ABS_Y                00000514            
+[     137.733700] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.751318] /dev/input/event12: EV_ABS       ABS_Y                0000050a            
+[     137.751318] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.766936] /dev/input/event12: EV_ABS       ABS_Y                00000500            
+[     137.766936] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.782495] /dev/input/event12: EV_ABS       ABS_Y                000004f6            
+[     137.782495] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.802090] /dev/input/event12: EV_ABS       ABS_Y                000004ec            
+[     137.802090] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.817376] /dev/input/event12: EV_ABS       ABS_Y                000004e2            
+[     137.817376] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.831952] /dev/input/event12: EV_ABS       ABS_Y                000004d8            
+[     137.831952] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.846643] /dev/input/event12: EV_ABS       ABS_Y                000004ce            
+[     137.846643] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.864990] /dev/input/event12: EV_ABS       ABS_Y                000004c4            
+[     137.864990] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.878700] /dev/input/event12: EV_ABS       ABS_Y                000004ba            
+[     137.878700] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.901559] /dev/input/event12: EV_ABS       ABS_Y                000004b0            
+[     137.901559] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.913221] /dev/input/event12: EV_ABS       ABS_Y                000004a6            
+[     137.913221] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.926266] /dev/input/event12: EV_ABS       ABS_Y                0000049c            
+[     137.926266] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.952763] /dev/input/event12: EV_ABS       ABS_Y                00000492            
+[     137.952763] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.959375] /dev/input/event12: EV_ABS       ABS_Y                00000488            
+[     137.959375] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.974889] /dev/input/event12: EV_ABS       ABS_Y                0000047e            
+[     137.974889] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     137.990040] /dev/input/event12: EV_ABS       ABS_Y                00000474            
+[     137.990040] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.005951] /dev/input/event12: EV_ABS       ABS_Y                0000046a            
+[     138.005951] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.021395] /dev/input/event12: EV_ABS       ABS_Y                00000460            
+[     138.021395] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.040651] /dev/input/event12: EV_ABS       ABS_Y                00000456            
+[     138.040651] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.054958] /dev/input/event12: EV_ABS       ABS_Y                0000044c            
+[     138.054958] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.071790] /dev/input/event12: EV_ABS       ABS_Y                00000442            
+[     138.071790] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.086962] /dev/input/event12: EV_ABS       ABS_Y                00000438            
+[     138.086962] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.107147] /dev/input/event12: EV_ABS       ABS_Y                0000042e            
+[     138.107147] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.117850] /dev/input/event12: EV_ABS       ABS_Y                00000424            
+[     138.117850] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.135237] /dev/input/event12: EV_ABS       ABS_Y                0000041a            
+[     138.135237] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.153129] /dev/input/event12: EV_ABS       ABS_Y                00000410            
+[     138.153129] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.165681] /dev/input/event12: EV_ABS       ABS_Y                00000406            
+[     138.165681] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.182042] /dev/input/event12: EV_ABS       ABS_Y                000003fc            
+[     138.182042] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.201543] /dev/input/event12: EV_ABS       ABS_Y                000003f2            
+[     138.201543] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.217302] /dev/input/event12: EV_ABS       ABS_Y                000003e8            
+[     138.217302] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.230065] /dev/input/event12: EV_ABS       ABS_Y                000003de            
+[     138.230065] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.246493] /dev/input/event12: EV_ABS       ABS_Y                000003d4            
+[     138.246493] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.261757] /dev/input/event12: EV_ABS       ABS_Y                000003ca            
+[     138.261757] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.280316] /dev/input/event12: EV_ABS       ABS_Y                000003c0            
+[     138.280316] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.295312] /dev/input/event12: EV_ABS       ABS_Y                000003b6            
+[     138.295312] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.309782] /dev/input/event12: EV_ABS       ABS_Y                000003ac            
+[     138.309782] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.326923] /dev/input/event12: EV_ABS       ABS_Y                000003a2            
+[     138.326923] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.341752] /dev/input/event12: EV_ABS       ABS_Y                00000398            
+[     138.341752] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.359197] /dev/input/event12: EV_ABS       ABS_Y                0000038e            
+[     138.359197] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.373695] /dev/input/event12: EV_ABS       ABS_Y                00000384            
+[     138.373695] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.374881] /dev/input/event12: EV_KEY       BTN_TOUCH            UP                  
+[     138.374881] /dev/input/event12: EV_ABS       ABS_PRESSURE         00000000            
+[     138.374881] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+[     138.374881] /dev/input/event12: EV_KEY       BTN_DIGI             UP                  
+[     138.374881] /dev/input/event12: EV_SYN       SYN_REPORT           00000000            
+remove device 13: /dev/input/event12

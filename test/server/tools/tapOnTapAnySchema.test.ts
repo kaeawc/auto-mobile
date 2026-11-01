@@ -304,6 +304,33 @@ describe("tapOn schema", () => {
 });
 
 describe("tapAny schema", () => {
+  describe("schema inferred action", () => {
+    test("refuses inferred longPress duration 499 below the minimum", () => {
+      expect(
+        zodIssues(() => tapAnySchema.parse({ platform: "android", duration: 499 })),
+      ).toContainEqual(
+        expect.objectContaining({
+          code: "custom",
+          path: ["duration"],
+          message: "longPress duration must be 0 (platform default) or at least 500 ms",
+        }),
+      );
+    });
+
+    test.each([0, 500, undefined])("accepts duration %s", (duration) => {
+      expect(tapAnySchema.safeParse({ platform: "android", duration }).success).toBe(true);
+    });
+  });
+
+  test.each([0, 1, 200, 499, 500, undefined])(
+    "accepts explicit longPress duration %s",
+    (duration) => {
+      expect(
+        tapAnySchema.safeParse({ platform: "android", action: "longPress", duration }).success,
+      ).toBe(true);
+    },
+  );
+
   test("infers longPress when only duration is given", () => {
     expect(tapAnySchema.parse({ platform: "android", duration: 800 })).toMatchObject({
       action: "longPress",

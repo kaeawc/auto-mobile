@@ -9,7 +9,9 @@ import { TapSemanticLinks } from "./TapSemanticLinks";
 import { TapTargetResolver } from "./TapTargetResolver";
 import { type TapFocusFailure } from "./tapTargetSupport";
 import { TapElementFinder } from "./tapElementFinder";
-import { TapPointPlanner } from "./tapPointPlanner";
+import { TapPointPlanner, type PrototypeTapAgentConnections } from "./tapPointPlanner";
+import { prototypeAgentRegistry } from "../prototype/ios/prototypeAgentInjection";
+import { prototypeViewerConnections } from "../prototype/ios/prototypeViewerAttach";
 import { FocusVerifier } from "./tapFocusVerifier";
 import { PostTapSettler } from "./tapPostTapSettler";
 import { withObservationReadScope } from "../observe/observationReadScope";
@@ -69,6 +71,7 @@ import { tapPlatformTraits, type TapPlatformTraits } from "./strategies/tapPlatf
  * Dependencies for TapOnElement that can be injected for testing.
  */
 export interface TapOnElementDependencies extends DisplayFenceDependencies {
+  prototypeAgents?: PrototypeTapAgentConnections;
   displayTransitions?: DisplayTransitionReader &
     Pick<DisplayTransitionTracker, "checkIdentity" | "record">;
   lastRenderedObservation?: RenderedObservationReader;
@@ -333,7 +336,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     device: this.device,
     geometry: () => this.geometry,
     strategy: () => this.strategy,
+    prototypeAgents: { get: (deviceId, bundleId) => this.prototypeAgents.get(deviceId, bundleId) },
   });
+  private readonly prototypeAgents: PrototypeTapAgentConnections;
   private readonly finder = new TapElementFinder({
     device: this.device,
     elementSelector: () => this.elementSelector,
@@ -397,6 +402,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     });
     this.refreshedDisplayTransitions = options.displayTransitions ?? displayTransitions;
     this.lastRenderedObservation = options.lastRenderedObservation;
+    this.prototypeAgents = options.prototypeAgents ?? {
+      get: (deviceId, bundleId) =>
+        prototypeViewerConnections.get(deviceId, bundleId) ??
+        prototypeAgentRegistry.getRecord(deviceId, bundleId)?.client,
+    };
     this.waitForCondition =
       options.waitForCondition ?? new RealWaitForCondition(this.observeScreen, this.timer);
     this.geometry = new DefaultElementGeometry();

@@ -145,8 +145,9 @@ recorded. When `AUTOMOBILE_EMULATOR_ARGS` redirects the userdata image with
 `-data`, the fixture tracks that image.
 
 Every restore of a fixture checks those inputs first, settings-only restores
-included. If any changed, the restore is refused and the device is left as it
-was:
+included. If any changed, the restore is refused, the device is left as it
+was, and the fixture is removed. Its in-AVD snapshot is deleted then, or once
+its emulator next runs:
 
 ```json
 {
@@ -170,6 +171,27 @@ Capture the fixture again with `fixture: true` to replace it. Pass
 `fixture: true` on restore to require a fixture: a snapshot captured without it
 is refused with `snapshot_not_a_fixture`, and `useVmSnapshot: false` with
 `fixture_requires_vm_snapshot`.
+
+A fixture persists across sessions. VM retention (`maxVmSnapshotsPerAvd`,
+`maxVmArchiveSizeMb`) neither evicts it nor counts it. It is removed only when
+it is invalidated, when you delete it, or when `deleteDevice` (or the session
+broker) destroys its AVD.
+
+### Deleting a snapshot
+
+Delete any snapshot, fixture or not, by name:
+
+```json
+{
+  "name": "deviceSnapshot",
+  "arguments": { "action": "delete", "snapshotName": "signed-in", "platform": "android" }
+}
+```
+
+The result has `deleted: true` once the snapshot and its data are gone. A VM
+snapshot whose emulator is not running returns `deleted: false` with
+`pendingReclaim: true`: its in-AVD snapshot is deleted the next time that
+emulator runs.
 
 ### Archive size, eviction, and reclaim
 

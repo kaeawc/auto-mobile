@@ -1,3 +1,4 @@
+import { intersectBounds } from "../../utils/bounds";
 import { ownPrototypeWindows } from "../observe/ownWindowFocus";
 import { iosWindowRoots, viewHierarchyLayerTree } from "../observe/layerTree";
 import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
@@ -93,6 +94,25 @@ function barBands(hierarchy: ViewHierarchyResult, warnIfUnknown = false): BarBan
     return undefined;
   }
   return legacy ? { top: legacy.top, bottom: legacy.bottom, visibilityKnown: false } : undefined;
+}
+
+/** Restrict iOS prototype ownership checks only when the capture proves a visible status bar. */
+export function iosPrototypeBarSafeTapBounds(
+  hierarchy: ViewHierarchyResult,
+  ownedByPrototype: boolean,
+  bounds: ElementBounds,
+): ElementBounds | null {
+  const bands = barBands(hierarchy, true);
+  if (
+    !ownedByPrototype ||
+    !bands?.visibilityKnown ||
+    !hierarchy.screenHeight ||
+    hierarchy.screenHeight <= 0 ||
+    bands.top <= bounds.top
+  ) {
+    return bounds;
+  }
+  return intersectBounds(bounds, { ...bounds, top: Math.max(0, bands.top) });
 }
 
 const GESTURE_BAR_WARNING =

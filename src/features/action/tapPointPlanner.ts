@@ -35,6 +35,7 @@ import {
 import { intersectBounds as intersectTapBounds } from "../../utils/bounds";
 import {
   isOwnPrototypeNode,
+  iosPrototypeBarSafeTapBounds,
   resolvePrototypeTapUnderSystemBar,
   type PrototypeBarTapDecision,
 } from "./prototypeTapUnderSystemBars";
@@ -360,7 +361,6 @@ export class TapPointPlanner {
     context: TapPointContext,
   ): { x: number; y: number } | null {
     const point = this.resolveImeSafeTapPoint(target, hierarchy, context);
-    const { left, top, right, bottom } = visibleBounds;
     const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
     if (this.deps.device.platform !== "ios") {
       const proposed = pointInTapBounds(point, visibleBounds)
@@ -388,8 +388,17 @@ export class TapPointPlanner {
       }
       return safe.point;
     }
-    const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
-    const exposedCenter = this.deps.geometry().getElementCenter({ bounds: visibleBounds });
+    const nodes = new SearchableHierarchy().project(hierarchy);
+    const targetNode = findTapTargetNode(nodes, target);
+    const barSafeBounds = this.barSafeIosVisibleBounds(hierarchy, targetNode, visibleBounds, point);
+    const barClipped = barSafeBounds !== visibleBounds;
+    const exposedImePoint = ime
+      ? tapPointOutsideIme(
+          [barSafeBounds.left, barSafeBounds.top, barSafeBounds.right, barSafeBounds.bottom],
+          ime.bounds,
+        )
+      : null;
+    const exposedCenter = this.deps.geometry().getElementCenter({ bounds: barSafeBounds });
     const chromeElements = context.chromeElements ?? [target];
     const navClipped = this.navigationTapBounds(
       target.bounds,
@@ -400,8 +409,6 @@ export class TapPointPlanner {
     if (!navClipped) {
       return null;
     }
-    const nodes = new SearchableHierarchy().project(hierarchy);
-    const targetNode = findTapTargetNode(nodes, target);
     const candidates = isIosTapFrameReduced(nodes, targetNode, target.bounds, navClipped)
       ? [exposedImePoint, exposedCenter, point]
       : [point, exposedImePoint, exposedCenter];
@@ -419,14 +426,14 @@ export class TapPointPlanner {
         return node ? [node] : [];
       }),
       screen: context.screenSize,
-      visibleBounds,
+      visibleBounds: barSafeBounds,
       candidates,
       imeBounds,
       isValid: (candidate): candidate is { x: number; y: number } =>
         candidate !== null &&
         Number.isInteger(candidate.x) &&
         Number.isInteger(candidate.y) &&
-        pointInTapBounds(candidate, visibleBounds) &&
+        pointInTapBounds(candidate, barSafeBounds) &&
         pointInTapBounds(candidate, target.bounds) &&
         (!imeBounds || !pointInTapBounds(candidate, imeBounds)) &&
         (!isUsableScreenSize(context.screenSize) ||
@@ -437,6 +444,7 @@ export class TapPointPlanner {
             elements: chromeElements,
           })),
     });
+    this.assertBarClippedIosTapPoint(barClipped, safe.point, point);
     if (safe.coveredBy) {
       throw new TapTargetUnavailableError(
         iosTapOwnershipErrorMessage(target, safe.coveredBy, safe.ownerInsideScrollContainer),
@@ -496,6 +504,89 @@ export class TapPointPlanner {
       );
     }
     return decision.point;
+  }
+
+  private barSafeIosVisibleBounds(
+    hierarchy: ViewHierarchyResult,
+    targetNode: ReturnType<typeof findTapTargetNode>,
+    visibleBounds: ElementBounds,
+    point: { x: number; y: number },
+  ): ElementBounds {
+    const bounds = iosPrototypeBarSafeTapBounds(
+      hierarchy,
+      isOwnPrototypeNode(hierarchy, targetNode?.source),
+      visibleBounds,
+    );
+    if (!bounds) {
+      throw this.prototypeBarRefusal(point, "status bar");
+    }
+    return bounds;
+  }
+
+  private assertBarClippedIosTapPoint(
+    barClipped: boolean,
+    safePoint: { x: number; y: number } | null,
+    point: { x: number; y: number },
+  ): void {
+    if (barClipped && !safePoint) {
+      throw this.prototypeBarRefusal(point, "status bar");
+    }
+  }
+
+  private revalidateBarAdjustedIosTapPoint({
+    viewHierarchy,
+    tapElement,
+    visibleBounds,
+    finalSelection,
+    options,
+    screenSize,
+    tapPoint,
+  }: {
+    viewHierarchy: ViewHierarchyResult;
+    tapElement: Element;
+    visibleBounds: ElementBounds;
+    finalSelection: ElementSelectionResult;
+    options: TapOnElementOptions;
+    screenSize: ObserveResult["screenSize"] | undefined;
+    tapPoint: { x: number; y: number };
+  }): void {
+    if (this.deps.device.platform === "ios") {
+      const nodes = new SearchableHierarchy().project(viewHierarchy);
+      const target = findTapTargetNode(nodes, tapElement);
+      const barSafeBounds = iosPrototypeBarSafeTapBounds(
+        viewHierarchy,
+        isOwnPrototypeNode(viewHierarchy, target?.source),
+        visibleBounds,
+      );
+      if (barSafeBounds !== visibleBounds) {
+        const safe =
+          barSafeBounds &&
+          resolveIosOwnedTapPoint({
+            nodes,
+            target,
+            matched: [
+              findTapTargetNode(nodes, matchedTapElement(finalSelection, tapElement, options)),
+            ].flatMap((node) => (node ? [node] : [])),
+            screen: screenSize,
+            visibleBounds: barSafeBounds,
+            candidates: [tapPoint],
+            isValid: (candidate): candidate is { x: number; y: number } =>
+              candidate !== null &&
+              pointInTapBounds(candidate, barSafeBounds) &&
+              pointInTapBounds(candidate, tapElement.bounds),
+          });
+        if (!safe?.point || safe.point.x !== tapPoint.x || safe.point.y !== tapPoint.y) {
+          throw this.prototypeBarRefusal(tapPoint, "status bar");
+        }
+      }
+    }
+  }
+
+  private prototypeBarRefusal(point: { x: number; y: number }, bar: string): ActionableError {
+    return new ActionableError(
+      `Cannot tap (${point.x}, ${point.y}): the AutoMobile prototype control is under the ${bar} and the touch would not reach it. ` +
+        "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
+    );
   }
 
   /** Pick the tap point inside the visible, unobstructed part of the resolved element. */
@@ -580,12 +671,18 @@ export class TapPointPlanner {
       visibleBounds,
     );
     if (barDecision.kind === "refuse") {
-      throw new ActionableError(
-        `Cannot tap (${clearPoint.x}, ${clearPoint.y}): the AutoMobile prototype control is under the ${barDecision.bar} and the touch would not reach it. ` +
-          "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
-      );
+      throw this.prototypeBarRefusal(clearPoint, barDecision.bar);
     }
     const tapPoint = barDecision.point;
+    this.revalidateBarAdjustedIosTapPoint({
+      viewHierarchy,
+      tapElement,
+      visibleBounds,
+      finalSelection,
+      options,
+      screenSize,
+      tapPoint,
+    });
     // The system-bar adjustment may move the point; it must not land back inside a host control.
     const covering = this.hostControls(viewHierarchy).find(
       (control) =>

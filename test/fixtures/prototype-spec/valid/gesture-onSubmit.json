@@ -1,0 +1,29 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["share"]
+  },
+  "root": {
+    "type": "textField",
+    "stateKey": "query",
+    "onSubmit": [
+      {
+        "type": "platform",
+        "call": "share.open",
+        "args": {
+          "text": {
+            "value": "Hello {name} {data:/post/title} {item.name} {index}"
+          }
+        }
+      }
+    ]
+  },
+  "state": {
+    "query": ""
+  }
+}

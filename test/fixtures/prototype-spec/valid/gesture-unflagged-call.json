@@ -1,0 +1,26 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["clipboard"]
+  },
+  "root": {
+    "type": "text",
+    "text": "Hi",
+    "onAppear": [
+      {
+        "type": "platform",
+        "call": "clipboard.copy",
+        "args": {
+          "text": {
+            "value": "Hi"
+          }
+        }
+      }
+    ]
+  }
+}

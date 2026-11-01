@@ -99,3 +99,27 @@ test("registerAllTools forwards the Keystore reset factory to the app handler", 
     platform: "android",
   });
 });
+
+test("resetKeychain on iOS never resolves the Android Keystore factory", async () => {
+  const device: BootedDevice = {
+    name: "iPhone",
+    deviceId: "A1B2C3D4-0000-4000-8000-000000000001",
+    platform: "ios",
+  };
+  let factoryCalls = 0;
+  registerAllTools({
+    daemonMode: false,
+    keystoreReset: () => {
+      factoryCalls += 1;
+      throw new Error("Keystore backend is Android-only");
+    },
+  });
+  // Without confirm the iOS path refuses before running simctl, proving it was reached.
+  await expect(
+    ToolRegistry.getTool("resetKeychain")!.deviceAwareHandler!(device, {
+      deviceId: device.deviceId,
+      appId: "com.example",
+    }),
+  ).rejects.toThrow(/explicit confirmation/);
+  expect(factoryCalls).toBe(0);
+});

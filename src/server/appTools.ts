@@ -823,7 +823,10 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     // deviceId/device-label/sessionUuid are the device-bound selectors; if none is
     // present the device was ambiently resolved and the action refuses to run.
     const explicitlyTargeted = Boolean(args.deviceId || args.device || args.sessionUuid);
-    const action = new ResetKeychain(device, null, dependencies.keystoreReset?.(device));
+    // The Keystore backend is Android-only; resolving it for iOS would throw.
+    const keystoreBackend =
+      device.platform === "android" ? dependencies.keystoreReset?.(device) : undefined;
+    const action = new ResetKeychain(device, null, keystoreBackend);
     const result = await action.execute({
       appId: args.appId,
       confirm: args.confirm,

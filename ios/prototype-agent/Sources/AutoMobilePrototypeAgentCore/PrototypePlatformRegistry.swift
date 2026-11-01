@@ -95,6 +95,39 @@ public final class PrototypePlatformRegistry {
 
     public var capabilities: [String] { Set(modules.values.map(\.capability)).sorted() }
 
+    // Production membership lives here so pure core tests exercise the same factories as UIKit.
+    static func feedbackModules(
+        haptics: any PrototypeHapticsPlayer,
+        sound: any PrototypeSoundPlayer,
+        connectivity: any PrototypeConnectivitySource,
+        links: any PrototypeLinkOpener,
+        bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
+    )
+        -> PrototypePlatformRegistry
+    {
+        PrototypePlatformRegistry(modules: [
+            PrototypeHapticsModule(player: haptics),
+            PrototypeSoundModule(player: sound),
+            PrototypeConnectivityModule(source: connectivity),
+            PrototypeLinksModule(opener: links),
+        ], bundle: bundle)
+    }
+
+    static func systemModules(
+        clipboard: any PrototypeClipboard,
+        connectivity: any PrototypeConnectivitySource,
+        links: any PrototypeLinkOpener,
+        bundle: any PrototypeBundleReader = PrototypeMainBundleReader()
+    )
+        -> PrototypePlatformRegistry
+    {
+        PrototypePlatformRegistry(modules: [
+            PrototypeClipboardModule(clipboard: clipboard),
+            PrototypeConnectivityModule(source: connectivity),
+            PrototypeLinksModule(opener: links),
+        ], bundle: bundle)
+    }
+
     var snapshot: [String: JSONValue] {
         modules.mapValues { .object($0.state) }
     }

@@ -53,9 +53,12 @@ notifications to 10 per 60000 ms. The iOS runtime enforces each module's sliding
 with `too_many_in_flight` refusals. Swift validator gesture refusal and Android validator/runtime
 parity remain (#15637).
 
-**R4: runtime isolation.** Where a module runs decides which privileges it can reach. The split
-below is the design; it is _not yet enforced_
-([#15642](https://github.com/kaeawc/auto-mobile/issues/15642)).
+**R4: runtime isolation.** Where a module runs decides which privileges it can reach. The iOS
+installer derives Info.plist usage strings from `requires.permissions`, strips inherited usage
+strings and background modes, and omits `UIBackgroundModes` until the shared background vocabulary
+has an unambiguous Apple mapping. The iOS agent capability table is tested against the contract's
+per-call permissions (#15642). The Android stamper (#14185) and CtrlProxy capability table (#15642)
+are _not yet enforced_.
 
 - CtrlProxy and the iOS prototype agent never advertise permissioned modules. They offer only
   modules that need no permission and no identity of their own.

@@ -896,6 +896,56 @@ describe("HomeScreen", () => {
     });
 
     describe("App Switcher recovery", () => {
+      test("stops runner presses and hierarchy polling at the caller deadline", async () => {
+        fakeTimer = new FakeTimer();
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: { executeCommandArgs: async () => createExecResult("", "") },
+        });
+        const press = spyOn(client, "requestPressHome");
+        const readTimes: number[] = [];
+        const read = spyOn(client, "requestHierarchySync").mockImplementation(async () => {
+          readTimes.push(fakeTimer.now());
+          return {
+            hierarchy:
+              client.getPressHomeRequestCount() === 0
+                ? iosSwitcherHierarchy()
+                : iosHierarchy("com.apple.Preferences"),
+          };
+        });
+        const pending = action
+          .executeIosHomeNavigation({ timeoutMs: 500 })
+          .catch((error: unknown) => error);
+
+        for (const delay of [100, 200, 200]) {
+          await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+            description: "App Switcher foreground retry",
+          });
+          fakeTimer.advanceTime(delay);
+        }
+        await drainUntil(
+          () => fakeTimer.getPendingSleepCount() === 0 || client.getPressHomeRequestCount() > 1,
+          { description: "App Switcher deadline exhaustion" },
+        );
+        expect(client.getPressHomeRequestCount()).toBe(1);
+        const failure = await pending;
+        expect(failure).toBeInstanceOf(ActionableError);
+        expect(failure).toHaveProperty(
+          "message",
+          expect.stringContaining(
+            "iOS Home deadline exhausted before SpringBoard could be verified",
+          ),
+        );
+        expect(press.mock.calls[0]?.[0]).toBe(500);
+        expect(readTimes).toEqual([0, 0, 100, 300]);
+        expect(
+          read.mock.calls.every(
+            (call, index) => (call[3]?.timeoutMs ?? 0) <= 500 - readTimes[index],
+          ),
+        ).toBe(true);
+        expect(fakeTimer.now()).toBe(500);
+      });
+
       test.each([false, true])(
         "dismisses the switcher using runner Home (simulator %s)",
         async (simulator) => {
@@ -953,10 +1003,16 @@ describe("HomeScreen", () => {
                   ),
           }));
 
-          const result = await action.execute();
-          expect(result.success).toBe(true);
-          expect(result.message).toBeUndefined();
-          expect(client.getPressHomeRequestCount()).toBe(2);
+          if (simulator) {
+            await expect(action.execute()).rejects.toThrow(
+              "iOS Home deadline exhausted before SpringBoard could be verified",
+            );
+          } else {
+            const result = await action.execute();
+            expect(result.success).toBe(true);
+            expect(result.message).toBeUndefined();
+          }
+          expect(client.getPressHomeRequestCount()).toBe(simulator ? 1 : 2);
         },
       );
 
@@ -981,9 +1037,13 @@ describe("HomeScreen", () => {
           expect(failure).toBeInstanceOf(ActionableError);
           expect(failure).toHaveProperty(
             "message",
-            expect.stringContaining("Home press did not background com.apple.Preferences"),
+            expect.stringContaining(
+              simulator
+                ? "iOS Home deadline exhausted before SpringBoard could be verified"
+                : "Home press did not background com.apple.Preferences",
+            ),
           );
-          expect(client.getPressHomeRequestCount()).toBe(2);
+          expect(client.getPressHomeRequestCount()).toBe(simulator ? 1 : 2);
         },
       );
 

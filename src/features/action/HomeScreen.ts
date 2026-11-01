@@ -420,7 +420,7 @@ export class HomeScreen extends BaseVisualChange {
         return;
       }
       if (isIosAppSwitcherVisible(hierarchy.hierarchy)) {
-        await this.pressRunnerHomeThenVerify(client, { perf, signal, onDispatch }, 2);
+        await this.pressRunnerHomeThenVerify(client, { perf, signal, onDispatch }, 2, deadline);
       }
     } catch (error) {
       throwIfAborted(signal);
@@ -460,10 +460,12 @@ export class HomeScreen extends BaseVisualChange {
     client: IosCtrlProxy,
     { perf, signal, onDispatch }: Pick<IosHomeNavigationOptions, "perf" | "signal" | "onDispatch">,
     remainingPresses = 1,
+    deadline?: number,
   ): Promise<void> {
     for (let press = 0; press < remainingPresses; press++) {
+      const remainingMs = this.iosHomeRemainingMs(deadline) ?? 5000;
       const pressError = await awaitWhileRequestIsLive(
-        this.tryIosRunnerHome(client, 5000, { perf, signal, onDispatch }),
+        this.tryIosRunnerHome(client, Math.min(5000, remainingMs), { perf, signal, onDispatch }),
         signal,
       );
       // The runner checks the foreground once, right after the press, and SpringBoard can take
@@ -476,12 +478,14 @@ export class HomeScreen extends BaseVisualChange {
       try {
         hierarchy = await this.verifyIosHomeForeground(client, {
           perf,
+          timeoutMs: this.iosHomeRemainingMs(deadline),
           retryDelaysMs: HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
           readTimeoutMs: HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
           pollUntilDeadline: true,
           signal,
         });
       } catch (error) {
+        this.iosHomeRemainingMs(deadline);
         if (!(error instanceof IosHomeNotForegroundError) || press + 1 === remainingPresses) {
           throw error;
         }
@@ -576,7 +580,10 @@ export class HomeScreen extends BaseVisualChange {
     }
   }
 
-  private iosHomeRemainingMs(deadline: number): number {
+  private iosHomeRemainingMs(deadline?: number): number | undefined {
+    if (deadline === undefined) {
+      return undefined;
+    }
     const remaining = deadline - this.timer.now();
     if (remaining <= 0) {
       throw new ActionableError("iOS Home deadline exhausted before SpringBoard could be verified");

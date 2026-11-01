@@ -13,7 +13,7 @@ import type {
 } from "./DeviceConditionController";
 import type { DeviceConditionKey } from "./DeviceConditionTypes";
 import { OwedResetError } from "./OwedResetError";
-import { createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
+import { adbCommand, createSerializer, rejectValue, shell, unsupported } from "./injectorSupport";
 import { assertRootableImage, ensureRootAdb } from "./rootStateInjector";
 
 const MOUNT = "/storage/emulated";
@@ -38,6 +38,7 @@ export function parseEmulatedStorageMount(output: string): "ro" | "rw" | undefin
 export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceConditionInjector {
   const serialize = createSerializer();
   let owned = false;
+  let acquiredRoot = false;
   const readMode = async (signal?: AbortSignal) =>
     parseEmulatedStorageMount(await shell(adb, ["mount"], signal));
   const remount = async (mode: "ro" | "rw", signal?: AbortSignal): Promise<void> => {
@@ -53,6 +54,10 @@ export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceCondit
     // Re-acquire root if another fixture or a reboot has unrooted adbd since apply.
     await ensureRootAdb(adb, signal);
     await remount("rw", signal);
+    if (acquiredRoot) {
+      await adbCommand(adb, ["unroot"], signal);
+      acquiredRoot = false;
+    }
     owned = false;
   };
   const reset = (signal?: AbortSignal): Promise<void> => serialize(() => restoreNow(signal));
@@ -65,6 +70,30 @@ export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceCondit
       }
       unsupported(errorMessage(error));
     }
+  };
+  const acquireRoot = async (signal?: AbortSignal): Promise<void> => {
+    let wasRooted = true;
+    try {
+      wasRooted = (await shell(adb, ["id", "-u"], signal)) === "0";
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(
+        `readOnlyFilesystem root probe failed; preserving existing privileges: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    try {
+      await ensureRootAdb(adb, signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      unsupported(errorMessage(error));
+    }
+    // A repeat apply after mount drift must retain the original privilege cleanup.
+    acquiredRoot ||= !wasRooted;
   };
   const applyNow = async (
     value: string,
@@ -81,14 +110,7 @@ export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceCondit
     if (mode === "ro") {
       return { status: "unchanged", detail: "Shared storage is already read-only for every app." };
     }
-    try {
-      await ensureRootAdb(adb, signal);
-    } catch (error) {
-      if (signal?.aborted) {
-        throw error;
-      }
-      unsupported(errorMessage(error));
-    }
+    await acquireRoot(signal);
     const wasOwned = owned;
     // Own the remount before its first mutation, including a command that fails after changing it.
     owned = true;
@@ -129,7 +151,7 @@ export function createReadOnlyFilesystemInjector(adb: AdbExecutor): DeviceCondit
         if (mode === undefined) {
           logger.warn(`readOnlyFilesystem clean check could not read ${MOUNT} mount options`);
         }
-        return mode === "rw";
+        return mode === "rw" && !acquiredRoot;
       } catch (error) {
         if (signal?.aborted) {
           throw error;

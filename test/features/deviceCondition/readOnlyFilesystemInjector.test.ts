@@ -32,6 +32,9 @@ function device() {
     debuggable: "1",
     buildType: "userdebug",
     root: "restarting adbd as root",
+    rooted: false,
+    failId: false,
+    failUnroot: false,
     ignoreRo: false,
     ignoreRw: false,
     failRw: false,
@@ -49,7 +52,22 @@ function device() {
       return result(state.buildType);
     }
     if (cmd === "root") {
+      if (!state.root.includes("cannot run as root")) {
+        state.rooted = true;
+      }
       return result(state.root);
+    }
+    if (cmd === "unroot") {
+      if (state.failUnroot) {
+        throw new Error("unroot refused");
+      }
+      state.rooted = false;
+    }
+    if (cmd === "shell id -u") {
+      if (state.failId) {
+        throw new Error("id unreadable");
+      }
+      return result(state.rooted ? "0" : "2000");
     }
     if (cmd === "shell mount") {
       if (state.failMount) {
@@ -112,10 +130,54 @@ describe("read-only shared storage", () => {
     expect(await injector.isClean()).toBe(false);
     await outcome.reset?.();
     expect(d.state.mode).toBe("rw");
-    expect(d.commands.slice(-2)).toEqual([
+    expect(d.commands.slice(-3)).toEqual([
       "shell mount -o remount,rw /storage/emulated",
       "shell mount",
+      "unroot",
     ]);
+    expect(await injector.isClean()).toBe(true);
+    expect(d.state.rooted).toBe(false);
+  });
+  test("preserves adbd that was already rooted", async () => {
+    const d = device();
+    d.state.rooted = true;
+    const injector = createReadOnlyFilesystemInjector(d.adb);
+    const outcome = await injector.apply("on");
+    await outcome.reset?.();
+    expect(await injector.isClean()).toBe(true);
+    expect(d.state.rooted).toBe(true);
+    expect(d.commands).not.toContain("unroot");
+  });
+  test("a failed privilege probe conservatively preserves root", async () => {
+    const d = device();
+    d.state.failId = true;
+    const outcome = await createReadOnlyFilesystemInjector(d.adb).apply("on");
+    await outcome.reset?.();
+    expect(d.state.rooted).toBe(true);
+    expect(d.commands).not.toContain("unroot");
+  });
+  test("repeat apply after mount drift retains acquired root cleanup", async () => {
+    const d = device();
+    const injector = createReadOnlyFilesystemInjector(d.adb);
+    const first = await injector.apply("on");
+    d.state.mode = "rw";
+    expect((await injector.apply("on")).reset).toBeUndefined();
+    await first.reset?.();
+    expect(d.state.rooted).toBe(false);
+    expect(await injector.isClean()).toBe(true);
+  });
+  test("failed unroot keeps reset owed and is not clean until retry succeeds", async () => {
+    const d = device();
+    const injector = createReadOnlyFilesystemInjector(d.adb);
+    const outcome = await injector.apply("on");
+    d.state.failUnroot = true;
+    await expect(outcome.reset?.()).rejects.toThrow(/unroot refused/);
+    expect(d.state.mode).toBe("rw");
+    expect(d.state.rooted).toBe(true);
+    expect(await injector.isClean()).toBe(false);
+    d.state.failUnroot = false;
+    await outcome.reset?.();
+    expect(d.state.rooted).toBe(false);
     expect(await injector.isClean()).toBe(true);
   });
   test("already ro stays unowned; repeated owned apply keeps the single reset", async () => {
@@ -124,6 +186,8 @@ describe("read-only shared storage", () => {
     d.state.mode = "ro";
     expect(await injector.apply("on")).toMatchObject({ status: "unchanged" });
     expect((await injector.apply("on")).reset).toBeUndefined();
+    expect(d.commands).not.toContain("shell id -u");
+    expect(d.commands).not.toContain("root");
     d.state.mode = "rw";
     const first = await injector.apply("on");
     expect((await injector.apply("on")).reset).toBeUndefined();
@@ -135,6 +199,8 @@ describe("read-only shared storage", () => {
     d.state.ignoreRo = true;
     await expect(createReadOnlyFilesystemInjector(d.adb).apply("on")).rejects.toThrow(/read-back/);
     expect(d.commands).toContain("shell mount -o remount,rw /storage/emulated");
+    expect(d.state.rooted).toBe(false);
+    expect(d.commands.at(-1)).toBe("unroot");
   });
   test("failed rollback hands back an owed reset for retry", async () => {
     const d = device();
@@ -153,6 +219,28 @@ describe("read-only shared storage", () => {
     }
     d.state.failRw = false;
     await caught.owedReset();
+    expect(await injector.isClean()).toBe(true);
+  });
+  test("failed rollback unroot hands back an owed reset for retry", async () => {
+    const d = device();
+    d.state.ignoreRo = true;
+    d.state.failUnroot = true;
+    const injector = createReadOnlyFilesystemInjector(d.adb);
+    let caught: unknown;
+    try {
+      await injector.apply("on");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(OwedResetError);
+    if (!(caught instanceof OwedResetError)) {
+      throw new Error("missing owed reset");
+    }
+    expect(d.state.rooted).toBe(true);
+    expect(await injector.isClean()).toBe(false);
+    d.state.failUnroot = false;
+    await caught.owedReset();
+    expect(d.state.rooted).toBe(false);
     expect(await injector.isClean()).toBe(true);
   });
   test("reset failure stays retryable, including successful commands without rw readback", async () => {

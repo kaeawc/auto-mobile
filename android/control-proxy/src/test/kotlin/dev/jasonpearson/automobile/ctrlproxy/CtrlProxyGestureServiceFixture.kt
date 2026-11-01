@@ -36,7 +36,7 @@ internal class CtrlProxyGestureServiceFixture {
 
   private val controller = Robolectric.buildService(CtrlProxy::class.java)
   val service: CtrlProxy = controller.get()
-  val actions: CtrlProxyActions = service
+  val actions: CtrlProxyActions = service.actions
   val gestureController: GestureController =
     ReflectionHelpers.getField(service, "gestureController")
   val shadow: ShadowAccessibilityService

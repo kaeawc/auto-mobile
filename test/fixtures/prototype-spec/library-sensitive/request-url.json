@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "sensitive-flow",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["clipboard"]
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "pasteButton",
+          "into": "/data/code"
+        },
+        {
+          "type": "button",
+          "label": "Send",
+          "onTap": [
+            {
+              "type": "request",
+              "url": "https://example.com/{data:/code}",
+              "via": "device"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.children[1].onTap[0].url",
+  "expectedMessage": "Sensitive value cannot be bound into a request"
+}

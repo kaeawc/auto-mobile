@@ -35,6 +35,12 @@ const deviceSnapshotCommonShape = {
       "VM snapshot timeout in milliseconds (positive integer; maximum 1800000 ms / 30 minutes)",
     ),
   appBundleIds: z.array(z.string()).optional().describe("iOS bundle IDs for app data snapshot"),
+  fixture: z
+    .boolean()
+    .optional()
+    .describe(
+      "Android emulator VM snapshots only. On capture, record the AVD, system image, config, emulator version and userdata image the snapshot depends on. On restore, require a fixture; a fixture whose identity changed is refused with its reasons either way",
+    ),
 };
 
 export const deviceSnapshotCaptureArgsShape = {
@@ -59,5 +65,5 @@ export type DeviceSnapshotCaptureArgs = z.output<typeof deviceSnapshotCaptureArg
 /** The restore options the snapshot manager reads from the validated `restore` action. */
 export type DeviceSnapshotRestoreArgs = Pick<
   z.output<typeof deviceSnapshotRestoreArgsSchema>,
-  "snapshotName" | "useVmSnapshot" | "vmSnapshotTimeoutMs"
+  "snapshotName" | "useVmSnapshot" | "vmSnapshotTimeoutMs" | "fixture"
 >;

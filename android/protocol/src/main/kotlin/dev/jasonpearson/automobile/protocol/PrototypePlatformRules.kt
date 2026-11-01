@@ -107,13 +107,9 @@ internal object PrototypePlatformRules {
         return it
       }
     for (use in uses(root, context)) {
-      (useError(use, declared)
-          ?: (use as? Use.Call)?.let { call ->
-            callChecks.firstNotNullOfOrNull { it(call.action, call.path, root, declared) }
-          })
-        ?.let {
-          return it
-        }
+      useError(use, declared, root)?.let {
+        return it
+      }
     }
     for ((action, path) in context.actions) {
       (emitNameError(action, path) ?: PrototypeSecureStorageRules.actionError(action, path, root))
@@ -144,7 +140,7 @@ internal object PrototypePlatformRules {
   private fun notDeclared(path: String, name: String) =
     fail(path, "Platform module $name is not declared in requires.platform")
 
-  private fun useError(use: Use, declared: Declared): PrototypeSpecError? =
+  private fun useError(use: Use, declared: Declared, root: JsonObject): PrototypeSpecError? =
     when (use) {
       is Use.Handler -> {
         val owner = eventModule(use.event)
@@ -154,11 +150,18 @@ internal object PrototypePlatformRules {
           else -> PrototypeSensorRules.eventError(use.event, use.path, declared.sensors)
         }
       }
-      is Use.Call -> callError(use.action, use.path, declared)
+      is Use.Call -> callError(use, declared, root)
       is Use.Read -> readError(use, declared)
       is Use.Event ->
-        if (use.inHandler) null
-        else fail(use.path, "{event} is only available inside a platform.on handler")
+        when {
+          !use.inHandler -> fail(use.path, "{event} is only available inside a platform.on handler")
+          use.inTimer ->
+            fail(
+              use.path,
+              "{event} is unavailable in startTimer actions: copy the needed event fields into data or state before starting the timer",
+            )
+          else -> null
+        }
     }
 
   private fun readError(use: Use.Read, declared: Declared): PrototypeSpecError? {
@@ -205,7 +208,9 @@ internal object PrototypePlatformRules {
     return null
   }
 
-  private fun callError(action: JsonObject, path: String, declared: Declared): PrototypeSpecError? {
+  private fun callError(use: Use.Call, declared: Declared, root: JsonObject): PrototypeSpecError? {
+    val action = use.action
+    val path = use.path
     val call = action.text("call")
     val (owner, definition) =
       callDefinition(call) ?: return fail("$path.call", "Unknown platform call")
@@ -228,17 +233,23 @@ internal object PrototypePlatformRules {
     argumentsError(action, path, definition)?.let {
       return it
     }
-    if (call == "share.open")
-      PrototypeShare.argumentsError(action.member("args") ?: JsonObject(emptyMap()), "$path.args")
-        ?.let {
-          return it
-        }
-    if (call == "links.open")
-      PrototypeLinks.argumentsError(action.member("args") ?: JsonObject(emptyMap()), "$path.args")
-        ?.let {
-          return it
-        }
-    return action.text("into")?.let(::intoError)?.let { fail("$path.into", it) }
+    PrototypeShare.platformArgumentsError(call, action, path)?.let {
+      return it
+    }
+    action.text("into")?.let(::intoError)?.let {
+      return fail("$path.into", it)
+    }
+    callChecks
+      .firstNotNullOfOrNull { it(action, path, root, declared) }
+      ?.let {
+        return it
+      }
+    return if (PrototypePlatformUses.needsUserGesture(use, definition)) {
+      fail(
+        use.path,
+        "Side-effecting platform call $call needs a user gesture: move it into onTap, onLongPress, onDoubleTap or onSubmit",
+      )
+    } else null
   }
 
   internal fun argumentsError(

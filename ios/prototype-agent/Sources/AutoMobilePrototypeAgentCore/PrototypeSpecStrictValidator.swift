@@ -140,6 +140,11 @@ public enum PrototypeSpecStrictValidator {
                 actions: context.actions,
                 repeats: repeats
             ) }
+            if library {
+                try PrototypeSensitiveSinkRules.validate(
+                    fields, nodes: context.locatedNodes, actions: context.actions, repeats: repeats
+                )
+            }
         } catch let error as PrototypeLoadError { throw error }
         catch let DecodingError.dataCorrupted(context) {
             if let separator = context.debugDescription.range(of: ": ") {

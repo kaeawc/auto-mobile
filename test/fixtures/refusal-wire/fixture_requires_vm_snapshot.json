@@ -1,0 +1,13 @@
+{
+  "code": "fixture_requires_vm_snapshot",
+  "builder": "SnapshotFixtureRefusedError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Snapshot 'signed-in' cannot be a fixture: fixtures are Android emulator VM snapshots only.\",\"code\":\"fixture_requires_vm_snapshot\",\"snapshotName\":\"signed-in\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

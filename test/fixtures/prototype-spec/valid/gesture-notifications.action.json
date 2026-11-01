@@ -1,0 +1,50 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["notifications", "device", "map", "sensors", "biometric"],
+    "permissions": [
+      {
+        "name": "notifications",
+        "purpose": "Messages"
+      }
+    ]
+  },
+  "root": {
+    "type": "spacer"
+  },
+  "notifications": {
+    "channels": [
+      {
+        "id": "messages",
+        "name": "Messages",
+        "importance": "default"
+      }
+    ]
+  },
+  "platform": {
+    "on": {
+      "notifications.action": [
+        {
+          "type": "platform",
+          "call": "notifications.post",
+          "args": {
+            "id": {
+              "value": "msg"
+            },
+            "channel": {
+              "value": "messages"
+            },
+            "title": {
+              "value": "Hi"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

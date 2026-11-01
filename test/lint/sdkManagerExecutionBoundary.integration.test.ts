@@ -1,24 +1,34 @@
 import { readGuardFile } from "./astGuard";
 import { describe, expect, test } from "bun:test";
 
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import { BOUNDARY_ROWS } from "../../scripts/lib/boundaryRows";
+import { scanBoundary } from "../../scripts/lib/boundaryScanner";
 import {
   directlyExecutesSdkManager,
-  findOffenders,
   OWNER as CLIENT,
   sourceFiles,
-} from "../../scripts/check-sdkmanager-execution-boundary";
+} from "../../scripts/lib/sdkManagerExecutionBoundary";
 
 const ROOT = join(import.meta.dir, "..", "..");
 
 describe("sdkmanager execution boundary (issue #4052)", () => {
   // Whole-tree scan: reads ~700 files, so give it far more than Bun's 5s default — under
   // `--coverage` on a slow CI runner the default timeout trips even though the work is small.
-  test("only SdkManagerClient directly executes sdkmanager", async () => {
+  test("only SdkManagerClient directly executes sdkmanager", () => {
     const files = sourceFiles(join(ROOT, "src"));
     // A silently-empty scan yields zero offenders and passes green while checking nothing.
     expect(files.length).toBeGreaterThan(100);
-    const offenders = await findOffenders(ROOT);
+    const row = BOUNDARY_ROWS.find((candidate) => candidate.id === "sdkmanager-execution")!;
+    const offenders = scanBoundary(
+      row,
+      files.map((file) => ({
+        path: relative(ROOT, file).replace(/\\/g, "/"),
+        addedLines: new Set<number>(),
+      })),
+      { readSource: (path) => readFileSync(join(ROOT, path), "utf8") },
+    ).map((violation) => violation.file);
     expect(offenders, offenders.join("\n")).toEqual([]);
   }, 30_000);
 

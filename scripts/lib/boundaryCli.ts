@@ -6,6 +6,7 @@ import {
   parseUnifiedDiff,
   renderBoundaryResult,
   scanBoundary,
+  treeTooSmallMessage,
 } from "./boundaryScanner";
 
 const SOURCE_ROOT = "src";
@@ -37,10 +38,15 @@ function readSource(path: string): string | undefined {
 
 /**
  * Runs one row of the table-driven boundary scanner (issue #13219) and exits.
- * Diff rows read a unified diff of src/ from `diffPath`; `tree` rows walk
- * `src/` and take no diff. Exit 1 on violations, 2 on usage errors.
+ * Diff rows read a unified diff of src/ from `diffPath`; `tree` rows walk their
+ * `treeRoot` (default `src/`) and take no diff, or scan only `targets` when given.
+ * Exit 1 on violations, 2 on usage errors.
  */
-export function runBoundaryRowCli(rowId: string | undefined, diffPath?: string): never {
+export function runBoundaryRowCli(
+  rowId: string | undefined,
+  diffPath?: string,
+  targets: readonly string[] = [],
+): never {
   const row = BOUNDARY_ROWS.find((candidate) => candidate.id === rowId);
   if (!row || (row.scope !== "tree" && !diffPath)) {
     console.error(
@@ -50,11 +56,19 @@ export function runBoundaryRowCli(rowId: string | undefined, diffPath?: string):
   }
   const changed: ChangedFile[] =
     row.scope === "tree"
-      ? sourceFiles(SOURCE_ROOT, row.extensions ?? [".ts"]).map((path) => ({
-          path,
-          addedLines: new Set<number>(),
-        }))
+      ? (targets.length > 0
+          ? targets.map((target) => target.replaceAll("\\", "/"))
+          : sourceFiles(row.treeRoot ?? SOURCE_ROOT, row.extensions ?? [".ts"])
+        ).map((path) => ({ path, addedLines: new Set<number>() }))
       : parseUnifiedDiff(readFileSync(diffPath!, "utf8"));
+  const tooSmall =
+    row.scope === "tree" && targets.length === 0
+      ? treeTooSmallMessage(row, changed.length)
+      : undefined;
+  if (tooSmall) {
+    console.error(tooSmall);
+    process.exit(1);
+  }
   const result = renderBoundaryResult(row, scanBoundary(row, changed, { readSource }));
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);

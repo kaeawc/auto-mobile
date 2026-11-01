@@ -78,6 +78,16 @@ export const deviceSnapshotManifestSchema = z.object({
         .optional(),
     })
     .optional(),
+  // What a snapshot fixture depends on (#14065); without it a reload skips the identity check.
+  fixture: z
+    .object({
+      avdName: z.string(),
+      systemImageId: z.string(),
+      avdConfigHash: z.string(),
+      emulatorVersion: z.string(),
+      userdataGeneration: z.string(),
+    })
+    .optional(),
 }) satisfies z.ZodType<DeviceSnapshotManifest>;
 
 function parseManifest(snapshotName: string, manifestJson: string): DeviceSnapshotManifest | null {

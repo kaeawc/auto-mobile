@@ -5,7 +5,6 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ClipboardManager
@@ -13,12 +12,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
-import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
@@ -77,17 +74,15 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
-import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWindows
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundOrUnscoped
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
-import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ErrorResponse
@@ -1343,7 +1338,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     PackageEventReceiver(
       serviceScope,
       object : PackageEventHost {
-        override fun isSystemApp(packageName: String) = resolveSystemApp(packageName)
+        override fun isSystemApp(packageName: String) =
+          packageManager.systemAppFlag(packageName) {
+            Log.w(TAG, "Failed to resolve system flag for $packageName", it)
+          }
 
         override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
           deviceEvents.packageEvent(event)
@@ -1480,11 +1478,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayDrawer.attachOverlayManager(overlayManager)
       if (!::prototypeController.isInitialized) {
         // Locks are shared safety facts; foreground suspension is request-local per surface.
-        val prototypeWindowBlocked = {
-          val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-          val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
-          keyguard?.isKeyguardLocked != false || power?.isInteractive != true
-        }
+        val windowBlocked = { this@CtrlProxy.prototypeWindowBlocked() }
         val createPrototypeHost = {
           DefaultPrototypeHost(
             context = this,
@@ -1494,7 +1488,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               overlayManager.setPrototypeAttached(true)
             },
             onWindowLost = ::refreshPrototypeWindow,
-            isBlocked = prototypeWindowBlocked,
+            isBlocked = windowBlocked,
             imeInset = PrototypeImeInset { displayId -> prototypeImeLiftPx(displayId) },
             backScope = serviceScope,
           )
@@ -1512,7 +1506,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             lifecycle =
               PrototypeLifecycle(
                 CoroutinePrototypeScheduler(serviceScope),
-                isBlocked = prototypeWindowBlocked,
+                isBlocked = windowBlocked,
                 observerSession = {
                   if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
                   else 0
@@ -1540,33 +1534,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true
               },
             windowOnScreen =
-              PrototypeWindowOnScreen { displayId ->
-                try {
-                  val selected =
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-                      // A null framework list is unavailable, rather than evidence of absence.
-                      windows?.let {
-                        if (displayId == Display.DEFAULT_DISPLAY) it else null
-                      }
-                    } else viewHierarchyExtractor.selectDisplayWindows(this, displayId).windows
-                  prototypeWindowOnScreen(
-                    selected,
-                    hasTitle = { hasPrototypeTitle(it.type, it.title) },
-                    rootPackage = { window ->
+              PrototypeWindowProbe(
+                sdkInt = Build.VERSION.SDK_INT,
+                source =
+                  object : PrototypeWindowProbe.Source<AccessibilityWindowInfo> {
+                    override fun legacyWindows(): List<AccessibilityWindowInfo>? = windows
+
+                    override fun displayWindows(displayId: Int) =
+                      viewHierarchyExtractor.selectDisplayWindows(this@CtrlProxy, displayId).windows
+
+                    override fun hasTitle(window: AccessibilityWindowInfo) =
+                      hasPrototypeTitle(window.type, window.title)
+
+                    override fun rootPackage(window: AccessibilityWindowInfo): String? {
                       val root = window.root
-                      try {
+                      return try {
                         root?.packageName?.toString()
                       } finally {
                         root?.recycle()
                       }
-                    },
-                    ownPackage = packageName,
-                  )
-                } catch (error: Exception) {
-                  Log.d(TAG, "Could not determine prototype window visibility", error)
-                  null
-                }
-              },
+                    }
+                  },
+                ownPackage = packageName,
+                onFailure = { Log.d(TAG, "Could not determine prototype window visibility", it) },
+              ),
             displays = prototypeDisplays,
             clearAssets = { prototypeAssets.clear() },
             hasAsset = { prototypeAssets.lookup(it) != null },
@@ -2375,17 +2366,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** The application in front, from the accessibility windows; null when none qualifies. */
   private fun currentForegroundApp(): String? =
-    try {
-      prototypeForegroundFromWindows(
+    prototypeForegroundOrUnscoped(
+      readWindows = {
         windows.map {
           PrototypeForegroundWindow(it.type, it.isActive, it.root?.packageName?.toString())
-        },
-        packageName,
-      )
-    } catch (error: Exception) {
-      // Unreadable windows leave the prototype unscoped (shown everywhere) rather than hiding it.
-      Log.w(TAG, "Foreground app unavailable for prototype scoping", error)
-      null
+        }
+      },
+      ownPackage = packageName,
+    ) {
+      Log.w(TAG, "Foreground app unavailable for prototype scoping", it)
     }
 
   /** Feeds a window-state event to prototype foreground scoping, only while a prototype exists. */
@@ -2492,17 +2481,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun onInterrupt() {
     Log.w(TAG, "Accessibility service interrupted")
-  }
-
-  private fun resolveSystemApp(packageName: String): Boolean? {
-    return try {
-      val appInfo = packageManager.getApplicationInfo(packageName, 0)
-      (appInfo.flags and
-        (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to resolve system flag for $packageName", e)
-      null
-    }
   }
 
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId

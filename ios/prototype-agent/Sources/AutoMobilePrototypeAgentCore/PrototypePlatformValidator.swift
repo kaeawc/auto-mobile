@@ -32,6 +32,7 @@ enum PrototypePlatformValidator {
         let background: [String]
         /// A capability the call needs on top of its module's (camera recording, media queues).
         var capability: String?
+        var userGesture = false
     }
 
     /// The capability `call` needs on top of its module's, when its definition names one.
@@ -68,7 +69,7 @@ enum PrototypePlatformValidator {
                 }
                 return Call(
                     args: args, permissions: strings("permissions"), background: strings("background"),
-                    capability: call["capability"]?.stringValue
+                    capability: call["capability"]?.stringValue, userGesture: call["userGesture"] == .bool(true)
                 )
             }
             return Module(
@@ -124,6 +125,41 @@ enum PrototypePlatformValidator {
     ]
     /// Emit payloads and literal repeat items are data, never vocabulary.
     private static let opaqueKeys: Set<String> = ["payload", "repeat"]
+    private static let userGestureKeys: Set<String> = ["onTap", "onLongPress", "onDoubleTap", "onSubmit"]
+
+    private struct ScanContext {
+        var inHandler = false
+        var inTimer = false
+        var inNode = false
+        var userGesture = false
+    }
+
+    /// Match the host's memberContext: nested UI owners can begin gestures; deferred chains cannot.
+    private static func memberContext(
+        _ fields: [String: JSONValue], key: String, context: ScanContext
+    )
+        -> ScanContext
+    {
+        let type = fields["type"]?.stringValue
+        let node = type.map {
+            PrototypeContractValidator.definition("node")?.objectFields?["variants"]?.objectFields?[$0] != nil
+        } ?? false
+        let gesture = userGestureKeys.contains(key)
+        let deferred = type == "startTimer"
+            || (key.hasPrefix("on") && !gesture && key != "onSuccess" && key != "onError")
+        return ScanContext(
+            inHandler: context.inHandler,
+            inTimer: context.inTimer || type == "startTimer",
+            inNode: !deferred && (node || context.inNode),
+            userGesture: node ? gesture : !deferred && ((gesture && context.inNode) || context.userGesture)
+        )
+    }
+
+    private static func userInitiated(_ event: String) -> Bool {
+        guard let parts = qualified(event) else { return false }
+        return PrototypeContractValidator.platformModules[parts.module]?.objectFields?["events"]?
+            .objectFields?[parts.member]?.objectFields?["userInitiated"] == .bool(true)
+    }
 
     private struct Declared {
         var modules: Set<String> = []
@@ -180,9 +216,9 @@ enum PrototypePlatformValidator {
                 depth: 1,
                 state: state
             ) }
-            try scan(handler, path: path, inHandler: true, declared: declared, state: state)
+            try scan(handler, path: path, context: ScanContext(inHandler: true), declared: declared, state: state)
         }
-        try scan(root, path: "root", inHandler: false, declared: declared, state: state)
+        try scan(root, path: "root", context: ScanContext(), declared: declared, state: state)
     }
 
     /// Throws at the first authored node whose `testTag` takes the host-reserved namespace.
@@ -302,21 +338,25 @@ enum PrototypePlatformValidator {
             guard declared.modules.contains(owner) else { throw notDeclared(path, owner) }
             try PrototypeSensorRules.validateEvent(event, path: path, sensors: declared.sensors)
             try PrototypeRequestValidator.validateList(actions, path: path, depth: 1, state: state)
-            try scan(.array(actions), path: path, inHandler: true, declared: declared, state: state)
+            try scan(
+                .array(actions), path: path,
+                context: ScanContext(inHandler: true, userGesture: userInitiated(event)),
+                declared: declared, state: state
+            )
         }
     }
 
     // MARK: scan
 
     private static func scan(
-        _ value: JSONValue, path: String, inHandler: Bool, declared: Declared, state: [String: JSONValue]
+        _ value: JSONValue, path: String, context: ScanContext, declared: Declared, state: [String: JSONValue]
     )
         throws
     {
         switch value {
         case let .array(items):
             for (index, item) in items.enumerated() {
-                try scan(item, path: "\(path)[\(index)]", inHandler: inHandler, declared: declared, state: state)
+                try scan(item, path: "\(path)[\(index)]", context: context, declared: declared, state: state)
             }
         case let .object(fields):
             if fields.count == 1, fields["value"] != nil { return }
@@ -325,11 +365,12 @@ enum PrototypePlatformValidator {
                     ["type": .string("platform"), "call": .string("clipboard.paste"), "into": fields["into"] ?? .null],
                     path: path,
                     declared: declared,
-                    state: state
+                    state: state,
+                    userGesture: context.userGesture
                 )
             }
             if fields["type"] == .string("platform") {
-                try validateCall(fields, path: path, declared: declared, state: state)
+                try validateCall(fields, path: path, declared: declared, state: state, userGesture: context.userGesture)
             }
             if fields["type"] == .string("emit"), case let .string(name)? = fields["name"],
                name != PrototypeRequestEvent.name, name.hasPrefix(reservedEmitPrefix)
@@ -346,18 +387,27 @@ enum PrototypePlatformValidator {
                     try read(pointer, path: "\(path).platform", declared: declared)
                     try comparison(fields, pointer: pointer, path: path)
                 }
-                if case .string(_)? = fields["event"], !inHandler {
-                    throw fail("\(path).event", "{event} is only available inside a platform.on handler")
+                if case .string(_)? = fields["event"] {
+                    guard context.inHandler else {
+                        throw fail("\(path).event", "{event} is only available inside a platform.on handler")
+                    }
+                    if context.inTimer {
+                        throw fail(
+                            "\(path).event",
+                            "{event} is unavailable in startTimer actions: copy the needed event fields into data or state before starting the timer"
+                        )
+                    }
                 }
             }
             for key in sorted(Set(fields.keys)) {
                 guard let member = fields[key] else { continue }
+                let next = memberContext(fields, key: key, context: context)
                 if key == "screens", case let .object(screens) = member {
                     // Stack screens are named in brackets, as the host's screen-map walk reports them.
                     for name in sorted(Set(screens.keys)) {
                         guard let screen = screens[name] else { continue }
                         try scan(
-                            screen, path: "\(path).screens[\(quoted(name))]", inHandler: inHandler,
+                            screen, path: "\(path).screens[\(quoted(name))]", context: next,
                             declared: declared, state: state
                         )
                     }
@@ -370,7 +420,7 @@ enum PrototypePlatformValidator {
                         try read(pointer, path: memberPath, declared: declared)
                     }
                 }
-                try scan(member, path: memberPath, inHandler: inHandler, declared: declared, state: state)
+                try scan(member, path: memberPath, context: next, declared: declared, state: state)
             }
         default:
             break
@@ -420,7 +470,8 @@ enum PrototypePlatformValidator {
     // MARK: call
 
     private static func validateCall(
-        _ action: [String: JSONValue], path: String, declared: Declared, state: [String: JSONValue]
+        _ action: [String: JSONValue], path: String, declared: Declared, state: [String: JSONValue],
+        userGesture: Bool
     )
         throws
     {
@@ -484,6 +535,12 @@ enum PrototypePlatformValidator {
         }
         if let into = action["into"] { try self.into(into, path: "\(path).into") }
         try statusKey(action["statusKey"], path: "\(path).statusKey", state: state)
+        if definition.userGesture, !userGesture {
+            throw fail(
+                path,
+                "Side-effecting platform call \(call) needs a user gesture: move it into onTap, onLongPress, onDoubleTap or onSubmit"
+            )
+        }
     }
 
     private static func arguments(_ raw: JSONValue?, path: String, realtime: Bool) throws -> [String: JSONValue] {

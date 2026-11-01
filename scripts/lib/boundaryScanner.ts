@@ -1,3 +1,4 @@
+import { relative } from "node:path";
 import ts from "typescript";
 
 /**
@@ -22,6 +23,8 @@ export interface BoundaryRow {
   readonly skipPrefixes: readonly string[];
   /** Repo-relative paths, beyond the owner, that are never scanned (documented exceptions or allowlists). */
   readonly skipFiles?: readonly string[];
+  /** The directory a `tree` row walks; defaults to `src`. */
+  readonly treeRoot?: string;
   /** File extensions scanned by `tree` rows; defaults to `.ts`. */
   readonly extensions?: readonly string[];
   /**
@@ -36,9 +39,12 @@ export interface BoundaryRow {
    * indented `file:line:col: text`; `positions` indented `file:line:col`;
    * `src-locations` unindented `file:line:col: text` with the leading `src/`
    * stripped; `bare-locations` and `bare-positions` are the same unindented
-   * forms with the full repo path kept.
+   * forms with the full repo path kept. `root-locations` is `file:line:col: text` with the file
+   * relative to the row's `treeRoot`. `file-messages` prints `fileMessage(file)` once per file.
    */
   readonly report:
+    | "file-messages"
+    | "root-locations"
     | "files"
     | "locations"
     | "positions"
@@ -48,6 +54,13 @@ export interface BoundaryRow {
   /** Printed above the violations; an empty string prints the violations alone. */
   readonly failureHeader: string;
   readonly successMessage?: string;
+  /** The line a `file-messages` row prints for each violating file. */
+  readonly fileMessage?: (file: string) => string;
+  /**
+   * For `tree` rows: fewer scanned files than this means the walk saw a partial tree, and a
+   * silently-empty scan would pass while checking nothing.
+   */
+  readonly minTreeFiles?: number;
   /** Hits as 1-based [startLine, endLine] spans plus position. */
   readonly detect: (source: string, file: string) => readonly BoundarySpan[];
 }
@@ -149,10 +162,19 @@ export function scanBoundary(
 }
 
 function reportLines(
-  report: BoundaryRow["report"],
+  { report, fileMessage, treeRoot }: Pick<BoundaryRow, "report" | "fileMessage" | "treeRoot">,
   violations: readonly BoundaryViolation[],
 ): string[] {
   switch (report) {
+    case "file-messages":
+      return [...new Set(violations.map((violation) => violation.file))].map(
+        (file) => fileMessage?.(file) ?? file,
+      );
+    case "root-locations":
+      return violations.map(
+        (violation) =>
+          `${relative(treeRoot ?? "src", violation.file).replaceAll("\\", "/")}:${violation.line}:${violation.column}: ${violation.text}`,
+      );
     case "files":
       return [...new Set(violations.map((violation) => violation.file))].map((file) => `  ${file}`);
     case "locations":
@@ -191,9 +213,16 @@ export function renderBoundaryResult(
       stderr: "",
     };
   }
-  const lines = reportLines(row.report, violations);
+  const lines = reportLines(row, violations);
   const output = row.failureHeader ? [row.failureHeader, ...lines] : lines;
   return { exitCode: 1, stdout: "", stderr: `${output.join("\n")}\n` };
+}
+
+/** The error for a `tree` scan that found fewer files than the row requires, or undefined. */
+export function treeTooSmallMessage(row: BoundaryRow, scanned: number): string | undefined {
+  return row.minTreeFiles !== undefined && scanned < row.minTreeFiles
+    ? `error: ${row.id}-boundary scanned only ${scanned} files under src; expected the full source tree.`
+    : undefined;
 }
 
 /** Builds a span for an AST node. */

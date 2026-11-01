@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  changedSourceFiles,
-  findViolationsInSource,
-  resolveBaseRef,
-} from "../../scripts/check-host-shell-boundary";
+import { changedSourceFiles, resolveBaseRef } from "../../scripts/check-host-shell-boundary";
+import { findViolationsInSource } from "../../scripts/lib/hostShellBoundary";
 
 describe("host shell execution boundary (issue #4068)", () => {
   test("rejects direct child_process shell APIs while allowing argv-first execution", () => {

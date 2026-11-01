@@ -1,7 +1,11 @@
 import ts from "typescript";
 import { type BoundaryHit, type BoundaryRow, type BoundarySpan, spanOf } from "./boundaryScanner";
 import * as appBundle from "./appBundleMetadataBoundary";
+import * as archiveExtraction from "./archiveExtractionBoundary";
 import { ALLOWED_IMPORTERS, findChildProcessImports } from "./childProcessImportBoundary";
+import * as daemonLauncher from "./daemonLauncherBoundary";
+import { findViolationsInSource as findHostShellCalls } from "./hostShellBoundary";
+import * as sdkManager from "./sdkManagerExecutionBoundary";
 import * as iosCtrlProxy from "./iosCtrlProxyProcessBoundary";
 import { findDirectEmulatorCalls } from "./androidEmulatorBoundary";
 import { findDirectFfmpegCalls } from "./ffmpegBoundary";
@@ -264,5 +268,68 @@ export const BOUNDARY_ROWS: readonly BoundaryRow[] = [
     successMessage: "child-process-import-boundary: no unlisted production imports.",
     detect: (source, file) =>
       findChildProcessImports(file, source).map((hit) => ({ ...hit, endLine: hit.line })),
+  },
+  {
+    id: "archive-extraction",
+    owner: archiveExtraction.OWNER,
+    skipPrefixes: [],
+    skipFiles: [...archiveExtraction.EXCEPTIONS.keys()],
+    scope: "tree",
+    report: "file-messages",
+    failureHeader: `error: tar extraction must use ${archiveExtraction.OWNER}:`,
+    fileMessage: (file) =>
+      `${file} directly runs tar extraction; route it through ${archiveExtraction.OWNER} instead.`,
+    successMessage: "archive-extraction-boundary: no direct production tar extraction.",
+    minTreeFiles: 100,
+    // The detector answers per file, so the hit marks the file rather than a call site.
+    detect: (source) =>
+      archiveExtraction.directlyExtractsTar(source)
+        ? [{ line: 1, column: 1, endLine: 1, text: "" }]
+        : [],
+  },
+  {
+    id: "sdkmanager-execution",
+    owner: sdkManager.OWNER,
+    skipPrefixes: [],
+    skipFiles: [...sdkManager.EXCEPTIONS.keys()],
+    scope: "tree",
+    report: "file-messages",
+    failureHeader: `error: sdkmanager execution must use ${sdkManager.OWNER}:`,
+    fileMessage: (file) =>
+      `${file} directly executes sdkmanager; route it through ${sdkManager.OWNER} instead.`,
+    successMessage: "sdkmanager-execution-boundary: no direct production sdkmanager invocations.",
+    minTreeFiles: 100,
+    // The detector answers per file, so the hit marks the file rather than a call site.
+    detect: (source) =>
+      sdkManager.directlyExecutesSdkManager(source)
+        ? [{ line: 1, column: 1, endLine: 1, text: "" }]
+        : [],
+  },
+  {
+    id: "daemon-launcher",
+    owner: daemonLauncher.OWNER,
+    skipPrefixes: [],
+    treeRoot: daemonLauncher.SOURCE_ROOT,
+    scope: "tree",
+    report: "root-locations",
+    failureHeader: "error: daemon execution must use DaemonLauncher:",
+    successMessage: "daemon-launcher-boundary: no direct production daemon invocations.",
+    detect: (source, file) =>
+      daemonLauncher
+        .findViolationsInSource(file, source)
+        .map(({ line, column, text }) => ({ line, column, endLine: line, text })),
+  },
+  {
+    id: "host-shell",
+    // No production file may run a host shell, so the owner is the checker itself (outside src/).
+    owner: "scripts/check-host-shell-boundary.ts",
+    skipPrefixes: [],
+    scope: "whole-file",
+    report: "bare-locations",
+    failureHeader:
+      "New production shell execution must be reviewed and listed in check-host-shell-boundary.ts:",
+    successMessage: "host-shell-boundary: no new direct production shell execution.",
+    detect: (source, file) =>
+      findHostShellCalls(file, source).map((hit) => ({ ...hit, endLine: hit.line })),
   },
 ];

@@ -1,19 +1,10 @@
-export type FixtureIdentity = {
-  avdName: string;
-  systemImageId: string;
-  avdConfigHash: string;
-  emulatorVersion: string;
-};
+import type { FixtureIdentity, FixtureInvalidationReason } from "../../models/FixtureIdentity";
+
+export type { FixtureIdentity, FixtureInvalidationReason } from "../../models/FixtureIdentity";
 
 export interface FixtureIdentityProbe {
   currentIdentity(avdName: string): Promise<FixtureIdentity>;
 }
-
-export type FixtureInvalidationReason =
-  | "avd-changed"
-  | "system-image-changed"
-  | "avd-config-changed"
-  | "emulator-version-changed";
 
 export async function checkFixtureValidity(
   recorded: FixtureIdentity,
@@ -33,6 +24,9 @@ export async function checkFixtureValidity(
   }
   if (current.emulatorVersion !== recorded.emulatorVersion) {
     reasons.push("emulator-version-changed");
+  }
+  if (current.userdataGeneration !== recorded.userdataGeneration) {
+    reasons.push("userdata-wiped");
   }
 
   return reasons.length === 0 ? { valid: true } : { valid: false, reasons };

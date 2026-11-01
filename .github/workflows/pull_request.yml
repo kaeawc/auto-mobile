@@ -2082,8 +2082,9 @@ jobs:
     # block PRs. Keep this required PR lane on Windows alongside the separate
     # Ubuntu build-and-test job below. It also runs the Windows unit, host
     # integration and stress lanes (#10894): they were separate Windows jobs,
-    # each paying a slow Windows checkout + bun install. Budget: lint/build
-    # (~25) + unit lane cap (26) + integration and stress (~20). The Windows
+    # each paying a slow Windows checkout + bun install. Lint is not run here:
+    # the Ubuntu ts-build-and-test job gates it (#11577).
+    # Budget: build (~25) + unit lane cap (26) + integration and stress (~20). The Windows
     # unit lane runs as concurrent --shard processes; host integration runs
     # one unsafe process beside safe shards, within this same required job.
     timeout-minutes: 70
@@ -2154,20 +2155,6 @@ jobs:
         uses: ./.github/actions/setup-auto-mobile-npm-package
         with:
           install-global: "false"
-
-      - name: "Run Lint"
-        if: env.RUN_MCP_BUILD_TEST == 'true'
-        shell: bash
-        env:
-          NODE_OPTIONS: "--max-old-space-size=4096"
-          TURBO_TELEMETRY_DISABLED: "1"
-          TURBO_NO_UPDATE_NOTIFIER: "1"
-          DO_NOT_TRACK: "1"
-          NO_COLOR: "1"
-        run: |
-          set -euo pipefail
-          mkdir -p ci-logs
-          turbo run lint --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-lint-${{ matrix.os }}.log"
 
       - name: "Check Android emulator execution boundary"
         if: env.RUN_MCP_BUILD_TEST == 'true'

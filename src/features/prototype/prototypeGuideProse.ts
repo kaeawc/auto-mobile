@@ -1048,8 +1048,9 @@ content (\`/data\`), state (\`/state\`) or one node by id (\`replaceNode\`). And
 carries \`revision\`; a state conflict carries
 \`{success:false,error,conflict:{revision,state:{key:scalar}}}\`. Revisions are
 non-negative safe integers; conflict values are strings, booleans or finite
-numbers with valid state keys. Malformed reply fields are dropped. Show, status,
-inspect and events do not report revisions through this host contract.
+numbers with valid state keys. Malformed reply fields are dropped. Status and
+inspect entries carry \`revision\` (the newest from a landed patch or a device
+/data write, absent until one arrives) and \`lastAction: "patch"\` once a patch lands.
 
 Ops apply in order, completely or not at all. \`add\`, \`replace\`, \`remove\` and
 \`test\` address \`/data\` or \`/data\` followed by an RFC 6901 JSON pointer: \`~0\`

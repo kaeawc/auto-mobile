@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "share",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["share"]
+    },
+    "root": {
+      "type": "text",
+      "text": "Hi",
+      "onAppear": [
+        {
+          "type": "request",
+          "url": "https://example.com/",
+          "onError": [
+            {
+              "type": "platform",
+              "call": "share.open",
+              "args": {
+                "text": {
+                  "value": "Hello {name} {data:/post/title} {item.name} {index}"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onAppear[0].onError[0]",
+  "expectedMessage": "Side-effecting platform call share.open needs a user gesture: move it into onTap, onLongPress, onDoubleTap or onSubmit"
+}

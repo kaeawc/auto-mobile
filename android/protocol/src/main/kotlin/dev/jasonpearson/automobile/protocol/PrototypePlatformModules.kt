@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protocol
 
+import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.flag
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -42,6 +43,11 @@ internal object PrototypePlatformModules {
   fun eventModule(event: String): String? {
     val (owner, member) = qualified(event) ?: return null
     return owner.takeIf { module(owner)?.member("events")?.containsKey(member) == true }
+  }
+
+  fun userInitiated(event: String): Boolean {
+    val (owner, member) = qualified(event) ?: return false
+    return module(owner)?.member("events")?.member(member)?.flag("userInitiated") == true
   }
 
   /** The module a `/platform` pointer reads: its first segment. */

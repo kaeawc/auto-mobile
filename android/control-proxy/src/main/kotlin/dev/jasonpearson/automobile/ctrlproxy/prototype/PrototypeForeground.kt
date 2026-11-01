@@ -65,6 +65,24 @@ internal fun prototypeForegroundFromWindows(
   return (candidates.firstOrNull { it.second } ?: candidates.firstOrNull())?.first
 }
 
+/**
+ * [prototypeForegroundFromWindows] over the windows [readWindows] returns. A window list that
+ * cannot be read leaves the prototype unscoped (shown everywhere) rather than hiding it, after
+ * reporting the cause to [onFailure].
+ */
+@Suppress("TooGenericExceptionCaught") // Any window read failure means "no foreground known".
+internal fun prototypeForegroundOrUnscoped(
+  readWindows: () -> List<PrototypeForegroundWindow>,
+  ownPackage: String,
+  onFailure: (Exception) -> Unit,
+): String? =
+  try {
+    prototypeForegroundFromWindows(readWindows(), ownPackage)
+  } catch (e: Exception) {
+    onFailure(e)
+    null
+  }
+
 /** What [PrototypeController] needs from foreground scoping. */
 interface PrototypeForegroundScope {
   /** True while the prototype's app is not in front; the window is hidden and untouchable. */

@@ -180,7 +180,8 @@ describe("integrityState injector", () => {
     adb.failures.clear();
     await second.reset?.();
     expect(adb.rooted).toBe(true);
-    expect(await injector.isClean()).toBe(false);
+    // The older frame still owns root, so the newest reset verifies clean (#16275).
+    expect(await injector.isClean()).toBe(true);
     await first.reset?.();
     expect(adb.rooted).toBe(false);
     expect(await injector.isClean()).toBe(true);
@@ -218,6 +219,204 @@ describe("integrityState injector", () => {
       expect(await root.isClean()).toBe(true);
     });
   }
+
+  test("clearing integrity keeps su stubs an active rootState fixture still needs (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-files" };
+    const owner = { device, deviceId: device.deviceId };
+    const integrity = resolve(owner, "integrityState")!;
+    const root = resolve(owner, "rootState")!;
+    const integrityOutcome = await integrity.apply("apply", undefined, {
+      signals: { "su-binary": "on" },
+    });
+    const rootOutcome = await root.apply("rooted-detectable");
+    expect([...adb.files].sort()).toEqual([...ROOT_ARTIFACT_PATHS].sort());
+
+    await integrityOutcome.reset?.();
+    // rootState still depends on the su stubs integrity planted.
+    expect([...adb.files].sort()).toEqual([...ROOT_ARTIFACT_PATHS].sort());
+    expect(await integrity.isClean()).toBe(true);
+    expect((await root.apply("rooted-detectable")).status).toBe("unchanged");
+
+    await rootOutcome.reset?.();
+    expect(adb.files.size).toBe(0);
+    expect(await root.isClean()).toBe(true);
+    expect(await integrity.isClean()).toBe(true);
+  });
+
+  test("integrity off refuses su stubs rootState still needs (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-off" };
+    const owner = { device, deviceId: device.deviceId };
+    const integrity = resolve(owner, "integrityState")!;
+    const root = resolve(owner, "rootState")!;
+    await integrity.apply("apply", undefined, { signals: { "su-binary": "on" } });
+    await root.apply("rooted-detectable");
+    const off = await integrity.apply("apply", undefined, { signals: { "su-binary": "off" } });
+    expect(off.signals?.[0]).toMatchObject({ id: "su-binary", status: "unsupported" });
+    expect([...adb.files].sort()).toEqual([...ROOT_ARTIFACT_PATHS].sort());
+  });
+
+  test("rootState re-plants an artifact it depends on but did not plant (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-drift" };
+    const owner = { device, deviceId: device.deviceId };
+    const integrity = resolve(owner, "integrityState")!;
+    const root = resolve(owner, "rootState")!;
+    await integrity.apply("apply", undefined, { signals: { "su-binary": "on" } });
+    await root.apply("rooted-detectable");
+    adb.files.delete("/system/xbin/su");
+    expect((await root.apply("rooted-detectable")).status).toBe("applied");
+    expect(adb.files.has("/system/xbin/su")).toBe(true);
+  });
+
+  test("root-first maximal integrity restores clean around root-held stubs (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-root-first" };
+    const owner = { device, deviceId: device.deviceId };
+    const root = resolve(owner, "rootState")!;
+    const integrityController = new DeviceConditionController(() =>
+      resolve(owner, "integrityState")!,
+    );
+    const rootOutcome = await root.apply("rooted-detectable");
+    await integrityController.apply({ integrityState: "maximally-detectable" });
+    expect((await integrityController.restore()).verifiedClean).toBe(true);
+    await rootOutcome.reset?.();
+    expect(adb.files.size).toBe(0);
+    expect(await resolve(owner, "integrityState")!.isClean()).toBe(true);
+    expect(await root.isClean()).toBe(true);
+  });
+
+  test("a failed integrity plant leaves no hold that keeps a stub after root reset (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-failed-plant" };
+    const owner = { device, deviceId: device.deviceId };
+    const integrity = resolve(owner, "integrityState")!;
+    const root = resolve(owner, "rootState")!;
+    adb.failures.add("shell chmod 06755 /system/xbin/su");
+    const failed = await integrity.apply("apply", undefined, { signals: { "su-binary": "on" } });
+    expect(failed.signals?.[0]?.status).toBe("unsupported");
+    adb.failures.clear();
+    expect(adb.files.size).toBe(0);
+    const rootOutcome = await root.apply("rooted-detectable");
+    await rootOutcome.reset?.();
+    expect(adb.files.size).toBe(0);
+    expect(await root.isClean()).toBe(true);
+    expect(await integrity.isClean()).toBe(true);
+  });
+
+  test("an image-shipped su held by rootState stays in the integrity baseline (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    adb.files.add("/system/xbin/su");
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-image-su" };
+    const owner = { device, deviceId: device.deviceId };
+    const root = resolve(owner, "rootState")!;
+    const integrityController = new DeviceConditionController(() =>
+      resolve(owner, "integrityState")!,
+    );
+    const rootOutcome = await root.apply("rooted-detectable");
+    await integrityController.apply({ integrityState: "maximally-detectable" });
+    await rootOutcome.reset?.();
+    expect([...adb.files]).toEqual(["/system/xbin/su"]);
+    expect((await integrityController.restore()).verifiedClean).toBe(true);
+    expect([...adb.files]).toEqual(["/system/xbin/su"]);
+  });
+
+  test("restoring an integrity off while rootState holds the stubs verifies (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-off-restore" };
+    const owner = { device, deviceId: device.deviceId };
+    const integrity = resolve(owner, "integrityState")!;
+    const root = resolve(owner, "rootState")!;
+    const on = await integrity.apply("apply", undefined, { signals: { "su-binary": "on" } });
+    const off = await integrity.apply("apply", undefined, { signals: { "su-binary": "off" } });
+    const rootOutcome = await root.apply("rooted-detectable");
+    await off.reset?.();
+    await on.reset?.();
+    expect([...adb.files].sort()).toEqual([...ROOT_ARTIFACT_PATHS].sort());
+    expect(await integrity.isClean()).toBe(true);
+    await rootOutcome.reset?.();
+    expect(adb.files.size).toBe(0);
+    expect(await root.isClean()).toBe(true);
+    expect(await integrity.isClean()).toBe(true);
+  });
+
+  test("a later integrity baseline keeps stubs integrity itself still holds (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    adb.mode = "Permissive";
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-later-frame" };
+    const owner = { device, deviceId: device.deviceId };
+    const root = resolve(owner, "rootState")!;
+    const integrityController = new DeviceConditionController(() =>
+      resolve(owner, "integrityState")!,
+    );
+    await integrityController.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    const rootOutcome = await root.apply("rooted-detectable");
+    await integrityController.apply({
+      integrityState: { signals: { "selinux-permissive": "off" } },
+    });
+    await rootOutcome.reset?.();
+    const report = await integrityController.restore();
+    expect(report).toMatchObject({ verifiedClean: true, failures: [] });
+    expect(adb.files.size).toBe(0);
+    expect(adb.mode).toBe("Permissive");
+  });
+
+  test("a failed plant whose rollback also fails keeps its fixture provenance (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-owed-plant" };
+    const owner = { device, deviceId: device.deviceId };
+    const root = resolve(owner, "rootState")!;
+    const integrityController = new DeviceConditionController(() =>
+      resolve(owner, "integrityState")!,
+    );
+    adb.failures.add("shell chmod 06755 /system/xbin/su");
+    adb.failures.add("shell rm");
+    await integrityController.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    expect(adb.files.has("/system/xbin/su")).toBe(true);
+    adb.failures.clear();
+    const rootOutcome = await root.apply("rooted-detectable");
+    // Integrity clears independently while rootState still needs the leftover stub.
+    expect((await integrityController.restore()).verifiedClean).toBe(true);
+    expect(adb.files.has("/system/xbin/su")).toBe(true);
+    await rootOutcome.reset?.();
+    expect(adb.files.size).toBe(0);
+    expect(await root.isClean()).toBe(true);
+    expect(await resolve(owner, "integrityState")!.isClean()).toBe(true);
+  });
+
+  test("an unverified integrity removal keeps fixture provenance for the retry (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-unverified-rm" };
+    const owner = { device, deviceId: device.deviceId };
+    const root = resolve(owner, "rootState")!;
+    const integrityController = new DeviceConditionController(() =>
+      resolve(owner, "integrityState")!,
+    );
+    await integrityController.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    // The removal reports success but the device keeps the files.
+    adb.ignoreWrites = true;
+    expect((await integrityController.restore()).verifiedClean).toBe(false);
+    adb.ignoreWrites = false;
+    const rootOutcome = await root.apply("rooted-detectable");
+    // Integrity clears independently while rootState is active, handing the leftovers to root.
+    expect((await integrityController.restore()).verifiedClean).toBe(true);
+    await rootOutcome.reset?.();
+    // Root's reset removes them: they were never the image's.
+    expect(adb.files.size).toBe(0);
+    expect(await root.isClean()).toBe(true);
+    expect(await resolve(owner, "integrityState")!.isClean()).toBe(true);
+  });
 
   test("factory-local SELinux owners isolate the same device id across adb clients", async () => {
     const firstAdb = new IntegrityAdb();
@@ -307,6 +506,38 @@ describe("integrityState injector", () => {
     expect((await controller.restore()).verifiedClean).toBe(true);
     expect(adb.files.size).toBe(0);
     expect(adb.mode).toBe("Enforcing");
+  });
+
+  test("stacked resets from non-root adbd verify clean at each step and drop root at the end (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    adb.rooted = false;
+    const injector = createIntegrityStateInjector(adb);
+    const controller = new DeviceConditionController(() => injector);
+    await controller.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    await controller.apply({ integrityState: { signals: { "selinux-permissive": "on" } } });
+    const report = await controller.restore();
+    expect(report).toMatchObject({ verifiedClean: true, failures: [] });
+    expect(controller.hasActiveConditions()).toBe(false);
+    expect(adb.rooted).toBe(false);
+    expect(adb.files.size).toBe(0);
+    expect(adb.mode).toBe("Enforcing");
+  });
+
+  test("privilege cleanup still owed after the last reset is not clean (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    adb.rooted = false;
+    const injector = createIntegrityStateInjector(adb);
+    const controller = new DeviceConditionController(() => injector);
+    await controller.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    await controller.apply({ integrityState: { signals: { "selinux-permissive": "on" } } });
+    adb.failures.add("unroot");
+    const report = await controller.restore();
+    expect(report.verifiedClean).toBe(false);
+    expect(adb.rooted).toBe(true);
+    expect(controller.hasActiveConditions()).toBe(true);
+    adb.failures.clear();
+    expect((await controller.restore()).verifiedClean).toBe(true);
+    expect(adb.rooted).toBe(false);
   });
 
   test("successive disjoint signal requests restore their own snapshots newest first", async () => {

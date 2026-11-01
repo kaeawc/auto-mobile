@@ -58,6 +58,117 @@ function harness() {
 }
 
 describe("IosPrototypeInstaller", () => {
+  test("derives usage strings only from declared permissions", async () => {
+    const h = harness();
+    h.plist.value = {
+      NSCameraUsageDescription: "Template camera",
+      NSMicrophoneUsageDescription: "Template microphone",
+      NSAppTransportSecurity: { NSAllowsArbitraryLoads: true },
+    };
+    await h.installer.install({
+      ...input,
+      spec: { requires: { permissions: [{ name: "camera", purpose: "Scan a code" }] } },
+    });
+    expect(h.plist.written?.value.NSCameraUsageDescription).toBe("Scan a code");
+    expect(h.plist.written?.value).not.toHaveProperty("NSMicrophoneUsageDescription");
+    expect(h.plist.written?.value.NSAppTransportSecurity).toEqual({ NSAllowsArbitraryLoads: true });
+  });
+
+  test("no requires removes all template usage strings and background modes", async () => {
+    const h = harness();
+    h.plist.value = {
+      NSCameraUsageDescription: "Template camera",
+      NSMicrophoneUsageDescription: "Template microphone",
+      NSLocalNetworkUsageDescription: "Template network",
+      NSFutureUsageDescription: "Template future permission",
+      UIBackgroundModes: ["audio", "location"],
+    };
+    await h.installer.install(input);
+    expect(
+      Object.keys(h.plist.written?.value ?? {}).filter((key) => /^NS.*UsageDescription$/.test(key)),
+    ).toEqual([]);
+    expect(h.plist.written?.value).not.toHaveProperty("UIBackgroundModes");
+  });
+
+  for (const [name, key] of [
+    ["camera", "NSCameraUsageDescription"],
+    ["microphone", "NSMicrophoneUsageDescription"],
+    ["location", "NSLocationWhenInUseUsageDescription"],
+    ["locationBackground", "NSLocationAlwaysAndWhenInUseUsageDescription"],
+    ["photos", "NSPhotoLibraryUsageDescription"],
+    ["photosAdd", "NSPhotoLibraryAddUsageDescription"],
+    ["contacts", "NSContactsUsageDescription"],
+    ["calendar", "NSCalendarsFullAccessUsageDescription"],
+    ["bluetooth", "NSBluetoothAlwaysUsageDescription"],
+    ["motion", "NSMotionUsageDescription"],
+    ["speech", "NSSpeechRecognitionUsageDescription"],
+  ]) {
+    test(`maps declared ${name} purpose to ${key}`, async () => {
+      const h = harness();
+      await h.installer.install({
+        ...input,
+        spec: { requires: { permissions: [{ name, purpose: "Declared purpose" }] } },
+      });
+      expect(h.plist.written?.value[key]).toBe("Declared purpose");
+      expect(
+        Object.keys(h.plist.written?.value ?? {}).filter((key) =>
+          /^NS.*UsageDescription$/.test(key),
+        ),
+      ).toEqual([key]);
+    });
+  }
+
+  test("permissions without usage keys and background declarations do not retain template privileges", async () => {
+    const h = harness();
+    h.plist.value = {
+      NSLocalNetworkUsageDescription: "Template network",
+      UIBackgroundModes: ["audio"],
+    };
+    await h.installer.install({
+      ...input,
+      spec: {
+        requires: {
+          permissions: [
+            { name: "notifications", purpose: "Notify me" },
+            { name: "nearbyWifi", purpose: "Find peers" },
+          ],
+          background: ["audio", "connectedDevice"],
+        },
+      },
+    });
+    expect(
+      Object.keys(h.plist.written?.value ?? {}).filter((key) => /^NS.*UsageDescription$/.test(key)),
+    ).toEqual([]);
+    expect(h.plist.written?.value).not.toHaveProperty("UIBackgroundModes");
+  });
+
+  test("update removes a permission omitted from the replacement spec", async () => {
+    const h = harness();
+    const first = await h.installer.install({
+      ...input,
+      spec: {
+        requires: {
+          permissions: [
+            { name: "camera", purpose: "Scan a code" },
+            { name: "microphone", purpose: "Record a note" },
+          ],
+        },
+      },
+    });
+    expect(h.plist.written?.value.NSMicrophoneUsageDescription).toBe("Record a note");
+    // Model a template carrying the previous install's permissions as well.
+    h.plist.value = h.plist.written?.value;
+    const second = await h.installer.install({
+      ...input,
+      spec: { requires: { permissions: [{ name: "camera", purpose: "Scan another code" }] } },
+    });
+    expect(second.bundleId).toBe(first.bundleId);
+    expect(h.plist.written?.value.NSCameraUsageDescription).toBe("Scan another code");
+    expect(h.plist.written?.value).not.toHaveProperty("NSMicrophoneUsageDescription");
+    expect(h.simctl.installed).toHaveLength(2);
+    expect(h.simctl.deleted).toEqual([]);
+  });
+
   test("stamps copied plist and icons in pipeline order without changing executable/layout", async () => {
     const h = harness();
     const result = await h.installer.install({ ...input, label: "Viewer Label" });

@@ -171,6 +171,55 @@ describe("CtrlProxyStorage (Android)", function () {
     }
   });
 
+  test("Keystore reset round trip preserves typed state and strips unexpected fields", async () => {
+    const { factory, getSocket } = createCapturingFactory(fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
+    try {
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "connected",
+          id: "new-apk",
+          supportedCommands: ["reset_keystore"],
+        }),
+      );
+      const count = socket!.sentMessages.length;
+      const pending = client.resetKeystore("com.example", "login", "token");
+      await waitForSentMessages(socket, count + 1);
+      const request = findSentMessage(socket!, "reset_keystore");
+      const state: Awaited<ReturnType<AndroidCtrlProxyClient["resetKeystore"]>> = {
+        schemaVersion: 1,
+        capability: "storage.keystore",
+        outcome: "disabled",
+        reason: "DISABLED",
+        bridgeAvailable: true,
+        requestedScope: "login",
+        requestedAlias: "token",
+        deletedCount: 0,
+        status: null,
+        aliases: null,
+      };
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "keystore_reset",
+          requestId: request.requestId,
+          state: { ...state, unexpected: "must be dropped" },
+        }),
+      );
+      expect(await pending).toEqual(state);
+      expect(request.packageName).toBe("com.example");
+      expect(request.scope).toBe("login");
+      expect(request.alias).toBe("token");
+    } finally {
+      void client.close();
+    }
+  });
+
   test("old APK consistently reports unsupported Keystore discovery without sending requests", async () => {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {

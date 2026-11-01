@@ -9,10 +9,41 @@
  *   The result records this honestly with `scope: "all-apps"` and
  *   `exceededRequestedScope: true` so consumers never mistake it for a per-app
  *   operation.
- * - Scoped, app-owned resets (physical iOS #5188, Android #5190) will report
- *   `scope: "app"` and `exceededRequestedScope: false` once implemented.
+ * - Android resets only app-declared aliases and reports `scope: "app"` with
+ *   `exceededRequestedScope: false`. Physical iOS resets remain unsupported.
  */
 export interface ResetKeychainResult {
+  schemaVersion?: 1;
+  capability?: "storage.keystore";
+  bridgeAvailable?: boolean;
+  /** Android-only deletion results. Refusals omit status and per-alias results. */
+  requestedScope?: string | null;
+  requestedAlias?: string | null;
+  status?: "deleted" | "partial" | "failed" | null;
+  deletedCount?: number;
+  aliases?:
+    | {
+        alias: string;
+        outcome: "deleted" | "not_found" | "locked" | "authentication_required" | "failed";
+      }[]
+    | null;
+  outcome?:
+    | "ok"
+    | "disabled"
+    | "unavailable"
+    | "unsupported"
+    | "scope_not_declared"
+    | "authorization_denied"
+    | "invalid_selector";
+  reason?:
+    | "DISABLED"
+    | "BRIDGE_NOT_INSTALLED"
+    | "BRIDGE_UNAVAILABLE"
+    | "DECLARED_UNSUPPORTED"
+    | "SCOPE_NOT_DECLARED"
+    | "MUTATION_NOT_ALLOWED"
+    | "EMPTY_SELECTOR"
+    | null;
   success: boolean;
   deviceId: string;
   platform: "ios" | "android";

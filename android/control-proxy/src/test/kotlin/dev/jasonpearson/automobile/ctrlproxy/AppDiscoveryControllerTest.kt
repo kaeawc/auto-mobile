@@ -27,6 +27,20 @@ class AppDiscoveryControllerTest {
     var failWith: RuntimeException? = null
     val reads = mutableListOf<String>()
 
+    override fun resetKeystore(
+      packageName: String,
+      scope: String?,
+      alias: String?,
+    ): dev.jasonpearson.automobile.protocol.KeystoreResetState {
+      reads += "reset:$packageName:$scope:$alias"
+      return dev.jasonpearson.automobile.protocol.KeystoreResetState(
+        outcome = "ok",
+        bridgeAvailable = true,
+        status = "deleted",
+        deletedCount = 1,
+      )
+    }
+
     override fun keystore(packageName: String): KeystoreDiscoveryState {
       reads += "keystore:$packageName"
       failWith?.let { throw it }
@@ -67,6 +81,17 @@ class AppDiscoveryControllerTest {
         ),
       timeProvider = FixedTimer(),
     )
+
+  @Test
+  fun `reset forwards selectors and returns correlated result`() = runTest {
+    controller(this).resetKeystore("kr1", "com.example", "login", "token")
+    assertEquals(listOf("reset:com.example:login:token"), bridge.reads)
+    val result =
+      transport.sentResponses.single() as dev.jasonpearson.automobile.protocol.KeystoreResetResult
+    assertEquals("kr1", result.requestId)
+    assertEquals("deleted", result.state.status)
+    assertEquals(1, result.state.deletedCount)
+  }
 
   @Test
   fun `keystore discovery returns the bridge state under the request id`() = runTest {

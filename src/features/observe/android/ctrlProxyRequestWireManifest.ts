@@ -38,6 +38,13 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     requestId: "required",
     id: "required",
   },
+  reset_keystore: {
+    type: "required",
+    requestId: "required",
+    packageName: "required",
+    scope: "optional",
+    alias: "optional",
+  },
   discover_keystore: {
     type: "required",
     requestId: "required",

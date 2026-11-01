@@ -65,6 +65,7 @@ import dev.jasonpearson.automobile.protocol.RequestSettingsPut
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
+import dev.jasonpearson.automobile.protocol.ResetKeystore
 import dev.jasonpearson.automobile.protocol.SavePrototype
 import dev.jasonpearson.automobile.protocol.SetAccessibilityFlags
 import dev.jasonpearson.automobile.protocol.SetHierarchyInterval
@@ -331,6 +332,13 @@ class CtrlProxyMessageHandler(
           actions.listPreferenceFiles(request.requestId, request.packageName)
         is GetPreferences ->
           actions.getPreferences(request.requestId, request.packageName, request.fileName)
+        is ResetKeystore ->
+          actions.resetKeystore(
+            request.requestId,
+            request.packageName,
+            request.scope,
+            request.alias,
+          )
         is DiscoverKeystore -> actions.discoverKeystore(request.requestId, request.packageName)
         is GetSdkCapabilities ->
           actions.getSdkCapabilities(request.requestId, request.packageName, request.userId)
@@ -769,6 +777,7 @@ private class RequestRoute(request: WebSocketRequest) {
       is ListPreferenceFiles,
       is GetPreferences,
       is DiscoverKeystore,
+      is ResetKeystore,
       is GetSdkCapabilities,
       is ListDataStores,
       is GetDataStore,

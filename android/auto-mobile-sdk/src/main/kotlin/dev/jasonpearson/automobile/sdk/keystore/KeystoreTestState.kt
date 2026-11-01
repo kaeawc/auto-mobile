@@ -5,7 +5,7 @@ import dev.jasonpearson.automobile.sdk.removeIfIdentical
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Code-only opt-in for debug/test metadata in the target application's own security context. Exact
+ * Code-only opt-in for debug/test metadata and scoped deletion in the app's security context. Exact
  * declared aliases only; grants no cross-application access and never returns key material. The
  * provider is absent from release builds. Package-data reset is a separate operation.
  *

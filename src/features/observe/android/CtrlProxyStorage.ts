@@ -6,6 +6,7 @@
  */
 
 import WebSocket from "ws";
+import { keystoreResetSchema, type KeystoreReset } from "../../storage/keystoreReset";
 import { toActionableError } from "../../../models/ActionableError";
 import {
   keystoreDiscoverySchema,
@@ -149,6 +150,54 @@ export class CtrlProxyStorage {
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] getPreferenceEntries failed after ${duration}ms: ${error}`);
       throw error;
+    }
+  }
+
+  /** Deletes only app-declared aliases through the optional debug bridge. */
+  async resetKeystore(
+    packageName: string,
+    scope?: string,
+    alias?: string,
+    timeoutMs = 5000,
+  ): Promise<KeystoreReset> {
+    const refusal = (
+      outcome: "unsupported" | "unavailable",
+      reason: "DECLARED_UNSUPPORTED" | "BRIDGE_UNAVAILABLE",
+    ): KeystoreReset => ({
+      schemaVersion: 1,
+      capability: "storage.keystore",
+      outcome,
+      reason,
+      bridgeAvailable: false,
+      requestedScope: scope,
+      requestedAlias: alias,
+      deletedCount: 0,
+    });
+    try {
+      if (!(await this.context.ensureConnected())) {
+        return refusal("unavailable", "BRIDGE_UNAVAILABLE");
+      }
+      const commands = await this.context.getSupportedCommands?.();
+      if (commands?.includes("reset_keystore") !== true) {
+        return refusal("unsupported", "DECLARED_UNSUPPORTED");
+      }
+      const result = await this.sendStorageCommand<{ state: unknown }>(
+        "reset_keystore",
+        { packageName, scope, alias },
+        {
+          timeoutMs,
+          connected: true,
+          managerId: true,
+          unsupportedCommandError: () => ({
+            state: refusal("unsupported", "DECLARED_UNSUPPORTED"),
+          }),
+          timeoutError: () => ({ state: refusal("unavailable", "BRIDGE_UNAVAILABLE") }),
+        },
+      );
+      return keystoreResetSchema.parse(result.state);
+    } catch (error) {
+      logger.warn("[CTRL_PROXY] Keystore reset unavailable", error);
+      return refusal("unavailable", "BRIDGE_UNAVAILABLE");
     }
   }
 

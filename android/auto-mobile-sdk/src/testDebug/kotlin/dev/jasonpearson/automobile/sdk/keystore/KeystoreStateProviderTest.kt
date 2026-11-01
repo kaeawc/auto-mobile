@@ -47,6 +47,12 @@ internal class KeystoreStateProviderTest : KeystoreStateHandlerTestBase() {
   }
 
   @Test(expected = SecurityException::class)
+  fun `provider rejects unrelated caller before deleting`() {
+    ShadowBinder.setCallingUid(10212)
+    KeystoreStateProvider().call("delete", null, Bundle().apply { putString("scope", "fixture") })
+  }
+
+  @Test(expected = SecurityException::class)
   fun `provider rejects unrelated caller before handling even disabled discovery`() {
     ShadowBinder.setCallingUid(10212)
     KeystoreStateProvider().call("discover", null, Bundle())

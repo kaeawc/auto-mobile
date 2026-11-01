@@ -33,30 +33,102 @@ internal data class AliasMetadata(
 )
 
 /**
- * Authorization belongs to the provider; this boundary is deterministic with backend/probe fakes.
+ * Caller authorization belongs to the provider; scoped deletion also enforces opt-in and the
+ * injected mutation gate here. Backend/probe fakes keep this boundary deterministic.
  * deviceLocked=locked comes only from the injected device lock probe and does not block reads.
- * Per-alias locked/authentication_required outcomes are reserved contract outcomes: AndroidKeyStore
- * swallows metadata lookup failures, so the real path cannot observe them. present=false means not
- * present or not observable, including an indistinguishable Keystore daemon failure.
+ * Metadata locked/authentication_required outcomes remain reserved: AndroidKeyStore swallows
+ * metadata lookup failures, so reads cannot observe them. Deletion maps failures per alias.
+ * present=false means not present or not observable, including an indistinguishable Keystore daemon
+ * failure.
  */
 internal class KeystoreStateHandler(
   private val backend: KeystoreBackend,
   private val lockProbe: DeviceLockProbe,
+  private val mutationsAllowed: () -> Boolean = { false },
 ) {
   fun handle(method: String, scope: String? = null, alias: String? = null): JSONObject {
+    if (method == "delete") return reset(scope, alias)
     if (!KeystoreTestState.isEnabled()) {
       return envelope(KeystoreResponse.Disabled, DeviceLockState.UNKNOWN)
     }
     val locked = probeLock()
     val response =
       when {
-        // Unknown calls, including all mutation requests, are always unsupported.
+        // The delete call uses its own narrow envelope above.
         method != "discover" && method != "metadata" -> KeystoreResponse.Unsupported
         method == "discover" -> KeystoreResponse.Ok()
         else -> metadata(scope, alias, locked)
       }
     return envelope(response, locked)
   }
+
+  /** Selectors and both authorization gates are checked before any backend operation. */
+  private fun reset(scope: String?, alias: String?): JSONObject {
+    val result =
+      JSONObject().apply {
+        put("schemaVersion", 1)
+        put("capability", "storage.keystore")
+        put("bridgeAvailable", true)
+        scope?.let { put("requestedScope", it) }
+        alias?.let { put("requestedAlias", it) }
+        put("deletedCount", 0)
+      }
+    fun refuse(outcome: String, reason: String): JSONObject =
+      result.put("outcome", outcome).put("reason", reason)
+    if (scope.isNullOrBlank() && alias.isNullOrBlank()) {
+      return refuse("invalid_selector", "EMPTY_SELECTOR")
+    }
+    if (!KeystoreTestState.isEnabled()) return refuse("disabled", "DISABLED")
+    if (!mutationsAllowed()) return refuse("authorization_denied", "MUTATION_NOT_ALLOWED")
+    val selected =
+      selectedAliases(scope, alias) ?: return refuse("scope_not_declared", "SCOPE_NOT_DECLARED")
+    val locked = probeLock()
+    val outcomes = selected.map { name ->
+      JSONObject().put("alias", name).put("outcome", deleteAlias(name, locked))
+    }
+    val deleted = outcomes.count { it.getString("outcome") == "deleted" }
+    val status =
+      when {
+        deleted == outcomes.size -> "deleted"
+        deleted > 0 -> "partial"
+        else -> "failed"
+      }
+    return result
+      .put("outcome", "ok")
+      .put("status", status)
+      .put("deletedCount", deleted)
+      .put("aliases", JSONArray(outcomes))
+  }
+
+  private fun selectedAliases(scope: String?, alias: String?): List<String>? {
+    val declared =
+      if (scope != null) KeystoreTestState.aliasesForScope(scope)
+      else
+        KeystoreTestState.declaredScopes()
+          .flatMap { KeystoreTestState.aliasesForScope(it).orEmpty() }
+          .toSet()
+    if (declared == null || (alias != null && alias !in declared)) return null
+    return if (alias != null) listOf(alias) else declared.sorted()
+  }
+
+  private fun deleteAlias(alias: String, locked: DeviceLockState): String =
+    try {
+      if (!backend.containsAlias(alias)) "not_found"
+      else {
+        backend.deleteAlias(alias)
+        "deleted"
+      }
+    } catch (error: Exception) {
+      // Never include exception text or key material in the response or logs.
+      Log.w("KeystoreTestState", "Keystore alias deletion failed")
+      when (error) {
+        is UserNotAuthenticatedException,
+        is KeyPermanentlyInvalidatedException -> "authentication_required"
+        is UnrecoverableKeyException,
+        is KeyStoreException -> if (locked == DeviceLockState.LOCKED) "locked" else "failed"
+        else -> "failed"
+      }
+    }
 
   private fun probeLock(): DeviceLockState =
     try {

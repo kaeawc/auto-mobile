@@ -31,6 +31,7 @@ import type {
   ListPreferenceFilesMessage,
   GetPreferencesMessage,
   DiscoverKeystoreMessage,
+  ResetKeystoreMessage,
   GetSdkCapabilitiesMessage,
   ListDataStoresMessage,
   GetDataStoreMessage,
@@ -450,6 +451,15 @@ export const ctrlProxyRequests = {
       packageName: args.packageName,
       fileName: args.fileName,
     };
+  },
+
+  resetKeystore(args: {
+    requestId: string;
+    packageName: string;
+    scope?: string;
+    alias?: string;
+  }): ResetKeystoreMessage {
+    return { type: "reset_keystore", ...args };
   },
 
   discoverKeystore(args: { requestId: string; packageName: string }): DiscoverKeystoreMessage {

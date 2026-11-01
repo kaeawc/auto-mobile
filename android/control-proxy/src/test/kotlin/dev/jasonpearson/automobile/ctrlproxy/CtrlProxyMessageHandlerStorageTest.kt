@@ -11,6 +11,14 @@ internal class CtrlProxyMessageHandlerStorageTest : CtrlProxyMessageHandlerFixtu
   // ---------------------------------------------------------------------------
 
   @Test
+  fun `dispatches scoped reset_keystore`() = runTest {
+    dispatch(
+      """{"type":"reset_keystore","requestId":"kr1","packageName":"com.example","scope":"login","alias":"token"}""",
+    )
+    assertEquals("resetKeystore" to listOf<Any?>("kr1", "com.example", "login", "token"), lastCall)
+  }
+
+  @Test
   fun `dispatches list_preference_files`() = runTest {
     dispatch("""{"type":"list_preference_files","requestId":"lf1","packageName":"com.example"}""")
     assertEquals("listPreferenceFiles" to listOf<Any?>("lf1", "com.example"), lastCall)

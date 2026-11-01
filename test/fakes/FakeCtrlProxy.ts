@@ -1526,6 +1526,12 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     throw new Error("FakeCtrlProxy.getPreferenceEntries is not scripted");
   }
 
+  resetKeystore(
+    ..._args: Parameters<AndroidCtrlProxy["resetKeystore"]>
+  ): ReturnType<AndroidCtrlProxy["resetKeystore"]> {
+    throw new Error("FakeCtrlProxy.resetKeystore is not scripted");
+  }
+
   discoverKeystore(
     ..._args: Parameters<AndroidCtrlProxy["discoverKeystore"]>
   ): ReturnType<AndroidCtrlProxy["discoverKeystore"]> {

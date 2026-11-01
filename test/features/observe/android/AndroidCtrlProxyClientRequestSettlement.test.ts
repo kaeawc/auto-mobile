@@ -665,6 +665,8 @@ const EXCLUDED: Record<string, string> = {
     "reads the certificate on the host, then sends the same frame as requestInstallCaCertificate",
   getSdkCapabilities:
     "sends only when the device advertises the optional command, which this harness does not",
+  resetKeystore:
+    "optional command covered with advertised capability, timeout and round-trip tests in CtrlProxyStorage tests",
   discoverKeystore:
     "sends only when the device advertises the optional command, which this harness does not",
   addStorageChangeListener: "registers an in-process listener; it sends nothing",

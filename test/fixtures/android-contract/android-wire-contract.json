@@ -1549,6 +1549,35 @@
       ]
     },
     {
+      "serialName": "reset_keystore",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "packageName",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "scope",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "alias",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        }
+      ]
+    },
+    {
       "serialName": "save_prototype",
       "fields": [
         {
@@ -3152,6 +3181,29 @@
         {
           "name": "state",
           "type": "object:dev.jasonpearson.automobile.protocol.KeystoreDiscoveryState",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
+      "serialName": "keystore_reset",
+      "fields": [
+        {
+          "name": "timestamp",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "state",
+          "type": "object:dev.jasonpearson.automobile.protocol.KeystoreResetState",
           "nullable": false,
           "hasDefault": false
         }
@@ -7711,6 +7763,20 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.KeystoreAliasReset": [
+      {
+        "name": "alias",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "outcome",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.KeystoreDiscoveryState": [
       {
         "name": "schemaVersion",
@@ -7764,6 +7830,68 @@
         "name": "scopes",
         "type": "list",
         "nullable": false,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.KeystoreResetState": [
+      {
+        "name": "schemaVersion",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "capability",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "outcome",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "reason",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "bridgeAvailable",
+        "type": "boolean",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "requestedScope",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "requestedAlias",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "deletedCount",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "aliases",
+        "type": "list",
+        "nullable": true,
         "hasDefault": true
       }
     ],

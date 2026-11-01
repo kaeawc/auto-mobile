@@ -44924,7 +44924,7 @@
       "destructiveHint": true,
       "idempotentHint": true
     },
-    "description": "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
+    "description": "Reset secure test state. Android deletes app-declared scope/alias under app opt-in and SDK mutation authorization, without confirm. iOS Simulator resets EVERY app's Keychain and requires confirm:true. Physical iOS is unsupported. Requires explicit device targeting.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -44936,8 +44936,18 @@
           "maxLength": 256,
           "pattern": "^[A-Za-z0-9._-]+$"
         },
+        "scope": {
+          "description": "Android declared scope to reset; required unless alias is given.",
+          "type": "string",
+          "minLength": 1
+        },
+        "alias": {
+          "description": "Android declared alias to delete; with scope, must belong to it.",
+          "type": "string",
+          "minLength": 1
+        },
         "confirm": {
-          "description": "Required. Must be true to proceed. On iOS Simulator this erases the Keychain for EVERY app on the target simulator, not just appId.",
+          "description": "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not use confirm; app opt-in, declared aliases and the SDK mutation gate authorize deletion.",
           "type": "boolean"
         },
         "platform": {
@@ -44956,7 +44966,7 @@
           "type": "string"
         }
       },
-      "required": ["appId", "confirm"],
+      "required": ["appId"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -44964,8 +44974,7 @@
       "type": "object",
       "properties": {
         "success": {
-          "type": "boolean",
-          "const": true
+          "type": "boolean"
         },
         "deviceId": {
           "type": "string"
@@ -44986,6 +44995,108 @@
         },
         "message": {
           "type": "string"
+        },
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "capability": {
+          "type": "string",
+          "const": "storage.keystore"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "disabled",
+            "unavailable",
+            "unsupported",
+            "scope_not_declared",
+            "authorization_denied",
+            "invalid_selector"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "DISABLED",
+                "BRIDGE_NOT_INSTALLED",
+                "BRIDGE_UNAVAILABLE",
+                "DECLARED_UNSUPPORTED",
+                "SCOPE_NOT_DECLARED",
+                "MUTATION_NOT_ALLOWED",
+                "EMPTY_SELECTOR"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bridgeAvailable": {
+          "type": "boolean"
+        },
+        "requestedScope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requestedAlias": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["deleted", "partial", "failed"]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deletedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "alias": {
+                    "type": "string"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": ["deleted", "not_found", "locked", "authentication_required", "failed"]
+                  }
+                },
+                "required": ["alias", "outcome"],
+                "additionalProperties": false
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

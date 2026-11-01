@@ -199,6 +199,13 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
   override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     Unit
 
+  override suspend fun resetKeystore(
+    requestId: String?,
+    packageName: String,
+    scope: String?,
+    alias: String?,
+  ) = Unit
+
   override suspend fun discoverKeystore(requestId: String?, packageName: String) = Unit
 
   override suspend fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) =
@@ -517,6 +524,13 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     record("getPreferences", requestId, packageName, fileName)
+
+  override suspend fun resetKeystore(
+    requestId: String?,
+    packageName: String,
+    scope: String?,
+    alias: String?,
+  ) = record("resetKeystore", requestId, packageName, scope, alias)
 
   override suspend fun discoverKeystore(requestId: String?, packageName: String) =
     record("discoverKeystore", requestId, packageName)

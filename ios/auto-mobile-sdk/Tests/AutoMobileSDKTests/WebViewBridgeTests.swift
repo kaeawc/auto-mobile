@@ -154,6 +154,24 @@ final class WebViewBridgeTests: XCTestCase {
         }
 
         @MainActor
+        func testContentProcessTerminationPreservesHostDelegate() {
+            let webView = WKWebView()
+            let delegate = HostNavigationDelegate()
+            webView.navigationDelegate = delegate
+            let bridge = AutoMobileWebViewBridge()
+            defer {
+                bridge.detach()
+                AutoMobileNavigation.shared.reset()
+            }
+            bridge.register(webView)
+
+            bridge.webViewWebContentProcessDidTerminate(webView)
+
+            XCTAssertTrue(webView.navigationDelegate === delegate)
+            XCTAssertFalse(webView.navigationDelegate === bridge)
+        }
+
+        @MainActor
         func testRegistrationFromBackgroundQueuePreservesDelegate() async {
             let webView = WKWebView()
             let delegate = HostNavigationDelegate()

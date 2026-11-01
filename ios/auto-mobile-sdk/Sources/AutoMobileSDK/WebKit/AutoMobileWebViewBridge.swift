@@ -583,12 +583,13 @@ extension AutoMobileWebAction {
             policy.forgetSnapshots()
         }
 
+        /// Recover script capture and reload while preserving the host's navigation delegate.
         public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             let url = webView.url
             pageState.withLock { $0.terminated(url: url) }
             policy.forgetSnapshots()
             emit(name: "content_process_terminated", url: url)
-            attach(to: webView)
+            register(webView)
             webView.reload()
         }
 

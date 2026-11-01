@@ -37,9 +37,9 @@ CtrlProxy encode one definition. The daemon reduces the payload to these fields
 Each registered app-group UserDefaults suite and Core Data store becomes one
 `StorageStoreState`:
 
-| `kind`                | `sharing`                                                                 | `coordination`                                                                 | `query`                |
-| --------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------- |
-| `user_defaults_suite` | always `app_group`                                                        | declared at `registerAppGroupSuite(_:coordination:)`                           | `supported`            |
+| `kind`                | `sharing`                                                                 | `coordination`                                                                 | `query`                                             |
+| --------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------- |
+| `user_defaults_suite` | always `app_group`                                                        | declared at `registerAppGroupSuite(_:coordination:)`                           | `supported`                                         |
 | `core_data`           | `app_group` when the registration names an `appGroup`, else `app_private` | `single_process` when app-private; otherwise declared, default `uncoordinated` | `supported` with a fetcher; otherwise `unsupported` |
 
 Hosts declare it at registration:
@@ -47,7 +47,6 @@ Hosts declare it at registration:
 for suites, and `CoreDataStoreRegistration(identifier:appGroup:coordination:)` for Core Data.
 Coordination is always the host's declaration. The SDK does not probe containers or
 file locks to infer it; re-registering a suite replaces the earlier declaration.
-
 
 Core Data reads use `sqlQuery` with `store`, `entity`, and optional positive `limit`.
 The host supplies `CoreDataReadOnlyFetching` on its registration; the SDK never

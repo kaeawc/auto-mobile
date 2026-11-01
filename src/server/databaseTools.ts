@@ -32,15 +32,40 @@ export const sqlQuerySchema = withAppIdAliases(
             "Absolute path under the app data directory, or on Android a bare file name in the app databases directory; omit when store and entity are supplied",
           ),
         query: z.string().optional().describe("SQL query; omit when store and entity are supplied"),
-        store: z.string().min(1).optional().describe("Registered Core Data store identifier on iOS; supply with entity instead of databasePath and query"),
-        entity: z.string().min(1).optional().describe("Registered Core Data entity to fetch on iOS; requires store"),
-        limit: z.number().int().positive().optional().describe("Maximum Core Data rows; only with store and entity, clamped to the host row limit"),
+        store: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Registered Core Data store identifier on iOS; supply with entity instead of databasePath and query",
+          ),
+        entity: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Registered Core Data entity to fetch on iOS; requires store"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "Maximum Core Data rows; only with store and entity, clamped to the host row limit",
+          ),
       })
       .strict(),
   ),
-).refine((args) =>
-  (args.databasePath !== undefined && args.query !== undefined && args.store === undefined && args.entity === undefined && args.limit === undefined) ||
-  (args.store !== undefined && args.entity !== undefined && args.databasePath === undefined && args.query === undefined),
+).refine(
+  (args) =>
+    (args.databasePath !== undefined &&
+      args.query !== undefined &&
+      args.store === undefined &&
+      args.entity === undefined &&
+      args.limit === undefined) ||
+    (args.store !== undefined &&
+      args.entity !== undefined &&
+      args.databasePath === undefined &&
+      args.query === undefined),
   "Supply exactly databasePath and query, or store and entity (with optional limit)",
 );
 
@@ -114,10 +139,20 @@ export function registerDatabaseTools(
       args = sqlQuerySchema.parse(args);
       if (args.store !== undefined && args.entity !== undefined) {
         if (device.platform !== "ios") {
-          throw new ActionableError("Core Data queries require an iOS app with a registered store and entity. Use databasePath and query for Android SQLite databases.");
+          throw new ActionableError(
+            "Core Data queries require an iOS app with a registered store and entity. Use databasePath and query for Android SQLite databases.",
+          );
         }
-        const result = await iosClient(device).queryCoreDataForIos(args.appId, args.store, args.entity, args.limit);
-        return createStructuredToolResponse({ message: `Query returned ${result.rows?.length ?? 0} row(s)`, ...result });
+        const result = await iosClient(device).queryCoreDataForIos(
+          args.appId,
+          args.store,
+          args.entity,
+          args.limit,
+        );
+        return createStructuredToolResponse({
+          message: `Query returned ${result.rows?.length ?? 0} row(s)`,
+          ...result,
+        });
       }
       if (args.databasePath === undefined || args.query === undefined) {
         throw new ActionableError("Supply databasePath and query, or store and entity.");
@@ -126,7 +161,11 @@ export function registerDatabaseTools(
         device.platform === "android"
           ? resolveAndroidDatabasePath(args.appId, args.databasePath)
           : args.databasePath;
-      const result = await executeSqlForDevice(device, { ...args, databasePath, query: args.query }, iosClient);
+      const result = await executeSqlForDevice(
+        device,
+        { ...args, databasePath, query: args.query },
+        iosClient,
+      );
 
       // The executed result type is authoritative; SQL text classification is
       // only an approximation for decisions that must happen before execution.

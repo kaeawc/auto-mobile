@@ -94,7 +94,10 @@ describe("CtrlProxyDatabase (iOS)", function () {
 
   test("queryCoreDataForIos forwards a bounded read without mutation credentials", async () => {
     const { factory, getSocket } = createCapturingFactory();
-    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, { wsFactory: factory, timer: fakeTimer });
+    const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+      wsFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       iosMutationTokens.set(testDevice.deviceId, "com.example.app", "launch-secret");
       const pending = client.queryCoreDataForIos("com.example.app", "Main", "Item", 2);
@@ -109,10 +112,27 @@ describe("CtrlProxyDatabase (iOS)", function () {
       expect(sent.mutationToken).toBeUndefined();
       expect(sent.sessionId).toBeUndefined();
       expect(sent.query).toBeUndefined();
-      socket!.simulateMessage(JSON.stringify({ type: "execute_sql_result", requestId: sent.requestId, success: true,
-        queryType: "query", columns: ["name"], rows: [[null]], truncated: true, totalTimeMs: 0 }));
-      await expect(pending).resolves.toEqual({ type: "query", columns: ["name"], rows: [[null]], truncated: true });
-    } finally { await client.close(); }
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "execute_sql_result",
+          requestId: sent.requestId,
+          success: true,
+          queryType: "query",
+          columns: ["name"],
+          rows: [[null]],
+          truncated: true,
+          totalTimeMs: 0,
+        }),
+      );
+      await expect(pending).resolves.toEqual({
+        type: "query",
+        columns: ["name"],
+        rows: [[null]],
+        truncated: true,
+      });
+    } finally {
+      await client.close();
+    }
   });
 
   test("executeSQLForIos sends execute_sql and returns query rows including blob strings", async function () {

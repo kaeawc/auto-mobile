@@ -98,26 +98,40 @@ describe("iOS database inspection server integration", function () {
 
   test("Core Data mode forwards only the store, entity and limit and preserves truncation", async () => {
     const calls: unknown[][] = [];
-    useIosClient({ queryCoreDataForIos: async (...args) => {
-      calls.push(args);
-      return { type: "query", columns: ["name"], rows: [["Apple"]], truncated: true };
-    } });
+    useIosClient({
+      queryCoreDataForIos: async (...args) => {
+        calls.push(args);
+        return { type: "query", columns: ["name"], rows: [["Apple"]], truncated: true };
+      },
+    });
     registerDatabaseTools(iosClient);
     const tool = ToolRegistry.getTool("sqlQuery")!;
     const result = await tool.deviceAwareHandler!(iosDevice, {
-      appId: "com.example.app", store: "Main", entity: "Item", limit: 2,
+      appId: "com.example.app",
+      store: "Main",
+      entity: "Item",
+      limit: 2,
     });
     expect(calls).toEqual([["com.example.app", "Main", "Item", 2]]);
-    expect(result).toMatchObject({ structuredContent: { type: "query", rows: [["Apple"]], truncated: true } });
+    expect(result).toMatchObject({
+      structuredContent: { type: "query", rows: [["Apple"]], truncated: true },
+    });
     expect(tool.isDeviceReadOnlyCall?.({ store: "Main", entity: "Item" })).toBe(true);
   });
 
   test("Core Data mode refuses Android before contacting a database bridge", async () => {
     registerDatabaseTools(iosClient);
     const tool = ToolRegistry.getTool("sqlQuery")!;
-    await expect(tool.deviceAwareHandler!({ deviceId: "android-1", platform: "android", name: "Android" }, {
-      appId: "com.example.app", store: "Main", entity: "Item",
-    })).rejects.toThrow("Core Data queries require an iOS app");
+    await expect(
+      tool.deviceAwareHandler!(
+        { deviceId: "android-1", platform: "android", name: "Android" },
+        {
+          appId: "com.example.app",
+          store: "Main",
+          entity: "Item",
+        },
+      ),
+    ).rejects.toThrow("Core Data queries require an iOS app");
   });
 
   test.each(["timeout", "not_connected", "sdk_capability_query_failed"] as const)(

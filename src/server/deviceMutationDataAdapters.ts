@@ -88,7 +88,13 @@ function opaqueDataToolMutations(
 ): ToolMutation[] | undefined {
   switch (name) {
     case "sqlQuery":
-      if (typeof args.store === "string" && typeof args.entity === "string" && args.query === undefined && args.databasePath === undefined) return [];
+      if (
+        typeof args.store === "string" &&
+        typeof args.entity === "string" &&
+        args.query === undefined &&
+        args.databasePath === undefined
+      )
+        return [];
       return [{ kind: "opaque", key: opaqueIntentKey("sql", args.appId, args.databasePath) }];
     case "mockNetwork":
     case "clearMockNetwork":

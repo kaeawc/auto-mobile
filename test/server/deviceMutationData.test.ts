@@ -97,7 +97,13 @@ function harness() {
 
 describe("data mutation identities", () => {
   test("Core Data queries produce no mutation intents", () => {
-    expect(deviceToolMutations("sqlQuery", { appId: "com.example", store: "Main", entity: "Item", limit: 2 }, "ios")).toEqual([]);
+    expect(
+      deviceToolMutations(
+        "sqlQuery",
+        { appId: "com.example", store: "Main", entity: "Item", limit: 2 },
+        "ios",
+      ),
+    ).toEqual([]);
   });
 
   test("set/remove and name/fileName aliases share a first-write identity without storing the new value", () => {

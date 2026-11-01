@@ -219,6 +219,59 @@ describe("integrityState injector", () => {
     });
   }
 
+  test("clearing integrity keeps su stubs an active rootState fixture still needs (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-files" };
+    const owner = { device, deviceId: device.deviceId };
+    const integrity = resolve(owner, "integrityState")!;
+    const root = resolve(owner, "rootState")!;
+    const integrityOutcome = await integrity.apply("apply", undefined, {
+      signals: { "su-binary": "on" },
+    });
+    const rootOutcome = await root.apply("rooted-detectable");
+    expect([...adb.files].sort()).toEqual([...ROOT_ARTIFACT_PATHS].sort());
+
+    await integrityOutcome.reset?.();
+    // rootState still depends on the su stubs integrity planted.
+    expect([...adb.files].sort()).toEqual([...ROOT_ARTIFACT_PATHS].sort());
+    expect(await integrity.isClean()).toBe(true);
+    expect((await root.apply("rooted-detectable")).status).toBe("unchanged");
+
+    await rootOutcome.reset?.();
+    expect(adb.files.size).toBe(0);
+    expect(await root.isClean()).toBe(true);
+    expect(await integrity.isClean()).toBe(true);
+  });
+
+  test("integrity off refuses su stubs rootState still needs (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-off" };
+    const owner = { device, deviceId: device.deviceId };
+    const integrity = resolve(owner, "integrityState")!;
+    const root = resolve(owner, "rootState")!;
+    await integrity.apply("apply", undefined, { signals: { "su-binary": "on" } });
+    await root.apply("rooted-detectable");
+    const off = await integrity.apply("apply", undefined, { signals: { "su-binary": "off" } });
+    expect(off.signals?.[0]).toMatchObject({ id: "su-binary", status: "unsupported" });
+    expect([...adb.files].sort()).toEqual([...ROOT_ARTIFACT_PATHS].sort());
+  });
+
+  test("rootState re-plants an artifact it depends on but did not plant (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-drift" };
+    const owner = { device, deviceId: device.deviceId };
+    const integrity = resolve(owner, "integrityState")!;
+    const root = resolve(owner, "rootState")!;
+    await integrity.apply("apply", undefined, { signals: { "su-binary": "on" } });
+    await root.apply("rooted-detectable");
+    adb.files.delete("/system/xbin/su");
+    expect((await root.apply("rooted-detectable")).status).toBe("applied");
+    expect(adb.files.has("/system/xbin/su")).toBe(true);
+  });
+
   test("factory-local SELinux owners isolate the same device id across adb clients", async () => {
     const firstAdb = new IntegrityAdb();
     const secondAdb = new IntegrityAdb();

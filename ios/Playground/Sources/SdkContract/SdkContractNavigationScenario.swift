@@ -24,6 +24,7 @@ final class SdkContractNavigationScenario: NSObject, UINavigationControllerDeleg
         webView.navigationDelegate = self
         bridge.register(webView)
     }
+
     let webView = WKWebView()
     private var uiKit: UIKitNavigationAdapter?
     private var shown = false
@@ -31,9 +32,9 @@ final class SdkContractNavigationScenario: NSObject, UINavigationControllerDeleg
     private var webFailure: Error?
 
     func navigationController(
-        _ navigationController: UINavigationController,
+        _: UINavigationController,
         didShow viewController: UIViewController,
-        animated: Bool
+        animated _: Bool
     ) {
         shown = true
         uiKit?.recordPush(viewController)
@@ -53,7 +54,7 @@ final class SdkContractNavigationScenario: NSObject, UINavigationControllerDeleg
         webFailure = error
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+    func webView(_: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError error: Error) {
         webFailure = error
     }
 

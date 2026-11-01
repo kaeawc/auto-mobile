@@ -58,6 +58,8 @@ export interface ReleaseChecksumEntry {
    * their prior, explicit development-only fallback behavior.
    */
   screenCaptureHelperSha256?: string;
+  /** SHA-256 of the signed, notarized universal macOS audio-loopback helper archive. */
+  audioLoopbackHelperSha256?: string;
   /**
    * SHA-256 of the universal ad-hoc-signed iOS-simulator prototype-agent dylib
    * (`AutoMobilePrototypeAgent.dylib`, #10564/#10565). Optional: releases that
@@ -101,6 +103,8 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     runnerSha256Target: "xctest",
     videoJarSha256: "092ad380e2cc80e763f1d91944113a79e343d8514178439bb2016bf52d9b5e92",
     screenCaptureHelperSha256: "bb0696c32e2ef61ebfede73a844817660e6a5aebbc8258dcc03e487afa294fb4",
+    // Pinned after the first release dry-run produces the notarized archive.
+    audioLoopbackHelperSha256: "",
     prototypeAgentSha256: "cc644a6dc81fd4aab561e2b7e8c1ba80a320a5b68da1729b650e750fd1b726e2",
     prototypeViewerSha256: "3fdabb1600c84db71ec8dbd089d8e741c1260bbf7631c48b5505b017713c7d22",
     networkFilterSha256: "ab1455dc7d737d4fc003ffaf11b5d2033c8b70f8648e059d7beef6164ce76336",
@@ -984,6 +988,9 @@ export const VIDEO_SERVER_JAR_FILENAME = "automobile-video.jar";
 /** Fixed GitHub Release asset for the signed universal macOS capture helper. */
 export const SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME = "screen-capture-helper-macos-universal.zip";
 
+/** Fixed GitHub Release asset for the signed universal macOS audio-loopback helper. */
+export const AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME = "audio-loopback-helper-macos-universal.zip";
+
 /** Fixed GitHub Release asset for the signed, notarized macOS Network Filter app. */
 export const NETWORK_FILTER_ARCHIVE_FILENAME = "automobile-network-filter-macos-universal.zip";
 
@@ -1085,6 +1092,27 @@ export function resolveScreenCaptureHelperChecksum(
   return entryForPinnedVersion(env, registry)?.screenCaptureHelperSha256 ?? "";
 }
 
+/** Download URL for the signed macOS CoreAudio helper archive. */
+export function resolveAudioLoopbackHelperUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected archive SHA-256 for the selected audio-loopback-helper release. */
+export function resolveAudioLoopbackHelperChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.audioLoopbackHelperSha256 ?? "";
+}
+
 /** Download URL for the signed macOS Network Filter app archive. */
 export function resolveNetworkFilterUrl(
   env: EnvLike = process.env,
@@ -1127,3 +1155,6 @@ export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of AutoMobileTest.app
 // per-release target records whether that is the legacy XCTRunner stub or the
 // CtrlProxy xctest executable.
 export const IOS_CTRL_PROXY_RUNNER_SHA256_CHECKSUM: string = resolveRunnerChecksum({});
+
+/** Empty until the first release dry-run pins the audio-loopback archive. */
+export const AUDIO_LOOPBACK_HELPER_SHA256_CHECKSUM: string = resolveAudioLoopbackHelperChecksum({});

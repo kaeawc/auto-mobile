@@ -3,6 +3,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import {
   APK_SHA256_CHECKSUM,
+  AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME,
+  AUDIO_LOOPBACK_HELPER_SHA256_CHECKSUM,
+  resolveAudioLoopbackHelperChecksum,
+  resolveAudioLoopbackHelperUrl,
   APK_URL,
   AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV,
   DAEMON_PACKAGE_NAME,
@@ -812,6 +816,53 @@ describe("prototype-viewer release delivery (#12255)", function () {
   test("registry prototype-viewer checksums are empty or SHA-256 values", function () {
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       const checksum = entry.prototypeViewerSha256 ?? "";
+      expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
+    }
+  });
+});
+
+describe("audio-loopback-helper release delivery", () => {
+  const checksum = "a".repeat(64);
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "1.0.0",
+      apkSha256: "apk",
+      ipaSha256: "ipa",
+      runnerSha256: "runner",
+      audioLoopbackHelperSha256: checksum,
+    },
+    { version: "0.9.0", apkSha256: "apk", ipaSha256: "ipa", runnerSha256: "runner" },
+  ];
+
+  test("uses the audio archive with the selected version and asset mirror", () => {
+    expect(AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME).toBe(
+      "audio-loopback-helper-macos-universal.zip",
+    );
+    expect(resolveAudioLoopbackHelperUrl({}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/1.0.0/${AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME}`,
+    );
+    expect(
+      resolveAudioLoopbackHelperUrl(
+        {
+          AUTOMOBILE_VERSION: "0.9.0",
+          AUTOMOBILE_ASSET_BASE_URL: "https://mirror.example/releases",
+        },
+        registry,
+      ),
+    ).toBe(`https://mirror.example/releases/0.9.0/${AUDIO_LOOPBACK_HELPER_ARCHIVE_FILENAME}`);
+  });
+
+  test("selects the checksum for the pinned version and fails closed for unknown releases", () => {
+    expect(resolveAudioLoopbackHelperChecksum({}, registry)).toBe(checksum);
+    expect(resolveAudioLoopbackHelperChecksum({ AUTOMOBILE_VERSION: "0.9.0" }, registry)).toBe("");
+    expect(resolveAudioLoopbackHelperChecksum({ AUTOMOBILE_VERSION: "9.0.0" }, registry)).toBe("");
+    expect(resolveAudioLoopbackHelperChecksum({}, [])).toBe("");
+  });
+
+  test("committed pins are empty or SHA-256 values and the scalar follows the registry", () => {
+    expect(AUDIO_LOOPBACK_HELPER_SHA256_CHECKSUM).toBe(resolveAudioLoopbackHelperChecksum({}));
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      const checksum = entry.audioLoopbackHelperSha256 ?? "";
       expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
     }
   });

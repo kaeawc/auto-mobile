@@ -18,8 +18,10 @@ devices (#13628, #13629). The emulator route is in
 
 ## Helper
 
-`ios/audio-loopback` builds `audio-loopback-helper`, a Swift CLI over AudioQueue. It is located
-through `AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER`; there is no released build yet.
+`ios/audio-loopback` builds `audio-loopback-helper`, a Swift CLI over AudioQueue. The daemon resolves its signed, notarized universal release archive through
+`AudioLoopbackHelperProvider`, verifies the pinned SHA-256 and caches the executable.
+`AUTOMOBILE_IOS_AUDIO_LOOPBACK_HELPER` takes precedence as a local path override.
+An unknown checksum disables release resolution.
 
 - `play --sample-rate N`: reads 16-bit little-endian mono PCM from stdin into the injection device.
   It reads one 50 ms buffer each time the queue frees one, so the daemon's writes are paced by

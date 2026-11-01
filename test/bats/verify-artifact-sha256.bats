@@ -75,6 +75,11 @@ write_release_ts() {
     protoviewer_apk_line="
     protoViewerApkSha256: \"$7\","
   fi
+  local audio_helper_line=""
+  if [ "$#" -ge 8 ]; then
+    audio_helper_line="
+    audioLoopbackHelperSha256: \"$8\","
+  fi
   cat > "$PROJECT/src/constants/release.ts" <<EOF
 export interface ReleaseChecksumEntry {
   version: string;
@@ -83,6 +88,7 @@ export interface ReleaseChecksumEntry {
   runnerSha256: string;
   videoJarSha256?: string;
   screenCaptureHelperSha256?: string;
+  audioLoopbackHelperSha256?: string;
   prototypeAgentSha256?: string;
   prototypeViewerSha256?: string;
   protoViewerApkSha256?: string;
@@ -94,7 +100,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "1.0.0",
     apkSha256: "",
     ipaSha256: "$1",
-    runnerSha256: "",$video_line$helper_line$prototype_line$filter_line$viewer_line$protoviewer_apk_line
+    runnerSha256: "",$video_line$helper_line$prototype_line$filter_line$viewer_line$protoviewer_apk_line$audio_helper_line
   },
 ];
 EOF
@@ -307,4 +313,29 @@ EOF
   run bash "$ABS_SCRIPT" "$ARTIFACT" protoviewerapk
   [ "$status" -ne 0 ]
   [[ "$output" == *"No SHA256 checksum found for protoViewerApkSha256"* ]]
+}
+
+
+@test "matching audioLoopbackHelperSha256 verifies successfully" {
+  write_release_ts "" "" "" "" "" "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" audioloopbackhelper
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified successfully"* ]]
+}
+
+@test "absent audioLoopbackHelperSha256 reports no checksum" {
+  write_release_ts "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" audioloopbackhelper
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found"* ]]
+}
+
+@test "mismatched audioLoopbackHelperSha256 is refused" {
+  write_release_ts "" "" "" "" "" "" "" "0000000000000000000000000000000000000000000000000000000000000000"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" audioloopbackhelper
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch"* ]]
 }

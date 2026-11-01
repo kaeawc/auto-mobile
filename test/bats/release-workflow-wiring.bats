@@ -83,7 +83,7 @@
   [ "$status" -eq 0 ]
 
   local artifact_name
-  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper prototype-agent prototype-viewer network-filter; do
+  for artifact_name in control-proxy-apk protoviewer-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper audio-loopback-helper prototype-agent prototype-viewer network-filter; do
     [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
   done
 
@@ -310,6 +310,7 @@
     .github/workflows/build-protoviewer-apk.yml \
     .github/workflows/build-video-server-jar.yml \
     .github/workflows/build-screen-capture-helper.yml \
+    .github/workflows/build-audio-loopback-helper.yml \
     .github/workflows/build-prototype-agent.yml \
     .github/workflows/build-prototype-viewer.yml; do
     run yq -r '.on.workflow_call.inputs."artifact-retention-days".default' "$workflow"
@@ -1066,4 +1067,23 @@ wiring_requires_yq() {
   run yq -r '.jobs."prepare-version".steps[] | select(.id == "protoviewer-version") | .env.RELEASE_VERSION' "$workflow"
   [ "$status" -eq 0 ]
   [ "$output" = '${{ inputs.version }}' ]
+}
+
+
+@test "audio-loopback helper is built, pinned, verified and published from prepared artifacts" {
+  local prepare=".github/workflows/prepare-release.yml"
+  local release=".github/workflows/release.yml"
+  local builder=".github/workflows/build-audio-loopback-helper.yml"
+  grep -Fq "uses: ./.github/workflows/build-audio-loopback-helper.yml" "$prepare"
+  grep -Fq 'AUDIO_LOOPBACK_HELPER_SHA256: ${{ needs.build-candidate-audio-loopback-helper.outputs.sha256 }}' "$prepare"
+  for workflow in "$prepare" "$release"; do
+    grep -Fq '"audio-loopback-helper"' "$workflow"
+  done
+  grep -Fq "verify-artifact-sha256.sh /tmp/audio-loopback-helper-macos-universal.zip audioloopbackhelper" "$prepare"
+  ! grep -Fq "uses: ./.github/workflows/build-audio-loopback-helper.yml" "$release"
+  grep -Fq "entry.audioLoopbackHelperSha256" "$release"
+  grep -Fq "setup-macos-signing-keychain.sh" "$builder"
+  grep -Fq "build-audio-loopback-helper-release.sh" "$builder"
+  grep -Fq "name: audio-loopback-helper" "$builder"
+  grep -Fq "path: /tmp/audio-loopback-helper-macos-universal.zip" "$builder"
 }

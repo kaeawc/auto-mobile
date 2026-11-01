@@ -89,6 +89,7 @@ ios/prototype-agent-build.sh
 ios/build-prototype-agent.sh
 ios/build-prototype-viewer-release.sh
 ios/build-screen-capture-helper-release.sh
+ios/build-audio-loopback-helper-release.sh
 ios/build-network-filter-probe.sh
 lib/host-slots.sh
 lib/bun-unit-chunks.sh

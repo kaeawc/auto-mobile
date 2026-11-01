@@ -4,7 +4,7 @@
 #
 # Usage: verify-artifact-sha256.sh <artifact-path> <platform>
 #
-# Platform is "android", "protoviewerapk", "ios", "videojar", "screencapturehelper", "prototypeagent", "prototypeviewer", or "networkfilter", which
+# Platform is "android", "protoviewerapk", "ios", "videojar", "screencapturehelper", "audioloopbackhelper", "prototypeagent", "prototypeviewer", or "networkfilter", which
 # selects the matching checksum from the first (newest) registry entry.
 #
 # Example:
@@ -52,6 +52,8 @@ elif [ "$PLATFORM" = "videojar" ]; then
   FIELD="videoJarSha256"
 elif [ "$PLATFORM" = "screencapturehelper" ]; then
   FIELD="screenCaptureHelperSha256"
+elif [ "$PLATFORM" = "audioloopbackhelper" ]; then
+  FIELD="audioLoopbackHelperSha256"
 elif [ "$PLATFORM" = "prototypeagent" ]; then
   FIELD="prototypeAgentSha256"
 elif [ "$PLATFORM" = "prototypeviewer" ]; then
@@ -59,7 +61,7 @@ elif [ "$PLATFORM" = "prototypeviewer" ]; then
 elif [ "$PLATFORM" = "networkfilter" ]; then
   FIELD="networkFilterSha256"
 else
-  echo "ERROR: Platform must be 'android', 'protoviewerapk', 'ios', 'videojar', 'screencapturehelper', 'prototypeagent', 'prototypeviewer', or 'networkfilter', got '$PLATFORM'"
+  echo "ERROR: Platform must be 'android', 'protoviewerapk', 'ios', 'videojar', 'screencapturehelper', 'audioloopbackhelper', 'prototypeagent', 'prototypeviewer', or 'networkfilter', got '$PLATFORM'"
   exit 1
 fi
 

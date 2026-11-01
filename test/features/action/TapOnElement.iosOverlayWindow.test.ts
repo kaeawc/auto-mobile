@@ -12,7 +12,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { iosFloatingOverlayOverSettings } from "../../fixtures/observe/iosOverlayWindow";
-import { createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
+import { type FlatHierarchyResult, createFlatNodeForTest } from "../observe/flatHierarchyBuilders";
 import { PROTOTYPE_WINDOW_MARKER_ID } from "../../../src/features/prototype/prototypeHostControls";
 import { tapOnHandler } from "../../../src/server/interactionTools/tapHandlers";
 import { getStructuredField } from "../../../src/utils/toolUtils";
@@ -107,7 +107,7 @@ describe("tapOn controls in a captured in-app iOS prototype window", () => {
   });
 });
 
-function fullscreenPrototype(top: number, bottom: number): ViewHierarchyResult {
+function fullscreenPrototype(top: number, bottom: number): FlatHierarchyResult {
   return {
     packageName: "dev.jasonpearson.ProtoViewer",
     screenWidth: 402,
@@ -169,6 +169,39 @@ describe("tapOn in a fullscreen iOS prototype under the status bar (#16175)", ()
     expect(getStructuredField(response, "message")).toContain("Failed to tap:");
     expect(getStructuredField(response, "message")).not.toContain("Tapped on element");
     expect(points).toEqual([]);
+  });
+
+  test("refuses when a sibling owns all of the target below the 59-point status bar", async () => {
+    const hierarchy = fullscreenPrototype(0, 100);
+    const prototype = hierarchy.hierarchy.node?.node?.[0];
+    if (!prototype) {
+      throw new Error("Missing prototype fixture root");
+    }
+    const target = prototype.node?.[0];
+    if (!target) {
+      throw new Error("Missing prototype fixture target");
+    }
+    prototype.node = [
+      createFlatNodeForTest({
+        class: "UIScrollView",
+        scrollable: true,
+        bounds: { left: 100, top: 0, right: 200, bottom: 100 },
+        node: [
+          target,
+          createFlatNodeForTest({
+            class: "UIButton",
+            "resource-id": "covering-sibling",
+            clickable: true,
+            enabled: true,
+            bounds: { left: 100, top: 59, right: 200, bottom: 100 },
+          }),
+        ],
+      }),
+    ];
+    const { result, points } = await tapElement(hierarchy, "emit-control");
+    expect(points).toEqual([]);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("under the status bar");
   });
 
   test("taps the reachable part of a control straddling the status-bar edge", async () => {

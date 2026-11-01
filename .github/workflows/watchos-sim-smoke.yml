@@ -1,0 +1,76 @@
+name: "watchOS Simulator Smoke"
+
+# Advisory only: nightly or PR opt-in via run-watchos-sim. Never required by
+# green-main and never a dependency of a required job. Failures stay visible;
+# continue-on-error is unnecessary for a standalone advisory workflow.
+# One fresh watch UDID belongs to this job and is used serially throughout.
+on:
+  schedule:
+    - cron: "23 8 * * *"
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watchos-sim-smoke:
+    name: "Watch Simulator Smoke (advisory)"
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-watchos-sim')
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Select Xcode 26.5"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.5"
+
+      - name: "Set up Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: "Install dependencies"
+        run: bun install --frozen-lockfile
+
+      # ensure-ios-simulator-runtime only queries/downloads iOS, not watchOS.
+      - name: "Ensure watchOS runtime"
+        run: |
+          mkdir -p scratch/watch-smoke-lane/latest
+          exec > >(tee scratch/watch-smoke-lane/latest/runtime.log) 2>&1
+          sdk_version="$(xcrun --sdk watchsimulator --show-sdk-version)"
+          has_runtime() {
+            xcrun simctl list runtimes available watchOS --json |
+              jq -e --arg version "${sdk_version}" \
+                'any(.runtimes[]; .isAvailable != false and .version == $version)'
+          }
+          if ! has_runtime; then
+            xcodebuild -downloadPlatform watchOS
+          fi
+          has_runtime
+          echo "WATCH_SMOKE_VERSION=${sdk_version}" >> "${GITHUB_ENV}"
+
+      - name: "Run watch smoke"
+        env:
+          WATCH_SMOKE_LOG_DIR: scratch/watch-smoke-lane/latest
+        run: |
+          export AUTOMOBILE_AUX_SOCKET_DIR="$(mktemp -d "${RUNNER_TEMP}/watch-aux.XXXXXX")"
+          trap 'rmdir "${AUTOMOBILE_AUX_SOCKET_DIR}" || true' EXIT
+          bash scripts/ios/watch-smoke-lane.sh "${WATCH_SMOKE_VERSION}"
+
+      - name: "Upload watch smoke failure artifacts"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: watchos-sim-smoke-failure
+          path: |
+            scratch/watch-smoke-lane/
+            !scratch/watch-smoke-lane/**/derived-data/**
+          if-no-files-found: warn
+          retention-days: 7

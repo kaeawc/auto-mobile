@@ -11,6 +11,10 @@ import org.xmlpull.v1.XmlPullParserException
 
 /** Reads directly so framework recovery cannot hide or delete the damaged fixture. */
 internal class AppFileReader {
+  private companion object {
+    const val MAX_FILE_BYTES = 1024L * 1024L
+  }
+
   private val errorHandler = DatabaseErrorHandler {
     throw SQLiteDatabaseCorruptException("Corrupt database: ${it.path}")
   }
@@ -19,6 +23,9 @@ internal class AppFileReader {
     val isXml = file.name.endsWith(".xml")
     if (seed && !file.exists()) seed(file, isXml)
     if (!file.isFile || file.length() == 0L) throw IOException("Missing or empty file: $file")
+    if (file.length() > MAX_FILE_BYTES) {
+      throw IOException("File exceeds limit of $MAX_FILE_BYTES bytes: $file")
+    }
     if (isXml) readXml(file) else readDatabase(file)
   }
 
@@ -27,16 +34,22 @@ internal class AppFileReader {
     if (!parent.isDirectory && !parent.mkdirs()) throw IOException("Cannot create $parent")
     // Never replace an existing file, including an empty or already corrupted fixture.
     if (!file.createNewFile()) return
-    if (isXml) {
-      file.writeText(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?><map><string name=\"probe\">ok</string></map>",
-      )
-    } else {
-      SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READWRITE, errorHandler)
-        .use {
-          it.execSQL("CREATE TABLE probe (value TEXT NOT NULL)")
-          it.execSQL("INSERT INTO probe (value) VALUES ('ok')")
-        }
+    var seeded = false
+    try {
+      if (isXml) {
+        file.writeText(
+          "<?xml version=\"1.0\" encoding=\"utf-8\"?><map><string name=\"probe\">ok</string></map>",
+        )
+      } else {
+        SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READWRITE, errorHandler)
+          .use {
+            it.execSQL("CREATE TABLE probe (value TEXT NOT NULL)")
+            it.execSQL("INSERT INTO probe (value) VALUES ('ok')")
+          }
+      }
+      seeded = true
+    } finally {
+      if (!seeded) file.delete()
     }
   }
 
@@ -47,7 +60,12 @@ internal class AppFileReader {
     file.inputStream().use { input ->
       parser.setInput(input, null)
       while (parser.next() != XmlPullParser.END_DOCUMENT) {
-        if (parser.eventType == XmlPullParser.START_TAG) elements++
+        if (parser.eventType == XmlPullParser.START_TAG) {
+          if (elements == 0 && parser.name != "map") {
+            throw XmlPullParserException("Expected map XML root element")
+          }
+          elements++
+        }
       }
     }
     if (elements == 0) throw XmlPullParserException("Missing XML root element")

@@ -1843,7 +1843,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         "event batch" to eventBatchReceiver,
         "screen state" to screenStateReceiver,
       ),
-      release = ::unregisterReceiver,
+      release = { unregisterReceiver(it) },
       onFailure = { name, e -> Log.e(TAG, "Error unregistering $name receiver", e) },
     )
 

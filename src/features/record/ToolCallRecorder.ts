@@ -2,6 +2,7 @@ import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/wire/constants";
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../../utils/logger";
 import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
+import type { ToolCallRecordingContext } from "../toolSelection/toolSelectionContext";
 import { normalizedAxis } from "./normalizedAxis";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { redactToolSecrets, TOOL_SECRET_PLACEHOLDER } from "../../utils/redactToolSecrets";
@@ -244,7 +245,16 @@ export class ToolCallRecorder {
     return this.steps.length;
   }
 
-  record(toolName: string, args: Record<string, unknown>, traits?: RecorderToolTraits): void {
+  /**
+   * @param recording - What the call's handler resolved for recording (#15663): a tapAt's geometry,
+   * a swipeAt's screen.
+   */
+  record(
+    toolName: string,
+    args: Record<string, unknown>,
+    traits?: RecorderToolTraits,
+    recording?: ToolCallRecordingContext,
+  ): void {
     if (!this.recording) {
       return;
     }
@@ -264,9 +274,7 @@ export class ToolCallRecorder {
       return;
     }
     const recorded = this.withholdUnsafeParams(toolName, params);
-    const context = args.__tapAtRecordingContext as
-      | import("../../models/TapAtGeometry").TapAtPlanContext
-      | undefined;
+    const context = recording?.tapAt;
     const geometry = toolName === "tapAt" ? context?.recordedGeometry : undefined;
     if (toolName === "tapAt" && context && !geometry) {
       const warning =
@@ -274,7 +282,7 @@ export class ToolCallRecorder {
       logger.warn(`[ToolCallRecorder] ${warning}`);
       this.warnings.push(warning);
     }
-    const recordedParams = this.paramsToStore(toolName, recorded, args);
+    const recordedParams = this.paramsToStore(toolName, recorded, recording);
     if (geometry) {
       const nativeParams = { ...recorded };
       delete nativeParams.image;
@@ -313,15 +321,12 @@ export class ToolCallRecorder {
   private paramsToStore(
     toolName: string,
     recorded: Record<string, unknown>,
-    args: Record<string, unknown>,
+    recording: ToolCallRecordingContext | undefined,
   ): Record<string, unknown> {
     if (toolName !== "swipeAt") {
       return recorded;
     }
-    return this.normalizeSwipeAt(
-      recorded,
-      args.__swipeAtRecordingContext as SwipeAtRecordingContext | undefined,
-    );
+    return this.normalizeSwipeAt(recorded, recording?.swipeAt);
   }
 
   /**

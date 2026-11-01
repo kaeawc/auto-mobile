@@ -329,7 +329,7 @@ const migrateAppParams = (
   return changed;
 };
 
-const migrateTapParams = (
+const defaultTapAction = (
   mergedParams: Record<string, any>,
   stepIndex: number,
   warnings: MigrationWarning[],
@@ -351,6 +351,17 @@ const migrateTapParams = (
     );
     changed = true;
   }
+
+  return changed;
+};
+
+const migrateTapParams = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = defaultTapAction(mergedParams, stepIndex, warnings);
+
   if (mergedParams.elementId === undefined && typeof mergedParams.id === "string") {
     mergedParams.elementId = mergedParams.id;
     delete mergedParams.id;

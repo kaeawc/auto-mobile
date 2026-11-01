@@ -1,5 +1,5 @@
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 final class WebViewBridgeTests: XCTestCase {
     func testPolicyBoundsAndRedactsSnapshot() {
@@ -120,3 +120,69 @@ final class WebViewBridgeTests: XCTestCase {
         XCTAssertEqual(object["requestId"] as? String, "req")
     }
 }
+
+#if canImport(WebKit)
+    import WebKit
+
+    final class WebViewRegistrationTests: XCTestCase {
+        @MainActor
+        func testRegisterPreservesHostDelegateAndInstallsScriptOnce() {
+            let webView = WKWebView()
+            let delegate = HostNavigationDelegate()
+            webView.navigationDelegate = delegate
+            webView.configuration.userContentController.addUserScript(WKUserScript(
+                source: "window.hostScript = true;", injectionTime: .atDocumentStart, forMainFrameOnly: true
+            ))
+            let bridge = AutoMobileWebViewBridge()
+            defer {
+                bridge.detach()
+                AutoMobileNavigation.shared.reset()
+            }
+            AutoMobileNavigation.shared.reset()
+            bridge.register(webView)
+            let before = AutoMobileNavigation.shared.hostIntegrations.descriptors(initialized: true)
+            bridge.register(webView)
+            XCTAssertTrue(webView.navigationDelegate === delegate)
+            XCTAssertEqual(webView.configuration.userContentController.userScripts.count, 2)
+            XCTAssertEqual(AutoMobileNavigation.shared.hostIntegrations.descriptors(initialized: true), before)
+            XCTAssertEqual(before.first?.state, .supported)
+            bridge.detach()
+            XCTAssertTrue(webView.navigationDelegate === delegate)
+            // Detach and re-register must not duplicate the installed user script.
+            bridge.register(webView)
+            XCTAssertEqual(webView.configuration.userContentController.userScripts.count, 2)
+        }
+
+        @MainActor
+        func testRegistrationFromBackgroundQueuePreservesDelegate() async {
+            let webView = WKWebView()
+            let delegate = HostNavigationDelegate()
+            webView.navigationDelegate = delegate
+            let bridge = AutoMobileWebViewBridge()
+            defer {
+                bridge.detach()
+                AutoMobileNavigation.shared.reset()
+            }
+            await Task.detached { bridge.register(webView) }.value
+            XCTAssertTrue(webView.navigationDelegate === delegate)
+        }
+
+        @MainActor
+        func testLegacyAttachSetsDelegateAndRegistersFamily() {
+            let webView = WKWebView()
+            let bridge = AutoMobileWebViewBridge()
+            defer {
+                bridge.detach()
+                AutoMobileNavigation.shared.reset()
+            }
+            bridge.attach(to: webView)
+            XCTAssertTrue(webView.navigationDelegate === bridge)
+            XCTAssertEqual(
+                AutoMobileNavigation.shared.hostIntegrations.descriptors(initialized: true).first?.state,
+                .supported
+            )
+        }
+    }
+
+    private final class HostNavigationDelegate: NSObject, WKNavigationDelegate {}
+#endif

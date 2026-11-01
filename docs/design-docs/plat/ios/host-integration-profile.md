@@ -3,8 +3,7 @@
 The iOS SDK never swizzles or replaces an app-owned delegate, so it captures only what the host
 app registers. This document defines one registration path per adapter family, who owns each
 lifecycle, and the capability descriptors that tell a host and AutoMobile what is covered. Network
-transports are implemented. WKWebView and navigation adapters follow the same profile and are
-tracked in #15693.
+transports, WKWebView and navigation adapters follow this profile.
 
 ## Capability descriptors
 
@@ -103,19 +102,39 @@ through. Background sessions and the forwarding-only adapter methods (`recordFra
 
 ## WKWebView and navigation (#15693)
 
-These families follow the same rules: one registration call, no delegate replacement, and a
-descriptor that is `DISABLED` / `HOST_OPT_IN` until registered.
+`AutoMobileNavigation.shared.hostIntegrationCapabilities()` returns five descriptors in the table's
+order. Each is `DISABLED` / `HOST_OPT_IN` until registered, then `SUPPORTED` while the SDK is
+initialized and enabled. A stopped or disabled SDK takes precedence and reports `NOT_INITIALIZED`
+with reason `NOT_INITIALIZED`. These families have adapters and never report `UNSUPPORTED`;
+`faultEnforcement` is always `NONE` and `faultActions` is empty. Network capture settings do not
+affect this matrix, and `transportCapabilities()` remains transport-only.
 
-| Family         | Planned registration                                                                                | Ownership notes                                                                                                                                                            |
-| -------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| WKWebView      | register a web view with the bridge, which adds only a script message handler and user script       | `AutoMobileWebViewBridge.attach(to:)` currently sets `navigationDelegate`; the registration path must instead take navigation callbacks forwarded from the host's delegate |
-| UIKit          | register once, then call the push, pop, presentation, tab and split hooks from the host's delegates | no swizzling; hooks resolve the scene on the main thread                                                                                                                   |
-| SwiftUI        | register once, then use `.trackNavigation()` or the `track*` calls                                  | one active flag per adapter                                                                                                                                                |
-| Deep links     | register once, then call `record` from the host's URL handler                                       | the host owns URL dispatch                                                                                                                                                 |
-| Custom routers | register once, then call `record` per completed transition                                          | events are dropped until the transition completes                                                                                                                          |
+| Family and capability id | Registration | Host forwarding |
+| --- | --- | --- |
+| WKWebView (`webview.wkwebview`) | `bridge.register(webView)` | Keep the host's `WKNavigationDelegate`; forward `didCommit`, `didFinish`, `didFail` and `webViewWebContentProcessDidTerminate` to the bridge's corresponding methods |
+| UIKit (`navigation.uikit`) | `AutoMobileNavigation.shared.registerUIKit()` | Call the returned adapter's completed push, pop, presentation, tab and split hooks from existing delegates; scene resolution runs on main |
+| SwiftUI (`navigation.swiftui`) | `AutoMobileNavigation.shared.registerSwiftUI()` | Use `.trackNavigation()` or the returned adapter's `track*` calls |
+| Deep links (`navigation.deeplink`) | `AutoMobileNavigation.shared.registerDeepLinks()` | Call the returned adapter's `record` from the host's URL handler; the host owns dispatch |
+| Custom routers (`navigation.custom`) | `AutoMobileNavigation.shared.registerCustomRouter()` | Call the returned adapter's `record` per completed transition; incomplete transitions are dropped |
 
-The navigation adapters share one hub. Registration must not reset a redactor another adapter
-installed.
+Registration may precede SDK initialization. Navigation calls return the shared family adapter and
+start its owner in the shared hub. Repeated registration leaves descriptors and the installed
+redactor unchanged. Starting another owner without an explicit redactor preserves the hub's
+installed policy; the initial factory uses `NoOpNavigationRedactor`. SDK startup does not start
+SwiftUI capture. SDK shutdown stops the navigation owners and clears family registrations, so a
+restart requires registration again. UIKit registration is available only on UIKit platforms.
+
+Web-view registration adds a script message handler in the configured content world and installs
+the user script once, without replacing the navigation delegate. Legacy `attach(to:)` also marks
+the family registered and retains its delegate-setting behavior. `detach()` removes the handler
+and clears the delegate only when it is the bridge itself; the installed user script remains.
+Registration attests host opt-in, not that every callback is forwarded or every web view registered.
+Register a bridge with `AutoMobileWebViewRegistry.shared.register(bridge)` separately to expose it
+to discovery and control routes.
+
+Registration and adapter calls may run on any queue; WebKit installation and detachment execute
+synchronously on main. Registry and hub state use `OSAllocatedUnfairLock`; host callbacks and
+redaction run outside locks.
 
 ## Fixture requirement
 

@@ -5,9 +5,9 @@ import { logger } from "../../../src/utils/logger";
 
 class FakeHelperProvider {
   calls = 0;
-  path: string | null | undefined = "/cache/audio-loopback-helper";
+  path: string | null = "/cache/audio-loopback-helper";
   failure?: Error;
-  async ensure(): Promise<string | null | undefined> {
+  async ensure(): Promise<string | null> {
     this.calls++;
     if (this.failure) {
       throw this.failure;
@@ -57,7 +57,9 @@ describe("audioLoopbackHelperPath", () => {
 
   test("unset env uses the provider on macOS", async () => {
     const provider = new FakeHelperProvider();
-    expect(await audioLoopbackHelperPath({}, { provider, platform: "darwin" })).toBe(provider.path);
+    expect(await audioLoopbackHelperPath({}, { provider, platform: "darwin" })).toBe(
+      provider.path ?? undefined,
+    );
     expect(provider.calls).toBe(1);
   });
 

@@ -4,7 +4,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { SwipeAtCoordinate } from "../features/action/SwipeAtCoordinate";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import type { BootedDevice } from "../models";
-import type { SwipeAtOptions, SwipeAtRecordingContext } from "../models/SwipeAtOptions";
+import type { SwipeAtOptions } from "../models/SwipeAtOptions";
 import { swipeAtResultSchema } from "./gestureToolOutputSchemas";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
 import {
@@ -14,7 +14,7 @@ import {
 } from "../features/action/swipeon/swipeTiming";
 import { hierarchyLayerSchema } from "../models/elementSelectorSchemas";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
-import { internalSwipeAtRecordingContext } from "./internalToolParams";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { pointerSchema } from "./pointerSchema";
 import {
   addDeviceTargetingToSchema,
@@ -25,9 +25,7 @@ import {
 
 // The handler's arguments are the parsed wire schema; its exclusivity refinement (image xor
 // from/to) is narrowed where the options are built.
-export type SwipeAtArgs = z.output<typeof swipeAtSchema> & {
-  __swipeAtRecordingContext?: SwipeAtRecordingContext;
-};
+export type SwipeAtArgs = z.output<typeof swipeAtSchema>;
 
 const swipeAtPointSchema = z
   .object({
@@ -199,7 +197,7 @@ export function createSwipeAtHandler({
         display: args.display,
         pointer: args.pointer,
       } as SwipeAtOptions,
-      { progress, signal, recordingContext: internalSwipeAtRecordingContext(args) },
+      { progress, signal, recordingContext: getToolSelectionContext()?.toolCallRecording?.swipeAt },
     );
     const message = result.success
       ? `Swiped from (${result.x1}, ${result.y1}) to (${result.x2}, ${result.y2})`

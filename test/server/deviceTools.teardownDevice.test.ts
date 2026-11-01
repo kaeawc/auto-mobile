@@ -741,6 +741,41 @@ describe("deleteDevice handler", () => {
     expect(resolveDirectSessionDevice("direct-session")).toBeUndefined();
   });
 
+  test("destroying an Android AVD forgets its snapshot fixtures (#14065)", async () => {
+    const forgotten: string[] = [];
+    setDeviceToolsDependencies({
+      forgetDestroyedAvdFixtures: async (avdName) => {
+        forgotten.push(avdName);
+      },
+    });
+    const device: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+    manager.setDeviceImages("android", [device]);
+
+    await teardownTool().handler(request("android", device.name, device.name));
+
+    expect(forgotten).toEqual(["Pixel_8_API_35"]);
+  });
+
+  test("a failed fixture cleanup never fails the AVD delete (#14065)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      setDeviceToolsDependencies({
+        forgetDestroyedAvdFixtures: async () => {
+          throw new Error("registry busy");
+        },
+      });
+      const device: DeviceInfo = { platform: "android", name: "Pixel_8_API_35", isRunning: false };
+      manager.setDeviceImages("android", [device]);
+
+      const response = await teardownTool().handler(request("android", device.name, device.name));
+
+      expect(JSON.stringify(response)).not.toContain('"isError":true');
+      expect(warn.mock.calls.map((call) => String(call[0])).join("\n")).toContain("registry busy");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("preserves a physical Android session with the same name as a destroyed AVD", async () => {
     const device: DeviceInfo = {
       platform: "android",

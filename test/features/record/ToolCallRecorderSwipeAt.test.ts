@@ -5,13 +5,14 @@ import { logger } from "../../../src/utils/logger";
 import { createSwipeAt } from "../../helpers/swipeAtCoordinate";
 import type { BootedDevice } from "../../../src/models";
 import type { SwipeAtRecordingContext } from "../../../src/models/SwipeAtOptions";
+import { runWithToolSelectionContext } from "../../../src/features/toolSelection/toolSelectionContext";
 
 const device: BootedDevice = { deviceId: "swipe-rec", platform: "android", name: "Fake" };
 
-function record(args: Record<string, unknown>) {
+function record(args: Record<string, unknown>, swipeAt: SwipeAtRecordingContext) {
   const recorder = new ToolCallRecorder();
   recorder.start();
-  recordPlanCall(recorder, "swipeAt", args);
+  recordPlanCall(recorder, "swipeAt", args, {}, { swipeAt });
   return recorder.stopWithWarnings();
 }
 
@@ -24,12 +25,14 @@ describe("recorded swipeAt geometry (#12878)", () => {
       { recordingContext },
     );
 
-    const { steps, warnings } = record({
-      from: { x: 540, y: 1200 },
-      to: { x: 108, y: 600 },
-      snapshotId: "ephemeral",
-      __swipeAtRecordingContext: recordingContext,
-    });
+    const { steps, warnings } = record(
+      {
+        from: { x: 540, y: 1200 },
+        to: { x: 108, y: 600 },
+        snapshotId: "ephemeral",
+      },
+      recordingContext,
+    );
 
     expect(steps).toEqual([
       {
@@ -45,11 +48,13 @@ describe("recorded swipeAt geometry (#12878)", () => {
   });
 
   test("the recorded step replays proportionally on a rotated screen", async () => {
-    const { steps } = record({
-      from: { x: 540, y: 1200 },
-      to: { x: 108, y: 600 },
-      __swipeAtRecordingContext: { screenSize: { width: 1080, height: 2400 } },
-    });
+    const { steps } = record(
+      {
+        from: { x: 540, y: 1200 },
+        to: { x: 108, y: 600 },
+      },
+      { screenSize: { width: 1080, height: 2400 } },
+    );
     const { swipeAt, swipes } = createSwipeAt(device, 2400, 1080);
 
     await swipeAt.execute(steps[0].params as never);
@@ -65,7 +70,7 @@ describe("recorded swipeAt geometry (#12878)", () => {
     const warn = spyOn(logger, "warn");
     try {
       const params = { from: { x: 540, y: 1200 }, to: { x: 108, y: 600 } };
-      const { steps, warnings } = record({ ...params, __swipeAtRecordingContext: {} });
+      const { steps, warnings } = record(params, {});
 
       expect(steps).toEqual([{ tool: "swipeAt", params }]);
       expect(warnings).toHaveLength(1);
@@ -81,7 +86,7 @@ describe("recorded swipeAt geometry (#12878)", () => {
       to: { x: 0.2, y: 0.2 },
       coordinateSpace: "normalized",
     };
-    const { steps, warnings } = record({ ...params, __swipeAtRecordingContext: {} });
+    const { steps, warnings } = record(params, {});
 
     expect(steps).toEqual([{ tool: "swipeAt", params }]);
     expect(warnings).toEqual([]);
@@ -98,8 +103,8 @@ describe("swipeAt recording context wiring (#12878)", () => {
   });
 
   test("the dispatcher hands swipeAt a fresh recording context the handler fills", async () => {
-    const args = dispatch.deviceAwareHandlerArgs({}, {} as never, undefined, "swipeAt");
-    expect(args.__swipeAtRecordingContext).toEqual({});
+    const recording = dispatch.deviceCallRecording("swipeAt", undefined);
+    expect(recording).toEqual({ swipeAt: {} });
 
     const seen: unknown[] = [];
     const handler = swipeAtTools.createSwipeAtHandler({
@@ -110,11 +115,10 @@ describe("swipeAt recording context wiring (#12878)", () => {
         },
       }),
     });
-    await handler(device, {
-      from: { x: 1, y: 2 },
-      to: { x: 3, y: 4 },
-      __swipeAtRecordingContext: args.__swipeAtRecordingContext as SwipeAtRecordingContext,
-    });
-    expect(seen).toEqual([args.__swipeAtRecordingContext]);
+    await runWithToolSelectionContext({ toolCallRecording: recording }, () =>
+      handler(device, { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } }),
+    );
+    expect(seen).toEqual([recording?.swipeAt]);
+    expect(seen[0]).toBe(recording?.swipeAt);
   });
 });

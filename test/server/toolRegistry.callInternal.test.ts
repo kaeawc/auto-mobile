@@ -4,7 +4,10 @@ import { ProgressCallback, RegisteredTool, ToolRegistry } from "../../src/server
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/daemon/internalToolCall";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/wire/constants";
 import { ActionableError } from "../../src/models/ActionableError";
-import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 
 /**
  * Unit guard for the `ToolRegistry.callInternal` seam (#3108).
@@ -280,6 +283,41 @@ describe("ToolRegistry.callInternal (#3108)", () => {
 
       expect(Object.keys(captured[0].args)).not.toContain(INTERNAL_LIVE_DEADLINE_KEY_PARAM);
       expect(captured[0].args.__mcpRequestTimeoutMs).toBe(20);
+    });
+  });
+
+  describe("a plan step's tapAt geometry (#15663)", () => {
+    test("reaches the call ambiently, never in its arguments", async () => {
+      const seen: unknown[] = [];
+      ToolRegistry.register("probe", "probe", schema, {
+        handler: async (args: Record<string, unknown>) => {
+          seen.push(getToolSelectionContext()?.tapAtPlanContext, Object.keys(args));
+          return SENTINEL;
+        },
+      });
+      const geometry = { geometry: undefined };
+
+      await ToolRegistry.callInternal("probe", { text: "a" }, { tapAtPlanContext: geometry });
+
+      expect(seen[0]).toBe(geometry);
+      expect(seen[1]).not.toContain("__tapAtPlanContext");
+    });
+
+    test("a nested call does not inherit the enclosing step's geometry", async () => {
+      const seen: unknown[] = [];
+      ToolRegistry.register("inner", "inner", schema, {
+        handler: async () => {
+          seen.push(getToolSelectionContext()?.tapAtPlanContext);
+          return SENTINEL;
+        },
+      });
+      ToolRegistry.register("outer", "outer", schema, {
+        handler: async () => ToolRegistry.callInternal("inner", {}),
+      });
+
+      await ToolRegistry.callInternal("outer", {}, { tapAtPlanContext: {} });
+
+      expect(seen).toEqual([undefined]);
     });
   });
 

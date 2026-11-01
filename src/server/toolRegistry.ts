@@ -47,7 +47,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { StructuredToolResponse } from "../utils/toolUtils";
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
 import { ToolDefinitionSchemaCache } from "./toolDefinitionSchemaCache";
-import { applyInheritedPlanRequestParams } from "./pipeline/advertisedSchema";
+import { internalToolInvocationContext } from "./pipeline/internalInvocationContext";
 import {
   AfterToolCallHandler,
   DefaultAfterToolCallHandler,
@@ -58,6 +58,7 @@ import { AuditRunner, DefaultAuditRunner } from "./pipeline/audit";
 import {
   assertInternalCallWithinBrokerGrant,
   deviceAwareHandlerArgs,
+  deviceCallRecording,
   invokeResolvedDeviceHandler,
   refuseInternalControlOnForeignOwnedSession,
   sessionDisplayPinnedHandler,
@@ -128,7 +129,6 @@ import {
   deviceReadOnlyMetadata,
   InternalToolCallOptions,
   InternalToolCallRequest,
-  InternalToolInvocationContext,
   pickToolTraits,
   PlainToolRegistration,
   PLAN_ONLY_GATE_REASON,
@@ -390,6 +390,7 @@ export class ToolRegistryClass {
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
       const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext, name);
+      const toolCallRecording = deviceCallRecording(name, selectionContext);
       return runRecordedToolCall(this.toolCallRepository, this.timer, name, {
         sessionUuid:
           typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined,
@@ -424,6 +425,8 @@ export class ToolRegistryClass {
             // nested calls re-inject the correct derived routing UUID.
             {
               deviceAwareDispatch: true,
+              // Per call (#15663): always set, so a nested call never inherits this one's.
+              toolCallRecording,
               routingSessionUuid: resolvedTarget.sessionUuid,
               toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
               // Handlers read this to stay on their read-only path (observe, snapshotOf).
@@ -647,7 +650,7 @@ export class ToolRegistryClass {
           signal,
           timer: this.timer,
         });
-    const invocation = this.createInternalToolInvocationContext(
+    const invocation = internalToolInvocationContext(
       callArgs instanceof Promise ? await callArgs : callArgs,
       options,
     );
@@ -685,32 +688,6 @@ export class ToolRegistryClass {
   private withAutolockPolicy(handler: ToolHandler): ToolHandler {
     return (args, progress, signal) =>
       runWithAutolockPolicy(this.env, () => handler(args, progress, signal));
-  }
-
-  private createInternalToolInvocationContext(
-    args: Record<string, unknown>,
-    options: InternalToolCallOptions,
-  ): InternalToolInvocationContext {
-    const context = getToolSelectionContext();
-    const request = context?.planRequest;
-    if (request) {
-      args = applyInheritedPlanRequestParams(args, request);
-    }
-    // An internal call inherits the ambient ROUTING session (issue #4611 Gap C)
-    // so a plan step or navigation replay routes to the same derived/label
-    // session the outer call resolved to, not the base session.
-    // A blank session names none (#11469), so it never replaces the one below it.
-    const sessionUuid =
-      nonBlankSessionUuid(options.sessionUuid) ??
-      nonBlankSessionUuid(context?.routingSessionUuid) ??
-      nonBlankSessionUuid(args.sessionUuid);
-    return {
-      args: sessionUuid && args.sessionUuid !== sessionUuid ? { ...args, sessionUuid } : args,
-      routingSessionUuid: sessionUuid,
-      toolSelectionProfileUuid: context?.toolSelectionProfileUuid,
-      sessionToolSelectionService:
-        options.sessionToolSelectionService ?? context?.sessionToolSelectionService,
-    };
   }
 
   // Typed variant of `callInternal` for internally-consumed tools whose envelope a caller then

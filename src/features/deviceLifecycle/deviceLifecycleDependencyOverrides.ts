@@ -112,6 +112,8 @@ function executionDependencyOverrides(
   return {
     clearInstalledAppsForDevice:
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
+    forgetDestroyedAvdFixtures:
+      deps.forgetDestroyedAvdFixtures ?? currentDeps.forgetDestroyedAvdFixtures,
     stopPerformanceMonitoring:
       deps.stopPerformanceMonitoring ?? currentDeps.stopPerformanceMonitoring,
     stopAndroidObservers: deps.stopAndroidObservers ?? currentDeps.stopAndroidObservers,

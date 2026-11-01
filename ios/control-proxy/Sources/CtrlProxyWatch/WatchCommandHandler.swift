@@ -11,6 +11,8 @@ protocol WatchGesturePerformer {
     func tap(x: Double, y: Double) throws
     func tap(identifier: String) throws
     func swipe(_ direction: WatchSwipeDirection) throws
+    func home() throws
+    func rotateCrown(delta: Double, velocity: Double) throws
 }
 
 enum WatchSwipeDirection: String, Decodable {
@@ -65,7 +67,7 @@ struct WatchResponse: Codable {
 
 @MainActor
 final class WatchCommandHandler {
-    nonisolated static let supportedCommands = ["hierarchy", "tap", "swipe"]
+    nonisolated static let supportedCommands = ["hierarchy", "tap", "swipe", "home", "crown"]
 
     private let snapshotSource: any WatchSnapshotSource
     private let gestures: any WatchGesturePerformer
@@ -100,6 +102,18 @@ final class WatchCommandHandler {
             case "swipe":
                 let swipe = try JSONDecoder().decode(Swipe.self, from: data)
                 try gestures.swipe(swipe.direction)
+            case "home":
+                try gestures.home()
+            case "crown":
+                let crown = try JSONDecoder().decode(Crown.self, from: data)
+                guard let delta = crown.delta, delta.isFinite else {
+                    throw WatchCommandError.invalidRequest("crown requires a finite delta")
+                }
+                let velocity = crown.velocity ?? 1.0
+                guard velocity.isFinite, velocity > 0 else {
+                    throw WatchCommandError.invalidRequest("crown requires a finite velocity greater than zero")
+                }
+                try gestures.rotateCrown(delta: delta, velocity: velocity)
             default:
                 throw WatchCommandError.unsupported(header.type)
             }
@@ -127,5 +141,10 @@ final class WatchCommandHandler {
 
     private struct Swipe: Decodable {
         let direction: WatchSwipeDirection
+    }
+
+    private struct Crown: Decodable {
+        let delta: Double?
+        let velocity: Double?
     }
 }

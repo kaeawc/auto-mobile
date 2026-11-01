@@ -33,14 +33,14 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertFalse(coordinator.recordDeflectedFailure("After truncated gesture"))
     }
 
-    func testAllowlistContainsExactlyHierarchyTapAndSwipe() {
-        XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe"])
+    func testAllowlistContainsExactlyHierarchyTapSwipeHomeAndCrown() {
+        XCTAssertEqual(WatchCommandHandler.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown"])
     }
 
     func testEveryOtherCommandReturnsStructuredUnsupportedError() throws {
         let source = FakeWatchSource()
         let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
-        for command in ["home", "crown", "screenshot", "unknown", "request_screenshot", "press_home", ""] {
+        for command in ["screenshot", "unknown", "request_screenshot", "press_home", ""] {
             // Unsupported commands are rejected before their parameters are decoded.
             let request = Data("{\"type\":\"\(command)\",\"requestId\":\"r1\",\"x\":\"invalid\"}".utf8)
             let response = handler.handle(request)
@@ -63,7 +63,7 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(event.type, "connected")
         XCTAssertEqual(event.id, 7)
         XCTAssertEqual(event.platform, "watchos")
-        XCTAssertEqual(event.supportedCommands, ["hierarchy", "tap", "swipe"])
+        XCTAssertEqual(event.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown"])
         XCTAssertEqual(event.supportedFeatures, [])
     }
 
@@ -81,6 +81,53 @@ final class WatchCommandHandlerTests: XCTestCase {
             XCTAssertTrue(handler.handle(Data("{\"type\":\"swipe\",\"direction\":\"\(direction)\"}".utf8)).success)
         }
         XCTAssertEqual(source.calls, ["hierarchy", "tap:12.5,20.0", "tap:counter", "up", "down", "left", "right"])
+    }
+
+    func testHomeReturnsResultAndUsesInjectedGesture() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"home","requestId":"h"}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "home_result")
+        XCTAssertEqual(response.requestId, "h")
+        XCTAssertEqual(source.calls, ["home"])
+    }
+
+    func testCrownDefaultsVelocityAndReturnsResult() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","requestId":"c","delta":0.5}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "crown_result")
+        XCTAssertEqual(response.requestId, "c")
+        XCTAssertEqual(source.calls, ["crown:0.5,1.0"])
+    }
+
+    func testCrownUsesExplicitVelocity() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = handler.handle(Data(#"{"type":"crown","delta":0.5,"velocity":2.0}"#.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "crown_result")
+        XCTAssertEqual(source.calls, ["crown:0.5,2.0"])
+    }
+
+    func testInvalidCrownRequestsReturnErrorsWithoutGestures() {
+        let source = FakeWatchSource()
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        for json in [
+            #"{"type":"crown"}"#,
+            #"{"type":"crown","delta":1e400}"#,
+            #"{"type":"crown","delta":0.5,"velocity":0}"#,
+            #"{"type":"crown","delta":0.5,"velocity":-1}"#,
+            #"{"type":"crown","delta":0.5,"velocity":1e400}"#,
+        ] {
+            let response = handler.handle(Data(json.utf8))
+            XCTAssertFalse(response.success)
+            XCTAssertEqual(response.type, "error")
+            XCTAssertEqual(response.errorCode, "invalid_request")
+        }
+        XCTAssertEqual(source.calls, [])
     }
 
     func testInvalidSupportedRequestsReturnErrorsWithoutGestures() {
@@ -138,5 +185,13 @@ private final class FakeWatchSource: WatchSnapshotSource, WatchGesturePerformer 
 
     func swipe(_ direction: WatchSwipeDirection) throws {
         calls.append(direction.rawValue)
+    }
+
+    func home() throws {
+        calls.append("home")
+    }
+
+    func rotateCrown(delta: Double, velocity: Double) throws {
+        calls.append("crown:\(delta),\(velocity)")
     }
 }

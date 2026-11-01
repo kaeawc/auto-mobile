@@ -80,7 +80,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
-import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWindows
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundOrUnscoped
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
@@ -2366,17 +2366,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** The application in front, from the accessibility windows; null when none qualifies. */
   private fun currentForegroundApp(): String? =
-    try {
-      prototypeForegroundFromWindows(
+    prototypeForegroundOrUnscoped(
+      readWindows = {
         windows.map {
           PrototypeForegroundWindow(it.type, it.isActive, it.root?.packageName?.toString())
-        },
-        packageName,
-      )
-    } catch (error: Exception) {
-      // Unreadable windows leave the prototype unscoped (shown everywhere) rather than hiding it.
-      Log.w(TAG, "Foreground app unavailable for prototype scoping", error)
-      null
+        }
+      },
+      ownPackage = packageName,
+    ) {
+      Log.w(TAG, "Foreground app unavailable for prototype scoping", it)
     }
 
   /** Feeds a window-state event to prototype foreground scoping, only while a prototype exists. */

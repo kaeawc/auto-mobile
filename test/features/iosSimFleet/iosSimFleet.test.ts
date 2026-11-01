@@ -649,7 +649,7 @@ describe("command-backed host source", () => {
         cpuCount: () => 10,
         loadAverage1m: () => null,
       },
-      simctl,
+      { simctl },
     );
     const host = await source.readHostSnapshot();
     expect(host.resources).toEqual({

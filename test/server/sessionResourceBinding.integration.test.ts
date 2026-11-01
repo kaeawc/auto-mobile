@@ -39,12 +39,14 @@ describe("session-scoped resource binding", () => {
       ResourceRegistry.registerTemplateWithReadContext(
         "automobile:test-session-binding/{sessionUuid}",
         "Session binding test",
-        "Returns the bound session for transport binding coverage.",
-        "application/json",
-        async (_params, context) => ({
-          uri: "automobile:test-session-binding/direct-session-1",
-          text: JSON.stringify({ sessionUuid: context.sessionUuid }),
-        }),
+        {
+          description: "Returns the bound session for transport binding coverage.",
+          mimeType: "application/json",
+          handler: async (_params, context) => ({
+            uri: "automobile:test-session-binding/direct-session-1",
+            text: JSON.stringify({ sessionUuid: context.sessionUuid }),
+          }),
+        },
       );
 
       const { client } = fixture.getContext();
@@ -87,15 +89,17 @@ describe("session-scoped resource binding", () => {
     ResourceRegistry.registerTemplateWithReadContext(
       "automobile:test-session-ownership/{sessionUuid}",
       "Session ownership test",
-      "Reports the current binding and whether it owns the requested session.",
-      "application/json",
-      async (params, context) => ({
-        uri: `automobile:test-session-ownership/${params.sessionUuid}`,
-        text: JSON.stringify({
-          sessionUuid: context.sessionUuid,
-          ownsRequestedSession: context.ownsSession?.(params.sessionUuid) ?? false,
+      {
+        description: "Reports the current binding and whether it owns the requested session.",
+        mimeType: "application/json",
+        handler: async (params, context) => ({
+          uri: `automobile:test-session-ownership/${params.sessionUuid}`,
+          text: JSON.stringify({
+            sessionUuid: context.sessionUuid,
+            ownsRequestedSession: context.ownsSession?.(params.sessionUuid) ?? false,
+          }),
         }),
-      }),
+      },
     );
 
     const { client } = fixture.getContext();

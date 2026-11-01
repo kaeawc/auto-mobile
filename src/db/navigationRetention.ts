@@ -113,6 +113,14 @@ const MAX_CONSECUTIVE_REVALIDATIONS = 3;
 /** Injectable protected-set query used to make concurrency and query scope observable in tests. */
 export type ProtectedBuildKeyResolver = typeof computeProtectedBuildKeyIds;
 
+/** Optional collaborators for {@link NavigationRetention}; each falls back to its default. */
+export interface NavigationRetentionDependencies {
+  removeScreenshotFile?: ScreenshotFileRemover;
+  logger?: Logger;
+  yieldBetweenBatches?: RetentionBatchYield;
+  resolveProtectedBuildKeyIds?: ProtectedBuildKeyResolver;
+}
+
 /**
  * Prunes the persisted nav data in a chunked pass: each tier, and each eviction
  * batch within a tier, is its own short atomic transaction rather than the whole
@@ -126,16 +134,22 @@ export type ProtectedBuildKeyResolver = typeof computeProtectedBuildKeyIds;
  */
 export class NavigationRetention {
   private readonly config: NavigationRetentionConfig;
+  private readonly removeScreenshotFile?: ScreenshotFileRemover;
+  private readonly logger: Logger;
+  private readonly yieldBetweenBatches: RetentionBatchYield;
+  private readonly resolveProtectedBuildKeyIds: ProtectedBuildKeyResolver;
 
   constructor(
     private readonly db: Kysely<Database>,
     config: Partial<NavigationRetentionConfig> = {},
-    private readonly removeScreenshotFile?: ScreenshotFileRemover,
-    private readonly logger: Logger = defaultLogger,
-    private readonly yieldBetweenBatches: RetentionBatchYield = yieldToIo,
-    private readonly resolveProtectedBuildKeyIds: ProtectedBuildKeyResolver = computeProtectedBuildKeyIds,
+    deps: NavigationRetentionDependencies = {},
   ) {
     this.config = resolveNavigationRetentionConfig(config);
+    this.removeScreenshotFile = deps.removeScreenshotFile;
+    this.logger = deps.logger ?? defaultLogger;
+    this.yieldBetweenBatches = deps.yieldBetweenBatches ?? yieldToIo;
+    this.resolveProtectedBuildKeyIds =
+      deps.resolveProtectedBuildKeyIds ?? computeProtectedBuildKeyIds;
   }
 
   /**

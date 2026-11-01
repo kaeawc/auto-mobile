@@ -258,8 +258,20 @@ async function requestedPoolDevice(
       throw discoveryIncomplete;
     }
   }
-  if (!device) {
-    throw new ActionableError(`Device '${deviceId}' not found in device pool`);
+  if (
+    !device ||
+    (device.platform === "watchos") !== (platform === "watchos") ||
+    (device.platform === "tvos") !== (platform === "tvos")
+  ) {
+    // Non-iOS Apple simulators are selected only when the call names their platform.
+    throw new ActionableError(
+      `Device '${deviceId}' not found in device pool` +
+        (device?.platform === "watchos"
+          ? '; pass platform "watchos" to select an Apple Watch'
+          : device?.platform === "tvos"
+            ? '; pass platform "tvos" to select an Apple TV'
+            : ""),
+    );
   }
   return device;
 }
@@ -276,7 +288,9 @@ function assertDeviceOwner(input: {
     holderOf(device) !== sessionUuid &&
     sessions.getSession(holderOf(device)!)
   ) {
-    throw heldDeviceBindRefusal(pool, device.id, holderOf(device)!, sessionUuid);
+    throw heldDeviceBindRefusal(pool, device.id, holderOf(device)!, {
+      requesterSessionUuid: sessionUuid,
+    });
   }
 }
 
@@ -328,7 +342,9 @@ async function bindRequestedDevice(input: {
     refusePreparedForOtherRequest: true,
   });
   if (boundSession !== args.sessionUuid) {
-    throw heldDeviceBindRefusal(pool, args.deviceId, boundSession, args.sessionUuid);
+    throw heldDeviceBindRefusal(pool, args.deviceId, boundSession, {
+      requesterSessionUuid: args.sessionUuid,
+    });
   }
   sessions.setDeviceReadiness(args.sessionUuid, "booted");
 }
@@ -387,7 +403,9 @@ async function selectSessionDevice(input: {
   // its admitted attempt, which a caller that does not hold the device must not do (#11651).
   pool.assertNotPreparedForOtherRequest(args.deviceId);
   assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions, pool });
-  await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
+  if (device.platform !== "tvos") {
+    await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
+  }
   // Checked again: another session may have bound the device while the resume listed devices.
   assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions, pool });
   // A request cancelled before the bind changes nothing.
@@ -437,7 +455,7 @@ function admitSessionlessSelection(args: HandlerArgs): void {
       // A display pin needs a session regardless of who holds the device.
       throw new DisplayPinNeedsSessionError();
     }
-    throw heldDeviceBindRefusal(pool, args.deviceId, liveHolder, undefined);
+    throw heldDeviceBindRefusal(pool, args.deviceId, liveHolder);
   }
   // No session holds it yet, but another request is preparing it and will bind it (#11651).
   pool.assertNotPreparedForOtherRequest(args.deviceId);
@@ -473,7 +491,12 @@ async function selectLegacyDevice(input: {
   signal?.throwIfAborted();
   assertNotPreparedForOtherRequest(readyDevice.deviceId);
   const resolvedPlatform = args.platform ?? readyDevice.platform;
-  await resumeCtrlProxy(readyDevice.deviceId, resolvedPlatform);
+  if ((readyDevice.platform === "tvos") !== (args.platform === "tvos")) {
+    throw new ActionableError('Pass platform "tvos" to select an Apple TV');
+  }
+  if (resolvedPlatform !== "tvos") {
+    await resumeCtrlProxy(readyDevice.deviceId, resolvedPlatform);
+  }
   signal?.throwIfAborted();
   assertNotPreparedForOtherRequest(readyDevice.deviceId);
   if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {

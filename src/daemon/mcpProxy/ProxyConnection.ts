@@ -664,15 +664,13 @@ export class ProxyConnection {
     status: DaemonStatus,
     runningVersion: string,
     runningBase: string,
-    clientBase: string,
-    sameRelease: boolean,
+    { clientBase, sameRelease }: { clientBase: string; sameRelease: boolean },
   ): void {
     return this.runtime.lifecycleReconciler.assertNewerClientVersion(
       status,
       runningVersion,
       runningBase,
-      clientBase,
-      sameRelease,
+      { clientBase, sameRelease },
     );
   }
 
@@ -687,16 +685,12 @@ export class ProxyConnection {
     runningVersion: string,
     reason: VersionMismatchReason,
     detail: string,
-    retryAfterMs?: number,
-    daemonBuild?: BuildIdentity,
+    { retryAfterMs, daemonBuild }: { retryAfterMs?: number; daemonBuild?: BuildIdentity } = {},
   ): DaemonVersionMismatchError {
-    return this.runtime.lifecycleReconciler.versionMismatchError(
-      runningVersion,
-      reason,
-      detail,
+    return this.runtime.lifecycleReconciler.versionMismatchError(runningVersion, reason, detail, {
       retryAfterMs,
       daemonBuild,
-    );
+    });
   }
 
   ensureAssetVersionPinMatches(): Promise<void> {

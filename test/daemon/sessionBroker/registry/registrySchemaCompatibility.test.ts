@@ -1,4 +1,15 @@
-import { afterAll, beforeAll, describe, expect, mock, spyOn, test } from "bun:test";
+import * as registryDatabase from "../../../../src/daemon/sessionBroker/registry/RegistryDatabase";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { Kysely } from "kysely";
 import { Migrator } from "kysely/migration";
@@ -7,20 +18,25 @@ import { NoOpMigrationLock } from "../../../../src/db/NoOpMigrationLock";
 import { BrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import * as refusals from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import {
+  assertBindingRegistryCurrent,
   migrateBindingRegistry,
   bindingRegistryMigrationProvider,
 } from "../../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import {
   openSqliteBindingRegistry,
+  SqliteBindingRegistry,
   type BindingRegistryDatabase,
 } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
+import type { BrokerAdmissionInput } from "../../../../src/daemon/sessionBroker/store";
 
 const FUTURE = "2026_10_17_009_future_schema";
 const MIGRATION_004 = "2026_10_12_004_free_device_deletion";
 const MIGRATION_005 = "2026_10_13_005_free_device_deletion_failed_deletes";
+const FUTURE_WRITER = "9.9.9+gfuture";
 
 function database() {
   const sqlite = new Sqlite(":memory:");
@@ -91,6 +107,10 @@ describe("binding registry schema compatibility", () => {
       "INSERT INTO slot_free_devices (platform, stable_device_id, from_scope_key, freed_at_ms) VALUES ('android', 'free', 'scope', 1)",
     );
     addFutureSchema(full.sqlite);
+    full.sqlite.run(
+      "INSERT INTO binding_registry_migration_writers (migration_name, writer_version, recorded_at) VALUES (?, ?, ?)",
+      [FUTURE, FUTURE_WRITER, "2099-01-01T00:00:00.000Z"],
+    );
     addFutureSchema(partial.sqlite);
   });
 
@@ -103,7 +123,9 @@ describe("binding registry schema compatibility", () => {
     ["partially migrated", partial],
   ] as const)("refuses a %s future registry without any write", async (_label, harness) => {
     const before = snapshot(harness.sqlite);
-    const error = await migrateBindingRegistry(harness.db, ":memory:").then(
+    const error = await migrateBindingRegistry(harness.db, ":memory:", undefined, {
+      writerVersion: "test-writer",
+    }).then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -126,6 +148,64 @@ describe("binding registry schema compatibility", () => {
     }
   });
 
+  test.each([
+    ["fully migrated", full],
+    ["partially migrated", partial],
+  ] as const)(
+    "read-only compatibility check refuses a %s future registry without DDL, DML, or bookkeeping writes",
+    async (_label, harness) => {
+      const before = snapshot(harness.sqlite);
+      await expect(assertBindingRegistryCurrent(harness.db, ":memory:")).rejects.toMatchObject({
+        code: "registry_schema_unsupported",
+        retryable: false,
+        unknownMigrations: [FUTURE],
+      });
+      expect(snapshot(harness.sqlite)).toEqual(before);
+    },
+  );
+
+  test.each([false, true])(
+    "migrate:%s open preserves the typed refusal and never changes a future registry",
+    async (migrate) => {
+      const before = snapshot(full.sqlite);
+      const statements: string[] = [];
+      const create = spyOn(registryDatabase, "createRegistryDatabase").mockImplementation(() => ({
+        prepare: (sql) => {
+          statements.push(sql);
+          return full.sqlite.prepare(sql);
+        },
+        exec: (sql) => {
+          statements.push(sql);
+          // Match the production registry handle, which suppresses close-time maintenance.
+          if (sql !== "PRAGMA optimize;" && sql !== "PRAGMA wal_checkpoint(TRUNCATE);") {
+            full.sqlite.exec(sql);
+          }
+        },
+        // This borrowed in-memory fixture remains open for the surrounding schema assertions.
+        close: () => {},
+      }));
+      try {
+        await expect(
+          openSqliteBindingRegistry({
+            dbPath: ":memory:",
+            migrate,
+            timer: new FakeTimer(),
+            writerVersion: "test-writer",
+          }),
+        ).rejects.toMatchObject({
+          code: "registry_schema_unsupported",
+          retryable: false,
+          writerVersions: { [FUTURE]: FUTURE_WRITER },
+          remedy: expect.stringContaining(FUTURE_WRITER),
+        });
+        expect(snapshot(full.sqlite)).toEqual(before);
+        expect(statements.every((sql) => /^(select|pragma)/i.test(sql.trim()))).toBe(true);
+      } finally {
+        create.mockRestore();
+      }
+    },
+  );
+
   test("rechecks a peer's migration after acquiring the lock, before Kysely writes", async () => {
     let before: ReturnType<typeof snapshot> | undefined;
     const acquire = spyOn(NoOpMigrationLock.prototype, "acquire").mockImplementation(async () => {
@@ -134,7 +214,9 @@ describe("binding registry schema compatibility", () => {
     });
     const release = spyOn(NoOpMigrationLock.prototype, "release");
     try {
-      const error = await migrateBindingRegistry(peer.db, ":memory:").then(
+      const error = await migrateBindingRegistry(peer.db, ":memory:", undefined, {
+        writerVersion: "test-writer",
+      }).then(
         () => undefined,
         (error: unknown) => error,
       );
@@ -153,16 +235,17 @@ describe("binding registry schema compatibility", () => {
   });
 
   test("known executed names still migrate and a fresh in-memory registry opens", async () => {
-    await migrateBindingRegistry(known.db, ":memory:");
+    await migrateBindingRegistry(known.db, ":memory:", undefined, { writerVersion: "test-writer" });
     expect(
       known.sqlite.query("SELECT name FROM kysely_migration WHERE name = ?").get(MIGRATION_005),
     ).toEqual({ name: MIGRATION_005 });
     const before = snapshot(known.sqlite);
-    await migrateBindingRegistry(known.db, ":memory:");
+    await migrateBindingRegistry(known.db, ":memory:", undefined, { writerVersion: "test-writer" });
     expect(snapshot(known.sqlite)).toEqual(before);
     const registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       timer: new FakeTimer(),
+      writerVersion: "test-writer",
     });
     try {
       expect(await registry.snapshotManagedDevices()).toEqual([]);
@@ -181,6 +264,8 @@ describe("binding registry schema compatibility", () => {
       retryable: false,
       dbPath: ":memory:",
       unknownMigrations: [FUTURE],
+      writerVersions: {},
+      remedy: error.remedy,
     });
     const open = mock(async () => {
       throw error;
@@ -232,5 +317,122 @@ describe("binding registry schema compatibility", () => {
       acquisition.close();
       ensureScope.mockRestore();
     }
+  });
+});
+
+describe("stale registry receipt write guard", () => {
+  let harness: ReturnType<typeof database>;
+  let registry: SqliteBindingRegistry;
+  const timer = new FakeTimer();
+  const input: BrokerAdmissionInput = {
+    requestId: "request",
+    fingerprint: "fingerprint",
+    parameters: {},
+    owner: { daemonId: "daemon", pid: 42 },
+    limits: {},
+    resolveCreation: () => ({ platform: "android" }),
+    matches: () => false,
+  };
+  const failure = { code: "unavailable", message: "Unavailable", retryable: false };
+  const identity = { prepareId: "prepare", requestDigest: "digest" };
+  const store = () => registry.sessionBrokerStore("scope", new CountingIdGenerator("resource"));
+
+  beforeEach(async () => {
+    harness = database();
+    await migrateBindingRegistry(harness.db, ":memory:", undefined, {
+      writerVersion: "test-writer",
+    });
+    registry = new SqliteBindingRegistry(harness.db, { timer }, ":memory:", harness.sqlite);
+  });
+  afterEach(async () => {
+    await registry.close();
+  });
+
+  function migratePeer() {
+    addFutureSchema(harness.sqlite);
+    harness.sqlite.run(
+      "INSERT INTO binding_registry_migration_writers (migration_name, writer_version, recorded_at) VALUES (?, ?, ?)",
+      [FUTURE, FUTURE_WRITER, "2099-01-01T00:00:00.000Z"],
+    );
+  }
+
+  test("sync guard includes the peer writer in its refusal and remedy", async () => {
+    migratePeer();
+    await expect(
+      registry.ensureScope({
+        managedHostScope: "host",
+        runnerNamespace: "runner",
+        runnerIncarnation: "inc",
+      }),
+    ).rejects.toMatchObject({
+      code: "registry_schema_unsupported",
+      retryable: false,
+      unknownMigrations: [FUTURE],
+      writerVersions: { [FUTURE]: FUTURE_WRITER },
+      remedy: expect.stringContaining(FUTURE_WRITER),
+    });
+  });
+
+  test("missing legacy writer table preserves the typed sync refusal", async () => {
+    addFutureSchema(harness.sqlite);
+    harness.sqlite.exec("DROP TABLE binding_registry_migration_writers");
+    await expect(store().abandon("new", input.owner, "token")).rejects.toMatchObject({
+      code: "registry_schema_unsupported",
+      retryable: false,
+      writerVersions: {},
+    });
+  });
+
+  test("supported schema still inserts a receipt", async () => {
+    expect(await store().recordPreAdmissionFailure(input, failure)).toMatchObject({
+      requestId: input.requestId,
+      state: "failed",
+    });
+    expect(
+      harness.sqlite.query("SELECT count(*) AS count FROM session_broker_requests").get(),
+    ).toEqual({ count: 1 });
+  });
+
+  test.each([
+    "admit",
+    "failure",
+    "abandon",
+    "update",
+    "timing",
+    "prune",
+    "link",
+    "acknowledge",
+  ] as const)("%s refuses before changing receipts on a stale handle", async (operation) => {
+    const brokerStore = store();
+    if (operation === "update") {
+      await brokerStore.admit(input);
+    } else {
+      await brokerStore.recordPreAdmissionFailure({ ...input, export: identity }, failure);
+    }
+    migratePeer();
+    const before = snapshot(harness.sqlite);
+    const beforeCount = harness.sqlite
+      .query("SELECT count(*) AS count FROM session_broker_requests")
+      .get();
+    const writes = {
+      admit: () => brokerStore.admit({ ...input, requestId: "new" }),
+      failure: () => brokerStore.recordPreAdmissionFailure({ ...input, requestId: "new" }, failure),
+      abandon: () => brokerStore.abandon("new", input.owner, "token"),
+      update: () =>
+        brokerStore.failInterruptedAcquisition(input.requestId, input.owner, "interrupted"),
+      timing: () => brokerStore.recordTiming(input.requestId, {}),
+      prune: () => brokerStore.pruneTerminalRequests(0, 10, 0),
+      link: () => brokerStore.linkRequestExport(input.requestId, input.fingerprint, identity),
+      acknowledge: () => brokerStore.acknowledgeExport(identity.prepareId),
+    };
+    await expect(writes[operation]()).rejects.toMatchObject({
+      code: "registry_schema_unsupported",
+      retryable: false,
+      writerVersions: { [FUTURE]: FUTURE_WRITER },
+    });
+    expect(
+      harness.sqlite.query("SELECT count(*) AS count FROM session_broker_requests").get(),
+    ).toEqual(beforeCount);
+    expect(snapshot(harness.sqlite)).toEqual(before);
   });
 });

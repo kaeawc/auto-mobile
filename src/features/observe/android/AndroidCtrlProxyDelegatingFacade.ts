@@ -2,12 +2,16 @@ import type WebSocket from "ws";
 import type { SendCommandOptions } from "../DeviceServiceUtils";
 import type {
   AndroidActionDispatcher,
+  AndroidActionRequestOptions,
   AndroidActivateAccessibilityLinkRequest,
   AndroidAccessibilityActionRequest,
 } from "./AndroidActionDispatcher";
 import type { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
 import type { AndroidInboundMessageRouter } from "./AndroidInboundMessageRouter";
-import type { AndroidScreenshotRequester } from "./AndroidScreenshotRequester";
+import type {
+  AndroidScreenshotRequester,
+  AndroidScreenshotRequestOptions,
+} from "./AndroidScreenshotRequester";
 import type { AndroidServiceReadinessVerifier } from "./AndroidServiceReadinessVerifier";
 import { type CertificateFileSystem } from "./CtrlProxyCertificates";
 import { CtrlProxyPackages } from "./CtrlProxyPackages";
@@ -21,7 +25,7 @@ import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { type PackageInfoOptions } from "./CtrlProxyPackages";
 // Import types
 import type { PinchRequest, TapCoordinatesRequest } from "../shared/SharedGestureDelegate";
-import type { GestureStartRequest } from "./CtrlProxyGestures";
+import type { GestureEndOptions, GestureStartRequest } from "./CtrlProxyGestures";
 import type {
   A11yActionResult,
   A11yInstalledPackagesResult,
@@ -31,7 +35,8 @@ import type {
   AccessibilityHierarchyResponse,
   AccessibilityNodeSelector,
   AndroidPerfTiming,
-  HierarchySyncDiagnostics,
+  HierarchySyncRequestOptions,
+  ImeCommitOptions,
   ScreenshotResult,
   TwoFingerSwipeRequest,
 } from "./types";
@@ -61,7 +66,7 @@ import type { PrototypeRequestHost } from "../../prototype/prototypeRequestHandl
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type {
   KeyValueEntry,
-  KeyValueType,
+  KeyValueWrite,
   PreferenceFile,
   StorageChangedEvent,
 } from "../../storage/storageTypes";
@@ -77,7 +82,6 @@ import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
 import type {
   InsertTextState,
-  PrototypeAppearanceOverride,
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
@@ -191,21 +195,18 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     gestureId: string,
     x: number,
     y: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
+    { timeoutMs, perf }: { timeoutMs?: number; perf?: PerformanceTracker } = {},
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureMove(gestureId, x, y, timeoutMs, perf);
+    return this.gestures.requestGestureMove(gestureId, x, y, { timeoutMs, perf });
   }
 
   async requestGestureEnd(
     gestureId: string,
     x: number,
     y: number,
-    cancel?: boolean,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
+    { cancel, ...options }: GestureEndOptions & { cancel?: boolean } = {},
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureEnd(gestureId, x, y, cancel, timeoutMs, perf);
+    return this.gestures.requestGestureEnd(gestureId, x, y, { cancel, ...options });
   }
 
   // ===========================================================================
@@ -218,27 +219,32 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
 
   async requestInsertText(
     text: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: {
-      expectedSuffix?: string;
-      acceptsCaretNotPlaced?: boolean;
-      precedingState?: InsertTextState;
-    },
-    transport: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs"> = {},
+    {
+      timeoutMs,
+      perf,
+      options,
+      transport = {},
+    }: {
+      timeoutMs?: number;
+      perf?: PerformanceTracker;
+      options?: {
+        expectedSuffix?: string;
+        acceptsCaretNotPlaced?: boolean;
+        precedingState?: InsertTextState;
+      };
+      transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">;
+    } = {},
   ): Promise<A11ySetTextResult> {
-    return this.text.requestInsertText(text, timeoutMs, perf, options, transport);
+    return this.text.requestInsertText(text, { timeoutMs, perf, options, transport });
   }
 
   async commitViaIme(
     text: string,
     priorImeId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    ...[delivery, trace]: [delivery?: "commit" | "keyEvents" | "clearField", trace?: boolean]
+    { perf, ...options }: ImeCommitOptions & { perf?: PerformanceTracker } = {},
   ): Promise<ImeCommitActionResult> {
-    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal, delivery, trace);
+    return this.text.commitViaIme(text, priorImeId, timeoutMs, { perf, ...options });
   }
 
   async setKeyboardProfile(
@@ -273,10 +279,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     action: ImeAction,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
+    { abortSignal, onDispatch }: { abortSignal?: AbortSignal; onDispatch?: () => void } = {},
   ): Promise<A11yImeActionResult> {
-    return this.text.requestImeAction(action, timeoutMs, perf, abortSignal, onDispatch);
+    return this.text.requestImeAction(action, timeoutMs, perf, { abortSignal, onDispatch });
   }
 
   async requestSelectAll(
@@ -383,12 +388,10 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   async setPreference(
     packageName: string,
     fileName: string,
-    key: string,
-    value: string | null,
-    type: KeyValueType,
+    entry: KeyValueWrite,
     timeoutMsOrOptions?: number | import("../../storage/storageTypes").StorageWriteOptions,
   ): Promise<void> {
-    return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMsOrOptions);
+    return this.storage.setPreference(packageName, fileName, entry, timeoutMsOrOptions);
   }
 
   async removePreference(
@@ -458,18 +461,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     spec: PrototypeSpec,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
+    overrides?: PrototypeShowOverrides,
   ): Promise<PrototypeResult> {
-    return this.prototypes.requestShowPrototype(
-      spec,
-      timeoutMs,
-      perf,
-      displayId,
-      reset,
-      appearance,
-    );
+    return this.prototypes.requestShowPrototype(spec, timeoutMs, perf, overrides);
   }
   requestDismissPrototype(
     target: PrototypeDismiss,
@@ -622,18 +616,12 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number,
-    diagnostics?: HierarchySyncDiagnostics,
-    displayId?: number,
+    { timeoutMs, ...options }: HierarchySyncRequestOptions & { timeoutMs?: number } = {},
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
-    return this.hierarchy.requestHierarchySync(
-      perf,
-      disableAllFiltering,
-      signal,
+    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, {
       timeoutMs,
-      diagnostics,
-      displayId,
-    );
+      ...options,
+    });
   }
 
   hasCachedHierarchy(): boolean {
@@ -660,18 +648,12 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     action: string,
     resourceId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker,
-    selector?: AccessibilityNodeSelector,
-    signal?: AbortSignal,
+    { perf, ...options }: AndroidActionRequestOptions & { perf?: PerformanceTracker } = {},
   ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestAction(
-      action,
-      resourceId,
-      timeoutMs,
+    return this.getActionDispatcher().requestAction(action, resourceId, timeoutMs, {
       perf,
-      selector,
-      signal,
-    );
+      ...options,
+    });
   }
 
   async requestClickFocusedInput(
@@ -685,11 +667,17 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    {
+      timeoutMs,
+      perf,
+      signal,
+    }: { timeoutMs?: number; perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<A11yActionResult> {
-    return this.getActionDispatcher().requestNodeAction(action, selector, timeoutMs, perf, signal);
+    return this.getActionDispatcher().requestNodeAction(action, selector, {
+      timeoutMs,
+      perf,
+      signal,
+    });
   }
 
   async supportsNodeActionSelectors(
@@ -780,26 +768,16 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    suppressObservationStreamPush: boolean = false,
-    signal?: AbortSignal,
-    displayId?: number,
-    hidePrototypes: boolean = false,
+    options: AndroidScreenshotRequestOptions = {},
   ): Promise<ScreenshotResult> {
-    return this.getScreenshotRequester().requestScreenshot(
-      timeoutMs,
-      perf,
-      suppressObservationStreamPush,
-      signal,
-      displayId,
-      hidePrototypes,
-    );
+    return this.getScreenshotRequester().requestScreenshot(timeoutMs, perf, options);
   }
 
   async requestScreenshotWithoutObservationStreamPush(
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<ScreenshotResult> {
-    return this.requestScreenshot(timeoutMs, perf, true);
+    return this.requestScreenshot(timeoutMs, perf, { suppressObservationStreamPush: true });
   }
 
   async verifyServiceReady(
@@ -912,16 +890,18 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
       SendCommandOptions<T>,
       "responseType" | "messageType" | "timeoutMs" | "responseError" | "beforeSend" | "onDispatch"
     > & { timeoutError: (timeoutMs: number) => T },
-    cancellation?: { signal: AbortSignal | undefined; startTime: number },
-    perf?: PerformanceTracker,
-  ): Promise<T> {
-    return this.getActionDispatcher().sendClientCommand<T>(
-      requestId,
-      serializeRequest,
-      options,
+    {
       cancellation,
       perf,
-    );
+    }: {
+      cancellation?: { signal: AbortSignal | undefined; startTime: number };
+      perf?: PerformanceTracker;
+    } = {},
+  ): Promise<T> {
+    return this.getActionDispatcher().sendClientCommand<T>(requestId, serializeRequest, options, {
+      cancellation,
+      perf,
+    });
   }
   protected abstract createHierarchyDelegateContext(): HierarchyDelegateContext;
   protected abstract createCertificatesDelegateContext(): CertificatesDelegateContext;

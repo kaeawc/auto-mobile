@@ -11,8 +11,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -42,6 +43,12 @@ class PrototypeControllerTest {
   private var dismissed = 0
   private val models = mutableListOf<PrototypeRenderModel>()
   private val controller =
+    createController(CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()))
+
+  private fun createController(
+    requestScope: CoroutineScope,
+    clearAssets: () -> Unit = {},
+  ) =
     PrototypeController(
       host,
       PrototypeResultSink { id, success, error ->
@@ -52,7 +59,8 @@ class PrototypeControllerTest {
       onDismissed = { dismissed++ },
       eventSink = PrototypeEventSink { if (connected) events += it },
       clock = { 42L },
-      requestScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
+      requestScope = requestScope,
+      clearAssets = clearAssets,
       lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
       render = { spec ->
         mapPrototypeSpec(spec).also { models += it }.request()
@@ -766,6 +774,10 @@ class PrototypeControllerTest {
 
   @Test
   fun `show same-id show and dismiss dispatch through the real message handler`() = runTest {
+    var assetsCleared = 0
+    // Requests and the controller's independent cleanup job must share this test's scheduler.
+    val requestScope = CoroutineScope(coroutineContext + StandardTestDispatcher(testScheduler))
+    val controller = createController(requestScope, clearAssets = { assetsCleared++ })
     val actions =
       object : NoOpCtrlProxyActions() {
         override suspend fun showPrototype(
@@ -789,7 +801,7 @@ class PrototypeControllerTest {
     val handler = CtrlProxyMessageHandler(actions)
     suspend fun dispatch(request: WebSocketRequest) {
       assertNull(handler.handleMessage(request))
-      runCurrent()
+      advanceUntilIdle()
     }
     dispatch(ShowPrototype(requestId = "show", spec = spec()))
     assertResult("show", true)
@@ -814,9 +826,11 @@ class PrototypeControllerTest {
     dispatch(DismissPrototype(requestId = "dismiss", id = "panel"))
     assertResult("dismiss", true)
     assertEquals(1, dismissed)
+    assertEquals(1, assetsCleared)
     dispatch(DismissPrototype(requestId = "all", all = true))
     assertResult("all", true)
     assertEquals(5, results.size)
+    assertEquals(2, assetsCleared)
   }
 
   @Test

@@ -24,8 +24,7 @@ export interface AndroidRecoveryOperations {
     device: PooledDevice,
     incidentId: string | undefined,
     options: AndroidEmulatorRecoveryOptions,
-    signal: AbortSignal,
-    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+    opts: { signal: AbortSignal; retainLeaseUntil: (settlement: Promise<unknown>) => void },
   ): Promise<boolean>;
   stopAndroidEmulatorForRecovery(
     options: StopAndroidEmulatorRecoveryOptions,
@@ -115,13 +114,10 @@ export class DevicePoolAndroidRecovery {
       return await runWithAbortSignal(
         lifecycleLease.signal,
         async () =>
-          await this.rebootDisconnectedAndroidDeviceCoordinated(
-            device,
-            incidentId,
-            options,
-            lifecycleLease.signal,
+          await this.rebootDisconnectedAndroidDeviceCoordinated(device, incidentId, options, {
+            signal: lifecycleLease.signal,
             retainLeaseUntil,
-          ),
+          }),
       );
     } finally {
       if (retainedLeaseSettlement) {
@@ -139,15 +135,16 @@ export class DevicePoolAndroidRecovery {
     device: PooledDevice,
     incidentId: string | undefined,
     options: AndroidEmulatorRecoveryOptions,
-    signal: AbortSignal,
-    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+    {
+      signal,
+      retainLeaseUntil,
+    }: { signal: AbortSignal; retainLeaseUntil: (settlement: Promise<unknown>) => void },
   ): Promise<boolean> {
     return await this.state.androidRebootCoordinator.rebootDisconnectedAndroidDeviceCoordinated(
       device,
       incidentId,
       options,
-      signal,
-      retainLeaseUntil,
+      { signal, retainLeaseUntil },
     );
   }
 
@@ -162,6 +159,7 @@ export class DevicePoolAndroidRecovery {
       handoffOwner,
       preservedSessionId,
       preservedSession,
+      signal,
     } = options;
     const current = this.state.devices.get(device.id);
     if (this.sameAvdReplacements(device, avdName).length > 0) {
@@ -196,6 +194,7 @@ export class DevicePoolAndroidRecovery {
         handoffOwner,
         preservedSessionId,
         preservedSession,
+        signal,
       });
     }
     return "stopped";

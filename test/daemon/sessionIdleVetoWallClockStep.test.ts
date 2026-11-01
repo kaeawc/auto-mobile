@@ -149,9 +149,11 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
     );
     manager.setActiveSessionExecutionChecker((sessionId, query) =>
       hasActiveSessionExecution(
-        tracker,
-        manager,
-        { isSessionRecoveryInFlight: () => false },
+        {
+          tracker,
+          sessionManager: manager,
+          devicePool: { isSessionRecoveryInFlight: () => false },
+        },
         sessionId,
         query,
       ),
@@ -388,9 +390,11 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
         let recovering = true;
         manager.setActiveSessionExecutionChecker((sessionId, query) =>
           hasActiveSessionExecution(
-            tracker,
-            manager,
-            { isSessionRecoveryInFlight: () => recovering },
+            {
+              tracker,
+              sessionManager: manager,
+              devicePool: { isSessionRecoveryInFlight: () => recovering },
+            },
             sessionId,
             query,
           ),
@@ -484,9 +488,11 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
     };
     expect(
       hasActiveSessionExecution(
-        tracker,
-        managerPort,
-        { isSessionRecoveryInFlight: () => false },
+        {
+          tracker,
+          sessionManager: managerPort,
+          devicePool: { isSessionRecoveryInFlight: () => false },
+        },
         derived,
         query,
       ),
@@ -494,18 +500,22 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
     tracker.endExecution(earlier.id);
     expect(
       hasActiveSessionExecution(
-        tracker,
-        managerPort,
-        { isSessionRecoveryInFlight: () => true },
+        {
+          tracker,
+          sessionManager: managerPort,
+          devicePool: { isSessionRecoveryInFlight: () => true },
+        },
         derived,
         query,
       ),
     ).toBe(false);
     expect(
       hasActiveSessionExecution(
-        tracker,
-        managerPort,
-        { isSessionRecoveryInFlight: () => true },
+        {
+          tracker,
+          sessionManager: managerPort,
+          devicePool: { isSessionRecoveryInFlight: () => true },
+        },
         derived,
         { excludeExecutionId: late.id, excludeReads: true },
       ),

@@ -42,9 +42,7 @@ export async function connect(host: Host, client: Client, grant: Grant) {
       },
     },
     host.state,
-    undefined,
-    undefined,
-    { socketSessionId: grant.socket },
+    { context: { socketSessionId: grant.socket } },
   );
 }
 

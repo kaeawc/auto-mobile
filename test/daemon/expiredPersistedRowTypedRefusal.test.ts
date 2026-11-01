@@ -35,7 +35,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -58,7 +58,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       hasReceivedHeartbeat: true,
     });
     if (reason) {
-      await repo.markReleased(SESSION, "released", 1_000, reason);
+      await repo.markReleased(SESSION, "released", 1_000, { reason });
     }
   }
 
@@ -153,7 +153,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     };
 
     const error = await manager
-      .getOrCreateSession(SESSION, pool, "android", undefined, true)
+      .getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true })
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(TerminalSessionError);
     expect((error as TerminalSessionError).release.releaseReason).toBe("expired");
@@ -292,7 +292,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       };
       const error = await (
         withPool
-          ? manager.getOrCreateSession(SESSION, pool, "android", undefined, true)
+          ? manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true })
           : manager.admitIssuedSessionForAutomation(SESSION)
       ).then(
         () => undefined,
@@ -340,10 +340,12 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
         };
         for (let attempt = 0; attempt < 2; attempt++) {
           const error = withPool
-            ? await manager.getOrCreateSession(SESSION, pool, "android", undefined, true).then(
-                () => undefined,
-                (caught: unknown) => caught,
-              )
+            ? await manager
+                .getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true })
+                .then(
+                  () => undefined,
+                  (caught: unknown) => caught,
+                )
             : await refusal(manager);
           expect(error).toBeInstanceOf(TerminalSessionError);
           if (!(error instanceof TerminalSessionError)) {
@@ -471,8 +473,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
           },
         },
         "android",
-        undefined,
-        true,
+        { requireIssuedSession: true },
       )
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(TerminalSessionError);
@@ -531,7 +532,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       },
     };
     await expect(
-      manager.getOrCreateSession(SESSION, pool, "android", undefined, true),
+      manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true }),
     ).rejects.toMatchObject({ release: { releaseReason: "expired" } });
     expect(assigned).toBe(false);
     expect(await repo.getSession(SESSION)).toEqual(before);
@@ -554,7 +555,9 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       },
     };
     await expect(
-      restartedDaemon().getOrCreateSession(SESSION, pool, "android", undefined, true),
+      restartedDaemon().getOrCreateSession(SESSION, pool, "android", {
+        requireIssuedSession: true,
+      }),
     ).rejects.toMatchObject({
       release: { releaseReason: "restart-recovery-timeout", terminal: true },
     });
@@ -608,7 +611,9 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
             return DEVICE;
           },
         };
-        const result = manager.getOrCreateSession(SESSION, pool, "android", undefined, true);
+        const result = manager.getOrCreateSession(SESSION, pool, "android", {
+          requireIssuedSession: true,
+        });
         if (offset < 0) {
           await expect(result).resolves.toMatchObject({ assignedDevice: DEVICE });
           expect(targets).toHaveLength(1);
@@ -706,7 +711,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       },
     };
     await expect(
-      manager.getOrCreateSession(SESSION, pool, "android", undefined, true),
+      manager.getOrCreateSession(SESSION, pool, "android", { requireIssuedSession: true }),
     ).resolves.toMatchObject({ assignedDevice: DEVICE });
     expect(targets).toHaveLength(1);
     expect(targets[0]).toMatchObject({
@@ -739,8 +744,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
           },
         },
         "android",
-        undefined,
-        true,
+        { requireIssuedSession: true },
       ),
     ).rejects.toMatchObject({ code: "device_owned_by_other_daemon" });
     expect(assigned).toBe(false);

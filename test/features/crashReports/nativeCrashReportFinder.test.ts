@@ -9,6 +9,7 @@ import {
 import {
   createNativeCrashReportFinder,
   createNativeCrashReportReader,
+  IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS,
   PHYSICAL_IOS_CRASH_REPORTS_UNSUPPORTED_REASON,
   PollingCrashReportFinder,
 } from "../../../src/features/crashReports/NativeCrashReportFinder";
@@ -93,6 +94,58 @@ describe("iOS Simulator .ips finder (#14103)", () => {
       "other-sim.ips",
       "stale-capture.ips",
     ]);
+  });
+
+  test("tolerates the duplicate .000.ips ReportCrash can write in the same second", async () => {
+    const captured = fixture("ios-simulator-playground-sigabrt-captured.ips");
+    const capturedSimulator = "B131B3E7-52E7-4FC9-B698-0A73E66BB494";
+    const crashedAt = Date.parse("2026-10-30T15:17:10-05:00");
+    const writtenAt = Date.parse("2026-10-30T15:17:29-05:00");
+    const reports = new MemoryReports();
+    reports.add("Playground-2026-10-30-151729.ips", captured, writtenAt);
+    reports.add("Playground-2026-10-30-151729.000.ips", captured, writtenAt);
+    const finder = new IosSimulatorCrashReportFinder(capturedSimulator, reports, REPORTS);
+
+    const lookup = await finder.find({
+      appId: "dev.jasonpearson.automobile.Playground",
+      processId: 73194,
+      notBeforeTimestampMs: crashedAt,
+    });
+
+    expect(lookup).toMatchObject({
+      status: "found",
+      report: { id: "3F55C604-EC99-4CA7-95B5-0E22E44A5EA5", processId: 73194 },
+    });
+    // One report per crash: the first match ends the lookup, so the copy is never read.
+    expect(reports.reads).toHaveLength(1);
+    const body = await finder.read("3F55C604-EC99-4CA7-95B5-0E22E44A5EA5");
+    expect(body?.text).toBe(captured);
+    expect(await finder.read("00000000-0000-0000-0000-000000000000")).toBeUndefined();
+  });
+
+  test("finds a crash whose only report is the numbered .000.ips copy", async () => {
+    const reports = new MemoryReports();
+    reports.add(
+      "Playground-2026-10-30-151729.000.ips",
+      fixture("ios-simulator-playground-sigabrt-captured.ips"),
+      Date.parse("2026-10-30T15:17:29-05:00"),
+    );
+    const finder = new IosSimulatorCrashReportFinder(
+      "B131B3E7-52E7-4FC9-B698-0A73E66BB494",
+      reports,
+      REPORTS,
+    );
+
+    const lookup = await finder.find({
+      appId: "dev.jasonpearson.automobile.Playground",
+      processId: 73194,
+      notBeforeTimestampMs: Date.parse("2026-10-30T15:17:10-05:00"),
+    });
+
+    expect(lookup).toMatchObject({
+      status: "found",
+      report: { id: "3F55C604-EC99-4CA7-95B5-0E22E44A5EA5" },
+    });
   });
 
   test("reports notFound when the DiagnosticReports folder does not exist", async () => {
@@ -229,6 +282,50 @@ describe("crash report lookup wiring (#14103)", () => {
     });
     expect(calls).toBe(3);
     expect(timer.getSleepHistory()).toEqual([500, 500]);
+  });
+
+  const SIMULATOR_DEVICE = { deviceId: SIMULATOR, name: "iPhone 17", platform: "ios" } as const;
+  const elapsed = (timer: FakeTimer) => timer.getSleepHistory().reduce((sum, ms) => sum + ms, 0);
+
+  test("waits for a Simulator .ips that ReportCrash writes 12 s after the crash", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const reports = new MemoryReports();
+    // The report only exists once 12 s of polling have passed (seen under host load).
+    const lateReports: CrashReportFileSystem = {
+      readdir: async (path) => {
+        if (elapsed(timer) >= 12_000 && reports.files.size === 0) {
+          reports.add("late.ips", IPS);
+        }
+        return reports.readdir(path);
+      },
+      stat: (path) => reports.stat(path),
+      readFileBuffer: (path) => reports.readFileBuffer(path),
+    };
+    const finder = new PollingCrashReportFinder(
+      new IosSimulatorCrashReportFinder(SIMULATOR, lateReports, REPORTS),
+      timer,
+      IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS,
+    );
+
+    expect(await finder.find(query)).toMatchObject({
+      status: "found",
+      report: { processId: 4321 },
+    });
+  });
+
+  test("gives up on a missing Simulator .ips after about 20 s", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const finder = createNativeCrashReportFinder(SIMULATOR_DEVICE, {
+      adb: new FakeAdbClient(),
+      fileSystem: new MemoryReports(),
+      timer,
+    });
+
+    expect(await finder.find(query)).toEqual({ status: "notFound" });
+    expect(timer.getSleepHistory()).toEqual([...IOS_SIMULATOR_CRASH_REPORT_POLL_DELAYS_MS]);
+    expect(elapsed(timer)).toBe(20_000);
   });
 
   test("gates physical iOS with a typed unsupported reason", async () => {

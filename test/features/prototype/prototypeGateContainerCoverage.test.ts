@@ -31,9 +31,56 @@ const mediaPickCall = {
   ...label,
   onTap: [{ type: "platform", call: "mediaLibrary.pick", args: { media: { value: "images" } } }],
 };
+const libraryQueryCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.query", args: { media: { value: "images" } } }],
+};
+const librarySaveCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "mediaLibrary.save", args: { media: { data: "/data/code" } } }],
+};
 const cameraCaptureCall = {
   ...label,
   onTap: [{ type: "platform", call: "camera.capture", args: { media: { value: "image" } } }],
+};
+const recorderCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "audioRecorder.start", args: {} }],
+};
+const notificationsCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "notifications.cancel", args: { all: { value: true } } }],
+};
+const scheduleCall = {
+  ...label,
+  onTap: [
+    {
+      type: "platform",
+      call: "notifications.schedule",
+      args: {
+        id: { value: "eta" },
+        channel: { value: "reminders" },
+        title: { value: "Soon" },
+        delaySeconds: { value: 60 },
+      },
+    },
+  ],
+};
+const mediaCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "media.play", args: { player: { value: "main" } } }],
+};
+const recordCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "camera.startRecording", args: { preview: { value: "vf" } } }],
+};
+const queueCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "media.next", args: { player: { value: "main" } } }],
+};
+const castCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "cast.stop", args: {} }],
 };
 const contactsCall = {
   ...label,
@@ -56,6 +103,10 @@ const authCall = {
 const locationCall = {
   ...label,
   onTap: [{ type: "platform", call: "location.request", args: {} }],
+};
+const commerceCall = {
+  ...label,
+  onTap: [{ type: "platform", call: "commerce.restore", args: {} }],
 };
 const openUrlCall = {
   ...label,
@@ -227,6 +278,7 @@ const fixtures: Record<string, Node> = {
     ],
   },
   prototype_chat_scroll_v1: { type: "scroll", reverse: true, child: label },
+  prototype_hide_keyboard_v1: { ...label, onTap: [{ type: "hideKeyboard" }] },
   prototype_menus_v1: {
     type: "menu",
     openWhen: { key: "liked", equals: true },
@@ -269,11 +321,14 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "upsertData", path: "/data/rows", key: "/id", value: { value: { id: 1 } } }],
   },
+  prototype_platform_sensors_v1: statusRead("sensors", "proximityNear", true),
+  prototype_platform_map_v1: { type: "map" },
   prototype_platform_v1: platformCall,
   prototype_platform_test_v1: platformCall,
   prototype_platform_device_v1: deviceRead,
   prototype_platform_battery_v1: statusRead("battery", "state", "charging"),
   prototype_platform_power_v1: statusRead("power", "thermal", "serious"),
+  prototype_platform_secureStorage_v1: statusRead("secureStorage", "locked", true),
   prototype_platform_audio_v1: statusRead("audio", "muted", true),
   prototype_platform_connectivity_v1: statusRead("connectivity", "online", false),
   prototype_platform_biometric_v1: biometricCall,
@@ -283,7 +338,18 @@ const fixtures: Record<string, Node> = {
   prototype_platform_mediaLibrary_v1: mediaPickCall,
   prototype_platform_location_v1: locationCall,
   prototype_platform_camera_v1: cameraCaptureCall,
+  prototype_platform_audioRecorder_v1: recorderCall,
+  prototype_platform_notifications_v1: notificationsCall,
+  prototype_platform_notifications_scheduled_v1: scheduleCall,
+  prototype_platform_media_v1: mediaCall,
+  prototype_platform_camera_capture_v1: cameraCaptureCall,
+  prototype_platform_camera_video_v1: recordCall,
+  prototype_platform_cast_v1: castCall,
+  prototype_platform_media_queue_v1: queueCall,
+  prototype_platform_mediaLibrary_query_v1: libraryQueryCall,
+  prototype_platform_mediaLibrary_save_v1: librarySaveCall,
   prototype_platform_calendar_v1: calendarCall,
+  prototype_platform_commerce_v1: commerceCall,
   prototype_platform_auth_v1: authCall,
   prototype_platform_clipboard_v1: { type: "pasteButton", into: "/data/code" },
   prototype_platform_haptics_v1: hapticsCall,
@@ -404,6 +470,21 @@ test("the window controls gate reports each window control the spec sets", () =>
   ]);
   expect(gate.fields({ window: { brightness: 0 }, root: label })).toEqual(["window.brightness"]);
   expect(gate.fields({ window: { transition: "fade" }, root: label })).toEqual([]);
+  expect(gate.fields({ root: label })).toEqual([]);
+});
+
+test("the hide keyboard gate reports every hideKeyboard action and nothing else", () => {
+  const gate = PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+    (entry) => entry.capability === "prototype_hide_keyboard_v1",
+  )!;
+  const root = {
+    type: "column",
+    children: [
+      { ...label, onTap: [{ type: "emit", name: "done" }, { type: "hideKeyboard" }] },
+      { ...label, onTap: [{ type: "dismiss" }] },
+    ],
+  };
+  expect(gate.fields({ root })).toEqual(["root.children[0].onTap[1]"]);
   expect(gate.fields({ root: label })).toEqual([]);
 });
 

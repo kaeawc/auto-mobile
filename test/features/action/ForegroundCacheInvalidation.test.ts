@@ -96,7 +96,7 @@ describe("shared foreground cache invalidation", () => {
       timer.enableAutoAdvance();
       const action = new PressButton(device, new FakeAdbExecutor(), timer);
       const invalidator = wire(action);
-      await action.press(button, 100);
+      await action.press(button, { timeoutMs: 100 });
       expect(invalidator.calls).toEqual([device]);
     },
   );
@@ -116,10 +116,10 @@ describe("shared foreground cache invalidation", () => {
       const adb = new FakeAdbExecutor();
       const action =
         name === "openLink"
-          ? new OpenURL(device, adb, null, null, timer)
+          ? new OpenURL(device, { adb, simctl: null, devicectl: null, timer })
           : name === "recentApps"
             ? new RecentApps(device, adb, timer)
-            : new HomeScreen(device, adb, timer);
+            : new HomeScreen(device, { adb, timer });
       const invalidator = wire(action);
       const execute = action.observeScreen.execute.bind(action.observeScreen);
       let postActionCaptures = 0;
@@ -158,7 +158,10 @@ describe("shared foreground cache invalidation", () => {
   test("shared action seam invalidates a partially failed app-changing dispatch", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const action = new BaseVisualChange(device, new FakeAdbExecutor(), timer);
+    const action = new BaseVisualChange(device, {
+      adb: new FakeAdbExecutor(),
+      timer,
+    });
     const invalidator = wire(action);
     await expect(
       action.observedInteraction(

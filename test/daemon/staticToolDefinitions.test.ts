@@ -9,6 +9,10 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
   getStaticToolDefinitions,
   getConnectedStaticToolDefinitions,
+  staticToolDeclaresDeviceResourceBudget,
+  staticToolDeclaresHostInventory,
+  staticToolChangesHostSideState,
+  staticToolChangesOpaquePersistentState,
   staticToolDeclaresInput,
 } from "../../src/daemon/staticToolDefinitions";
 import type { ProxiedToolDefinition } from "../../src/daemon/daemonMcpProxy";
@@ -57,6 +61,10 @@ describe("getStaticToolDefinitions", () => {
       delete meta["automobile/debugOnly"];
       delete meta["automobile/embeddedSdkOnly"];
       delete meta["automobile/planOnly"];
+      delete meta["automobile/deviceResourceBudget"];
+      delete meta["automobile/hostInventory"];
+      delete meta["automobile/hostSideState"];
+      delete meta["automobile/opaquePersistentState"];
       if (Object.keys(meta).length) {
         definition._meta = meta;
       } else {
@@ -244,5 +252,77 @@ describe("staticToolDeclaresInput", () => {
     expect(staticToolDeclaresInput("tapOn", "force")).toBe(false);
     expect(staticToolDeclaresInput("killDevice", "noSuchInput")).toBe(false);
     expect(staticToolDeclaresInput("noSuchTool", "force")).toBe(false);
+  });
+});
+
+describe("staticToolDeclaresDeviceResourceBudget (#15672)", () => {
+  test("the device-resource tools declare the budget trait in the committed definitions", () => {
+    expect(staticToolDeclaresDeviceResourceBudget("setDeviceResources")).toBe(true);
+    expect(staticToolDeclaresDeviceResourceBudget("reconcileDeviceResources")).toBe(true);
+  });
+
+  test("other tools, including those with a timeoutMs input, do not declare it", () => {
+    expect(staticToolDeclaresDeviceResourceBudget("startDevice")).toBe(false);
+    expect(staticToolDeclaresDeviceResourceBudget("provisionDevice")).toBe(false);
+    expect(staticToolDeclaresDeviceResourceBudget("tapOn")).toBe(false);
+    expect(staticToolDeclaresDeviceResourceBudget("noSuchTool")).toBe(false);
+  });
+
+  test("the trait key is internal and never leaves the cold wire payload", () => {
+    for (const tools of [getStaticToolDefinitions(), getConnectedStaticToolDefinitions()]) {
+      for (const tool of tools) {
+        expect(Object.hasOwn(tool._meta ?? {}, "automobile/deviceResourceBudget")).toBe(false);
+      }
+    }
+  });
+});
+
+describe("staticToolDeclaresHostInventory (#15672)", () => {
+  test("the host inventory tools declare the trait in the committed definitions", () => {
+    expect(staticToolDeclaresHostInventory("listDevices")).toBe(true);
+    expect(staticToolDeclaresHostInventory("listDeviceImages")).toBe(true);
+  });
+
+  test("device and acquisition tools, unknown names and non-strings do not declare it", () => {
+    for (const name of ["getAndroid", "setActiveDevice", "observe", "noSuchTool"]) {
+      expect(staticToolDeclaresHostInventory(name)).toBe(false);
+    }
+    expect(staticToolDeclaresHostInventory(undefined)).toBe(false);
+    expect(staticToolDeclaresHostInventory(42)).toBe(false);
+  });
+
+  test("the trait key is internal and never leaves the cold wire payload", () => {
+    for (const tools of [getStaticToolDefinitions(), getConnectedStaticToolDefinitions()]) {
+      for (const tool of tools) {
+        expect(Object.hasOwn(tool._meta ?? {}, "automobile/hostInventory")).toBe(false);
+      }
+    }
+  });
+});
+
+describe("broker reset-policy traits (#15672)", () => {
+  test("host-side and opaque-persistent tools declare their traits in the committed definitions", () => {
+    for (const name of ["network", "mockNetwork", "clearMockNetwork", "setDeviceResources"]) {
+      expect(staticToolChangesHostSideState(name)).toBe(true);
+      expect(staticToolChangesOpaquePersistentState(name)).toBe(false);
+    }
+    expect(staticToolChangesOpaquePersistentState("deviceSnapshot")).toBe(true);
+    expect(staticToolChangesHostSideState("deviceSnapshot")).toBe(false);
+  });
+
+  test("other tools declare neither trait", () => {
+    for (const name of ["tapOn", "reconcileDeviceResources", "installApp", "noSuchTool"]) {
+      expect(staticToolChangesHostSideState(name)).toBe(false);
+      expect(staticToolChangesOpaquePersistentState(name)).toBe(false);
+    }
+  });
+
+  test("the trait keys are internal and never leave the cold wire payload", () => {
+    for (const tools of [getStaticToolDefinitions(), getConnectedStaticToolDefinitions()]) {
+      for (const tool of tools) {
+        expect(Object.hasOwn(tool._meta ?? {}, "automobile/hostSideState")).toBe(false);
+        expect(Object.hasOwn(tool._meta ?? {}, "automobile/opaquePersistentState")).toBe(false);
+      }
+    }
   });
 });

@@ -162,9 +162,7 @@ test("#10665: expiry release whose quarantine is chained after notify clears the
   const rotateCall = rotateHandler(
     DEVICE,
     { orientation: "landscape", sessionUuid: sessionId },
-    undefined,
-    undefined,
-    interactionDeps,
+    { deps: interactionDeps },
   );
   await drainUntil(rotate.hasStarted, { description: "rotation mutation started" });
 
@@ -223,9 +221,7 @@ test("H13 control: the same expiry release with NO chained cleanup clears the au
   const rotateCall = rotateHandler(
     DEVICE,
     { orientation: "landscape", sessionUuid: sessionId },
-    undefined,
-    undefined,
-    interactionDeps,
+    { deps: interactionDeps },
   );
   await drainUntil(rotate.hasStarted, { description: "rotation mutation started" });
 
@@ -263,9 +259,7 @@ test("H13 reachability control: with the daemon's execution gate, the in-flight 
   const rotateCall = rotateHandler(
     DEVICE,
     { orientation: "landscape", sessionUuid: sessionId },
-    undefined,
-    undefined,
-    interactionDeps,
+    { deps: interactionDeps },
   );
   await drainUntil(rotate.hasStarted, { description: "rotation mutation started" });
 

@@ -49,7 +49,7 @@ export class CtrlProxySecureSettingsRpc implements SecureSettingsRpc {
     valueType?: SettingsValueType,
   ): Promise<SecureSettingsPutResult> {
     const client = AndroidCtrlProxyClient.getInstance(this.device);
-    const result = await client.requestSettingsPut("secure", key, value, valueType);
+    const result = await client.requestSettingsPut("secure", key, value, { valueType });
     return { success: result.success };
   }
 

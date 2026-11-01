@@ -1,4 +1,4 @@
-import type { Platform } from "../../../models/Platform";
+import { type AndroidOrIosPlatform, isAndroidOrIosPlatform } from "../../../models/Platform";
 
 /**
  * The platform facts `TapOnElement` and its collaborators branch on, kept in one table so the
@@ -7,7 +7,7 @@ import type { Platform } from "../../../models/Platform";
  */
 export interface TapPlatformTraits {
   /** Which `TapExecution` dispatch ladder runs the tap; undefined for an unsupported platform. */
-  readonly tapDispatch: Platform | undefined;
+  readonly tapDispatch: AndroidOrIosPlatform | undefined;
   /** Accessibility links are activated through the Android node action. */
   readonly androidLinkActivation: boolean;
   /** Accessibility links are activated through the iOS runner. */
@@ -30,7 +30,7 @@ export interface TapPlatformTraits {
   readonly panelAwareSelection: boolean;
 }
 
-const TRAITS: Readonly<Record<Platform, TapPlatformTraits>> = {
+const TRAITS: Readonly<Record<AndroidOrIosPlatform, TapPlatformTraits>> = {
   android: {
     tapDispatch: "android",
     androidLinkActivation: true,
@@ -59,7 +59,7 @@ const TRAITS: Readonly<Record<Platform, TapPlatformTraits>> = {
   },
 };
 
-/** A platform outside the table: no dispatch ladder and no platform-specific behavior. */
+/** A platform outside the table (e.g. watchOS): no dispatch ladder and no platform-specific behavior. */
 const UNSUPPORTED: TapPlatformTraits = {
   tapDispatch: undefined,
   androidLinkActivation: false,
@@ -75,5 +75,5 @@ const UNSUPPORTED: TapPlatformTraits = {
 };
 
 export function tapPlatformTraits(platform: string): TapPlatformTraits {
-  return Object.hasOwn(TRAITS, platform) ? TRAITS[platform as Platform] : UNSUPPORTED;
+  return isAndroidOrIosPlatform(platform) ? TRAITS[platform] : UNSUPPORTED;
 }

@@ -2,6 +2,8 @@ import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
+import { BindingDiscoveryIncompleteError } from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
+import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import type { BindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
   SESSION_REHYDRATION_DEADLINE_MS,
@@ -47,7 +49,7 @@ async function seedRestartReleasedRow(
     heartbeatTimeoutMs: 10_000,
     hasReceivedHeartbeat: true,
   });
-  await persistence.markReleased(sessionUuid, "released", 0, "daemon-restart");
+  await persistence.markReleased(sessionUuid, "released", 0, { reason: "daemon-restart" });
 }
 
 describe("restart recovery device reservation: the pool (#11294)", () => {
@@ -102,6 +104,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     manager = new FakeDeviceManager();
     bindingDevices = new Set();
     bindingExecSession = null;
+    bindingExclusion.refresh = async () => {};
   });
 
   afterEach(() => {
@@ -138,7 +141,9 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     await setUp([ios(SIM_A)]);
     await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
 
-    const recovered = await sessions.getOrCreateSession("row-a", pool, "ios", undefined, true);
+    const recovered = await sessions.getOrCreateSession("row-a", pool, "ios", {
+      requireIssuedSession: true,
+    });
 
     expect(recovered).toMatchObject({ sessionId: "row-a", assignedDevice: SIM_A });
     expect(sessions.getTerminalReleaseSnapshot("row-a")).toBeUndefined();
@@ -154,12 +159,12 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     ]);
 
     await expect(
-      sessions.getOrCreateSession("row-duplicate", pool, "ios", undefined, true),
+      sessions.getOrCreateSession("row-duplicate", pool, "ios", { requireIssuedSession: true }),
     ).rejects.toThrow("target-busy");
 
     expect(pool.getDevice(SIM_A)?.sessionId).toBeNull();
     await expect(
-      sessions.getOrCreateSession("row-a", pool, "ios", undefined, true),
+      sessions.getOrCreateSession("row-a", pool, "ios", { requireIssuedSession: true }),
     ).resolves.toMatchObject({ assignedDevice: SIM_A });
   });
 
@@ -205,6 +210,33 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     expect(pool.genericAvailability(SIM_A)).toBe("free");
   });
 
+  test("an unknown registry schema still reserves the rehydration row's device", async () => {
+    await setUp([ios(SIM_A)], true);
+    const refreshRequirements: (boolean | undefined)[] = [];
+    bindingExclusion.refresh = async (options) => {
+      refreshRequirements.push(options?.requireCurrent);
+      if (options?.requireCurrent) {
+        throw new BindingRegistrySchemaUnsupportedError("fake-registry.db", ["future-migration"]);
+      }
+    };
+
+    await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
+
+    expect(refreshRequirements).toEqual([true, undefined]);
+    expect(pool.genericAvailability(SIM_A)).toBe("reserved");
+  });
+
+  test("an unreadable registry still reserves nothing for rehydration", async () => {
+    await setUp([ios(SIM_A)], true);
+    bindingExclusion.refresh = async () => {
+      throw new BindingDiscoveryIncompleteError("fake read failure");
+    };
+
+    await pool.reserveDevicesForRehydration([reservation("row-a", SIM_A)]);
+
+    expect(pool.genericAvailability(SIM_A)).toBe("free");
+  });
+
   // Broker bindings win even when the slot takes the device after the row reserved it: the
   // reservation never blocks the slot, and the row then ends through the normal target-busy path.
   test("a binding that acquires a reserved device afterwards takes it from the row", async () => {
@@ -227,7 +259,7 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
     expect(pool.getDevice(SIM_A)?.sessionId).toBe("slot-exec");
 
     await expect(
-      sessions.getOrCreateSession("row-a", pool, "ios", undefined, true),
+      sessions.getOrCreateSession("row-a", pool, "ios", { requireIssuedSession: true }),
     ).rejects.toThrow("target-busy");
     expect(sessions.getTerminalReleaseSnapshot("row-a")).toMatchObject({
       releaseReason: "identity-recovery-target-busy",

@@ -142,8 +142,7 @@ describe("appearance socket set_appearance as a control call on the holder's ses
       "/fake/path/appearance.sock",
       timer,
       new SessionScopedStreamAuthenticator(() => sessionManager, "appearance", {}),
-      deviceSource,
-      dependencies,
+      { deviceSource, dependencies },
     );
   });
 

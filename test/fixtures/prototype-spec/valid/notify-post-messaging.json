@@ -1,0 +1,144 @@
+{
+  "id": "notify-post-messaging",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "postStatus": ""
+  },
+  "requires": {
+    "platform": ["notifications"],
+    "permissions": [
+      {
+        "name": "notifications",
+        "purpose": "Tell you about new messages"
+      }
+    ]
+  },
+  "data": {
+    "conversation": {
+      "id": "c1"
+    },
+    "replies": []
+  },
+  "platform": {
+    "on": {
+      "notifications.opened": [
+        {
+          "type": "setState",
+          "key": "postStatus",
+          "value": {
+            "event": "/notificationId"
+          }
+        }
+      ],
+      "notifications.reply": [
+        {
+          "type": "appendData",
+          "path": "/data/replies",
+          "value": {
+            "event": "/reply"
+          }
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "button",
+    "label": "Notify",
+    "onTap": [
+      {
+        "type": "platform",
+        "call": "notifications.post",
+        "args": {
+          "id": {
+            "value": "msg-1"
+          },
+          "channel": {
+            "value": "messages"
+          },
+          "title": {
+            "value": "Ada"
+          },
+          "body": {
+            "value": "See you at 5"
+          },
+          "largeImage": {
+            "value": "avatar"
+          },
+          "style": {
+            "value": {
+              "type": "messaging",
+              "self": "Me",
+              "conversationTitle": "#design",
+              "messages": [
+                {
+                  "from": "Ada",
+                  "text": "See you at 5"
+                },
+                {
+                  "text": "On my way"
+                }
+              ]
+            }
+          },
+          "group": {
+            "value": "conv-{data:/conversation/id}"
+          },
+          "badge": {
+            "value": 3
+          },
+          "data": {
+            "value": {
+              "conversationId": "{data:/conversation/id}"
+            }
+          },
+          "actions": {
+            "value": [
+              {
+                "id": "like",
+                "label": "Like",
+                "opensApp": false
+              },
+              {
+                "id": "reply",
+                "label": "Reply",
+                "reply": {
+                  "placeholder": "Message"
+                }
+              },
+              {
+                "id": "open",
+                "label": "Open"
+              }
+            ]
+          },
+          "silent": {
+            "value": false
+          }
+        },
+        "statusKey": "postStatus"
+      },
+      {
+        "type": "platform",
+        "call": "notifications.setBadge",
+        "args": {
+          "count": {
+            "value": 9999
+          }
+        }
+      }
+    ]
+  },
+  "notifications": {
+    "channels": [
+      {
+        "id": "messages",
+        "name": "Messages",
+        "importance": "default"
+      }
+    ]
+  }
+}

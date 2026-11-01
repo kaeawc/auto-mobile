@@ -293,8 +293,10 @@ async function stopOwnedRecordings(
   deps: RecordingSessionCleanupDeps,
   sessionId: string | undefined,
   deviceId: string,
-  state: RecordingFinalizeStageState,
-  deviceGestureRecordingId: string | undefined,
+  {
+    state,
+    deviceGestureRecordingId,
+  }: { state: RecordingFinalizeStageState; deviceGestureRecordingId?: string },
 ): Promise<void> {
   const { stopping } = state;
   // `stopping` starts as every recording the owner has; a stage that finished drops the ids that
@@ -389,7 +391,7 @@ async function stopOwnedRecordingsWithinCap(
   const releasedSession = sessionId ?? "(owner-less)";
   try {
     await raceWithDeadline(
-      stopOwnedRecordings(deps, sessionId, deviceId, state, deviceGestureRecordingId),
+      stopOwnedRecordings(deps, sessionId, deviceId, { state, deviceGestureRecordingId }),
       {
         timer: deps.timer,
         timeoutMs: capMs,
@@ -693,7 +695,7 @@ export function registerRecordingSessionCleanup(
     );
   };
   // A terminal upgrade of a finished release would stop the device's next owner's recording (#10825).
-  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+  manager.onSessionRelease((sessionId, deviceId, _reason, releaseOptions) => {
     if (!releaseOptions?.upgradeOnly) {
       const ids = [...new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId))];
       if (ids.length > 0) {

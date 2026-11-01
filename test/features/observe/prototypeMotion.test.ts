@@ -160,12 +160,9 @@ describe("AwaitIdle quiet-tree stability with prototype motion", () => {
       tree({ active: 0, loops: 2 }),
       tree({ active: 0, loops: 2 }),
     ]);
-    const idle = new AwaitIdle(
-      device,
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
-      timer,
-      reader,
-    );
+    const idle = new AwaitIdle(device, new FakeAdbClientFactory(new FakeAdbExecutor()), timer, {
+      hierarchyReader: reader,
+    });
 
     const result = await idle.waitForUiStability("com.android.systemui", 500);
 

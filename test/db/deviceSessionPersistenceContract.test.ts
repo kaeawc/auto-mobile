@@ -74,7 +74,7 @@ const implementations: Array<[string, () => Promise<DeviceSessionPersistence>]> 
     "DeviceSessionRepository (SQLite)",
     async () => {
       db = await createTestDatabase();
-      return new DeviceSessionRepository(db, new FakeTimer());
+      return new DeviceSessionRepository({ db, timer: new FakeTimer() });
     },
   ],
   ["FakeDeviceSessionPersistence", async () => new FakeDeviceSessionPersistence()],
@@ -137,7 +137,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
         await persistence.upsertActiveSession(record());
       }
       if (state === "released") {
-        await persistence.markReleased(SESSION, "released", 2_000, "daemon-shutdown");
+        await persistence.markReleased(SESSION, "released", 2_000, { reason: "daemon-shutdown" });
       }
       const before = structuredClone(await persistence.getSession(SESSION));
       if (state === "active") {
@@ -164,7 +164,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
         await persistence.upsertActiveSession(record());
       }
       if (state !== "missing" && state !== "active") {
-        await persistence.markReleased(SESSION, "released", 2_000, state);
+        await persistence.markReleased(SESSION, "released", 2_000, { reason: state });
       }
       const before = structuredClone(await persistence.getSession(SESSION));
       await persistence.recordRestartRecoveryActivity(SESSION, 4_000);
@@ -185,7 +185,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     async (state: string) => {
       const persistence = await create();
       const generation = Number(await persistence.upsertActiveSession(record()));
-      await persistence.markReleased(SESSION, "released", 2_000, "daemon-shutdown");
+      await persistence.markReleased(SESSION, "released", 2_000, { reason: "daemon-shutdown" });
       const expected = {
         rowGeneration: generation + (state === "stale-generation" ? 1 : 0),
         daemonSessionId: state === "stale-owner" ? "other" : "daemon-a",
@@ -230,7 +230,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     ] as const) {
       await persistence.upsertActiveSession(record({ sessionUuid }));
       if (reason) {
-        await persistence.markReleased(sessionUuid, "released", 2_000, reason);
+        await persistence.markReleased(sessionUuid, "released", 2_000, { reason });
       }
     }
     expect(
@@ -303,7 +303,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       await persistence.upsertActiveSession(
         record({ livenessPolicy: policy as "managed-execution" | "heartbeat" }),
       );
-      await persistence.markReleased(SESSION, "released", 2_000, "daemon-shutdown");
+      await persistence.markReleased(SESSION, "released", 2_000, { reason: "daemon-shutdown" });
       const rows = await persistence.listRecoverableSessions(30 * 60_000);
       const managed = policy === "managed-execution";
       expect(rows.map((row) => row.session_uuid)).toEqual(managed ? [SESSION] : []);
@@ -316,7 +316,9 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
   test("managed predicates and SELECTs keep restart and terminal bounds beyond idle expiry", async () => {
     const persistence = await create();
     await persistence.upsertActiveSession(record({ livenessPolicy: "managed-execution" }));
-    await persistence.markReleased(SESSION, "released", 2_000, "device-restart:Pixel_8");
+    await persistence.markReleased(SESSION, "released", 2_000, {
+      reason: "device-restart:Pixel_8",
+    });
     const row = (await rowOf(persistence))!;
     expect(isRecoverableDeviceSession(row, 6_000)).toBe(true);
     expect(persistedSessionExpiryReason(row, 6_000)).toBeUndefined();
@@ -335,7 +337,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
   test("managed terminal releases are never returned despite idle exemption", async () => {
     const persistence = await create();
     await persistence.upsertActiveSession(record({ livenessPolicy: "managed-execution" }));
-    await persistence.markReleased(SESSION, "released", 2_000, "heartbeat-timeout");
+    await persistence.markReleased(SESSION, "released", 2_000, { reason: "heartbeat-timeout" });
     expect(await persistence.listRecoverableSessions(30 * 60_000)).toEqual([]);
     expect((await rowOf(persistence))?.release_reason).toBe("heartbeat-timeout");
   });
@@ -343,7 +345,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
   test("managed idle exemption never bypasses released-row retention", async () => {
     const persistence = await create();
     await persistence.upsertActiveSession(record({ livenessPolicy: "managed-execution" }));
-    await persistence.markReleased(SESSION, "released", 2_000, "daemon-shutdown");
+    await persistence.markReleased(SESSION, "released", 2_000, { reason: "daemon-shutdown" });
     expect(
       await persistence.listRecoverableSessions(2_001 + DEVICE_SESSION_RETENTION_MAX_AGE_MS),
     ).toEqual([]);
@@ -354,7 +356,9 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     async (change) => {
       const persistence = await create();
       const generation = await persistence.upsertActiveSession(record({ expiresAtMs: 301_000 }));
-      await persistence.markReleased(SESSION, "released", 1_000, "device-restart:Pixel_8");
+      await persistence.markReleased(SESSION, "released", 1_000, {
+        reason: "device-restart:Pixel_8",
+      });
       if (change === "resumed" || change === "generation" || change === "peer") {
         await persistence.upsertActiveSession(
           record({
@@ -363,16 +367,23 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
           }),
         );
         if (change !== "resumed") {
-          await persistence.markReleased(SESSION, "released", 1_000, "device-restart:Pixel_8");
+          await persistence.markReleased(SESSION, "released", 1_000, {
+            reason: "device-restart:Pixel_8",
+          });
         }
       } else if (change === "new-handoff") {
-        await persistence.markReleased(SESSION, "released", 2_000, "device-restart:Pixel_8");
+        await persistence.markReleased(SESSION, "released", 2_000, {
+          reason: "device-restart:Pixel_8",
+        });
       } else if (change === "idle-first") {
         await persistence.upsertActiveSession(record({ expiresAtMs: 181_000 }));
-        await persistence.markReleased(SESSION, "released", 1_000, "device-restart:Pixel_8");
+        await persistence.markReleased(SESSION, "released", 1_000, {
+          reason: "device-restart:Pixel_8",
+        });
       }
       const before = structuredClone(await rowOf(persistence));
-      await persistence.markReleased(SESSION, "expired", 181_001, "restart-recovery-timeout", {
+      await persistence.markReleased(SESSION, "expired", 181_001, {
+        reason: "restart-recovery-timeout",
         expectedRowGeneration:
           change === "generation"
             ? typeof generation === "number"
@@ -421,7 +432,8 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
         await upsert;
         expect(await rowOf(persistence)).toMatchObject({ device_id: "new-device" });
       }
-      const release = persistence.markReleased(SESSION, "released", 3_000, "explicit-release", {
+      const release = persistence.markReleased(SESSION, "released", 3_000, {
+        reason: "explicit-release",
         unlessTerminalOrOwnedByLivePeer: guard,
       });
       if (owner === "daemon-other") {
@@ -440,7 +452,8 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       const persistence = await create();
       await persistence.upsertActiveSession(record({ daemonSessionId: owner }));
       const before = structuredClone(await rowOf(persistence));
-      const release = persistence.markReleased(SESSION, "released", 3_000, "explicit-release", {
+      const release = persistence.markReleased(SESSION, "released", 3_000, {
+        reason: "explicit-release",
         unlessTerminalOrOwnedByLivePeer: {
           livePeerDaemonSessionIds: [],
           ownDaemonSessionId: "daemon-a",
@@ -461,7 +474,8 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     const generation = await persistence.upsertActiveSession(record());
     const before = structuredClone(await rowOf(persistence));
     await expect(
-      persistence.markReleased(SESSION, "released", 3_000, "explicit-release", {
+      persistence.markReleased(SESSION, "released", 3_000, {
+        reason: "explicit-release",
         expectedRowGeneration: Number(generation) + 1,
         unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: [], reportRefusal: true },
       }),
@@ -483,11 +497,12 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       const persistence = await create();
       await persistence.upsertActiveSession(record({ daemonSessionId: owner }));
       if (reason) {
-        await persistence.markReleased(SESSION, "released", 2_000, reason);
+        await persistence.markReleased(SESSION, "released", 2_000, { reason });
       }
       const before = structuredClone(await rowOf(persistence));
       const result = await persistence
-        .markReleased(SESSION, "released", 3_000, "device-disconnected:emulator-5554", {
+        .markReleased(SESSION, "released", 3_000, {
+          reason: "device-disconnected:emulator-5554",
           unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: ["daemon-peer"] },
         })
         .then(
@@ -511,15 +526,13 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       async (owner) => {
         const persistence = await create();
         await persistence.upsertActiveSession(record({ daemonSessionId: owner }));
-        await persistence.markReleased(
-          SESSION,
-          "released",
-          2_000,
-          "device-disconnected:emulator-5554",
-        );
+        await persistence.markReleased(SESSION, "released", 2_000, {
+          reason: "device-disconnected:emulator-5554",
+        });
         const before = structuredClone(await rowOf(persistence));
         const result = await persistence
-          .markReleased(SESSION, "released", 3_000, "explicit-release", {
+          .markReleased(SESSION, "released", 3_000, {
+            reason: "explicit-release",
             unlessTerminalOrOwnedByLivePeer: {
               livePeerDaemonSessionIds: ["daemon-peer"],
               supersededReasons: ["device-disconnected:emulator-5554"],
@@ -543,7 +556,8 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       const persistence = await create();
       const generation = await persistence.upsertActiveSession(record());
       const before = structuredClone(await rowOf(persistence));
-      await persistence.markReleased(SESSION, "released", 3_000, "explicit-release", {
+      await persistence.markReleased(SESSION, "released", 3_000, {
+        reason: "explicit-release",
         expectedRowGeneration: Number(generation) + 1,
         unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: [] },
       });
@@ -556,7 +570,8 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       const persistence = await create();
       await persistence.upsertActiveSession(record({ expiresAtMs: 5_000 }));
 
-      await persistence.markReleased(SESSION, "expired", 5_000, "expired", {
+      await persistence.markReleased(SESSION, "expired", 5_000, {
+        reason: "expired",
         onlyIfExpiredAtMs: 5_000,
       });
 
@@ -578,7 +593,8 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
         hasReceivedHeartbeat: true,
       });
 
-      await persistence.markReleased(SESSION, "expired", 6_000, "expired", {
+      await persistence.markReleased(SESSION, "expired", 6_000, {
+        reason: "expired",
         onlyIfExpiredAtMs: 6_000,
       });
 
@@ -593,10 +609,13 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     test("leaves a device-restart row whose recovery window activity extended past the instant", async () => {
       const persistence = await create();
       await persistence.upsertActiveSession(record({ expiresAtMs: 5_000 }));
-      await persistence.markReleased(SESSION, "released", 2_000, "device-restart:Pixel_8");
+      await persistence.markReleased(SESSION, "released", 2_000, {
+        reason: "device-restart:Pixel_8",
+      });
       await persistence.recordRestartRecoveryActivity(SESSION, 4_900);
 
-      await persistence.markReleased(SESSION, "expired", 6_000, "expired", {
+      await persistence.markReleased(SESSION, "expired", 6_000, {
+        reason: "expired",
         onlyIfExpiredAtMs: 6_000,
       });
 
@@ -638,7 +657,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       async (reason) => {
         const persistence = await create();
         await persistence.upsertActiveSession(record());
-        await persistence.markReleased(SESSION, "released", 2_000, reason);
+        await persistence.markReleased(SESSION, "released", 2_000, { reason });
 
         await persistence.upsertActiveSession(record({ lastUsedAtMs: 3_000 }), 3_000, {
           unlessTerminal: true,
@@ -658,7 +677,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       async (reason) => {
         const persistence = await create();
         await persistence.upsertActiveSession(record());
-        await persistence.markReleased(SESSION, "released", 2_000, reason);
+        await persistence.markReleased(SESSION, "released", 2_000, { reason });
         const before = await rowOf(persistence);
 
         const refusal = await persistence
@@ -678,7 +697,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     test("without the option a terminal row is still replaced, as a fresh creation needs", async () => {
       const persistence = await create();
       await persistence.upsertActiveSession(record());
-      await persistence.markReleased(SESSION, "released", 2_000, "explicit-release");
+      await persistence.markReleased(SESSION, "released", 2_000, { reason: "explicit-release" });
 
       await persistence.upsertActiveSession(record({ lastUsedAtMs: 3_000 }), 3_000);
 
@@ -699,7 +718,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
         const generation = await persistence.upsertActiveSession(
           record({ daemonSessionId: owner }),
         );
-        await persistence.markReleased(SESSION, "released", 2_000, "daemon-restart");
+        await persistence.markReleased(SESSION, "released", 2_000, { reason: "daemon-restart" });
         if (generationChanged) {
           await persistence.upsertActiveSession(
             record({ deviceId: "replacement", daemonSessionId: owner }),
@@ -749,7 +768,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       const persistence = await create();
       await persistence.upsertActiveSession(record({ daemonSessionId: scenario.owner }));
       if (scenario.reason) {
-        await persistence.markReleased(SESSION, "released", 2_000, scenario.reason);
+        await persistence.markReleased(SESSION, "released", 2_000, { reason: scenario.reason });
       }
       const before = structuredClone(await rowOf(persistence));
 
@@ -796,7 +815,7 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
         const persistence = await create();
         await persistence.upsertActiveSession(record({ daemonSessionId: "daemon-peer" }));
         if (reason) {
-          await persistence.markReleased(SESSION, "released", 2_000, reason);
+          await persistence.markReleased(SESSION, "released", 2_000, { reason });
         }
         const before = structuredClone(await rowOf(persistence));
         const result = await persistence

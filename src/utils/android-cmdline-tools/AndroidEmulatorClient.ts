@@ -52,6 +52,7 @@ import {
   DefaultEmulatorReadinessPoller,
   type EmulatorReadinessHost,
   type EmulatorReadinessPoller,
+  type EmulatorReadyWait,
 } from "./EmulatorReadinessPoller";
 import {
   DefaultEmulatorLauncher,
@@ -88,7 +89,6 @@ import { DefaultEmulatorLaunchTargets, type EmulatorLaunchTargets } from "./Emul
 import type {
   AndroidEmulatorLaunchHandle,
   AndroidEmulatorLaunchRequest,
-  AndroidEmulatorReadinessOptions,
 } from "./AndroidEmulatorLaunchTypes";
 export type {
   AndroidEmulatorLaunchHandle,
@@ -231,16 +231,14 @@ export interface AndroidEmulator {
    * @param avdName - The AVD name to wait for
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
    * @param childProcess - Optional child process to monitor for early exit
-   * @param targetDeviceId - Optional adb device id to require when waiting for an already-running device
+   * @param wait - Optional target device id, cancellation signal and post-readiness options
    * @returns Promise that resolves with device ID when emulator is ready
    */
   waitForEmulatorReady(
     avdName: string,
     timeoutMs?: number,
     childProcess?: ChildProcess | null,
-    targetDeviceId?: string,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    wait?: EmulatorReadyWait,
   ): Promise<BootedDevice>;
 }
 
@@ -535,19 +533,10 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     avdName: string,
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
-    targetDeviceId?: string,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    wait?: EmulatorReadyWait,
   ): Promise<BootedDevice> {
     // Not `async`: adopting the poller promise would add microtask turns the launch-exit timing tests pin.
-    return this.readinessPoller.waitForEmulatorReady(
-      avdName,
-      timeoutMs,
-      childProcess,
-      targetDeviceId,
-      signal,
-      options,
-    );
+    return this.readinessPoller.waitForEmulatorReady(avdName, timeoutMs, childProcess, wait);
   }
 
   private createLauncherHost(): EmulatorLauncherHost {
@@ -817,8 +806,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       },
       { deviceId: serial, name: serial, platform: "android" },
       options.timeoutMs,
-      options.signal,
-      options.consoleExclusiveOwner,
+      { signal: options.signal, consoleExclusiveOwner: options.consoleExclusiveOwner },
     );
     // Reset retries need timeout evidence; inventory callers retain the unresolved-name result.
     if (options.throwOnTimeout && result.nameProbeTimedOut) {
@@ -842,7 +830,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       },
       device,
       infoTimeoutMs,
-      signal,
+      { signal },
     );
   }
 

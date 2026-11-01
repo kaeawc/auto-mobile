@@ -194,7 +194,12 @@ describe("setDeviceState location", () => {
     const finished = Promise.withResolvers<void>();
     let admitted = true;
     const simctl = new FakeSimctl();
-    routeRegistry.start(ios.deviceId, route.waypoints, 1000, 500, true, () => finished.promise);
+    routeRegistry.start(
+      ios.deviceId,
+      route.waypoints,
+      { durationMs: 1000, updateIntervalMs: 500, loop: true },
+      () => finished.promise,
+    );
     timer.advanceTime(0);
     await flush();
     const state = new DeviceState(ios, {
@@ -273,9 +278,14 @@ describe("setDeviceState location", () => {
   test("stop reports a failed route once", async () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
-    routeRegistry.start(ios.deviceId, route.waypoints, 2000, 500, false, async () => {
-      throw new Error("offline");
-    });
+    routeRegistry.start(
+      ios.deviceId,
+      route.waypoints,
+      { durationMs: 2000, updateIntervalMs: 500, loop: false },
+      async () => {
+        throw new Error("offline");
+      },
+    );
     for (const delta of [0, 500, 500]) {
       timer.advanceTime(delta);
       await flush();
@@ -521,7 +531,7 @@ describe("setDeviceState location", () => {
       heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1000, ageMs: 0 },
     };
     for (const teardown of [
-      () => release!("session", ios.deviceId, "test", snapshot, {}),
+      () => release!("session", ios.deviceId, "test", { snapshot }),
       () => unbound!("session", ios.deviceId),
       () => stopLocationRouteForRemovedDevice(ios.deviceId, routeRegistry),
     ]) {

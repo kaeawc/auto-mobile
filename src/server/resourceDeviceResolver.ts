@@ -54,7 +54,7 @@ async function foldResourceDiscovery(
   const pool = defaultDaemonContext.devicePool();
   const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
   const devices =
-    platform === "ios"
+    platform === "ios" || platform === "watchos" || platform === "tvos"
       ? rawDevices
       : pool
         ? pool.mapAndroidDiscovery(rawDevices)
@@ -137,7 +137,7 @@ export async function listBootedDevicesForReadWithStatus(
 ): Promise<BootedResourceReadListing> {
   try {
     let status: Omit<BootedResourceReadListing, "devices"> = {
-      scanned: { android: false, ios: false },
+      scanned: { android: false, ios: false, watchos: false, tvos: false },
     };
     const rawDevices = await discoverForResource(
       platform,
@@ -147,6 +147,9 @@ export async function listBootedDevicesForReadWithStatus(
           scanned: {
             android: discovery.succeededPlatforms.has("android"),
             ios: discovery.succeededPlatforms.has("ios"),
+            // Only a read that names watchOS lists watches; "either" never scans them.
+            watchos: discovery.succeededPlatforms.has("watchos"),
+            tvos: discovery.succeededPlatforms.has("tvos"),
           },
           discoveryErrors: discovery.discoveryErrors,
         };
@@ -160,7 +163,7 @@ export async function listBootedDevicesForReadWithStatus(
     const failure: DeviceDiscoveryError = { code: "failed", message: errorMessage(error) };
     return {
       devices: [],
-      scanned: { android: false, ios: false },
+      scanned: { android: false, ios: false, watchos: false, tvos: false },
       discoveryErrors:
         platform === "either" ? { android: failure, ios: failure } : { [platform]: failure },
     };

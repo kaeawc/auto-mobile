@@ -103,13 +103,10 @@ export class OverlayDetector implements OverlayAnalyzer {
           const nodeProperties = parser.extractNodeProperties(node);
 
           if (
-            this.isContainerNode(
-              node,
-              nodeProperties,
-              containerNode,
+            this.isContainerNode(node, nodeProperties, containerNode, {
               containerElement,
               containerBounds,
-            )
+            })
           ) {
             if (!insideContainer) {
               insideContainer = true;
@@ -171,14 +168,10 @@ export class OverlayDetector implements OverlayAnalyzer {
     const secondaryEnd = isVertical ? bounds.right : bounds.bottom;
 
     const candidates = this.buildCandidateCoordinates(secondaryStart, secondaryEnd);
-    const bestCandidate = this.findBestSwipeCandidate(
-      isVertical,
-      bounds,
-      overlayBounds,
+    const bestCandidate = this.findBestSwipeCandidate(isVertical, bounds, overlayBounds, {
       candidates,
-      primaryStart,
-      primaryEnd,
-    );
+      primary: { start: primaryStart, end: primaryEnd },
+    });
 
     if (!bestCandidate) {
       return null;
@@ -228,9 +221,10 @@ export class OverlayDetector implements OverlayAnalyzer {
     isVertical: boolean,
     bounds: Element["bounds"],
     overlayBounds: Element["bounds"][],
-    candidates: number[],
-    primaryStart: number,
-    primaryEnd: number,
+    {
+      candidates,
+      primary,
+    }: { candidates: number[]; primary: Pick<SwipeInterval, "start" | "end"> },
   ): { coordinate: number; interval: SwipeInterval } | null {
     let bestCandidate: { coordinate: number; interval: SwipeInterval } | null = null;
 
@@ -239,7 +233,7 @@ export class OverlayDetector implements OverlayAnalyzer {
         ? this.getBlockedIntervalsForX(overlayBounds, bounds, coordinate)
         : this.getBlockedIntervalsForY(overlayBounds, bounds, coordinate);
 
-      const largestGap = this.findLargestGap(primaryStart, primaryEnd, blocked);
+      const largestGap = this.findLargestGap(primary.start, primary.end, blocked);
       if (!largestGap) {
         continue;
       }
@@ -574,8 +568,10 @@ export class OverlayDetector implements OverlayAnalyzer {
     node: ViewHierarchyNode,
     nodeProperties: Record<string, unknown>,
     containerNode: ViewHierarchyNode | null,
-    containerElement: Element,
-    containerBounds: Element["bounds"],
+    {
+      containerElement,
+      containerBounds,
+    }: { containerElement: Element; containerBounds: Element["bounds"] },
   ): boolean {
     if (containerNode && node === containerNode) {
       return true;

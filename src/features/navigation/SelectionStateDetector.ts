@@ -159,8 +159,10 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
       tappedElement.bounds,
       beforeScreenshotPath,
       afterScreenshotPath,
-      context.previousObservation?.screenSize,
-      currentObservation.screenSize,
+      {
+        beforeScreenSize: context.previousObservation?.screenSize,
+        afterScreenSize: currentObservation.screenSize,
+      },
     );
 
     if (!visualResult) {
@@ -266,8 +268,10 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
     bounds: ElementBounds,
     beforeScreenshotPath: string,
     afterScreenshotPath: string,
-    beforeScreenSize?: ScreenSize,
-    afterScreenSize?: ScreenSize,
+    {
+      beforeScreenSize,
+      afterScreenSize,
+    }: { beforeScreenSize?: ScreenSize; afterScreenSize?: ScreenSize } = {},
   ): Promise<{ differencePercent: number; confidence: number; reason: string } | null> {
     try {
       const beforeScreenshot = await this.screenshotUtils.getCachedScreenshot(beforeScreenshotPath);
@@ -357,13 +361,10 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
       return null;
     }
 
-    return this.imageUtils.crop(
-      buffer,
-      normalized.width,
-      normalized.height,
-      normalized.left,
-      normalized.top,
-    );
+    return this.imageUtils.crop(buffer, normalized.width, normalized.height, {
+      x: normalized.left,
+      y: normalized.top,
+    });
   }
 
   private normalizeBounds(

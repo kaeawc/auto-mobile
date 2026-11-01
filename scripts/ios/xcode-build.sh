@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Xcode Project Build Script
-# Builds Xcode projects (xcodeproj) for iOS simulator
+# Builds Xcode projects (xcodeproj) for their simulator platforms
 #
 
 set -e
@@ -204,8 +204,6 @@ XCODE_VERSION=$(xcodebuild -version)
 XCODE_VERSION=${XCODE_VERSION%%$'\n'*}
 print_info "Xcode version: ${XCODE_VERSION}"
 
-DESTINATION="generic/platform=iOS Simulator"
-print_info "Using iOS destination: ${DESTINATION}"
 echo ""
 
 # Ensure iOS Simulator SDK is installed
@@ -285,11 +283,23 @@ for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
         continue
     fi
 
-    # Build each scheme for iOS simulator
+    # Build each scheme for its simulator platform, defaulting to iOS when the
+    # settings probe fails or does not identify a supported platform family.
     BUILD_SUCCESS=true
     while IFS= read -r scheme; do
         if [ -n "${scheme}" ]; then
             echo -e "    Building scheme: ${scheme}..."
+            DESTINATION="generic/platform=iOS Simulator"
+            capture_run_cmd discard xcodebuild -project "${xcodeproj}" -scheme "${scheme}" -showBuildSettings
+            if [ "${CAPTURED_STATUS}" -eq 0 ]; then
+                PLATFORM_NAME=$(printf '%s\n' "${CAPTURED_OUTPUT}" | awk '$1 == "PLATFORM_NAME" && $2 == "=" { print $3; exit }')
+                case "${PLATFORM_NAME}" in
+                    iphone*) DESTINATION="generic/platform=iOS Simulator" ;;
+                    watch*) DESTINATION="generic/platform=watchOS Simulator" ;;
+                    appletv*) DESTINATION="generic/platform=tvOS Simulator" ;;
+                esac
+            fi
+            print_info "Using destination for ${scheme}: ${DESTINATION}"
             capture_run_cmd merge xcodebuild \
                 -project "${xcodeproj}" \
                 -scheme "${scheme}" \

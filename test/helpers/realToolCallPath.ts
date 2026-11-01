@@ -122,8 +122,8 @@ export class RealToolCallPath {
       return { success: true, totalTimeMs: 0 };
     };
     proxy.setPreference = async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-      if (typeof args[5] === "object") {
-        args[5].onDispatch?.();
+      if (typeof args[3] === "object") {
+        args[3].onDispatch?.();
       }
       this.ctrlProxyWrites.push("setPreference");
     };
@@ -137,7 +137,12 @@ export class RealToolCallPath {
       this.gestureFrames.push(`move:${gestureId}`);
       return { success: true, totalTimeMs: 0 };
     };
-    proxy.requestGestureEnd = async (gestureId: string, _x: number, _y: number, cancel = false) => {
+    proxy.requestGestureEnd = async (
+      gestureId: string,
+      _x: number,
+      _y: number,
+      { cancel = false } = {},
+    ) => {
       this.gestureFrames.push(`${cancel ? "cancel" : "end"}:${gestureId}`);
       return { success: true, totalTimeMs: 0 };
     };
@@ -173,17 +178,15 @@ export class RealToolCallPath {
       }),
     });
     // The real handler and registration; only the CtrlProxy resume at the device boundary is fake.
-    ToolRegistry.register(
-      "setActiveDevice",
-      "Set active device",
-      setActiveDeviceSchema,
-      createSetActiveDeviceHandler({
+    ToolRegistry.register("setActiveDevice", "Set active device", setActiveDeviceSchema, {
+      handler: createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider(),
         resumeCtrlProxy: async () => undefined,
         legacyDeviceSelection: () => this.deviceReadiness,
       }),
-      { defaultEnabled: true, ...SELECTS_ACTIVE_DEVICE },
-    );
+      defaultEnabled: true,
+      ...SELECTS_ACTIVE_DEVICE,
+    });
     return this;
   }
 

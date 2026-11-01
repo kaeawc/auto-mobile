@@ -103,7 +103,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
         { cause: error },
       );
     }
-    return this.recording(child, exited, artifactPath, request.template, warnings);
+    return this.recording(child, exited, artifactPath, { template: request.template, warnings });
   }
 
   private async resolveTarget(
@@ -137,8 +137,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
     child: HostChildProcess,
     exited: Promise<void>,
     artifactPath: string,
-    template: PerformanceTraceTemplate,
-    warnings: string[],
+    { template, warnings }: { template: PerformanceTraceTemplate; warnings: string[] },
   ): RecordingPerformanceTrace {
     const { timer, host } = this.deps;
     const stopTimeoutMs = this.deps.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS;
@@ -180,6 +179,19 @@ async function exportXml(
 
 function isEmptyRun(toc: XctraceToc): boolean {
   return toc.durationMs === 0 && toc.schemas.length === 0;
+}
+
+function timeProfilerSummaryWarnings(
+  template: PerformanceTraceTemplate,
+  sampleCount: number,
+  summary: PerformanceTraceSummary,
+): string[] {
+  if (template === "timeProfiler" && sampleCount > 0 && summary.topFunctions?.length === 0) {
+    return [
+      `performanceTrace timeProfiler: ${sampleCount} samples exported but no function names could be read; the Xcode export shape may be unsupported.`,
+    ];
+  }
+  return [];
 }
 
 /** Summarise a finished `.trace` through `xctrace export`: the TOC, then the template's table. */
@@ -233,6 +245,7 @@ export async function summarizeXctrace(
       await exportXml(host, ["--input", artifactPath, "--xpath", xpath], signal),
     );
     Object.assign(summary, summarizeXctraceTable(template, rows));
+    warnings.push(...timeProfilerSummaryWarnings(template, rows.length, summary));
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn(

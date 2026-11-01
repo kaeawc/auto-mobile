@@ -343,6 +343,8 @@ jobs:
               - 'test/fixtures/prototype-embedded-routing/**'
               # Shared fixtures read by renderer, protocol, runner, and CtrlProxy tests.
               - 'test/fixtures/prototype-spec/**'
+              # Concept slices read by PrototypeConceptCorpusTest.
+              - 'test/fixtures/prototype-concepts/**'
               - 'test/fixtures/prototype/**'
               - 'test/fixtures/refusal-wire/**'
               - 'test/fixtures/refusal-wire-hints/**'
@@ -417,6 +419,8 @@ jobs:
               - 'test/fixtures/prototype-capabilities/**'
               - 'test/fixtures/prototype-embedded-routing/**'
               - 'test/fixtures/prototype-spec/**'
+              # Concept slices read by PrototypeConceptCorpusTests.
+              - 'test/fixtures/prototype-concepts/**'
               - 'test/fixtures/prototype/**'
               - 'test/fixtures/prototype-saved-layout/**'
               - 'test/fixtures/desktop-wire/**'
@@ -574,14 +578,30 @@ jobs:
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # The advisory XCTestRunner simulator lane is label opt-in on PRs (#10895);
-      # it runs every night on CircleCI (nightly-macos) regardless.
+      # The advisory XCTestRunner simulator lane runs on PRs with the `run-ios-sim`
+      # label (#10895) and on PRs that touch a layer the iOS SDK contract suite
+      # crosses (#5164); it runs every night on CircleCI (nightly-macos) regardless.
+      - name: "Check for iOS SDK contract inputs"
+        id: filter-ios-sdk-contract
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ios_sdk_contract:
+              - 'ios/auto-mobile-sdk/Sources/**'
+              - 'ios/control-proxy/Sources/**'
+              - 'ios/sdk-wire/Sources/**'
+              - 'ios/Playground/Sources/SdkContract/**'
+              - 'src/features/observe/ios/**'
+              - 'scripts/ios/sdk-contract/**'
+              - 'scripts/ios/sdk-contract-integration.sh'
+
       - name: "Decide if XCTestRunner simulator tests should run"
         id: ios_sim_tests_should_run
         env:
           OPT_IN: ${{ contains(github.event.pull_request.labels.*.name, 'run-ios-sim') }}
+          CONTRACT_INPUTS: ${{ steps.filter-ios-sdk-contract.outputs.ios_sdk_contract }}
         run: |
-          if [[ "$OPT_IN" == "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
+          if [[ ( "$OPT_IN" == "true" || "$CONTRACT_INPUTS" == "true" ) && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -596,8 +616,13 @@ jobs:
         with:
           filters: |
             prototype_simulator:
+              - '.github/workflows/pull_request.yml'
               - 'ios/prototype-agent/**'
               - 'scripts/ios/prototype-agent-*'
+              - 'scripts/ios/prototype-mcp-smoke*.sh'
+              - 'scripts/lib/session-release.sh'
+              - 'test/bats/prototype-mcp-smoke.bats'
+              - 'test/bats/prototype-mcp-smoke-lane.bats'
               - 'scripts/ios/run_with_timeout.sh'
               - 'src/features/prototype/prototypeSpec.ts'
               - 'src/features/prototype/prototypeValidation.ts'
@@ -2691,7 +2716,7 @@ jobs:
       - name: "Resolve Swift package dependencies"
         shell: bash
         run: |
-          for package in ios/screen-capture ios/network-filter ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+          for package in ios/screen-capture ios/network-filter ios/audio-loopback ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
             (cd "${package}" && swift package resolve)
           done
 
@@ -3094,8 +3119,8 @@ jobs:
     # prototype-only change does not build the Xcode projects).
     needs: [detect-changes, fast-validation, ios-xcode-build]
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.prototype_simulator_should_run == 'true' && needs.fast-validation.result == 'success'
-    # Tight bound for the single heavy lane; the smoke boots one simulator.
-    timeout-minutes: 25
+    # Covers a cold Playground build plus the 20-minute agent and 25-minute MCP steps.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -3155,12 +3180,24 @@ jobs:
         timeout-minutes: 20
         run: bash scripts/ios/prototype-agent-smoke.sh "${{ matrix.ios }}"
 
+      - name: "Run prototype MCP smoke (iOS ${{ matrix.ios }})"
+        timeout-minutes: 25
+        env:
+          AUTOMOBILE_IOS_PROTOTYPE_AGENT: ${{ github.workspace }}/scratch/prototype-agent/AutoMobilePrototypeAgent.dylib
+        run: |
+          if [[ ! -f "${AUTOMOBILE_IOS_PROTOTYPE_AGENT}" ]]; then
+            bash scripts/ios/prototype-agent-build.sh
+          fi
+          bash scripts/ios/prototype-mcp-smoke-lane.sh "${{ matrix.ios }}"
+
       - name: "Upload prototype agent smoke artifacts"
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: prototype-agent-smoke-ios-${{ matrix.ios }}
-          path: scratch/prototype-agent-smoke/
+          path: |
+            scratch/prototype-agent-smoke/
+            scratch/prototype-mcp-smoke-lane/
           if-no-files-found: ignore
           retention-days: 7
 

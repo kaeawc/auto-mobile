@@ -2,6 +2,77 @@
 import XCTest
 
 final class ElementLocatorTests: XCTestCase {
+    func testProtoViewerConfirmationOpensOnlyTheNamedApp() {
+        for title in ["Open in ProtoViewer?", "Open in “ProtoViewer”?", "Open in \"ProtoViewer\"?"] {
+            XCTAssertEqual(
+                ProtoViewerAlertAction.decide(
+                    titleOrLabel: title, buttonTitles: ["Cancel", "Open"], appDisplayName: "ProtoViewer"
+                ),
+                .openProtoViewer
+            )
+        }
+    }
+
+    func testProtoViewerConfirmationIgnoresOtherSystemAlerts() {
+        for title in [
+            "Open in Safari?", "Open in ProtoViewer Beta?", "ProtoViewer would like to send notifications",
+            "Allow ProtoViewer to access your photos?", "Open in OtherProtoViewer?", "", "ProtoViewer",
+        ] {
+            for cleaningUp in [false, true] {
+                XCTAssertEqual(
+                    ProtoViewerAlertAction.decide(
+                        titleOrLabel: title, buttonTitles: ["Cancel", "Open"], appDisplayName: "ProtoViewer",
+                        cleaningUp: cleaningUp
+                    ),
+                    .none
+                )
+            }
+        }
+    }
+
+    func testProtoViewerConfirmationRequiresExactOpenButtonAndDisplayName() {
+        for buttons in [["Cancel"], ["Cancel", "Open Settings"], ["Cancel", "open"], []] {
+            for cleaningUp in [false, true] {
+                XCTAssertEqual(
+                    ProtoViewerAlertAction.decide(
+                        titleOrLabel: "Open in ProtoViewer?", buttonTitles: buttons, appDisplayName: "ProtoViewer",
+                        cleaningUp: cleaningUp
+                    ),
+                    .none
+                )
+            }
+        }
+        XCTAssertEqual(
+            ProtoViewerAlertAction.decide(
+                titleOrLabel: "Open in ProtoViewer?", buttonTitles: ["Open"], appDisplayName: ""
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ProtoViewerAlertAction.decide(
+                titleOrLabel: "Open in ProtoViewer?", buttonTitles: ["Open"], appDisplayName: "Other App"
+            ),
+            .none
+        )
+    }
+
+    func testProtoViewerConfirmationCleanupCancelsInsteadOfOpening() {
+        XCTAssertEqual(
+            ProtoViewerAlertAction.decide(
+                titleOrLabel: "Open in ProtoViewer?", buttonTitles: ["Cancel", "Open"], appDisplayName: "ProtoViewer",
+                cleaningUp: true
+            ),
+            .cancel
+        )
+        XCTAssertEqual(
+            ProtoViewerAlertAction.decide(
+                titleOrLabel: "Open in ProtoViewer?", buttonTitles: ["Open"], appDisplayName: "ProtoViewer",
+                cleaningUp: true
+            ),
+            .none
+        )
+    }
+
     // Plain identifier inputs, not invented SpringBoard hierarchy captures.
     func testBundleIdCandidate_acceptsExistingAndOtherPrefixes() {
         for bundleId in [

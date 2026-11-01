@@ -3,6 +3,7 @@ import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { isProcessRunning } from "../../../utils/processLiveness";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import { runWithDeviceExecutionBinding } from "../../../utils/deviceExecutionBinding";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -136,10 +137,13 @@ export class DefaultForeignCtrlProxyForwardEvidence implements ForeignCtrlProxyF
   constructor(private readonly deps: ForeignForwardEvidenceDependencies) {}
 
   private listForwards(deviceId: string, signal?: AbortSignal): Promise<{ stdout: string }> {
+    // Inventory probes retain admission without binding the caller to the probed device.
     const list = () =>
-      this.deps.adbFactory
-        .create({ deviceId, name: deviceId, platform: "android" })
-        .execute(["forward", "--list"], { signal });
+      runWithDeviceExecutionBinding(undefined, () =>
+        this.deps.adbFactory
+          .create({ deviceId, name: deviceId, platform: "android" })
+          .execute(["forward", "--list"], { signal }),
+      );
     // Cancellation belongs to one caller; only signal-less inventory reads coalesce.
     if (signal) {
       return list();

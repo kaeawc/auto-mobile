@@ -1,0 +1,13 @@
+{
+  "code": "registry_schema_unsupported",
+  "builder": "BindingRegistrySchemaUnsupportedError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"The binding registry at /registry/slots.sqlite contains migrations unknown to this daemon: 004_new_schema; nothing was changed.\",\"code\":\"registry_schema_unsupported\",\"retryable\":false,\"dbPath\":\"/registry/slots.sqlite\",\"unknownMigrations\":[\"004_new_schema\"],\"writerVersions\":{},\"remedy\":\"Upgrade the daemons sharing managed devices to a release that includes these migrations.\"}"
+      }
+    ],
+    "isError": true
+  }
+}

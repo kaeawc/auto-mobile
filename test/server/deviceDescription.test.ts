@@ -33,6 +33,10 @@ const projectionKeys = {
   architecture: true,
   osVersion: true,
   apiLevel: true,
+  configuredRamMb: true,
+  effectiveRamMb: true,
+  configuredCpuCores: true,
+  effectiveCpuCores: true,
   runtimeId: true,
   display: true,
   displays: true,
@@ -769,6 +773,100 @@ describe("device description projections", () => {
       height: null,
       density: null,
       units: "physical-pixels",
+    });
+  });
+
+  test("lists configured and effective Android guest hardware side by side", () => {
+    const description = describeDevice({
+      kind: "image",
+      image: {
+        name: "AVD",
+        isRunning: false,
+        platform: "android",
+        configuredRamMb: 2048,
+        effectiveRamMb: 2560,
+        configuredCpuCores: 4,
+        effectiveCpuCores: 4,
+      },
+    });
+    const hardware = {
+      configuredRamMb: 2048,
+      effectiveRamMb: 2560,
+      configuredCpuCores: 4,
+      effectiveCpuCores: 4,
+    };
+    expect(description).toMatchObject(hardware);
+    expect(listDevicesEntrySchema.parse(projectListDevicesEntry(description))).toMatchObject(
+      hardware,
+    );
+  });
+
+  test.each(["android", "ios"] as const)("lists unknown %s guest hardware as null", (platform) => {
+    const description = describeDevice({
+      kind: "image",
+      image: { name: "Unlaunched", platform, isRunning: false },
+    });
+    const hardware = {
+      configuredRamMb: null,
+      effectiveRamMb: null,
+      configuredCpuCores: null,
+      effectiveCpuCores: null,
+    };
+    expect(description).toMatchObject(hardware);
+    expect(listDevicesEntrySchema.parse(description)).toMatchObject(hardware);
+  });
+
+  test("keeps configured hardware for an AVD that has never launched", () => {
+    const description = describeDevice({
+      kind: "image",
+      image: {
+        name: "Unlaunched",
+        isRunning: false,
+        platform: "android",
+        configuredRamMb: 2048,
+        configuredCpuCores: 4,
+      },
+    });
+    expect(description).toMatchObject({
+      configuredRamMb: 2048,
+      configuredCpuCores: 4,
+      effectiveRamMb: null,
+      effectiveCpuCores: null,
+    });
+  });
+
+  test("does not expose Android guest hardware on iOS", () => {
+    const description = describeDevice({
+      kind: "image",
+      image: {
+        name: "iOS",
+        isRunning: false,
+        platform: "ios",
+        effectiveRamMb: 2560,
+        effectiveCpuCores: 4,
+      },
+    });
+    expect(description).toMatchObject({ effectiveRamMb: null, effectiveCpuCores: null });
+  });
+
+  test("never emits zero guest hardware values", () => {
+    const description = describeDevice({
+      kind: "image",
+      image: {
+        name: "Unknown",
+        isRunning: false,
+        platform: "android",
+        configuredRamMb: 0,
+        effectiveRamMb: 0,
+        configuredCpuCores: 0,
+        effectiveCpuCores: 0,
+      },
+    });
+    expect(description).toMatchObject({
+      configuredRamMb: null,
+      effectiveRamMb: null,
+      configuredCpuCores: null,
+      effectiveCpuCores: null,
     });
   });
 

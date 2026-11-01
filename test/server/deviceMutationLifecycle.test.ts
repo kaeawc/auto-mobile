@@ -14,11 +14,13 @@ import {
   opaqueIntentKey,
   type DeviceBaseline,
 } from "../../src/daemon/sessionBroker/mutations/types";
+import { launchedAppIntentKey } from "../../src/daemon/sessionBroker/mutations/launchedApp";
 
 const fallback = (tool: string, appId: string | null) => ({
   kind: "opaque",
   key: opaqueIntentKey(tool, appId),
 });
+const launch = (appId: string) => ({ kind: "opaque", key: launchedAppIntentKey(appId) });
 
 describe("Lifecycle journal intents (#14359)", () => {
   test.each(["terminateApp", "crashApp", "appLifecycle", "performanceTrace", "videoRecording"])(
@@ -28,23 +30,32 @@ describe("Lifecycle journal intents (#14359)", () => {
     },
   );
 
-  test("launchApp only records when it clears app data", () => {
-    expect(deviceToolMutations("launchApp", { appId: "com.example" }, "android")).toEqual([]);
+  test("launchApp records a fallback only when it clears app data, plus an Android launch row", () => {
+    expect(deviceToolMutations("launchApp", { appId: "com.example" }, "android")).toEqual([
+      launch("com.example"),
+    ]);
+    expect(deviceToolMutations("launchApp", { appId: "com.example" }, "ios")).toEqual([]);
     expect(
       deviceToolMutations("launchApp", { appId: "com.example", clearAppData: true }, "ios"),
     ).toEqual([fallback("clearAppData", "com.example")]);
+    expect(
+      deviceToolMutations("launchApp", { appId: "com.example", clearAppData: true }, "android"),
+    ).toEqual([fallback("clearAppData", "com.example"), launch("com.example")]);
   });
 
-  test("measureStartup records only for a persistent compilation mode", () => {
+  test("measureStartup records a fallback only for a persistent compilation mode", () => {
+    expect(
+      deviceToolMutations("measureStartup", { appId: "a.b", dropCaches: true }, "ios"),
+    ).toEqual([]);
     expect(
       deviceToolMutations("measureStartup", { appId: "a.b", dropCaches: true }, "android"),
-    ).toEqual([]);
+    ).toEqual([launch("a.b")]);
     expect(
       deviceToolMutations("measureStartup", { appId: "a.b", compilation: "asIs" }, "android"),
-    ).toEqual([]);
+    ).toEqual([launch("a.b")]);
     expect(
       deviceToolMutations("measureStartup", { appId: "a.b", compilation: "speed" }, "android"),
-    ).toEqual([fallback("measureStartup", "a.b")]);
+    ).toEqual([fallback("measureStartup", "a.b"), launch("a.b")]);
   });
 
   test("installApp keeps its installed-app row first and adds the fallback", () => {
@@ -191,28 +202,34 @@ describe("recording an app lifecycle sequence", () => {
     });
     const recording = new SessionDeviceMutationRecording(
       () => new SessionMutationRecorder(journal, scope),
-      new FamilyMutationPriorReader([]),
-      { appId: async () => "a.b" },
+      { reader: new FamilyMutationPriorReader([]), artifactReader: { appId: async () => "a.b" } },
     );
-    await recording.beforeToolCall("installApp", { appId: "a.b" }, device, "session");
-    await recording.beforeToolCall(
-      "launchApp",
-      { appId: "a.b", clearAppData: true },
-      device,
-      "session",
-    );
-    return (await journal.list(scope)).map((entry) => [entry.kind, entry.toolName]);
+    await recording.beforeToolCall("installApp", { appId: "a.b" }, device, {
+      sessionUuid: "session",
+    });
+    await recording.beforeToolCall("launchApp", { appId: "a.b", clearAppData: true }, device, {
+      sessionUuid: "session",
+    });
+    return (await journal.list(scope)).map((entry) => [
+      entry.kind,
+      entry.toolName,
+      entry.key === launchedAppIntentKey("a.b") ? "launch" : "intent",
+    ]);
   }
 
-  test("installing, then clearing a session-installed app leaves only the install row", async () => {
-    expect(await run([])).toEqual([["installed-app", "installApp"]]);
+  test("installing, then clearing a session-installed app leaves the install and launch rows", async () => {
+    expect(await run([])).toEqual([
+      ["installed-app", "installApp", "intent"],
+      ["opaque", "launchApp", "launch"],
+    ]);
   });
 
   test("clearing data of an app the baseline held records the escalating intent", async () => {
     expect(await run(["user:0:a.b"])).toEqual([
-      ["installed-app", "installApp"],
-      ["opaque", "installApp"],
-      ["opaque", "launchApp"],
+      ["installed-app", "installApp", "intent"],
+      ["opaque", "installApp", "intent"],
+      ["opaque", "launchApp", "intent"],
+      ["opaque", "launchApp", "launch"],
     ]);
   });
 });

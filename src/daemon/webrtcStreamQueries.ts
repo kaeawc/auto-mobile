@@ -356,13 +356,18 @@ export class WebRtcStreamQueries {
    * Wait for local capture or WHIP publishing without conflating the two phases.
    * A timeout is a request-scoped result, not a capture failure, so one caller
    * cannot degrade a stream that is still healthy for another consumer.
+   *
+   * @param streamId - The stream to wait on
+   * @param readiness - The phase to wait for
+   * @param timeoutMs - Request-scoped wait bound
+   * @param options.leaseId - The caller's lease, renewed while waiting
+   * @param options.sessionUuid - The caller's session, recorded on the lease
    */
   waitForWebRtcStreamReadiness = async (
     streamId: string,
     readiness: "capture_ready" | "publishing",
     timeoutMs: number = this.context.DEFAULT_STREAM_READY_TIMEOUT_MS,
-    leaseId?: string,
-    sessionUuid?: string,
+    { leaseId, sessionUuid }: { leaseId?: string; sessionUuid?: string } = {},
   ): Promise<WebRtcStreamDescriptor> => {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       throw new ActionableError(

@@ -16,6 +16,7 @@ import {
   pruneTableByRowCap,
   runAmortizedRetention,
 } from "./rowCapRetention";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 const TEST_EXECUTION_RETENTION_MAX_ROWS = 10_000;
 export const TEST_EXECUTION_RETENTION_MAX_DAYS = 90;
@@ -153,7 +154,7 @@ export class TestExecutionRepository {
   private timer: Timer;
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>, timer: Timer = defaultTimer) {
+  constructor({ db, timer = defaultTimer }: Pick<RepositoryDeps, "db" | "timer"> = {}) {
     this.timer = timer;
     this.db = db ?? null;
   }

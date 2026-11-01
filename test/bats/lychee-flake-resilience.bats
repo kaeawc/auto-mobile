@@ -55,7 +55,12 @@ self_referential_exclude_pattern() {
 # Extracts the kaeawc/auto-mobile release-download base exclude pattern as a
 # raw (non-JSON-escaped) string usable directly as a bash =~ regex.
 release_download_base_exclude_pattern() {
-  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/releases/download"))' "$CONFIG"
+  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/releases/download") and (test("%7B") | not))' "$CONFIG"
+}
+
+# Extracts the exclude pattern for a shell sample's unexpanded release tag.
+release_download_placeholder_exclude_pattern() {
+  yq -p toml -oy '.exclude[] | select(test("kaeawc/auto-mobile/releases/download") and test("%7B"))' "$CONFIG"
 }
 
 @test "lychee retries failed requests with a backoff (retry_wait_time)" {
@@ -176,4 +181,59 @@ release_download_base_exclude_pattern() {
   [[ ! "$asset" =~ $pattern ]]
   [[ ! "$releases" =~ $pattern ]]
   [[ ! "$other_repo" =~ $pattern ]]
+}
+
+@test "release-download placeholder exclude matches an unexpanded tag and nothing real" {
+  requires_yq
+  run release_download_placeholder_exclude_pattern
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  local pattern="$output"
+
+  # The form lychee extracts from BASE="…/download/${VERSION}".
+  local placeholder='https://github.com/kaeawc/auto-mobile/releases/download/$%7BVERSION%7D'
+  [[ "$placeholder" =~ $pattern ]]
+
+  # Real tags and assets stay checked, as does a placeholder in another repo.
+  local real_tag="https://github.com/kaeawc/auto-mobile/releases/download/0.0.89"
+  local asset='https://github.com/kaeawc/auto-mobile/releases/download/$%7BVERSION%7D/automobile-protoviewer.apk'
+  local other_repo='https://github.com/lycheeverse/lychee/releases/download/$%7BVERSION%7D'
+  [[ ! "$real_tag" =~ $pattern ]]
+  [[ ! "$asset" =~ $pattern ]]
+  [[ ! "$other_repo" =~ $pattern ]]
+}
+
+# #15952: On Merge failed four runs in a row on a lone [TIMEOUT] for the README's
+# shields.io endpoint badge (lychee: 0 errors, 1 timeout, still exit 2).
+badge_endpoint_exclude_pattern() {
+  yq -p toml -oy '.exclude[] | select(test("img.*shields.*endpoint"))' "$CONFIG"
+}
+
+@test "shields.io endpoint badges backed by our own gh-pages JSON are excluded" {
+  requires_yq
+  run badge_endpoint_exclude_pattern
+  [ "$status" -eq 0 ]
+  # Exactly one entry.
+  [ "$(printf '%s\n' "$output" | wc -l)" -eq 1 ]
+  local pattern="$output"
+
+  local base="https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile"
+  [[ "$base/kotlin-tests-badge.json" =~ $pattern ]]
+  [[ "$base/typescript-tests-badge.json" =~ $pattern ]]
+  [[ "$base/swift-coverage-badge.json" =~ $pattern ]]
+}
+
+@test "badge exclude does not widen to static badges, other endpoints, other hosts or suffixes" {
+  requires_yq
+  run badge_endpoint_exclude_pattern
+  [ "$status" -eq 0 ]
+  local pattern="$output"
+
+  [[ ! "https://img.shields.io/badge/License-Apache_2.0-blue.svg" =~ $pattern ]]
+  [[ ! "https://img.shields.io/endpoint?url=https://example.org/x-badge.json" =~ $pattern ]]
+  [[ ! "https://img.shields.io/endpoint?url=https://kaeawc.github.io/other/x-badge.json" =~ $pattern ]]
+  [[ ! "https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile/x-badge.json.evil" =~ $pattern ]]
+  [[ ! "https://img.shields.io/endpoint?url=https://kaeawc.github.io/auto-mobile/a/b-badge.json" =~ $pattern ]]
+  [[ ! "https://kaeawc.github.io/auto-mobile/kotlin-tests-badge.json" =~ $pattern ]]
+  [[ ! "https://img.shields.io.evil.com/endpoint?url=https://kaeawc.github.io/auto-mobile/x-badge.json" =~ $pattern ]]
 }

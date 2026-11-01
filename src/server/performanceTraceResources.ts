@@ -220,10 +220,13 @@ export function registerPerformanceTraceResources(
   ResourceRegistry.registerTemplateWithReadContext(
     PERFORMANCE_TRACE_RESOURCE_TEMPLATE,
     "Performance Trace",
-    "The state, bounded summary and warnings of a `performanceTrace` the caller's session " +
-      "started, plus the artifact's size. `maxBytes` (up to 1 MiB) with `offset` returns " +
-      "base64 slices of a single-file artifact (Perfetto); iOS `.trace` bundles are directories.",
-    "application/json",
-    createPerformanceTraceHandler(deps),
+    {
+      description:
+        "The state, bounded summary and warnings of a `performanceTrace` the caller's session " +
+        "started, plus the artifact's size. `maxBytes` (up to 1 MiB) with `offset` returns " +
+        "base64 slices of a single-file artifact (Perfetto); iOS `.trace` bundles are directories.",
+      mimeType: "application/json",
+      handler: createPerformanceTraceHandler(deps),
+    },
   );
 }

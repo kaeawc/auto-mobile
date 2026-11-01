@@ -349,7 +349,9 @@ warmedTest(
       });
       expect(await h.pool.waitForEmulatorLossIncident(incident.id, 0)).toEqual(incident);
       expect(
-        await h.sessions.getOrCreateSession("holder", h.pool, undefined, undefined, true),
+        await h.sessions.getOrCreateSession("holder", h.pool, undefined, {
+          requireIssuedSession: true,
+        }),
       ).toBe(live);
       expect(inFlightHold).toMatchObject({ owned: true, restartHandoff: true });
     } finally {
@@ -742,7 +744,7 @@ for (const reused of [false, true]) {
         let answered = false;
         let error: unknown;
         const recovery = h.sessions
-          .getOrCreateSession("holder", h.pool, undefined, undefined, true)
+          .getOrCreateSession("holder", h.pool, undefined, { requireIssuedSession: true })
           .then(
             (value) => {
               answered = true;
@@ -784,7 +786,9 @@ for (const reused of [false, true]) {
         h.timer.advanceTime(179_500);
         // A caller can arrive before the expiry callback has drained.
         await expect(
-          h.sessions.getOrCreateSession("holder", h.pool, undefined, undefined, true),
+          h.sessions.getOrCreateSession("holder", h.pool, undefined, {
+            requireIssuedSession: true,
+          }),
         ).rejects.toBeDefined();
         await drainMicrotasks(40);
         expect(row.release_reason).toBe("restart-recovery-timeout");
@@ -849,7 +853,7 @@ warmedTest("terminal target-busy recovery drops the restart hold", async () => {
     await h.pool.initializeWithDevices([returned]);
     patchDeviceBinding(h.pool.getDevice(returned.deviceId)!, { status: "busy" });
     await expect(
-      h.sessions.getOrCreateSession("holder", h.pool, undefined, undefined, true),
+      h.sessions.getOrCreateSession("holder", h.pool, undefined, { requireIssuedSession: true }),
     ).rejects.toMatchObject({ reason: "target-busy" });
     expect((await h.persistence.getSession!("holder"))?.release_reason).toBe(
       "identity-recovery-target-busy",
@@ -872,14 +876,14 @@ warmedTest(
     const h = await setup(original, true, undefined, {
       recoveryPolicy: { onLoss: true, maxAttempts: 1 },
       deviceSessionContinuityEnabled: true,
-      releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason, shouldCommit) => {
+      releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason, options) => {
         if (reason === "explicit-release" && !paused) {
           paused = true;
           await gate.promise;
           return;
         }
         const result = await h.sessions.releaseSessionUnlessSuperseded(sessionId, reason, {
-          commitFence: shouldCommit ?? (() => true),
+          commitFence: options?.shouldCommit ?? (() => true),
         });
         return !result.superseded;
       },

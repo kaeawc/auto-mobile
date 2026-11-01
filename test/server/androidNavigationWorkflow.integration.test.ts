@@ -108,9 +108,8 @@ describe("Android navigation graph workflow (#4459)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const sessionManager = NavigationGraphManager.createForTesting(
-      new NavigationRepository(harness.db),
-      new TestCoverageRepository(harness.db),
-      timer,
+      new NavigationRepository({ db: harness.db }),
+      { testCoverageRepository: new TestCoverageRepository({ db: harness.db }), timer },
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionUuid, sessionManager);
     expect(harness.manager.getCurrentScreen()).toBeNull();
@@ -145,7 +144,9 @@ describe("Android navigation graph workflow (#4459)", () => {
         return createJSONToolResponse({ success: true });
       },
     );
-    const explore = new Explore(device, new FakeAdbExecutor(), timer, sessionManager);
+    const explore = new Explore(device, new FakeAdbExecutor(), timer, {
+      navigationManager: sessionManager,
+    });
     const observeScreen = new FakeObserveScreen();
     observeScreen.setObserveResult({
       ...loadAndroidHomeObserve().observe,

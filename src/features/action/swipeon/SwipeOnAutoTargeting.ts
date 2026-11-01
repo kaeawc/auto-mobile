@@ -7,6 +7,7 @@ import {
   SwipeOnOptions,
   SwipeOnResult,
   ScrollableCandidate,
+  requireAndroidOrIosPlatform,
 } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { AutoTargetSelectorService } from "./types";
@@ -83,7 +84,7 @@ export class SwipeOnAutoTargeting {
     }
     const screenBounds = observeResult
       ? this.selector().getScreenBounds(observeResult, {
-          platform: this.device.platform,
+          platform: requireAndroidOrIosPlatform(this.device.platform, "swipeOn"),
           includeSystemInsets,
         })
       : null;

@@ -39,7 +39,7 @@ describe("MemoryAuditResultRepository", () => {
       violations_json: "[]",
       diagnostics_json: null,
     };
-    await new MemoryAuditResultRepository(db).insert(result);
+    await new MemoryAuditResultRepository({ db }).insert(result);
     const rows = await db.selectFrom("memory_audit_results").selectAll().execute();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.tool_name).toBe("tapOn");

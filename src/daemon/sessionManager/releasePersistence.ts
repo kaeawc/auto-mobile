@@ -26,6 +26,7 @@ import type { SupersededRowReasserts } from "../supersededRowReasserts";
 import { TerminalReleaseGenerationRefusedError } from "../TerminalReleaseGenerationRefusedError";
 import { type SessionLifecycleSlots } from "./internalContracts";
 import { type TerminalIntentDurability } from "./releaseWrite";
+import type { RefusedRowWriteRelease } from "./supersededRows";
 
 export interface SessionReleasePersistenceHost {
   isTerminalReleaseRetryCurrent(snapshot: SessionReleaseSnapshot): boolean;
@@ -39,14 +40,10 @@ export interface SessionReleasePersistenceHost {
     error: DeviceSessionRowNotRewritableError | DeviceSessionRowNotReleasableError,
     sessionId: string,
     guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
-    write: (
-      guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
-    ) => Promise<T>,
-    releaseReason?: string,
-    releaseOptions?: {
-      unlessDaemonShutdown?: boolean;
-      resolveRowGeneration?: (row: DeviceSession | undefined) => number | undefined;
-      incarnation?: Session;
+    release: RefusedRowWriteRelease & {
+      write: (
+        guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
+      ) => Promise<T>;
     },
   ): Promise<T>;
   readonly sessionSlots: Pick<
@@ -145,14 +142,14 @@ export class SessionReleasePersistence {
         ...guard,
         expectedRowGeneration: precondition.expectedRowGeneration,
       },
-      (next) =>
-        write({
-          ...precondition,
-          expectedRowGeneration: next.expectedRowGeneration,
-          unlessTerminalOrOwnedByLivePeer: next,
-        }),
-      snapshot.releaseReason,
       {
+        write: (next) =>
+          write({
+            ...precondition,
+            expectedRowGeneration: next.expectedRowGeneration,
+            unlessTerminalOrOwnedByLivePeer: next,
+          }),
+        writingReleaseReason: snapshot.releaseReason,
         unlessDaemonShutdown: precondition.unlessDaemonShutdown,
         incarnation: this.releaseRowSessions.get(snapshot)?.deref(),
         resolveRowGeneration: (row) => {
@@ -208,9 +205,11 @@ export class SessionReleasePersistence {
           ...guard,
           expectedRowGeneration: precondition.expectedRowGeneration,
         },
-        (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
-        snapshot.releaseReason,
-        { unlessDaemonShutdown: precondition.unlessDaemonShutdown },
+        {
+          write: (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
+          writingReleaseReason: snapshot.releaseReason,
+          unlessDaemonShutdown: precondition.unlessDaemonShutdown,
+        },
       ));
     };
   }
@@ -227,8 +226,7 @@ export class SessionReleasePersistence {
       snapshot.sessionId,
       releasedRowStatus(snapshot.releaseReason),
       snapshot.releasedAtMs,
-      snapshot.releaseReason,
-      options,
+      { reason: snapshot.releaseReason, ...options },
     );
   }
 

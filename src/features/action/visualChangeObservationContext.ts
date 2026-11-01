@@ -102,8 +102,7 @@ export async function resolvePackageName(
   window: Window,
   options: ObservedChangeOptions,
   previous: ObserveResult | null,
-  beforeWindow: ActiveWindowInfo | null | undefined,
-  timeoutMs: number,
+  { beforeWindow, timeoutMs }: { beforeWindow?: ActiveWindowInfo | null; timeoutMs: number },
 ): Promise<string | undefined> {
   const cached = await readPostGestureWindow(window, options, beforeWindow, timeoutMs);
   const destinationPackage = changedWindowPackage(beforeWindow, cached);

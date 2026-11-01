@@ -6,7 +6,7 @@ import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/de
 import type { PooledDevice } from "./devicePool";
 
 /**
- * One iOS liveness sweep, carrying completeness per source (#5683).
+ * One Apple liveness sweep, carrying completeness per source (#5683).
  *
  * `discoverySucceeded` is the simulator (`simctl`) half and keeps its original
  * meaning; `physicalDiscoverySucceeded` is the devicectl half.
@@ -20,6 +20,8 @@ import type { PooledDevice } from "./devicePool";
 export interface IosLivenessSnapshot {
   discoverySucceeded: boolean;
   physicalDiscoverySucceeded: boolean;
+  /** Present when this snapshot includes the independent tvOS simulator sweep. */
+  tvosDiscoverySucceeded?: boolean;
   bootedDeviceIds: Set<string>;
 }
 
@@ -88,10 +90,11 @@ export class IdleDeviceReaper {
   }
 
   async getIosLivenessSnapshot(
-    options: { discovery?: BootedDeviceDiscovery } = {},
+    options: { discovery?: BootedDeviceDiscovery; platform?: "ios" | "tvos" } = {},
   ): Promise<IosLivenessSnapshot> {
     const discovery =
-      options.discovery ?? (await this.deviceManager.getBootedDevicesDetailed("ios"));
+      options.discovery ??
+      (await this.deviceManager.getBootedDevicesDetailed(options.platform ?? "ios"));
     const sources = discovery.succeededSources;
     const platformSucceeded = discovery.succeededPlatforms.has("ios");
     // Presence alone does not prove liveness: a failed devicectl sweep replays
@@ -102,14 +105,19 @@ export class IdleDeviceReaper {
     return {
       discoverySucceeded: sources ? sources.has("ios-simulator") : platformSucceeded,
       physicalDiscoverySucceeded: sources ? sources.has("ios-physical") : platformSucceeded,
+      tvosDiscoverySucceeded: sources
+        ? sources.has("tvos-simulator")
+        : discovery.succeededPlatforms.has("tvos"),
       bootedDeviceIds: new Set(
         discovery.devices
-          .map((booted) => booted.deviceId)
-          .filter((deviceId) =>
+          .filter((booted) =>
             // Producers that do not report freshness fall back to the source
             // aggregate, which is what they meant before #5683.
-            fresh ? fresh.has(deviceId) : didSourceSucceedForDevice(discovery, "ios", deviceId),
-          ),
+            fresh
+              ? fresh.has(booted.deviceId)
+              : didSourceSucceedForDevice(discovery, booted.platform, booted.deviceId),
+          )
+          .map((booted) => booted.deviceId),
       ),
     };
   }
@@ -123,7 +131,12 @@ export class IdleDeviceReaper {
     device: Pick<PooledDevice, "id" | "platform">,
     iosLiveness: IosLivenessSnapshot | undefined,
   ): IdleDeviceLivenessStatus {
-    if (device.platform !== "ios") {
+    if (device.platform === "android") {
+      return "assignable";
+    }
+    if (device.platform === "watchos") {
+      // Exact non-iOS Apple binds confirm booted presence with their own fresh listing
+      // before reaching this check; an iOS liveness snapshot does not describe them.
       return "assignable";
     }
 
@@ -140,9 +153,12 @@ export class IdleDeviceReaper {
     }
 
     // Only the source that would have listed this device can call it gone.
-    const observingSourceSucceeded = isIosPhysicalUdid(device.id)
-      ? iosLiveness.physicalDiscoverySucceeded
-      : iosLiveness.discoverySucceeded;
+    const observingSourceSucceeded =
+      device.platform === "tvos"
+        ? iosLiveness.tvosDiscoverySucceeded
+        : isIosPhysicalUdid(device.id)
+          ? iosLiveness.physicalDiscoverySucceeded
+          : iosLiveness.discoverySucceeded;
     return observingSourceSucceeded ? "stale" : "unknown";
   }
 }

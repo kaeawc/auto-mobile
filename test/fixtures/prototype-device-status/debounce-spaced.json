@@ -1,0 +1,50 @@
+{
+  "description": "Changes further apart than 500 ms are separate events; a reading equal to the current values changes nothing and does not restart the timer.",
+  "module": "power",
+  "updates": [
+    {
+      "timestampMs": 0,
+      "values": {
+        "saver": false,
+        "thermal": "nominal"
+      }
+    },
+    {
+      "timestampMs": 100,
+      "values": {
+        "saver": true,
+        "thermal": "nominal"
+      }
+    },
+    {
+      "timestampMs": 400,
+      "values": {
+        "saver": true,
+        "thermal": "nominal"
+      }
+    },
+    {
+      "timestampMs": 1000,
+      "values": {
+        "saver": true,
+        "thermal": "serious"
+      }
+    }
+  ],
+  "expectedEvents": [
+    {
+      "timestampMs": 600,
+      "values": {
+        "saver": true,
+        "thermal": "nominal"
+      }
+    },
+    {
+      "timestampMs": 1500,
+      "values": {
+        "saver": true,
+        "thermal": "serious"
+      }
+    }
+  ]
+}

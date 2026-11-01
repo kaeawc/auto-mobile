@@ -4,6 +4,7 @@ import {
   type BootedDevice,
   type Platform,
   type SomePlatform,
+  requireAndroidOrIosPlatform,
 } from "../models";
 import type { BootedDeviceDiscovery, DeviceDiscoveryError } from "../devices/deviceUtils";
 import {
@@ -64,21 +65,23 @@ async function transitionalHeldListing(input: {
   let probeFailure: DeviceDiscoveryError | undefined;
   const devices: BootedDevice[] = [];
   const holds = new Map<string, TransitionalHold>();
-  for (const offlineHeld of await adbOfflineHeldDevices({
-    platform: input.platform === "ios" ? "ios" : "android",
-    discovered,
-    devicePool: pool,
-    deviceManager,
-    signal: input.signal,
-    onProbeFailure: (failure) => {
-      probeFailure = failure;
-    },
-  })) {
-    holds.set(offlineHeld.device.deviceId, {
-      adbState: offlineHeld.adbState,
-      avdName: offlineHeld.avdName,
-    });
-    devices.push(offlineHeld.device);
+  if (input.platform !== "tvos") {
+    for (const offlineHeld of await adbOfflineHeldDevices({
+      platform: input.platform === "ios" ? "ios" : "android",
+      discovered,
+      devicePool: pool,
+      deviceManager,
+      signal: input.signal,
+      onProbeFailure: (failure) => {
+        probeFailure = failure;
+      },
+    })) {
+      holds.set(offlineHeld.device.deviceId, {
+        adbState: offlineHeld.adbState,
+        avdName: offlineHeld.avdName,
+      });
+      devices.push(offlineHeld.device);
+    }
   }
   for (const held of transitionalHeldSimulators({
     transitional: discovery.transitionalSimulators,
@@ -137,10 +140,15 @@ function selectBootedDevices(
 
 function listingDiscoveryObservation(
   requestedPlatforms: Platform[],
-  succeededPlatforms: Set<Platform>,
-  succeededSources: Set<DiscoverySource> | undefined,
-  discoveryErrors: BootedDeviceDiscovery["discoveryErrors"],
-  sourceErrors: BootedDeviceDiscovery["sourceErrors"],
+  {
+    succeededPlatforms,
+    succeededSources,
+    discoveryErrors,
+    sourceErrors,
+  }: Pick<
+    BootedDeviceDiscovery,
+    "succeededPlatforms" | "succeededSources" | "discoveryErrors" | "sourceErrors"
+  >,
   pool: { getAllDevices(): Iterable<{ platform: Platform; id: string }> } | null | undefined,
 ) {
   // One classifier for every inventory surface (#11605): a source whose tooling is not installed
@@ -167,6 +175,13 @@ function listingDiscoveryObservation(
       ? { errors: discoveryErrors }
       : {}),
   };
+}
+
+function listingPlatform(platform: SomePlatform): SomePlatform {
+  if (platform === "either" || platform === "tvos") {
+    return platform;
+  }
+  return requireAndroidOrIosPlatform(platform, "listDevices");
 }
 
 export function createListingHandlers() {
@@ -217,7 +232,8 @@ export function createListingHandlers() {
     // here — enumerate booted devices directly instead of forcing a modality
     // switch to resources. The resource pointers (which also cover not-yet-booted
     // images and richer per-device detail) survive as a `note`.
-    const platform: SomePlatform = args.platform ?? "either";
+    // Internal callers may pass "either", which the tool schema itself does not offer.
+    const platform = listingPlatform(args.platform ?? "either");
     const presentationOrder = acceptancePresentationOrder(args);
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const deps = getDeviceToolsDependencies();
@@ -250,7 +266,7 @@ export function createListingHandlers() {
       // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
       // through the same join the booted-devices resource uses (#6863 review).
       booted =
-        platform === "ios"
+        platform !== "android" && platform !== "either"
           ? discovery.devices
           : pool
             ? pool.mapAndroidDiscovery(discovery.devices)
@@ -290,10 +306,7 @@ export function createListingHandlers() {
 
     const discovery = listingDiscoveryObservation(
       requestedPlatforms,
-      succeededPlatforms,
-      succeededSources,
-      discoveryErrors,
-      sourceErrors,
+      { succeededPlatforms, succeededSources, discoveryErrors, sourceErrors },
       pool,
     );
 
@@ -311,14 +324,13 @@ export function createListingHandlers() {
     );
     // Refresh the broker binding snapshot so held devices are not reported as free.
     await pool?.refreshInventoryOwnership();
-    const devices = listDevicePayloads(
-      matchingBooted,
-      pool,
-      configured.images,
-      (deviceId) => pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
-      (deviceId) => pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
+    const devices = listDevicePayloads(matchingBooted, pool, configured.images, {
+      aliasesForDevice: (deviceId) =>
+        pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
+      transportAvdNameForDevice: (deviceId) =>
+        pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
       transitionalHolds,
-    );
+    });
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createStructuredToolResponse({

@@ -16,6 +16,13 @@ export type LaunchFailureCategory =
   | "kvm_permission_denied"
   | "missing_shared_library";
 
+/** How the emulator process ended and the failure category its output was classified as. */
+export interface EarlyExitStatus {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  category: LaunchFailureCategory | undefined;
+}
+
 export interface EmulatorLaunchState {
   launchOutput: string;
   duplicateAvdDetected: boolean;
@@ -274,9 +281,7 @@ export interface EmulatorLauncherHost {
   emulatorAudioArguments(): string[];
   formatEarlyExitError(
     avdName: string,
-    code: number | null,
-    signal: NodeJS.Signals | null,
-    category: LaunchFailureCategory | undefined,
+    exit: EarlyExitStatus,
     output: string,
     accelCheckOutput: string,
   ): ActionableError;

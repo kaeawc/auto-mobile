@@ -1,0 +1,67 @@
+{
+  "spec": {
+    "id": "c",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "requires": {
+      "platform": ["cast"]
+    },
+    "platform": {
+      "on": {
+        "cast.sessionStarted": [
+          {
+            "type": "emit",
+            "name": "cast_started"
+          }
+        ],
+        "cast.sessionFailed": [
+          {
+            "type": "emit",
+            "name": "cast_failed"
+          }
+        ]
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{platform:/cast/state} {platform:/cast/deviceName} {platform:/cast/protocol} {platform:/cast/volume}"
+        },
+        {
+          "type": "button",
+          "label": "Louder",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "cast.setVolume",
+              "args": {}
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Stop",
+          "onTap": [
+            {
+              "type": "platform",
+              "call": "cast.disconnect",
+              "args": {}
+            },
+            {
+              "type": "platform",
+              "call": "cast.stop",
+              "args": {}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].args.volume",
+  "expectedMessage": "Required argument"
+}

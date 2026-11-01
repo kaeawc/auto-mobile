@@ -84,22 +84,18 @@ export interface SharedStorageReadServiceDependencies {
   iosFixtureReader?: Pick<SimctlIosFilesFixtureContainer, "listNamespace" | "readNamespaceFile">;
 }
 
+/** One file's identity in the hash cache: a size or mtime change is a different key. */
+export interface SharedStorageHashKey {
+  deviceId: string;
+  namespace: string;
+  path: string;
+  byteCount: number;
+  modifiedSeconds: number;
+}
+
 export interface SharedStorageHashCache {
-  get(
-    deviceId: string,
-    namespace: string,
-    path: string,
-    byteCount: number,
-    modifiedSeconds: number,
-  ): string | undefined;
-  set(
-    deviceId: string,
-    namespace: string,
-    path: string,
-    byteCount: number,
-    modifiedSeconds: number,
-    sha256: string,
-  ): void;
+  get(key: SharedStorageHashKey): string | undefined;
+  set(key: SharedStorageHashKey, sha256: string): void;
   retainNamespacePaths(deviceId: string, namespace: string, paths: ReadonlySet<string>): void;
 }
 
@@ -122,12 +118,15 @@ export function createSharedStorageReadServiceForTesting(
     dependencies.adbFactory ?? defaultAdbClientFactory,
     dependencies.createUserResolver ?? ((adb) => new AndroidUserTargetResolver(adb)),
     dependencies.deviceResolver ?? findBootedDevice,
-    dependencies.hashCache ?? new BoundedSharedStorageHashCache(),
-    dependencies.iosFixtureReader ??
-      new SimctlIosFilesFixtureContainer(
-        (device) => new SimCtlClient(device),
-        nodeAppFileFileSystem,
-      ),
+    {
+      hashCache: dependencies.hashCache ?? new BoundedSharedStorageHashCache(),
+      iosFixtureReader:
+        dependencies.iosFixtureReader ??
+        new SimctlIosFilesFixtureContainer(
+          (device) => new SimCtlClient(device),
+          nodeAppFileFileSystem,
+        ),
+    },
   );
 }
 
@@ -143,16 +142,27 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
     return describeDefaultSharedStorageReadCoverage(platform, domain);
   }
 
+  private readonly hashCache: SharedStorageHashCache;
+  private readonly iosFixtureReader: Pick<
+    SimctlIosFilesFixtureContainer,
+    "listNamespace" | "readNamespaceFile"
+  >;
+
   constructor(
     private readonly adbFactory: AdbClientFactory,
     private readonly createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver,
     private readonly deviceResolver: (deviceId: string) => Promise<BootedDevice | null>,
-    private readonly hashCache: SharedStorageHashCache,
-    private readonly iosFixtureReader: Pick<
-      SimctlIosFilesFixtureContainer,
-      "listNamespace" | "readNamespaceFile"
-    >,
-  ) {}
+    {
+      hashCache,
+      iosFixtureReader,
+    }: {
+      hashCache: SharedStorageHashCache;
+      iosFixtureReader: Pick<SimctlIosFilesFixtureContainer, "listNamespace" | "readNamespaceFile">;
+    },
+  ) {
+    this.hashCache = hashCache;
+    this.iosFixtureReader = iosFixtureReader;
+  }
 
   async list(request: ListSharedStorageRequest): Promise<SharedStorageNamespaceListing> {
     const namespace = normalizeSharedStorageNamespace(request.namespace);
@@ -217,14 +227,11 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
         namespace,
         new Set(statEntries.map((entry) => entry.absolutePath)),
       );
-      const hashes = await listHashes(
-        adb,
-        statEntries,
-        request,
+      const hashes = await listHashes(adb, statEntries, request, {
         namespace,
         directory,
-        this.hashCache,
-      );
+        cache: this.hashCache,
+      });
       return {
         ...resolved,
         observation: "complete",
@@ -530,19 +537,22 @@ async function listHashes(
   adb: AdbExecutor,
   entries: readonly ParsedStatEntry[],
   request: ListSharedStorageRequest,
-  namespace: string,
-  directory: string,
-  cache: SharedStorageHashCache,
+  {
+    namespace,
+    directory,
+    cache,
+  }: { namespace: string; directory: string; cache: SharedStorageHashCache },
 ): Promise<Map<string, string>> {
   const hashes = new Map<string, string>();
+  const keyFor = (entry: ParsedStatEntry): SharedStorageHashKey => ({
+    deviceId: request.deviceId,
+    namespace,
+    path: entry.absolutePath,
+    byteCount: entry.byteCount,
+    modifiedSeconds: entry.modifiedSeconds,
+  });
   const pending = entries.filter((entry) => {
-    const cached = cache.get(
-      request.deviceId,
-      namespace,
-      entry.absolutePath,
-      entry.byteCount,
-      entry.modifiedSeconds,
-    );
+    const cached = cache.get(keyFor(entry));
     if (cached) {
       hashes.set(entry.absolutePath, cached);
     }
@@ -570,14 +580,7 @@ async function listHashes(
         continue;
       }
       hashes.set(entry.absolutePath, sha256);
-      cache.set(
-        request.deviceId,
-        namespace,
-        entry.absolutePath,
-        entry.byteCount,
-        entry.modifiedSeconds,
-        sha256,
-      );
+      cache.set(keyFor(entry), sha256);
     }
     // Hash lines for paths absent from stat output are ignored because only requested paths are read.
   }

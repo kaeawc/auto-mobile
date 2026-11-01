@@ -225,12 +225,11 @@ export class DevicePoolLifecycleWiring {
         options.deviceReleaseManaged = true;
         let releasedDeviceId: string | null = null;
         return releaseSessionAndDevice(
-          this.state.sessionManager,
-          this.callbacks,
+          { manager: this.state.sessionManager, pool: this.callbacks },
           terminalRelease.deviceId,
           sessionId,
-          reason,
           {
+            reason,
             release: async () => {
               releasedDeviceId = await attempt();
               return releasedDeviceId;
@@ -249,18 +248,20 @@ export class DevicePoolLifecycleWiring {
     this.state.sessionManager.onSessionCreated((session) => {
       this.state.deviceReservations.handleSessionCreated(session);
     });
-    this.state.sessionManager.onSessionRelease((sessionId, deviceId, reason, snapshot, options) => {
-      this.state.deviceReservations.handleSessionRelease(sessionId, reason, snapshot, options);
-      this.callbacks.clearMcpSessionOwnership(sessionId);
-      // An expiry handler that owns the ordered release consumes its capture after the attempt.
-      if (options.expiryOrigin && !options.deviceReleaseManaged) {
-        this.callbacks.releaseExpiredSessionDevice(sessionId, deviceId);
-      } else {
-        this.callbacks.captureReleasedDevice(sessionId, deviceId);
-        this.state.autolockManager.clearReleasedAutolockState(sessionId, deviceId);
-      }
-      this.state.recoveryCoordinator.finalizeReleasedRecoverySession(sessionId);
-    });
+    this.state.sessionManager.onSessionRelease(
+      (sessionId, deviceId, reason, { snapshot, ...options }) => {
+        this.state.deviceReservations.handleSessionRelease(sessionId, reason, snapshot, options);
+        this.callbacks.clearMcpSessionOwnership(sessionId);
+        // An expiry handler that owns the ordered release consumes its capture after the attempt.
+        if (options.expiryOrigin && !options.deviceReleaseManaged) {
+          this.callbacks.releaseExpiredSessionDevice(sessionId, deviceId);
+        } else {
+          this.callbacks.captureReleasedDevice(sessionId, deviceId);
+          this.state.autolockManager.clearReleasedAutolockState(sessionId, deviceId);
+        }
+        this.state.recoveryCoordinator.finalizeReleasedRecoverySession(sessionId);
+      },
+    );
   }
 
   createShutdownReservationsPort(): DeviceShutdownReservationsPoolPort {
@@ -386,15 +387,11 @@ export class DevicePoolLifecycleWiring {
         this.callbacks.clearAutoStartSuppressionForBootedDevice(device),
       foldObservationIntoPooledEntry: (pooled, device, source) =>
         this.callbacks.foldObservationIntoPooledEntry(pooled, device, source),
-      removeMissingDevicesForRefresh: (held, generation, ids, platforms, succeeded, sources) =>
-        this.state.missingDeviceLiveness.removeMissingDevicesForRefresh(
-          held,
-          generation,
-          ids,
-          platforms,
-          succeeded,
-          sources,
-        ),
+      removeMissingDevicesForRefresh: (held, generation, ids, { platforms, discovery }) =>
+        this.state.missingDeviceLiveness.removeMissingDevicesForRefresh(held, generation, ids, {
+          bootedPlatforms: platforms,
+          ...discovery,
+        }),
       notifyDeviceReady: (id) => this.callbacks.notifyDeviceReady(id),
       liftUnconfirmedRecoveringAndroidImages: (discovery, generation) =>
         this.state.recoveryCoordinator.liftUnconfirmedRecoveringAndroidImages(
@@ -420,13 +417,8 @@ export class DevicePoolLifecycleWiring {
         this.callbacks.recordEmulatorLossIncident(id, path, exit),
       finishEmulatorLossIncident: (id, outcome) =>
         this.callbacks.finishEmulatorLossIncident(id, outcome),
-      evictMissingPooledDevice: (device, reason, attempt, incidentId, captured, preparation) =>
-        this.callbacks.evictMissingPooledDevice(device, reason, {
-          attemptDeviceLossRecovery: attempt,
-          incidentId,
-          incidentCaptureComplete: captured,
-          recoveryPreparation: preparation,
-        }),
+      evictMissingPooledDevice: (device, reason, options) =>
+        this.callbacks.evictMissingPooledDevice(device, reason, options),
     };
   }
 
@@ -481,7 +473,12 @@ export class DevicePoolLifecycleWiring {
                 stableIds: [platform === "android" ? sourceImage?.name : undefined],
               })
           : undefined,
-        claimAcquiredDevice: async (sessionId, deviceId, heldBefore, platform, createdSession) => {
+        claimAcquiredDevice: async (
+          sessionId,
+          deviceId,
+          heldBefore,
+          { platform, createdSession },
+        ) => {
           if (this.callbacks.foreignOwnershipFor(platform)) {
             await this.callbacks.claimExplicitlyBoundDevice(
               sessionId,

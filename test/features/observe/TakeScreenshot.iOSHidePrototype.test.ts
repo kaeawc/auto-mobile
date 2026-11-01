@@ -193,10 +193,12 @@ function screenshotClient(): IOSCtrlProxyClient {
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "screenshot-stub", name: "iPhone", platform: "ios" },
     8765,
-    () => {
-      throw new Error("Unexpected socket connection");
+    {
+      wsFactory: () => {
+        throw new Error("Unexpected socket connection");
+      },
+      timer: new FakeTimer(),
     },
-    new FakeTimer(),
   );
   return client;
 }

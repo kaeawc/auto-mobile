@@ -1,3 +1,5 @@
+import { DAEMON_VERSION } from "../wire/constants";
+import { BindingRegistrySchemaUnsupportedError } from "../sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
 import type { DaemonDeviceSessionStore } from "../daemonDependencies";
 import type {
@@ -144,6 +146,8 @@ export class DaemonBroker {
   private bindingRedrive: BindingJournalRedriveLoop | undefined;
   private readonly maintainedRegistries = new WeakSet<SqliteBindingRegistry>();
   private registryClosing = false;
+  // No retry can make this daemon understand new migrations; restart re-evaluates the schema.
+  private unsupportedRegistrySchema: BindingRegistrySchemaUnsupportedError | undefined;
   constructor(private readonly host: DaemonBrokerHost) {}
 
   /**
@@ -174,7 +178,7 @@ export class DaemonBroker {
     this.brokerExecutionRelease = release;
     this.host.services
       .sessionManager()
-      .onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
+      .onSessionRelease((_sessionId, _deviceId, _reason, { snapshot, ...options }) =>
         release.onSessionReleased(snapshot, options),
       );
   }
@@ -331,6 +335,9 @@ export class DaemonBroker {
     signal?: AbortSignal,
     options?: { quiet?: boolean },
   ): Promise<SqliteBindingRegistry> {
+    if (this.unsupportedRegistrySchema) {
+      return Promise.reject(this.unsupportedRegistrySchema);
+    }
     const cached = this.host.bindingRegistry();
     if (cached) {
       return options?.quiet
@@ -341,6 +348,7 @@ export class DaemonBroker {
           });
     }
     const opening = openSqliteBindingRegistry({
+      writerVersion: DAEMON_VERSION,
       // Rehydration may open here before startup reaches the socket: only brokers may upgrade
       // in that window. Local daemons retry from the post-bind background upgrade instead.
       migrate:
@@ -378,6 +386,9 @@ export class DaemonBroker {
     this.host.setBindingRegistry(opening);
     opening.then(
       (registry) => {
+        if (!this.registryClosing) {
+          this.host.services.daemonState().setBindingRegistrySchemaProbe(registry);
+        }
         // Claims taken before the registry opened, and releases still owed, reach the table now.
         this.host.deviceClaimMirrors().registryOpened(registry.deviceClaims());
         if (!options?.quiet) {
@@ -388,8 +399,12 @@ export class DaemonBroker {
       () => undefined,
     );
     opening.catch((error: unknown) => {
-      // The release that asked reports this failure; forgetting the failed open lets the next
-      // release retry instead of failing forever.
+      if (error instanceof BindingRegistrySchemaUnsupportedError) {
+        this.host.deviceClaimMirrors().skip();
+        this.unsupportedRegistrySchema = error;
+      }
+      // The release that asked reports this failure; forgetting the failed open lets transient
+      // failures retry. An unsupported schema is latched above and never opened again here.
       logger.debug(`[Daemon] Binding registry open failed: ${errorMessage(error)}`);
       if (this.host.bindingRegistry() === opening) {
         this.host.setBindingRegistry(undefined);
@@ -421,6 +436,7 @@ export class DaemonBroker {
   async closeManagedExecutionRelease(): Promise<void> {
     // Mirrors are disposed later: fence late probes before the first shutdown await.
     this.registryClosing = true;
+    this.host.services.daemonState().setBindingRegistrySchemaProbe(undefined);
     await this.host.lifecycle.backgroundRegistryUpgrade()?.close();
     this.host.lifecycle.setBackgroundRegistryUpgrade(undefined);
     await this.sessionBrokerService?.close();

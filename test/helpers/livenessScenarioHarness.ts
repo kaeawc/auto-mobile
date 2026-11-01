@@ -648,7 +648,10 @@ export class LivenessScenario {
   /** Restart-scenario helpers boot successor daemons through this. */
   async createDaemonSide(startupMs = 0): Promise<DaemonSide> {
     // One database across daemon "processes", so a restart rehydrates what the last one persisted.
-    this.repository ??= new DeviceSessionRepository(await createTestDatabase(), this.timer);
+    this.repository ??= new DeviceSessionRepository({
+      db: await createTestDatabase(),
+      timer: this.timer,
+    });
     const repository = this.repository;
     // Both process identity and session identity come from the daemon's injected id generator.
     const daemonName = `scenario-daemon-${++this.daemonCount}`;
@@ -707,6 +710,7 @@ export class LivenessScenario {
       deviceManager: this.discovery,
       foreignDeviceOwnership: this.peerAwareOwnership(clock),
       iosForeignDeviceOwnership: undefined,
+      watchForeignDeviceOwnership: undefined,
     });
     manager.onSessionRelease((sessionId, deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), sessionId, deviceId, reason: reason ?? "" });
@@ -1169,23 +1173,25 @@ export class LivenessScenario {
       this.timer,
       new SessionScopedStreamAuthenticator(() => manager, "appearance"),
       {
-        getPooledDevices: () => this.deviceIds.map((id) => this.device(id) as never),
-        getSessionDevice: () => undefined,
-        getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId) ?? null,
-        getSessionManager: () => manager,
-      },
-      {
-        getConfig: async () => config as never,
-        updateConfig: async (update) => {
-          config = { ...config, ...update } as typeof config;
-          return config as never;
+        deviceSource: {
+          getPooledDevices: () => this.deviceIds.map((id) => this.device(id) as never),
+          getSessionDevice: () => undefined,
+          getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId) ?? null,
+          getSessionManager: () => manager,
         },
-        resolveMode: async () => "light",
-        applyToDevice: async (device, appliedMode) => {
-          applied.push(`${device.deviceId}:${appliedMode}`);
+        dependencies: {
+          getConfig: async () => config as never,
+          updateConfig: async (update) => {
+            config = { ...config, ...update } as typeof config;
+            return config as never;
+          },
+          resolveMode: async () => "light",
+          applyToDevice: async (device, appliedMode) => {
+            applied.push(`${device.deviceId}:${appliedMode}`);
+          },
+          triggerSync: async () => {},
+          isSyncEnabled: () => false,
         },
-        triggerSync: async () => {},
-        isSyncEnabled: () => false,
       },
     );
     const socket = new FakeSocket();

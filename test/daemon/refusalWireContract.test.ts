@@ -261,6 +261,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "launchApp intent failures (#14080) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "utils/android-cmdline-tools/EmulatorConsolePortExcludedError":
     "Emulator launch refusal is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
+  "utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError":
+    "Emulator gRPC audio failures (#13628, #13629) are thrown as ActionableError through the generic tool-error path, which serializes only the message; the code reaches clients as the message's leading [code] text, not a structured wire field.",
   "features/deviceLifecycle/teardown/stuckEmulatorEscalation":
     "Emulator teardown failure (#14018) is thrown as an ActionableError through the generic tool-error path, which serializes only the message; the code is a property on the error, not a structured wire field.",
   "models/ResetCapacityWaitExceededError":
@@ -300,6 +302,8 @@ const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
     "Session-log source failure caught by DefaultSessionLogService.runSource and reported as that source's {status, reason, code} outcome inside a successful collection (test/server/physicalIosSessionLog.test.ts); it never escapes as a tool or daemon refusal.",
   "daemon/sessionBroker/SessionBrokerStoppingError":
     "Shutdown refusal is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply by broker handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
+  "daemon/sessionBroker/SessionBrokerMaintenanceError":
+    "Maintenance refusal is mapped to a {success:false, code, retryable, retryAfterMs} daemon reply by broker handlers (test/daemon/sessionBroker/handlers.test.ts), not a tool refusal serializer.",
 };
 
 interface CodedErrorModule {
@@ -543,6 +547,8 @@ function readFields(payload: WirePayload): RefusalFields {
     ...(typeof recovering === "boolean" ? { recovering } : {}),
     ...(payload.externalDevices ? { externalDevices: payload.externalDevices } : {}),
     ...(payload.heldDevices ? { heldDevices: payload.heldDevices } : {}),
+    ...(payload.dbPath ? { dbPath: payload.dbPath } : {}),
+    ...(payload.unknownMigrations ? { unknownMigrations: payload.unknownMigrations } : {}),
   };
 }
 

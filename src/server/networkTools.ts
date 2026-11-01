@@ -405,13 +405,10 @@ async function setIosErrorSimulation(
   if (config === null) {
     return;
   }
-  state.startSimulationUntil(
-    device.deviceId,
-    config.errorType,
-    expiresAtEpochMs!,
-    config.limit,
-    sessionUuid,
-  );
+  state.startSimulationUntil(device.deviceId, config.errorType, expiresAtEpochMs!, {
+    limit: config.limit,
+    ownerSessionUuid: sessionUuid,
+  });
 }
 
 function iosSimulationConfig(
@@ -450,13 +447,10 @@ function updateSimulation(
       throw new ActionableError("durationSeconds is required unless cancel is true");
     }
     const errorType: SimulatedErrorType = simulation.errorType ?? "http500";
-    state.startSimulation(
-      device.deviceId,
-      errorType,
-      simulation.durationSeconds,
-      simulation.limit ?? null,
-      sessionUuid,
-    );
+    state.startSimulation(device.deviceId, errorType, simulation.durationSeconds, {
+      limit: simulation.limit ?? null,
+      ownerSessionUuid: sessionUuid,
+    });
   }
 }
 
@@ -524,8 +518,13 @@ export function registerNetworkTools(): void {
     "network",
     "Control network capture and error simulation.",
     networkSchema,
-    createNetworkHandler(state),
-    { defaultEnabled: false, embeddedSdkOnly: true, outputSchema: networkResultSchema },
+    {
+      handler: createNetworkHandler(state),
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      outputSchema: networkResultSchema,
+      changesHostSideState: true,
+    },
   );
 
   // --- mockNetwork ---
@@ -533,32 +532,39 @@ export function registerNetworkTools(): void {
     "mockNetwork",
     "Add mock network response rule.",
     mockNetworkSchema,
-    async (device, args: MockNetworkArgs) => {
-      if (!serverConfig.isNetworkMockableEnabled()) {
-        throw new ActionableError(
-          "Network mocking is disabled. Start the server with --network-mockable to enable.",
-        );
-      }
-      if (device.platform !== "android" && device.platform !== "ios") {
-        throw new ActionableError("Network mocking is only supported on Android and iOS devices.");
-      }
+    {
+      handler: async (device, args: MockNetworkArgs) => {
+        if (!serverConfig.isNetworkMockableEnabled()) {
+          throw new ActionableError(
+            "Network mocking is disabled. Start the server with --network-mockable to enable.",
+          );
+        }
+        if (device.platform !== "android" && device.platform !== "ios") {
+          throw new ActionableError(
+            "Network mocking is only supported on Android and iOS devices.",
+          );
+        }
 
-      // The device compiles these with its own regex engine; reject only what is certainly invalid.
-      assertValidMockPattern("host", args.host);
-      assertValidMockPattern("path", args.path);
-      assertValidResponseHeaders(args.responseHeaders);
+        // The device compiles these with its own regex engine; reject only what is certainly invalid.
+        assertValidMockPattern("host", args.host);
+        assertValidMockPattern("path", args.path);
+        assertValidResponseHeaders(args.responseHeaders);
 
-      const mock = state.addMock(device.deviceId, mockRuleFields(args), args.sessionUuid);
+        const mock = state.addMock(device.deviceId, mockRuleFields(args), args.sessionUuid);
 
-      const syncResult = await syncMockRulesToDevice(device, state);
+        const syncResult = await syncMockRulesToDevice(device, state);
 
-      return createStructuredToolResponse({
-        mockId: mock.mockId,
-        mocked: state.getMockSummary(device.deviceId),
-        ...deviceSyncFields(syncResult),
-      });
+        return createStructuredToolResponse({
+          mockId: mock.mockId,
+          mocked: state.getMockSummary(device.deviceId),
+          ...deviceSyncFields(syncResult),
+        });
+      },
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      outputSchema: mockNetworkResultSchema,
+      changesHostSideState: true,
     },
-    { defaultEnabled: false, embeddedSdkOnly: true, outputSchema: mockNetworkResultSchema },
   );
 
   // --- clearMockNetwork ---
@@ -566,35 +572,42 @@ export function registerNetworkTools(): void {
     "clearMockNetwork",
     "Clear mock network response rules.",
     clearMockNetworkSchema,
-    async (device, args: ClearMockNetworkArgs) => {
-      if (!serverConfig.isNetworkMockableEnabled()) {
-        throw new ActionableError(
-          "Network mocking is disabled. Start the server with --network-mockable to enable.",
-        );
-      }
-      if (device.platform !== "android" && device.platform !== "ios") {
-        throw new ActionableError("Network mocking is only supported on Android and iOS devices.");
-      }
-
-      let cleared: number;
-      if (args.mockId) {
-        cleared = state.removeMock(device.deviceId, args.mockId) ? 1 : 0;
-        if (cleared === 0) {
-          throw new ActionableError(`Mock '${args.mockId}' not found`);
+    {
+      handler: async (device, args: ClearMockNetworkArgs) => {
+        if (!serverConfig.isNetworkMockableEnabled()) {
+          throw new ActionableError(
+            "Network mocking is disabled. Start the server with --network-mockable to enable.",
+          );
         }
-      } else {
-        cleared = state.clearAllMocks(device.deviceId);
-      }
+        if (device.platform !== "android" && device.platform !== "ios") {
+          throw new ActionableError(
+            "Network mocking is only supported on Android and iOS devices.",
+          );
+        }
 
-      const syncResult = await syncMockRulesToDevice(device, state);
+        let cleared: number;
+        if (args.mockId) {
+          cleared = state.removeMock(device.deviceId, args.mockId) ? 1 : 0;
+          if (cleared === 0) {
+            throw new ActionableError(`Mock '${args.mockId}' not found`);
+          }
+        } else {
+          cleared = state.clearAllMocks(device.deviceId);
+        }
 
-      return createStructuredToolResponse({
-        cleared,
-        remaining: state.getMockSummary(device.deviceId),
-        ...deviceSyncFields(syncResult),
-      });
+        const syncResult = await syncMockRulesToDevice(device, state);
+
+        return createStructuredToolResponse({
+          cleared,
+          remaining: state.getMockSummary(device.deviceId),
+          ...deviceSyncFields(syncResult),
+        });
+      },
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      outputSchema: clearMockNetworkResultSchema,
+      changesHostSideState: true,
     },
-    { defaultEnabled: false, embeddedSdkOnly: true, outputSchema: clearMockNetworkResultSchema },
   );
 
   // --- getNetworkGraph ---
@@ -602,30 +615,30 @@ export function registerNetworkTools(): void {
     "getNetworkGraph",
     "Get aggregate captured network graph.",
     getNetworkGraphSchema,
-    async (device, args: GetNetworkGraphArgs) => {
-      const sinceTimestamp = args.sinceSeconds
-        ? defaultTimer.now() - args.sinceSeconds * 1000
-        : undefined;
-
-      const events = await getNetworkEvents({
-        deviceId: device.deviceId,
-        sinceTimestamp,
-        method: args.method,
-        limit: NETWORK_GRAPH_MAX_EVENTS + 1,
-      });
-
-      const truncated = events.length > NETWORK_GRAPH_MAX_EVENTS;
-      // The repository orders newest first; exclude the extra oldest event.
-      const graph = buildNetworkGraph(events.slice(0, NETWORK_GRAPH_MAX_EVENTS), {
-        minRequests: args.minRequests,
-      });
-
-      return createStructuredToolResponse({
-        ...graph,
-        ...(truncated ? { truncated: true, maxEvents: NETWORK_GRAPH_MAX_EVENTS } : {}),
-      });
-    },
     {
+      handler: async (device, args: GetNetworkGraphArgs) => {
+        const sinceTimestamp = args.sinceSeconds
+          ? defaultTimer.now() - args.sinceSeconds * 1000
+          : undefined;
+
+        const events = await getNetworkEvents({
+          deviceId: device.deviceId,
+          sinceTimestamp,
+          method: args.method,
+          limit: NETWORK_GRAPH_MAX_EVENTS + 1,
+        });
+
+        const truncated = events.length > NETWORK_GRAPH_MAX_EVENTS;
+        // The repository orders newest first; exclude the extra oldest event.
+        const graph = buildNetworkGraph(events.slice(0, NETWORK_GRAPH_MAX_EVENTS), {
+          minRequests: args.minRequests,
+        });
+
+        return createStructuredToolResponse({
+          ...graph,
+          ...(truncated ? { truncated: true, maxEvents: NETWORK_GRAPH_MAX_EVENTS } : {}),
+        });
+      },
       defaultEnabled: false,
       embeddedSdkOnly: true,
       // Reads only the host's captured events; open to any watcher (#10830).

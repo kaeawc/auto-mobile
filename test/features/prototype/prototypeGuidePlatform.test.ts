@@ -23,9 +23,25 @@ describe("platform guide section", () => {
         expect(guide).toContain(`\`${name}.${event}\``);
       }
       for (const key of Object.keys(module.state ?? {})) {
-        expect(guide).toContain(`\`/${name}/${key}\``);
+        const scope =
+          name === "media"
+            ? "players/<id>/"
+            : name === "notifications" && key === "blocked"
+              ? "channels/<id>/"
+              : "";
+        expect(guide).toContain(`\`/${name}/${scope}${key}\``);
       }
     }
+  });
+
+  test("names media state under its declared player, never as a module-level key", () => {
+    expect(guide).toContain("`/media/players/<id>/positionMs`");
+    expect(guide).not.toContain("`/media/positionMs`");
+  });
+
+  test("names the notification blocked key under its declared channel", () => {
+    expect(guide).toContain("`/notifications/channels/<id>/blocked`");
+    expect(guide).not.toContain("`/notifications/blocked`");
   });
 
   test("keeps the test placeholder out of the guide", () => {

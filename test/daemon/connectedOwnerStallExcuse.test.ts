@@ -86,7 +86,7 @@ async function setUp(connected: boolean | undefined = true): Promise<Rig> {
       reaped.push(reason);
       await manager.releaseSession(id, reason);
     },
-    timer,
+    { timer },
   );
   rig = { timer, manager, session, monitor, heartbeat, reaped };
   return rig;

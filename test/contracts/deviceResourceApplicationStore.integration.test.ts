@@ -10,5 +10,5 @@ runDeviceResourceApplicationStoreContract("FakeDeviceResourceApplicationStore", 
 }));
 runDeviceResourceApplicationStoreContract("DeviceResourceApplicationRepository", async () => {
   const db = await createTestDatabase();
-  return { store: new DeviceResourceApplicationRepository(db), dispose: () => db.destroy() };
+  return { store: new DeviceResourceApplicationRepository({ db }), dispose: () => db.destroy() };
 });

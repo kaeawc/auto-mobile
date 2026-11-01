@@ -23,8 +23,7 @@ export class PinnedDisplayUnavailableError extends ActionableError {
             disconnected.panel.key,
             disconnected.panel.role,
             disconnected.connectedPanels,
-            disconnected.hasPostures,
-            true,
+            { hasPostures: disconnected.hasPostures, pinned: true },
           )
         : `Pinned display "${pin}" is unavailable. Known panels (connection status unknown): ${panelChoices(inventory)}. Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), or select another display explicitly.`,
       options,

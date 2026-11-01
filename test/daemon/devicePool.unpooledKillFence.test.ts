@@ -50,14 +50,9 @@ test("pickup refuses an unpooled shutdown recorded during discovery", async () =
   );
   await gate.entered;
   expect(
-    await pool.reserveDeviceForShutdown(
-      device.deviceId,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { fenceUnpooled: true },
-    ),
+    await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, {
+      fenceUnpooled: true,
+    }),
   ).toBeUndefined();
   gate.release();
   const error = await result;
@@ -81,14 +76,9 @@ test("exact-device discovery refuses an unpooled shutdown recorded during discov
     );
   await gate.entered;
   expect(
-    await pool.reserveDeviceForShutdown(
-      device.deviceId,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { fenceUnpooled: true },
-    ),
+    await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, {
+      fenceUnpooled: true,
+    }),
   ).toBeUndefined();
   gate.release();
   const error = await result;
@@ -102,14 +92,9 @@ test("exact-device discovery refuses an unpooled shutdown recorded during discov
 test("pickup refuses an active unpooled shutdown before discovery", async () => {
   const { pool, manager } = harness();
   expect(
-    await pool.reserveDeviceForShutdown(
-      device.deviceId,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { fenceUnpooled: true },
-    ),
+    await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, {
+      fenceUnpooled: true,
+    }),
   ).toBeUndefined();
   const discovery = spyOn(manager, "getBootedDevicesDetailed");
   await expect(pool.pickUpRunningDevice(device)).rejects.toThrow("being shut down");
@@ -120,14 +105,9 @@ test("pickup refuses an active unpooled shutdown before discovery", async () => 
 test("pickup inserts after the unpooled shutdown fence expires", async () => {
   const { pool, timer } = harness();
   expect(
-    await pool.reserveDeviceForShutdown(
-      device.deviceId,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { fenceUnpooled: true },
-    ),
+    await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, {
+      fenceUnpooled: true,
+    }),
   ).toBeUndefined();
   expect(
     pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
@@ -145,14 +125,9 @@ test("pickup inserts after the unpooled shutdown fence expires", async () => {
 test("clearIntentionalShutdown lifts an unpooled shutdown fence", async () => {
   const { pool } = harness();
   expect(
-    await pool.reserveDeviceForShutdown(
-      device.deviceId,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { fenceUnpooled: true },
-    ),
+    await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, {
+      fenceUnpooled: true,
+    }),
   ).toBeUndefined();
   expect(
     pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
@@ -166,14 +141,9 @@ test("pooled shutdown reserves the entry without an unpooled fence", async () =>
   const { pool } = harness();
   await pool.addDevice(device);
   const entry = pool.getDevice(device.deviceId)!;
-  const reservation = await pool.reserveDeviceForShutdown(
-    device.deviceId,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fenceUnpooled: true },
-  );
+  const reservation = await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, {
+    fenceUnpooled: true,
+  });
   expect(reservation?.device).toBe(entry);
   expect(
     pool.testHooks.shutdownReservationCoordinator.isUnpooledShutdownFenced(device.deviceId),
@@ -207,7 +177,7 @@ test("refresh refuses an unpooled kill during discovery and admits after grace",
   const gate = parkDiscovery(manager);
   const refresh = pool.refreshDevices();
   await gate.entered;
-  await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, undefined, undefined, {
+  await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, {
     fenceUnpooled: true,
   });
   gate.release();
@@ -232,7 +202,7 @@ test("refresh refuses a shutdown marker recorded during discovery", async () => 
 
 test("refresh still folds an existing pooled entry with a stale fence", async () => {
   const { pool, manager } = harness();
-  await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, undefined, undefined, {
+  await pool.reserveDeviceForShutdown(device.deviceId, undefined, undefined, {
     fenceUnpooled: true,
   });
   await pool.addDevice(device);

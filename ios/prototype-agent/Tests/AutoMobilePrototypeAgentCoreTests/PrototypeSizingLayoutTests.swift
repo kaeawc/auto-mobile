@@ -359,6 +359,39 @@ import XCTest
             XCTAssertEqual(frames.byName["b"]?.minX, 130)
         }
 
+        func testRowSharesGreedyContentWithWeightKeySpacersAndHonorsCaps() throws {
+            let capped = try rules(#"{"maxWidth":60}"#)
+            let frames = Frames()
+            layOut(
+                PrototypeRowLayout(spacing: 8) {
+                    flexible("control", frames)
+                    PrototypeSizedLayout(rules: capped, alignment: .center) { flexible("spacer", frames) }
+                        .layoutValue(key: PrototypeWeightKey.self, value: 1)
+                    probe("label", frames, width: 40, height: 10)
+                }.frame(width: 340, height: 40, alignment: .leading)
+            )
+            XCTAssertEqual(frames.byName["control"]?.width, 224)
+            XCTAssertEqual(frames.byName["spacer"]?.width, 60)
+            XCTAssertEqual(frames.byName["label"]?.minX, 300)
+        }
+
+        func testWeightKeyArrangementSpacerExpandsOnlyHorizontally() {
+            let frames = Frames()
+            layOut(
+                PrototypeRowLayout(spacing: 0) {
+                    probe("a", frames, width: 40, height: 10)
+                    Spacer(minLength: 0).layoutValue(key: PrototypeWeightKey.self, value: 1)
+                    probe("b", frames, width: 70, height: 10)
+                }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                    frames.byName["row"] = $0
+                }
+                .frame(width: 200, height: 100)
+            )
+            XCTAssertEqual(frames.byName["b"]?.minX, 130)
+            XCTAssertEqual(frames.byName["row"]?.height, 10)
+        }
+
         func testGreedyFrameAndSliderTakeRemainderBesideNaturalPercentageLabel() throws {
             let labelWidth = layOut(Text("50%")).width
             for realSlider in [false, true] {

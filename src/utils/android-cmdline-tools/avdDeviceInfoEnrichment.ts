@@ -47,6 +47,20 @@ function deviceInfoFromConfig(
     screenDensity: config.screenDensity ?? device.screenDensity,
     formFactor: formFactor === "unknown" ? device.formFactor : formFactor,
     capabilityInventory: config.capabilityInventory ?? device.capabilityInventory,
+    ...guestHardwareFromConfig(device, config),
+  };
+}
+
+function guestHardwareFromConfig(
+  device: DeviceInfo,
+  config: AvdConfig,
+): Pick<
+  DeviceInfo,
+  "configuredRamMb" | "configuredCpuCores" | "effectiveRamMb" | "effectiveCpuCores"
+> {
+  return {
+    configuredRamMb: config.ramSizeMb ?? device.configuredRamMb,
+    configuredCpuCores: config.hardware?.cpuCores ?? device.configuredCpuCores,
     effectiveRamMb: config.effectiveRamMb ?? device.effectiveRamMb,
     effectiveCpuCores: config.effectiveCpuCores ?? device.effectiveCpuCores,
   };

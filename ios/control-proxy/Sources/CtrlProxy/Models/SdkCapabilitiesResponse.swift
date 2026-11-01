@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 /// Foreground-app-scoped capabilities exposed by the optional in-app AutoMobile SDK.
@@ -21,6 +22,8 @@ public struct SdkCapabilitiesResponse: Codable, Sendable {
     public let available: Bool
     public let bundleId: String?
     public let capabilities: [String]
+    /// The app's observation-bridge state (#5159); nil when the SDK is unavailable or predates it.
+    public let observationBridge: ObservationBridgeState?
     public let totalTimeMs: Int64
 
     public init(
@@ -28,6 +31,7 @@ public struct SdkCapabilitiesResponse: Codable, Sendable {
         available: Bool,
         bundleId: String?,
         capabilities: [String],
+        observationBridge: ObservationBridgeState? = nil,
         totalTimeMs: Int64
     ) {
         type = ResponseType.sdkCapabilitiesResult.rawValue
@@ -37,6 +41,7 @@ public struct SdkCapabilitiesResponse: Codable, Sendable {
         self.available = available
         self.bundleId = bundleId
         self.capabilities = capabilities.sorted()
+        self.observationBridge = observationBridge
         self.totalTimeMs = totalTimeMs
     }
 }

@@ -52,6 +52,23 @@ enum PrototypeRepeat {
         return segments
     }
 
+    /// Field `expand` stamps on the first child of each keyed repeat row; it is not part of the authored contract.
+    static let rowKeyField = "_repeatKey"
+
+    /// Drops the expansion-only row key everywhere under `value`, so a post-expansion structural
+    /// check sees only authored fields (#15815). Authored specs are contract-checked before expansion.
+    static func withoutRowKeys(_ value: JSONValue) -> JSONValue {
+        switch value {
+        case var .object(fields):
+            fields[rowKeyField] = nil
+            return .object(fields.mapValues(withoutRowKeys))
+        case let .array(items):
+            return .array(items.map(withoutRowKeys))
+        default:
+            return value
+        }
+    }
+
     /// Expands every `repeat` in the node tree rooted at `node`.
     static func expand(
         _ node: JSONValue,
@@ -72,7 +89,7 @@ enum PrototypeRepeat {
                            let value = instance.item[key], var fields = bound.objectFields,
                            let rendered = PrototypeScrollTarget.scalarKey(value)
                         {
-                            fields["_repeatKey"] = .string(rendered)
+                            fields[rowKeyField] = .string(rendered)
                             bound = .object(fields)
                         }
                         return bound

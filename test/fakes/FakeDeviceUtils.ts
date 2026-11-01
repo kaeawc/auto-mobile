@@ -358,7 +358,11 @@ export class FakeDeviceUtils implements FakeDeviceUtilsContract {
         );
       });
     }
-    const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
+    // As in production, "either" sweeps watches only when the caller opts in (#14908).
+    const requested: Platform[] =
+      platform === "either"
+        ? ["android", "ios", ...(options.includeWatchOs ? (["watchos"] as const) : [])]
+        : [platform];
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();
     const succeededSources = new Set<DiscoverySource>();
@@ -396,11 +400,11 @@ export class FakeDeviceUtils implements FakeDeviceUtilsContract {
       }
       // The platform aggregate mirrors production: iOS tracks the simulator
       // source, so a devicectl-only failure keeps the platform succeeded.
-      const platformSource: DiscoverySource = p === "android" ? "android" : "ios-simulator";
+      const platformSource: DiscoverySource = sourcesForPlatform(p)[0];
       if (this.notInstalledSources.has(platformSource)) {
         discoveryErrors[p] = {
           code: "unavailable",
-          message: `${p === "ios" ? "iOS" : "Android"} booted-device discovery is unavailable.`,
+          message: `${platformLabel(p)} booted-device discovery is unavailable.`,
         };
         continue;
       }
@@ -412,7 +416,7 @@ export class FakeDeviceUtils implements FakeDeviceUtilsContract {
           message:
             p === "android" && this.androidDiscoveryErrorMessage
               ? this.androidDiscoveryErrorMessage
-              : `${p === "ios" ? "iOS" : "Android"} booted-device discovery failed.`,
+              : `${platformLabel(p)} booted-device discovery failed.`,
         };
         continue;
       }
@@ -506,8 +510,7 @@ export class FakeDeviceUtils implements FakeDeviceUtilsContract {
     device: DeviceInfo,
     timeoutMs: number = 120000,
     childProcess?: ChildProcess | null,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    { signal, options }: { signal?: AbortSignal; options?: AndroidEmulatorReadinessOptions } = {},
   ): Promise<BootedDevice> {
     this.waitForDeviceReadyChildProcess = childProcess;
     this.waitForDeviceReadySignal = signal;
@@ -545,4 +548,8 @@ class FakeDeviceLaunchProcess extends EventEmitter implements FakeDeviceLaunchPr
     this.emit("exit", 0, null);
     return false;
   }
+}
+
+function platformLabel(platform: Platform): string {
+  return { android: "Android", ios: "iOS", watchos: "watchOS", tvos: "tvOS" }[platform];
 }

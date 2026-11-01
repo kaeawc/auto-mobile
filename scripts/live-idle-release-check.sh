@@ -602,20 +602,31 @@ mcp_request() {
     if ! IFS= read -r -t "$((deadline - SECONDS + 1))" -u 8 line; then
       break
     fi
-    if jq -e --argjson id "${request_id}" '.id == $id' <<< "${line}" > /dev/null 2>&1; then
-      last_response="${line}"
-      if jq -e '.error != null' <<< "${line}" > /dev/null; then
+    # One jq per line: every reply and notification is classified, so this loop forks once per line.
+    local kind
+    kind="$(jq -r --argjson id "${request_id}" \
+      'if .id != $id then "other" elif .error != null then "error"
+        elif .result.isError == true then "tool-error" else "ok" end' <<< "${line}" 2> /dev/null)" ||
+      kind="other"
+    case "${kind}" in
+      other) continue ;;
+      error)
+        last_response="${line}"
         [[ "${expect_refusal}" != true ]] || return 3
         die "${method} failed: $(jq -c '.error' <<< "${line}")"
-      fi
-      if jq -e '.result.isError == true' <<< "${line}" > /dev/null; then
+        ;;
+      tool-error)
+        last_response="${line}"
         if [[ "${expect_refusal}" == true || (-n "${tolerate}" && "${line}" == *"${tolerate}"*) ]]; then
           return 3
         fi
         die "${method} returned an error: $(jq -c '.result.content' <<< "${line}")"
-      fi
-      return 0
-    fi
+        ;;
+      *)
+        last_response="${line}"
+        return 0
+        ;;
+    esac
   done
   die "no response to ${method} within ${timeout_s} s; see ${work_dir}/proxy.stderr"
 }
@@ -873,12 +884,13 @@ scenario_idle() {
 # Make a control call by device id only, every call interval for active_ms, requiring the device to
 # stay held and lastToolActivityAt to advance with the calls (they were credited to the session).
 drive_selector_calls() {
-  local start now before after
+  local start now before after device_args
   start="$(now_ms)"
   now="${start}"
   before="$(entry_field "${entry}" lastToolActivityAt)"
+  device_args="$(jq -cn --arg device "${serial}" '{deviceId: $device}')"
   while ((now - start < active_ms)); do
-    call_tool "${CONTROL_TOOL}" "$(jq -cn --arg device "${serial}" '{deviceId: $device}')" 120
+    call_tool "${CONTROL_TOOL}" "${device_args}" 120
     query_device_entry
     [[ -n "${entry}" ]] || die "${serial} was released after $((now - start)) ms of calls that named only its deviceId"
     after="$(entry_field "${entry}" lastToolActivityAt)"
@@ -912,18 +924,21 @@ scenario_observe_only() {
   first="${entry}"
   [[ -n "${first}" ]] || die "${serial} released right after getAndroid"
   local deadline=$((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms))
+  local device_args first_activity
+  device_args="$(jq -cn --arg device "${serial}" '{deviceId: $device}')"
+  first_activity="$(entry_field "${first}" lastToolActivityAt)"
   released_at=""
   while [[ -z "${released_at}" ]]; do
     # After the release the owner's next call is refused (lazy expiry): that refusal is the
     # release signal, not a failure (#11073). The entry query below confirms it.
     call_status=0
-    run_capture_status call_tool observe "$(jq -cn --arg device "${serial}" '{deviceId: $device}')" 120 no_active_device_session
+    run_capture_status call_tool observe "${device_args}" 120 no_active_device_session
     call_status="$RUN_STATUS"
     now="$(now_ms)"
     query_device_entry
     local activity_changed=false
     if [[ -n "${entry}" ]]; then
-      run_capture_status same_instant "$(entry_field "${entry}" lastToolActivityAt)" "$(entry_field "${first}" lastToolActivityAt)"
+      run_capture_status same_instant "$(entry_field "${entry}" lastToolActivityAt)" "${first_activity}"
       if [[ "$RUN_STATUS" -ne 0 ]]; then activity_changed=true; fi
     fi
     if ((call_status == 3)) && [[ -n "${entry}" ]]; then

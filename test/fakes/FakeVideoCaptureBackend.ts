@@ -36,6 +36,13 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
     this.liveCapturePathFor = derive;
   }
 
+  private sidecarPathsFor: ((config: VideoCaptureConfig) => string[]) | null = null;
+
+  /** Make start() report sidecar files the capture grows (an audio track's PCM). */
+  setInProgressSidecarPaths(derive: (config: VideoCaptureConfig) => string[]): void {
+    this.sidecarPathsFor = derive;
+  }
+
   setStopResultOverrides(overrides: Partial<RecordingResult>): void {
     this.stopResultOverrides = overrides;
   }
@@ -66,6 +73,7 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
       outputPath: config.outputPath,
       startedAt: config.startedAt,
       ...(this.liveCapturePathFor ? { liveCapturePath: this.liveCapturePathFor(config) } : {}),
+      ...(this.sidecarPathsFor ? { inProgressSidecarPaths: this.sidecarPathsFor(config) } : {}),
     };
     this.startResults.push(handle);
     return handle;

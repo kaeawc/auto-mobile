@@ -5,7 +5,7 @@ import {
   staleDisplaySchema,
 } from "./display";
 import { elementSchema, selectedElementSchema } from "./elements";
-import { observationOutputSchema } from "./observation";
+import { observationBackendFields, observationOutputSchema } from "./observation";
 import { observationDiffMetadataSchema, tapEffectSchema } from "./observationMetadata";
 import { platformSchema } from "../../utils/schemaHelpers";
 
@@ -90,7 +90,8 @@ export const sendKeysResultSchema = z
               })
               .optional(),
             imeTrace: z.array(z.string()).optional(),
-            backend: z.literal("autoMobileIme").optional(),
+            backend: z.enum(["autoMobileIme", "sdk", "xctest"]).optional(),
+            fallbackReason: z.enum(["unavailable", "unsupported"]).optional(),
             capability: z.literal("semanticText").optional(),
             keyboard: keyboardIdentitySchema.optional(),
           })
@@ -212,6 +213,7 @@ export const tapOnResultSchema = z
     observationDiff: observationDiffMetadataSchema.optional(),
     effect: tapEffectSchema.optional(),
     selectedElement: selectedElementSchema.optional(),
+    ...observationBackendFields,
     activatedSubtext: z
       .object({
         text: z.string(),

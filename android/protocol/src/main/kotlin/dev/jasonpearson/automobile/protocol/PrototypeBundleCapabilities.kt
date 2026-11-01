@@ -38,6 +38,7 @@ internal object PrototypeBundleCapabilities {
         caps.add("prototype_platform_realtime_device_v1")
     }
     if ("data" in spec) caps.add("prototype_data_model_v1")
+    if (PrototypeMediaQueue.queued(spec)) caps.add("prototype_platform_media_queue_v1")
     if ("storage" in spec) caps.add("prototype_storage_v1")
     if ("derive" in spec) caps.add("prototype_format_v1")
   }
@@ -109,6 +110,7 @@ internal object PrototypeBundleCapabilities {
         if (PrototypeStackPatternRules.required(action)) caps.add("prototype_stack_patterns_v1")
       }
       "scrollTo" -> caps.add("prototype_chat_scroll_v1")
+      "hideKeyboard" -> caps.add("prototype_hide_keyboard_v1")
       "emit" -> if ("context" in action) caps.add("prototype_emit_context_v1")
     }
   }
@@ -179,6 +181,8 @@ internal object PrototypeBundleCapabilities {
           is PrototypePlatformUses.Use.Event -> null
         }
       module?.let { text(PrototypePlatformModules.module(it)?.get("capability")) }?.let(caps::add)
+      if (use is PrototypePlatformUses.Use.Call)
+        PrototypePlatformModules.callCapability(text(use.action["call"]))?.let(caps::add)
     }
   }
 }

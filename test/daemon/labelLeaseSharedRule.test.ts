@@ -58,7 +58,7 @@ describe("shared label owner lease (#11722)", () => {
         reaped.push({ id, reason, at: timer.now() });
         await manager.releaseSession(id, reason);
       },
-      timer,
+      { timer },
     );
     state = {
       isInitialized: () => true,

@@ -255,7 +255,7 @@ describe("tapOn iOS multi-panel screen size", () => {
         strategy: "first",
       },
       hierarchy,
-      tap["getScreenSizeFromHierarchy"](hierarchy),
+      { screenSize: tap["getScreenSizeFromHierarchy"](hierarchy) },
     );
     expect(visible).toEqual({ left: 0, top: 24, right: 951, bottom: 82 });
     expect(observation.screenSize).toEqual({ width: 951, height: 669 });

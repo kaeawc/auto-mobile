@@ -28,6 +28,13 @@ import type {
 } from "./deviceBootService";
 import { waitForDeviceReadyOrCancel, type BootedDeviceDiscoveryOptions } from "./deviceUtils";
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+
+/** How a boot phase sweeps booted devices; absent fields keep the cached, settling defaults. */
+export interface BootDiscoveryOptions {
+  bypassAndroidCache?: boolean;
+  awaitAbortSettlement?: boolean;
+  presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"];
+}
 /** Deadline-bound discovery, launch and cleanup of processes owned by a boot. */
 export class DeviceBootExecution {
   constructor(
@@ -39,9 +46,11 @@ export class DeviceBootExecution {
     platform: DeviceBootRequest["platform"],
     context: BootDeadlineContext,
     phase: string,
-    bypassAndroidCache = false,
-    awaitAbortSettlement = true,
-    presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
+    {
+      bypassAndroidCache = false,
+      awaitAbortSettlement = true,
+      presentationOrder,
+    }: BootDiscoveryOptions = {},
   ): Promise<BootedDevice[]> {
     // Android completeness can only be judged from the detailed discovery
     // result (`succeededPlatforms`), so android always takes this path — a
@@ -415,8 +424,10 @@ export class DeviceBootExecution {
       context.operationName,
       phase,
       this.timer.now() - context.startedAtMs,
-      Math.max(0, context.deadlineMs - context.startedAtMs),
-      context.deviceLabel ?? context.request.name ?? context.request.deviceId,
+      {
+        budgetMs: Math.max(0, context.deadlineMs - context.startedAtMs),
+        device: context.deviceLabel ?? context.request.name ?? context.request.deviceId,
+      },
     );
   }
 }

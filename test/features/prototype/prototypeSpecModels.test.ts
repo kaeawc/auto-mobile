@@ -201,6 +201,30 @@ data class CustomSwitch(val \`in\`: String? = null) : CustomChoice()
 data class PrototypeDefaultChoice(val \`when\`: Boolean) : CustomChoice()
 `);
   });
+  test("wraps a field-less Kotlin variant the way ktfmt does once it passes 100 columns", () => {
+    const tag = (name: string) => ({
+      kind: "object",
+      fields: { type: { rule: { kind: "enum", values: [name] }, optional: false } },
+    });
+    const kotlin = renderPrototypeSpecModels(
+      {
+        definitions: {
+          action: {
+            kind: "tagged",
+            variants: { stop: tag("stop"), hideKeyboard: tag("hideKeyboard") },
+          },
+        },
+      },
+      { action: { kotlinName: "PrototypeAction", languages: ["kotlin"] } },
+    ).kotlin;
+    expect(kotlin).toContain(
+      '\n@SerialName("stop") @Serializable data object PrototypeStopAction : PrototypeAction()\n',
+    );
+    expect(kotlin).toContain(
+      '\n@SerialName("hideKeyboard")\n@Serializable\ndata object PrototypeHideKeyboardAction : PrototypeAction()\n',
+    );
+  });
+
   test("renders exact Swift tagged Codable with optional values and escaped identifiers", () => {
     expect(renderPrototypeSpecModels(tagged, { choice: { swiftName: "ChoiceValue" } }).swift)
       .toBe(`${header}

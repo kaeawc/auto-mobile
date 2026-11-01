@@ -12,7 +12,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { didSourceSucceedForDevice } from "../../utils/discoverySource";
 import { getAbortSignal, throwIfRequestAborted } from "../../utils/AbortContext";
 import { type AutolockClient } from "../deviceAutolockManager";
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, Platform } from "../../models";
 import type { PooledDevice } from "../devicePoolTypes";
 import {
   ALLOCATION_SNAPSHOT_STALE_RETRIES,
@@ -306,25 +306,8 @@ export class DevicePoolTargetDiscovery {
       let result: string | undefined;
       try {
         const snapshot = await raceWithDeadline(
-          async (): Promise<TargetDeviceDiscoverySnapshot> => {
-            const targetPlatform = capturedEntry?.platform ?? platform;
-            if (targetPlatform === "android") {
-              const androidPresence = await this.callbacks.takeFreshPresenceDiscovery("android");
-              return { capturedEntry, androidPresence, bootedDevices: androidPresence.devices };
-            }
-            if (capturedEntry) {
-              return {
-                capturedEntry,
-                iosLiveness: await this.state.idleDeviceReaper.getIosLivenessSnapshot(),
-              };
-            }
-            const discovery = await this.callbacks.takeFreshPresenceDiscovery("ios");
-            return {
-              capturedEntry,
-              bootedDevices: discovery.devices,
-              iosLiveness: await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery }),
-            };
-          },
+          async () =>
+            await this.takeTargetSnapshot(deviceId, capturedEntry, platform, unavailableMessage),
           { timer: this.state.timer, signal: getAbortSignal(), label: "Exact device discovery" },
         );
         const skipTransportWait = [
@@ -392,6 +375,51 @@ export class DevicePoolTargetDiscovery {
         throw new ActionableError(unavailableMessage);
       }
     }
+  }
+
+  /** The pre-lock discovery evidence an exact bind judges its target by. */
+  private async takeTargetSnapshot(
+    deviceId: string,
+    capturedEntry: PooledDevice | undefined,
+    platform: Platform,
+    unavailableMessage: string,
+  ): Promise<TargetDeviceDiscoverySnapshot> {
+    const targetPlatform = capturedEntry?.platform ?? platform;
+    if (targetPlatform === "android") {
+      const androidPresence = await this.callbacks.takeFreshPresenceDiscovery("android");
+      return { capturedEntry, androidPresence, bootedDevices: androidPresence.devices };
+    }
+    if (targetPlatform === "watchos" || targetPlatform === "tvos") {
+      // Non-iOS Apple simulators need their own fresh listing, for a pooled entry and
+      // a new one alike, before binding; an iOS snapshot cannot confirm either platform.
+      const discovery = await this.callbacks.takeFreshPresenceDiscovery(targetPlatform);
+      if (
+        !didSourceSucceedForDevice(discovery, targetPlatform, deviceId) ||
+        !discovery.devices.some((device) => device.deviceId === deviceId)
+      ) {
+        throw new ActionableError(unavailableMessage);
+      }
+      return {
+        capturedEntry,
+        bootedDevices: discovery.devices,
+        iosLiveness:
+          targetPlatform === "tvos"
+            ? await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery })
+            : undefined,
+      };
+    }
+    if (capturedEntry) {
+      return {
+        capturedEntry,
+        iosLiveness: await this.state.idleDeviceReaper.getIosLivenessSnapshot(),
+      };
+    }
+    const discovery = await this.callbacks.takeFreshPresenceDiscovery("ios");
+    return {
+      capturedEntry,
+      bootedDevices: discovery.devices,
+      iosLiveness: await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery }),
+    };
   }
 
   async validateOrReloadIdlePooledDevice(
@@ -472,13 +500,9 @@ export class DevicePoolTargetDiscovery {
   ): boolean {
     if (caller?.oneShotCli === true) {
       if (!isAnonymousAcquisitionSession(session)) {
-        throw heldDeviceBindRefusal(
-          this.callbacks,
-          device.id,
-          session.sessionId,
-          undefined,
-          "another",
-        );
+        throw heldDeviceBindRefusal(this.callbacks, device.id, session.sessionId, {
+          wording: "another",
+        });
       }
       // Anonymous acquisitions share one owner, so a one-shot CLI caller reusing one is its
       // confirmed owner. Returning false sent an acquisition that resolved a source image (an AVD
@@ -496,13 +520,9 @@ export class DevicePoolTargetDiscovery {
       !this.callbacks.isSessionAssignmentCurrent(device, session) ||
       !this.state.sessionManager.isAdmittedForAutomation(session)
     ) {
-      throw heldDeviceBindRefusal(
-        this.callbacks,
-        device.id,
-        session.sessionId,
-        undefined,
-        "another",
-      );
+      throw heldDeviceBindRefusal(this.callbacks, device.id, session.sessionId, {
+        wording: "another",
+      });
     }
     return true;
   }

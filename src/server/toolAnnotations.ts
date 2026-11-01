@@ -104,6 +104,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
   pressButton: entry("Press Button", destructiveDevice),
   recentApps: entry("Open Recent Apps", controlDevice),
   rotaryScroll: entry("Scroll Rotary Input", destructiveDevice),
+  rotateCrown: entry("Rotate Digital Crown", destructiveDevice),
   recordDeviceGestures: entry("Record Gestures", controlDevice),
   selectAllText: entry("Select All Text", controlDevice),
   sendSms: entry("Simulate SMS", controlDevice),
@@ -174,6 +175,9 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolAnnotationEntry>> = {
 
   // Scoped clears/deletes and replacement values remain destructive even when idempotent.
   setSensor: entry("Set Emulator Sensor", clearDevice),
+  injectAudioInput: entry("Inject Emulator Microphone Audio", controlDevice),
+  stopAudioInput: entry("Stop Emulator Microphone Audio", setDevice),
+  captureAudio: entry("Capture Emulator Audio Output", captureDevice),
   statusBar: entry("Set Status Bar", clearDevice),
   clearKeyValueFile: entry("Clear Key Value File", clearDevice),
   clearMockNetwork: entry("Clear Mock Network Rules", clearDevice),

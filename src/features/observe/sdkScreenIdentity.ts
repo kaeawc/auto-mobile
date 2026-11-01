@@ -44,8 +44,7 @@ function makeKey(
   bundleId: string,
   route: string,
   arguments_: StringMap,
-  tab?: string,
-  presentationRoute?: string,
+  { tab, presentationRoute }: { tab?: string; presentationRoute?: string } = {},
 ): string {
   const parts: string[][] = [
     ["bundle", bundleId],
@@ -98,7 +97,7 @@ export function deriveSdkNavigationScreenIdentity(
     platform,
     source: "sdk",
     confidence: "high",
-    key: makeKey(applicationId, route, arguments_, tab, presentationRoute),
+    key: makeKey(applicationId, route, arguments_, { tab, presentationRoute }),
     components: {
       bundleId: applicationId,
       navigationRoute: route,

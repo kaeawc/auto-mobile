@@ -84,17 +84,15 @@ export const defaultGetLogsDependencies: GetLogsDependencyFactory = (device, arg
       (target) => new SimCtlClient(target),
       nodeAppFileFileSystem,
       defaultTimer,
-      UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
+      { unifiedLogTimeoutMs: UNIFIED_LOG_DEFAULT_TIMEOUT_MS },
     );
     return {
-      collect: (appId, lastSeconds, level, signal, processName) =>
+      collect: (appId, lastSeconds, level, { signal, processName } = {}) =>
         provider.collectUnifiedLog(
           device,
           appId,
           { lastSeconds, level, processName },
-          SESSION_LOG_MAX_BYTES_LIMIT,
-          signal,
-          "tail",
+          { maxBytes: SESSION_LOG_MAX_BYTES_LIMIT, signal, retain: "tail" },
         ),
       resolveProcessName: async (appId, signal) => {
         const apps = await new SimCtlClient(device).listAppsOrThrow(device.deviceId, { signal });

@@ -27,7 +27,7 @@ teardown() {
   rm -rf "$TEST_ROOT"
 }
 
-# write_fixtures <manifest_version> <gradle_version_name> <registry_version> <runner_sha> [helper_sha] [prototype_sha] [filter_sha] [viewer_sha]
+# write_fixtures <manifest_version> <gradle_version_name> <registry_version> <runner_sha> [helper_sha] [prototype_sha] [filter_sha] [viewer_sha] [protoviewer_apk_sha]
 write_fixtures() {
   local ver="$1" gradle="$2" registry="$3" runner="$4" helper="$HELPER_SHA"
   if [ "$#" -ge 5 ]; then
@@ -43,6 +43,7 @@ write_fixtures() {
   fi
 
   local viewer="${8-$HELPER_SHA}"
+  local protoviewer_apk="${9-$HELPER_SHA}"
 
   cat > "${TEST_ROOT}/package.json" <<EOF
 { "name": "@kaeawc/auto-mobile", "version": "${ver}" }
@@ -76,6 +77,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     screenCaptureHelperSha256: "${helper}",
     prototypeAgentSha256: "${prototype}",
     prototypeViewerSha256: "${viewer}",
+    protoViewerApkSha256: "${protoviewer_apk}",
     networkFilterSha256: "${filter}",
   },
 ];
@@ -339,4 +341,19 @@ PY
     [ "$status" -ne 0 ]
     [[ "$output" == *"registry[0].prototypeViewerSha256"* ]]
   done
+}
+
+@test "fails when ProtoViewer APK sha256 is empty or malformed (#15301)" {
+  for apk in "" "not-a-valid-sha"; do
+    write_fixtures "$VERSION" "${VERSION}-SNAPSHOT" "$VERSION" "$RUNNER_SHA" "$HELPER_SHA" "$HELPER_SHA" "$FILTER_SHA" "$HELPER_SHA" "$apk"
+    run_gate "$VERSION"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"registry[0].protoViewerApkSha256"* ]]
+  done
+}
+
+@test "passes when ProtoViewer APK sha256 is populated (#15301)" {
+  run_gate "$VERSION"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"registry[0].protoViewerApkSha256 populated"* ]]
 }

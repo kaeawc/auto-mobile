@@ -30,6 +30,67 @@ const spec = (extra: Record<string, unknown>, root: unknown = { type: "spacer" }
   root,
 });
 
+describe("notifications module contract", () => {
+  const notifications = PROTOTYPE_PLATFORM_MODULES.notifications;
+
+  test("post, cancel, setBadge and schedule; all but cancel need the notifications permission", () => {
+    expect(Object.keys(notifications.calls)).toEqual(["post", "cancel", "setBadge", "schedule"]);
+    expect(notifications.calls.schedule.permissions).toEqual(["notifications"]);
+    expect(notifications.calls.post.permissions).toEqual(["notifications"]);
+    expect(notifications.calls.setBadge.permissions).toEqual(["notifications"]);
+    expect(notifications.calls.cancel.permissions).toEqual([]);
+    expect(
+      Object.entries(notifications.calls.post.args)
+        .filter(([, arg]) => !arg.optional)
+        .map(([name]) => name),
+    ).toEqual(["id", "channel", "title"]);
+    expect(Object.values(notifications.calls.cancel.args).every((arg) => arg.optional)).toBe(true);
+  });
+
+  test("events are opened, action, reply, dismissed and scheduledFired; only reply is sensitive", () => {
+    expect(notifications.events).toEqual({
+      opened: { sensitive: false, userInitiated: true },
+      action: { sensitive: false, userInitiated: true },
+      reply: { sensitive: true, userInitiated: true },
+      dismissed: { sensitive: false },
+      scheduledFired: { sensitive: false },
+    });
+  });
+
+  test("state is the counts, the authorization status and the per-channel blocked flag", () => {
+    expect(Object.keys(notifications.state ?? {})).toEqual([
+      "badge",
+      "active",
+      "pending",
+      "authorization",
+      "blocked",
+    ]);
+    expect(notifications.state?.blocked?.value).toEqual({ kind: "boolean" });
+    expect(notifications.state?.active?.value).toMatchObject({ min: 0, max: 24 });
+    expect(notifications.state?.authorization?.value.values).toEqual([
+      "granted",
+      "denied",
+      "blocked",
+      "notDetermined",
+      "limited",
+      "restricted",
+      "unavailable",
+    ]);
+  });
+
+  test("schedule takes the post arguments plus a whole-second delay of 1 to 604800 behind its own capability", () => {
+    const { delaySeconds, ...postArgs } = notifications.calls.schedule.args;
+    expect(postArgs).toEqual(notifications.calls.post.args);
+    expect(delaySeconds).toEqual({
+      optional: false,
+      value: { kind: "number", integer: true, min: 1, max: 604800 },
+    });
+    expect(notifications.calls.schedule.capability).toBe(
+      "prototype_platform_notifications_scheduled_v1",
+    );
+  });
+});
+
 describe("platform module table", () => {
   test("resolves calls, events and pointer modules from the contract", () => {
     expect(prototypePlatformCall("test.echo")?.definition.args.message?.optional).toBe(false);
@@ -52,12 +113,24 @@ describe("platform module table", () => {
     for (const [name, definition] of Object.entries(contract.platformModules)) {
       expect(definition.capability).toMatch(new RegExp(`^prototype_platform_${name}_v[0-9]+$`));
     }
-    expect(PROTOTYPE_PLATFORM_MODULE_GATES.map((gate) => gate.capability)).toEqual(
-      Object.values(PROTOTYPE_PLATFORM_MODULES).flatMap((definition) => [
+    const callCapabilities = Object.entries(contract.platformModules).flatMap(
+      ([name, definition]) =>
+        Object.values(definition.calls as Record<string, { capability?: string }>)
+          .map((call) => call.capability)
+          .filter((capability): capability is string => capability !== undefined)
+          .map((capability) => {
+            // A call capability extends its module's name: prototype_platform_<module>_<op>_vN.
+            expect(capability).toMatch(new RegExp(`^prototype_platform_${name}_[a-z]+_v[0-9]+$`));
+            return capability;
+          }),
+    );
+    expect(PROTOTYPE_PLATFORM_MODULE_GATES.map((gate) => gate.capability)).toEqual([
+      ...Object.values(PROTOTYPE_PLATFORM_MODULES).flatMap((definition) => [
         definition.capability,
         ...(definition.deviceCapability ? [definition.deviceCapability] : []),
       ]),
-    );
+      ...new Set(callCapabilities),
+    ]);
   });
 });
 
@@ -611,9 +684,17 @@ describe("settings module contract", () => {
 });
 
 describe("picker module contracts", () => {
-  test("contacts.pick takes one optional boolean and is sensitive", () => {
+  test("contacts.pick takes an optional field list and flag, and is sensitive", () => {
     const pick = PROTOTYPE_PLATFORM_MODULES.contacts.calls.pick;
-    expect(Object.keys(pick.args)).toEqual(["multiple"]);
+    expect(Object.keys(pick.args)).toEqual(["fields", "multiple"]);
+    expect(pick.args.fields.optional).toBe(true);
+    expect(pick.args.fields.value).toMatchObject({
+      kind: "array",
+      item: { kind: "enum", values: ["name", "phone", "email"] },
+      min: 1,
+      max: 3,
+      unique: true,
+    });
     expect(pick.args.multiple.optional).toBe(true);
     expect(pick.sensitive).toBe(true);
     expect(pick.permissions).toEqual([]);
@@ -714,16 +795,14 @@ describe("system media picker and camera module contracts", () => {
     expect(capture.args.maxDurationMs.value.min).toBe(1);
   });
 
-  test("both use system UI: sensitive, no declared permission, events or state", () => {
+  test("both use system UI: sensitive, with no declared permission or background mode", () => {
     for (const call of [pick, capture]) {
       expect(call.sensitive).toBe(true);
       expect(call.permissions).toEqual([]);
       expect(call.background).toEqual([]);
     }
-    for (const name of ["mediaLibrary", "camera"]) {
-      expect(PROTOTYPE_PLATFORM_MODULES[name].events).toEqual({});
-      expect(PROTOTYPE_PLATFORM_MODULES[name].state).toEqual({});
-    }
+    expect(PROTOTYPE_PLATFORM_MODULES.mediaLibrary.events).toEqual({});
+    expect(PROTOTYPE_PLATFORM_MODULES.mediaLibrary.state).toEqual({});
   });
 
   test("picker and capture are gated separately, so a device can offer only the picker", () => {
@@ -731,6 +810,60 @@ describe("system media picker and camera module contracts", () => {
       "prototype_platform_mediaLibrary_v1",
     );
     expect(PROTOTYPE_PLATFORM_MODULES.camera.capability).toBe("prototype_platform_camera_v1");
+  });
+});
+
+describe("photo library read and save contract", () => {
+  const library = PROTOTYPE_PLATFORM_MODULES.mediaLibrary;
+  const spec = (onTap: unknown[], permissions: string[]) => ({
+    id: "library",
+    window: { placement: { type: "fullscreen" } },
+    requires: {
+      platform: ["mediaLibrary"],
+      permissions: permissions.map((name) => ({ name, purpose: "Photos" })),
+    },
+    root: { type: "button", label: "Go", onTap },
+  });
+  const query = {
+    type: "platform",
+    call: "mediaLibrary.query",
+    args: { media: { value: "images" } },
+  };
+  const save = { type: "platform", call: "mediaLibrary.save", args: { media: { value: {} } } };
+
+  test("query and manageLimitedSelection read the library under photos; save adds under photosAdd", () => {
+    expect(Object.keys(library.calls)).toEqual(["pick", "query", "manageLimitedSelection", "save"]);
+    expect(library.calls.query.permissions).toEqual(["photos"]);
+    expect(library.calls.manageLimitedSelection.permissions).toEqual(["photos"]);
+    expect(library.calls.save.permissions).toEqual(["photosAdd"]);
+    expect(library.calls.query.args.limit.value).toEqual({
+      kind: "number",
+      integer: true,
+      min: 1,
+      max: 64,
+    });
+    expect(library.calls.save.args.media.optional).toBe(false);
+    expect(library.calls.query.sensitive).toBe(true);
+  });
+
+  test("read and save each add their own capability, so a device can offer save alone", () => {
+    const read = requiredPrototypeCapabilities(spec([query], ["photos"]));
+    expect(read).toContain("prototype_platform_mediaLibrary_query_v1");
+    expect(read).not.toContain("prototype_platform_mediaLibrary_save_v1");
+    const write = requiredPrototypeCapabilities(spec([save], ["photosAdd"]));
+    expect(write).toContain("prototype_platform_mediaLibrary_save_v1");
+    expect(write).not.toContain("prototype_platform_mediaLibrary_query_v1");
+    const manage = { type: "platform", call: "mediaLibrary.manageLimitedSelection", args: {} };
+    const limited = requiredPrototypeCapabilities(spec([manage], ["photos"]));
+    expect(limited).toContain("prototype_platform_mediaLibrary_query_v1");
+    expect(limited).not.toContain("prototype_platform_mediaLibrary_save_v1");
+  });
+
+  test("each call needs its declared permission", () => {
+    expect(validatePrototypeSpec(spec([query], ["photos"])).success).toBe(true);
+    expect(validatePrototypeSpec(spec([query], ["photosAdd"])).success).toBe(false);
+    expect(validatePrototypeSpec(spec([save], ["photosAdd"])).success).toBe(true);
+    expect(validatePrototypeSpec(spec([save], ["photos"])).success).toBe(false);
   });
 });
 
@@ -775,5 +908,231 @@ describe("location module contract", () => {
     expect(Object.keys(location.state ?? {})).toEqual(["current", "servicesEnabled"]);
     expect(location.state?.current.value.kind).toBe("json");
     expect(location.state?.servicesEnabled.value.kind).toBe("boolean");
+  });
+});
+
+describe("commerce module contract", () => {
+  const commerce = PROTOTYPE_PLATFORM_MODULES.commerce;
+
+  test("commerce.purchase takes only a product identifier and commerce.restore takes nothing", () => {
+    expect(Object.keys(commerce.calls)).toEqual(["purchase", "restore"]);
+    const productId = commerce.calls.purchase.args.productId;
+    expect(Object.keys(commerce.calls.purchase.args)).toEqual(["productId"]);
+    expect(productId.optional).toBe(false);
+    expect(productId.value.pattern).toBe("stateKey");
+    expect(commerce.calls.restore.args).toEqual({});
+    for (const call of Object.values(commerce.calls)) {
+      expect(call.permissions).toEqual([]);
+    }
+  });
+
+  test("entitlements and the last transaction are read-only state with one change event", () => {
+    expect(commerce.events).toEqual({ entitlementsChanged: { sensitive: false } });
+    expect(Object.keys(commerce.state ?? {})).toEqual(["entitlements", "lastTransaction"]);
+  });
+});
+
+describe("sensors module contract", () => {
+  const sensors = PROTOTYPE_PLATFORM_MODULES.sensors;
+
+  test("sensors has no calls and one shake event", () => {
+    expect(sensors.calls).toEqual({});
+    expect(sensors.events).toEqual({ shake: { sensitive: false } });
+  });
+
+  test("continuous readings are flat whole-number keys and light is Android only", () => {
+    const state = sensors.state ?? {};
+    expect(Object.keys(state)).toEqual([
+      "pitchDeg",
+      "rollDeg",
+      "headingDeg",
+      "steps",
+      "proximityNear",
+      "lightLux",
+    ]);
+    for (const name of ["pitchDeg", "rollDeg", "headingDeg", "steps", "lightLux"]) {
+      expect(state[name].value.integer).toBe(true);
+    }
+    expect(state.headingDeg.value.min).toBe(0);
+    expect(state.headingDeg.value.max).toBe(359);
+    expect(state.pitchDeg.value.min).toBe(-180);
+    expect(state.pitchDeg.value.max).toBe(180);
+    expect(state.rollDeg.value.min).toBe(-180);
+    expect(state.rollDeg.value.max).toBe(180);
+    expect(state.steps.value.min).toBe(0);
+    expect(state.steps.value.max).toBe(Number.MAX_SAFE_INTEGER);
+    expect(state.lightLux.value.min).toBe(0);
+    expect(state.lightLux.value.max).toBe(1_000_000);
+    expect(state.proximityNear.value.kind).toBe("boolean");
+    expect(state.lightLux.platforms).toEqual(["android"]);
+    expect(state.steps.platforms).toEqual(["android", "ios"]);
+    expect(state.headingDeg.platforms).toEqual(["android", "ios"]);
+    expect(state.proximityNear.platforms).toEqual(["android", "ios"]);
+  });
+});
+
+describe("audioRecorder module contract", () => {
+  const recorder = PROTOTYPE_PLATFORM_MODULES.audioRecorder;
+
+  test("start, stop and cancel need the microphone permission", () => {
+    expect(Object.keys(recorder.calls)).toEqual(["start", "stop", "cancel"]);
+    for (const call of Object.values(recorder.calls)) {
+      expect(call.permissions).toEqual(["microphone"]);
+      expect(call.background).toEqual([]);
+    }
+    expect(recorder.calls.start.sensitive).toBe(true);
+    expect(recorder.calls.stop.sensitive).toBe(true);
+  });
+
+  test("start caps a recording at five minutes; stop and cancel take no arguments", () => {
+    expect(recorder.calls.start.args.maxDurationMs).toEqual({
+      optional: true,
+      value: { kind: "number", integer: true, min: 1, max: 300000 },
+    });
+    expect(recorder.calls.stop.args).toEqual({});
+    expect(recorder.calls.cancel.args).toEqual({});
+  });
+
+  test("status, a 0-1 level and elapsed time are readable on both platforms", () => {
+    expect(Object.keys(recorder.state ?? {})).toEqual(["status", "level", "elapsedMs"]);
+    expect(recorder.state?.status.value.values).toEqual([
+      "recording",
+      "stopped",
+      "permission_denied",
+      "unavailable",
+      "error",
+    ]);
+    expect(recorder.state?.level.value).toEqual({ kind: "number", min: 0, max: 1 });
+    expect(Object.keys(recorder.events)).toEqual(["statusChanged"]);
+  });
+
+  test("a level reading binds into a progress value through {platform}", () => {
+    const result = validatePrototypeSpec({
+      id: "rec",
+      window: { placement: { type: "fullscreen" } },
+      requires: {
+        platform: ["audioRecorder"],
+        permissions: [{ name: "microphone", purpose: "Record a voice note" }],
+      },
+      root: { type: "text", text: "Level {platform:/audioRecorder/level}" },
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("live camera calls and per-call capabilities", () => {
+  const camera = PROTOTYPE_PLATFORM_MODULES.camera;
+  const spec = (onTap: unknown[], permissions = [{ name: "camera", purpose: "Shoot" }]) => ({
+    id: "cam",
+    window: { placement: { type: "fullscreen" } },
+    requires: { platform: ["camera"], permissions },
+    root: { type: "button", label: "Go", onTap },
+  });
+  const call = (op: string) => ({
+    type: "platform",
+    call: `camera.${op}`,
+    args: { preview: { value: "vf" } },
+  });
+
+  test("live calls name a preview and need the camera permission", () => {
+    for (const op of ["takePhoto", "startRecording", "stopRecording"]) {
+      expect(camera.calls[op].args.preview.optional).toBe(false);
+      expect(camera.calls[op].permissions).toEqual(["camera"]);
+      expect(camera.calls[op].sensitive).toBe(true);
+    }
+    expect(Object.keys(camera.state ?? {})).toEqual([
+      "status",
+      "flashAvailable",
+      "recordingMs",
+      "source",
+    ]);
+    expect(Object.keys(camera.events)).toEqual(["statusChanged"]);
+  });
+
+  test("a photo needs only the module capability", () => {
+    const required = requiredPrototypeCapabilities(spec([call("takePhoto")]));
+    expect(required).toContain("prototype_platform_camera_v1");
+    expect(required).not.toContain("prototype_platform_camera_video_v1");
+    expect(required).not.toContain("prototype_platform_camera_capture_v1");
+  });
+
+  test("recording and system capture each add their own capability", () => {
+    expect(requiredPrototypeCapabilities(spec([call("stopRecording")]))).toContain(
+      "prototype_platform_camera_video_v1",
+    );
+    const capture = {
+      type: "platform",
+      call: "camera.capture",
+      args: { media: { value: "image" } },
+    };
+    const required = requiredPrototypeCapabilities(spec([capture], []));
+    expect(required).toContain("prototype_platform_camera_capture_v1");
+    expect(required).toContain("prototype_platform_camera_v1");
+  });
+
+  test("the call gate reports each recording call's path", () => {
+    const gate = PROTOTYPE_PLATFORM_MODULE_GATES.find(
+      (entry) => entry.capability === "prototype_platform_camera_video_v1",
+    )!;
+    const recording = spec([call("takePhoto"), call("startRecording"), call("stopRecording")]);
+    expect(gate.fields(recording)).toEqual(["root.onTap[1]", "root.onTap[2]"]);
+    expect(gate.unsupportedMessage(["root.onTap[1]"], "ios")).toContain(
+      "`camera.startRecording` or `camera.stopRecording`",
+    );
+  });
+
+  test("a live call without the camera permission is refused", () => {
+    expect(validatePrototypeSpec(spec([call("takePhoto")], [])).success).toBe(false);
+    const withPreview = {
+      ...spec([call("takePhoto")]),
+      root: {
+        type: "column",
+        children: [{ type: "cameraPreview", id: "vf" }, spec([call("takePhoto")]).root],
+      },
+    };
+    expect(validatePrototypeSpec(withPreview).success).toBe(true);
+  });
+});
+
+describe("cast module contract", () => {
+  const cast = PROTOTYPE_PLATFORM_MODULES.cast;
+
+  test("remote-only controls: disconnect, stop and a 0-1 setVolume", () => {
+    expect(Object.keys(cast.calls)).toEqual(["disconnect", "stop", "setVolume"]);
+    expect(cast.calls.disconnect.args).toEqual({});
+    expect(cast.calls.stop.args).toEqual({});
+    expect(cast.calls.setVolume.args.volume).toEqual({
+      optional: false,
+      value: { kind: "number", min: 0, max: 1 },
+    });
+    for (const call of Object.values(cast.calls)) {
+      expect(call.permissions).toEqual([]);
+    }
+  });
+
+  test("session events and route state cover both cast protocols", () => {
+    expect(Object.keys(cast.events)).toEqual([
+      "routesChanged",
+      "sessionStarting",
+      "sessionStarted",
+      "sessionEnded",
+      "sessionFailed",
+      "remoteVolume",
+    ]);
+    expect(Object.keys(cast.state ?? {})).toEqual([
+      "state",
+      "deviceName",
+      "protocol",
+      "player",
+      "volume",
+    ]);
+    expect(cast.state?.state.value.values).toEqual([
+      "unavailable",
+      "noDevices",
+      "notConnected",
+      "connecting",
+      "connected",
+    ]);
+    expect(cast.state?.protocol.value.values).toEqual(["googleCast", "airplay"]);
   });
 });

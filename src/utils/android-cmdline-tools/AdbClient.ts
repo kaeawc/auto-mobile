@@ -40,7 +40,7 @@ import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHeal
 import { AdbDeviceReadings } from "./AdbDeviceReadings";
 import { AdbDeviceTransportUnavailableError } from "./AdbDeviceTransportUnavailableError";
 import { AdbPathDiscovery } from "./AdbPathDiscovery";
-import { AdbSignalExecutor } from "./AdbSignalExecutor";
+import { AdbSignalExecutor, type AdbSignalExecOptions } from "./AdbSignalExecutor";
 import {
   ADB_TRANSPORT_RECOVERY_BACKOFF,
   executeWithAdbTransportRecovery,
@@ -805,14 +805,13 @@ export class AdbClient implements AdbExecutor {
     const command = logLabel ?? commandArgs.join(" ");
     const rawExec = async (remainingMs?: number): Promise<ExecResult> => {
       try {
-        return await this.execWithSignal(
-          adbPath,
-          fullArgs,
+        return await this.execWithSignal(adbPath, fullArgs, {
           maxBuffer,
-          remainingMs,
-          resolvedSignal,
-          { waitForProcessSettlementAfterAbort, onStdout },
-        );
+          timeoutMs: remainingMs,
+          signal: resolvedSignal,
+          waitForProcessSettlementAfterAbort,
+          onStdout,
+        });
       } catch (error) {
         throw logLabel ? redactCommandFromError(error, fullArgs, commandArgs, logLabel) : error;
       }
@@ -930,17 +929,14 @@ export class AdbClient implements AdbExecutor {
   private execWithSignal(
     file: string,
     args: string[],
-    maxBuffer?: number,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    options: Pick<AdbExecuteOptions, "waitForProcessSettlementAfterAbort" | "onStdout"> = {},
+    options: AdbSignalExecOptions = {},
   ): Promise<ExecResult> {
     return new AdbSignalExecutor({
       isTestMode: this.isTestMode,
       execAsync: this.execAsync,
       hostProcessExecutor: this.hostProcessExecutor,
       timer: this.timer,
-    }).execWithSignal(file, args, maxBuffer, timeoutMs, signal, options);
+    }).execWithSignal(file, args, options);
   }
 
   /** Typed test seam for the private execution members (#11865). */

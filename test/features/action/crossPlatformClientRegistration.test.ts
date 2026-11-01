@@ -25,15 +25,15 @@ const adb = new FakeAdbExecutor();
 const timer = new FakeTimer();
 const factory = new FakeAdbClientFactory(adb);
 const constructors: [string, () => object][] = [
-  ["ViewHierarchy", () => new ViewHierarchy(device, factory, null, timer)],
+  ["ViewHierarchy", () => new ViewHierarchy(device, factory, null, { timer })],
   ["TapOnElement", () => new TapOnElement(device, adb, { timer })],
   ["TapAnyElement", () => new TapAnyElement(device, adb, { timer })],
   ["TapAtCoordinate", () => new TapAtCoordinate(device, adb, { timer })],
   ["SwipeAtCoordinate", () => new SwipeAtCoordinate(device, adb, { timer })],
   ["DragAndDrop", () => new DragAndDrop(device, adb, timer)],
   ["SwipeOn", () => new SwipeOn(device, adb, { timer })],
-  ["LaunchApp", () => new LaunchApp(device, adb, new FakeSimctl(), timer)],
-  ["RealObserveScreen", () => new RealObserveScreen(device, factory, undefined, timer)],
+  ["LaunchApp", () => new LaunchApp(device, { adb, simctl: new FakeSimctl(), timer })],
+  ["RealObserveScreen", () => new RealObserveScreen(device, factory, undefined, { timer })],
 ];
 const clearRegistries = (): void => {
   AndroidCtrlProxyClient.clearInstanceRegistryForTesting();

@@ -96,14 +96,11 @@ export abstract class IosCtrlProxyDiagnosticsFacade extends DeviceServiceClient 
     const deadline = this.timer.now() + Math.max(0, timeoutMs);
     return this.readForDiagnostics(
       (client) =>
-        client.hierarchy.requestHierarchySync(
-          perf,
-          disableAllFiltering,
-          signal,
-          Math.max(0, deadline - this.timer.now()),
-          true,
-          { observerMode: true },
-        ),
+        client.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, {
+          timeoutMs: Math.max(0, deadline - this.timer.now()),
+          suppressObservationStreamPush: true,
+          observerMode: true,
+        }),
       null,
       signal,
     );

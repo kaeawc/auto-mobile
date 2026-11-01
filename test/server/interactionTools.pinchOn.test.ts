@@ -91,7 +91,7 @@ describe("pinchOnHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ success: false, error: "scale must be greater than 0" }),
     });
 
-    const response = await pinchOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await pinchOnHandler(fakeDevice, args, { deps: interactionDeps });
     const message = parseMessage(response);
     expect(message).toBe("scale must be greater than 0");
     expect(message).not.toBe("Pinched in");
@@ -107,7 +107,7 @@ describe("pinchOnHandler (registered handler wiring)", () => {
       execute: async () => fakeResult({ success: true }),
     });
 
-    const response = await pinchOnHandler(fakeDevice, args, undefined, undefined, interactionDeps);
+    const response = await pinchOnHandler(fakeDevice, args, { deps: interactionDeps });
     expect(parseMessage(response)).toBe("Pinched in");
     expect(readToolResponse(response).isError).toBeUndefined();
   });
@@ -121,7 +121,7 @@ describe("pinchOnHandler (registered handler wiring)", () => {
         return fakeResult({ success: true });
       },
     });
-    await pinchOnHandler(fakeDevice, args, undefined, signal, interactionDeps);
+    await pinchOnHandler(fakeDevice, args, { signal, deps: interactionDeps });
     expect(forwarded).toBe(signal);
   });
 });

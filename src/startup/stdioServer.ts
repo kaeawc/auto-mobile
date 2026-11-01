@@ -55,14 +55,11 @@ export async function runStdioServer(
       ? new (await import("../server/earlyStartTransport")).EarlyStartTransport(stdioTransport)
       : undefined;
   await earlyTransport?.startEarly();
-  const { server, proxyToClaimInitialSession } = await createStdioMcpServer(
-    args,
-    modules,
-    state,
+  const { server, proxyToClaimInitialSession } = await createStdioMcpServer(args, modules, state, {
     launch,
     useProxyMode,
     deviceReadiness,
-  );
+  });
   try {
     logger.info("Connecting MCP server to stdio transport");
     startupBenchmark.startPhase("serverListening");
@@ -112,9 +109,9 @@ export async function startDirectModeServices(
 }
 
 /**
- * Detect when the MCP client disconnects (stdin closes / stdout writes fail). This uses the shared
- * lifecycle handler so resources close before exit. The returned flag turns true once the server
- * is connecting, after which an EOF still answers what was received.
+ * Detect when the MCP client disconnects (stdin/stdout closes or stdout writes fail). This uses
+ * the shared lifecycle handler so resources close before exit. The returned flag turns true once
+ * the server is connecting, after which an EOF still answers what was received.
  */
 async function installStdioTransportShutdown(
   stdioTransport: StdioTransport,
@@ -130,18 +127,25 @@ async function installStdioTransportShutdown(
     MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
   );
   installStdoutShutdownHandler(process.stdout, () =>
-    stdioTransport.stopSending("stdout write failed"),
+    stdioTransport.stopSending("stdout closed or write failed"),
   );
   return connecting;
 }
 
+/**
+ * @param options.launch - Launch context (daemon startup options, parent pid, owner generation).
+ * @param options.useProxyMode - Whether to serve through the daemon proxy instead of in-process.
+ * @param options.deviceReadiness - Device readiness for the in-process server.
+ */
 async function createStdioMcpServer(
   args: ParsedArgs,
   modules: ServerModules,
   state: StdioRuntimeState,
-  launch: StdioLaunchContext,
-  useProxyMode: boolean,
-  deviceReadiness?: DeviceReadiness,
+  {
+    launch,
+    useProxyMode,
+    deviceReadiness,
+  }: { launch: StdioLaunchContext; useProxyMode: boolean; deviceReadiness?: DeviceReadiness },
 ): Promise<{
   server: ConnectableServer;
   proxyToClaimInitialSession: { claimInitialSession(): Promise<void> } | undefined;
@@ -165,13 +169,11 @@ async function createStdioMcpServer(
     // Published first, so shutdown (stdin EOF, SIGTERM) closes it and aborts an acquisition.
     state.stdioProxy = proxy;
     const session = args.sessionConfig
-      ? await acquireBrokerSessionBeforeServing(
-          proxy,
-          args.sessionConfig,
-          launch.launchParentPid,
-          launch.ownerGenerationToken,
+      ? await acquireBrokerSessionBeforeServing(proxy, args.sessionConfig, {
+          launchParentPid: launch.launchParentPid,
+          ownerGenerationToken: launch.ownerGenerationToken,
           modules,
-        )
+        })
       : undefined;
     const result = modules.createProxyMcpServer({
       proxy,
@@ -184,16 +186,24 @@ async function createStdioMcpServer(
   }
 }
 
-/** Prepare one durable broker request while stdin and owner-loss cancellation are already armed. */
+/**
+ * Prepare one durable broker request while stdin and owner-loss cancellation are already armed.
+ *
+ * @param options.launchParentPid - The launching parent, watched as the default execution owner.
+ * @param options.ownerGenerationToken - The owner's process generation, when known.
+ * @param options.modules - Server modules (for the acquisition log line).
+ */
 async function acquireBrokerSessionBeforeServing(
   proxy: {
     acquireBrokerSession(config: SessionConfig): Promise<SessionBrokerResult>;
     setExecutionOwnerLossProbe(probe: () => boolean): void;
   },
   config: SessionConfig,
-  launchParentPid: number,
-  ownerGenerationToken: string | undefined,
-  modules: ServerModules,
+  {
+    launchParentPid,
+    ownerGenerationToken,
+    modules,
+  }: { launchParentPid: number; ownerGenerationToken: string | undefined; modules: ServerModules },
 ): Promise<SessionBrokerResult> {
   const ownerWatch = await startExecutionOwnerWatch(
     launchParentPid,

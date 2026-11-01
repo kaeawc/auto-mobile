@@ -23,6 +23,17 @@ enum PrototypeCarousel {
     static func showsIndicator(_ node: PrototypeNode) -> Bool {
         node.type == "pager" && node.indicator == "dots"
     }
+
+    /// Where a pager's dots sit relative to its pages: a row under a horizontal pager, a column
+    /// beside a vertical one. They are laid out after the pages, never drawn over them.
+    enum IndicatorSide: Equatable {
+        case below
+        case beside
+    }
+
+    static func indicatorSide(vertical: Bool) -> IndicatorSide {
+        vertical ? .beside : .below
+    }
 }
 
 extension PrototypeCarousel {

@@ -1,0 +1,1423 @@
+{
+  "id": "chirp-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "derive": {
+    "poll0": {
+      "of": {
+        "data": "/poll/0/share"
+      },
+      "format": {
+        "percent": {
+          "maxFraction": 0
+        }
+      },
+      "locale": "en-US"
+    },
+    "poll1": {
+      "of": {
+        "data": "/poll/1/share"
+      },
+      "format": {
+        "percent": {
+          "maxFraction": 0
+        }
+      },
+      "locale": "en-US"
+    },
+    "poll2": {
+      "of": {
+        "data": "/poll/2/share"
+      },
+      "format": {
+        "percent": {
+          "maxFraction": 0
+        }
+      },
+      "locale": "en-US"
+    }
+  },
+  "state": {
+    "draft": "",
+    "openId": "",
+    "openAuthor": "",
+    "openBody": "",
+    "linkText": "",
+    "linkKind": "",
+    "following_ana": false,
+    "pollVote": "",
+    "pollBar0": 0.46,
+    "pollBar1": 0.21,
+    "pollBar2": 0.33,
+    "unread": 3,
+    "liked_c1": false,
+    "liked_c2": false,
+    "liked_c3": false,
+    "liked_c4": false,
+    "liked_c5": false,
+    "reposted_c1": false,
+    "reposted_c2": false,
+    "reposted_c3": false,
+    "reposted_c4": false,
+    "reposted_c5": false
+  },
+  "data": {
+    "forYou": [
+      {
+        "id": "c1",
+        "author": "Ana Ruiz",
+        "handle": "@ana",
+        "postedAt": "2026-10-28T07:57:00Z",
+        "body": "Shipping the offline mode today. Huge thanks to @bo for the reviews #launch",
+        "replies": 12,
+        "reposts": 48,
+        "likes": 1240,
+        "ago": "3m",
+        "likesText": "1.2K",
+        "repostsText": "48"
+      },
+      {
+        "id": "c2",
+        "author": "Bo Lind",
+        "handle": "@bo",
+        "postedAt": "2026-10-28T06:30:00Z",
+        "body": "Release notes are up: https://example.com/notes",
+        "replies": 3,
+        "reposts": 9,
+        "likes": 87,
+        "ago": "1h",
+        "likesText": "87",
+        "repostsText": "9"
+      },
+      {
+        "id": "c3",
+        "author": "Mia Okafor",
+        "handle": "@mia",
+        "postedAt": "2026-10-27T21:10:00Z",
+        "body": "Which #coffee order wins? Poll in the replies",
+        "replies": 41,
+        "reposts": 2,
+        "likes": 15300,
+        "ago": "11h",
+        "likesText": "15K",
+        "repostsText": "2"
+      }
+    ],
+    "following": [
+      {
+        "id": "c4",
+        "author": "Leo Park",
+        "handle": "@leo",
+        "postedAt": "2026-10-28T08:01:00Z",
+        "body": "Morning run done, 10K under 50 min #running",
+        "replies": 4,
+        "reposts": 1,
+        "likes": 64,
+        "ago": "now",
+        "likesText": "64",
+        "repostsText": "1"
+      },
+      {
+        "id": "c5",
+        "author": "Ana Ruiz",
+        "handle": "@ana",
+        "postedAt": "2026-10-27T18:00:00Z",
+        "body": "Office hours on Thursday, bring questions",
+        "replies": 0,
+        "reposts": 3,
+        "likes": 210,
+        "ago": "14h",
+        "likesText": "210",
+        "repostsText": "3"
+      }
+    ],
+    "poll": [
+      {
+        "share": 0.46
+      },
+      {
+        "share": 0.21
+      },
+      {
+        "share": 0.33
+      }
+    ],
+    "replies": {
+      "c1": [
+        {
+          "id": "r1",
+          "author": "Bo Lind",
+          "handle": "@bo",
+          "body": "Congrats! Worth the late nights"
+        },
+        {
+          "id": "r2",
+          "author": "Leo Park",
+          "handle": "@leo",
+          "body": "Trying it on the train tomorrow #launch"
+        }
+      ]
+    },
+    "notifications": [
+      {
+        "id": "n1",
+        "text": "Bo liked your post",
+        "when": "5m",
+        "post": "c1",
+        "author": "Ana Ruiz",
+        "body": "Shipping the offline mode today. Huge thanks to @bo for the reviews #launch"
+      },
+      {
+        "id": "n2",
+        "text": "Leo replied to you",
+        "when": "40m",
+        "post": "c1",
+        "author": "Ana Ruiz",
+        "body": "Shipping the offline mode today. Huge thanks to @bo for the reviews #launch"
+      },
+      {
+        "id": "n3",
+        "text": "Mia mentioned you",
+        "when": "2h",
+        "post": "c3",
+        "author": "Mia Okafor",
+        "body": "Which #coffee order wins? Poll in the replies"
+      }
+    ],
+    "pending": {
+      "text": ""
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "style": {
+      "width": "fill",
+      "height": "fill",
+      "background": "surface"
+    },
+    "screens": {
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "pager",
+            "id": "tabs",
+            "style": {
+              "weight": 1
+            },
+            "children": [
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "home_bar",
+                    "title": "Chirp",
+                    "variant": "centerAligned"
+                  },
+                  {
+                    "type": "tabBar",
+                    "testTag": "timeline_tabs",
+                    "pager": "timelines",
+                    "items": [
+                      {
+                        "label": "For you"
+                      },
+                      {
+                        "label": "Following"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "pager",
+                    "id": "timelines",
+                    "style": {
+                      "weight": 1
+                    },
+                    "children": [
+                      {
+                        "type": "list",
+                        "testTag": "for_you",
+                        "style": {
+                          "weight": 1
+                        },
+                        "repeat": {
+                          "items": {
+                            "path": "/forYou"
+                          },
+                          "as": "post",
+                          "key": "id"
+                        },
+                        "header": {
+                          "type": "column",
+                          "children": [
+                            {
+                              "type": "column",
+                              "testTag": "my_post",
+                              "visibleWhen": {
+                                "data": "/pending/text",
+                                "empty": false
+                              },
+                              "style": {
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 12,
+                                  "bottom": 12
+                                },
+                                "spacing": 4,
+                                "background": "secondaryContainer"
+                              },
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "text": "You · now",
+                                  "style": {
+                                    "textStyle": "titleSmall",
+                                    "color": "onSecondaryContainer"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "testTag": "my_post_text",
+                                  "text": "{data:/pending/text}",
+                                  "style": {
+                                    "textStyle": "bodyLarge",
+                                    "color": "onSecondaryContainer"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "card",
+                              "testTag": "poll_card",
+                              "variant": "outlined",
+                              "style": {
+                                "padding": {
+                                  "start": 16,
+                                  "end": 16,
+                                  "top": 8,
+                                  "bottom": 8
+                                }
+                              },
+                              "children": [
+                                {
+                                  "type": "column",
+                                  "style": {
+                                    "padding": {
+                                      "start": 16,
+                                      "end": 16,
+                                      "top": 16,
+                                      "bottom": 16
+                                    },
+                                    "spacing": 8
+                                  },
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "text": "Mia asks: best coffee order?",
+                                      "semantics": {
+                                        "heading": true
+                                      },
+                                      "style": {
+                                        "textStyle": "titleSmall"
+                                      }
+                                    },
+                                    {
+                                      "type": "column",
+                                      "style": {
+                                        "spacing": 4
+                                      },
+                                      "children": [
+                                        {
+                                          "type": "button",
+                                          "testTag": "poll_flat",
+                                          "label": "Flat white",
+                                          "variant": "outlined",
+                                          "visibleWhen": {
+                                            "key": "pollVote",
+                                            "lengthLt": 1
+                                          },
+                                          "onTap": [
+                                            {
+                                              "type": "setState",
+                                              "key": "pollVote",
+                                              "value": "flat"
+                                            },
+                                            {
+                                              "type": "emit",
+                                              "name": "poll_voted",
+                                              "context": {
+                                                "option": {
+                                                  "value": "flat"
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "column",
+                                          "testTag": "poll_result_flat",
+                                          "visibleWhen": {
+                                            "key": "pollVote",
+                                            "lengthGt": 0
+                                          },
+                                          "style": {
+                                            "spacing": 2
+                                          },
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "text": "Flat white · {derived:poll0}",
+                                              "style": {
+                                                "textStyle": "labelLarge"
+                                              }
+                                            },
+                                            {
+                                              "type": "progress",
+                                              "variant": "linear",
+                                              "stateKey": "pollBar0",
+                                              "max": 1
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "column",
+                                      "style": {
+                                        "spacing": 4
+                                      },
+                                      "children": [
+                                        {
+                                          "type": "button",
+                                          "testTag": "poll_filter",
+                                          "label": "Filter",
+                                          "variant": "outlined",
+                                          "visibleWhen": {
+                                            "key": "pollVote",
+                                            "lengthLt": 1
+                                          },
+                                          "onTap": [
+                                            {
+                                              "type": "setState",
+                                              "key": "pollVote",
+                                              "value": "filter"
+                                            },
+                                            {
+                                              "type": "emit",
+                                              "name": "poll_voted",
+                                              "context": {
+                                                "option": {
+                                                  "value": "filter"
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "column",
+                                          "testTag": "poll_result_filter",
+                                          "visibleWhen": {
+                                            "key": "pollVote",
+                                            "lengthGt": 0
+                                          },
+                                          "style": {
+                                            "spacing": 2
+                                          },
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "text": "Filter · {derived:poll1}",
+                                              "style": {
+                                                "textStyle": "labelLarge"
+                                              }
+                                            },
+                                            {
+                                              "type": "progress",
+                                              "variant": "linear",
+                                              "stateKey": "pollBar1",
+                                              "max": 1
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "column",
+                                      "style": {
+                                        "spacing": 4
+                                      },
+                                      "children": [
+                                        {
+                                          "type": "button",
+                                          "testTag": "poll_cortado",
+                                          "label": "Cortado",
+                                          "variant": "outlined",
+                                          "visibleWhen": {
+                                            "key": "pollVote",
+                                            "lengthLt": 1
+                                          },
+                                          "onTap": [
+                                            {
+                                              "type": "setState",
+                                              "key": "pollVote",
+                                              "value": "cortado"
+                                            },
+                                            {
+                                              "type": "emit",
+                                              "name": "poll_voted",
+                                              "context": {
+                                                "option": {
+                                                  "value": "cortado"
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "column",
+                                          "testTag": "poll_result_cortado",
+                                          "visibleWhen": {
+                                            "key": "pollVote",
+                                            "lengthGt": 0
+                                          },
+                                          "style": {
+                                            "spacing": 2
+                                          },
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "text": "Cortado · {derived:poll2}",
+                                              "style": {
+                                                "textStyle": "labelLarge"
+                                              }
+                                            },
+                                            {
+                                              "type": "progress",
+                                              "variant": "linear",
+                                              "stateKey": "pollBar2",
+                                              "max": 1
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "text",
+                                      "testTag": "poll_total",
+                                      "visibleWhen": {
+                                        "key": "pollVote",
+                                        "lengthGt": 0
+                                      },
+                                      "text": "1,204 votes",
+                                      "style": {
+                                        "textStyle": "labelSmall"
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        "onEndReached": [
+                          {
+                            "type": "emit",
+                            "name": "load_more",
+                            "context": {
+                              "timeline": {
+                                "value": "for_you"
+                              }
+                            }
+                          }
+                        ],
+                        "children": [
+                          {
+                            "type": "column",
+                            "testTag": "post_row",
+                            "contentDescription": "Open post",
+                            "style": {
+                              "padding": {
+                                "start": 16,
+                                "end": 16,
+                                "top": 12,
+                                "bottom": 12
+                              },
+                              "spacing": 6
+                            },
+                            "onTap": [
+                              {
+                                "type": "setState",
+                                "key": "openId",
+                                "value": "{post.id}"
+                              },
+                              {
+                                "type": "setState",
+                                "key": "openAuthor",
+                                "value": "{post.author}"
+                              },
+                              {
+                                "type": "setState",
+                                "key": "openBody",
+                                "value": "{post.body}"
+                              },
+                              {
+                                "type": "push",
+                                "stack": "nav",
+                                "screen": "thread"
+                              }
+                            ],
+                            "children": [
+                              {
+                                "type": "row",
+                                "style": {
+                                  "spacing": 6,
+                                  "alignment": "center"
+                                },
+                                "children": [
+                                  {
+                                    "type": "text",
+                                    "text": "{post.author}",
+                                    "style": {
+                                      "textStyle": "titleSmall"
+                                    }
+                                  },
+                                  {
+                                    "type": "text",
+                                    "text": "{post.handle} · {post.ago}",
+                                    "style": {
+                                      "textStyle": "bodySmall",
+                                      "color": "onSurfaceVariant"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "text",
+                                "testTag": "post_text",
+                                "text": "{post.body}",
+                                "linkify": {
+                                  "kinds": ["mention", "hashtag", "url"],
+                                  "style": {
+                                    "color": "primary"
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "setState",
+                                      "key": "linkText",
+                                      "value": {
+                                        "match": "text"
+                                      }
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "linkKind",
+                                      "value": {
+                                        "match": "kind"
+                                      }
+                                    },
+                                    {
+                                      "type": "push",
+                                      "stack": "nav",
+                                      "screen": "link"
+                                    }
+                                  ]
+                                },
+                                "style": {
+                                  "textStyle": "bodyLarge"
+                                }
+                              },
+                              {
+                                "type": "row",
+                                "style": {
+                                  "spacing": 4,
+                                  "alignment": "center"
+                                },
+                                "children": [
+                                  {
+                                    "type": "button",
+                                    "testTag": "reply_count",
+                                    "label": "{post.replies}",
+                                    "icon": "chat_bubble_outline",
+                                    "variant": "text",
+                                    "onTap": [
+                                      {
+                                        "type": "emit",
+                                        "name": "reply_tapped",
+                                        "context": {
+                                          "post": {
+                                            "item": "id"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "button",
+                                    "testTag": "repost_button",
+                                    "label": "{post.repostsText}",
+                                    "icon": "repeat",
+                                    "variant": "text",
+                                    "onTap": [
+                                      {
+                                        "type": "toggle",
+                                        "key": "reposted_{post.id}"
+                                      },
+                                      {
+                                        "type": "emit",
+                                        "name": "reposted",
+                                        "context": {
+                                          "post": {
+                                            "item": "id"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "button",
+                                    "testTag": "like_button",
+                                    "label": "{post.likesText}",
+                                    "icon": "favorite_border",
+                                    "variant": "text",
+                                    "visibleWhen": {
+                                      "key": "liked_{post.id}",
+                                      "equals": false
+                                    },
+                                    "onTap": [
+                                      {
+                                        "type": "toggle",
+                                        "key": "liked_{post.id}"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "button",
+                                    "testTag": "unlike_button",
+                                    "label": "{post.likesText} + you",
+                                    "icon": "favorite",
+                                    "variant": "text",
+                                    "visibleWhen": {
+                                      "key": "liked_{post.id}",
+                                      "equals": true
+                                    },
+                                    "onTap": [
+                                      {
+                                        "type": "toggle",
+                                        "key": "liked_{post.id}"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "iconButton",
+                                    "testTag": "share_button",
+                                    "icon": "share",
+                                    "contentDescription": "Share",
+                                    "onTap": [
+                                      {
+                                        "type": "emit",
+                                        "name": "share_requested",
+                                        "context": {
+                                          "post": {
+                                            "item": "id"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "divider"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "list",
+                        "testTag": "following",
+                        "style": {
+                          "weight": 1
+                        },
+                        "repeat": {
+                          "items": {
+                            "path": "/following"
+                          },
+                          "as": "post",
+                          "key": "id"
+                        },
+                        "header": {
+                          "type": "text",
+                          "text": "Latest from people you follow",
+                          "style": {
+                            "textStyle": "labelMedium",
+                            "padding": {
+                              "start": 16,
+                              "end": 16,
+                              "top": 16,
+                              "bottom": 16
+                            }
+                          }
+                        },
+                        "onEndReached": [
+                          {
+                            "type": "emit",
+                            "name": "load_more",
+                            "context": {
+                              "timeline": {
+                                "value": "following"
+                              }
+                            }
+                          }
+                        ],
+                        "children": [
+                          {
+                            "type": "column",
+                            "testTag": "post_row",
+                            "contentDescription": "Open post",
+                            "style": {
+                              "padding": {
+                                "start": 16,
+                                "end": 16,
+                                "top": 12,
+                                "bottom": 12
+                              },
+                              "spacing": 6
+                            },
+                            "onTap": [
+                              {
+                                "type": "setState",
+                                "key": "openId",
+                                "value": "{post.id}"
+                              },
+                              {
+                                "type": "setState",
+                                "key": "openAuthor",
+                                "value": "{post.author}"
+                              },
+                              {
+                                "type": "setState",
+                                "key": "openBody",
+                                "value": "{post.body}"
+                              },
+                              {
+                                "type": "push",
+                                "stack": "nav",
+                                "screen": "thread"
+                              }
+                            ],
+                            "children": [
+                              {
+                                "type": "row",
+                                "style": {
+                                  "spacing": 6,
+                                  "alignment": "center"
+                                },
+                                "children": [
+                                  {
+                                    "type": "text",
+                                    "text": "{post.author}",
+                                    "style": {
+                                      "textStyle": "titleSmall"
+                                    }
+                                  },
+                                  {
+                                    "type": "text",
+                                    "text": "{post.handle} · {post.ago}",
+                                    "style": {
+                                      "textStyle": "bodySmall",
+                                      "color": "onSurfaceVariant"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "text",
+                                "testTag": "post_text",
+                                "text": "{post.body}",
+                                "linkify": {
+                                  "kinds": ["mention", "hashtag", "url"],
+                                  "style": {
+                                    "color": "primary"
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "setState",
+                                      "key": "linkText",
+                                      "value": {
+                                        "match": "text"
+                                      }
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "linkKind",
+                                      "value": {
+                                        "match": "kind"
+                                      }
+                                    },
+                                    {
+                                      "type": "push",
+                                      "stack": "nav",
+                                      "screen": "link"
+                                    }
+                                  ]
+                                },
+                                "style": {
+                                  "textStyle": "bodyLarge"
+                                }
+                              },
+                              {
+                                "type": "row",
+                                "style": {
+                                  "spacing": 4,
+                                  "alignment": "center"
+                                },
+                                "children": [
+                                  {
+                                    "type": "button",
+                                    "testTag": "reply_count",
+                                    "label": "{post.replies}",
+                                    "icon": "chat_bubble_outline",
+                                    "variant": "text",
+                                    "onTap": [
+                                      {
+                                        "type": "emit",
+                                        "name": "reply_tapped",
+                                        "context": {
+                                          "post": {
+                                            "item": "id"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "button",
+                                    "testTag": "repost_button",
+                                    "label": "{post.repostsText}",
+                                    "icon": "repeat",
+                                    "variant": "text",
+                                    "onTap": [
+                                      {
+                                        "type": "toggle",
+                                        "key": "reposted_{post.id}"
+                                      },
+                                      {
+                                        "type": "emit",
+                                        "name": "reposted",
+                                        "context": {
+                                          "post": {
+                                            "item": "id"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "button",
+                                    "testTag": "like_button",
+                                    "label": "{post.likesText}",
+                                    "icon": "favorite_border",
+                                    "variant": "text",
+                                    "visibleWhen": {
+                                      "key": "liked_{post.id}",
+                                      "equals": false
+                                    },
+                                    "onTap": [
+                                      {
+                                        "type": "toggle",
+                                        "key": "liked_{post.id}"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "button",
+                                    "testTag": "unlike_button",
+                                    "label": "{post.likesText} + you",
+                                    "icon": "favorite",
+                                    "variant": "text",
+                                    "visibleWhen": {
+                                      "key": "liked_{post.id}",
+                                      "equals": true
+                                    },
+                                    "onTap": [
+                                      {
+                                        "type": "toggle",
+                                        "key": "liked_{post.id}"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "type": "iconButton",
+                                    "testTag": "share_button",
+                                    "icon": "share",
+                                    "contentDescription": "Share",
+                                    "onTap": [
+                                      {
+                                        "type": "emit",
+                                        "name": "share_requested",
+                                        "context": {
+                                          "post": {
+                                            "item": "id"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "divider"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "column",
+                "style": {
+                  "weight": 1
+                },
+                "children": [
+                  {
+                    "type": "topAppBar",
+                    "testTag": "notifications_bar",
+                    "title": "Notifications",
+                    "actions": [
+                      {
+                        "icon": "done",
+                        "label": "Mark all read",
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "unread",
+                            "value": 0
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "testTag": "unread_count",
+                    "visibleWhen": {
+                      "key": "unread",
+                      "gt": 0
+                    },
+                    "text": "{unread} new",
+                    "semantics": {
+                      "liveRegion": "polite"
+                    },
+                    "style": {
+                      "textStyle": "labelLarge",
+                      "padding": {
+                        "start": 16,
+                        "end": 16,
+                        "top": 16,
+                        "bottom": 16
+                      }
+                    }
+                  },
+                  {
+                    "type": "column",
+                    "repeat": {
+                      "items": {
+                        "path": "/notifications"
+                      },
+                      "as": "note",
+                      "key": "id"
+                    },
+                    "children": [
+                      {
+                        "type": "listItem",
+                        "testTag": "notification_row",
+                        "headline": "{note.text}",
+                        "supporting": "{note.when}",
+                        "leadingIcon": "notifications",
+                        "onTap": [
+                          {
+                            "type": "setState",
+                            "key": "openId",
+                            "value": "{note.post}"
+                          },
+                          {
+                            "type": "setState",
+                            "key": "openAuthor",
+                            "value": "{note.author}"
+                          },
+                          {
+                            "type": "setState",
+                            "key": "openBody",
+                            "value": "{note.body}"
+                          },
+                          {
+                            "type": "push",
+                            "stack": "nav",
+                            "screen": "thread"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "fab",
+            "testTag": "compose_fab",
+            "icon": "edit",
+            "label": "Post",
+            "onTap": [
+              {
+                "type": "push",
+                "stack": "nav",
+                "screen": "compose"
+              }
+            ]
+          },
+          {
+            "type": "bottomNav",
+            "testTag": "bottom_nav",
+            "pager": "tabs",
+            "items": [
+              {
+                "label": "Home",
+                "icon": "home"
+              },
+              {
+                "label": "Notifications",
+                "icon": "notifications"
+              }
+            ]
+          }
+        ]
+      },
+      "compose": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "compose_bar",
+            "title": "New post",
+            "navigationIcon": {
+              "icon": "close",
+              "label": "Discard",
+              "onTap": [
+                {
+                  "type": "setState",
+                  "key": "draft",
+                  "value": ""
+                },
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            },
+            "children": [
+              {
+                "type": "textField",
+                "testTag": "compose_field",
+                "stateKey": "draft",
+                "label": "What's happening?",
+                "multiline": true,
+                "minLines": 3,
+                "maxLines": 8,
+                "maxLength": 280
+              },
+              {
+                "type": "button",
+                "testTag": "post_button",
+                "label": "Post",
+                "enabledWhen": {
+                  "key": "draft",
+                  "lengthGt": 0
+                },
+                "onTap": [
+                  {
+                    "type": "setData",
+                    "path": "/data/pending/text",
+                    "value": {
+                      "state": "draft"
+                    }
+                  },
+                  {
+                    "type": "emit",
+                    "name": "post_created",
+                    "context": {
+                      "text": {
+                        "state": "draft"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "draft",
+                    "value": ""
+                  },
+                  {
+                    "type": "pop",
+                    "stack": "nav"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "thread": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "thread_bar",
+            "title": "Post",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 12
+              },
+              "children": [
+                {
+                  "type": "text",
+                  "text": "{openAuthor}",
+                  "style": {
+                    "textStyle": "titleMedium"
+                  }
+                },
+                {
+                  "type": "text",
+                  "testTag": "thread_text",
+                  "text": "{openBody}",
+                  "linkify": {
+                    "kinds": ["mention", "hashtag", "url"],
+                    "style": {
+                      "color": "primary"
+                    },
+                    "onTap": [
+                      {
+                        "type": "setState",
+                        "key": "linkText",
+                        "value": {
+                          "match": "text"
+                        }
+                      },
+                      {
+                        "type": "setState",
+                        "key": "linkKind",
+                        "value": {
+                          "match": "kind"
+                        }
+                      },
+                      {
+                        "type": "push",
+                        "stack": "nav",
+                        "screen": "link"
+                      }
+                    ]
+                  },
+                  "style": {
+                    "textStyle": "headlineSmall"
+                  }
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "column",
+                  "testTag": "replies_c1",
+                  "visibleWhen": {
+                    "key": "openId",
+                    "equals": "c1"
+                  },
+                  "style": {
+                    "spacing": 8
+                  },
+                  "repeat": {
+                    "items": {
+                      "path": "/replies/c1"
+                    },
+                    "as": "reply",
+                    "key": "id"
+                  },
+                  "children": [
+                    {
+                      "type": "column",
+                      "testTag": "reply_row",
+                      "style": {
+                        "padding": {
+                          "start": 0,
+                          "end": 0,
+                          "top": 4,
+                          "bottom": 4
+                        }
+                      },
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "{reply.author} {reply.handle}",
+                          "style": {
+                            "textStyle": "titleSmall"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "{reply.body}",
+                          "linkify": {
+                            "kinds": ["mention", "hashtag", "url"],
+                            "style": {
+                              "color": "primary"
+                            },
+                            "onTap": [
+                              {
+                                "type": "setState",
+                                "key": "linkText",
+                                "value": {
+                                  "match": "text"
+                                }
+                              },
+                              {
+                                "type": "setState",
+                                "key": "linkKind",
+                                "value": {
+                                  "match": "kind"
+                                }
+                              },
+                              {
+                                "type": "push",
+                                "stack": "nav",
+                                "screen": "link"
+                              }
+                            ]
+                          },
+                          "style": {
+                            "textStyle": "bodyMedium"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "link": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "link_bar",
+            "title": "{linkText}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            },
+            "children": [
+              {
+                "type": "text",
+                "testTag": "link_kind",
+                "text": "Showing the {linkKind} {linkText}",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              },
+              {
+                "type": "button",
+                "testTag": "follow_button",
+                "label": "Follow",
+                "visibleWhen": {
+                  "all": [
+                    {
+                      "key": "linkKind",
+                      "equals": "mention"
+                    },
+                    {
+                      "key": "following_ana",
+                      "equals": false
+                    }
+                  ]
+                },
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "following_ana",
+                    "value": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

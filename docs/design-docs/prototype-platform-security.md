@@ -32,21 +32,26 @@ Imported specs already lose privileged windows, host requests and AGSL shaders
 
 **R1: imported specs use no `sensitive` call.** `sensitive` in the contract's `platformModules`
 table marks calls and events that touch personal data (clipboard, share, contacts, location,
-camera and microphone output). The strict validator refuses them when `library` is set, with the
-call's path. Relaxing this is an owner decision. _Not yet enforced_
+camera and microphone output). The strict validator refuses sensitive calls and handlers when
+`library: true`, with the call or handler's path. Relaxing this is an owner decision
 ([#15636](https://github.com/kaeawc/auto-mobile/issues/15636)).
 
 **R2: sensitive results cannot reach a network or storage sink.** A `/data` path written by a
 `sensitive` call's `into`, and `sensitive` `/platform` state, may not be bound into a `request`
-URL, header, query or body, a channel URL or header, or `storage.keys`. For imported specs this is
-a refusal, as it is for `secure` text fields today (`secureLibraryError`). For MCP-direct shows it
-is a warning in the show result. _Not yet enforced_
-([#15635](https://github.com/kaeawc/auto-mobile/issues/15635)).
+URL, header, query or body, a channel URL or header, or `storage.keys`. The TypeScript validator
+refuses sensitive `/data` bindings into request or channel fields when `library: true`, as it
+does for `secure` text fields (`secureLibraryError`). Successful MCP-direct shows include a warning
+for those bindings. No host path imports specs yet. Sensitive `/platform` state and `storage.keys`
+checks are not applied, and the Swift validator does not apply this rule yet (tracked in #15635).
 
-**R3: side effects need a user gesture.** Side-effecting calls (`share.*`, notifications,
-background leases) run only from taps, submits and user-initiated platform events, never from
-`onAppear`, timers or show time, and each module has a call rate limit. _Not yet enforced_
-([#15637](https://github.com/kaeawc/auto-mobile/issues/15637)).
+**R3: side effects need a user gesture.** The TypeScript validator permits `share.open` and
+`notifications.post|schedule|setBadge` only in `onTap`, `onLongPress`, `onDoubleTap`, `onSubmit`
+or user-initiated platform event chains (`notifications.opened|action|reply`, `map.markerTap`).
+Follow-ups inherit the chain's gesture status; `onAppear`, `onEndReached`, timers and show-time
+calls are refused at the action path. The contract limits share to 5 calls per 10000 ms and
+notifications to 10 per 60000 ms. The iOS runtime enforces each module's sliding-window `rateLimit`
+with `too_many_in_flight` refusals. Swift validator gesture refusal and Android validator/runtime
+parity remain (#15637).
 
 **R4: runtime isolation.** Where a module runs decides which privileges it can reach. The split
 below is the design; it is _not yet enforced_

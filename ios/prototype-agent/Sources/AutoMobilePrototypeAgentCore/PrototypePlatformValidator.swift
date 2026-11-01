@@ -12,7 +12,13 @@ enum PrototypePlatformValidator {
         case string([String: JSONValue])
         case boolean
         case integer(min: Double, max: Double)
+        /// A contract number without `integer`, such as a playback rate or a 0-1 volume.
+        case number(min: Double, max: Double)
+        /// A state key name (the contract's `key` kind), such as a media player or camera preview id.
+        case key
         case enumeration(Set<String>)
+        /// Any other contract rule (arrays, objects), checked by the shared contract walk.
+        case contract(JSONValue)
     }
 
     struct Argument: Equatable {
@@ -24,6 +30,14 @@ enum PrototypePlatformValidator {
         let args: [String: Argument]
         let permissions: [String]
         let background: [String]
+        /// A capability the call needs on top of its module's (camera recording, media queues).
+        var capability: String?
+    }
+
+    /// The capability `call` needs on top of its module's, when its definition names one.
+    static func callCapability(_ call: String?) -> String? {
+        guard let call, let parts = qualified(call) else { return nil }
+        return modules[parts.module]?.calls[parts.member]?.capability
     }
 
     struct Module: Equatable {
@@ -52,7 +66,10 @@ enum PrototypePlatformValidator {
                     guard case let .array(values)? = call[key] else { return [] }
                     return values.compactMap(\.stringValue)
                 }
-                return Call(args: args, permissions: strings("permissions"), background: strings("background"))
+                return Call(
+                    args: args, permissions: strings("permissions"), background: strings("background"),
+                    capability: call["capability"]?.stringValue
+                )
             }
             return Module(
                 capability: fields["capability"]?.stringValue ?? "",
@@ -73,7 +90,12 @@ enum PrototypePlatformValidator {
             } else {
                 preconditionFailure("platform enum argument without values")
             }
-        default: .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        case "key": .key
+        case "number" where rule["integer"] == .bool(true):
+            .integer(min: rule["min"]?.numberValue ?? 0, max: rule["max"]?.numberValue ?? 0)
+        case "number":
+            .number(min: rule["min"]?.numberValue ?? -.infinity, max: rule["max"]?.numberValue ?? .infinity)
+        default: .contract(.object(rule))
         }
     }
 
@@ -110,20 +132,46 @@ enum PrototypePlatformValidator {
         var channels: [String: JSONValue] = [:]
         /// Whether the spec has a root `auth` block for `auth.*` calls (#14303).
         var hasAuth = false
+        /// The root `commerce` catalog's product ids, or nil without the block (#14314).
+        var products: Set<String>?
+        /// The root `notifications` block's channel ids (#14280).
+        var notificationChannels: Set<String> = []
+        /// `state:` keys kept in secure storage, which an emit context may not carry (#14321).
+        var secureKeys: [String] = []
+        var players: Set<String> = []
+        /// The root `sensors` block: the sensors the device listens to (#14327).
+        var sensors: JSONValue?
+        var previews: Set<String> = []
     }
 
     /// Throws the first platform rule the spec breaks, at the host validator's path.
     static func validate(
         requires: JSONValue?, handlers: JSONValue?, channels: JSONValue? = nil, auth: JSONValue? = nil,
-        root: JSONValue, state: [String: JSONValue]
+        commerce: JSONValue? = nil,
+        storage: JSONValue? = nil, location: JSONValue? = nil, sensors: JSONValue? = nil,
+        notifications: JSONValue? = nil,
+        media: JSONValue? = nil, root: JSONValue,
+        state: [String: JSONValue]
     )
         throws
     {
         try PrototypeChannels.validate(channels?.objectFields, requires: requires, state: state)
         try PrototypeAuthRules.validateBlock(auth, requires: requires)
+        try PrototypeCommerceRules.validateBlock(commerce, requires: requires)
+        try PrototypeSecureStorageRules.validateBlock(storage, requires: requires, state: state)
+        try PrototypeLocationRules.validateBlock(location, requires: requires)
+        try PrototypeSensorRules.validateBlock(sensors, requires: requires)
+        try PrototypeNotificationRules.validateBlock(notifications, requires: requires)
+        try PrototypeMedia.validate(media, requires: requires)
         var declared = try validateRequires(requires)
         declared.channels = channels?.objectFields ?? [:]
         declared.hasAuth = auth?.objectFields != nil
+        declared.products = PrototypeCommerceRules.products(commerce)
+        declared.notificationChannels = PrototypeNotificationRules.channels(notifications)
+        declared.secureKeys = PrototypeSecureStorageRules.secureKeys(storage)
+        declared.sensors = sensors
+        declared.players = PrototypeMedia.players(media).union(PrototypeMedia.inlinePlayers(root))
+        declared.previews = PrototypeCameraPreview.ids(root)
         if let handlers { try validateHandlers(handlers, declared: declared, state: state) }
         for (handler, path) in PrototypeChannels.handlers(declared.channels) {
             if case let .array(actions) = handler { try PrototypeRequestValidator.validateList(
@@ -252,6 +300,7 @@ enum PrototypePlatformValidator {
             }
             guard let owner = eventModule(event) else { throw fail(path, "Unknown platform event") }
             guard declared.modules.contains(owner) else { throw notDeclared(path, owner) }
+            try PrototypeSensorRules.validateEvent(event, path: path, sensors: declared.sensors)
             try PrototypeRequestValidator.validateList(actions, path: path, depth: 1, state: state)
             try scan(.array(actions), path: path, inHandler: true, declared: declared, state: state)
         }
@@ -290,6 +339,8 @@ enum PrototypePlatformValidator {
                     "Emit names starting with \(reservedEmitPrefix) are reserved for runtime events"
                 )
             }
+            try PrototypeSecureStorageRules.validateEmit(fields, path: path, secure: declared.secureKeys)
+            try PrototypeSecureStorageRules.validateRequest(fields, path: path, secure: declared.secureKeys)
             if fields["type"] == nil {
                 if case let .string(pointer)? = fields["platform"] {
                     try read(pointer, path: "\(path).platform", declared: declared)
@@ -333,11 +384,17 @@ enum PrototypePlatformValidator {
         guard declared.modules.contains(name) else { throw notDeclared(path, name) }
         if let state = modules[name]?.state {
             let tokens = PrototypeDataPointer.tokens(pointer)
-            let valid = name == "realtime" ? tokens.count == 3 && declared.channels[tokens[1]] != nil && state
-                .contains(tokens[2]) : tokens.count == 2 && state.contains(tokens[1])
+            let valid = switch name {
+            case "realtime": tokens.count == 3 && declared.channels[tokens[1]] != nil && state.contains(tokens[2])
+            case "media": PrototypeMedia.validRead(tokens, players: declared.players, state: state)
+            case "notifications":
+                PrototypeNotificationRules.validRead(tokens, channels: declared.notificationChannels, state: state)
+            default: tokens.count == 2 && state.contains(tokens[1])
+            }
             guard valid else {
                 throw fail(path, "Unknown platform state \(pointer)")
             }
+            try PrototypeSensorRules.validateRead(tokens, path: path, sensors: declared.sensors)
         }
     }
 
@@ -413,6 +470,12 @@ enum PrototypePlatformValidator {
         }
         try PrototypeChannels.call(action, path: path, channels: declared.channels)
         try PrototypeAuthRules.validateCall(call, path: path, hasAuth: declared.hasAuth)
+        try PrototypeCommerceRules.validateCall(call, args: args, path: path, products: declared.products)
+        try PrototypeNotificationRules.validateCall(
+            call, args: args, path: path, channels: declared.notificationChannels
+        )
+        try PrototypeMedia.call(action, path: path, players: declared.players)
+        try PrototypeCameraPreview.call(action, path: path, previews: declared.previews)
         if call == "share.open", let error = PrototypeShare.argumentsError(args, path: "\(path).args") {
             throw fail(error.path, error.message)
         }
@@ -465,9 +528,24 @@ enum PrototypePlatformValidator {
             guard case let .number(value) = literal, value == value.rounded(), (min ... max).contains(value) else {
                 throw fail(path, "Invalid number value")
             }
+        case let .number(min, max):
+            guard case let .number(value) = literal, value.isFinite, (min ... max).contains(value) else {
+                throw fail(path, "Invalid number value")
+            }
+        case .key:
+            guard let text = literal.stringValue, PrototypeRepeat.isFieldName(text) else {
+                throw fail(path, "Invalid key value")
+            }
         case let .enumeration(values):
             guard case let .string(value) = literal, values.contains(value) else {
                 throw fail(path, "Invalid enum value")
+            }
+        case let .contract(rule):
+            do {
+                try PrototypeContractValidator.validateValue(literal, rule: rule, path: path)
+            } catch let error as PrototypeLoadError {
+                guard case let .invalidSpec(at, message) = error else { throw error }
+                throw fail(at, message)
             }
         }
     }

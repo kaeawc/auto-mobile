@@ -48,6 +48,7 @@ import { DeviceGestureRecordingStartUnheldError } from "./deviceGestureRecording
 import { DeviceOutsideBrokerGrantError } from "./sessionBroker/connectionRefusal";
 import {
   DeviceAssignedToBindingError,
+  BindingRegistrySchemaUnsupportedError,
   BindingDiscoveryIncompleteError,
   BindingOwnershipUnconfirmedError,
 } from "./sessionBroker/provisioning/refusal";
@@ -186,6 +187,7 @@ function hasSelfDescribedRefusalPayload(
   | AppNotRunningError
   | DirectSessionNotActiveError
   | SdkTooOldError
+  | BindingRegistrySchemaUnsupportedError
   | BindingDiscoveryIncompleteError
   | BindingOwnershipUnconfirmedError {
   return [
@@ -209,6 +211,7 @@ function hasSelfDescribedRefusalPayload(
     AppNotRunningError,
     DirectSessionNotActiveError,
     SdkTooOldError,
+    BindingRegistrySchemaUnsupportedError,
     BindingDiscoveryIncompleteError,
     BindingOwnershipUnconfirmedError,
   ].some((Refusal) => error instanceof Refusal);

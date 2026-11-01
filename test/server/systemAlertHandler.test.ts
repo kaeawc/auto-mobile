@@ -115,7 +115,8 @@ describe("ToolRegistry gates UI interactions on the system-alert policy (#14106)
       afterAction: async () => [],
     });
     const action = async () => createStructuredToolResponse({ success: true });
-    ToolRegistry.registerDeviceAware("systemAlertGateNav", "test", z.object({}), action, {
+    ToolRegistry.registerDeviceAware("systemAlertGateNav", "test", z.object({}), {
+      handler: action,
       answersSystemAlerts: true,
     });
     ToolRegistry.registerDeviceAware("systemAlertGatePlain", "test", z.object({}), action);

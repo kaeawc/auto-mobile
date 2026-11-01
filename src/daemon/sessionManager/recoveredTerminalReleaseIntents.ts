@@ -99,13 +99,10 @@ export class RecoveredTerminalReleaseIntents {
           await raceWithDeadline(
             this.port
               .deviceSessionRepository()
-              .markReleased(
-                intent.sessionId,
-                releasedRowStatus(intent.reason),
-                intent.at,
-                intent.reason,
+              .markReleased(intent.sessionId, releasedRowStatus(intent.reason), intent.at, {
+                reason: intent.reason,
                 ...this.adoptedTerminalReleaseFence(intent.sessionId),
-              ),
+              }),
             {
               timer: this.port.timer,
               timeoutMs: SESSION_RELEASE_PERSIST_TIMEOUT_MS,
@@ -175,9 +172,9 @@ export class RecoveredTerminalReleaseIntents {
    * so the release itself is conditioned on the row still being the dead daemon's. A row another
    * survivor recovered meanwhile, or one this write reaches only after parking, is left alone.
    */
-  private adoptedTerminalReleaseFence(sessionId: string): [] | [MarkReleasedOptions] {
+  private adoptedTerminalReleaseFence(sessionId: string): MarkReleasedOptions {
     const adoptedFrom = this.port.sessionSlots().getAdoptedTerminalOwner(sessionId);
-    return adoptedFrom === undefined ? [] : [{ onlyIfOwnedByDaemon: adoptedFrom }];
+    return adoptedFrom === undefined ? {} : { onlyIfOwnedByDaemon: adoptedFrom };
   }
 
   /**

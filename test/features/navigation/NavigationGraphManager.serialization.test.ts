@@ -33,12 +33,11 @@ describe("NavigationGraphManager navigation write ordering", () => {
 
   beforeEach(async () => {
     appId = `${APP_ID}.${++appNumber}`;
-    repository = new NavigationRepository(harness.db);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
-      new FakeTimer(),
-    );
+    repository = new NavigationRepository({ db: harness.db });
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
+      timer: new FakeTimer(),
+    });
     await manager.setCurrentApp(appId);
     await manager.recordNavigationEvent({
       source: "",
@@ -266,7 +265,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
     const otherApp = `${appId}.other`;
     const node = await repository.getNode(appId, "Other");
     await repository.getOrCreateApp(otherApp);
-    await repository.getOrCreateFingerprint(otherApp, node!.id, "fp_corrupt", "{}", 3200);
+    await repository.getOrCreateFingerprint(otherApp, node!.id, "fp_corrupt", {
+      data: "{}",
+      timestamp: 3200,
+    });
     await manager.recordHierarchyNavigation({
       packageName: otherApp,
       fromFingerprint: null,
@@ -289,7 +291,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
       sessionUuidX: "keep",
       session: "keep",
     };
-    await repository.createEdge(appId, "Other", "Home", "tapOn", args, 4000);
+    await repository.createEdge(appId, "Other", "Home", {
+      tool: { toolName: "tapOn", toolArgs: args },
+      timestamp: 4000,
+    });
     const expected = { text: "Continue", _foo: "keep", sessionUuidX: "keep", session: "keep" };
     expect((await manager.getEdgesFrom("Other"))[0].interaction?.args).toEqual(expected);
     expect((await manager.findPath("Home")).path[0].interaction?.args).toEqual(expected);
@@ -298,7 +303,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
 
   for (const variant of ["empty", "selected", "scroll", "combined"] as const) {
     test(`edge conversion preserves ${variant} UI state, empty identifiers and modal stacks`, async () => {
-      const edge = await repository.createEdge(appId, "Other", "Home", "tapOn", null, 4000);
+      const edge = await repository.createEdge(appId, "Other", "Home", {
+        tool: { toolName: "tapOn", toolArgs: null },
+        timestamp: 4000,
+      });
       const selected = await repository.getOrCreateUIElement(
         appId,
         { text: "", resourceId: "id/tab", contentDescription: "" },
@@ -318,13 +326,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
         await repository.linkUIElementsToEdge(edge.id, [selected.id]);
       }
       if (variant === "scroll" || variant === "combined") {
-        await repository.setScrollPosition(
-          edge.id,
-          target.id,
-          "down",
-          variant === "combined" ? container.id : undefined,
-          variant === "combined" ? "fast" : undefined,
-        );
+        await repository.setScrollPosition(edge.id, target.id, "down", {
+          containerElementId: variant === "combined" ? container.id : undefined,
+          speed: variant === "combined" ? "fast" : undefined,
+        });
       }
       await repository.setEdgeModals(edge.id, "from", ["dialog", "menu"]);
       await repository.setEdgeModals(edge.id, "to", ["sheet"]);
@@ -372,7 +377,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
   }
 
   test("unknown edges skip interaction reads but retain modal stacks", async () => {
-    const edge = await repository.createEdge(appId, "Other", "Home", null, null, 4000);
+    const edge = await repository.createEdge(appId, "Other", "Home", {
+      tool: { toolName: null, toolArgs: null },
+      timestamp: 4000,
+    });
     await repository.setEdgeModals(edge.id, "to", ["sheet"]);
     const ui = spyOn(repository, "getUIElementsForEdge");
     const scroll = spyOn(repository, "getScrollPosition");
@@ -392,8 +400,14 @@ describe("NavigationGraphManager navigation write ordering", () => {
   });
 
   test("edge reads await UI, scroll, from modals and to modals before starting the next edge", async () => {
-    const first = await repository.createEdge(appId, "Other", "Home", "tapOn", {}, 4000);
-    const second = await repository.createEdge(appId, "Other", "Home", "swipeOn", {}, 5000);
+    const first = await repository.createEdge(appId, "Other", "Home", {
+      tool: { toolName: "tapOn", toolArgs: {} },
+      timestamp: 4000,
+    });
+    const second = await repository.createEdge(appId, "Other", "Home", {
+      tool: { toolName: "swipeOn", toolArgs: {} },
+      timestamp: 5000,
+    });
     const gates = Array.from({ length: 4 }, () => deferred());
     const started = Array.from({ length: 4 }, () => deferred());
     const calls: string[] = [];
@@ -456,7 +470,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
   });
 
   test("invalid stored JSON throws before any interaction or modal reads", async () => {
-    const edge = await repository.createEdge(appId, "Other", "Home", "tapOn", {}, 4000);
+    const edge = await repository.createEdge(appId, "Other", "Home", {
+      tool: { toolName: "tapOn", toolArgs: {} },
+      timestamp: 4000,
+    });
     await harness.db
       .updateTable("navigation_edges")
       .set({ tool_args: "{" })
@@ -478,7 +495,10 @@ describe("NavigationGraphManager navigation write ordering", () => {
   });
 
   test("a UI read rejection propagates unchanged before scroll or modal reads", async () => {
-    await repository.createEdge(appId, "Other", "Home", "tapOn", {}, 4000);
+    await repository.createEdge(appId, "Other", "Home", {
+      tool: { toolName: "tapOn", toolArgs: {} },
+      timestamp: 4000,
+    });
     const failure = new Error("UI read failed");
     const ui = spyOn(repository, "getUIElementsForEdge").mockRejectedValue(failure);
     const scroll = spyOn(repository, "getScrollPosition");
@@ -589,13 +609,11 @@ describe("NavigationGraphManager navigation write ordering", () => {
 
   test("times out a stuck write, warns once, and releases the next write", async () => {
     const timer = new FakeTimer();
-    const bounded = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    const bounded = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
-      undefined,
-      50,
-    );
+      writeTimeoutMs: 50,
+    });
     await bounded.setCurrentApp(appId);
     const gate = deferred();
     const started = deferred();
@@ -645,13 +663,11 @@ describe("NavigationGraphManager navigation write ordering", () => {
 
   test("late event completion cannot replace a newer screen", async () => {
     const timer = new FakeTimer();
-    const bounded = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    const bounded = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
-      undefined,
-      50,
-    );
+      writeTimeoutMs: 50,
+    });
     await bounded.setCurrentApp(appId);
     const gate = deferred();
     const started = deferred();
@@ -701,13 +717,11 @@ describe("NavigationGraphManager navigation write ordering", () => {
 
   test("a settling write clears its deadline without warning", async () => {
     const timer = new FakeTimer();
-    const bounded = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    const bounded = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
-      undefined,
-      50,
-    );
+      writeTimeoutMs: 50,
+    });
     const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
     try {
       warn.mockClear();

@@ -63,14 +63,19 @@ describe("waitFor multi-panel element visibility", () => {
     const screenSize = resolveActionableHierarchyScreenSize(raw, true) ?? undefined;
     expect(screenSize).toEqual({ width: 951, height: 669 });
     expect(
-      findWaitForElement(finder, waitFor, raw, "ios", new Map(), {
-        iosMultiPanel: true,
-        observationScreenSize: screenSize,
+      findWaitForElement(finder, waitFor, raw, {
+        platform: "ios",
+        options: {
+          iosMultiPanel: true,
+          observationScreenSize: screenSize,
+        },
       })?.text,
     ).toBe(duoSelectionText);
-    expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), false)).toBeNull();
-    expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), {})).toBeNull();
-    expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), true)?.text).toBe(
+    expect(
+      findWaitForElement(finder, waitFor, raw, { platform: "ios", options: false }),
+    ).toBeNull();
+    expect(findWaitForElement(finder, waitFor, raw, { platform: "ios", options: {} })).toBeNull();
+    expect(findWaitForElement(finder, waitFor, raw, { platform: "ios", options: true })?.text).toBe(
       duoSelectionText,
     );
   });

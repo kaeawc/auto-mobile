@@ -136,7 +136,9 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     h.timer.advanceTime(CACHE_TTL_MS * 4);
     h.setRunnerCache(makeHierarchy(100, "polled-before-change"));
 
-    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+    });
 
     expect(result[iosHierarchyAcquisition]).toBe("client-cache");
     expect(result.fresh).toBe(false);
@@ -144,7 +146,7 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     expect(h.getCached()?.captureReceivedAt).toBe(100);
     expect(h.getCached()?.receivedAt).toBe(CACHE_TTL_MS * 4);
     expect(h.getCached()?.fresh).toBe(false);
-    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, { skipWaitForFresh: true });
     expect(h.fetchCount()).toBe(3);
     expect(h.getCached()?.captureReceivedAt).toBe(100);
   });
@@ -155,7 +157,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     h.timer.advanceTime(CACHE_TTL_MS);
     h.setRunnerCache(cached);
 
-    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 30);
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 30,
+    });
 
     expect(result[iosHierarchyAcquisition]).toBe("client-cache");
     expect(result.fresh).toBe(false);
@@ -168,16 +173,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     h.timer.advanceTime(CACHE_TTL_MS);
     h.setRunnerCache(makeHierarchy(100, "observer-cache"));
 
-    const result = await h.hierarchy.requestHierarchySync(
-      undefined,
-      false,
-      undefined,
-      1000,
-      false,
-      {
-        observerMode: true,
-      },
-    );
+    const result = await h.hierarchy.requestHierarchySync(undefined, false, undefined, {
+      timeoutMs: 1000,
+      observerMode: true,
+    });
 
     expect(result?.[iosHierarchyAcquisition]).toBe("client-cache");
     expect(result?.fresh).toBe(false);
@@ -188,12 +187,14 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
   test("runner-cache clock skew never establishes a new freshness budget", async () => {
     h.setRunnerCache(makeHierarchy(3_600_000, "ahead-device-clock"));
 
-    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+    });
 
     expect(result.fresh).toBe(false);
     expect(result[iosHierarchyAcquisition]).toBe("client-cache");
     expect(h.getCached()?.captureReceivedAt).toBe(h.timer.now());
-    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, { skipWaitForFresh: true });
     expect(h.fetchCount()).toBe(2);
   });
 
@@ -206,7 +207,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     });
     h.timer.advanceTime(CACHE_TTL_MS);
 
-    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 30);
+    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 30,
+    });
 
     expect(h.requests()).toEqual([
       { type: "request_hierarchy_if_stale", disableAllFiltering: false, sinceTimestamp: 30 },
@@ -217,7 +221,7 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     await primeCache();
     h.timer.advanceTime(CACHE_TTL_MS);
 
-    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, { skipWaitForFresh: true });
 
     expect(h.requests()[1]).toEqual({
       type: "request_hierarchy_if_stale",
@@ -226,7 +230,8 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
   });
 
   test("a synchronous stale check forwards an explicitly supplied zero timestamp", async () => {
-    await h.hierarchy.requestHierarchySync(undefined, false, undefined, 1000, false, {
+    await h.hierarchy.requestHierarchySync(undefined, false, undefined, {
+      timeoutMs: 1000,
       sinceTimestamp: 0,
     });
 
@@ -299,7 +304,9 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     // caches the *unfiltered* snapshot, then invalidates so it does not bleed into
     // the next normal observe. That caller is the one the no-op was defeating —
     // it never depended on invalidateCache() doing nothing.
-    const rawResult = await h.hierarchy.requestHierarchySync(undefined, true, undefined, 1000);
+    const rawResult = await h.hierarchy.requestHierarchySync(undefined, true, undefined, {
+      timeoutMs: 1000,
+    });
     expect(h.fetchCount()).toBe(1);
     expect(rawResult).not.toBeNull();
     // The unfiltered snapshot really is in the shared cache at this point.
@@ -320,10 +327,15 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     // ObserveScreen defaults to skipWaitForFresh=true, which normally suppresses the
     // sync fetch entirely. An invalidated entry must override that, or the stale
     // fallback hands back exactly the snapshot the invalidation was retiring.
-    const rawResult = await h.hierarchy.requestHierarchySync(undefined, true, undefined, 1000);
+    const rawResult = await h.hierarchy.requestHierarchySync(undefined, true, undefined, {
+      timeoutMs: 1000,
+    });
     h.hierarchy.invalidateCache();
 
-    const next = await h.hierarchy.getLatestHierarchy(false, 15000, undefined, true, 0);
+    const next = await h.hierarchy.getLatestHierarchy(false, 15000, undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(h.fetchCount()).toBe(2);
     expect(next.fresh).toBe(true);
@@ -331,7 +343,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
   });
 
   test("a missing cache forces a full fetch on the skipWaitForFresh observe path", async () => {
-    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 0);
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(h.fetchCount()).toBe(1);
     expect(h.requestTypes()).toEqual(["request_hierarchy"]);
@@ -343,7 +358,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     await primeCache();
     h.timer.advanceTime(1);
 
-    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 1);
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 1,
+    });
 
     expect(h.fetchCount()).toBe(2);
     expect(h.requests()[1]).toEqual({ type: "request_hierarchy", disableAllFiltering: false });
@@ -354,7 +372,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     await primeCache();
     h.timer.advanceTime(CACHE_TTL_MS * 4); // past the TTL, but not invalidated
 
-    const result = await h.hierarchy.getLatestHierarchy(false, 15000, undefined, true, 0);
+    const result = await h.hierarchy.getLatestHierarchy(false, 15000, undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(h.fetchCount()).toBe(2);
     expect(h.requests()[1]).toEqual({
@@ -373,7 +394,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     });
 
     h.timer.advanceTime(10_000);
-    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 0);
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+      minTimestamp: 0,
+    });
 
     expect(h.fetchCount()).toBe(1);
     expect(result.fresh).toBe(true);
@@ -387,7 +411,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
       await primeCache();
       h.timer.advanceTime(101);
 
-      await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 0);
+      await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+        skipWaitForFresh: true,
+        minTimestamp: 0,
+      });
 
       expect(h.fetchCount()).toBe(2);
     } finally {
@@ -435,7 +462,9 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     // rather than disappearing. This is why invalidateCache() keeps the entry
     // instead of nulling it the way the Android delegate does.
     h.setConnected(false);
-    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+    });
 
     expect(h.fetchCount()).toBe(1); // ensureConnected failed before any send
     expect(result.fresh).toBe(false);

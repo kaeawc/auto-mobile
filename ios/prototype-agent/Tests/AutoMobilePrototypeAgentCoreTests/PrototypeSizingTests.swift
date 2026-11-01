@@ -226,6 +226,45 @@ final class PrototypeSizingTests: XCTestCase {
 }
 
 extension PrototypeSizingTests {
+    func testRigidFirstRowMeasuresTextWithinRemainingWidth() {
+        let bounds = PrototypeSizeRules(style: nil, constrainsWidth: true)
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 100, spacing: 10, weights: [nil, nil], minimums: [0, 0],
+            leastFlexibleFirst: true, measuresFlexibleSlots: true
+        ) { index, most in
+            PrototypeSizing.resolve(bounds, proposed: (most, nil)) { maxWidth, _ in
+                (min([70.0, 100][index], maxWidth ?? .infinity), 20)
+            }.width
+        }
+        XCTAssertEqual(widths, [70, 20])
+    }
+
+    func testRigidFirstRowSharesGreedyControlAndCappedSpacerAfterLabel() throws {
+        var spacer = try rules(#"{"minWidth":20,"maxWidth":60}"#)
+        spacer.fillsByDefault = true
+        for available in [340.0, 80] {
+            let widths = PrototypeWeightedStack.mainSizes(
+                available: available, spacing: 8, weights: [nil, 1, nil], minimums: [80, 20, 40],
+                leastFlexibleFirst: true, measuresFlexibleSlots: true
+            ) { index, most in
+                switch index {
+                case 0: max(most ?? 80, 80)
+                case 1: PrototypeSizing.resolve(spacer, proposed: (most, nil)) { _, _ in (0, 10) }.width
+                default: 40
+                }
+            }
+            XCTAssertEqual(widths, available == 340 ? [224, 60, 40] : [80, 20, 40])
+        }
+        let ideal = PrototypeWeightedStack.mainSizes(
+            available: nil, spacing: 8, weights: [nil, 1, nil], minimums: [80, 20, 40],
+            leastFlexibleFirst: true, measuresFlexibleSlots: true
+        ) { index, most in
+            XCTAssertNil(most)
+            return [80, 20, 40][index]
+        }
+        XCTAssertEqual(ideal, [80, 20, 40])
+    }
+
     func testOverfullRowKeepsEveryControlMinimumAndOverflowsAtTheEnd() {
         let minimums = [Double](repeating: 44, count: 6)
         let widths = PrototypeRowSizing.widths(

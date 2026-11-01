@@ -8,6 +8,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
+import { matchesPlatformSelector } from "../models/Platform";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
@@ -55,7 +56,7 @@ interface AutolockAcquisitionOptions {
   collectCancellationSettlement?: (settlement: Promise<void>) => void;
   /** Records the session this acquisition minted (never a reused one) once it is committed. */
   receipt: AcquisitionReceipt;
-  /** The caller's cancel signal, threaded explicitly (#11817); DevicePool supplies it. */
+  /** The caller's cancel signal, threaded explicitly (#11817, #15671). */
   signal?: AbortSignal;
 }
 
@@ -122,8 +123,7 @@ export interface DeviceAutolockPoolPort {
     sessionId: string,
     deviceId: string,
     heldBefore: string | null,
-    platform: Platform,
-    createdSession?: Session,
+    options: { platform: Platform; createdSession?: Session },
   ): Promise<void>;
 }
 
@@ -218,13 +218,10 @@ export class DeviceAutolockManager {
         }),
     });
     if (sessionId) {
-      await this.pool.claimAcquiredDevice(
-        sessionId,
-        deviceId,
-        heldBefore,
+      await this.pool.claimAcquiredDevice(sessionId, deviceId, heldBefore, {
         platform,
-        receipt.minted?.session,
-      );
+        createdSession: receipt.minted?.session,
+      });
     }
     return sessionId;
   }
@@ -359,14 +356,11 @@ export class DeviceAutolockManager {
       this.mcpSessionAcquiredAutolocks.set(owner, acquired);
     }
     // A refused owner is not persisted either, so a restart cannot restore it (#11192).
-    await this.persistAcquiredAutolockSession(
-      device,
-      session,
-      assignmentSnapshot,
-      owner,
+    await this.persistAcquiredAutolockSession(device, session, assignmentSnapshot, {
+      mcpSessionId: owner,
       collectCancellationSettlement,
       signal,
-    );
+    });
     receipt.minted = mintedSession(session, deviceId);
     this.noteStateChanged(device);
 
@@ -395,9 +389,15 @@ export class DeviceAutolockManager {
     device: PooledDevice,
     session: Session,
     snapshot: SessionAssignmentSnapshot,
-    mcpSessionId?: string,
-    collectCancellationSettlement?: (settlement: Promise<void>) => void,
-    signal?: AbortSignal,
+    {
+      mcpSessionId,
+      collectCancellationSettlement,
+      signal,
+    }: {
+      mcpSessionId?: string;
+      collectCancellationSettlement?: (settlement: Promise<void>) => void;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<void> {
     const cancelPublishedSession = async () => {
       // Only this newly minted session may be compensated; never a replacement.
@@ -503,7 +503,7 @@ export class DeviceAutolockManager {
     // admission from being judged as earlier work still in flight (#11400).
     const refreshed = await this.pool
       .getSessionManager()
-      .getOrCreateSession(session.sessionId, undefined, undefined, undefined, false, {
+      .getOrCreateSession(session.sessionId, undefined, undefined, {
         callerExecutionId: getToolSelectionContext()?.execution?.executionId,
         signal,
       });
@@ -533,13 +533,9 @@ export class DeviceAutolockManager {
       mcpSessionId &&
       this.mcpSessionAutolockMap.get(mcpSessionId) !== client.expectedSessionId
     ) {
-      throw heldDeviceBindRefusal(
-        this.pool,
-        device.id,
-        holderOf(device) ?? undefined,
-        undefined,
-        "another",
-      );
+      throw heldDeviceBindRefusal(this.pool, device.id, holderOf(device) ?? undefined, {
+        wording: "another",
+      });
     }
     const session = holderOf(device)
       ? this.pool.getSessionManager().getSession(holderOf(device)!)
@@ -548,13 +544,9 @@ export class DeviceAutolockManager {
       return undefined;
     }
     if (!this.isOwnedAutolockSession(device, session, mcpSessionId)) {
-      throw heldDeviceBindRefusal(
-        this.pool,
-        device.id,
-        holderOf(device) ?? undefined,
-        undefined,
-        "another",
-      );
+      throw heldDeviceBindRefusal(this.pool, device.id, holderOf(device) ?? undefined, {
+        wording: "another",
+      });
     }
     return session;
   }
@@ -654,13 +646,14 @@ export class DeviceAutolockManager {
     const device = this.pool.getDevice(session.assignedDevice);
     if (!device || device.autolockSessionId !== sessionId) {
       if (this.pool.isAdbServerResetQuarantined(sessionId)) {
-        return !platform || session.platform === platform ? sessionId : undefined;
+        return matchesPlatformSelector(session.platform, platform) ? sessionId : undefined;
       }
       this.mcpSessionAutolockMap.delete(mcpSessionId);
       return undefined;
     }
 
-    if (platform && device.platform !== platform) {
+    // A call that names no platform never lands on a watch (#14908).
+    if (!matchesPlatformSelector(device.platform, platform)) {
       return undefined;
     }
 
@@ -703,7 +696,7 @@ export class DeviceAutolockManager {
     );
     const matches = candidates.filter(
       (candidate) =>
-        (!platform || candidate.platform === platform) &&
+        matchesPlatformSelector(candidate.platform, platform) &&
         (!deviceId || candidate.deviceId === deviceId),
     );
     if (matches.length === 1) {
@@ -976,16 +969,14 @@ export class DeviceAutolockManager {
     if (!sessionUuid || base(device.autolockSessionId) !== base(sessionUuid)) {
       // Typed (device_owned_by_other_session) so the JUnit runner's held-device wait and the CLI
       // held-device hint recognize it (#10833).
-      throw new InputDeviceOwnedError(
-        "Tool call",
-        deviceId,
-        sessionUuid,
-        "autolock is enabled, so tool calls must either come from the same MCP session that " +
+      throw new InputDeviceOwnedError("Tool call", deviceId, sessionUuid, {
+        remedy:
+          "autolock is enabled, so tool calls must either come from the same MCP session that " +
           "called 'getAndroid' or 'getApple', or include the sessionUuid returned for this " +
           "device. Options: pass the sessionUuid from getAndroid or getApple that locked this " +
           "device; use getAndroid or getApple to lock a different available device; or wait for " +
           "the idle timeout to release this device.",
-      );
+      });
     }
   }
 

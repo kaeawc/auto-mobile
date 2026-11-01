@@ -3,7 +3,12 @@ import { runBlockWith } from "../../helpers/observedInteractionStub";
 import { expect, describe, test, beforeEach, spyOn, afterEach, mock } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
 import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionToolHandlers";
-import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import {
+  BootedDevice,
+  ObserveResult,
+  OpenURLResult,
+  ViewHierarchyResult,
+} from "../../../src/models";
 
 const testDevice: BootedDevice = {
   name: "test-device",
@@ -80,13 +85,15 @@ describe("HandleIntentChooser", () => {
     fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
     // Create HandleIntentChooser instance
-    handleIntentChooser = new HandleIntentChooser(
-      testDevice,
-      null,
-      () => fakeDeepLinkManager,
-      undefined,
-      { observeScreen: fakeObserveScreen, window: fakeWindow, awaitIdle: fakeAwaitIdle },
-    );
+    handleIntentChooser = new HandleIntentChooser(testDevice, {
+      adb: null,
+      deepLinkManagerFactory: () => fakeDeepLinkManager,
+      collaborators: {
+        observeScreen: fakeObserveScreen,
+        window: fakeWindow,
+        awaitIdle: fakeAwaitIdle,
+      },
+    });
     // These cases exercise chooser routing. BaseVisualChange's observation and
     // settle contract is covered independently, so invoke the feature block
     // directly with the configured fake observation.
@@ -339,14 +346,15 @@ describe("HandleIntentChooser", () => {
   test("openLink's chooser selection treats that failure as a failed open with the chooser error", async () => {
     fakeObserveScreen.setObserveResult({ ...mockObserveResult, viewHierarchy: undefined });
 
-    const opened = { success: true, url: "https://example.com", observation: mockObserveResult };
-    const result = await selectAndroidOpenLinkChooser(
-      testDevice,
-      "com.example.target",
-      opened as never,
-      "https://example.com",
-      handleIntentChooser,
-    );
+    const opened: OpenURLResult = {
+      success: true,
+      url: "https://example.com",
+      observation: mockObserveResult,
+    };
+    const result = await selectAndroidOpenLinkChooser(testDevice, "com.example.target", opened, {
+      url: "https://example.com",
+      chooser: handleIntentChooser,
+    });
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("View hierarchy not found");

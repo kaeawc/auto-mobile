@@ -67,15 +67,12 @@ function setup(dispatchBeforeCancel: boolean) {
   };
   const first = server
     .runKeyedForward(KEY, () =>
-      server.forwardIdeRequest(
-        client,
-        request,
-        TIMEOUT_MS,
-        "socket-1",
-        new ProgressExtendableDeadline(timer.now(), TIMEOUT_MS),
-        TIMEOUT_MS,
-        controller.signal,
-      ),
+      server.forwardIdeRequest(client, request, TIMEOUT_MS, {
+        socketSessionId: "socket-1",
+        deadline: new ProgressExtendableDeadline(timer.now(), TIMEOUT_MS),
+        originalTimeoutMs: TIMEOUT_MS,
+        signal: controller.signal,
+      }),
     )
     .then(
       (value) => ({ value }),

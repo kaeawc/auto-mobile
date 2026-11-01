@@ -52,8 +52,7 @@ function unsupported(
   fields: readonly string[],
   platform: "android" | "ios",
   capability: string,
-  what: string,
-  fallback: string,
+  { what, fallback }: { what: string; fallback: string },
 ): string {
   const device = platform === "android" ? "connected CtrlProxy" : "connected iOS prototype agent";
   const update =
@@ -68,26 +67,20 @@ export function prototypeNetworkUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
 ): string {
-  return unsupported(
-    fields,
-    platform,
-    PROTOTYPE_NETWORK_CAPABILITY,
-    "the request action",
-    "or load data with a /data patch instead",
-  );
+  return unsupported(fields, platform, PROTOTYPE_NETWORK_CAPABILITY, {
+    what: "the request action",
+    fallback: "or load data with a /data patch instead",
+  });
 }
 
 export function prototypeNetworkDeviceUnsupportedMessage(
   fields: readonly string[],
   platform: "android" | "ios",
 ): string {
-  return unsupported(
-    fields,
-    platform,
-    PROTOTYPE_NETWORK_DEVICE_CAPABILITY,
-    'a request with via "device"',
-    'or use via "host", which the host executes',
-  );
+  return unsupported(fields, platform, PROTOTYPE_NETWORK_DEVICE_CAPABILITY, {
+    what: 'a request with via "device"',
+    fallback: 'or use via "host", which the host executes',
+  });
 }
 
 /** The `<into>__meta` pointer: the same path with `__meta` appended to its last segment. */

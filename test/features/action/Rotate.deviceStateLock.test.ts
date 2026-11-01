@@ -92,7 +92,7 @@ class DeviceStateLockAdb extends FakeAdbExecutor {
 function harness(adb: DeviceStateLockAdb) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const rotate = new Rotate(device, adb, timer);
+  const rotate = new Rotate(device, { adb, timer });
   const observe = new FakeObserveScreen();
   observe.enableAutoVaryHierarchy();
   observe.setObserveResult(() =>

@@ -1,4 +1,8 @@
 import {
+  KNOWN_BINDING_REGISTRY_SCHEMA_VERSION,
+  type BindingRegistrySchemaDescription,
+} from "../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
+import {
   type BindingResourceSnapshot,
   isBindingJournalPhaseOpen,
   journalOwnersEqual,
@@ -72,6 +76,26 @@ export class FakeBindingRegistry implements BindingRegistry {
 
   isClosed(): boolean {
     return this.closed;
+  }
+
+  schemaError: Error | undefined;
+  schemaProbes = 0;
+
+  async describeSchema(): Promise<BindingRegistrySchemaDescription> {
+    await this.assertSupportedSchema();
+    return {
+      schemaVersion: KNOWN_BINDING_REGISTRY_SCHEMA_VERSION,
+      knownSchemaVersion: KNOWN_BINDING_REGISTRY_SCHEMA_VERSION,
+      supported: true,
+      writerVersion: "test-writer",
+    };
+  }
+
+  async assertSupportedSchema(): Promise<void> {
+    this.schemaProbes++;
+    if (this.schemaError) {
+      throw this.schemaError;
+    }
   }
 
   async ensureScope(identity: BindingScopeIdentity): Promise<EnsureScopeResult> {

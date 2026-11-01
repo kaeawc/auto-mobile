@@ -1,0 +1,54 @@
+{
+  "spec": {
+    "id": "secure-storage-non-string",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "token": 0,
+      "remember": false
+    },
+    "requires": {
+      "platform": ["secureStorage", "biometric"]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:remember"],
+      "secure": ["state:token"],
+      "secureAuth": {
+        "state:token": "biometric"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Save",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "save",
+              "context": {
+                "r": {
+                  "state": "remember"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Locked",
+          "visibleWhen": {
+            "platform": "/secureStorage/locked",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "storage.secure[0]"
+}

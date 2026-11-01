@@ -333,8 +333,7 @@ function revalidateTerminalMatch(
   context: PollFinalizationContext,
   freshnessState: PollFreshnessState,
   outcome: ObservePollOutcome,
-  original: ObserveResult,
-  capture: PollCapture,
+  { original, capture }: { original: ObserveResult; capture: PollCapture },
 ): PollFinalizationResult | undefined {
   if (!outcome.stopped) {
     return undefined;
@@ -373,17 +372,14 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
     generation?: number,
     cachedAt?: number,
   ): Promise<PollFinalizationResult> => {
-    const refreshed = await reconcileTerminalCapture(
-      observeScreen,
-      timer,
-      options,
-      outcome.observation,
-      nextPollMinTimestamp(
+    const refreshed = await reconcileTerminalCapture(observeScreen, timer, options, {
+      observation: outcome.observation,
+      minTimestamp: nextPollMinTimestamp(
         freshnessState.hasPostInvocationEvidence,
         freshnessState.deviceFloor,
         freshnessState.enteringReference,
       ),
-    );
+    });
     if (refreshed) {
       const original = outcome.observation;
       outcome.observation = refreshed.observation;
@@ -392,7 +388,10 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
       generation = refreshed.generation;
       cachedAt = refreshed.cachedAt;
       canProcessRecomposition = isCompleteFreshCapture(refreshed.observation);
-      const resume = revalidateTerminalMatch(context, freshnessState, outcome, original, refreshed);
+      const resume = revalidateTerminalMatch(context, freshnessState, outcome, {
+        original,
+        capture: refreshed,
+      });
       if (resume) {
         return resume;
       }
@@ -425,9 +424,11 @@ async function capturePoll(
   observeScreen: PollingObserveScreen,
   timer: Timer,
   options: ObservePollOptions,
-  minTimestamp: number,
-  timeoutMs?: number,
-  readBackStackEachPoll = options.readBackStackEachPoll,
+  {
+    minTimestamp,
+    timeoutMs,
+    readBackStackEachPoll = options.readBackStackEachPoll,
+  }: { minTimestamp: number; timeoutMs?: number; readBackStackEachPoll?: boolean },
 ): Promise<PollCapture> {
   const generation = observeScreen.captureCacheGeneration?.();
   const cachedAt = timer.now();
@@ -456,8 +457,7 @@ async function reconcileTerminalCapture(
   observeScreen: PollingObserveScreen,
   timer: Timer,
   options: ObservePollOptions,
-  observation: ObserveResult,
-  minTimestamp: number,
+  { observation, minTimestamp }: { observation: ObserveResult; minTimestamp: number },
 ): Promise<PollCapture | undefined> {
   if (options.readBackStackEachPoll || !observeScreen.collectDeferredBackStack) {
     return undefined;
@@ -474,7 +474,8 @@ async function reconcileTerminalCapture(
     // No exhausted remaining budget: use execute's normal capture timeout,
     // while the outer race (like the terminal read) is bounded only by abort.
     const capture = await raceWithDeadline(
-      () => capturePoll(observeScreen, timer, options, minTimestamp, undefined, true),
+      () =>
+        capturePoll(observeScreen, timer, options, { minTimestamp, readBackStackEachPoll: true }),
       { timer, signal: options.signal, label: "Observe poll attribution reconciliation" },
     );
     throwIfAborted(options.signal);
@@ -580,13 +581,10 @@ export async function pollObserveUntil(
       freshnessState.deviceFloor,
       freshnessState.enteringReference,
     );
-    const capture = await capturePoll(
-      observeScreen,
-      timer,
-      options,
+    const capture = await capturePoll(observeScreen, timer, options, {
       minTimestamp,
-      Math.max(1, options.timeoutMs - (timer.now() - start)),
-    );
+      timeoutMs: Math.max(1, options.timeoutMs - (timer.now() - start)),
+    });
     const { observation, generation: cacheGeneration, cachedAt: cacheStartedAt } = capture;
     polls++;
     lastCapture = capture;

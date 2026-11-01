@@ -6,6 +6,7 @@ import type {
 import type { Timer } from "../../utils/SystemTimer";
 import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import type { BrokerLimits } from "./admission";
+import type { IdlePoolTtlMs } from "./idlePoolExpiry";
 import type { SessionBrokerDevicePort } from "./devicePort";
 import type { SessionLiveness } from "./sessionDisposition";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
@@ -15,7 +16,11 @@ export interface SessionBrokerOptions {
   devices: SessionBrokerDevicePort;
   owner: BindingProcessIdentity;
   limits: BrokerLimits;
-  catalog: (platform: "ios" | "android", signal?: AbortSignal) => Promise<SessionDeviceCatalog>;
+  catalog: (
+    platform: SessionCatalogPlatform,
+    signal?: AbortSignal,
+  ) => Promise<SessionDeviceCatalog>;
+  /** Watch requests are exact and have no defaults, so only iOS and Android are asked. */
   defaults: (platform: "ios" | "android") => SessionRequirementDefaults;
   /** Operator-enabled hardware capabilities; omitted capabilities refuse their requests. */
   capabilities?: SessionRequirementCapabilities;
@@ -25,6 +30,8 @@ export interface SessionBrokerOptions {
   reuseCleanDevices?: boolean;
   /** Opt in to Android reuse only after its native reset strategy passes contamination tests. */
   reuseAndroidCleanDevices?: boolean;
+  /** Idle pooled devices of a listed platform are destroyed after this long idle; omitted keeps them. */
+  idleTtlMs?: IdlePoolTtlMs;
   /** How long a terminal receipt keeps answering replay; defaults to the broker retention window. */
   receiptRetentionMs?: number;
   /** Maximum pin age for an unacknowledged export. */
@@ -37,11 +44,21 @@ export interface SessionBrokerOptions {
   timer?: Pick<Timer, "setTimeout" | "clearTimeout"> & Partial<Pick<Timer, "now">>;
 }
 
+export type SessionCatalogPlatform = SessionDeviceCatalog["platform"];
+
+/**
+ * Whether a released device of this platform is reset for reuse. An Apple Watch simulator
+ * follows the iOS simulator policy (owner decision, #15882).
+ */
 export function cleanDeviceReuseEnabled(
-  platform: "ios" | "android",
+  platform: SessionCatalogPlatform,
   options: Pick<SessionBrokerOptions, "reuseCleanDevices" | "reuseAndroidCleanDevices">,
 ): boolean {
-  return platform === "android"
-    ? options.reuseAndroidCleanDevices === true
-    : options.reuseCleanDevices === true;
+  switch (platform) {
+    case "android":
+      return options.reuseAndroidCleanDevices === true;
+    case "ios":
+    case "watchos":
+      return options.reuseCleanDevices === true;
+  }
 }

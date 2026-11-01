@@ -206,10 +206,12 @@ describe("detached promise rejection ownership", () => {
     const scheduler = new DefaultScreenshotBackoffScheduler(
       async () => ({ success: true, data: "frame" }),
       () => {},
-      { intervals: [0], keepAliveIntervalMs: 10 },
-      timer,
-      () => {
-        throw error;
+      {
+        config: { intervals: [0], keepAliveIntervalMs: 10 },
+        timer,
+        shouldKeepAlive: () => {
+          throw error;
+        },
       },
     );
     scheduler.startBackoffSequence();
@@ -229,13 +231,15 @@ describe("detached promise rejection ownership", () => {
     const scheduler = new DefaultScreenshotBackoffScheduler(
       async () => ({ success: true, data: "frame" }),
       () => {},
-      { intervals: [0], keepAliveIntervalMs: 10 },
-      timer,
-      () => {
-        if (failProbe) {
-          throw error;
-        }
-        return true;
+      {
+        config: { intervals: [0], keepAliveIntervalMs: 10 },
+        timer,
+        shouldKeepAlive: () => {
+          if (failProbe) {
+            throw error;
+          }
+          return true;
+        },
       },
     );
     scheduler.startBackoffSequence();

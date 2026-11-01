@@ -139,8 +139,7 @@ describe("SendKeys iOS text transport", () => {
             { action: "type", text: "again" },
           ],
           undefined,
-          undefined,
-          controller.signal,
+          { signal: controller.signal },
         );
         await new Promise<void>((resolve) => setImmediate(resolve));
         if (failure === "timeout") {
@@ -471,7 +470,7 @@ function createTextClient(
       calls.push(`setKeyboardProfile:${id}`);
       return options.setKeyboardProfile?.(id) ?? { success: true, previousProfileId: "direct" };
     },
-    commitViaIme: async (text, priorImeId, _signal, delivery) => {
+    commitViaIme: async (text, priorImeId, _signal, { delivery } = {}) => {
       if (delivery === "clearField") {
         calls.push("clearField");
         return { success: true };
@@ -687,7 +686,7 @@ describe("SendKeys", () => {
       const result = await commitViaIme(...args);
       if (result.success) {
         // Model the device applying both the IME clear and the subsequent commit.
-        fieldText = args[3] === "clearField" ? "" : args[0];
+        fieldText = args[3]?.delivery === "clearField" ? "" : args[0];
       }
       return result;
     };
@@ -982,9 +981,7 @@ describe("SendKeys", () => {
       await sendKeys.execute(
         [{ action: "type", text: "123", mode: "ime" }],
         { text: "Phone" },
-        undefined,
-        undefined,
-        "external",
+        { display: "external" },
       ),
     ).toMatchObject({ success: true });
     expect(
@@ -4238,7 +4235,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
     expect(calls).toEqual(["ime:next"]);
     expect(press).toHaveBeenCalledTimes(1);
-    expect(press).toHaveBeenCalledWith("tab", undefined, undefined, ["shift"]);
+    expect(press).toHaveBeenCalledWith("tab", undefined, undefined, { modifiers: ["shift"] });
   });
 
   test("forwards an IME action warning on semantic keys", async () => {
@@ -4601,7 +4598,7 @@ describe("SendKeys post-action capture boundary", () => {
   test("explicit-display focus preparation captures nothing and preserves its routing", async () => {
     const h = createSendKeysCaptureHarness();
     await runWithPostActionCaptureScope(undefined, async () => {
-      const result = await h.action.execute(h.commands, undefined, undefined, undefined, "0");
+      const result = await h.action.execute(h.commands, undefined, { display: "0" });
       expect(result.success).toBe(true);
       expect(h.captures).toHaveLength(0);
       expect(h.reads[0]).toEqual({
@@ -4644,14 +4641,16 @@ describe("SendKeys post-action capture boundary", () => {
     const after: ObserveResult = { ...before, observationId: "after-command" };
     const observe = new FakeObserveScreen();
     observe.setObserveResult(before);
-    const focus = new CapturingFocus(device, h.adb, timer);
+    const focus = new CapturingFocus(device, { adb: h.adb, timer });
     focus.observeScreen = observe;
     focus.window = new FakeWindow();
-    const capture = mock<typeof observe.captureScreenshot>(async (_perf, _signal, chosen) => {
-      events.push(`capture:start:${chosen?.observationId}`);
-      await Promise.resolve();
-      events.push(`capture:end:${chosen?.observationId}`);
-    });
+    const capture = mock<typeof observe.captureScreenshot>(
+      async (_perf, { observation: chosen } = {}) => {
+        events.push(`capture:start:${chosen?.observationId}`);
+        await Promise.resolve();
+        events.push(`capture:end:${chosen?.observationId}`);
+      },
+    );
     observe.captureScreenshot = capture;
     const insert = h.client.insert;
     h.client.insert = async (...args) => {
@@ -4688,7 +4687,7 @@ describe("SendKeys post-action capture boundary", () => {
         observer: {
           execute: async () => {
             // Model the final ObserveScreen read's own automatic screenshot.
-            await observe.captureScreenshot(undefined, undefined, after);
+            await observe.captureScreenshot(undefined, { observation: after });
             return after;
           },
         },
@@ -4715,7 +4714,7 @@ describe("SendKeys post-action capture boundary", () => {
           "capture:end:after-command",
         ]);
         expect(h.capture).toHaveBeenCalledTimes(2);
-        expect(h.capture.mock.calls[0][2]).toBe(h.before);
+        expect(h.capture.mock.calls[0][1]?.observation).toBe(h.before);
       } finally {
         h.capture.mockReset();
       }
@@ -4763,8 +4762,11 @@ describe("SendKeys Android non-idempotent outcomes", () => {
             return { success: true, caretPlaced: false };
           }
           attempts.push(value);
-          const pending = text.requestInsertText(value, 5000, undefined, undefined, {
-            abortSignal: options?.abortSignal,
+          const pending = text.requestInsertText(value, {
+            timeoutMs: 5000,
+            transport: {
+              abortSignal: options?.abortSignal,
+            },
           });
           await Promise.resolve();
           if (failure === "timeout") {
@@ -4826,16 +4828,13 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         if (failure === "preAbort") {
           controller.abort();
           await expect(
-            sendKeys.execute([...primer, command], undefined, undefined, controller.signal),
+            sendKeys.execute([...primer, command], undefined, { signal: controller.signal }),
           ).rejects.toThrow();
           expect(attempts).toHaveLength(0);
         } else {
-          const result = await sendKeys.execute(
-            [...primer, command, command],
-            undefined,
-            undefined,
-            controller.signal,
-          );
+          const result = await sendKeys.execute([...primer, command, command], undefined, {
+            signal: controller.signal,
+          });
           if (["timeout", "disconnect", "abort"].includes(failure)) {
             expect(result).toMatchObject({ success: false, retryable: false });
             expect(result.commands[lead]).toMatchObject({
@@ -4921,11 +4920,11 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         if (failure === "preAbort") {
           controller.abort();
           await expect(
-            sendKeys.execute(commands, undefined, undefined, controller.signal),
+            sendKeys.execute(commands, undefined, { signal: controller.signal }),
           ).rejects.toThrow();
           expect(attempts).toBe(0);
         } else {
-          const result = await sendKeys.execute(commands, undefined, undefined, controller.signal);
+          const result = await sendKeys.execute(commands, undefined, { signal: controller.signal });
           if (["timeout", "disconnect", "abort"].includes(failure)) {
             expect(result).toMatchObject({ success: false, retryable: false });
             expect(result.commands[0].retryable).toBe(false);
@@ -5027,8 +5026,11 @@ describe("Android insertion stops mixed typing after an unconfirmed suffix or ru
       let attempts = 0;
       h.client.insert = async (inserted, options) => {
         attempts++;
-        const pending = text.requestInsertText(inserted, 5000, undefined, undefined, {
-          abortSignal: options?.abortSignal,
+        const pending = text.requestInsertText(inserted, {
+          timeoutMs: 5000,
+          transport: {
+            abortSignal: options?.abortSignal,
+          },
         });
         await Promise.resolve();
         if (failure === "abort") {

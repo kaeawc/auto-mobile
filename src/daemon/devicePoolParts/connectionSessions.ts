@@ -1,7 +1,6 @@
 import { holderOf } from "../deviceBinding";
 import { logger } from "../../utils/logger";
 import { type Session } from "../sessionManager";
-import { getAbortSignal } from "../../utils/AbortContext";
 import { DeviceAutolockManager } from "../deviceAutolockManager";
 import type { RefusedOwnedSessionRestore } from "../devicePoolTypes";
 import type { DevicePoolOperations } from "./operations";
@@ -120,11 +119,8 @@ export class DevicePoolConnectionSessions {
   ): Promise<string | undefined> {
     // Tracked like an explicit bind: a connection closing mid-acquire must not stay an owner (#11166).
     const endBind = this.callbacks.beginMcpBind(args[2]);
-    // The one ambient read for this entry point (#11817): the manager takes the signal explicitly.
-    const policy = args[10] ?? {};
-    const forwarded = [...args] as typeof args;
-    forwarded[10] = { ...policy, signal: policy.signal ?? getAbortSignal() };
-    return this.state.autolockManager.autolockDevice(...forwarded).finally(endBind);
+    // The caller's policy carries its cancel signal (#15671); no ambient request signal is read.
+    return this.state.autolockManager.autolockDevice(...args).finally(endBind);
   }
 
   captureAutolockSessionForMcpSession(mcpSessionId: string | undefined): string | undefined {

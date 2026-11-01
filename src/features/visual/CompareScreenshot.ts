@@ -108,8 +108,7 @@ export class CompareScreenshot<S extends VisualScreen = VisualScreen> {
       screen.png,
       request.target ? regionBounds(request.target, screen) : screenBounds(screen.geometry),
       screen.geometry,
-      this.deps.backend,
-      "compareScreenshot",
+      { backend: this.deps.backend, label: "compareScreenshot" },
     );
     const profile = await this.deps.profile(screen);
     const base: CompareBase = { baseline: request.baseline, mode: request.mode, profile };
@@ -131,9 +130,12 @@ export class CompareScreenshot<S extends VisualScreen = VisualScreen> {
       ...(request.mask ?? []).map((region) => regionBounds(region, screen)),
       ...(request.ignoreSystemBars === false ? [] : screen.systemBars),
     ].map((bounds) => toCropPixels(bounds, crop.clippedBounds, crop.pixelsPerNativeUnit));
-    return this.compare(base, existing.png, existing.path, crop.png, {
-      ignore,
-      ...request.threshold,
+    return this.compare(base, existing.png, existing.path, {
+      current: crop.png,
+      options: {
+        ignore,
+        ...request.threshold,
+      },
     });
   }
 
@@ -169,8 +171,7 @@ export class CompareScreenshot<S extends VisualScreen = VisualScreen> {
     base: CompareBase,
     baselinePng: Buffer,
     baselinePath: string,
-    current: Buffer,
-    options: Parameters<typeof diffPngs>[2],
+    { current, options }: { current: Buffer; options: Parameters<typeof diffPngs>[2] },
   ): Promise<CompareScreenshotOutcome> {
     const result = diffPngs(baselinePng, current, options);
     if (result === "size_mismatch") {

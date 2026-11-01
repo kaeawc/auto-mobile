@@ -383,13 +383,11 @@ describe("ViewHierarchy", function () {
       const controller = new AbortController();
       controller.abort();
 
-      const result = await viewHierarchy.getAndroidViewHierarchy(
-        undefined,
-        undefined,
-        false,
-        0,
-        controller.signal,
-      );
+      const result = await viewHierarchy.getAndroidViewHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        signal: controller.signal,
+      });
 
       expect(probed).toBe(false);
       expect(String(result.hierarchy.error)).toContain("Failed to retrieve view hierarchy");
@@ -406,15 +404,12 @@ describe("ViewHierarchy", function () {
         return originalGetDeviceLock();
       });
 
-      // timeoutMs supplied (5th arg signal omitted, 6th arg timeoutMs=500).
-      const result = await viewHierarchy.getAndroidViewHierarchy(
-        undefined,
-        undefined,
-        false,
-        0,
-        undefined,
-        500,
-      );
+      // timeoutMs supplied (signal omitted, readOptions timeoutMs=500).
+      const result = await viewHierarchy.getAndroidViewHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        readOptions: 500,
+      });
 
       expect(probed).toBe(false);
       expect(String(result.hierarchy.error)).toContain("Failed to retrieve view hierarchy");
@@ -576,7 +571,7 @@ describe("ViewHierarchy", function () {
           iosDevice,
           new FakeAdbClientFactory(fakeAdb),
           mockCtrlProxyClient,
-          new FakeTimer(),
+          { timer: new FakeTimer() },
         );
         const result = await subject.getViewHierarchy();
         expect(result.hierarchy.unavailableReason).toBe("runner_launch_queued");
@@ -616,7 +611,7 @@ describe("ViewHierarchy", function () {
           iosDevice,
           new FakeAdbClientFactory(fakeAdb),
           mockCtrlProxyClient,
-          new FakeTimer(),
+          { timer: new FakeTimer() },
         );
         const result = await vh.getViewHierarchy();
         expect([reads, waits]).toEqual([2, 1]);
@@ -662,7 +657,7 @@ describe("ViewHierarchy", function () {
           iosDevice,
           new FakeAdbClientFactory(fakeAdb),
           mockCtrlProxyClient,
-          timer,
+          { timer },
         );
         const result = await vh.getViewHierarchy();
         expect([reads, waits]).toEqual([2, 1]);
@@ -702,12 +697,9 @@ describe("ViewHierarchy", function () {
       };
       const spy = spyOnIosClientInstance(client);
       try {
-        const vh = new ViewHierarchy(
-          iosDevice,
-          new FakeAdbClientFactory(),
-          mockCtrlProxyClient,
+        const vh = new ViewHierarchy(iosDevice, new FakeAdbClientFactory(), mockCtrlProxyClient, {
           timer,
-        );
+        });
         const result = await vh.getViewHierarchy();
         expect(reads).toBe(1);
         expect(result.hierarchy.unavailableReason).toBe("service_recovering");
@@ -914,9 +906,9 @@ describe("ViewHierarchy", function () {
           _waitForFresh?: boolean,
           _timeout?: number,
           _perf?: unknown,
-          _skipWaitForFresh?: boolean,
-          _minTimestamp?: number,
-          signal?: AbortSignal,
+          {
+            signal,
+          }: { skipWaitForFresh?: boolean; minTimestamp?: number; signal?: AbortSignal } = {},
         ) => {
           receivedSignal = signal;
           // A wedged CtrlProxy: this settles ONLY when the caller cancels.
@@ -1907,15 +1899,12 @@ describe("Offscreen Node Filtering", function () {
       const recoveryManager = AndroidCtrlProxyManager.createForTestingWithDeps(
         device,
         new FakeAdbExecutor(),
-        timer,
+        { timer },
       );
-      const vh = new ViewHierarchy(
-        device,
-        new FakeAdbClientFactory(),
-        connectedClient,
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), connectedClient, {
         timer,
-        () => recoveryManager,
-      );
+        observeAccessibilityManagerFactory: () => recoveryManager,
+      });
       const result = await vh.getViewHierarchy();
       expect(result.hierarchy.transportFailure).toBeUndefined();
       expect(starts).toBe(0);
@@ -1941,13 +1930,10 @@ describe("Offscreen Node Filtering", function () {
         },
         waitForAccessibilityServiceBinding: async () => "unhealthy" as const,
       };
-      const vh = new ViewHierarchy(
-        device,
-        new FakeAdbClientFactory(),
-        client,
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, {
         timer,
-        () => manager,
-      );
+        observeAccessibilityManagerFactory: () => manager,
+      });
       const result = await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
         minTimestamp: 0,
@@ -1966,14 +1952,17 @@ describe("Offscreen Node Filtering", function () {
         getAccessibilityHierarchy: async () => null,
         isConnected: () => true,
       });
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer, () => ({
-        isAccessibilityServiceHealthy: async () => true,
-        rebindIfUnhealthy: async () => {
-          rebinds++;
-          return true;
-        },
-        waitForAccessibilityServiceBinding: async () => "already-bound",
-      }));
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, {
+        timer,
+        observeAccessibilityManagerFactory: () => ({
+          isAccessibilityServiceHealthy: async () => true,
+          rebindIfUnhealthy: async () => {
+            rebinds++;
+            return true;
+          },
+          waitForAccessibilityServiceBinding: async () => "already-bound",
+        }),
+      });
       const result = await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
         minTimestamp: 0,
@@ -2098,7 +2087,7 @@ describe("Offscreen Node Filtering", function () {
           return "recovered";
         },
       });
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, { timer });
       await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
         minTimestamp: 0,
@@ -2126,7 +2115,7 @@ describe("Offscreen Node Filtering", function () {
         },
         isRecoveryInFlight: () => false,
       });
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, { timer });
       await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
         minTimestamp: 0,
@@ -2148,7 +2137,7 @@ describe("Offscreen Node Filtering", function () {
           return "recovered";
         },
       });
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, { timer });
       await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
         minTimestamp: 0,
@@ -2165,13 +2154,11 @@ describe("Offscreen Node Filtering", function () {
       const controller = new AbortController();
       controller.abort();
 
-      const result = await vh.getAndroidViewHierarchy(
-        undefined,
-        undefined,
-        false,
-        0,
-        controller.signal,
-      );
+      const result = await vh.getAndroidViewHierarchy(undefined, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        signal: controller.signal,
+      });
 
       expect(result.hierarchy.transportFailure).toBeFalsy();
     });
@@ -2241,14 +2228,10 @@ describe("ViewHierarchy queued runner launch typing (#15291)", () => {
       },
       awaitRecovery: async () => "timed_out" as const,
     });
-    const subject = new ViewHierarchy(
-      iosDevice,
-      adbFactory(),
-      androidClient(),
-      new FakeTimer(),
-      undefined,
-      gate,
-    );
+    const subject = new ViewHierarchy(iosDevice, adbFactory(), androidClient(), {
+      timer: new FakeTimer(),
+      launchQueue: gate,
+    });
     return {
       read: async () => {
         try {

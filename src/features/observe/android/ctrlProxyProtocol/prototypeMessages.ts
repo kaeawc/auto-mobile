@@ -108,9 +108,10 @@ export interface SavedPrototypeInfo {
 export interface SavedPrototypeEntry {
   id: string;
   label: string;
-  slug: string;
-  savedAt: number;
+  slug?: string;
+  savedAt?: number;
   pinned: boolean;
+  hostOnly?: boolean;
 }
 export const SAVED_PROTOTYPE_ERROR_CODES = [
   "pin_unsupported",
@@ -201,6 +202,8 @@ export interface PrototypeResult {
   droppedEvents?: number;
   /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
+  /** Only a successful show reply, when the host knows the display shape. */
+  screenRound?: boolean;
   /** Only a successful `show_prototype` reply for a spec with `window.backdrop` (prototype_backdrop_v1). */
   backdrop?: "blur" | "fallback";
   /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */

@@ -183,6 +183,44 @@ describe("connectPrototypeAgent handshake", () => {
 });
 
 describe("PrototypeAgentClient after the handshake", () => {
+  test("status exposes safeAreaTop in points, including zero and older agents", async () => {
+    const { socket, client, timer } = await connected();
+    for (const safeAreaTop of [59, 0, undefined]) {
+      const pending = client.request("get_prototype_status");
+      const requestId = socket.frames().at(-1)?.requestId;
+      socket.push({
+        type: "prototype_result",
+        requestId,
+        success: true,
+        status: { shown: true, ...(safeAreaTop === undefined ? {} : { safeAreaTop }) },
+      });
+      expect((await pending).status).toEqual({
+        shown: true,
+        ...(safeAreaTop === undefined ? {} : { safeAreaTop }),
+      });
+    }
+    expect(timer.getSleepHistory()).toEqual([]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    client.close();
+  });
+
+  test("invalid safeAreaTop stays unknown without losing other status fields", async () => {
+    const { socket, client } = await connected();
+    for (const safeAreaTop of [-1, "59", null, true]) {
+      const pending = client.request("get_prototype_status");
+      socket.push({
+        type: "prototype_result",
+        requestId: socket.frames().at(-1)?.requestId,
+        success: true,
+        status: { shown: true, safeAreaTop },
+      });
+      const status = (await pending).status;
+      expect(status?.safeAreaTop).toBeUndefined();
+      expect(status?.shown).toBe(true);
+    }
+    client.close();
+  });
+
   test("correlates prototype_result replies by requestId", async () => {
     const { socket, client } = await connected();
     const status = client.request("get_prototype_status");

@@ -73,7 +73,7 @@ describe("BiometricAuth", () => {
       createExecResult("Broadcast completed (1 receivers)", ""),
     );
 
-    biometricAuth = new BiometricAuth(device, fakeAdb, fakeTimer, null, undefined, {
+    biometricAuth = new BiometricAuth(device, fakeAdb, fakeTimer, {
       observeScreen: fakeObserveScreen,
       window: fakeWindow,
       awaitIdle: fakeAwaitIdle,

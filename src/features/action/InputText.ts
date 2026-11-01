@@ -1,3 +1,4 @@
+import { rejectWatchAction } from "../watch/WatchActions";
 import type { ActionCall } from "./ActionCall";
 import {
   type AppendTextFailureSource,
@@ -10,7 +11,7 @@ import { unsupportedPlatformError } from "../../models/ActionableError";
 import { getRequestContext } from "../../utils/AbortContext";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
-import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { Timer } from "../../utils/SystemTimer";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { executeAndroidInputText } from "../../utils/android-cmdline-tools/AndroidInputText";
@@ -69,6 +70,28 @@ export type AppendKeyEventValidator = (
   timeoutMs?: number,
 ) => Promise<{ success: boolean; error?: string; failureSource?: AppendTextFailureSource }>;
 
+/** Bounds and hooks for {@link InputText.appendText}. */
+export interface AppendTextOptions {
+  timeoutMs?: number;
+  beforeKeyEvents?: AppendKeyEventValidator;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
+interface AndroidTextInputOptions {
+  imeAction?: ImeAction;
+  dismissKeyboard?: boolean;
+  mode?: InputTextMode;
+  signal?: AbortSignal;
+}
+
+interface KeyEventPlanOptions {
+  timeoutMs?: number;
+  noRetry?: boolean;
+  beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>;
+  signal?: AbortSignal;
+}
+
 interface KeyboardCloser {
   close(signal?: AbortSignal): Promise<KeyboardResult>;
 }
@@ -91,23 +114,21 @@ type KeyboardDismissalOutcome = Pick<SendTextResult, "keyboardDismissed" | "warn
 export interface InputTextTestHooks {
   executeAndroidTextInput: (
     text: string,
-    imeAction?: ImeAction,
-    dismissKeyboard?: boolean,
-    mode?: InputTextMode,
-    signal?: AbortSignal,
+    options?: AndroidTextInputOptions,
   ) => Promise<SendTextResult & { method?: InputTextMode }>;
-  executeKeyEventPlan: (
-    plan: KeyEventPlan,
-    timeoutMs?: number,
-    noRetry?: boolean,
-    beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>,
-    signal?: AbortSignal,
-  ) => Promise<void>;
+  executeKeyEventPlan: (plan: KeyEventPlan, options?: KeyEventPlanOptions) => Promise<void>;
   executeiOSTextInput: (
     text: string,
     imeAction?: ImeAction,
     signal?: AbortSignal,
   ) => ReturnType<typeof executeIosTextInput>;
+}
+
+/** Collaborator overrides for {@link InputText}; each defaults to the real implementation. */
+export interface InputTextDependencies extends DisplayFenceDependencies {
+  keyboardCloserFactory?: KeyboardCloserFactory;
+  timer?: Timer;
+  targetFocuserFactory?: TextInputTargetFocuserFactory;
 }
 
 function inputTextArgs(
@@ -120,27 +141,28 @@ function inputTextArgs(
 export class InputText extends BaseVisualChange {
   private androidApiLevel: number | undefined;
   private targetFocuser: TextInputTargetFocuser;
+  private readonly keyboardCloserFactory: KeyboardCloserFactory;
 
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null,
-    private readonly keyboardCloserFactory: KeyboardCloserFactory = defaultKeyboardCloserFactory,
-    timer: Timer = defaultTimer,
-    targetFocuserFactory: TextInputTargetFocuserFactory = defaultTargetFocuserFactory,
-    collaborators: DisplayFenceDependencies = {},
+    dependencies: InputTextDependencies = {},
   ) {
-    super(device, adbFactoryOrExecutor, timer, undefined, collaborators);
+    super(device, {
+      adb: adbFactoryOrExecutor,
+      timer: dependencies.timer,
+      displayFence: dependencies,
+    });
     this.device = device;
-    this.targetFocuser = targetFocuserFactory(device);
+    this.keyboardCloserFactory = dependencies.keyboardCloserFactory ?? defaultKeyboardCloserFactory;
+    this.targetFocuser = (dependencies.targetFocuserFactory ?? defaultTargetFocuserFactory)(device);
   }
 
   /** Typed view of the internals unit tests drive directly; not a production API. */
   get testHooks(): InputTextTestHooks {
     return {
-      executeAndroidTextInput: (text, imeAction, dismissKeyboard, mode, signal) =>
-        this.executeAndroidTextInput(text, { imeAction, dismissKeyboard, mode, signal }),
-      executeKeyEventPlan: (plan, timeoutMs, noRetry, beforeDispatch, signal) =>
-        this.executeKeyEventPlan(plan, { timeoutMs, noRetry, beforeDispatch, signal }),
+      executeAndroidTextInput: (text, options) => this.executeAndroidTextInput(text, options),
+      executeKeyEventPlan: (plan, options) => this.executeKeyEventPlan(plan, options),
       executeiOSTextInput: (text, imeAction, signal) =>
         executeIosTextInput(this.iosTextDeps(), text, imeAction, signal),
     };
@@ -155,6 +177,7 @@ export class InputText extends BaseVisualChange {
     options?: InputTextOptions,
     call?: ActionCall,
   ): Promise<SendTextResult & { method?: InputTextMode; retryable?: false }> {
+    rejectWatchAction(this.device.platform, "text input");
     const { imeAction, dismissKeyboard, mode, selector, signal } = inputTextArgs(options, call);
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
@@ -273,12 +296,7 @@ export class InputText extends BaseVisualChange {
    */
   private async executeAndroidTextInput(
     text: string,
-    options: {
-      imeAction?: ImeAction;
-      dismissKeyboard?: boolean;
-      mode?: InputTextMode;
-      signal?: AbortSignal;
-    } = {},
+    options: AndroidTextInputOptions = {},
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const { imeAction, dismissKeyboard = false, mode = "a11y", signal } = options;
     assertInputNotAborted(signal);
@@ -291,14 +309,7 @@ export class InputText extends BaseVisualChange {
     }
 
     if (mode === "append") {
-      return this.executeAndroidAppendTextInput(
-        text,
-        imeAction,
-        dismissKeyboard,
-        undefined,
-        undefined,
-        { signal },
-      );
+      return this.executeAndroidAppendTextInput(text, { imeAction, dismissKeyboard, signal });
     }
 
     // Use accessibility service exclusively (fastest method, ~10-30ms vs ~200-300ms for ADB)
@@ -566,15 +577,9 @@ export class InputText extends BaseVisualChange {
    */
   async appendText(
     text: string,
-    timeoutMs?: number,
-    beforeKeyEvents?: AppendKeyEventValidator,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    options: AppendTextOptions = {},
   ): Promise<SendTextResult & { method?: InputTextMode }> {
-    return this.executeAndroidAppendTextInput(text, undefined, false, timeoutMs, beforeKeyEvents, {
-      signal,
-      onDispatch,
-    });
+    return this.executeAndroidAppendTextInput(text, options);
   }
 
   /**
@@ -602,13 +607,9 @@ export class InputText extends BaseVisualChange {
    */
   private async executeAndroidAppendTextInput(
     text: string,
-    imeAction?: ImeAction,
-    dismissKeyboard: boolean = false,
-    timeoutMs?: number,
-    beforeKeyEvents?: AppendKeyEventValidator,
-    options: { signal?: AbortSignal; onDispatch?: () => void } = {},
+    options: AppendTextOptions & { imeAction?: ImeAction; dismissKeyboard?: boolean } = {},
   ): Promise<SendTextResult & { method?: InputTextMode }> {
-    const { signal, onDispatch } = options;
+    const { imeAction, timeoutMs, beforeKeyEvents, signal, onDispatch } = options;
     assertInputNotAborted(signal);
     const remaining = this.createBudget(timeoutMs);
     const planned = await this.planAppendKeyEvents(text, remaining, timeoutMs, signal);
@@ -636,7 +637,7 @@ export class InputText extends BaseVisualChange {
     // All characters landed (and any imeAction already ran), so a post-typing
     // dismissal failure is a warning on this success, not a failure a caller
     // might answer by re-appending the whole string (issues #5887, #6868).
-    const dismissal = dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
+    const dismissal = options.dismissKeyboard ? await this.dismissKeyboardEpilogue(signal) : {};
 
     return {
       success: true,
@@ -994,12 +995,7 @@ export class InputText extends BaseVisualChange {
 
   private async executeKeyEventPlan(
     plan: KeyEventPlan,
-    options: {
-      timeoutMs?: number;
-      noRetry?: boolean;
-      beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>;
-      signal?: AbortSignal;
-    } = {},
+    options: KeyEventPlanOptions = {},
   ): Promise<void> {
     const { timeoutMs, noRetry = false, beforeDispatch, signal } = options;
     for (const [index, command] of plan.commands.entries()) {

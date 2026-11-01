@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BindingDiscoveryIncompleteError } from "../../../../src/daemon/sessionBroker/provisioning/refusal";
 import { GateBindingBootCapacity } from "../../../../src/daemon/sessionBroker/provisioning/GateBindingBootCapacity";
 import {
   BrokerDeviceAcquisition,
@@ -41,7 +42,7 @@ class NoSessions implements BrokerDeviceAcquisitionSessions {
   async releaseSession(): Promise<void> {}
 }
 
-async function setup() {
+async function setup(ownershipUnreadable = () => false) {
   const timer = new FakeTimer();
   const registry = new FakeBindingRegistry(timer);
   const inventory = new FakeInventory();
@@ -58,6 +59,9 @@ async function setup() {
       ownership: {
         refresh: async () => {
           refreshes += 1;
+          if (ownershipUnreadable()) {
+            throw new BindingDiscoveryIncompleteError("unreadable");
+          }
           snapshot = new Set(["HELD", ...inventory.devices.map((device) => device.deviceId ?? "")]);
         },
         isAutoMobileOwned: (udid) => snapshot.has(udid),
@@ -101,11 +105,58 @@ async function setup() {
       }),
       { livenessOwnerToken: "token" },
     );
-  return { acquire, registry, source, inventory, provisioner, deleter, refreshes: () => refreshes };
+  return {
+    acquire,
+    registry,
+    source,
+    inventory,
+    provisioner,
+    deleter,
+    timer,
+    refreshes: () => refreshes,
+  };
 }
 
 describe("iOS binding refusal ownership end to end", () => {
   for (const path of ["precheck", "reservation"] as const) {
+    test(`${path} qualifies external ownership when its refresh fails without held UDIDs`, async () => {
+      let ownershipUnreadable = false;
+      const h = await setup(() => ownershipUnreadable);
+      if (path === "reservation") {
+        const seeded = await h.acquire("com.apple.CoreSimulator.SimDeviceType.iPhone-15");
+        expect(seeded.outcome).toBe("ready");
+        await h.registry.releaseExecution(
+          { scopeKey: seeded.scope.scopeKey!, bindingIndex: 0 },
+          seeded.bindings[0].sessionUuid!,
+        );
+      }
+      const old = h.inventory.devices[0]?.deviceId;
+      h.source.inventory = [...(old ? [old] : []), "UNKNOWN", "FOREIGN"].map((udid) => ({
+        udid,
+        name: udid,
+        state: "Booted",
+        runtime: SPEC.runtime,
+        isAvailable: true,
+      }));
+      ownershipUnreadable = true;
+      const reads = h.refreshes();
+      const result = await h.acquire();
+      expect(result.outcome).toBe("failed");
+      expect(result.failure).toMatchObject({
+        code: "capacity_exhausted",
+        capacity: { limit: 2, booted: 2, externalDevices: ["UNKNOWN", "FOREIGN"] },
+      });
+      expect(result.failure?.message).toContain("have unconfirmed AutoMobile ownership");
+      expect(result.failure?.message).not.toContain("were not started by AutoMobile");
+      expect(result.failure?.message).not.toContain("have no AutoMobile owner");
+      expect(result.failure?.capacity).not.toHaveProperty("heldDevices");
+      expect(result.failure?.capacity).not.toHaveProperty("ownershipUnknown");
+      expect(result.bindings[0].failure?.message).toBe(result.failure?.message);
+      expect(h.refreshes()).toBe(reads + 1);
+      expect(h.deleter.calls).toHaveLength(0);
+      expect(h.provisioner.calls).toHaveLength(path === "reservation" ? 1 : 0);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    });
     test(`${path} preserves held and foreign UDIDs through acquisition and provisioning payloads`, async () => {
       const h = await setup();
       if (path === "reservation") {

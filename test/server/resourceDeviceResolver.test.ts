@@ -235,7 +235,7 @@ describe("read listing status preserves incomplete discovery", () => {
     expect(await listBootedDevicesForResource("android", "test")).toEqual([]);
     expect(await resourceRead.listBootedDevicesForReadWithStatus("android", "test")).toMatchObject({
       devices: [],
-      scanned: { android: false, ios: false },
+      scanned: { android: false, ios: false, watchos: false, tvos: false },
       discoveryErrors: { android: { code: "failed", message: "listing failed" } },
     });
   });
@@ -260,7 +260,7 @@ describe("read listing status preserves incomplete discovery", () => {
     installManager(manager);
     expect(await defaultDeviceObservationAccess.listBootedWithStatus!(undefined)).toEqual({
       devices: [device],
-      scanned: { android: true, ios: false },
+      scanned: { android: true, ios: false, watchos: false, tvos: false },
       discoveryErrors: { ios: error },
     });
   });
@@ -276,10 +276,41 @@ describe("read listing status preserves incomplete discovery", () => {
     installManager(manager);
     expect(await resourceRead.listBootedDevicesForReadWithStatus("either", "test")).toEqual({
       devices: [],
-      scanned: { android: true, ios: false },
+      scanned: { android: true, ios: false, watchos: false, tvos: false },
       discoveryErrors: { ios: error },
     });
   });
+  test("a watchOS read scope lists watches and reports the watch source as scanned", async () => {
+    const watch: BootedDevice = {
+      deviceId: "6B1F3C2E-0000-4000-8000-00000000A7C1",
+      name: "Apple Watch Series 10 (46mm)",
+      platform: "watchos",
+    };
+    const asked: SomePlatform[] = [];
+    installManager({
+      getBootedDevicesDetailed: async (platform: SomePlatform) => {
+        asked.push(platform);
+        return {
+          devices: platform === "watchos" ? [watch] : [],
+          succeededPlatforms: new Set<Platform>(
+            platform === "watchos" ? ["watchos"] : ["android", "ios"],
+          ),
+        };
+      },
+    });
+
+    expect(
+      await defaultDeviceObservationAccess.listBootedWithStatus!(undefined, "watchos"),
+    ).toEqual({
+      devices: [watch],
+      scanned: { android: false, ios: false, watchos: true, tvos: false },
+    });
+    expect(await defaultDeviceObservationAccess.listBootedWithStatus!(undefined)).toMatchObject({
+      scanned: { android: true, ios: true, watchos: false, tvos: false },
+    });
+    expect(asked).toEqual(["watchos", "either"]);
+  });
+
   test("a successful empty listing is authoritative and source-compatible legacy access stays available", async () => {
     const manager = {
       getBootedDevicesDetailed: async () => ({
@@ -290,7 +321,7 @@ describe("read listing status preserves incomplete discovery", () => {
     installManager(manager);
     expect(await resourceRead.listBootedDevicesForReadWithStatus("either", "test")).toMatchObject({
       devices: [],
-      scanned: { android: true, ios: true },
+      scanned: { android: true, ios: true, watchos: false, tvos: false },
     });
     expect(await defaultDeviceObservationAccess.listBooted(undefined)).toEqual([]);
   });

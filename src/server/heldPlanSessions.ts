@@ -17,7 +17,7 @@ export function markPlanHeld(manager: SessionManager, uuid: string, callerHeld =
     held = new Set<string>();
     heldByManager.set(manager, held);
     const sessions = held;
-    manager.onSessionRelease((sessionId, _deviceId, _reason, _snapshot, options) => {
+    manager.onSessionRelease((sessionId, _deviceId, _reason, options) => {
       if (!options?.upgradeOnly) {
         sessions.delete(sessionId);
       }

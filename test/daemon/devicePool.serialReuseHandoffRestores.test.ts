@@ -108,7 +108,7 @@ async function setup(saved = true) {
   });
   sessions.stopCleanupTimer();
   const releases: Array<{ reason: string; identityReplaced: boolean }> = [];
-  sessions.onSessionRelease((_id, _deviceId, reason, _snapshot, options) => {
+  sessions.onSessionRelease((_id, _deviceId, reason, options) => {
     releases.push({ reason, identityReplaced: options.deviceIdentityReplaced === true });
   });
   const manager = new FakeDeviceManager([], [original]);
@@ -196,7 +196,10 @@ for (const replaced of [true, false]) {
         timer: h.timer,
         notifier: { notifyResourceUpdated: () => {} },
       });
-      state.startSimulation(original.deviceId, "timeout", 30, null, "holder");
+      state.startSimulation(original.deviceId, "timeout", 30, {
+        limit: null,
+        ownerSessionUuid: "holder",
+      });
       registerNetworkStateSessionCleanup(h.sessions, {
         state: () => state,
         pusher: {
@@ -304,7 +307,10 @@ for (const superseded of [true, false]) {
           timer: h.timer,
           notifier: { notifyResourceUpdated: () => {} },
         });
-        state.startSimulation(original.deviceId, "timeout", 30, null, "holder");
+        state.startSimulation(original.deviceId, "timeout", 30, {
+          limit: null,
+          ownerSessionUuid: "holder",
+        });
         registerNetworkStateSessionCleanup(h.sessions, {
           state: () => state,
           pusher: {
@@ -1250,7 +1256,10 @@ warmedTest(
         timer: h.timer,
         notifier: { notifyResourceUpdated: () => {} },
       });
-      state.startSimulation(original.deviceId, "timeout", 30, null, "holder");
+      state.startSimulation(original.deviceId, "timeout", 30, {
+        limit: null,
+        ownerSessionUuid: "holder",
+      });
       registerNetworkStateSessionCleanup(h.sessions, {
         state: () => state,
         pusher: {
@@ -1279,9 +1288,7 @@ warmedTest(
           { latitude: 0, longitude: 0 },
           { latitude: 0, longitude: 1 },
         ],
-        1000,
-        500,
-        true,
+        { durationMs: 1000, updateIntervalMs: 500, loop: true },
         async () => {
           h.restores.push(`location-fix:${original.deviceId}`);
         },

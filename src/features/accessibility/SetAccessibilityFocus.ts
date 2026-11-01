@@ -50,8 +50,7 @@ function unconfirmedWarning(
   action: string,
   resourceId: string,
   focusedElement: Element | undefined,
-  mismatch: boolean | undefined,
-  readError: string | undefined,
+  { mismatch, readError }: { mismatch?: boolean; readError?: string } = {},
 ): string {
   const acknowledged = `Focus ${action} was acknowledged by the accessibility service but`;
   return mismatch
@@ -122,7 +121,7 @@ export class SetAccessibilityFocus {
     const confirmed = readError === undefined && !mismatch;
     const warning = confirmed
       ? undefined
-      : unconfirmedWarning(action, resourceId, focusedElement, mismatch, readError);
+      : unconfirmedWarning(action, resourceId, focusedElement, { mismatch, readError });
     return {
       success: true,
       focusedElement,

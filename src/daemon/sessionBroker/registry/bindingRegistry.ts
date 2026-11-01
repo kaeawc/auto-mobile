@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ActionableError } from "../../../models/ActionableError";
+import type { BindingRegistrySchemaProbe } from "./bindingRegistryMigrations";
 
 /**
  * Host-wide registry of managed device bindings (#11172, #11174).
@@ -14,7 +15,12 @@ import { ActionableError } from "../../../models/ActionableError";
  * Idempotency comes from that scoped identity plus the generation; there is no caller operation id.
  */
 
-export type BindingPlatform = "android" | "ios";
+/**
+ * A binding's platform. A `"watchos"` binding holds one unpaired Apple Watch simulator the broker
+ * creates, boots, reuses and deletes like an iOS simulator, ready once booted (#15882); its devices
+ * count against the shared total-resource limit.
+ */
+export type BindingPlatform = "android" | "ios" | "watchos";
 
 /** The three caller-declared parts of a scope; the scope key is derived from them. */
 export interface BindingScopeIdentity {
@@ -392,7 +398,7 @@ export const BINDING_JOURNAL_TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
  */
 export type BindingExecOwnerLiveness = (owner: BindingProcessIdentity) => boolean;
 
-export interface BindingRegistry {
+export interface BindingRegistry extends BindingRegistrySchemaProbe {
   /**
    * Admit an acquisition into a scope, creating it on first use and recording the acquisition time.
    * Revives a scope invalidated only by abandonment; never revives one that was reset, and never

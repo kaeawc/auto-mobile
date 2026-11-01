@@ -103,6 +103,8 @@ public final class AutoMobileNetwork: Sendable {
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
+    private let sequenceAllocator = NetworkSequenceAllocator()
+    let hostTransports = HostTransportRegistry()
 
     // Keep the internal testing seam while storing its value under the same lock.
     var bodyByteLimit: Int {
@@ -208,17 +210,79 @@ public final class AutoMobileNetwork: Sendable {
 
     /// Creates a recorder for custom transports that cannot install a URLProtocol.
     public func captureRecorder() -> NetworkCaptureRecorder {
+        makeCaptureRecorder(emit: { [weak self] record in self?.recordRequest(record) })
+    }
+
+    func makeCaptureRecorder(emit: @escaping NetworkCaptureRecorder.Emit) -> NetworkCaptureRecorder {
         NetworkCaptureRecorder(
-            emit: { [weak self] record in
-                self?.recordRequest(record)
-            },
+            emit: emit,
             maxBodyBytes: maxBodyBytes,
             isEnabled: { [weak self] in
                 self?.isEnabled ?? false
             },
             isBodyCaptureEnabled: { [weak self] in
                 self?.requestBodyCaptureLimit != nil
-            }
+            },
+            sequenceAllocator: sequenceAllocator
+        )
+    }
+
+    // MARK: - Host registration (#5160)
+
+    /// Registers a `URLSession` configuration. Call it before creating the session: a session copies
+    /// its configuration, so a later change has no effect.
+    ///
+    /// For a default or custom configuration this puts the SDK's `URLProtocol` first in
+    /// `protocolClasses` (once, however often it is called) and returns ``URLSessionRegistration/Mode/urlProtocol``.
+    /// Your session delegate is never replaced. A background configuration ignores `protocolClasses`,
+    /// so it is left unchanged and the result carries an adapter: forward your background session
+    /// delegate's callbacks to it.
+    @discardableResult
+    public func registerURLSession(_ configuration: URLSessionConfiguration) -> URLSessionRegistration {
+        if configuration.identifier != nil {
+            hostTransports.register(.backgroundURLSession)
+            return URLSessionRegistration(
+                transport: .backgroundURLSession,
+                mode: .delegateForwarding,
+                adapter: URLSessionNetworkCaptureAdapter(recorder: captureRecorder())
+            )
+        }
+        let installed = configuration.protocolClasses ?? []
+        let protocolId = ObjectIdentifier(AutoMobileURLProtocol.self)
+        if !installed.contains(where: { ObjectIdentifier($0) == protocolId }) {
+            configuration.protocolClasses = [AutoMobileURLProtocol.self] + installed
+        }
+        hostTransports.register(.urlSession)
+        return URLSessionRegistration(transport: .urlSession, mode: .urlProtocol, adapter: nil)
+    }
+
+    /// Registers `URLSessionWebSocketTask` capture. Forward each task's sent and received frames to
+    /// the returned adapter; keep one adapter per task.
+    public func registerWebSocket() -> WebSocketNetworkCaptureAdapter {
+        hostTransports.register(.webSocket)
+        return WebSocketNetworkCaptureAdapter(recorder: captureRecorder())
+    }
+
+    /// Registers `NWConnection` capture. Forward each connection's state, send and receive callbacks
+    /// to the returned adapter; keep one adapter per connection.
+    public func registerNWConnection() -> NWConnectionNetworkCaptureAdapter {
+        hostTransports.register(.nwConnection)
+        return NWConnectionNetworkCaptureAdapter(recorder: captureRecorder())
+    }
+
+    /// The capture and fault-enforcement state of every transport family, one descriptor per
+    /// ``HostTransport``. An unregistered family reads `DISABLED` with reason `HOST_OPT_IN`.
+    public func transportCapabilities() -> [SdkCapabilityDescriptor] {
+        let initialized = state.withLock { $0.buffer != nil }
+        #if DEBUG
+            let faultRulesAvailable = true
+        #else
+            let faultRulesAvailable = false
+        #endif
+        return hostTransports.descriptors(
+            networkInitialized: initialized && AutoMobileSDK.shared.isEnabled,
+            networkEnabled: isEnabled,
+            faultRulesAvailable: faultRulesAvailable
         )
     }
 
@@ -467,6 +531,7 @@ public final class AutoMobileNetwork: Sendable {
             state.captureBodies = false
             state.maxBodyBytes = AutoMobileNetwork.defaultMaxBodyBytes
         }
+        hostTransports.reset()
     }
 }
 

@@ -142,7 +142,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           tool === "tapOn" ? "Element not found" : "No clickable element found",
         );
         expect(h.dispatch).not.toHaveBeenCalled();
-        expect(h.sync.mock.calls[0]?.[4]).toEqual({ forceCapture: true });
+        expect(h.sync.mock.calls[0]?.[3]).toMatchObject({ forceCapture: true });
       } finally {
         h.restore();
       }
@@ -155,7 +155,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         expect(result.element?.bounds).toEqual({ left: 210, top: 200, right: 290, bottom: 260 });
         expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 250, y: 230 });
         expect(h.sync).toHaveBeenCalledTimes(1);
-        expect(h.sync.mock.calls[0]?.[4]).toEqual({ forceCapture: true });
+        expect(h.sync.mock.calls[0]?.[3]).toMatchObject({ forceCapture: true });
       } finally {
         h.restore();
       }
@@ -179,8 +179,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           undefined,
           false,
           undefined,
-          15000,
-          { forceCapture: true },
+          { timeoutMs: 15000, forceCapture: true },
         ]);
         expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 50, y: 230 });
       } finally {
@@ -239,7 +238,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         expect(result.success).toBe(true);
         expect(result.searchUntil?.requestCount).toBe(1);
         expect(h.sync).toHaveBeenCalledTimes(2);
-        expect(h.sync.mock.calls[0]?.[4]).toEqual({ forceCapture: true });
+        expect(h.sync.mock.calls[0]?.[3]).toMatchObject({ forceCapture: true });
         expect(h.sync.mock.calls[1]).toHaveLength(4);
         expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 250, y: 230 });
       } finally {
@@ -250,7 +249,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       const h = harness(tool);
       try {
         expect((await h.run(100, 4000)).success).toBe(true);
-        expect(h.sync.mock.calls[0]?.[3]).toBe(3000);
+        expect(h.sync.mock.calls[0]?.[3]?.timeoutMs).toBe(3000);
       } finally {
         h.restore();
       }
@@ -286,9 +285,9 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           h.sync.mock.calls.length === 1 ? null : { hierarchy: raw(210) },
         );
         expect((await h.run(100, 4000)).success).toBe(true);
-        expect(h.sync.mock.calls.map((call) => [call[3], call[4]])).toEqual([
-          [3000, { forceCapture: true }],
-          [2500, { forceCapture: true }],
+        expect(h.sync.mock.calls.map((call) => call[3])).toEqual([
+          { timeoutMs: 3000, forceCapture: true },
+          { timeoutMs: 2500, forceCapture: true },
         ]);
         expect(h.timer.getSleepHistory()).toContain(500);
         expect(h.dispatch.mock.calls[0]?.[0]).toMatchObject({ x: 250, y: 230 });
@@ -330,7 +329,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           `${tool} ${scenario}: total=${h.sync.mock.calls.length} resolution device reads`,
         );
         expect(h.sync).toHaveBeenCalledTimes(1);
-        expect(h.sync.mock.calls[0]?.[4]).toEqual({ forceCapture: true });
+        expect(h.sync.mock.calls[0]?.[3]).toMatchObject({ forceCapture: true });
       } finally {
         h.restore();
       }

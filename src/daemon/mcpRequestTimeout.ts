@@ -38,6 +38,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { DaemonRequest } from "./types";
+import { staticToolDeclaresDeviceResourceBudget } from "./staticToolDefinitions";
 import {
   asRecord,
   MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
@@ -309,7 +310,7 @@ export function resolveEnvTimeoutFloorMs(
   fallbackMs: number,
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  return readEnvPositiveInteger(primaryEnvVar, legacyEnvVar, { fallback: fallbackMs }, env);
+  return readEnvPositiveInteger(primaryEnvVar, legacyEnvVar, { fallback: fallbackMs, env });
 }
 
 function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {
@@ -530,16 +531,12 @@ function resolveLegacyStartDeviceBudgetMs(
   );
 }
 
-const DEVICE_RESOURCE_TOOLS: ReadonlySet<string> = new Set([
-  "setDeviceResources",
-  "reconcileDeviceResources",
-]);
-
+// The `deviceResourceBudget` trait (#15672) read from the committed tool definitions.
 function resolveDeviceResourceToolBudgetMs(
   toolName: unknown,
   argumentsRecord: Record<string, unknown>,
 ): number | undefined {
-  return DEVICE_RESOURCE_TOOLS.has(String(toolName))
+  return staticToolDeclaresDeviceResourceBudget(String(toolName))
     ? resolveDeviceResourceBudgetMs(argumentsRecord)
     : undefined;
 }
@@ -586,47 +583,24 @@ function resolveDeviceResourceBudgetMs(args: Record<string, unknown>): number {
   return Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS;
 }
 
+function isTapAnyLongPressRequest(args: Record<string, unknown>): boolean {
+  return (
+    args.action === "longPress" ||
+    (args.action === undefined && positiveFiniteNumber(args.duration) !== undefined)
+  );
+}
+
 /**
- * Floor for a `tapAny` longPress derived from its `duration` argument. A
- * plain tap/doubleTap (no `action: "longPress"`) or a longPress with no
- * positive `duration` still budgets the EFFECTIVE press duration --
- * `TapAnyElement.getLongPressDuration` substitutes a real default press
- * (`TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS`, the larger of the iOS/Android
- * defaults) in that case rather than performing no press at all, so an
- * omitted/zero `duration` must not budget zero press time either (issue
- * #6248 review, P2). A plain tap/doubleTap (no `action: "longPress"`) keeps
- * the standard floor/default -- only a longPress is raised.
- *
- * The outer MCP deadline must cover every phase of the call, not just the
- * press itself (issue #6248 review, P2):
- *   - The press itself, sized by the effective duration (the explicit
- *     `duration` argument, or `TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS` when
- *     omitted/zero).
- *   - PRE-GESTURE element discovery, sized by the effective
- *     `searchUntil.duration` -- when `searchUntil` is omitted entirely,
- *     `TapAnyElement.getSearchUntilDuration` still defaults every call to
- *     `TAP_ANY_SEARCH_UNTIL_DEFAULT_MS` (1500ms) of polling, so this budgets
- *     that implicit default too rather than leaving it unaccounted for.
- *   - The VoiceOver-detection probe and the final post-gesture observation,
- *     both budgeted via the single consolidated
- *     `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` constant (which also
- *     includes the fixed headroom) rather than as separate itemized terms --
- *     see that constant's doc for what it covers.
- *
- * So the floor is `effectivePressDuration + effectiveSearchWindow +
- * nonPressOverhead`. The result is clamped to `MAX_SETTIMEOUT_DELAY_MS`
- * because internal requests are budgeted before schema validation and
- * a large-enough `duration` would otherwise push this past `setTimeout`'s
- * 32-bit ceiling, which Bun/Node
- * silently normalize to 1ms rather than honoring -- timing the request out
- * almost immediately instead of running for the intended duration.
+ * Floor for explicit longPress or omitted action with a positive finite duration.
+ * Budgets the effective press duration (defaulting for explicit longPress), search
+ * window, and non-press overhead; clamps to the setTimeout ceiling before validation.
  */
 function resolveTapAnyLongPressBudgetMs(request: DaemonRequest): number | undefined {
   if (request.method !== "tools/call" || request.params?.name !== "tapAny") {
     return undefined;
   }
   const argumentsRecord = asRecord(request.params?.arguments);
-  if (!argumentsRecord || argumentsRecord.action !== "longPress") {
+  if (!argumentsRecord || !isTapAnyLongPressRequest(argumentsRecord)) {
     return undefined;
   }
   const duration =
@@ -652,13 +626,13 @@ function resolveLongPressBudgetMs(
   );
 }
 
-/** tapOn extends its existing 30 s non-press allowance only for an explicit positive duration. */
+/** tapOn extends its 30 s non-press allowance for a positive duration with longPress or omitted action. */
 function resolveTapOnLongPressBudgetMs(request: DaemonRequest): number | undefined {
   if (request.method !== "tools/call" || request.params?.name !== "tapOn") {
     return undefined;
   }
   const args = asRecord(request.params?.arguments);
-  if (args?.action !== "longPress") {
+  if (!args || (args.action !== undefined && args.action !== "longPress")) {
     return undefined;
   }
   const duration = positiveFiniteNumber(args.duration);
@@ -668,31 +642,16 @@ function resolveTapOnLongPressBudgetMs(request: DaemonRequest): number | undefin
 }
 
 /**
- * Floor for a `tapAny` ordinary `tap`/`doubleTap` (i.e. any call that is NOT
- * `action: "longPress"`, including an omitted `action`, which the schema
- * defaults to `"tap"`). Mirrors `resolveTapAnyLongPressBudgetMs` above: the
- * outer MCP deadline must cover every phase of the call, not just the
- * gesture itself (issue #6276, follow-up to #6248 review thread funaf) --
- * `TapAnyElement.executeIosTapWithCoordinates` previously passed
- * `timeoutMs: undefined` for ordinary tap/doubleTap, leaving the daemon's
- * outer deadline to fall through to the generic `DEFAULT_MCP_REQUEST_TIMEOUT_MS`
- * (30s) with no tapAny-specific floor tailored to the call's real worst case.
- *
- * So the floor is `gestureWorstCase + effectiveSearchWindow +
- * nonPressOverhead`, the same shape `resolveTapAnyLongPressBudgetMs` uses --
- * `TAP_ANY_LONG_PRESS_NON_PRESS_OVERHEAD_MS` is action-agnostic (every tapAny
- * action runs the same pre/post-action observation pipeline), so it applies
- * here unchanged. Clamped to `MAX_SETTIMEOUT_DELAY_MS` for the same reason as
- * the longPress floor, even though the fixed inputs here can never actually
- * reach that ceiling -- kept for structural symmetry with the longPress
- * resolver and to stay correct if a future change makes any term variable.
+ * Floor for explicit tap/doubleTap or omitted action without a positive finite duration.
+ * Budgets the ordinary gesture worst case, search window, and non-press overhead,
+ * clamped to the setTimeout ceiling.
  */
 function resolveTapAnyOrdinaryTapBudgetMs(request: DaemonRequest): number | undefined {
   if (request.method !== "tools/call" || request.params?.name !== "tapAny") {
     return undefined;
   }
   const argumentsRecord = asRecord(request.params?.arguments);
-  if (argumentsRecord?.action === "longPress") {
+  if (argumentsRecord && isTapAnyLongPressRequest(argumentsRecord)) {
     return undefined;
   }
   const searchUntilDuration =
@@ -791,8 +750,7 @@ function addPlanStepBudgets(
   steps: unknown,
   multiDevice: boolean,
   parentTrack: string | undefined,
-  accumulator: PlanBudgetAccumulator,
-  depth: number,
+  { accumulator, depth }: { accumulator: PlanBudgetAccumulator; depth: number },
 ): void {
   if (!Array.isArray(steps)) {
     return;
@@ -823,7 +781,7 @@ function addPlanStepBudgets(
       (accumulator.tracks.get(track) ?? 0) + resolvePlanStepBudgetMs(step.tool, step.params),
     );
     if (step.tool === "criticalSection") {
-      addPlanStepBudgets(step.params.steps, multiDevice, track, accumulator, depth + 1);
+      addPlanStepBudgets(step.params.steps, multiDevice, track, { accumulator, depth: depth + 1 });
     }
   }
 }
@@ -865,7 +823,7 @@ function resolveExecutePlanStepsBudgetMs(planContent: unknown): number {
     saturated: false,
   };
   const multiDevice = Array.isArray(plan.devices) && plan.devices.length > 0;
-  addPlanStepBudgets(plan.steps, multiDevice, undefined, accumulator, 0);
+  addPlanStepBudgets(plan.steps, multiDevice, undefined, { accumulator, depth: 0 });
   if (accumulator.saturated) {
     return MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
   }

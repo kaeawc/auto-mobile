@@ -99,8 +99,7 @@ export async function writeAndroidPreferencesXml(
   adb: AdbExecutor,
   appId: string,
   fileName: string,
-  xml: string,
-  userId?: number,
+  { xml, userId }: { xml: string; userId?: number },
 ): Promise<void> {
   const encodedXml = Buffer.from(xml, "utf8").toString("base64");
   const innerCommand = `mkdir -p shared_prefs && printf '%s' '${encodedXml}' | base64 -d > shared_prefs/${fileName}.xml`;

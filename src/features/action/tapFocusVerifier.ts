@@ -147,6 +147,14 @@ function findSoleExpandedNativeFocusField(
     : candidate;
 }
 
+/** What the tap selected, used to tell the target apart from other focused fields. */
+export interface FocusVerificationHints {
+  /** The matched label's text when the tap target is a different (input) element. */
+  labelText?: string;
+  selectedIndex?: number;
+  preTapHierarchy?: ViewHierarchyResult;
+}
+
 /** What the focus verifier needs from the owning tap action (kept narrow on purpose). */
 export interface FocusVerifierDeps {
   device: BootedDevice;
@@ -191,7 +199,7 @@ export class FocusVerifier {
     const candidate = distinctFocusedFields[0].element;
     return candidate &&
       (this.deps.device.platform === "android" && !candidate.text
-        ? this.hasEmptyTextFocusIdentity(target, candidate, nodes, labelText, preTapHierarchy)
+        ? this.hasEmptyTextFocusIdentity(target, candidate, nodes, { labelText, preTapHierarchy })
         : hasStableFocusIdentity(target, candidate, labelText)) &&
       horizontalExtentNearlyEqual(
         target.bounds,
@@ -290,8 +298,7 @@ export class FocusVerifier {
     target: Element,
     candidate: Element,
     nodes: readonly SearchableEntry[],
-    labelText?: string,
-    preTapHierarchy?: ViewHierarchyResult,
+    { labelText, preTapHierarchy }: { labelText?: string; preTapHierarchy?: ViewHierarchyResult },
   ): boolean {
     // Empty Compose fields can lose labels/s2 IDs on focus. Require matching size and
     // no label/hint or ordinal conflict, plus a label match, sole empty field at
@@ -355,17 +362,16 @@ export class FocusVerifier {
     options: TapOnElementOptions,
     target: Element,
     hierarchy: ViewHierarchyResult,
-    identifier: { key: FocusIdentifierKey; value: string },
-    selectedIndex?: number,
-  ): boolean {
-    const nodes = this.focusProjection.project(hierarchy);
-    const selected = this.findIndexedFocusSelection(
-      options,
-      hierarchy,
-      nodes,
+    {
       identifier,
       selectedIndex,
-    );
+    }: { identifier: { key: FocusIdentifierKey; value: string }; selectedIndex?: number },
+  ): boolean {
+    const nodes = this.focusProjection.project(hierarchy);
+    const selected = this.findIndexedFocusSelection(options, hierarchy, nodes, {
+      identifier,
+      selectedIndex,
+    });
     const selectedSource = selected && getHierarchyNodeSource(selected);
     const selectedNode = nodes.find((node) => node.source === selectedSource);
     return Boolean(
@@ -393,8 +399,10 @@ export class FocusVerifier {
     options: TapVerificationOptions,
     hierarchy: ViewHierarchyResult,
     nodes: readonly SearchableEntry[],
-    identifier: { key: FocusIdentifierKey; value: string },
-    selectedIndex?: number,
+    {
+      identifier,
+      selectedIndex,
+    }: { identifier: { key: FocusIdentifierKey; value: string }; selectedIndex?: number },
   ): Element | null {
     // A known focus target may carry a view-id shared by several id-less fields.
     // Public ID lookup rejects that ambiguous selector, so verify its selected
@@ -470,10 +478,9 @@ export class FocusVerifier {
     options: TapOnElementOptions,
     target: Element,
     observation?: ObserveResult,
-    labelText?: string,
-    selectedIndex?: number,
-    preTapHierarchy?: ViewHierarchyResult,
+    hints: FocusVerificationHints = {},
   ): boolean {
+    const { labelText, selectedIndex, preTapHierarchy } = hints;
     if (!observation?.viewHierarchy) {
       return false;
     }
@@ -488,9 +495,9 @@ export class FocusVerifier {
         options,
         this.deps.withObservationScreenSize(options, observation),
         target,
-        observation.viewHierarchy,
-        nodes,
         {
+          viewHierarchy: observation.viewHierarchy,
+          nodes,
           labelText,
           selectedIndex,
           preTapHierarchy,
@@ -579,14 +586,16 @@ export class FocusVerifier {
     options: TapOnElementOptions,
     scopedOptions: TapVerificationOptions,
     target: Element,
-    viewHierarchy: ViewHierarchyResult,
-    nodes: readonly SearchableEntry[],
     {
+      viewHierarchy,
+      nodes,
       labelText,
       selectedIndex,
       preTapHierarchy,
       screenHeight,
     }: {
+      viewHierarchy: ViewHierarchyResult;
+      nodes: readonly SearchableEntry[];
       labelText?: string;
       selectedIndex?: number;
       preTapHierarchy?: ViewHierarchyResult;
@@ -595,13 +604,10 @@ export class FocusVerifier {
   ): boolean {
     const identifier = findFocusIdentifier(target, nodes);
     if (identifier?.shared) {
-      return this.verifyIndexedFocusTarget(
-        scopedOptions,
-        target,
-        viewHierarchy,
+      return this.verifyIndexedFocusTarget(scopedOptions, target, viewHierarchy, {
         identifier,
         selectedIndex,
-      );
+      });
     }
     const iosNativeEditorFallback = () =>
       this.deps.device.platform === "ios" &&

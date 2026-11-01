@@ -203,7 +203,7 @@ test("real observer commit verification only captures hierarchy, never device st
     h.device,
     h.adbFactory,
     { hierarchyCapture: capture, viewHierarchy },
-    h.timer,
+    { timer: h.timer },
   );
   const audit = spyOn(screen["performanceAuditor"], "run").mockResolvedValue(undefined);
   const deviceState = screen["deviceStateCollector"];
@@ -335,7 +335,7 @@ test("IME, clear, IME uses the active input connection", async () => {
   const commit = h.client.commitViaIme;
   let selectionsAtClear: string[] = [];
   h.client.commitViaIme = async (...args) => {
-    if (args[3] === "clearField") {
+    if (args[3]?.delivery === "clearField") {
       selectionsAtClear = h.selections();
     }
     return commit(...args);
@@ -364,7 +364,7 @@ function fieldHarness(initial = "old", attributes: Record<string, string> = {}) 
   });
   const commit = h.client.commitViaIme;
   h.client.commitViaIme = async (...args) => {
-    field = args[3] === "clearField" ? "" : field + args[0];
+    field = args[3]?.delivery === "clearField" ? "" : field + args[0];
     return commit(...args);
   };
   const execute = h.adb.executeCommand.bind(h.adb);
@@ -468,7 +468,7 @@ test.each(["ime", "auto", "imeKeyEvents"] as const)(
     expect((await h.action.execute([{ action: "clear" }, { ...type("a"), mode }])).success).toBe(
       true,
     );
-    expect(calls[0]).toEqual(["", null, undefined, "clearField"]);
+    expect(calls[0]).toEqual(["", null, undefined, { delivery: "clearField" }]);
     expect(h.clientCalls).toEqual(["clearField", "commit:a"]);
     expect(h.selections()).toEqual([activate, restore]);
   },
@@ -650,12 +650,9 @@ test("cancellation during clear capability lookup does not dispatch the fallback
     return false;
   };
   await expect(
-    h.action.execute(
-      [{ ...type("new"), operation: "replace" }],
-      undefined,
-      undefined,
-      controller.signal,
-    ),
+    h.action.execute([{ ...type("new"), operation: "replace" }], undefined, {
+      signal: controller.signal,
+    }),
   ).rejects.toThrow("The operation was aborted");
   expect(h.clientCalls).toEqual([]);
   expect(h.selections()).toEqual([activate, restore]);
@@ -896,16 +893,14 @@ test("unbounded cancellation with a failed restore returns structured recovery g
   h.adb.setCommandError(restore, new Error("restore rejected"));
   try {
     const result = await runWithAbortSignal(controller.signal, () =>
-      h.action.execute(
-        [type("a"), type("b"), type("c")],
-        undefined,
-        async (index) => {
+      h.action.execute([type("a"), type("b"), type("c")], undefined, {
+        progress: async (index) => {
           if (index === 2) {
             controller.abort(new Error("cancelled between commands"));
           }
         },
-        controller.signal,
-      ),
+        signal: controller.signal,
+      }),
     );
     expect(result).toMatchObject({ success: false, completedCommands: 2, failedIndex: 2 });
     expect(result.commands).toHaveLength(2);
@@ -975,16 +970,14 @@ test("cancellation between commands restores once outside the request context", 
   const cancellation = new Error("cancelled between commands");
   await expect(
     runWithAbortSignal(controller.signal, () =>
-      h.action.execute(
-        [type("a"), type("b"), type("c")],
-        undefined,
-        async (index) => {
+      h.action.execute([type("a"), type("b"), type("c")], undefined, {
+        progress: async (index) => {
           if (index === 2) {
             controller.abort(cancellation);
           }
         },
-        controller.signal,
-      ),
+        signal: controller.signal,
+      }),
     ),
   ).rejects.toBe(cancellation);
   expect(h.committed).toEqual(["a", "b"]);
@@ -1031,10 +1024,12 @@ test("budget cancellation between IME commands still reports a restore failure",
   h.adb.setCommandError(restore, new Error("restore rejected"));
   try {
     const result = await runWithTextRequestContext({ getDeadlineMs: () => 120_000 }, () =>
-      h.action.execute([type("a"), type("b"), type("c")], undefined, async (index) => {
-        if (index === 2) {
-          h.timer.advanceTime(99_000);
-        }
+      h.action.execute([type("a"), type("b"), type("c")], undefined, {
+        progress: async (index) => {
+          if (index === 2) {
+            h.timer.advanceTime(99_000);
+          }
+        },
       }),
     );
     expect(result.success).toBe(false);
@@ -1082,8 +1077,7 @@ test("cancellation during a failed mode-switch restore retains recovery guidance
     const result = await h.action.execute(
       [type("a"), { action: "type", text: "b", mode: "a11y" }],
       undefined,
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
     expect(result).toMatchObject({ success: false, completedCommands: 1, failedIndex: 1 });
     expect(h.clientCalls).toEqual(["commit:a"]);
@@ -1120,7 +1114,7 @@ test.each(["", "hint-only"])("IME clear verifies the field after it becomes %j",
   const h = harness(read);
   const commit = h.client.commitViaIme;
   h.client.commitViaIme = async (...args) => {
-    if (args[3] === "clearField") {
+    if (args[3]?.delivery === "clearField") {
       value = after;
     } else {
       value = args[0];
@@ -1172,7 +1166,7 @@ test("IME clear retains unchanged-field warning with fake settling", async () =>
 
 test("failed IME clear stops replace before text delivery and restores once", async () => {
   const h = harness();
-  h.client.commitViaIme = async (_text, _prior, _signal, delivery) => {
+  h.client.commitViaIme = async (_text, _prior, _signal, { delivery } = {}) => {
     expect(delivery).toBe("clearField");
     return { success: false, partialApplication: true, error: "IME clear failed" };
   };
@@ -1187,7 +1181,7 @@ test("failed IME clear stops replace before text delivery and restores once", as
 
 test("unacknowledged IME clear quarantines the span and skips restoration", async () => {
   const h = harness();
-  h.client.commitViaIme = async (_text, _prior, _signal, delivery) => {
+  h.client.commitViaIme = async (_text, _prior, _signal, { delivery } = {}) => {
     expect(delivery).toBe("clearField");
     return {
       success: false,

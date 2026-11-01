@@ -6,6 +6,7 @@ import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError
 import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
 import type { DeviceStartResult, PlatformDeviceManager } from "../devices/deviceUtils";
+import type { WaitForDeviceReadyOrCancelOptions } from "../devices/WaitForDeviceReadyOrCancelOptions";
 import type { VirtualDeviceLifecycleCoordinator } from "../devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import type { Timer } from "../utils/SystemTimer";
@@ -21,7 +22,10 @@ import type { DevicePoolRefreshResult } from "./devicePoolRefresh";
 import type { DeviceRuntimeIdentity } from "./deviceRuntimeIdentity";
 import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
-import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
+import {
+  refreshAllocationBindingExclusion,
+  type BindingExclusion,
+} from "./sessionBroker/provisioning/exclusion";
 
 export interface DeviceAutoStartPort {
   readonly criteriaMatcher: Pick<
@@ -73,10 +77,9 @@ export interface DeviceAutoStartPort {
   waitForDeviceReadyOrCancel(
     device: DeviceInfo,
     childProcess: ChildProcess | null,
-    timeoutMs: number,
-    signal: AbortSignal,
-    timer: Pick<Timer, "setTimeout" | "clearTimeout">,
-    cancelOwnedBoot: () => Promise<void>,
+    options: Required<
+      Pick<WaitForDeviceReadyOrCancelOptions, "timeoutMs" | "signal" | "timer" | "cancelOwnedBoot">
+    >,
   ): Promise<BootedDevice>;
 }
 
@@ -91,7 +94,8 @@ export class DeviceAutoStart {
     deadlineMs: number,
     platform?: Platform,
   ): Promise<number> {
-    if (!platform || requiredCount <= 0) {
+    // Watches start only through an explicit startDevice, never as pool capacity (#14908).
+    if (!platform || platform === "watchos" || requiredCount <= 0) {
       return 0;
     }
 
@@ -181,14 +185,13 @@ export class DeviceAutoStart {
           return null;
         }
         const ready = this.port.criteriaMatcher.withDeviceImageMetadata(
-          await this.port.waitForDeviceReadyOrCancel(
-            device,
-            childProcess,
-            readinessTimeoutMs,
+          await this.port.waitForDeviceReadyOrCancel(device, childProcess, {
+            timeoutMs: readinessTimeoutMs,
             signal,
-            this.port.timer,
-            () => this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil),
-          ),
+            timer: this.port.timer,
+            cancelOwnedBoot: () =>
+              this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil),
+          }),
           device,
         );
         if (
@@ -559,7 +562,7 @@ export class DeviceAutoStart {
     excludedImageIds: Set<string> = new Set(),
   ): Promise<DeviceInfo[]> {
     if (this.port.bindingExclusion) {
-      await this.port.bindingExclusion.refresh({ requireCurrent: true });
+      await refreshAllocationBindingExclusion(this.port.bindingExclusion);
     }
     const availableImages = await this.port.deviceManager.listDeviceImages(platform);
     if (availableImages.length === 0) {

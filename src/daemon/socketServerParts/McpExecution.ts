@@ -114,6 +114,27 @@ type Callbacks = Pick<
   | "isMcpClientKeyBound"
 >;
 /** Mcp Execution over shared connection state and explicit callbacks. */
+/** The deadline window and cancellation one forwarded IDE request runs under. */
+export interface IdeForwardWindow {
+  deadline: ProgressExtendableDeadline;
+  /**
+   * The FULL per-request timeout window this request was granted at
+   * receipt (`totalTimeoutMs` from `handleRequest`) -- UNLIKE `timeoutMs`,
+   * which is the budget remaining for THIS specific forward
+   * attempt after time already spent waiting in the per-session queue
+   * (or reconnecting). A request that waited most of its budget in queue
+   * would otherwise have every progress-driven reset use that tiny
+   * queue-depleted remnant as its "how long is ordinary device work
+   * between ticks allowed to take" window -- collapsing a 30s tool to a
+   * ~1s one. Every progress-driven extension (the SDK's own
+   * `resetTimeoutOnProgress`, which reuses this SAME `timeout` value on
+   * every reset, and this daemon's own `deadline`) uses THIS value
+   * instead, independent of queue wait (#6222 review, P1).
+   */
+  originalTimeoutMs: number;
+  signal?: AbortSignal;
+}
+
 export class McpExecution {
   private readonly discoveryCache: ControlDiscoveryCache;
   private readonly inventoryForward: HostInventoryForward;
@@ -190,8 +211,7 @@ export class McpExecution {
       },
       executionKey,
       fn,
-      idleCloseKey,
-      chainWait,
+      { idleCloseKey, chainWait },
     );
   }
   /**
@@ -204,8 +224,10 @@ export class McpExecution {
     initialRoute: McpForwardRoute,
     request: DaemonRequest,
     socketSessionId: string,
-    fn: (route: McpForwardRoute) => Promise<T>,
-    chainWait?: McpForwardChainWait,
+    {
+      fn,
+      chainWait,
+    }: { fn: (route: McpForwardRoute) => Promise<T>; chainWait?: McpForwardChainWait },
   ): Promise<T> {
     // Inventory reads share discovery rather than holding a global serial queue.
     // Distinct-key flights run discovery in parallel without a concurrency limit (known limitation).
@@ -348,15 +370,12 @@ export class McpExecution {
         context.deadline,
         "waiting in queues and preparing the MCP client",
       );
-      return await this.callbacks.handleIdeRequest(
-        mcpClient,
-        context.request,
-        forwardRemainingMs,
-        context.socketSessionId,
-        context.deadline,
-        context.totalTimeoutMs,
-        context.signal,
-      );
+      return await this.callbacks.handleIdeRequest(mcpClient, context.request, forwardRemainingMs, {
+        socketSessionId: context.socketSessionId,
+        deadline: context.deadline,
+        originalTimeoutMs: context.totalTimeoutMs,
+        signal: context.signal,
+      });
     } finally {
       // A close failure must never replace the forward's own answer.
       await Promise.resolve()
@@ -450,23 +469,12 @@ export class McpExecution {
     mcpClient: ForwardMcpClient,
     request: DaemonRequest,
     timeoutMs: number,
-    socketSessionId: string,
-    deadline: ProgressExtendableDeadline,
-    /**
-     * The FULL per-request timeout window this request was granted at
-     * receipt (`totalTimeoutMs` from `handleRequest`) -- UNLIKE `timeoutMs`
-     * above, which is the budget remaining for THIS specific forward
-     * attempt after time already spent waiting in the per-session queue
-     * (or reconnecting). A request that waited most of its budget in queue
-     * would otherwise have every progress-driven reset use that tiny
-     * queue-depleted remnant as its "how long is ordinary device work
-     * between ticks allowed to take" window -- collapsing a 30s tool to a
-     * ~1s one. Every progress-driven extension (the SDK's own
-     * `resetTimeoutOnProgress`, which reuses this SAME `timeout` value on
-     * every reset, and this daemon's own `deadline`) uses THIS value
-     * instead, independent of queue wait (#6222 review, P1).
-     */
-    ...[originalTimeoutMs, signal]: [originalTimeoutMs: number, signal?: AbortSignal]
+    {
+      socketSessionId,
+      deadline,
+      originalTimeoutMs,
+      signal,
+    }: IdeForwardWindow & { socketSessionId: string },
   ): Promise<any> {
     signal?.throwIfAborted();
     const requestOptions = this.callbacks.mcpRequestOptions(timeoutMs, signal);
@@ -555,14 +563,13 @@ export class McpExecution {
               this.state.timer.clearTimeout(abortTimer);
               deadline.extendOnProgress(this.state.timer.now(), originalTimeoutMs);
               abortTimer = armAbort(deadline.value - this.state.timer.now());
-              this.callbacks.pushProgressNotification(
-                socketSessionId,
-                request.id,
+              this.callbacks.pushProgressNotification(socketSessionId, {
+                requestId: request.id,
                 progressToken,
-                notification.progress,
-                notification.total,
-                notification.message,
-              );
+                progress: notification.progress,
+                total: notification.total,
+                message: notification.message,
+              });
             },
           };
         }
@@ -640,11 +647,11 @@ export class McpExecution {
       return await callTool();
     }
     const deviceId = this.callbacks.frameDeviceId(request);
-    this.callbacks.traceFrame("callTool_entered", request.id, deviceId);
+    this.callbacks.traceFrame("callTool_entered", request.id, { deviceId });
     try {
       return await callTool();
     } finally {
-      this.callbacks.traceFrame("callTool_settled", request.id, deviceId);
+      this.callbacks.traceFrame("callTool_settled", request.id, { deviceId });
     }
   }
   /**

@@ -66,8 +66,7 @@ export interface IosUnifiedLogSource {
     appId: string,
     lastSeconds: number,
     level: UnifiedLogLevel,
-    signal?: AbortSignal,
-    processName?: string,
+    options?: { signal?: AbortSignal; processName?: string },
   ): Promise<{ text: string; truncated: boolean }>;
   /** The app's executable name (CFBundleExecutable), or undefined when it cannot be resolved. */
   resolveProcessName?(appId: string, signal?: AbortSignal): Promise<string | undefined>;
@@ -148,6 +147,13 @@ export function parseUnifiedCompact(text: string): GetLogsLine[] {
   });
 }
 
+/** The resolved read window shared by the per-platform `getLogs` paths. */
+interface GetLogsWindow {
+  sinceSeconds: number;
+  maxLines: number;
+  minPriority: LogcatPriority;
+}
+
 /** One bounded, filtered log read for `getLogs` (#14082). */
 export class GetLogs {
   constructor(private readonly deps: GetLogsDependencies) {}
@@ -167,7 +173,7 @@ export class GetLogs {
     const maxLines = Math.min(request.maxLines ?? GET_LOGS_DEFAULT_MAX_LINES, GET_LOGS_MAX_LINES);
     const minPriority = request.minPriority ?? "V";
     if (device.platform === "ios") {
-      return this.ios(request, sinceSeconds, maxLines, minPriority, warnings, signal);
+      return this.ios(request, { sinceSeconds, maxLines, minPriority }, warnings, signal);
     }
     const result = await this.deps.android().read(
       {
@@ -196,12 +202,11 @@ export class GetLogs {
 
   private async ios(
     request: GetLogsRequest,
-    sinceSeconds: number,
-    maxLines: number,
-    minPriority: LogcatPriority,
+    window: GetLogsWindow,
     warnings: string[],
     signal?: AbortSignal,
   ): Promise<GetLogsResult> {
+    const { sinceSeconds, maxLines, minPriority } = window;
     if (!request.appId) {
       throw new ActionableError(
         "getLogs on iOS needs appId: the unified log is read per app subsystem.",
@@ -222,8 +227,7 @@ export class GetLogs {
       request.appId,
       sinceSeconds,
       unifiedLogLevel(minPriority),
-      signal,
-      processName,
+      { signal, processName },
     );
     if (collected.truncated) {
       warnings.push(

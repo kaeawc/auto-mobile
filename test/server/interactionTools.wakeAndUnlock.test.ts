@@ -8,6 +8,7 @@ import {
   registerInteractionTools,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { deviceAwareHandler } from "../helpers/registeredHandler";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -89,11 +90,12 @@ test("wakeAndUnlock handler forwards the daemon's absolute transport deadline", 
   });
   try {
     registerInteractionTools(interactionDeps);
-    const handler = registration.mock.calls.find(([name]) => name === "wakeAndUnlock")?.[3];
-    expect(handler).toBeDefined();
+    const registered = registration.mock.calls.find(([name]) => name === "wakeAndUnlock")?.[3];
+    expect(registered).toBeDefined();
+    const handler = deviceAwareHandler(registered!);
     const device: BootedDevice = { deviceId: "fake-unlock", platform: "android", name: "Fake" };
-    await handler!(device, { pin: "1234", [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 123_000 });
-    await handler!(device, {});
+    await handler(device, { pin: "1234", [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 123_000 });
+    await handler(device, {});
     expect(calls).toEqual([
       ["1234", { deadlineMs: 123_000, signal: undefined }],
       [undefined, { deadlineMs: undefined, signal: undefined }],

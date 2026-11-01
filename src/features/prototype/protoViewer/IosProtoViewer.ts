@@ -3,13 +3,14 @@ import { ActionableError } from "../../../models/ActionableError";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { IdGenerator } from "../../../utils/IdGenerator";
 import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
-import { SimctlCommandTimeoutError } from "../../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import {
   PROTOVIEWER_CLEANUP_TIMEOUT_MS,
-  ProtoViewerEntryPointMissingError,
+  PROTOVIEWER_RESULT_POLL_MS,
+  ProtoViewerInboxUnsupportedError,
+  ProtoViewerForegroundError,
   ProtoViewerStorageError,
   type ProtoViewerDevice,
 } from "./protoViewerDevice";
@@ -18,8 +19,8 @@ import {
   PROTOVIEWER_INBOX_FOLDER,
   PROTOVIEWER_RESULTS_FOLDER,
   PROTOVIEWER_REQUEST_ID,
-  protoViewerIosImportUrl,
-  protoViewerIosOpenUrl,
+  PROTOVIEWER_IOS_DELIVERY,
+  type ProtoViewerIosRequest,
   type ProtoViewerResult,
 } from "./protoViewerContract";
 import { pollProtoViewerResult } from "./pollProtoViewerResult";
@@ -30,12 +31,9 @@ export interface IosProtoViewerSimctl {
   installed(udid: string, signal?: AbortSignal): Promise<boolean>;
   dataContainer(udid: string, signal?: AbortSignal): Promise<string>;
   /**
-   * Brings ProtoViewer to the foreground (`simctl launch`). iOS asks "Open in ProtoViewer?" when a URL
-   * is opened while the app is in the background, and nothing answers that alert (#15435).
+   * Brings ProtoViewer to the foreground without custom-scheme delivery or system confirmation.
    */
   launch(udid: string, timeoutMs: number, signal?: AbortSignal): Promise<void>;
-  /** Resolves only on exit zero; rejects for non-delivery or a typed command timeout. */
-  openurl(args: readonly string[], timeoutMs: number, signal?: AbortSignal): Promise<void>;
 }
 export interface IosProtoViewerFiles {
   mkdir(path: string): Promise<void>;
@@ -52,7 +50,7 @@ interface Dependencies {
   timer: Timer;
   ids: IdGenerator;
 }
-/** Simulator filesystem inbox and URL delivery; physical devices retain the template path. */
+/** Simulator filesystem inbox delivery; physical devices retain the template path. */
 export class IosProtoViewer implements ProtoViewerDevice {
   constructor(private readonly deps: Dependencies) {}
   async installed(signal?: AbortSignal): Promise<boolean> {
@@ -93,15 +91,18 @@ export class IosProtoViewer implements ProtoViewerDevice {
     const inbox = join(inboxDir, `${request}.automobile-proto`);
     const temporary = `${inbox}.tmp`;
     const resultPath = join(resultsDir, `${request}.json`);
+    const requestPath = join(inboxDir, `${request}.request`);
+    const requestTemporary = `${requestPath}.tmp`;
     try {
-      await this.prepare(inboxDir, resultsDir, temporary, inbox, work, signal);
+      await this.prepare({ inboxDir, resultsDir, temporary, inbox }, work, signal);
       signal?.throwIfAborted();
-      const url =
-        "bytes" in work
-          ? protoViewerIosImportUrl(request, work.label)
-          : protoViewerIosOpenUrl(request, work.libraryId);
       await this.foreground(timeoutMs, signal);
-      await this.deliver(url, timeoutMs, signal);
+      await this.requireFileDelivery(
+        root,
+        Math.max(0, timeoutMs - (this.deps.timer.now() - started)),
+        signal,
+      );
+      await this.deliverRequest(requestTemporary, requestPath, work, signal);
       // One budget for delivery and polling, so a slow cold launch cannot double the wait.
       const pollMs = Math.max(
         timeoutMs - (this.deps.timer.now() - started),
@@ -111,7 +112,11 @@ export class IosProtoViewer implements ProtoViewerDevice {
         () => this.deps.files.read(resultPath),
         this.deps.timer,
         pollMs,
-        signal,
+        {
+          signal,
+          timeoutGuidance:
+            "Retrying the same spec is safe: imports are idempotent. Open ProtoViewer and unlock the simulator if it is locked.",
+        },
       );
       if (result.request !== request) {
         throw new ActionableError(
@@ -128,15 +133,17 @@ export class IosProtoViewer implements ProtoViewerDevice {
       }
       return result;
     } finally {
-      await this.cleanup([resultPath, inbox, temporary]);
+      await this.cleanup([requestPath, requestTemporary, resultPath, inbox, temporary]);
     }
   }
 
   private async prepare(
-    inboxDir: string,
-    resultsDir: string,
-    temporary: string,
-    inbox: string,
+    {
+      inboxDir,
+      resultsDir,
+      temporary,
+      inbox,
+    }: { inboxDir: string; resultsDir: string; temporary: string; inbox: string },
     work: { bytes: Uint8Array } | { libraryId: string },
     signal?: AbortSignal,
   ): Promise<void> {
@@ -158,7 +165,35 @@ export class IosProtoViewer implements ProtoViewerDevice {
     }
   }
 
-  /** Best effort: a failed launch still lets openurl try, which then reports its own failure. */
+  private async deliverRequest(
+    requestTemporary: string,
+    requestPath: string,
+    work: { bytes: Uint8Array; label?: string } | { libraryId: string },
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const command: ProtoViewerIosRequest =
+      "bytes" in work
+        ? { action: "import", ...(work.label === undefined ? {} : { label: work.label }) }
+        : { action: "open", libraryId: work.libraryId };
+    try {
+      signal?.throwIfAborted();
+      await this.deps.files.write(
+        requestTemporary,
+        new TextEncoder().encode(JSON.stringify(command)),
+      );
+      await this.deps.files.rename(requestTemporary, requestPath);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      throw new ProtoViewerStorageError(
+        `Could not publish ProtoViewer's request: ${errorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  }
+
+  /** Launch makes the scene active so its inbox consumer can run. */
   private async foreground(timeoutMs: number, signal?: AbortSignal): Promise<void> {
     try {
       await this.deps.simctl.launch(this.deps.deviceId, timeoutMs, signal);
@@ -166,28 +201,28 @@ export class IosProtoViewer implements ProtoViewerDevice {
       if (signal?.aborted) {
         throw error;
       }
-      logger.warn(
-        `[protoviewer] could not bring ProtoViewer to the foreground; an "Open in" alert may appear: ${errorMessage(error)}`,
-      );
+      throw new ProtoViewerForegroundError({ cause: error });
     }
   }
 
-  private async deliver(url: string, timeoutMs: number, signal?: AbortSignal): Promise<void> {
-    try {
-      await this.deps.simctl.openurl(["openurl", this.deps.deviceId, url], timeoutMs, signal);
-    } catch (error) {
-      if (signal?.aborted) {
-        throw error;
+  private async requireFileDelivery(
+    root: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const deadline = this.deps.timer.now() + timeoutMs;
+    do {
+      signal?.throwIfAborted();
+      if (
+        (await this.deps.files.read(join(root, "delivery"))).trim() === PROTOVIEWER_IOS_DELIVERY
+      ) {
+        return;
       }
-      if (error instanceof SimctlCommandTimeoutError) {
-        throw new ActionableError(
-          "ProtoViewer openurl timed out; the request may have been delivered. Check ProtoViewer before retrying.",
-          { cause: error },
-        );
-      }
-      // No captured simctl stderr fixture: nonzero exit, not message text, means non-delivery.
-      throw new ProtoViewerEntryPointMissingError();
-    }
+      await this.deps.timer.sleep(
+        Math.min(PROTOVIEWER_RESULT_POLL_MS, Math.max(0, deadline - this.deps.timer.now())),
+      );
+    } while (this.deps.timer.now() < deadline);
+    throw new ProtoViewerInboxUnsupportedError();
   }
 
   private async cleanup(paths: readonly string[]): Promise<void> {

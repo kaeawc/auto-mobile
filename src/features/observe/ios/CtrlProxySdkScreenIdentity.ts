@@ -86,8 +86,7 @@ export class CtrlProxySdkScreenIdentity {
     eventType: string,
     applicationId: string | undefined,
     payload: Record<string, unknown>,
-    timestamp: number,
-    sequenceNumber: number | undefined,
+    { timestamp, sequenceNumber }: { timestamp: number; sequenceNumber?: number },
   ): boolean {
     if (
       !applicationId ||

@@ -74,11 +74,9 @@ export class AccessibilityStateDetector {
         } else if (this.device.platform === "ios") {
           // Detect VoiceOver state via CtrlProxy WebSocket
           const client = this.iosClient ?? IOSCtrlProxyClient.getInstance(this.device);
-          const enabled = await this.iosDetector.resolveState(
-            this.device.deviceId,
-            client,
+          const enabled = await this.iosDetector.resolveState(this.device.deviceId, client, {
             featureFlags,
-          );
+          });
           if (enabled === null) {
             // accessibilityState is optional: omit unreadable evidence rather than asserting off
             // (same contract as the Android branch, #9682).

@@ -88,7 +88,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
     });
 
     test("forwards a caller-provided detection deadline to CtrlProxy", async () => {
-      await detector.isVoiceOverEnabled("device123", fakeClient, undefined, 1_250);
+      await detector.isVoiceOverEnabled("device123", fakeClient, { timeoutMs: 1_250 });
 
       expect(fakeClient.timeoutMsArgs).toEqual([1_250]);
     });
@@ -334,7 +334,9 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       fakeFeatureFlags.setFlag("force-accessibility-mode", true);
       fakeClient.voiceOverEnabled = false;
 
-      const enabled = await detector.isVoiceOverEnabled("device123", fakeClient, fakeFeatureFlags);
+      const enabled = await detector.isVoiceOverEnabled("device123", fakeClient, {
+        featureFlags: fakeFeatureFlags,
+      });
 
       expect(enabled).toBe(true);
       expect(fakeClient.callCount).toBe(0);
@@ -345,7 +347,9 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       fakeFeatureFlags.setFlag("accessibility-auto-detect", false);
       fakeClient.voiceOverEnabled = true;
 
-      const enabled = await detector.isVoiceOverEnabled("device123", fakeClient, fakeFeatureFlags);
+      const enabled = await detector.isVoiceOverEnabled("device123", fakeClient, {
+        featureFlags: fakeFeatureFlags,
+      });
 
       expect(enabled).toBe(false);
       expect(fakeClient.callCount).toBe(0);
@@ -357,13 +361,17 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       fakeClient.voiceOverEnabled = false;
 
       // Populate cache with false
-      const first = await detector.isVoiceOverEnabled("device123", fakeClient, fakeFeatureFlags);
+      const first = await detector.isVoiceOverEnabled("device123", fakeClient, {
+        featureFlags: fakeFeatureFlags,
+      });
       expect(first).toBe(false);
       expect(fakeClient.callCount).toBe(1);
 
       // Enable force flag — should override cache
       fakeFeatureFlags.setFlag("force-accessibility-mode", true);
-      const second = await detector.isVoiceOverEnabled("device123", fakeClient, fakeFeatureFlags);
+      const second = await detector.isVoiceOverEnabled("device123", fakeClient, {
+        featureFlags: fakeFeatureFlags,
+      });
       expect(second).toBe(true);
       expect(fakeClient.callCount).toBe(1); // no additional CtrlProxy call
     });

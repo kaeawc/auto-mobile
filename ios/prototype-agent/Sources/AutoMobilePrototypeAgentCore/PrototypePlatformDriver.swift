@@ -27,6 +27,10 @@ final class PrototypePlatformDriver {
             subscriptions.append(Task { [weak self] in
                 for await event in stream {
                     guard !Task.isCancelled, let self else { break }
+                    if event.event == PlatformEvent.stateRefresh(name).event {
+                        onState?(registry.snapshot)
+                        continue
+                    }
                     guard event.event.hasPrefix(name + "."),
                           PrototypePlatformValidator.modules[name]?.events.contains(
                               String(event.event.dropFirst(name.count + 1))
@@ -78,7 +82,7 @@ final class PrototypePlatformDriver {
         }
     }
 
-    private static func invalidArguments(_ call: PlatformCall) -> PlatformCallResult? {
+    nonisolated static func invalidArguments(_ call: PlatformCall) -> PlatformCallResult? {
         let parts = call.call.split(separator: ".")
         guard parts.count == 2,
               let definition = PrototypePlatformValidator.modules[String(parts[0])]?.calls[String(parts[1])]

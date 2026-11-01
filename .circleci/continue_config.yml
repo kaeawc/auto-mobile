@@ -112,11 +112,11 @@ commands:
     steps:
       - run:
           name: "Compute SwiftPM cache key"
-          command: cat ios/*/Package.swift > /tmp/spm-lock.txt
+          command: |
+            find ios/*/Package.swift ios/sdk-wire/Sources ios/sdk-wire/Tests ios/auto-mobile-sdk/Sources ios/auto-mobile-sdk/Tests -type f | LC_ALL=C sort | xargs cat > /tmp/spm-lock.txt
       - restore_cache:
           keys:
-            - spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
-            - spm-v1-
+            - spm-v2-{{ checksum "/tmp/spm-lock.txt" }}
 
   install_bun:
     steps:
@@ -322,7 +322,7 @@ jobs:
       - run:
           name: "Resolve Swift package dependencies"
           command: |
-            for package in ios/screen-capture ios/network-filter ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+            for package in ios/screen-capture ios/network-filter ios/audio-loopback ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
               (cd "${package}" && swift package resolve)
             done
       - run:
@@ -332,12 +332,13 @@ jobs:
           name: "Test Swift packages"
           command: ./scripts/ios/swift-test.sh
       - save_cache:
-          key: spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
+          key: spm-v2-{{ checksum "/tmp/spm-lock.txt" }}
           paths:
             - ~/Library/Caches/org.swift.swiftpm
             - ios/auto-mobile-sdk/.build
             - ios/control-proxy/.build
             - ios/screen-capture/.build
+            - ios/audio-loopback/.build
             - ios/XCTestRunner/.build
 
   # Advisory diagnostic: no simulator. #6061 exposed a lock-order hang only under
@@ -564,6 +565,15 @@ jobs:
           environment:
             AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
           command: ./scripts/ios/navigation-graph-sdk-event-integration.sh "${SIMULATOR_UDID}"
+      - run:
+          name: "Run iOS SDK contract suite"
+          no_output_timeout: 15m
+          environment:
+            AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
+          # Same 15-minute elapsed bound as the GitHub step's timeout-minutes.
+          command: |
+            source ./scripts/ios/run_with_timeout.sh
+            run_with_timeout 900 ./scripts/ios/sdk-contract-integration.sh "${SIMULATOR_UDID}"
       - run:
           name: "Run saved prototype smoke (advisory)"
           no_output_timeout: 12m

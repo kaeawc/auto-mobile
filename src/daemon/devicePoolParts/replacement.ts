@@ -5,7 +5,11 @@ import { BootedDevice, DeviceInfo } from "../../models";
 import { deviceLossCancellationReason } from "../emulatorLossIncident";
 import { type DeviceRetirementOptions } from "../deviceRuntimeIdentity";
 import type { PooledDevice } from "../devicePoolTypes";
-import { DiscoveryReconcileOptions, SystemUiAnrRecoveryHandoff } from "./contracts";
+import {
+  DiscoveryReconcileOptions,
+  SystemUiAnrRecoveryHandoff,
+  type SystemUiAnrReplacementOptions,
+} from "./contracts";
 import type { DevicePoolOperations } from "./operations";
 import type { DevicePoolState } from "./state";
 
@@ -25,9 +29,7 @@ export interface ReplacementOperations {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
-    childProcess?: ChildProcess | null,
-    beforeReplacementPublishes?: () => void,
-    excludeExecutionId?: string,
+    options?: SystemUiAnrReplacementOptions & { childProcess?: ChildProcess | null },
   ): Promise<SystemUiAnrRecoveryHandoff>;
   settleSystemUiAnrOriginalClaim(originalDeviceId: string): void;
   validateSystemUiAnrRecoverySession(
@@ -48,8 +50,7 @@ export interface ReplacementOperations {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
-    beforeReplacementPublishes?: () => void,
-    excludeExecutionId?: string,
+    options?: { beforeReplacementPublishes?: () => void; excludeExecutionId?: string },
   ): Promise<PooledDevice>;
   cancelOldDeviceWorkForSystemUiAnr(deviceId: string, excludeExecutionId?: string): Promise<void>;
   assertPooledSystemUiAnrReplacement(replacement: PooledDevice, sourceImage: DeviceInfo): void;
@@ -174,17 +175,16 @@ export class DevicePoolReplacement {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
-    childProcess?: ChildProcess | null,
-    beforeReplacementPublishes?: () => void,
-    excludeExecutionId?: string,
+    {
+      childProcess,
+      ...options
+    }: SystemUiAnrReplacementOptions & { childProcess?: ChildProcess | null } = {},
   ): Promise<SystemUiAnrRecoveryHandoff> {
     return this.state.deviceReplacement.replaceDeviceForSystemUiAnrRecovery(
       expectedDevice,
       replacement,
       sourceImage,
-      childProcess,
-      beforeReplacementPublishes,
-      excludeExecutionId,
+      { childProcess, ...options },
     );
   }
 
@@ -239,15 +239,16 @@ export class DevicePoolReplacement {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
-    beforeReplacementPublishes?: () => void,
-    excludeExecutionId?: string,
+    {
+      beforeReplacementPublishes,
+      excludeExecutionId,
+    }: { beforeReplacementPublishes?: () => void; excludeExecutionId?: string } = {},
   ): Promise<PooledDevice> {
     return this.state.deviceReplacement.replaceStoppedDeviceForSystemUiAnr(
       expectedDevice,
       replacement,
       sourceImage,
-      beforeReplacementPublishes,
-      excludeExecutionId,
+      { beforeReplacementPublishes, excludeExecutionId },
     );
   }
 

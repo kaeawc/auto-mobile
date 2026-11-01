@@ -1,6 +1,7 @@
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { errorMessage } from "../../utils/describeUnknownError";
-import type { BootedDevice } from "../../models";
+import type { AndroidOrIosPlatform, BootedDevice } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import {
   SimulatorTccSqliteClient,
   permissionForTccService,
@@ -201,13 +202,25 @@ export class IosSimulatorPermissions {
   private readonly backend: IosPermissionsBackend;
   private tccReader: TccPermissionReader;
 
+  private readonly withPrivacyLock: typeof withDeviceReadinessLock;
+  private readonly photosVerifier: PhotosAuthorizationVerifier;
+
   constructor(
     device: BootedDevice,
-    simctl: IosSimulatorPrivacyClient | null = null,
-    tccReader: TccPermissionReader | null = null,
-    private readonly withPrivacyLock: typeof withDeviceReadinessLock = withDeviceReadinessLock,
-    private readonly photosVerifier: PhotosAuthorizationVerifier = new UnobservablePhotosAuthorizationVerifier(),
+    {
+      simctl = null,
+      tccReader = null,
+      withPrivacyLock = withDeviceReadinessLock,
+      photosVerifier = new UnobservablePhotosAuthorizationVerifier(),
+    }: {
+      simctl?: IosSimulatorPrivacyClient | null;
+      tccReader?: TccPermissionReader | null;
+      withPrivacyLock?: typeof withDeviceReadinessLock;
+      photosVerifier?: PhotosAuthorizationVerifier;
+    } = {},
   ) {
+    this.withPrivacyLock = withPrivacyLock;
+    this.photosVerifier = photosVerifier;
     this.device = device;
     this.iosMajor = parseIosMajorVersion(device.iosVersion ?? device.osVersion);
     this.backend = resolveIosPermissionsBackend({
@@ -330,7 +343,7 @@ export class IosSimulatorPermissions {
       success: failedCount === 0,
       appId: normalizedAppId,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.reportedPlatform(),
       action,
       changedCount: results.length - failedCount,
       failedCount,
@@ -462,6 +475,11 @@ export class IosSimulatorPermissions {
     }
   }
 
+  /** The device's platform for a result; a watch is rejected rather than reported as a phone. */
+  private reportedPlatform(): AndroidOrIosPlatform {
+    return requireAndroidOrIosPlatform(this.device.platform, "Managing app permissions");
+  }
+
   private mutationFailure(
     action: IosSimulatorPermissionAction,
     appId: string,
@@ -471,7 +489,7 @@ export class IosSimulatorPermissions {
       success: false,
       appId,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.reportedPlatform(),
       action,
       changedCount: 0,
       failedCount: 0,
@@ -485,7 +503,7 @@ export class IosSimulatorPermissions {
       success: false,
       appId,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform: this.reportedPlatform(),
       permissions: [],
       error,
     };

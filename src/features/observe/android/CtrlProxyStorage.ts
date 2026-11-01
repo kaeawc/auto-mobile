@@ -29,7 +29,7 @@ import type {
   StorageWriteOptions,
   PreferenceFile,
   KeyValueEntry,
-  KeyValueType,
+  KeyValueWrite,
   StorageSubscription,
   StorageChangedEvent,
   ListPreferenceFilesResult,
@@ -570,19 +570,17 @@ export class CtrlProxyStorage {
    *
    * @param packageName - The package name of the app
    * @param fileName - Name of the preference file
-   * @param key - The key to set
-   * @param value - The value to set (serialized as string, or null)
-   * @param type - The type of the value (STRING, INT, LONG, FLOAT, BOOLEAN, STRING_SET)
+   * @param entry - The key to set, its value (serialized as string, or null) and its type
+   *   (STRING, INT, LONG, FLOAT, BOOLEAN, STRING_SET)
    * @param timeoutMsOrOptions - Response timeout or timeout and successful-send hook
    */
   async setPreference(
     packageName: string,
     fileName: string,
-    key: string,
-    value: string | null,
-    type: KeyValueType,
+    entry: KeyValueWrite,
     timeoutMsOrOptions?: number | StorageWriteOptions,
   ): Promise<void> {
+    const { key, value, type } = entry;
     const { timeoutMs, onDispatch } = normalizeStorageWriteOptions(timeoutMsOrOptions);
     const startTime = this.context.timer.now();
 

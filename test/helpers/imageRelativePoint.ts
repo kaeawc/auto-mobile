@@ -20,7 +20,7 @@ export async function cropSource(
     captured?.source ?? Buffer.from("fake"),
     bounds,
     geometry,
-    captured?.backend ?? fake,
+    { backend: captured?.backend ?? fake },
   );
   if (png.length === 0) {
     throw new Error("Crop backend returned an empty raster");

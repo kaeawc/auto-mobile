@@ -8,7 +8,10 @@ import {
   AndroidCommandOutputStreamRedactor,
   redactAndroidCommandOutput,
 } from "./redactAndroidCommandOutput";
-import type { EmulatorDeviceIdReservation } from "./EmulatorPortReservations";
+import type {
+  EmulatorDeviceIdReservation,
+  EmulatorGrpcPortLease,
+} from "./EmulatorPortReservations";
 
 import {
   EARLY_EXIT_DRAIN_TIMEOUT_MS,
@@ -27,7 +30,12 @@ import type {
   EmulatorLauncherHost,
 } from "./EmulatorLaunchSupport";
 import { EmulatorStartupValidation } from "./EmulatorStartupValidation";
+import {
+  handOffEmulatorGrpcLease,
+  leaseEmulatorGrpcPort,
+} from "./emulatorGrpc/emulatorGrpcLaunchLease";
 import { ENV, readEnvRaw } from "../../config/env";
+import * as tails from "./EmulatorOutputTail";
 
 export * from "./EmulatorLaunchSupport";
 
@@ -149,10 +157,19 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       args.push(...requestedExtraArgs);
     }
     this.appendCameraPosterArguments(args, options.cameraPosterPath);
-    this.host.throwIfLaunchCancelled(avdName, isCancelled);
-    // Queue for capacity only now that this launch will spawn: every adoption
-    // path above returned first, and an invalid AVD has already failed fast.
-    return await this.spawnWithBootAdmission(avdName, perf, args, options);
+    let grpcLease: EmulatorGrpcPortLease | undefined;
+    try {
+      grpcLease = await leaseEmulatorGrpcPort(args, this.host.reservations());
+      this.host.throwIfLaunchCancelled(avdName, isCancelled);
+      // Queue for capacity only now that this launch will spawn: every adoption
+      // path above returned first, and an invalid AVD has already failed fast.
+      const launch = await this.spawnWithBootAdmission(avdName, perf, args, options);
+      handOffEmulatorGrpcLease(grpcLease, launch.process, this.host.reservations());
+      return launch;
+    } catch (error) {
+      grpcLease?.release();
+      throw error;
+    }
   }
 
   /**
@@ -168,11 +185,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
   ): Promise<EmulatorProcessLaunch> {
     const admission = await options.admitColdBoot?.();
     if (!admission) {
-      return await this.spawnAdmittedEmulator(avdName, perf, args, options);
+      return await this.spawnAdmittedEmulator(avdName, perf, args, { options });
     }
     options.onAdmitted?.(admission);
     return await spawnUnderBootAdmission(admission, options.expectedDeviceId, (onAdmittedSpawn) =>
-      this.spawnAdmittedEmulator(avdName, perf, args, options, onAdmittedSpawn),
+      this.spawnAdmittedEmulator(avdName, perf, args, { options, onAdmittedSpawn }),
     );
   }
 
@@ -180,8 +197,10 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     avdName: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     args: string[],
-    options: EmulatorProcessOptions,
-    onAdmittedSpawn?: OnAdmittedSpawn<ChildProcess>,
+    {
+      options,
+      onAdmittedSpawn,
+    }: { options: EmulatorProcessOptions; onAdmittedSpawn?: OnAdmittedSpawn<ChildProcess> },
   ): Promise<EmulatorProcessLaunch & { reservedDeviceId?: string }> {
     const {
       onSpawn,
@@ -197,13 +216,10 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     this.host.throwIfLaunchCancelled(avdName, isCancelled);
     const reservedEmulator = await this.host
       .reservations()
-      .addReservedEmulatorPort(
-        args,
-        avdName,
-        preLaunchEmulatorDeviceSnapshot,
+      .addReservedEmulatorPort(args, avdName, preLaunchEmulatorDeviceSnapshot, {
         expectedDeviceId,
         signal,
-      );
+      });
     this.host.releaseReservationIfLaunchCancelled(avdName, reservedEmulator, isCancelled);
     logger.info(`Starting emulator with AVD: ${avdName}`);
     logger.debug(`Emulator command: ${this.host.emulatorPath()} ${args.join(" ")}`);
@@ -296,12 +312,13 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       // Keep only a redacted tail for launch diagnostics and failure classification.
       const stdoutRedactor = new AndroidCommandOutputStreamRedactor();
       const stderrRedactor = new AndroidCommandOutputStreamRedactor();
+      const redactors = [stdoutRedactor, stderrRedactor];
 
       const state = this.createLaunchState();
       perf.startOperation("panicDetection");
 
       const {
-        appendRedactedLaunchOutput,
+        appendRedactedLaunchOutput: append,
         currentLaunchOutput,
         flushLaunchOutput,
         recordEarlyExitCategory,
@@ -310,6 +327,8 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
         snapshot: currentLaunchOutput,
         flush: flushLaunchOutput,
       });
+      tails.indexEmulatorOutputTail(child, context, currentLaunchOutput, this.host);
+      const appendRedactedLaunchOutput = tails.observeEmulatorOutput(child, append, redactors);
       const { beginPostValidationExit, finalizePostValidationExit } =
         this.createPostValidationExitHandlers({
           avdName,
@@ -408,9 +427,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
             reject(
               this.host.formatEarlyExitError(
                 avdName,
-                state.exitCode ?? null,
-                state.exitSignal ?? null,
-                state.earlyExitCategory,
+                {
+                  code: state.exitCode ?? null,
+                  signal: state.exitSignal ?? null,
+                  category: state.earlyExitCategory,
+                },
                 flushLaunchOutput(),
                 "",
               ),
@@ -447,18 +468,14 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     >,
     options: Pick<EmulatorProcessOptions, "expectedDeviceId" | "signal">,
   ): EmulatorStartupValidation {
-    return new EmulatorStartupValidation(
-      this.host,
-      context.state,
-      context.child,
-      () => {
+    return new EmulatorStartupValidation(this.host, context.state, context.child, {
+      resolveStartup: () => {
         context.completeStartupValidation();
         context.perf.endOperation("panicDetection");
         context.resolve(context.child);
       },
-      options.expectedDeviceId,
-      options.signal,
-    );
+      options: { expectedDeviceId: options.expectedDeviceId, signal: options.signal },
+    });
   }
 
   private createLaunchCaptureHandlers(
@@ -558,6 +575,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     child.stderr?.on("data", monitorStderrHandler);
 
     child.on("exit", (code, signal) => {
+      tails.removeEmulatorOutputTail(child);
       this.host.timer().clearTimeout(startupTimeout);
       startupValidation.cancelEarlySignals();
       this.host.reservations().releaseLaunchChild(child);
@@ -582,6 +600,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     });
 
     child.on("close", (code, signal) => {
+      tails.removeEmulatorOutputTail(child);
       this.host.timer().clearTimeout(startupTimeout);
       startupValidation.cancelEarlySignals();
       this.host.reservations().releaseLaunchChild(child);
@@ -629,9 +648,11 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
     const postValidationExitError = (output: string): ActionableError => {
       const formattedError = this.host.formatEarlyExitError(
         avdName,
-        state.exitCode ?? null,
-        state.exitSignal ?? null,
-        state.earlyExitCategory,
+        {
+          code: state.exitCode ?? null,
+          signal: state.exitSignal ?? null,
+          category: state.earlyExitCategory,
+        },
         output,
         "",
       );
@@ -1038,9 +1059,7 @@ export class DefaultEmulatorLauncher implements EmulatorLauncher {
       reject(
         this.host.formatEarlyExitError(
           avdName,
-          completedExitCode,
-          completedExitSignal,
-          category,
+          { code: completedExitCode, signal: completedExitSignal, category },
           finalizedOutput,
           accelCheckOutput,
         ),

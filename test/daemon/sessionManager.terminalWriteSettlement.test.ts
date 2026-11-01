@@ -79,7 +79,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
   test.each(["first statement", "refusal retry"] as const)(
     "an own activity %s lands before the terminal classifier but settles afterwards",
     async (attempt) => {
-      await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+      await store.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
       const held = withholdActivityStatement(attempt === "refusal retry");
       timer.advanceTime(1);
       const activity = manager.getOrCreateSession(SESSION);
@@ -114,7 +114,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
 
   test("a live peer's newer row is re-read after the own statement settles", async () => {
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
-    await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+    await store.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
     const held = withholdActivityStatement();
     timer.advanceTime(1);
     const activity = manager.getOrCreateSession(SESSION);
@@ -179,7 +179,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     });
     expect(replacement).not.toBe(original);
 
-    await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+    await store.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
     const held = withholdActivityStatement();
     timer.advanceTime(1);
     const activity = manager.getOrCreateSession(SESSION);
@@ -202,7 +202,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
   });
 
   test("a wedged own statement reaches the existing deadline with its intent still owed", async () => {
-    await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
+    await store.markReleased(SESSION, "expired", timer.now(), { reason: "daemon-restart" });
     const held = withholdActivityStatement();
     timer.advanceTime(1);
     // Observe the activity caller without ever settling the statement in this scenario.

@@ -1,0 +1,58 @@
+{
+  "spec": {
+    "id": "secure-storage-also-in-keys",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "token": "",
+      "remember": ""
+    },
+    "requires": {
+      "platform": ["secureStorage", "biometric"]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:remember"],
+      "secure": ["state:token", "state:remember"],
+      "secureAuth": {
+        "state:token": "biometric"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "token"
+        },
+        {
+          "type": "button",
+          "label": "Save",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "save",
+              "context": {
+                "r": {
+                  "state": "remember"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "Locked",
+          "visibleWhen": {
+            "platform": "/secureStorage/locked",
+            "equals": true
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "storage.secure[1]"
+}

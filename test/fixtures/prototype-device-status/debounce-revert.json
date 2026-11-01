@@ -1,0 +1,53 @@
+{
+  "description": "A burst that settles back on the last delivered values is not an event, as with connectivity.changed; a later real change still is.",
+  "module": "audio",
+  "updates": [
+    {
+      "timestampMs": 0,
+      "values": {
+        "volume": 40,
+        "muted": false,
+        "route": "speaker",
+        "ringer": "normal"
+      }
+    },
+    {
+      "timestampMs": 100,
+      "values": {
+        "volume": 0,
+        "muted": true,
+        "route": "speaker",
+        "ringer": "normal"
+      }
+    },
+    {
+      "timestampMs": 200,
+      "values": {
+        "volume": 40,
+        "muted": false,
+        "route": "speaker",
+        "ringer": "normal"
+      }
+    },
+    {
+      "timestampMs": 1000,
+      "values": {
+        "volume": 40,
+        "muted": true,
+        "route": "speaker",
+        "ringer": "normal"
+      }
+    }
+  ],
+  "expectedEvents": [
+    {
+      "timestampMs": 1500,
+      "values": {
+        "volume": 40,
+        "muted": true,
+        "route": "speaker",
+        "ringer": "normal"
+      }
+    }
+  ]
+}

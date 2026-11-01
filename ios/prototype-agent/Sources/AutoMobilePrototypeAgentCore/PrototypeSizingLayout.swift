@@ -10,6 +10,12 @@ struct PrototypeRowFillKey: LayoutValueKey {
 struct PrototypeRowLayout: Layout {
     let spacing: Double
 
+    static var layoutProperties: LayoutProperties {
+        var properties = LayoutProperties()
+        properties.stackOrientation = .horizontal
+        return properties
+    }
+
     struct Frames {
         let widths: [Double]
         let height: Double
@@ -31,18 +37,22 @@ struct PrototypeRowLayout: Layout {
 
     private func frames(for proposal: ProposedViewSize, subviews: Subviews) -> Frames {
         let available = proposal.width.flatMap { $0.isFinite ? Double($0) : nil }
-        let fills = subviews.map { $0[PrototypeRowFillKey.self] }
+        let weights = subviews.map {
+            $0[PrototypeWeightKey.self] ?? ($0[PrototypeRowFillKey.self] ? 1 : nil)
+        }
         let minimums = subviews.indices.map { index in
             available == nil ? 0 : Double(subviews[index].sizeThatFits(
                 ProposedViewSize(width: 0, height: proposal.height)
             ).width)
         }
-        let widths = PrototypeRowSizing.widths(
+        let widths = PrototypeWeightedStack.mainSizes(
             available: available,
             spacing: spacing,
+            weights: weights,
             minimums: minimums,
-            fills: fills,
-            priorities: subviews.map(\.priority)
+            priorities: subviews.map(\.priority),
+            leastFlexibleFirst: true,
+            measuresFlexibleSlots: true
         ) { index, most in
             Double(subviews[index].sizeThatFits(
                 ProposedViewSize(width: most.map { CGFloat($0) }, height: proposal.height)
@@ -71,6 +81,7 @@ struct PrototypeRowLayout: Layout {
         }
         let greedy = proposal.width == .infinity && subviews.contains {
             $0[PrototypeRowFillKey.self]
+                || ($0[PrototypeWeightKey.self] ?? 0) > 0
                 || $0.sizeThatFits(ProposedViewSize(width: .infinity, height: proposal.height)).width
                 > $0.sizeThatFits(ProposedViewSize(width: nil, height: proposal.height)).width
         }
@@ -151,7 +162,7 @@ struct PrototypeWeightKey: LayoutValueKey {
     static let defaultValue: Double? = nil
 }
 
-/// A `row` or `column` with at least one weighted child, laid out by `PrototypeWeightedStack`.
+/// A `row` or `column`, laid out by `PrototypeWeightedStack`.
 /// Children are centred across a row and leading-aligned down a column, as in the plain stacks.
 /// SwiftUI mirrors a custom `Layout`'s placements under right-to-left on its own (proved by
 /// `PrototypeSizingLayoutTests`), so a row reverses and a column's leading edge flips with no
@@ -160,6 +171,7 @@ struct PrototypeWeightKey: LayoutValueKey {
 struct PrototypeWeightedStackLayout: Layout {
     let axis: PrototypeAxis
     let spacing: Double
+    var measuresFlexibleSlots = false
 
     private struct Frames {
         var main: [Double]
@@ -182,7 +194,7 @@ struct PrototypeWeightedStackLayout: Layout {
         let limits = split(offered)
         let weights = subviews.map { $0[PrototypeWeightKey.self] }
         let minimums = limits.main != nil ? subviews.indices.map { index in
-            (weights[index] ?? 0) > 0 ? 0 : Double(subviews[index].sizeThatFits(
+            (weights[index] ?? 0) > 0 && !measuresFlexibleSlots ? 0 : Double(subviews[index].sizeThatFits(
                 offer(main: 0, cross: limits.cross)
             )[keyPath: isHorizontal() ? \CGSize.width : \CGSize.height])
         } : nil
@@ -192,7 +204,8 @@ struct PrototypeWeightedStackLayout: Layout {
             weights: weights,
             minimums: minimums,
             priorities: isHorizontal() ? subviews.map(\.priority) : nil,
-            leastFlexibleFirst: isHorizontal()
+            leastFlexibleFirst: isHorizontal(),
+            measuresFlexibleSlots: measuresFlexibleSlots
         ) { index, most in
             let size = subviews[index].sizeThatFits(offer(main: most, cross: limits.cross))
             return Double(isHorizontal() ? size.width : size.height)
@@ -203,8 +216,10 @@ struct PrototypeWeightedStackLayout: Layout {
         }
         let gaps = spacing * Double(max(subviews.count - 1, 0))
         let sum = main.reduce(0, +) + gaps
-        // A weight fills what is left, so a bounded stack with one takes the whole axis.
-        let total = weights.contains { ($0 ?? 0) > 0 } ? max(sum, limits.main ?? sum) : sum
+        // Authored weights fill the axis. Flexible spacer slots can cap below their shares,
+        // leaving a wrap-sized row smaller than the proposal.
+        let fills = !measuresFlexibleSlots && weights.contains { ($0 ?? 0) > 0 }
+        let total = fills ? max(sum, limits.main ?? sum) : sum
         return Frames(main: main, cross: cross, mainTotal: total)
     }
 

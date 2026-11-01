@@ -321,7 +321,7 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     const state = this.states.get(key) ?? { identity, waiters: [], released: [] };
     this.states.set(key, state);
     if (!state.owner) {
-      return this.assignOwner(key, state, options.operation, controller);
+      return this.assignOwner(key, state, options.operation, { controller });
     }
     this.assertNotHeldByUnkillableProcess(state.owner, identity, options.operation);
     const remainingMs = options.deadlineMs - this.timer.now();
@@ -400,8 +400,13 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     key: string,
     state: LifecycleState,
     operation: VirtualDeviceLifecycleOperation,
-    controller: AbortController,
-    precedingOperations: readonly VirtualDeviceLifecycleOperation[] = [],
+    {
+      controller,
+      precedingOperations = [],
+    }: {
+      controller: AbortController;
+      precedingOperations?: readonly VirtualDeviceLifecycleOperation[];
+    },
   ): LifecycleOwner {
     let released = false;
     const owner: LifecycleOwner = {
@@ -417,13 +422,10 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
         const next = state.waiters.shift();
         if (next) {
           next.resolve(
-            this.assignOwner(
-              key,
-              state,
-              next.operation,
-              next.controller,
-              state.released.slice(next.releasedFrom),
-            ),
+            this.assignOwner(key, state, next.operation, {
+              controller: next.controller,
+              precedingOperations: state.released.slice(next.releasedFrom),
+            }),
           );
           return;
         }

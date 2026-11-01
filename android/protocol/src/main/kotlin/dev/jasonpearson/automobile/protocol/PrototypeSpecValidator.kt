@@ -146,6 +146,18 @@ object PrototypeSpecValidator {
         PrototypeSpecValidation.Failure(PrototypeSpecError("$", "Invalid UTF-8"))
       }
 
+  private val specStateRule: JsonObject by lazy {
+    definitions
+      .getValue("spec")
+      .jsonObject
+      .getValue("fields")
+      .jsonObject
+      .getValue("state")
+      .jsonObject
+      .getValue("rule")
+      .jsonObject
+  }
+
   /** The caller supplies the same compact encoder it uses for full-spec writes. */
   fun prepareStateWrites(spec: PrototypeSpec, encoder: Json): PrototypeStateWriteValidator {
     val encoded =
@@ -162,6 +174,9 @@ object PrototypeSpecValidator {
     }
     val value = checkNotNull(context.root).jsonObject
     val checked = checkNotNull(context.stateBindings)
+    // A state write can break a videoPlayer's number-typed positionKey or a cameraPreview's keys.
+    val videoPlayers = context.nodes.filter { it.value.text("type") == "videoPlayer" }
+    val cameraPreviews = context.nodes.filter { it.value.text("type") == "cameraPreview" }
     // Only bindings can change their verdict. Static-only nodes/actions passed full validation.
     checked.nodes.removeAll {
       boundKeys(it.value).isEmpty() &&
@@ -180,16 +195,7 @@ object PrototypeSpecValidator {
     val fixedBytes =
       encoded.toByteArray(Charsets.UTF_8).size -
         (value["state"]?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: -",\"state\":".length)
-    val stateRule =
-      definitions
-        .getValue("spec")
-        .jsonObject
-        .getValue("fields")
-        .jsonObject
-        .getValue("state")
-        .jsonObject
-        .getValue("rule")
-        .jsonObject
+    val stateRule = specStateRule
     return PrototypeStateWriteValidator { state ->
       // Encoding first preserves serialization exceptions, including non-finite numbers.
       val encodedState = encoder.encodeToString(serializer, state)
@@ -199,7 +205,15 @@ object PrototypeSpecValidator {
         try {
           val stored = json.parseToJsonElement(PrototypeStrictJson.prepare(encodedState))
           if (!validNumberTokens(stored)) fail("", "Invalid JSON")
-          else storedStateError(stored, stateRule, value, checked, keyframeKeys)
+          else
+            storedStateError(stored, stateRule, value, keyframeKeys)
+              // Node rules run before binding checks, as platform rules do in full validation.
+              ?: mediaNodeError(
+                JsonObject(value + ("state" to stored)),
+                videoPlayers,
+                cameraPreviews,
+              )
+              ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
         } catch (_: IllegalArgumentException) {
           fail("", "Invalid JSON")
         }
@@ -207,12 +221,20 @@ object PrototypeSpecValidator {
     }
   }
 
+  /** The state-dependent media node rules: a videoPlayer positionKey and cameraPreview keys. */
+  private fun mediaNodeError(
+    root: JsonObject,
+    videoPlayers: List<PrototypeStateChecks.Located>,
+    cameraPreviews: List<PrototypeStateChecks.Located>,
+  ): PrototypeSpecError? =
+    PrototypeMedia.videoPlayerError(root, videoPlayers)
+      ?: PrototypeCameraPreview.error(root, cameraPreviews)
+
   /** The verdict for a decoded state write against the spec it replaces the state of. */
   private fun storedStateError(
     stored: JsonElement,
     stateRule: JsonObject,
     value: JsonObject,
-    checked: Context,
     keyframeKeys: List<Pair<String, String>>,
   ): PrototypeSpecError? =
     walk(stored, stateRule, "state", Context(), 0)
@@ -222,7 +244,8 @@ object PrototypeSpecValidator {
         enforceBytes = false,
       )
       ?: PrototypeChannels.error(JsonObject(value + ("state" to stored)))
-      ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
+      // A secure key must keep holding a string after the write.
+      ?: PrototypeSecureStorageRules.blockError(JsonObject(value + ("state" to stored)))
 
   private val stateWriteActionTypes =
     setOf("setState", "toggle", "increment", "decrement", "request", "platform")

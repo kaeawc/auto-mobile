@@ -201,7 +201,7 @@ function harness(
     layer: "prototype" | "app" | undefined = "prototype",
     input = commands,
     selector: SendKeysSelector = { elementId: "ptf" },
-  ) => action.execute(input, selector, undefined, undefined, undefined, { layer });
+  ) => action.execute(input, selector, { focus: { layer } });
   return { ...h, action, run, reads, timer, keyboardCalls, observer };
 }
 
@@ -429,9 +429,15 @@ for (const platform of ["android", "ios"] as const) {
       const baselineResult = await baseline.action.execute(commands, { elementId: "ptf" });
       const h = harness(platform, { reader });
       expect(
-        await h.action.execute(commands, { elementId: "ptf" }, undefined, undefined, undefined, {
-          layer,
-        }),
+        await h.action.execute(
+          commands,
+          { elementId: "ptf" },
+          {
+            focus: {
+              layer,
+            },
+          },
+        ),
       ).toEqual(baselineResult);
       expect(h.reads).toHaveLength(baseline.reads.length);
       expect(calls).toBe(0);
@@ -493,10 +499,7 @@ test("the default focuser reports the resolved node identifiers for an iOS text 
     const result = await action.execute(
       commands,
       { text: "Name" },
-      undefined,
-      undefined,
-      undefined,
-      { layer: "prototype" },
+      { focus: { layer: "prototype" } },
     );
     expect(result.success).toBe(true);
     expect(result.commands[0]?.warning).toBeUndefined();
@@ -818,10 +821,7 @@ for (const platform of ["android", "ios"] as const) {
       await h.action.execute(
         commands,
         { elementId: "ptf" },
-        undefined,
-        undefined,
-        undefined,
-        layer === "prototype" ? { layer: "app" } : undefined,
+        { focus: layer === "prototype" ? { layer: "app" } : undefined },
       );
       expect(h.reads).toHaveLength(baseline.reads.length);
     }
@@ -908,7 +908,7 @@ test("display-routed Android focus applies the inferred prototype layer", async 
     timestampProvider: { now: async () => 1 },
     focuser: { focus: async () => ({ success: true, layer: "prototype" }) },
   });
-  const result = await action.execute(commands, { elementId: "ptf" }, undefined, undefined, "0");
+  const result = await action.execute(commands, { elementId: "ptf" }, { display: "0" });
   expect(h.committed).toEqual(["Rb one"]);
   expect(result.success).toBe(true);
   expect(result.commands[0]?.imeFailure).toBeUndefined();

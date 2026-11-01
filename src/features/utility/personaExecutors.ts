@@ -70,7 +70,10 @@ export const defaultPersonaExecutors = (
         if (!isKeyboardProfileId(profile)) {
           throw new ActionableError(`Unknown keyboard profile '${profile}'.`);
         }
-        return setKeyboardProfileRecorded(device, profile, undefined, setSignal, { owner });
+        return setKeyboardProfileRecorded(device, profile, undefined, {
+          signal: setSignal,
+          record: { owner },
+        });
       },
       pending: () => defaultKeyboardProfileRestoreRegistry.pending(device.deviceId),
       reset: (resetSignal) => resetKeyboardProfileFromRecord(device, undefined, resetSignal),

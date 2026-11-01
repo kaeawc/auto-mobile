@@ -304,24 +304,19 @@ export class PersistedSessionAdmission {
       return persisted;
     }
     // Only the row judged expired: a peer may re-upsert the UUID after this read (#11129).
-    await this.host.deviceSessionRepository.markReleased(
-      persisted.session_uuid,
-      "expired",
-      now,
-      "expired",
-      {
-        ...(persisted.stable_identity_generation === undefined
-          ? {}
-          : { expectedRowGeneration: persisted.stable_identity_generation }),
-        // The repository compares stored stamps, which are wall ms; the session-clock wrapper
-        // converts the release stamp but passes options through as given. A stamp this daemon
-        // wrote itself is judged above as the session-clock instant it was written from (#11358),
-        // so after a wall step the statement can disagree with that judgement by the step; then
-        // nothing is written and the row is still answered as it reads below.
-        onlyIfExpiredAtMs: this.host.sessionClockToWall(now),
-        onlyIfOwnedByDaemon,
-      },
-    );
+    await this.host.deviceSessionRepository.markReleased(persisted.session_uuid, "expired", now, {
+      reason: "expired",
+      ...(persisted.stable_identity_generation === undefined
+        ? {}
+        : { expectedRowGeneration: persisted.stable_identity_generation }),
+      // The repository compares stored stamps, which are wall ms; the session-clock wrapper
+      // converts the release stamp but passes options through as given. A stamp this daemon
+      // wrote itself is judged above as the session-clock instant it was written from (#11358),
+      // so after a wall step the statement can disagree with that judgement by the step; then
+      // nothing is written and the row is still answered as it reads below.
+      onlyIfExpiredAtMs: this.host.sessionClockToWall(now),
+      onlyIfOwnedByDaemon,
+    });
     const current = await this.readPersistedSession(persisted.session_uuid);
     this.confirmPersistedExpiry(persisted, current, "expired");
     if (!this.isReissuablePersistedSession(current)) {

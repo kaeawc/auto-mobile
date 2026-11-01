@@ -14,6 +14,7 @@ import {
   failedPath,
   type SessionLogProvider,
   type ResetAppLogsRequest,
+  type SessionLogReadBounds,
 } from "./DefaultSessionLogService";
 import {
   type SessionLogFileOutcome,
@@ -90,8 +91,7 @@ export class AndroidSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: UnifiedLogWindowRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
+    { maxBytes, signal }: SessionLogReadBounds,
   ): Promise<AndroidLogcatWindowResult> {
     const adb = this.adbFactory.create(device);
     try {
@@ -145,8 +145,7 @@ export class AndroidSessionLogProvider implements SessionLogProvider {
     device: BootedDevice,
     appId: string,
     request: SessionLogFilesRequest,
-    maxBytes: number,
-    signal?: AbortSignal,
+    { maxBytes, signal }: SessionLogReadBounds,
   ): Promise<SessionLogFilesResult> {
     const adb = this.adbFactory.create(device);
     const entries: SessionLogFileOutcome[] = [];

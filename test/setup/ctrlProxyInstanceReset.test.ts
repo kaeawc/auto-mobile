@@ -43,14 +43,12 @@ describe("CtrlProxy unit-test preload registry cleanup", () => {
 
   test("iOS cleanup clears a registered client", () => {
     const timer = new FakeTimer();
-    const client = IOSCtrlProxyClient.createForTesting(
-      iosDevice,
-      8765,
-      () => {
+    const client = IOSCtrlProxyClient.createForTesting(iosDevice, 8765, {
+      wsFactory: () => {
         throw new Error("Registry test must not open a WebSocket");
       },
       timer,
-    );
+    });
 
     IOSCtrlProxyClient.registerForTesting(client, iosDevice.deviceId);
     expect(IOSCtrlProxyClient.getExistingInstance(iosDevice.deviceId)).toBe(client);

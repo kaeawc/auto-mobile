@@ -21,6 +21,12 @@ export interface PerfettoPollOptions {
   flushPollIntervalMs?: number;
 }
 
+/** Trailing options for the perfetto stop/flush waits. */
+export interface PerfettoWaitOptions {
+  poll?: PerfettoPollOptions;
+  signal?: AbortSignal;
+}
+
 /** `perfetto --background` prints the detached recorder's pid as its last line. */
 export function parsePerfettoBackgroundPid(output: string): number | undefined {
   return output
@@ -39,8 +45,7 @@ export async function startPerfettoRecorder(
   adb: PerfettoAdb,
   deviceId: string,
   config: string,
-  remotePath: string,
-  signal?: AbortSignal,
+  { remotePath, signal }: { remotePath: string; signal?: AbortSignal },
 ): Promise<number> {
   const encoded = Buffer.from(config).toString("base64");
   const started = await adb.execute(
@@ -61,9 +66,7 @@ export async function stopPerfettoRecorder(
   adb: PerfettoAdb,
   timer: Pick<Timer, "sleep">,
   pid: number,
-  warnings: string[],
-  poll: PerfettoPollOptions = {},
-  signal?: AbortSignal,
+  { warnings, poll = {}, signal }: PerfettoWaitOptions & { warnings: string[] },
 ): Promise<void> {
   const options = { timeoutMs: ADB_TIMEOUT_MS, noRetry: true, signal };
   // Exits 0 either way: an already-finished recorder (its duration elapsed) is not an error.
@@ -132,9 +135,7 @@ export async function awaitFlushedDeviceFile(
   adb: PerfettoAdb,
   timer: Pick<Timer, "sleep">,
   remotePath: string,
-  poll: PerfettoPollOptions,
-  logTag: string,
-  signal?: AbortSignal,
+  { logTag, poll = {}, signal }: PerfettoWaitOptions & { logTag: string },
 ): Promise<void> {
   const attempts = poll.flushPollAttempts ?? 40;
   let previous = 0;

@@ -64,6 +64,10 @@ struct PrototypeScreen: View {
             prototypeContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
+                .ignoresSafeArea(
+                    .container,
+                    edges: ProtoViewerContentLayout.ignoresBottomContainerSafeArea ? .bottom : []
+                )
         }
         .preferredColorScheme(chromeAppearance?.colorScheme)
         .navigationTitle(entry.label)

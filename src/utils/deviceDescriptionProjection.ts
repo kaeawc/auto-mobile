@@ -1,3 +1,7 @@
+import { VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION } from "../models/virtualDeviceCapabilities";
+import { isAndroidEmulatorSerial } from "./androidSerial";
+import { androidGrpcAudioCapabilities } from "./audio/audioCapabilities";
+import { emulatorGrpcAudioSnapshot } from "./audio/emulatorGrpcAudioState";
 import type { DeviceInfo } from "../models";
 import type {
   DeviceDescription,
@@ -109,11 +113,22 @@ export function staticFactsFrom(
   device: DeviceInfo,
 ): Pick<
   DeviceDescription,
-  "formFactor" | "deviceType" | "model" | "architecture" | "osVersion" | "apiLevel" | "runtimeId"
+  | "formFactor"
+  | "deviceType"
+  | "model"
+  | "architecture"
+  | "osVersion"
+  | "apiLevel"
+  | "runtimeId"
+  | "configuredRamMb"
+  | "effectiveRamMb"
+  | "configuredCpuCores"
+  | "effectiveCpuCores"
 > {
   return {
     osVersion: device.osVersion ?? device.iosVersion ?? null,
     apiLevel: device.platform === "android" ? (device.apiLevel ?? null) : null,
+    ...guestHardwareFrom(device),
     runtimeId: device.runtimeId ?? device.runtime ?? null,
     deviceType: device.deviceType ?? null,
     architecture: device.architecture ?? null,
@@ -126,6 +141,28 @@ export function staticFactsFrom(
       density: device.screenDensity,
       deviceType: device.deviceType,
     }),
+  };
+}
+
+function guestHardwareFrom(
+  device: DeviceInfo,
+): Pick<
+  DeviceDescription,
+  "configuredRamMb" | "effectiveRamMb" | "configuredCpuCores" | "effectiveCpuCores"
+> {
+  if (device.platform !== "android") {
+    return {
+      configuredRamMb: null,
+      effectiveRamMb: null,
+      configuredCpuCores: null,
+      effectiveCpuCores: null,
+    };
+  }
+  return {
+    configuredRamMb: (device.configuredRamMb ?? 0) > 0 ? device.configuredRamMb : null,
+    effectiveRamMb: (device.effectiveRamMb ?? 0) > 0 ? device.effectiveRamMb : null,
+    configuredCpuCores: (device.configuredCpuCores ?? 0) > 0 ? device.configuredCpuCores : null,
+    effectiveCpuCores: (device.effectiveCpuCores ?? 0) > 0 ? device.effectiveCpuCores : null,
   };
 }
 
@@ -164,6 +201,18 @@ export function imageLifecycle(image: ImageLike): DeviceDescription["runtime"]["
   };
 }
 
+function androidGrpcCapabilities(
+  device: DeviceInfo,
+  isVirtual: boolean,
+): ReturnType<typeof androidGrpcAudioCapabilities> {
+  return device.platform === "android" &&
+    isVirtual &&
+    device.deviceId &&
+    isAndroidEmulatorSerial(device.deviceId)
+    ? androidGrpcAudioCapabilities(emulatorGrpcAudioSnapshot(device.deviceId))
+    : [];
+}
+
 export function capabilityInventory(
   device: DeviceInfo,
   isVirtual: boolean,
@@ -178,12 +227,18 @@ export function capabilityInventory(
           hostAudio: hostAudioSnapshot(),
         })
       : undefined);
-  if (!inventory) {
+  const grpc = androidGrpcCapabilities(device, isVirtual);
+  if (!inventory && grpc.length === 0) {
     return null;
   }
+  const grpcIds = new Set(grpc.map((entry) => entry.id));
+  const capabilities = [
+    ...(inventory?.capabilities ?? []).filter((entry) => !grpcIds.has(entry.id)),
+    ...grpc,
+  ];
   return {
-    schemaVersion: inventory.schemaVersion,
-    capabilities: inventory.capabilities.map((capability) => ({
+    schemaVersion: inventory?.schemaVersion ?? VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
+    capabilities: capabilities.map((capability) => ({
       id: capability.id,
       state:
         capability.state === "available"

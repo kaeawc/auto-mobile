@@ -168,6 +168,8 @@ export function createHostEmulatorProcessStopper(deps: {
   return new ProcessTableEmulatorProcessStopper(
     new ProcessTableReader(deps.executor, {
       timer: deps.timer,
+      // Shutdown must tolerate loaded hosts; the stopper still fences the caller deadline.
+      attemptTimeoutMs: 15_000,
       processTableSupported: platform !== "win32",
       procFs: platform === "linux" ? nodeProcFs : undefined,
     }),

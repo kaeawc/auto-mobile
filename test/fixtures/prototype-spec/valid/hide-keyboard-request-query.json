@@ -1,0 +1,28 @@
+{
+  "id": "hide-keyboard-request-query",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "results": []
+  },
+  "root": {
+    "type": "button",
+    "label": "Search",
+    "onTap": [
+      {
+        "type": "request",
+        "url": "http://localhost:8080/search",
+        "query": {
+          "type": "hideKeyboard"
+        },
+        "headers": {
+          "type": "hideKeyboard"
+        },
+        "into": "/data/results"
+      }
+    ]
+  }
+}

@@ -149,7 +149,7 @@ test("createForTesting preserves the injected builder", () => {
   PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
   const timer = new FakeTimer();
   const builder = builderStub();
-  const manager = IOSCtrlProxyManager.createForTesting(device, timer, builder);
+  const manager = IOSCtrlProxyManager.createForTesting(device, timer, { builder });
   expect(manager.diagnostics.device).toBe(device);
   expect(manager.diagnostics.timer).toBe(timer);
   expect(manager.diagnostics.builder).toBe(builder);

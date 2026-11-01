@@ -360,7 +360,7 @@ describe("DaemonManager readiness", () => {
       platform: "linux",
     });
 
-    const ready = manager.waitForReady(10_000, controller.signal);
+    const ready = manager.waitForReady(10_000, { signal: controller.signal });
     expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
 
     controller.abort();
@@ -467,9 +467,7 @@ describe("DaemonManager readiness", () => {
       return holderAlive;
     };
 
-    await expect(manager.waitForReady(30_000, undefined, shouldContinueWaiting)).resolves.toBe(
-      false,
-    );
+    await expect(manager.waitForReady(30_000, { shouldContinueWaiting })).resolves.toBe(false);
     // Interrupted early: fake time is nowhere near the 30s budget the un-watched
     // probe would have consumed.
     expect(fakeTimer.getCurrentTime()).toBeLessThan(1_000);

@@ -262,13 +262,11 @@ export class AppPermissions {
       return this.setIosPhysicalPermissions(appId, action, permissions);
     }
 
-    const iosPermissions = new IosSimulatorPermissions(
-      this.device,
-      this.simctl,
-      this.tccReader,
-      undefined,
-      this.photosVerifier,
-    );
+    const iosPermissions = new IosSimulatorPermissions(this.device, {
+      simctl: this.simctl,
+      tccReader: this.tccReader,
+      photosVerifier: this.photosVerifier,
+    });
     const result = await iosPermissions.setPermissions(action, appId, permissions);
 
     return {
@@ -498,7 +496,10 @@ export class AppPermissions {
       };
     }
 
-    const iosPermissions = new IosSimulatorPermissions(this.device, this.simctl, this.tccReader);
+    const iosPermissions = new IosSimulatorPermissions(this.device, {
+      simctl: this.simctl,
+      tccReader: this.tccReader,
+    });
     const result = await iosPermissions.getPermissions(
       appId,
       normalizePermissions(input.permissions),

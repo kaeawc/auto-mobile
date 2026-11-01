@@ -116,7 +116,7 @@ describe("request_screenshot hidePrototypes (#9305)", () => {
       "s-1",
       "screenshot",
       1000,
-      () => ({ success: false, error: "timeout" }),
+      { timeoutErrorFactory: () => ({ success: false, error: "timeout" }) },
     );
     client.testHooks.screenshotObservationStreamSuppressions.add("s-1");
     client.testHooks.webSocketMessageHandlers().screenshot({

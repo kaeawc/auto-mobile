@@ -1,3 +1,5 @@
+import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
+import { registerWatchRunnerBuilder } from "../features/watch/WatchRunnerLifecycle";
 import { clientAdvertisesMcpApps } from "./mcpAppsSupport";
 import { DeviceReadiness } from "../daemon/readiness/DeviceReadiness";
 import type { ListToolsResult, McpServer, ServerCapabilities } from "@modelcontextprotocol/server";
@@ -81,7 +83,10 @@ import { registerDeviceSnapshotResources } from "./deviceSnapshotResources";
 import { registerDatabaseResources } from "./databaseResources";
 import { registerFailuresResources } from "./failuresResources";
 import { registerStorageResources } from "./storageResources";
-import { registerStorageCapabilityResources } from "./storageCapabilityResources";
+import {
+  registerStorageCapabilityResources,
+  runnerIosStorageDiscovery,
+} from "./storageCapabilityResources";
 import { registerSdkCapabilityResources } from "./sdkCapabilityResources";
 import { registerDataStoreResources } from "./dataStoreResources";
 import { registerAppFileResources } from "./appFileResources";
@@ -201,6 +206,7 @@ let lastToolRegistration: { daemonMode: boolean; removalEpoch: number } | undefi
  * by exact tool name.
  */
 export function registerMcpTools(daemonMode: boolean): void {
+  registerWatchRunnerBuilder(() => IosCtrlProxyBuilder.getInstance());
   installDefaultProvisionedDeviceTransportFence();
   // Re-registering rebuilds every definition and drops the tool-schema cache, which a
   // stateless endpoint (one createMcpServer per request) would pay on every tools/list.
@@ -263,7 +269,10 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerDatabaseResources();
   registerFailuresResources();
   registerStorageResources();
-  registerStorageCapabilityResources();
+  registerStorageCapabilityResources({
+    createIosStorageDiscovery: (device) =>
+      runnerIosStorageDiscovery(IOSCtrlProxyClient.getInstance(device)),
+  });
   registerSdkCapabilityResources();
   registerDataStoreResources();
   registerAppFileResources();
@@ -395,9 +404,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     options.sessionContext?.initialSessionToolBinding,
     options.sessionContext?.initialToolSelectionProfile,
     undefined,
-    options.sessionContext?.initialReleasedSession,
-    namesLiveSessionOfBoundPlan,
-    bindingStore.store,
+    {
+      initialReleasedSessionUuid: options.sessionContext?.initialReleasedSession,
+      namesLiveSessionOfBoundPlan,
+      store: bindingStore.store,
+    },
   );
   const bindingKey = serverBindingKey(options);
   // Plan execution lock with per-session scope to prevent interference during executePlan
@@ -436,8 +447,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       version: getMcpServerVersion(),
     },
     sdkServerCapabilities(options.era),
-    options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
-    modernRequestState(options),
+    {
+      cacheHints: options.era === "modern" ? MODERN_CACHE_HINTS : undefined,
+      requestState: modernRequestState(options),
+    },
   );
   startupBenchmark.endPhase("sdkInitialization");
 

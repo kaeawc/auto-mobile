@@ -9,7 +9,12 @@ import {
 import type { SessionConfig } from "../../../src/devices/sessionConfig";
 import { SESSION_REQUEST_ABANDONED_CODE } from "../../../src/daemon/sessionBroker/requestIdentity";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
+import {
+  androidCatalog,
+  androidDefaults,
+  iosCatalog,
+  iosDefaults,
+} from "../../devices/sessionRequirements/fixtures";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "../../helpers/fakeSessionBrokerDevicePort";
 
 afterEach(() => {
@@ -67,6 +72,45 @@ describe("broker result receipts", () => {
   afterEach(async () => {
     await broker.close();
     await registry.close();
+  });
+
+  test("Android receipt replays configured memory beside effective launch hardware", async () => {
+    options.catalog = async () => androidCatalog();
+    options.defaults = () =>
+      androidDefaults({
+        hardware: {
+          omitted: "phone",
+          profiles: [{ archetype: "phone", profileId: "pixel_phone", memoryMb: 2048 }],
+        },
+      });
+    const prepare = devices.prepare.bind(devices);
+    devices.prepare = async (...args) => {
+      const prepared = await prepare(...args);
+      return {
+        ...prepared,
+        profile: { ...prepared.profile, effectiveRamMb: 2560, effectiveCpuCores: 4 },
+      };
+    };
+    const request = {
+      ...config("android-hardware"),
+      device: {
+        schemaVersion: 1 as const,
+        platform: "android" as const,
+        hardware: { kind: "omitted" as const },
+        os: { kind: "omitted" as const },
+      },
+    };
+    const first = await broker.prepare(request, "owner-token");
+    expect(first).toMatchObject({
+      outcome: "ready",
+      profile: {
+        platform: "android",
+        memoryMb: 2048,
+        effectiveRamMb: 2560,
+        effectiveCpuCores: 4,
+      },
+    });
+    expect(await broker.prepare(request, "owner-token")).toEqual(first);
   });
 
   test("a retryable post-admission capacity failure carries the retry hint on the first reply", async () => {

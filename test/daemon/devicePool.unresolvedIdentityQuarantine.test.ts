@@ -1079,10 +1079,10 @@ describe("DevicePool", () => {
       const commitRelease = Promise.withResolvers<void>();
       const sessionReleases: string[] = [];
       devicePool = makePool({
-        releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason, shouldCommit) => {
+        releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, reason, options) => {
           releaseEntered.resolve();
           await commitRelease.promise;
-          if (shouldCommit?.() === false) {
+          if (options?.shouldCommit?.() === false) {
             return false;
           }
           sessionReleases.push(sessionId);

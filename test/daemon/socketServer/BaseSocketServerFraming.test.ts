@@ -18,7 +18,7 @@ class FramingTestServer extends BaseSocketServer {
 
   constructor() {
     // idleTimeoutMs = 0 so handleConnection installs no idle timer.
-    super("/fake/framing.sock", new FakeTimer(), "Framing", 0);
+    super("/fake/framing.sock", new FakeTimer(), "Framing", { idleTimeoutMs: 0 });
   }
 
   /** Expose the protected connection setup for direct driving in tests. */

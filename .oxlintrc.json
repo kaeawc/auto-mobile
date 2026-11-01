@@ -99,7 +99,7 @@
         // any diagnostic there is a new violation and fails the gate.
         "complexity": ["error", 12],
         "max-depth": ["error", 3],
-        "max-params": ["error", 6],
+        "max-params": ["error", 4],
         "max-lines-per-function": [
           "error",
           { "max": 150, "skipBlankLines": true, "skipComments": true }

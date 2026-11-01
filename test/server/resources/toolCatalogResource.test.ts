@@ -12,25 +12,16 @@ const configurableTools = () =>
   ToolRegistry.getAllTools().filter((tool) => ToolRegistry.isUserConfigurableTool(tool.name));
 
 function registerCatalogTools(): void {
-  ToolRegistry.register(
-    "catalogDefaultEnabled",
-    "enabled catalog tool",
-    z.object({}),
-    async () => ({}),
-    {
-      defaultEnabled: true,
-    },
-  );
-  ToolRegistry.register(
-    "catalogDefaultGated",
-    "gated catalog tool",
-    z.object({}),
-    async () => ({}),
-    {
-      defaultEnabled: false,
-    },
-  );
-  ToolRegistry.register("catalogHidden", "hidden catalog tool", z.object({}), async () => ({}), {
+  ToolRegistry.register("catalogDefaultEnabled", "enabled catalog tool", z.object({}), {
+    handler: async () => ({}),
+    defaultEnabled: true,
+  });
+  ToolRegistry.register("catalogDefaultGated", "gated catalog tool", z.object({}), {
+    handler: async () => ({}),
+    defaultEnabled: false,
+  });
+  ToolRegistry.register("catalogHidden", "hidden catalog tool", z.object({}), {
+    handler: async () => ({}),
     hidden: true,
   });
 }

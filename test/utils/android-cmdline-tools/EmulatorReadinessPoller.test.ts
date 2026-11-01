@@ -11,6 +11,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { FakeDeviceExecutionBinding } from "../../fakes/FakeDeviceExecutionBinding";
 
 const result = (stdout = ""): ExecResult => ({
   stdout,
@@ -58,8 +59,8 @@ function setup(
     getLaunchTargetDeviceId: () => undefined,
     captureLaunchTargetDeviceId: () => {},
     maybeRecoverFreshOffline: async () => {},
-    nextPollingDelayMs: (_tracker, _options, _id, _now, interval, remaining) =>
-      Math.min(interval, remaining),
+    nextPollingDelayMs: (_tracker, _options, _id, budget) =>
+      Math.min(budget.pollingIntervalMs, budget.remainingPollingTimeMs),
     getBootedDevicesWithDiagnostics: async () => ({ devices: [emulator], diagnostics: [] }),
     findNamedEmulator: (_name, _child, running) => ({ emulator: running[0] }),
     resolvedReadyAvdName: async (avdName) => avdName,
@@ -71,6 +72,81 @@ function setup(
 }
 
 describe("DefaultEmulatorReadinessPoller", () => {
+  for (const correlation of ["launch-output", "avd-name"]) {
+    for (const quarantined of [false, true]) {
+      test(`binds only the correlated target during boot: ${correlation}, quarantined=${quarantined}`, async () => {
+        const { timer, adb, host } = setup(
+          readyAdb({ "shell getprop sys.boot_completed": "0\n" }),
+          () => null,
+          { autoAdvance: false },
+        );
+        const binding = new FakeDeviceExecutionBinding();
+        const target: BootedDevice = {
+          name: "Pixel_9",
+          deviceId: "emulator-5558",
+          platform: "android",
+        };
+        const unrelated: BootedDevice = {
+          name: "Other",
+          deviceId: "emulator-5556",
+          platform: "android",
+        };
+        const admitted: string[] = [];
+        const expectedBindings = quarantined ? [] : [target.deviceId];
+        const poller = new DefaultEmulatorReadinessPoller(host, undefined, {
+          executionBinding: binding,
+          admissionGate: {
+            assertDeviceActionable: (id) => {
+              admitted.push(id);
+              if (quarantined) {
+                throw new ActionableError("Device identity is quarantined");
+              }
+            },
+          },
+        });
+        host.getLaunchTargetDeviceId = () =>
+          correlation === "launch-output" ? target.deviceId : undefined;
+        // Launch correlation must bind even before the target appears in discovery.
+        host.getBootedDevicesWithDiagnostics = async () => {
+          if (correlation === "launch-output") {
+            expect(binding.deviceIds).toEqual(expectedBindings);
+          }
+          return {
+            devices: correlation === "launch-output" ? [unrelated] : [unrelated, target],
+            diagnostics: [],
+          };
+        };
+        host.findNamedEmulator = (name, _child, devices) => ({
+          emulator: devices.find((device) => device.name === name),
+        });
+        host.adbFactory = () => ({
+          create: (device) => {
+            if (device) {
+              // Name correlation must bind before the first selected-device probe.
+              expect(device.deviceId).toBe(target.deviceId);
+              expect(binding.deviceIds).toEqual(expectedBindings);
+            }
+            return adb;
+          },
+        });
+        const controller = new AbortController();
+        const reason = new Error("test completed before readiness");
+        const pending = poller
+          .waitForEmulatorReady("Pixel_9", 5_000, null, {
+            signal: controller.signal,
+          })
+          .catch((error: unknown) => error);
+        await drainMicrotasks(200);
+        controller.abort(reason);
+        expect(await pending).toBe(reason);
+        expect(binding.deviceIds).toEqual(expectedBindings);
+        expect(admitted).toEqual([target.deviceId]);
+        expect(timer.now()).toBe(0);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      });
+    }
+  }
+
   test("abort during both readiness sleeps rejects promptly without leaving timers", async () => {
     const { poller, timer } = setup(
       readyAdb({ "shell getprop sys.boot_completed": "0\n" }),
@@ -81,7 +157,7 @@ describe("DefaultEmulatorReadinessPoller", () => {
     timer.setTimeout(() => controller.abort(reason), 120);
 
     await expect(
-      poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, controller.signal),
+      poller.waitForEmulatorReady("Pixel_9", 5_000, null, { signal: controller.signal }),
     ).rejects.toBe(reason);
 
     expect(timer.now()).toBe(120);
@@ -183,7 +259,7 @@ describe("DefaultEmulatorReadinessPoller", () => {
     const reason = new Error("test finished");
     // Bun's `expect(...).rejects` blocks until settlement, so capture the rejection as a value.
     const pending = poller
-      .waitForEmulatorReady("Pixel_9", 5_000, child, undefined, controller.signal)
+      .waitForEmulatorReady("Pixel_9", 5_000, child, { signal: controller.signal })
       .then(() => undefined)
       .catch((error: unknown) => error);
 
@@ -279,8 +355,8 @@ describe("DefaultEmulatorReadinessPoller", () => {
   test("returns the booted device once every readiness signal passes", async () => {
     const { poller, timer } = setup(readyAdb(), () => null);
 
-    const device = await poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, undefined, {
-      skipWakeAndUnlock: true,
+    const device = await poller.waitForEmulatorReady("Pixel_9", 5_000, null, {
+      options: { skipWakeAndUnlock: true },
     });
 
     // The caller is released when the poller finishes, not on the 500 ms fallback tick.
@@ -301,9 +377,7 @@ describe("DefaultEmulatorReadinessPoller", () => {
     );
 
     await expect(
-      poller.waitForEmulatorReady("Pixel_9", 3_000, null, undefined, undefined, {
-        skipWakeAndUnlock: true,
-      }),
+      poller.waitForEmulatorReady("Pixel_9", 3_000, null, { options: { skipWakeAndUnlock: true } }),
     ).rejects.toThrow(/failed to become ready within 3000ms[\s\S]*phase=system-boot-complete/);
     expect(timer.now()).toBeGreaterThanOrEqual(3_000);
   });
@@ -316,8 +390,8 @@ describe("DefaultEmulatorReadinessPoller", () => {
     child.pid = 4242;
     const stdout = child.stdout;
 
-    const pending = poller.waitForEmulatorReady("Pixel_9", 60_000, child, undefined, undefined, {
-      skipWakeAndUnlock: true,
+    const pending = poller.waitForEmulatorReady("Pixel_9", 60_000, child, {
+      options: { skipWakeAndUnlock: true },
     });
     await Promise.resolve();
     stdout.emit("data", "corrupt system image");
@@ -333,8 +407,9 @@ describe("DefaultEmulatorReadinessPoller", () => {
     controller.abort(reason);
 
     await expect(
-      poller.waitForEmulatorReady("Pixel_9", 5_000, null, undefined, controller.signal, {
-        skipWakeAndUnlock: true,
+      poller.waitForEmulatorReady("Pixel_9", 5_000, null, {
+        signal: controller.signal,
+        options: { skipWakeAndUnlock: true },
       }),
     ).rejects.toBe(reason);
   });

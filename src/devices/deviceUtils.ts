@@ -1,4 +1,5 @@
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
+import { requireAndroidOrIosPlatform, requireAndroidOrIosSelector } from "../models/Platform";
 import { toActionableError } from "../models/ActionableError";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import type { DeviceDiscoveryError } from "../models/DeviceDiscoveryError";
@@ -26,6 +27,19 @@ import {
 } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { resolveIosLifecycleBackend } from "../utils/ios-cmdline-tools/IosLifecycleBackend";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { AppleTvSimulatorInventory } from "../utils/ios-cmdline-tools/AppleTvSimulatorInventory";
+import { discoverAppleTvDeviceImages, resolveSimulatorKillTarget } from "./appleTvDiscovery";
+import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
+import { WatchSimulatorLifecycle } from "../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
+import {
+  appendAndroidBootedDiscovery,
+  appendIosBootedDiscovery,
+  appendWatchBootedDiscovery,
+  appendTvOsBootedDiscovery,
+  discoverBootedAppleTvs,
+  bootedSweepsFor,
+  discoverBootedWatches,
+} from "./bootedDiscoveryAppend";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -47,8 +61,8 @@ import {
   type PlatformDeviceManager,
   androidDiscoveryErrorCode,
   assertAndroidImageRunningStateKnown,
-  iosSucceededSources,
   mergeIosDevices,
+  mergeDeviceImageDiscoveries,
   presentBootedDevices,
   simulatorDiscoveryErrorCode,
   skippedPhysicalIosDiscovery,
@@ -81,11 +95,20 @@ export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 
 export type { DeviceDiscoveryError };
 
+/** Trailing MultiPlatformDeviceManager seams; absent ones use the production defaults. */
+export interface MultiPlatformDeviceManagerOptions {
+  lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
+  timer?: Pick<Timer, "now">;
+  physicalIosDevices?: IosPhysicalDeviceLister | null;
+}
+
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private foreignSource?: ForeignAndroidSerialSource;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorForDeviceManager;
   private simctl: DeviceManagerSimCtl;
+  private appleTvSimulators?: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators">;
+  private watchSimulators?: Pick<WatchSimulatorInventory, "listWatchSimulators">;
   private readonly physicalIosDevices: IosPhysicalDeviceLister;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly timer: Pick<Timer, "now">;
@@ -100,22 +123,42 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * @param adb - An instance of AdbExecutor for interacting with Android Debug Bridge
    * @param simctl - An instance of SimCtlClient for interacting with iOS simulator controls
    * @param emulator - An instance of AndroidEmulatorClient for managing Android emulators
-   * @param physicalIosDevices - Discovery seam for connected physical iOS devices (devicectl)
+   * @param options.lifecycleCoordinator - Virtual-device lifecycle lease coordinator
+   * @param options.timer - Clock for discovery bookkeeping
+   * @param options.physicalIosDevices - Discovery seam for connected physical iOS devices (devicectl)
    */
   constructor(
     adb: AdbExecutor | null = null,
     simctl: DeviceManagerSimCtl | null = null,
     emulator: AndroidEmulatorForDeviceManager | null = null,
-    lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
-    timer: Pick<Timer, "now"> = defaultTimer,
-    physicalIosDevices: IosPhysicalDeviceLister | null = null,
+    {
+      lifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
+      timer = defaultTimer,
+      physicalIosDevices,
+    }: MultiPlatformDeviceManagerOptions = {},
   ) {
     this.adb = adb || defaultAdbClientFactory.create(null);
     this.simctl = simctl || new SimCtlClient();
+    if (this.simctl instanceof SimCtlClient) {
+      this.watchSimulators = new WatchSimulatorInventory(this.simctl);
+      this.appleTvSimulators = new AppleTvSimulatorInventory(this.simctl);
+    }
     this.emulator = emulator || new AndroidEmulatorClient();
     this.physicalIosDevices = physicalIosDevices || getSharedDevicectlDeviceLister();
     this.lifecycleCoordinator = lifecycleCoordinator;
     this.timer = timer;
+  }
+
+  /** Apple TV inventory over the same simctl; injectable for unit tests. */
+  withAppleTvSimulators(source: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators">): this {
+    this.appleTvSimulators = source;
+    return this;
+  }
+
+  /** Booted Apple Watch simulators; read only when a caller asks for watchOS (#14908). */
+  withWatchSimulators(source: Pick<WatchSimulatorInventory, "listWatchSimulators">): this {
+    this.watchSimulators = source;
+    return this;
   }
 
   withForeignAndroidSerialSource(source: ForeignAndroidSerialSource): this {
@@ -245,12 +288,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     return mergeIosDevices(simulators, (await this.listPhysicalIosDevices()).devices);
   }
 
-  /**
-   * List all available device images
-   * @returns Promise with array of device image names
-   */
+  /** List the device images available for a platform, or both for `"either"`. */
   async listDeviceImages(platform: SomePlatform, signal?: AbortSignal): Promise<DeviceInfo[]> {
-    switch (platform) {
+    if (platform === "tvos") {
+      if (!this.appleTvSimulators) {
+        throw new ActionableError("Apple TV simulator inventory is unavailable on this host.");
+      }
+      return this.appleTvSimulators.listAppleTvSimulators(signal);
+    }
+    switch (requireAndroidOrIosSelector(platform, "Listing device images")) {
       case "android":
         return this.listAndroidDeviceImages({ signal });
       case "ios":
@@ -337,7 +383,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * @returns Promise with boolean indicating if the device image is running
    */
   async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {
-    switch (device.platform) {
+    switch (requireAndroidOrIosPlatform(device.platform, "Checking a device image")) {
       case "android": {
         const booted = await this.emulator.getBootedDevicesChecked(false, {
           bypassDeviceListCache: true,
@@ -365,7 +411,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * @returns Promise with array of running device info
    */
   async getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]> {
-    switch (platform) {
+    switch (requireAndroidOrIosSelector(platform, "Listing booted devices")) {
       case "android":
         return this.emulator.getBootedDevices();
       case "ios":
@@ -389,36 +435,33 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
     const transitional: { simulators?: TransitionalSimulator[] } = {};
 
-    const [android, ios] = await Promise.all([
-      platform === "android" || platform === "either"
-        ? this.discoverBootedAndroidDevices(options)
-        : undefined,
-      platform === "ios" || platform === "either"
-        ? this.discoverBootedIosDevices(options)
-        : undefined,
+    const sweeps = bootedSweepsFor(platform, options);
+    const [android, ios, watch, tv] = await Promise.all([
+      sweeps.android ? this.discoverBootedAndroidDevices(options) : undefined,
+      sweeps.ios ? this.discoverBootedIosDevices(options) : undefined,
+      sweeps.watchos ? discoverBootedWatches(this.watchSimulators, options.signal) : undefined,
+      sweeps.tvos ? discoverBootedAppleTvs(this.appleTvSimulators, options.signal) : undefined,
     ]);
-
+    const result = {
+      devices,
+      succeededPlatforms,
+      succeededSources,
+      freshDeviceIds,
+      discoveryErrors,
+      sourceErrors,
+    };
     if (android) {
-      this.appendAndroidBootedDiscovery(android, {
-        devices,
-        succeededPlatforms,
-        succeededSources,
-        freshDeviceIds,
-        discoveryErrors,
-        sourceErrors,
-      });
+      appendAndroidBootedDiscovery(android, result);
     }
-
     if (ios) {
       transitional.simulators = ios.transitionalSimulators;
-      this.appendIosBootedDiscovery(ios, {
-        devices,
-        succeededPlatforms,
-        succeededSources,
-        freshDeviceIds,
-        discoveryErrors,
-        sourceErrors,
-      });
+      appendIosBootedDiscovery(ios, result);
+    }
+    if (tv) {
+      appendTvOsBootedDiscovery(tv, result);
+    }
+    if (watch) {
+      appendWatchBootedDiscovery(watch, result);
     }
 
     return {
@@ -430,54 +473,6 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       ...(Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
       ...(transitional.simulators ? { transitionalSimulators: transitional.simulators } : {}),
     };
-  }
-
-  private appendAndroidBootedDiscovery(
-    android: { devices: BootedDevice[]; error?: DeviceDiscoveryError },
-    result: BootedDeviceDiscovery & {
-      succeededSources: Set<DiscoverySource>;
-      freshDeviceIds: Set<string>;
-      discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
-    },
-  ): void {
-    result.devices.push(...android.devices);
-    if (android.error) {
-      result.discoveryErrors.android = android.error;
-      return;
-    }
-    result.succeededPlatforms.add("android");
-    result.succeededSources.add("android");
-    // adb has no retention replay: a listed device was listed just now.
-    for (const emulator of android.devices) {
-      result.freshDeviceIds.add(emulator.deviceId);
-    }
-  }
-
-  private appendIosBootedDiscovery(
-    ios: Awaited<ReturnType<MultiPlatformDeviceManager["discoverBootedIosDevices"]>>,
-    result: BootedDeviceDiscovery & {
-      succeededSources: Set<DiscoverySource>;
-      freshDeviceIds: Set<string>;
-      sourceErrors: Partial<Record<DiscoverySource, DeviceDiscoveryError>>;
-      discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
-    },
-  ): void {
-    if (ios.physicalError) {
-      result.sourceErrors["ios-physical"] = ios.physicalError;
-    }
-    // Physical devices confirmed by devicectl survive simulator discovery failure.
-    result.devices.push(...ios.devices);
-    for (const source of iosSucceededSources(ios)) {
-      result.succeededSources.add(source);
-    }
-    if (ios.simulatorsSucceeded) {
-      result.succeededPlatforms.add("ios");
-    } else if (ios.error) {
-      result.discoveryErrors.ios = ios.error;
-    }
-    for (const deviceId of ios.freshDeviceIds) {
-      result.freshDeviceIds.add(deviceId);
-    }
   }
 
   /**
@@ -521,9 +516,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     platform: SomePlatform,
     options: DeviceImageDiscoveryOptions = {},
   ): Promise<DeviceImageDiscovery> {
-    const devices: DeviceInfo[] = [];
-    const succeededPlatforms = new Set<Platform>();
-    const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
+    if (platform === "tvos") {
+      return discoverAppleTvDeviceImages(
+        () => this.listDeviceImages("tvos", options.signal),
+        options.signal,
+      );
+    }
 
     const [android, ios] = await Promise.all([
       platform === "android" || platform === "either"
@@ -534,27 +532,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         : undefined,
     ]);
 
-    if (android) {
-      devices.push(...android.devices);
-      if (android.error) {
-        discoveryErrors.android = android.error;
-      }
-      if (android.succeeded) {
-        succeededPlatforms.add("android");
-      }
-    }
-
-    if (ios) {
-      devices.push(...ios.devices);
-      if (ios.error) {
-        discoveryErrors.ios = ios.error;
-      }
-      if (ios.succeeded) {
-        succeededPlatforms.add("ios");
-      }
-    }
-
-    return { devices, succeededPlatforms, discoveryErrors };
+    return mergeDeviceImageDiscoveries({ android, ios });
   }
 
   private async discoverAndroidDeviceImages(options: DeviceImageDiscoveryOptions): Promise<{
@@ -921,6 +899,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     );
   }
 
+  /** Resolve the simulator family before lifecycle admission and shutdown. */
+  resolveKillDeviceTarget(device: BootedDevice, signal?: AbortSignal): Promise<BootedDevice> {
+    return resolveSimulatorKillTarget(device, this.simctl, this.appleTvSimulators, signal);
+  }
+
   /**
    * Kill a running device
    * @param device - The device to kill
@@ -930,7 +913,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: BootedDevice,
     options?: DeviceShutdownOptions,
   ): Promise<BootedDevice | void> {
+    device = await this.resolveKillDeviceTarget(device, options?.signal);
     switch (device.platform) {
+      case "tvos":
+        await this.simctl.killSimulator(device, options);
+        return device;
       case "android":
         return this.emulator.killDevice(device, options);
       case "ios":
@@ -940,7 +927,17 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           device,
           options,
         );
+      case "watchos":
+        return this.watchLifecycle().shutdown(device, options);
     }
+  }
+
+  /** Apple Watch simulator boot/shutdown over this manager's simctl and watch listing (#14908). */
+  private watchLifecycle(): WatchSimulatorLifecycle {
+    if (!this.watchSimulators) {
+      throw new ActionableError("Apple Watch simulator inventory is not available on this host.");
+    }
+    return new WatchSimulatorLifecycle(this.simctl, this.watchSimulators);
   }
 
   async destroyDevice(device: DeviceInfo, options?: DeviceDestroyOptions): Promise<void> {
@@ -1015,19 +1012,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
     childProcess?: ChildProcess | null,
-    signal?: AbortSignal,
-    options?: AndroidEmulatorReadinessOptions,
+    { signal, options }: { signal?: AbortSignal; options?: AndroidEmulatorReadinessOptions } = {},
   ): Promise<BootedDevice> {
     switch (device.platform) {
       case "android":
-        return this.emulator.waitForEmulatorReady(
-          device.name,
-          timeoutMs,
-          childProcess,
-          device.deviceId,
+        return this.emulator.waitForEmulatorReady(device.name, timeoutMs, childProcess, {
+          targetDeviceId: device.deviceId,
           signal,
           options,
-        );
+        });
       case "ios":
         if (!device.deviceId) {
           throw new ActionableError(

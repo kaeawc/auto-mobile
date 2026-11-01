@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "location-block-undeclared-module",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "fixes": 0
+    },
+    "requires": {
+      "platform": ["battery"],
+      "permissions": [
+        {
+          "name": "location",
+          "purpose": "Show rides near you"
+        }
+      ]
+    },
+    "location": {
+      "accuracy": "approximate",
+      "minIntervalMs": 5000,
+      "minDistanceM": 25
+    },
+    "root": {
+      "type": "text",
+      "text": "Fixes {fixes}"
+    }
+  },
+  "expectedPath": "location"
+}

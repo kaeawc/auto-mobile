@@ -70,10 +70,12 @@ describe("wireSessionLifecycle", () => {
 
     wireSessionLifecycle(manager, timer, hostWith([]));
 
-    // The location, network, App Links, device-condition, kill-profile, emulator sensor, display-profile, keyboard-profile, status bar, performance, screen
+    // The location, network, App Links, device-condition, kill-profile, emulator sensor, emulator audio, display-profile, keyboard-profile, status bar, performance, screen
     // lock, system-alert, power, profiling and recording cleanups register first (each takes a release listener and an unbound
     // listener), then the daemon's own, in this order.
     expect(order).toEqual([
+      "onSessionRelease",
+      "onSessionDeviceUnbound",
       "onSessionRelease",
       "onSessionDeviceUnbound",
       "onSessionRelease",
@@ -145,7 +147,10 @@ test("failed network cleanup marks the ownership session before settlement", asy
   };
   try {
     wireSessionLifecycle(manager, timer, host);
-    state.startSimulation("fake-device", "timeout", 30, null, "derived-session");
+    state.startSimulation("fake-device", "timeout", 30, {
+      limit: null,
+      ownerSessionUuid: "derived-session",
+    });
     callbacks[1]!("derived-session", "fake-device");
     expect(ownership).toHaveBeenCalledWith("derived-session");
     expect(base).toHaveBeenCalledWith("derived-session");

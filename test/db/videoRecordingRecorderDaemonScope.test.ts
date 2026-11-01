@@ -14,6 +14,7 @@ import {
   down as recorderDown,
 } from "../../src/db/migrations/2026_10_13_000_video_recording_recorder_daemon";
 import { up as captureUp } from "../../src/db/migrations/2026_10_12_001_video_recording_capture_teardown";
+import { up as audioStateUp } from "../../src/db/migrations/2026_10_29_000_video_recording_audio_state";
 
 let db: Kysely<unknown>;
 let repo: VideoRecordingRepository;
@@ -24,7 +25,15 @@ beforeAll(async () => {
     dialect: new BunSqliteDialect({ database }),
   });
   try {
-    for (const up of [baseUp, highlightsUp, ownerUp, displayUp, captureUp, recorderUp]) {
+    for (const up of [
+      baseUp,
+      highlightsUp,
+      ownerUp,
+      displayUp,
+      captureUp,
+      recorderUp,
+      audioStateUp,
+    ]) {
       await up(schema);
     }
     await sql`CREATE TABLE device_sessions (session_uuid TEXT, status TEXT, daemon_session_id TEXT)`.execute(
@@ -42,9 +51,9 @@ beforeEach(() => {
   db = new Kysely<unknown>({
     dialect: new BunSqliteDialect({ database: BunDatabase.deserialize(new Uint8Array(template)) }),
   });
-  repo = new VideoRecordingRepository(
-    db.withTables<{ [Table in keyof Database]: Database[Table] }>(),
-  );
+  repo = new VideoRecordingRepository({
+    db: db.withTables<{ [Table in keyof Database]: Database[Table] }>(),
+  });
 });
 afterEach(async () => {
   await db.destroy();

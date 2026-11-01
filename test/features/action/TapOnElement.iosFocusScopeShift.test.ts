@@ -126,7 +126,7 @@ async function focusOnIos(
       refreshesAfterTap += 1;
       return next;
     },
-    executeiOSTap: async (_action: string, x: number, y: number) => {
+    executeiOSTap: async (_action: string, { x, y }: { x: number; y: number }) => {
       taps.push([x, y]);
     },
     observedInteraction: async (action: (observation: ObserveResult) => Promise<object>) => ({

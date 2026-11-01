@@ -57,7 +57,10 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       }),
     );
 
-    const result = await new ExecuteGesture(device).swipe(1, 2, 3, 4, { duration: 250 });
+    const result = await new ExecuteGesture(device).swipe(
+      { x1: 1, y1: 2, x2: 3, y2: 4 },
+      { duration: 250 },
+    );
 
     expect(result).toMatchObject({
       success: false,
@@ -85,7 +88,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       })),
     );
 
-    const result = await new ExecuteGesture(device).swipe(1, 2, 3, 4);
+    const result = await new ExecuteGesture(device).swipe({ x1: 1, y1: 2, x2: 3, y2: 4 });
 
     expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
   });
@@ -98,7 +101,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       }),
     );
 
-    const result = await new ExecuteGesture(device).swipe(1, 2, 3, 4);
+    const result = await new ExecuteGesture(device).swipe({ x1: 1, y1: 2, x2: 3, y2: 4 });
 
     expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
     expect(result.error).toContain("WebSocket connection closed");
@@ -123,7 +126,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
   ] as const)("%s stays a plain failure", async (_name, reply) => {
     use(new ScriptedSwipeClient(async () => ({ ...reply })));
 
-    const result = await new ExecuteGesture(device).swipe(1, 2, 3, 4);
+    const result = await new ExecuteGesture(device).swipe({ x1: 1, y1: 2, x2: 3, y2: 4 });
 
     expect(result.success).toBe(false);
     expect(result.error).toBe(reply.error);
@@ -139,7 +142,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       })),
     );
 
-    const result = await new ExecuteGesture(device).swipe(1, 2, 3, 4);
+    const result = await new ExecuteGesture(device).swipe({ x1: 1, y1: 2, x2: 3, y2: 4 });
 
     expect(result).toMatchObject({ success: false, error: "Not connected" });
     expect(result.outcomeIndeterminate).toBeUndefined();
@@ -154,7 +157,9 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       }),
     );
 
-    await expect(new ExecuteGesture(device).swipe(1, 2, 3, 4)).rejects.toBe(refusal);
+    await expect(new ExecuteGesture(device).swipe({ x1: 1, y1: 2, x2: 3, y2: 4 })).rejects.toBe(
+      refusal,
+    );
   });
 
   test("a stale display thrown after dispatch is not downgraded to indeterminate", async () => {
@@ -170,7 +175,9 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       }),
     );
 
-    await expect(new ExecuteGesture(device).swipe(1, 2, 3, 4)).rejects.toBe(stale);
+    await expect(new ExecuteGesture(device).swipe({ x1: 1, y1: 2, x2: 3, y2: 4 })).rejects.toBe(
+      stale,
+    );
   });
 
   test("an error before dispatch propagates", async () => {
@@ -180,7 +187,9 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       }),
     );
 
-    await expect(new ExecuteGesture(device).swipe(1, 2, 3, 4)).rejects.toThrow("connect failed");
+    await expect(new ExecuteGesture(device).swipe({ x1: 1, y1: 2, x2: 3, y2: 4 })).rejects.toThrow(
+      "connect failed",
+    );
   });
 
   test("the caller's AbortSignal and a dispatch callback reach the request", async () => {
@@ -189,10 +198,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
     const controller = new AbortController();
 
     const result = await new ExecuteGesture(device).swipe(
-      1,
-      2,
-      3,
-      4,
+      { x1: 1, y1: 2, x2: 3, y2: 4 },
       { duration: 100 },
       { signal: controller.signal },
     );
@@ -209,7 +215,11 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
     controller.abort(new ActionableError("caller cancelled"));
 
     await expect(
-      new ExecuteGesture(device).swipe(1, 2, 3, 4, {}, { signal: controller.signal }),
+      new ExecuteGesture(device).swipe(
+        { x1: 1, y1: 2, x2: 3, y2: 4 },
+        {},
+        { signal: controller.signal },
+      ),
     ).rejects.toThrow("Operation cancelled");
     expect(client.calls).toBe(0);
   });
@@ -225,7 +235,9 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       })),
     );
 
-    expect(await new ExecuteGesture(device).swipe(1, 2, 10, 2, { duration: 90 })).toEqual({
+    expect(
+      await new ExecuteGesture(device).swipe({ x1: 1, y1: 2, x2: 10, y2: 2 }, { duration: 90 }),
+    ).toEqual({
       success: true,
       x1: 1,
       y1: 2,
@@ -261,10 +273,7 @@ describe("ExecuteGesture iOS swipe over the real transport", () => {
       const h = wire();
       const controller = new AbortController();
       const outcome = new ExecuteGesture(device, null, h.timer).swipe(
-        1,
-        2,
-        3,
-        4,
+        { x1: 1, y1: 2, x2: 3, y2: 4 },
         {},
         { signal: controller.signal },
       );
@@ -286,7 +295,7 @@ describe("ExecuteGesture iOS swipe over the real transport", () => {
 
   test("a runner refusal reply is a plain failure", async () => {
     const h = wire();
-    const outcome = new ExecuteGesture(device, null, h.timer).swipe(1, 2, 3, 4);
+    const outcome = new ExecuteGesture(device, null, h.timer).swipe({ x1: 1, y1: 2, x2: 3, y2: 4 });
     await flush();
     h.resolveLast({ success: false, totalTimeMs: 4, error: "runner refused" });
     const result = await outcome;
@@ -297,7 +306,12 @@ describe("ExecuteGesture iOS swipe over the real transport", () => {
   test("not connected is a plain failure and sends nothing", async () => {
     const h = wire();
     h.setConnected(false);
-    const result = await new ExecuteGesture(device, null, h.timer).swipe(1, 2, 3, 4);
+    const result = await new ExecuteGesture(device, null, h.timer).swipe({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+    });
     expect(result).toMatchObject({ success: false, error: "Not connected" });
     expect(result.outcomeIndeterminate).toBeUndefined();
     expect(h.sentMessages).toHaveLength(0);
@@ -307,14 +321,20 @@ describe("ExecuteGesture iOS swipe over the real transport", () => {
 describe("ExecuteGesture iOS XCUICoordinate velocity clamp (#12987)", () => {
   test("a 3000 ms / 100 pt swipe reports the clamped duration and a warning", async () => {
     use(new FakeIOSCtrlProxy());
-    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    const result = await new ExecuteGesture(device).swipe(
+      { x1: 0, y1: 0, x2: 100, y2: 0 },
+      { duration: 3000 },
+    );
     expect(result).toMatchObject({ success: true, duration: 3000, effectiveDurationMs: 1000 });
     expect(result.warnings?.[0]).toContain("clamped");
   });
 
   test("an in-range swipe carries no clamp report", async () => {
     use(new FakeIOSCtrlProxy());
-    const result = await new ExecuteGesture(device).swipe(0, 0, 300, 0, { duration: 300 });
+    const result = await new ExecuteGesture(device).swipe(
+      { x1: 0, y1: 0, x2: 300, y2: 0 },
+      { duration: 300 },
+    );
     expect(result.effectiveDurationMs).toBeUndefined();
     expect(result.warnings).toBeUndefined();
   });
@@ -329,7 +349,10 @@ describe("ExecuteGesture iOS swipe reports the dispatch route that ran (#13145)"
 
   test("unpinned synthesis below 50 ms reports the runner's 50 ms floor, not the XCUICoordinate clamp", async () => {
     usingReply({ swipeRoute: "unpinnedSynthesized", effectiveDurationMs: 50 });
-    const result = await new ExecuteGesture(device).swipe(0, 0, 300, 0, { duration: 10 });
+    const result = await new ExecuteGesture(device).swipe(
+      { x1: 0, y1: 0, x2: 300, y2: 0 },
+      { duration: 10 },
+    );
     expect(result).toMatchObject({
       success: true,
       duration: 10,
@@ -342,7 +365,10 @@ describe("ExecuteGesture iOS swipe reports the dispatch route that ran (#13145)"
   test("a synthesized route is not clamped to 100-10000 pt/s", async () => {
     // 100 pt in 3000 ms would be clamped to 1000 ms on XCUICoordinate; synthesis honours 3000.
     usingReply({ swipeRoute: "lockScreenSynthesized", effectiveDurationMs: 3000 });
-    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    const result = await new ExecuteGesture(device).swipe(
+      { x1: 0, y1: 0, x2: 100, y2: 0 },
+      { duration: 3000 },
+    );
     expect(result.effectiveDurationMs).toBeUndefined();
     expect(result.warnings).toBeUndefined();
     expect(result.dispatchRoute).toBe("lockScreenSynthesized");
@@ -350,14 +376,20 @@ describe("ExecuteGesture iOS swipe reports the dispatch route that ran (#13145)"
 
   test("the XCUICoordinate route reports the duration the runner computed", async () => {
     usingReply({ swipeRoute: "xcuiCoordinate", effectiveDurationMs: 1000 });
-    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    const result = await new ExecuteGesture(device).swipe(
+      { x1: 0, y1: 0, x2: 100, y2: 0 },
+      { duration: 3000 },
+    );
     expect(result).toMatchObject({ effectiveDurationMs: 1000, dispatchRoute: "xcuiCoordinate" });
     expect(result.warnings?.[0]).toContain("clamped");
   });
 
   test("an older runner that reports no route keeps the XCUICoordinate assumption", async () => {
     usingReply({});
-    const result = await new ExecuteGesture(device).swipe(0, 0, 100, 0, { duration: 3000 });
+    const result = await new ExecuteGesture(device).swipe(
+      { x1: 0, y1: 0, x2: 100, y2: 0 },
+      { duration: 3000 },
+    );
     expect(result).toMatchObject({ effectiveDurationMs: 1000 });
     expect(result.dispatchRoute).toBeUndefined();
   });

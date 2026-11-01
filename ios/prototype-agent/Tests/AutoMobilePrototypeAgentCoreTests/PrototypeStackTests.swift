@@ -2,6 +2,146 @@
 import XCTest
 
 final class PrototypeStackTests: XCTestCase {
+    func testUnweightedRowMeasuresTextWithinTheRemainingWidth() {
+        let rules = PrototypeSizeRules(style: nil, constrainsWidth: true)
+        XCTAssertTrue(rules.needsResolvedLayout, "Row children must use the constraint-aware sizing path")
+        var offers: [Double?] = []
+        var heights: [Double] = []
+        let naturalWidths = [70.0, 100.0]
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 100, spacing: 10, weights: [nil, nil], measuresFlexibleSlots: true
+        ) { index, most in
+            offers.append(most)
+            let size = PrototypeSizing.resolve(rules, proposed: (most, nil)) { maxWidth, _ in
+                let width = min(naturalWidths[index], maxWidth ?? .infinity)
+                // A pure wrapping-text fake: narrower proposals add lines rather than overflow.
+                return (width, 20 * ceil(naturalWidths[index] / width))
+            }
+            heights.append(size.height)
+            return size.width
+        }
+        XCTAssertEqual(offers, [90, 20])
+        XCTAssertEqual(widths, [70, 20])
+        XCTAssertEqual(heights, [20, 100])
+    }
+
+    func testUnweightedRowThatFitsKeepsItsNaturalSizes() {
+        let rules = PrototypeSizeRules(style: nil, constrainsWidth: true)
+        let naturalWidths = [70.0, 100.0]
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 200, spacing: 10, weights: [nil, nil], measuresFlexibleSlots: true
+        ) { index, most in
+            PrototypeSizing.resolve(rules, proposed: (most, nil)) { maxWidth, _ in
+                (min(naturalWidths[index], maxWidth ?? .infinity), 20)
+            }.width
+        }
+        XCTAssertEqual(widths, naturalWidths)
+    }
+
+    func testUnweightedRowConstrainsFixedChildrenWhenWidthRunsOut() throws {
+        let style = try JSONDecoder().decode(Style.self, from: Data(#"{"width":{"dp":44}}"#.utf8))
+        let rules = PrototypeSizeRules(style: style, constrainsWidth: true)
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 60, spacing: 0, weights: [nil, nil, nil], measuresFlexibleSlots: true
+        ) { _, most in
+            PrototypeSizing.resolve(rules, proposed: (most, nil)) { maxWidth, _ in
+                (maxWidth ?? 44, 44)
+            }.width
+        }
+        XCTAssertEqual(widths, [44, 16, 0])
+    }
+
+    func testUnweightedRowSpacerSharesOnlyTheSpaceAfterContent() {
+        let spacer = PrototypeSizeRules(style: nil, fillsByDefault: true, constrainsWidth: true)
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 200, spacing: 10, weights: [nil, spacer.unweightedRowWeight, nil], measuresFlexibleSlots: true
+        ) { index, most in
+            if index == 1 { return most ?? 0 }
+            return index == 0 ? 70 : 40
+        }
+        XCTAssertEqual(widths, [70, 70, 40])
+    }
+
+    func testUnweightedRowCappedSpacerKeepsItsMaximumAndTheRowWraps() throws {
+        let style = try JSONDecoder().decode(Style.self, from: Data(#"{"maxWidth":20}"#.utf8))
+        let spacer = PrototypeSizeRules(style: style, fillsByDefault: true, constrainsWidth: true)
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 200, spacing: 10, weights: [nil, spacer.unweightedRowWeight, nil],
+            measuresFlexibleSlots: true
+        ) { index, most in
+            if index == 1 {
+                return PrototypeSizing.resolve(spacer, proposed: (most, nil)) { _, _ in (0, 0) }.width
+            }
+            return index == 0 ? 70 : 40
+        }
+        XCTAssertEqual(widths, [70, 20, 40])
+        XCTAssertEqual(widths.reduce(0, +) + 20, 150)
+    }
+
+    func testUnweightedRowRedistributesCappedSpacerSpaceToOtherSlots() {
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 100, spacing: 0, weights: [1, nil, 1], measuresFlexibleSlots: true
+        ) { index, most in
+            switch index {
+            case 0: min(most ?? .infinity, 10)
+            case 1: 20
+            default: most ?? 0
+            }
+        }
+        XCTAssertEqual(widths, [10, 20, 70])
+    }
+
+    func testUnweightedRowArrangementSlotsShareSpaceAndKeepTheirGaps() {
+        // The existing spaceAround/spaceEvenly renderer has equal outer and inner spacer slots.
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: 160, spacing: 5, weights: [1, nil, 1, nil, 1], measuresFlexibleSlots: true
+        ) { index, most in
+            if index == 1 { return 20 }
+            if index == 3 { return 30 }
+            return most ?? 0
+        }
+        XCTAssertEqual(widths, [30, 20, 30, 30, 30])
+    }
+
+    func testUnweightedRowWithoutAProposalKeepsIdealWidths() {
+        let rules = PrototypeSizeRules(style: nil, constrainsWidth: true)
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: nil, spacing: 10, weights: [nil, nil], measuresFlexibleSlots: true
+        ) { _, most in
+            XCTAssertNil(most)
+            return PrototypeSizing.resolve(rules, proposed: (most, nil)) { _, _ in (70, 20) }.width
+        }
+        XCTAssertEqual(widths, [70, 70])
+    }
+
+    func testUnweightedRowUnboundedSpacerKeepsItsMinimumWidth() throws {
+        let style = try JSONDecoder().decode(Style.self, from: Data(#"{"minWidth":20}"#.utf8))
+        let spacer = PrototypeSizeRules(style: style, fillsByDefault: true, constrainsWidth: true)
+        let widths = PrototypeWeightedStack.mainSizes(
+            available: nil, spacing: 0, weights: [nil, spacer.unweightedRowWeight], measuresFlexibleSlots: true
+        ) { index, most in
+            if index == 0 { return 40 }
+            return PrototypeSizing.resolve(spacer, proposed: (most, nil)) { _, _ in (0, 0) }.width
+        }
+        XCTAssertEqual(widths, [40, 20])
+    }
+
+    func testOnlyUnsizedOrFillingSpacersGetFlexibleRowSlots() throws {
+        for (json, flexible) in [
+            ("{}", true),
+            (#"{"width":"fill"}"#, true),
+            (#"{"width":"wrap"}"#, false),
+            (#"{"width":{"dp":12}}"#, false),
+        ] {
+            let style = try JSONDecoder().decode(Style.self, from: Data(json.utf8))
+            XCTAssertEqual(
+                PrototypeSizeRules(style: style, fillsByDefault: true).unweightedRowWeight,
+                flexible ? 1 : nil
+            )
+            XCTAssertNil(PrototypeSizeRules(style: style).unweightedRowWeight)
+        }
+    }
+
     private var fixtures: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

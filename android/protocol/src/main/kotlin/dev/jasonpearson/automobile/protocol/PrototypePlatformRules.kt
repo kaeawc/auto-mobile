@@ -44,7 +44,7 @@ object PrototypePlatform {
  * `{event}` scope, the `into` path and the reserved `prototype_` emit prefix.
  */
 internal object PrototypePlatformRules {
-  private class Declared(root: JsonObject) {
+  private class Declared(root: JsonObject, nodes: List<PrototypeStateChecks.Located>) {
     private val requires = root.member("requires") ?: JsonObject(emptyMap())
     val modules = requires.strings("platform").toSet()
     val permissions =
@@ -53,38 +53,73 @@ internal object PrototypePlatformRules {
         .mapNotNull { (it as? JsonObject)?.text("name") }
         .toSet()
     val channels = root.member("channels") ?: JsonObject(emptyMap())
+    val players = PrototypeMedia.players(root, nodes)
+    val notificationChannels = PrototypeNotificationRules.channels(root)
+    val previews = PrototypeCameraPreview.ids(nodes)
     val background = requires.strings("background").toSet()
+    val sensors = root.member("sensors")
   }
+
+  // Root-level blocks, checked in order before any call or event use. The videoPlayer node rules
+  // need the node list, so they take it too and run before requires, in the host's order.
+  private val rootChecks:
+    List<(JsonObject, List<PrototypeStateChecks.Located>) -> PrototypeSpecError?> =
+    listOf(
+      { root, _ -> PrototypeChannels.error(root) },
+      { root, _ -> PrototypeAuthRules.blockError(root) },
+      { root, _ -> PrototypeCommerceRules.blockError(root) },
+      { root, _ -> PrototypeSecureStorageRules.blockError(root) },
+      { root, _ -> PrototypeLocationRules.blockError(root) },
+      { root, _ -> PrototypeSensorRules.blockError(root) },
+      { root, _ -> PrototypeNotificationRules.blockError(root) },
+      { root, _ -> PrototypeMedia.error(root) },
+      { root, _ -> PrototypeMediaQueue.error(root) },
+      PrototypeMedia::videoPlayerError,
+      PrototypeMap::error,
+      PrototypeMediaCaptions::error,
+      PrototypeMedia::castButtonError,
+      PrototypeCameraPreview::error,
+      { root, _ -> requiresError(root) },
+    )
+
+  // Module rules for a call beyond its arguments, checked in order after the generic call checks.
+  private val callChecks: List<(JsonObject, String, JsonObject, Declared) -> PrototypeSpecError?> =
+    listOf(
+      { action, path, root, _ -> PrototypeChannels.callError(action, path, root) },
+      { action, path, root, _ -> PrototypeAuthRules.callError(action, path, root) },
+      { action, path, root, _ -> PrototypeCommerceRules.callError(action, path, root) },
+      { action, path, root, _ -> PrototypeNotificationRules.callError(action, path, root) },
+      { action, path, _, declared -> PrototypeMedia.callError(action, path, declared.players) },
+      { action, path, _, declared ->
+        PrototypeCameraPreview.callError(action, path, declared.previews)
+      },
+    )
 
   fun platformErrors(value: JsonElement, context: Context): PrototypeSpecError? {
     val root = value as? JsonObject ?: return null
-    val declared = Declared(root)
+    val declared = Declared(root, context.nodes)
     reservedTestTagError(context)?.let {
       return it
     }
-    PrototypeChannels.error(root)?.let {
-      return it
-    }
-    PrototypeAuthRules.blockError(root)?.let {
-      return it
-    }
-    requiresError(root)?.let {
-      return it
-    }
+    rootChecks
+      .firstNotNullOfOrNull { it(root, context.nodes) }
+      ?.let {
+        return it
+      }
     for (use in uses(root, context)) {
       (useError(use, declared)
-          ?: (if (use is Use.Call)
-            PrototypeChannels.callError(use.action, use.path, root)
-              ?: PrototypeAuthRules.callError(use.action, use.path, root)
-          else null))
+          ?: (use as? Use.Call)?.let { call ->
+            callChecks.firstNotNullOfOrNull { it(call.action, call.path, root, declared) }
+          })
         ?.let {
           return it
         }
     }
     for ((action, path) in context.actions) {
-      emitNameError(action, path)?.let {
-        return it
-      }
+      (emitNameError(action, path) ?: PrototypeSecureStorageRules.actionError(action, path, root))
+        ?.let {
+          return it
+        }
     }
     return null
   }
@@ -116,7 +151,7 @@ internal object PrototypePlatformRules {
         when {
           owner == null -> fail(use.path, "Unknown platform event")
           owner !in declared.modules -> notDeclared(use.path, owner)
-          else -> null
+          else -> PrototypeSensorRules.eventError(use.event, use.path, declared.sensors)
         }
       }
       is Use.Call -> callError(use.action, use.path, declared)
@@ -133,10 +168,17 @@ internal object PrototypePlatformRules {
       name !in declared.modules -> notDeclared(use.path, name)
       module(name)?.member("state")?.let { state ->
         val tokens = PrototypeDataPointer.tokens(use.pointer)
-        if (name == "realtime") !PrototypeChannels.validRead(use.pointer, declared.channels)
-        else tokens.size != 2 || tokens[1] !in state
+        when (name) {
+          "realtime" -> !PrototypeChannels.validRead(use.pointer, declared.channels)
+          "media" -> !PrototypeMedia.validRead(use.pointer, declared.players)
+          "notifications" ->
+            !PrototypeNotificationRules.validRead(tokens, declared.notificationChannels, state)
+          else -> tokens.size != 2 || tokens[1] !in state
+        }
       } == true -> fail(use.path, "Unknown platform state ${use.pointer}")
-      else -> comparisonError(use)
+      else ->
+        PrototypeSensorRules.readError(use.pointer, use.path, declared.sensors)
+          ?: comparisonError(use)
     }
   }
 

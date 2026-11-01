@@ -15,6 +15,7 @@ import type { HandoverResolution } from "./HandoverResolution";
 import type { HeldSessionLosses } from "./HeldSessionLosses";
 import type { ReleaseEpochLedger } from "./ReleaseEpochLedger";
 import type { SessionBinding } from "./SessionBinding";
+import type { RecoverableReconnectOptions } from "./ConnectionRecovery";
 
 /** How one forward of a tool call behaves. */
 export interface ToolCallForwardMode {
@@ -22,6 +23,8 @@ export interface ToolCallForwardMode {
   readonly allowSuspectRetry: boolean;
   /** The Tasks relay (#4668), only for a call whose client declared the extension. */
   readonly tasks?: TaskRelayFrame;
+  /** The caller's cancellation of this forward. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -63,9 +66,12 @@ function callDaemonTool(
   },
 ): Promise<any> {
   const { name, args, progressToken, onRequestId, signal, tasks } = call;
-  return tasks
-    ? client.callTool(name, args, progressToken, onRequestId, signal, { tasks })
-    : client.callTool(name, args, progressToken, onRequestId, signal);
+  return client.callTool(
+    name,
+    args,
+    progressToken,
+    tasks ? { onRequestId, signal, tasks } : { onRequestId, signal },
+  );
 }
 
 /** The tool name when replaying it could repeat a device action, else undefined. */
@@ -125,9 +131,7 @@ export interface ToolCallForwarderPort {
     operation: () => Promise<T>,
     attemptedSessionUuid?: string,
     allowReleasedSession?: boolean,
-    fenceSessionNotFoundOnRetry?: boolean,
-    nonIdempotentToolName?: string,
-    signal?: AbortSignal,
+    options?: RecoverableReconnectOptions,
   ): Promise<T>;
   deferredToTask(
     tasks: TaskRelayFrame | undefined,
@@ -198,9 +202,12 @@ export class ToolCallForwarder {
     name: string,
     callerArgs: Record<string, unknown>,
     progressToken: string | number | undefined,
-    onProgress: DaemonProxyProgressCallback | undefined,
-    signal: AbortSignal | undefined,
-    { allowSuspectRetry, tasks }: ToolCallForwardMode,
+    {
+      onProgress,
+      allowSuspectRetry,
+      tasks,
+      signal,
+    }: ToolCallForwardMode & { onProgress?: DaemonProxyProgressCallback },
   ): Promise<ForwardedToolCall> {
     if (this.port.hasLivenessLifecycleFence()) {
       await this.port.waitForLivenessRecovery(signal);
@@ -286,9 +293,11 @@ export class ToolCallForwarder {
         // Acquisition is admitted while fenced; the terminal fence is cleared once
         // the result-minted session establishes a fresh binding.
         allowReleasedSession,
-        true,
-        nonIdempotentToolName(name),
-        signal,
+        {
+          fenceSessionNotFoundOnRetry: true,
+          nonIdempotentToolName: nonIdempotentToolName(name),
+          signal,
+        },
       );
       // Connection recovery is shared with siblings; cancel this wait and fence
       // replay without aborting the shared connection attempt.

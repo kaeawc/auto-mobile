@@ -3,6 +3,7 @@ import {
   type ResolutionIntent,
 } from "../../../src/features/utility/ElementResolver";
 import type { ViewHierarchyResult } from "../../../src/models";
+import { requireAndroidOrIosPlatform } from "../../../src/models";
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { beforeEach, afterEach, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -75,14 +76,11 @@ test("projection stamp takes precedence even in a selector without a device flag
 });
 
 test("observe identification projects an unstamped Duo tree with the device flag", () => {
-  const snapshot = identifyObservedHierarchy(
-    "ios",
-    issue8379SelectionHierarchy(),
-    "cached-ok",
-    new FakeTimer(),
-    new FakeIdGenerator(),
-    { iosMultiPanel: true },
-  );
+  const snapshot = identifyObservedHierarchy("ios", issue8379SelectionHierarchy(), "cached-ok", {
+    timer: new FakeTimer(),
+    ids: new FakeIdGenerator(),
+    iosMultiPanel: true,
+  });
   expect({
     width: snapshot.hierarchy.screenWidth,
     height: snapshot.hierarchy.screenHeight,
@@ -118,7 +116,8 @@ test("single iPhone uses runner geometry and Android uses capture display metada
     selectionFixtureDevice("android", 2),
   ]) {
     for (const raw of [issue8379Hierarchy(), issue8379SelectionHierarchy()]) {
-      for (const hierarchy of [raw, projectActionableHierarchy(device.platform, raw)]) {
+      const platform = requireAndroidOrIosPlatform(device.platform, "Projecting the fixture");
+      for (const hierarchy of [raw, projectActionableHierarchy(platform, raw)]) {
         const selector = new TapOnElement(device, new FakeAdbExecutor(), {
           timer: new FakeTimer(),
         })["elementSelector"];
@@ -147,11 +146,12 @@ test.each([false, true])(
       selectionFixtureDevice("android"),
     ]) {
       const raw = structuredClone(portraitCapture.viewHierarchy);
+      const platform = requireAndroidOrIosPlatform(device.platform, "Projecting the fixture");
       const hierarchy = projected
         ? projectActionableHierarchy(
-            device.platform,
+            platform,
             raw,
-            device.platform === "ios" && device.displays!.panels.length > 1,
+            platform === "ios" && device.displays!.panels.length > 1,
           )
         : raw;
       const selector = new TapOnElement(device, new FakeAdbExecutor(), { timer: new FakeTimer() })[

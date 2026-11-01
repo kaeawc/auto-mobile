@@ -47,7 +47,7 @@ describe("boot capacity gate parity", () => {
       psFailsExecutor,
       new FakeTimer(),
       { totalMemoryBytes: () => 128 * GIB, cpuCount: () => 16, loadAverage1m: () => null },
-      simctl,
+      { simctl },
     );
     const source: FleetHostSource = {
       readHostSnapshot: (options) => commandSource.readHostSnapshot(options),

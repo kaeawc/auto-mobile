@@ -26,7 +26,7 @@ import {
   LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   LEGACY_DEFAULT_SESSION_TIMEOUT_MS,
   type SessionLifecycleSlots,
-  type SharedSessionAssignment,
+  type PersistedSessionRecovery,
   isSessionRecoveryIdentityLossError,
   persistedHeartbeatTimeoutSource,
   persistedLivenessPolicy,
@@ -47,9 +47,7 @@ export interface SessionRecoveryHost {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
-    persisted: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    recovery: PersistedSessionRecovery & { persisted?: DeviceSession },
   ): Promise<Session>;
   readonly daemonSessionId: string | undefined;
   readonly deviceSessionRepository: Pick<
@@ -88,9 +86,7 @@ export class SessionRecovery {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
-    listed: DeviceSession | undefined,
-    initialOwnership: "owned" | "awaiting-owner",
-    shared: SharedSessionAssignment,
+    { listed, ...recovery }: PersistedSessionRecovery & { listed?: DeviceSession },
   ): Promise<Session> {
     if (this.host.isLapsedUnownedRestartRecovery(listed)) {
       listed = await this.host.admitPersistedSession(sessionId, listed);
@@ -100,14 +96,10 @@ export class SessionRecovery {
         ? await this.claimRecoverableRow(sessionId, listed)
         : undefined;
     try {
-      return await this.host.recoverPersistedRow(
-        sessionId,
-        devicePool,
-        platform,
-        claim?.row ?? listed,
-        initialOwnership,
-        shared,
-      );
+      return await this.host.recoverPersistedRow(sessionId, devicePool, platform, {
+        persisted: claim?.row ?? listed,
+        ...recovery,
+      });
     } catch (error) {
       if (claim) {
         await this.releaseFailedRecoveryClaim(sessionId, claim);
@@ -327,8 +319,10 @@ export class SessionRecovery {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     platform: Platform | undefined,
-    recoveryTarget: SessionRecoveryTarget | undefined,
-    persisted: DeviceSession | undefined,
+    {
+      recoveryTarget,
+      persisted,
+    }: { recoveryTarget?: SessionRecoveryTarget; persisted?: DeviceSession } = {},
   ): Promise<void> {
     try {
       await devicePool.assignDeviceToSession(sessionId, platform, recoveryTarget);

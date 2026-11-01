@@ -43,7 +43,7 @@ describe("Window disk cache unit-test guard", () => {
   }
 
   function createWindow(env: NodeJS.ProcessEnv, homeDir = isolation.dataDir): Window {
-    return new Window(device, new FakeAdbClientFactory(adb), undefined, env, homeDir);
+    return new Window(device, new FakeAdbClientFactory(adb), undefined, { env, homeDir });
   }
 
   for (const override of ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"]) {

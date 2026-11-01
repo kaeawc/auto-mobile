@@ -70,7 +70,7 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     gestures = new FakeGestureEmitter();
     a11y = new FakeA11ySource();
     timer = new FakeTimer();
-    recorder = new DualTrackRecorder(device, gestures, a11y, timer);
+    recorder = new DualTrackRecorder(device, gestures, a11y, { timer });
   });
 
   test("a stylus tap over an element is a tapAt with a pointer, never a tapOn", async () => {
@@ -91,6 +91,55 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     ]);
     expect(exportWarnings).toBeUndefined();
     expect(tapAtSchema.safeParse(steps[0].params).success).toBe(true);
+  });
+
+  test.each(["tap", "swipe"] as const)(
+    "a stylus %s exports probe pressure, tilt and primary button",
+    async (type) => {
+      await recorder.start();
+      gestures.emit({
+        type,
+        arrivedAt: 0,
+        screenX: 500,
+        screenY: 2050,
+        startX: 500,
+        startY: 2050,
+        endX: 700,
+        endY: 2050,
+        toolType: "stylus",
+        pressure: { min: 4000 / 4095, max: 4000 / 4095, mean: 4000 / 4095, normalized: true },
+        tilt: 0.55,
+        buttons: ["stylusPrimary"],
+      });
+      const { steps } = await recorder.stop();
+      expect(steps).toHaveLength(1);
+      expect(steps[0].params.pointer).toEqual({
+        toolType: "stylus",
+        pressure: 0.9768,
+        tilt: 0.55,
+        buttons: ["primary"],
+      });
+      expect(
+        (type === "tap" ? tapAtSchema : swipeAtSchema).safeParse(steps[0].params).success,
+      ).toBe(true);
+    },
+  );
+
+  test("raw pressure without an axis range is omitted and both buttons map to replay names", async () => {
+    await recorder.start();
+    gestures.emit({
+      type: "tap",
+      arrivedAt: 0,
+      screenX: 50,
+      screenY: 60,
+      toolType: "stylus",
+      pressure: { min: 4000, max: 4000, mean: 4000, normalized: false },
+      buttons: ["stylusPrimary", "stylusSecondary"],
+    });
+    expect((await recorder.stop()).steps[0].params.pointer).toEqual({
+      toolType: "stylus",
+      buttons: ["primary", "secondary"],
+    });
   });
 
   test("a stylus long press keeps its pointer and duration", async () => {
@@ -191,7 +240,7 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
     expect(result.exportWarnings).toEqual([expect.stringContaining("not exported")]);
   });
 
-  test("an eraser gesture cannot be replayed, so it is skipped with a warning", async () => {
+  test("an eraser gesture exports as an eraser step with a replay warning (#13105)", async () => {
     await recorder.start();
     gestures.emit({
       type: "tap",
@@ -199,12 +248,19 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
       screenX: 50,
       screenY: 60,
       toolType: "eraser",
+      pressure: { min: 0.98, max: 0.98, mean: 0.98, normalized: true },
+      tilt: 0.55,
+      buttons: ["stylusPrimary"],
     });
 
     const result = await recorder.stop();
 
-    expect(result.steps).toEqual([]);
-    expect(result.exportWarnings).toEqual([expect.stringContaining("eraser")]);
+    expect(result.steps).toHaveLength(1);
+    expect(result.steps[0]).toMatchObject({
+      tool: "tapAt",
+      params: { x: 50, y: 60, pointer: { toolType: "eraser", pressure: 0.98, tilt: 0.55 } },
+    });
+    expect(result.exportWarnings).toEqual([expect.stringContaining("root adb shell")]);
   });
 
   test("a stylus double tap upgrades only a stylus tap, and keeps the pointer", async () => {
@@ -289,7 +345,15 @@ describe("recorded stylus gestures keep their pointer (#13084)", () => {
   test("finger gestures export exactly as before", async () => {
     await recorder.start();
     a11y.emit({ type: "tap", timestamp: timer.now(), element: BUTTON });
-    gestures.emit({ type: "tap", arrivedAt: timer.now(), screenX: 342, screenY: 891 });
+    gestures.emit({
+      type: "tap",
+      arrivedAt: timer.now(),
+      screenX: 342,
+      screenY: 891,
+      pressure: { min: 0.98, max: 0.98, mean: 0.98, normalized: true },
+      tilt: 0.55,
+      buttons: ["stylusPrimary"],
+    });
 
     expect((await recorder.stop()).steps).toEqual([
       { tool: "tapOn", params: { action: "tap", elementId: BUTTON["resource-id"] } },

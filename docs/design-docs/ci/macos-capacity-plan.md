@@ -60,7 +60,7 @@ run in favour of a newer pipeline that has no iOS changes.
 with `run-nightly-macos=true` runs the `nightly-macos` workflow, chained in this
 order with `terminal` requirements so a failure never skips later jobs:
 
-1. XCTestRunner Simulator Tests (the PR `run-ios-sim` label opt-in still uses
+1. XCTestRunner Simulator Tests (the PR `run-ios-sim` label and contract-input runs still use
    `.github/workflows/xctestrunner-simulator-tests.yml`; a policy test keeps the
    selected tests and daemon budget identical)
 2. Swift Packages Sweep (Xcode 26.6)
@@ -161,12 +161,13 @@ runner queues forever, and its required check with it (#11580).
   `Build Root SPM Package`, `Installer Minimal (macos-latest)`, `iOS Build`), so
   the `green-main` ruleset needs no edit.
 
-**Exception: XCTestRunner Simulator Tests (`run-ios-sim` label).** The label
-opt-in still runs on hosted `macos-26` for same-repo PRs. Its daemon steps start
+**Exception: XCTestRunner Simulator Tests (`run-ios-sim` label or iOS SDK contract inputs).** The
+lane still runs on hosted `macos-26` for same-repo PRs. Its daemon steps start
 an AutoMobile daemon on the default port and install gems and Homebrew packages,
 which would collide with the owner's own daemon and tooling on this Mac. Moving
 it needs a dedicated runner user (see owner steps) and an isolated daemon port.
-It is a rare, opt-in label run, so this was left for an owner decision.
+It runs only on the label or on changes to the layers the iOS SDK contract suite crosses, so this
+was left for an owner decision.
 
 **N for the small pool: 4.** Swift package builds and the desktop Gradle build
 are CPU-bound and each can use most of the cores. Four small jobs plus the heavy
@@ -210,7 +211,7 @@ ports, so use that fallback only with the heavy runner under a dedicated user.
 | Prototype Simulator iOS 26                                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |
 | iOS Playground Tests                                                           | CircleCI (heavy lane if label-forced)      | CircleCI       |
 | iOS Device Capture to WHEP                                                     | Namespace `auto-mobile-macos`              | `macos-26`     |
-| XCTestRunner Simulator Tests (`run-ios-sim`)                                   | hosted `macos-26` (exception, see above)   | `macos-26`     |
+| XCTestRunner Simulator Tests (`run-ios-sim`, contract inputs)                  | hosted `macos-26` (exception, see above)   | `macos-26`     |
 | merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | CircleCI post-merge, path-gated, coalesced | n/a            |
 | nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | CircleCI `nightly-macos`                   | n/a            |
 

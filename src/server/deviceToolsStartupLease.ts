@@ -34,6 +34,12 @@ interface AndroidStartupLeaseNameContext {
   signal: AbortSignal | undefined;
 }
 
+/** The listing, deadline, clock and cancellation one Android startup-lease reservation runs under. */
+type AndroidStartupLeaseRequest = Pick<
+  AndroidStartupLeaseNameContext,
+  "deviceUtils" | "bootDeadlineMs" | "timer"
+> & { signal?: AbortSignal };
+
 async function resolveAndroidStartupLeaseAvdName({
   args,
   budgets,
@@ -61,13 +67,10 @@ async function resolveAndroidStartupLeaseAvdName({
   // is not running yet is unknown to it. Name the lease after the image rather
   // than taking the wildcard, which would make this exact acquisition wait on —
   // and defer — every unrelated reset cohort.
-  return await resolveAndroidStartupLeaseImageName(
-    args.deviceId,
-    deviceUtils,
-    bootDeadlineMs,
+  return await resolveAndroidStartupLeaseImageName(args.deviceId, deviceUtils, bootDeadlineMs, {
     timer,
     signal,
-  );
+  });
 }
 
 /**
@@ -81,8 +84,7 @@ async function resolveAndroidStartupLeaseImageName(
   deviceId: string,
   deviceUtils: PlatformDeviceManager,
   bootDeadlineMs: number,
-  timer: Timer,
-  signal: AbortSignal | undefined,
+  { timer, signal }: { timer: Timer; signal?: AbortSignal },
 ): Promise<string | undefined> {
   try {
     // This optional hint must leave time to reserve the non-owning lease and
@@ -92,8 +94,8 @@ async function resolveAndroidStartupLeaseImageName(
       { name: deviceId, platform: "android", deviceId },
       timer,
       lookupDeadlineMs,
-      "Android AVD image lookup for the startup lease did not complete",
       {
+        detail: "Android AVD image lookup for the startup lease did not complete",
         requestAbortSignal: signal,
         operation: async (lookupSignal) =>
           await deviceUtils.listDeviceImages("android", lookupSignal),
@@ -116,10 +118,7 @@ async function resolveAndroidStartupLeaseImageName(
 export async function reserveAndroidStartupLease(
   args: StartDeviceArgs,
   budgets: { androidAvdName?: string },
-  bootDeadlineMs: number,
-  timer: Timer,
-  deviceUtils: PlatformDeviceManager,
-  signal?: AbortSignal,
+  { bootDeadlineMs, timer, deviceUtils, signal }: AndroidStartupLeaseRequest,
 ): Promise<(() => Promise<void>) | undefined> {
   if (args.platform !== "android") {
     return undefined;
@@ -160,14 +159,12 @@ export async function reserveAndroidStartupLease(
   signal?.addEventListener("abort", abortForCaller, { once: true });
   const timeout = timer.setTimeout(abortForTimeout, remainingMs);
   const reservation = (async () => {
-    const ownsOfflineRecovery = await ownsAndroidStartupOfflineRecovery(
-      exactAvdName,
-      devicePool,
+    const ownsOfflineRecovery = await ownsAndroidStartupOfflineRecovery(exactAvdName, devicePool, {
       deviceUtils,
-      bootDeadlineMs,
+      deadlineMs: bootDeadlineMs,
       timer,
-      timeoutController.signal,
-    );
+      signal: timeoutController.signal,
+    });
     // Classification can finish after cancellation; do not queue new work then.
     timeoutController.signal.throwIfAborted();
     return await devicePool.reserveAndroidStartupLease(
@@ -219,10 +216,12 @@ export async function reserveAndroidStartupLease(
 async function ownsAndroidStartupOfflineRecovery(
   avdName: string | undefined,
   devicePool: DevicePool,
-  deviceUtils: PlatformDeviceManager,
-  deadlineMs: number,
-  timer: Timer,
-  signal: AbortSignal,
+  {
+    deviceUtils,
+    deadlineMs,
+    timer,
+    signal,
+  }: { deviceUtils: PlatformDeviceManager; deadlineMs: number; timer: Timer; signal: AbortSignal },
 ): Promise<boolean> {
   // A criteria-only request may reuse a running AVD, so it cannot claim
   // ownership until an exact image has been resolved.
@@ -250,8 +249,8 @@ async function ownsAndroidStartupOfflineRecovery(
       { platform: "android", name: avdName, deviceId: avdName },
       timer,
       lookupDeadlineMs,
-      "Android startup lease running-device discovery did not complete",
       {
+        detail: "Android startup lease running-device discovery did not complete",
         requestAbortSignal: signal,
         operation: async (signal) => {
           const discovery = await deviceUtils.getBootedDevicesDetailed("android", {

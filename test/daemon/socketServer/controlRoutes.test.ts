@@ -30,13 +30,10 @@ describe("controlRoutes input dispatch", () => {
   test("every table route reaches its named handler", async () => {
     for (const route of INPUT_ROUTES) {
       const { calls, handlers } = recordingHandlers();
-      await dispatchInputRoute(
-        handlers,
-        inputRouteFor(route.method)!,
-        req(route.method),
-        "s",
-        "ctx",
-      );
+      await dispatchInputRoute(handlers, inputRouteFor(route.method)!, req(route.method), {
+        socketSessionId: "s",
+        input: "ctx",
+      });
       const expected = route.handler === "gesture" ? `gesture:${route.gestureKind}` : route.handler;
       expect(calls).toEqual([expected]);
     }

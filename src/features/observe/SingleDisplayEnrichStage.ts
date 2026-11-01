@@ -1,7 +1,7 @@
 import { recordObservationRead } from "./observationReadScope";
 import { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import { logger } from "../../utils/logger";
-import { BootedDevice, ObserveResult } from "../../models";
+import { BootedDevice, ObserveResult, requireAndroidOrIosPlatform } from "../../models";
 import type { ObserveScreenshotOptions } from "./screenshot/screenshotOptions";
 import { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -61,7 +61,10 @@ export class SingleDisplayEnrichStage {
     if (result.viewHierarchy) {
       result.elements = this.d
         .elementsBuilder()
-        .build(result.viewHierarchy, this.d.device().platform);
+        .build(
+          result.viewHierarchy,
+          requireAndroidOrIosPlatform(this.d.device().platform, "Observing the view hierarchy"),
+        );
     }
   }
   /** Stage 3: derive elements, start screenshots, and run audits and predictions. */
@@ -96,22 +99,19 @@ export class SingleDisplayEnrichStage {
     stampPrototypeHidden(result, capture);
     if (screenshotMode === "settled") {
       result.screenshotOrientation = this.d.platformTraits().settledScreenshotOrientation();
-      await this.d.captureSettledScreenshot(
-        result,
-        perf,
-        signal,
-        options?.screenshot === "settled",
-        screenshotDisplayId,
-        options?.screenshotOptions,
-      );
+      await this.d.captureSettledScreenshot(result, perf, signal, {
+        strict: options?.screenshot === "settled",
+        displayId: screenshotDisplayId,
+        screenshotOptions: options?.screenshotOptions,
+      });
     } else if (serverConfig.getAccessibilityAuditConfig()) {
       await this.d
         .screenshotRecorder()
-        .capture(result.observationId, perf, signal, screenshotDisplayId, capture);
+        .capture(result.observationId, { perf, signal, displayId: screenshotDisplayId, capture });
     } else {
       this.d
         .screenshotRecorder()
-        .start(result.observationId, perf, signal, screenshotDisplayId, capture);
+        .start(result.observationId, { perf, signal, displayId: screenshotDisplayId, capture });
     }
   }
 

@@ -52,6 +52,7 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { writeDeviceCameraPoster } from "./DeviceCameraPoster";
@@ -188,8 +189,7 @@ export class DeviceState {
       () => this.device,
       () => this.adbFactory,
       () => this.deviceTraits,
-      () => this.timer,
-      dependencies.power,
+      { timer: () => this.timer, seams: dependencies.power },
     );
     this.clock = new ClockOperations(
       {
@@ -234,12 +234,13 @@ export class DeviceState {
   }
 
   private async readState(include: readonly DeviceStateField[]): Promise<DeviceStateResult> {
+    const platform = requireAndroidOrIosPlatform(this.device.platform, "Reading device state");
     // An empty selection would otherwise read nothing and report success.
     if (include.length === 0) {
       return {
         success: false,
         deviceId: this.device.deviceId,
-        platform: this.device.platform,
+        platform,
         error: EMPTY_STATE_SELECTION_ERROR,
       };
     }
@@ -257,7 +258,7 @@ export class DeviceState {
     return {
       success: !failedState,
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform,
       ...(this.device.displays ? { displays: this.device.displays } : {}),
       ...selected,
       ...(unsupported.length > 0 ? { unsupported } : {}),
@@ -297,6 +298,7 @@ export class DeviceState {
   }
 
   async setState(input: SetDeviceStateInput): Promise<DeviceStateResult> {
+    const platform = requireAndroidOrIosPlatform(this.device.platform, "Setting device state");
     if (input.clock !== undefined) {
       validateDeviceClockInput(input.clock);
       validateClockCombinedInputs(input);
@@ -305,7 +307,7 @@ export class DeviceState {
       return {
         success: false,
         deviceId: this.device.deviceId,
-        platform: this.device.platform,
+        platform,
         error: "At least one device state field must be provided",
       };
     }
@@ -318,7 +320,7 @@ export class DeviceState {
       return {
         success: false,
         deviceId: this.device.deviceId,
-        platform: this.device.platform,
+        platform,
         error: inputError,
       };
     }
@@ -337,7 +339,7 @@ export class DeviceState {
         (state) => state.supported && !state.error && state.verified !== false,
       ),
       deviceId: this.device.deviceId,
-      platform: this.device.platform,
+      platform,
       ...states,
       ...(error ? { error } : {}),
     };

@@ -60,7 +60,7 @@ describe("RealSettleObserve", () => {
     const signal = new AbortController().signal;
     let attempts = 0;
     const capture = spyOn(fake, "captureScreenshot").mockImplementation(
-      async (_perf, passedSignal, frame) => {
+      async (_perf, { signal: passedSignal, observation: frame } = {}) => {
         expect(passedSignal).toBe(signal);
         expect(frame).toBe(chosen);
         if (++attempts === 1) {
@@ -93,7 +93,7 @@ describe("RealSettleObserve", () => {
     try {
       await settle.captureScreenshot(adopted, signal);
       expect(fake.getCapturedScreenshotObservations()).toEqual([adopted]);
-      expect(capture).toHaveBeenCalledWith(undefined, signal, adopted);
+      expect(capture).toHaveBeenCalledWith(undefined, { signal, observation: adopted });
       expect(fake.getCaptureScreenshotCallCount()).toBe(1);
     } finally {
       capture.mockRestore();

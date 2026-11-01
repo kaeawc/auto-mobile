@@ -26,16 +26,15 @@ describe("NavigationGraphManager app resume (#10193)", () => {
     harness = await installInMemoryNavManager();
   });
   beforeEach(async () => {
-    repository = new NavigationRepository(harness.db);
+    repository = new NavigationRepository({ db: harness.db });
     await repository.clearAppGraph(APP);
     await repository.clearAppGraph(LAUNCHER);
     timer = new FakeTimer();
     timer.setCurrentTime(T0);
-    manager = NavigationGraphManager.createForTesting(
-      repository,
-      new TestCoverageRepository(harness.db),
+    manager = NavigationGraphManager.createForTesting(repository, {
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
-    );
+    });
   });
   afterAll(async () => {
     await harness.dispose();

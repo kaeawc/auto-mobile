@@ -263,14 +263,7 @@ describe("control socket discovery cache", () => {
       const restore = preserveToolRegistry();
       const h = harness();
       const store = new SessionToolBindingStore();
-      const binding = new SessionToolBinding(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        store,
-      );
+      const binding = new SessionToolBinding(undefined, undefined, undefined, { store });
       const profiles = new InMemoryToolSelectionProfileRegistry();
       const disabled = new Set<string>(["acquired"]);
       const service = {
@@ -349,13 +342,10 @@ describe("control socket discovery cache", () => {
     try {
       await manager.createSession("base", "fake-device", "android");
       ToolRegistry.clearToolsForTesting();
-      ToolRegistry.registerDeviceAware(
-        "cacheLabelTool",
-        "label tool",
-        z.object({}),
-        async () => ({}),
-        { defaultEnabled: false },
-      );
+      ToolRegistry.registerDeviceAware("cacheLabelTool", "label tool", z.object({}), {
+        handler: async () => ({}),
+        defaultEnabled: false,
+      });
       const list = createListSessionTools({
         options: {
           toolSelectionSessionManager: manager,
@@ -442,10 +432,14 @@ describe("control socket discovery cache", () => {
       await h.server.forwardRequest(context);
       expect(h.trips()).toBe(1);
       expect(refreshes).toBe(2);
-      ResourceRegistry.register(uri, "cache", "cache", "text/plain", async () => ({
-        uri,
-        text: "ok",
-      }));
+      ResourceRegistry.register(uri, "cache", {
+        description: "cache",
+        mimeType: "text/plain",
+        handler: async () => ({
+          uri,
+          text: "ok",
+        }),
+      });
       const changed = await h.server.forwardRequest(context);
       expect(changed).toEqual({ resources: ResourceRegistry.getResourceDefinitions() });
       expect(h.trips()).toBe(2);
@@ -464,10 +458,14 @@ describe("control socket discovery cache", () => {
     const h = harness({
       refreshResources: async () => {
         if (changed && !ResourceRegistry.getResource(uri)) {
-          ResourceRegistry.register(uri, "refreshed", "refreshed", "text/plain", async () => ({
-            uri,
-            text: "ok",
-          }));
+          ResourceRegistry.register(uri, "refreshed", {
+            description: "refreshed",
+            mimeType: "text/plain",
+            handler: async () => ({
+              uri,
+              text: "ok",
+            }),
+          });
         }
       },
     });

@@ -64,7 +64,7 @@ describe("activity sequence orders writes independently of the wall clock", () =
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(10_000);
-    repo = new RejectingUpsertRepository(db, timer);
+    repo = new RejectingUpsertRepository({ db, timer });
   });
   afterEach(async () => {
     await db.destroy();
@@ -234,7 +234,7 @@ describe("activity sequence orders writes independently of the wall clock", () =
         legacy,
       );
       expect(columns.rows).toEqual([{ name: "activity_seq", notnull: 1, dflt_value: "0" }]);
-      const upgraded = new DeviceSessionRepository(legacy, timer);
+      const upgraded = new DeviceSessionRepository({ db: legacy, timer });
       expect(await upgraded.getSession(SESSION)).toMatchObject({
         activity_seq: 0,
         last_used_at_ms: 10_000,

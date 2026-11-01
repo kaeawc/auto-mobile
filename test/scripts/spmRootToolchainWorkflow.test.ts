@@ -86,8 +86,10 @@ describe("root SPM toolchain floor workflow", () => {
       );
     }
     for (const name of HEAVY_LANE_JOBS) {
-      // One heavy runner process: a hung job must not hold the lane for long.
-      expect(jobs[name]?.["timeout-minutes"]).toBeLessThanOrEqual(30);
+      // Prototype smoke covers a cold build and both agent and MCP steps.
+      expect(jobs[name]?.["timeout-minutes"]).toBeLessThanOrEqual(
+        name === "prototype-simulator" ? 60 : 30,
+      );
     }
     const xcodeBuild = loadJobSteps(".github/workflows/pull_request.yml", "ios-xcode-build");
     // The PR-time XcodeGen drift gate (#10939) runs on the heavy lane.

@@ -40,7 +40,8 @@ describe("InputText iOS IME action", () => {
       activityName: "MainActivity",
       layoutSeqSum: 1,
     });
-    return new InputText(device, fakeAdb, undefined, fakeTimer, undefined, {
+    return new InputText(device, fakeAdb, {
+      timer: fakeTimer,
       observeScreen: fakeObserveScreen,
       window: fakeWindow,
       awaitIdle: new FakeAwaitIdle(),

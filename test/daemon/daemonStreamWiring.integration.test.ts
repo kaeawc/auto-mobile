@@ -426,10 +426,9 @@ describe("Daemon stream wiring", () => {
       test(`invalidates ${state} device frames on ${event.name}`, async () => {
         const timer = new FakeTimer();
         const db = await createTestDatabase();
-        const graph = NavigationGraphManager.createForTesting(
-          new NavigationRepository(db),
-          new TestCoverageRepository(db),
-        );
+        const graph = NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+          testCoverageRepository: new TestCoverageRepository({ db }),
+        });
         const navigation = spyOn(NavigationGraphManager, "getInstanceForSession").mockReturnValue(
           graph,
         );
@@ -904,7 +903,7 @@ describe("Daemon stream wiring", () => {
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(db),
+        deviceSessionRepository: new DeviceSessionRepository({ db }),
         idGenerator: new CountingIdGenerator("device-session"),
       },
     );
@@ -968,7 +967,7 @@ describe("Daemon stream wiring", () => {
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(db),
+        deviceSessionRepository: new DeviceSessionRepository({ db }),
         idGenerator: new CountingIdGenerator("device-session"),
       },
     );
@@ -1008,23 +1007,20 @@ describe("Daemon stream wiring", () => {
     const db = await createTestDatabase();
     const sessionId = "navigation-session";
     const sessionNavigation = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
-      undefined,
-      sessionId,
+      new NavigationRepository({ db }),
+      { testCoverageRepository: new TestCoverageRepository({ db }), sessionUuid: sessionId },
     );
     NavigationGraphManager.setInstanceForTesting(
-      NavigationGraphManager.createForTesting(
-        new NavigationRepository(db),
-        new TestCoverageRepository(db),
-      ),
+      NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+        testCoverageRepository: new TestCoverageRepository({ db }),
+      }),
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
     const daemon = new Daemon(
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(db),
+        deviceSessionRepository: new DeviceSessionRepository({ db }),
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
@@ -1051,23 +1047,20 @@ describe("Daemon stream wiring", () => {
     const db = await createTestDatabase();
     const sessionId = "navigation-request-session";
     const sessionNavigation = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
-      undefined,
-      sessionId,
+      new NavigationRepository({ db }),
+      { testCoverageRepository: new TestCoverageRepository({ db }), sessionUuid: sessionId },
     );
     NavigationGraphManager.setInstanceForTesting(
-      NavigationGraphManager.createForTesting(
-        new NavigationRepository(db),
-        new TestCoverageRepository(db),
-      ),
+      NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+        testCoverageRepository: new TestCoverageRepository({ db }),
+      }),
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
     const daemon = new Daemon(
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(db),
+        deviceSessionRepository: new DeviceSessionRepository({ db }),
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
@@ -1103,23 +1096,20 @@ describe("Daemon stream wiring", () => {
     const db = await createTestDatabase();
     const sessionId = "created-after-stream-setup";
     const sessionNavigation = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
-      undefined,
-      sessionId,
+      new NavigationRepository({ db }),
+      { testCoverageRepository: new TestCoverageRepository({ db }), sessionUuid: sessionId },
     );
     NavigationGraphManager.setInstanceForTesting(
-      NavigationGraphManager.createForTesting(
-        new NavigationRepository(db),
-        new TestCoverageRepository(db),
-      ),
+      NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+        testCoverageRepository: new TestCoverageRepository({ db }),
+      }),
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
     const daemon = new Daemon(
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(db),
+        deviceSessionRepository: new DeviceSessionRepository({ db }),
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
@@ -1148,23 +1138,20 @@ describe("Daemon stream wiring", () => {
     const db = await createTestDatabase();
     const sessionId = "rebound-navigation-session";
     const initialNavigation = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
-      undefined,
-      sessionId,
+      new NavigationRepository({ db }),
+      { testCoverageRepository: new TestCoverageRepository({ db }), sessionUuid: sessionId },
     );
     NavigationGraphManager.setInstanceForTesting(
-      NavigationGraphManager.createForTesting(
-        new NavigationRepository(db),
-        new TestCoverageRepository(db),
-      ),
+      NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+        testCoverageRepository: new TestCoverageRepository({ db }),
+      }),
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, initialNavigation);
     const daemon = new Daemon(
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(db),
+        deviceSessionRepository: new DeviceSessionRepository({ db }),
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
@@ -1196,23 +1183,20 @@ describe("Daemon stream wiring", () => {
     const db = await createTestDatabase();
     const sessionId = "released-navigation-session";
     NavigationGraphManager.setInstanceForTesting(
-      NavigationGraphManager.createForTesting(
-        new NavigationRepository(db),
-        new TestCoverageRepository(db),
-      ),
+      NavigationGraphManager.createForTesting(new NavigationRepository({ db }), {
+        testCoverageRepository: new TestCoverageRepository({ db }),
+      }),
     );
     const sessionNavigation = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
-      undefined,
-      sessionId,
+      new NavigationRepository({ db }),
+      { testCoverageRepository: new TestCoverageRepository({ db }), sessionUuid: sessionId },
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
     const daemon = new Daemon(
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(db),
+        deviceSessionRepository: new DeviceSessionRepository({ db }),
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
@@ -1250,8 +1234,10 @@ describe("Daemon stream wiring", () => {
     const db = await createTestDatabase();
     const sessionId = "recreated-session";
     const globalNavigation = NavigationGraphManager.createForTesting(
-      new NavigationRepository(db),
-      new TestCoverageRepository(db),
+      new NavigationRepository({ db }),
+      {
+        testCoverageRepository: new TestCoverageRepository({ db }),
+      },
     );
     NavigationGraphManager.setInstanceForTesting(globalNavigation);
     NavigationGraphManager.releaseSession(sessionId);
@@ -1259,7 +1245,7 @@ describe("Daemon stream wiring", () => {
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(db),
+        deviceSessionRepository: new DeviceSessionRepository({ db }),
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
@@ -1297,7 +1283,7 @@ describe("Daemon stream wiring", () => {
         {},
         {
           timer: new FakeTimer(),
-          deviceSessionRepository: new DeviceSessionRepository(db),
+          deviceSessionRepository: new DeviceSessionRepository({ db }),
           idGenerator: new CountingIdGenerator("device-session"),
         },
       );

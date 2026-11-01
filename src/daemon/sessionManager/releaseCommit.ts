@@ -29,6 +29,12 @@ import {
   type SessionLifecycleSlots,
 } from "./internalContracts";
 
+/** The snapshot a release committed and the one it persisted (a terminal upgrade differs). */
+export interface CommittedReleaseSnapshots {
+  releaseSnapshot: SessionReleaseSnapshot;
+  persistedSnapshot: SessionReleaseSnapshot;
+}
+
 export interface SessionReleaseCommitHost {
   readonly stateRestore: SessionDeviceStateRestore;
   revokeSupersededIdentityReplacement(operation?: SessionReleaseOperation): boolean;
@@ -86,10 +92,8 @@ export interface SessionReleaseCommitHost {
   finishCommittedRelease(
     session: Session,
     reason: ReleaseReasonState,
-    releaseSnapshot: SessionReleaseSnapshot,
-    persistedSnapshot: SessionReleaseSnapshot,
+    committed: CommittedReleaseSnapshots & { pendingCleanup: readonly Promise<void>[] },
     options: SessionReleaseOptions,
-    pendingCleanup: readonly Promise<void>[],
   ): string;
   removeSession(sessionId: string, expectedSession?: Session): boolean;
   trackPendingTeardownCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void;
@@ -238,13 +242,10 @@ export class SessionReleaseCommit {
 
       // A durable terminal intent frees the device without waiting for the row, which is written
       // now, after the commit, and awaited below.
-      const terminalWrite = this.startCommittedTerminalWrite(
-        releaseSnapshot,
-        reason,
-        session,
-        terminalIntent,
+      const terminalWrite = this.startCommittedTerminalWrite(releaseSnapshot, reason, session, {
+        intent: terminalIntent,
         enter,
-      );
+      });
       this.host.notifySessionRelease(releaseSnapshot, options);
       enter("finalize-persist");
       let persistedSnapshot: SessionReleaseSnapshot;
@@ -268,10 +269,8 @@ export class SessionReleaseCommit {
       return this.host.finishCommittedRelease(
         session,
         reason,
-        releaseSnapshot,
-        persistedSnapshot,
+        { releaseSnapshot, persistedSnapshot, pendingCleanup },
         options,
-        pendingCleanup,
       );
     } finally {
       this.host.sessionSlots.unmarkReleasing(session);
@@ -286,8 +285,10 @@ export class SessionReleaseCommit {
     snapshot: SessionReleaseSnapshot,
     reason: ReleaseReasonState,
     session: Session,
-    intent: TerminalIntentDurability | undefined,
-    enter: (stage: SessionReleaseStage) => void,
+    {
+      intent,
+      enter,
+    }: { intent?: TerminalIntentDurability; enter: (stage: SessionReleaseStage) => void },
   ): ReturnType<SessionReleaseCommit["persistCommittedTerminalRelease"]> | undefined {
     if (!snapshot.terminal || intent === "volatile") {
       return undefined;
@@ -422,10 +423,12 @@ export class SessionReleaseCommit {
   finishCommittedRelease(
     session: Session,
     reason: ReleaseReasonState,
-    releaseSnapshot: SessionReleaseSnapshot,
-    persistedSnapshot: SessionReleaseSnapshot,
+    {
+      releaseSnapshot,
+      persistedSnapshot,
+      pendingCleanup,
+    }: CommittedReleaseSnapshots & { pendingCleanup: readonly Promise<void>[] },
     options: SessionReleaseOptions,
-    pendingCleanup: readonly Promise<void>[],
   ): string {
     const { sessionId, deviceId } = releaseSnapshot;
     this.host.recordFinalizedSessionRelease(session, reason);

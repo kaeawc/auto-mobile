@@ -136,6 +136,9 @@ fun interface PrototypeResultSink : PrototypeReplySink {
    */
   fun noteShownBackdrop(requestId: String?, backdrop: String) {}
 
+  /** The display actually selected by the show, including an in-place replay. */
+  fun noteShownDisplay(requestId: String?, displayId: Int) {}
+
   suspend fun sendCleared(requestId: String?, cleared: Int) = send(requestId, true, null)
 
   suspend fun sendAdvanced(requestId: String?, fired: Int) = send(requestId, true, null)
@@ -425,6 +428,7 @@ class PrototypeController(
           pages = shown.runtime.current.pages,
           stacks = shown.runtime.current.stacks,
           backdrop = shown.request.backdrop?.mode?.wire,
+          displayId = shown.request.displayId,
           degradedEffects =
             prototypeEffectReport(
               shown.runtime.renderModel(shown.runtime.current).root,
@@ -493,6 +497,7 @@ class PrototypeController(
     val pages: Map<String, Int>? = null,
     val stacks: Map<String, PrototypeStackSnapshot>? = null,
     val backdrop: String? = null,
+    val displayId: Int = Display.DEFAULT_DISPLAY,
     val degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
   )
 
@@ -990,6 +995,7 @@ class PrototypeController(
         outcome.revision ?: surfaces[patchId]?.runtime?.current?.takeIf { it.active }?.revision
       sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
     } else if (error == null && appearance != null) {
+      sink.noteShownDisplay(requestId, outcome.displayId)
       outcome.backdrop?.let { sink.noteShownBackdrop(requestId, it) }
       sendShown(requestId, outcome, missing, appearance)
     } else if (missing.isEmpty()) sink.send(requestId, error == null, error)

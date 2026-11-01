@@ -244,8 +244,7 @@ describe("SessionManager", () => {
           async (_id, reason) => {
             reaped.push(reason);
           },
-          fakeTimer,
-          { graceMs: 20_000 },
+          { timer: fakeTimer, graceMs: 20_000 },
         );
         fakeTimer.advanceTime(991 + SUSPECT_GRACE_MS);
         await monitor.tick();

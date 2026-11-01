@@ -42,6 +42,7 @@
         let style: Style?
         let shape: PrototypeStyleShape
         let palette: PrototypePalette
+        let clipsContent: Bool
         var styleAnimation: PrototypeStyleAnimation? = nil
         let shimmerAnimated: Bool
         var effects: PrototypeEffects.Plan = .empty
@@ -53,21 +54,14 @@
         }
 
         func body(content: Content) -> some View {
-            let background = content
-                .background { PrototypeEffectMeshBackground(plan: effects, palette: palette) }
-                .background {
-                    if let gradient = style?.gradient {
-                        PrototypeGradientFill(gradient: gradient, palette: palette)
-                    }
-                }
-                .animation(styleAnimation?.animation("background")) { view in
-                    view.background(palette.color(style?.background) ?? .clear)
-                }
+            let background = styledBackground(content)
             let clipped = background
                 .modifier(PrototypeShimmerModifier(
                     enabled: style?.shimmer == true, animated: shimmerAnimated, shape: shape
                 ))
-                .animation(styleAnimation?.animation("cornerRadius")) { view in view.clipShape(shape) }
+                .animation(styleAnimation?.animation("cornerRadius")) { view in
+                    if clipsContent { view.clipShape(shape) } else { view }
+                }
                 .modifier(PrototypeEffectsModifier(
                     plan: effects, palette: palette, shape: shape, motion: motion, authored: authorsEffects
                 ))
@@ -80,6 +74,36 @@
             let elevation = CGFloat(style?.elevation ?? 0)
             return painted.animation(styleAnimation?.animation("shadowColor")) { view in
                 view.shadow(color: shadow, radius: elevation)
+            }
+        }
+
+        @ViewBuilder
+        private func styledBackground(_ content: Content) -> some View {
+            if clipsContent {
+                content
+                    .background { PrototypeEffectMeshBackground(plan: effects, palette: palette) }
+                    .background {
+                        if let gradient = style?.gradient {
+                            PrototypeGradientFill(gradient: gradient, palette: palette)
+                        }
+                    }
+                    .animation(styleAnimation?.animation("background")) { view in
+                        view.background(palette.color(style?.background) ?? .clear)
+                    }
+            } else {
+                // Shape only the paints, preserving the card's own border, shadow and children.
+                content
+                    .background {
+                        PrototypeEffectMeshBackground(plan: effects, palette: palette).clipShape(shape)
+                    }
+                    .background {
+                        if let gradient = style?.gradient {
+                            PrototypeGradientFill(gradient: gradient, palette: palette).clipShape(shape)
+                        }
+                    }
+                    .animation(styleAnimation?.animation("background")) { view in
+                        view.background(shape.fill(palette.color(style?.background) ?? .clear))
+                    }
             }
         }
 
@@ -108,13 +132,18 @@
         let shape: PrototypeStyleShape
         let inner: Bool
 
+        private var margin: Double {
+            inner ? 0 : PrototypeStyleShadowLayer.outerMargin(layers)
+        }
+
         var body: some View {
-            if inner { canvas.clipShape(shape) } else { canvas }
+            // Negative padding expands only the background canvas, leaving the node's layout intact.
+            if inner { canvas.clipShape(shape) } else { canvas.padding(-margin) }
         }
 
         private var canvas: some View {
             Canvas { context, size in
-                let rect = CGRect(origin: .zero, size: size)
+                let rect = CGRect(origin: .zero, size: size).insetBy(dx: margin, dy: margin)
                 for layer in layers where layer.inner == inner {
                     guard let color = layer.color else { continue }
                     var sourceShape = shape

@@ -113,11 +113,19 @@ function adoptReportedPrototypes(
   store: PrototypeStatusStore,
   events: PrototypeEventCoordinator,
   source: PrototypeEventSource,
-  scope: PrototypeScope,
-  prototypes: readonly unknown[] | undefined,
-  options: { replayed: readonly PrototypeEvent[]; timersSupported: boolean },
+  {
+    scope,
+    report,
+  }: {
+    scope: PrototypeScope;
+    report: {
+      prototypes: readonly unknown[] | undefined;
+      replayed: readonly PrototypeEvent[];
+      timersSupported: boolean;
+    };
+  },
 ): void {
-  const { replayed, timersSupported } = options;
+  const { prototypes, replayed, timersSupported } = report;
   const reported = parseReportedPrototypes(prototypes);
   const reportedIds = new Set(reported.map((entry) => entry.id));
   const history = groupByPrototype(replayed);
@@ -126,13 +134,16 @@ function adoptReportedPrototypes(
     // still belongs to whoever awaits it.
     if (reportedIds.has(id) || grouped.some((event) => event.kind === "dismissed")) {
       const entry = reported.find((known) => known.id === id);
-      events.adopt(scope, id, source, grouped, entry?.lastSequence ?? 0);
+      events.adopt(scope, id, source, {
+        replayed: grouped,
+        lastSequence: entry?.lastSequence ?? 0,
+      });
     }
   }
   dropUnreportedPrototypes(store, events, scope, reportedIds);
   for (const entry of reported) {
     if (!history.has(entry.id)) {
-      events.adopt(scope, entry.id, source, [], entry.lastSequence);
+      events.adopt(scope, entry.id, source, { replayed: [], lastSequence: entry.lastSequence });
     }
     if (!events.isDismissed(scope, entry.id)) {
       store.adopt(scope, {
@@ -159,8 +170,7 @@ async function inspectDevice(
   dependencies: Pick<PrototypeHandlerDependencies, "store" | "events">,
   target: PrototypeTarget,
   scope: PrototypeScope,
-  timeoutMs: number | undefined,
-  signal: AbortSignal | undefined,
+  { timeoutMs, signal }: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<PrototypeOutput> {
   const { store, events } = dependencies;
   const client = target.android;
@@ -196,14 +206,14 @@ async function inspectDevice(
   if (!result.success) {
     return { success: false, error: result.error ?? "Prototype inspect failed" };
   }
-  adoptReportedPrototypes(
-    store,
-    events,
-    prototypeEventSource(target.transport),
+  adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), {
     scope,
-    result.prototypes,
-    { replayed, timersSupported: await client.supportsCommand(PROTOTYPE_TIMERS_CAPABILITY) },
-  );
+    report: {
+      prototypes: result.prototypes,
+      replayed,
+      timersSupported: await client.supportsCommand(PROTOTYPE_TIMERS_CAPABILITY),
+    },
+  });
   return {
     success: true,
     ...statusOutput(store, events, scope, { deviceDark: "fresh" }),
@@ -222,9 +232,11 @@ export async function deviceRequestAction(
   args: z.infer<typeof prototypeSchema>,
   host: Pick<PrototypeHandlerDependencies, "store" | "events" | "reverses">,
   device: BootedDevice,
-  target: PrototypeTarget,
-  scope: PrototypeScope,
-  signal: AbortSignal | undefined,
+  {
+    target,
+    scope,
+    signal,
+  }: { target: PrototypeTarget; scope: PrototypeScope; signal: AbortSignal | undefined },
 ): Promise<PrototypeOutput> {
   if (args.action === "simulate") {
     return performPrototypeSimulate(target, args);
@@ -232,7 +244,7 @@ export async function deviceRequestAction(
   if (args.action === "clearStorage") {
     return performPrototypeClearStorage(target, args, host.store, device.deviceId);
   }
-  const inspected = await inspectDevice(host, target, scope, args.timeoutMs, signal);
+  const inspected = await inspectDevice(host, target, scope, { timeoutMs: args.timeoutMs, signal });
   return withReverseReport(inspected, host.reverses.report(device.deviceId));
 }
 
@@ -326,9 +338,13 @@ async function inspectIosAgent(
           },
         ]
       : [];
-  adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), scope, reported, {
-    replayed: [],
-    timersSupported: ios.supportsCapability(PROTOTYPE_TIMERS_CAPABILITY),
+  adoptReportedPrototypes(store, events, prototypeEventSource(target.transport), {
+    scope,
+    report: {
+      prototypes: reported,
+      replayed: [],
+      timersSupported: ios.supportsCapability(PROTOTYPE_TIMERS_CAPABILITY),
+    },
   });
   return { success: true, ...statusOutput(store, events, scope, { deviceDark: "fresh" }) };
 }
@@ -396,11 +412,16 @@ export async function waitForPrototypeEvent(
   events: PrototypeEventCoordinator,
   scope: PrototypeScope,
   source: PrototypeEventSource,
-  query: Pick<
-    z.infer<typeof prototypeSchema>,
-    "id" | "eventName" | "kind" | "afterSequence" | "timeoutMs"
-  >,
-  context: { progress?: ProgressCallback; signal?: AbortSignal },
+  {
+    query,
+    context,
+  }: {
+    query: Pick<
+      z.infer<typeof prototypeSchema>,
+      "id" | "eventName" | "kind" | "afterSequence" | "timeoutMs"
+    >;
+    context: { progress?: ProgressCallback; signal?: AbortSignal };
+  },
 ) {
   const waiting = events.awaitEvent(scope, query.id!, source, {
     eventName: query.eventName,

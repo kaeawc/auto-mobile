@@ -54,8 +54,7 @@ interface IosCtrlProxyStartupHost {
     sharedStart: SharedCtrlProxyStart,
     perf: PerformanceTracker,
     delayMs: number,
-    windowMs: number,
-    firstLaunchOwned: boolean,
+    options: { windowMs: number; firstLaunchOwned: boolean },
   ): Promise<boolean>;
   checkHealthEndpointOnPortForDevice(
     port: number,
@@ -324,13 +323,10 @@ export class IosCtrlProxyStartup {
     // it adopted from host control or deferred to, and a supervisor restart, keep the
     // default budget (#14509).
     if (
-      await this.host.waitForHealthRestartingUnresponsiveRunner(
-        sharedStart,
-        perf,
-        delayMs,
-        defaultHealthPollDurationMs,
-        provenance === "spawned" && !this.state.isProcessSupervisorRestarting,
-      )
+      await this.host.waitForHealthRestartingUnresponsiveRunner(sharedStart, perf, delayMs, {
+        windowMs: defaultHealthPollDurationMs,
+        firstLaunchOwned: provenance === "spawned" && !this.state.isProcessSupervisorRestarting,
+      })
     ) {
       return;
     }
@@ -339,7 +335,9 @@ export class IosCtrlProxyStartup {
     const timeoutSeconds = Math.round(
       ((sharedStart.healthPollDeadlineMs ?? 0) - healthPollStartedAt) / 1000,
     );
-    if (await this.recoverDeferredRunner(sharedStart, perf, delayMs, timeoutSeconds, provenance)) {
+    if (
+      await this.recoverDeferredRunner(sharedStart, perf, delayMs, { timeoutSeconds, provenance })
+    ) {
       return;
     }
 
@@ -411,8 +409,7 @@ export class IosCtrlProxyStartup {
     sharedStart: SharedCtrlProxyStart,
     perf: PerformanceTracker,
     delayMs: number,
-    timeoutSeconds: number,
-    provenance: RunnerStartupProvenance,
+    { timeoutSeconds, provenance }: { timeoutSeconds: number; provenance: RunnerStartupProvenance },
   ): Promise<boolean> {
     if (provenance !== "deferred" || this.state.xcTestProcessId === null) {
       return false;

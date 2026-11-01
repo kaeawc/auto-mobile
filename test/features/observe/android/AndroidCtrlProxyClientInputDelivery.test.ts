@@ -92,8 +92,8 @@ describe("AndroidCtrlProxyClient input delivery", () => {
       });
       const pending =
         kind === "global_action"
-          ? client.requestGlobalAction("back", 3000, undefined, undefined, undefined, onDispatch)
-          : client.requestClipboard("paste", undefined, 5000, undefined, undefined, onDispatch);
+          ? client.requestGlobalAction("back", 3000, undefined, { onDispatch })
+          : client.requestClipboard("paste", undefined, 5000, { onDispatch });
       if (scenario === "timeout" || scenario === "socket closed") {
         await sent;
         // Dispatch must be reported synchronously after the successful send.

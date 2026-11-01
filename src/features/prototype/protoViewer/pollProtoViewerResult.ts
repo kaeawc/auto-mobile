@@ -8,7 +8,10 @@ export async function pollProtoViewerResult(
   read: () => Promise<string>,
   timer: Timer,
   timeoutMs: number,
-  signal?: AbortSignal,
+  {
+    signal,
+    timeoutGuidance = "It may still have saved the prototype: check ProtoViewer before retrying, and unlock the device if it is locked.",
+  }: { signal?: AbortSignal; timeoutGuidance?: string } = {},
 ): Promise<ProtoViewerWireResult> {
   const deadline = timer.now() + timeoutMs;
   do {
@@ -20,7 +23,7 @@ export async function pollProtoViewerResult(
     await timer.sleep(Math.min(PROTOVIEWER_RESULT_POLL_MS, Math.max(0, deadline - timer.now())));
   } while (timer.now() < deadline);
   throw new ActionableError(
-    `ProtoViewer did not answer within ${timeoutMs} ms. It may still have saved the prototype: check ProtoViewer before retrying, and unlock the device if it is locked.`,
+    `ProtoViewer did not answer within ${timeoutMs} ms. ${timeoutGuidance}`,
   );
 }
 

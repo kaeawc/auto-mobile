@@ -179,6 +179,10 @@ data class PrototypeIncrementAction(
 
 @SerialName("dismiss") @Serializable data object PrototypeDismissAction : PrototypeAction()
 
+@SerialName("hideKeyboard")
+@Serializable
+data object PrototypeHideKeyboardAction : PrototypeAction()
+
 @SerialName("decrement")
 @Serializable
 data class PrototypeDecrementAction(
@@ -260,6 +264,7 @@ data class PrototypeRequestAction(
   val into: String? = null,
   val statusKey: String? = null,
   val via: String? = null,
+  val allowSecureInRequest: Boolean? = null,
   val timeoutMs: Int? = null,
   val onSuccess: List<PrototypeAction>? = null,
   val onError: List<PrototypeAction>? = null,
@@ -334,6 +339,11 @@ data class PrototypeSetStackAction(
   val stack: String,
   val path: List<PrototypeRouteEntry>,
 ) : PrototypeAction()
+
+@Serializable
+data class PrototypeNodeMapOnCameraIdle(
+  val into: String,
+)
 
 @Serializable
 sealed class PrototypeNode {
@@ -1837,6 +1847,145 @@ data class PrototypeAdaptiveNode(
   val stateKey: String? = null,
   val openKey: String? = null,
   val items: List<PrototypeRadioOption>? = null,
+) : PrototypeNode()
+
+@SerialName("videoPlayer")
+@Serializable
+data class PrototypeVideoPlayerNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  val player: String? = null,
+  val source: JsonObject? = null,
+  val poster: String? = null,
+  val controls: String? = null,
+  val contentScale: String? = null,
+  val autoplay: JsonElement? = null,
+  val muted: Boolean? = null,
+  val loop: Boolean? = null,
+  val startMs: Int? = null,
+  val positionKey: String? = null,
+  val visibleThreshold: Double? = null,
+  val resumePosition: Boolean? = null,
+  val captions: List<JsonObject>? = null,
+) : PrototypeNode()
+
+@SerialName("map")
+@Serializable
+data class PrototypeMapNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  val mapStyle: String? = null,
+  val camera: JsonObject? = null,
+  val fit: String? = null,
+  val markers: JsonObject? = null,
+  val polylines: List<JsonObject>? = null,
+  val showUserLocation: Boolean? = null,
+  val onMarkerTap: List<PrototypeAction>? = null,
+  val onCameraIdle: PrototypeNodeMapOnCameraIdle? = null,
+) : PrototypeNode()
+
+@SerialName("castButton")
+@Serializable
+data class PrototypeCastButtonNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  val player: String,
+  val protocols: List<String>? = null,
+) : PrototypeNode()
+
+@SerialName("cameraPreview")
+@Serializable
+data class PrototypeCameraPreviewNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val shared: PrototypeShared? = null,
+  override val sharedKey: String? = null,
+  override val transition: PrototypeTransition? = null,
+  override val press: PrototypePress? = null,
+  override val animate: PrototypeAnimate? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val scrollTransition: PrototypeScrollTransition? = null,
+  override val scrollLinked: PrototypeScrollLinked? = null,
+  override val onAppear: List<PrototypeAction>? = null,
+  override val semantics: PrototypeSemantics? = null,
+  override val ios: PrototypeIosNamespace? = null,
+  override val android: PrototypeAndroidNamespace? = null,
+  override val keyframes: JsonObject? = null,
+  val lensKey: String? = null,
+  val flashKey: String? = null,
+  val zoomKey: String? = null,
+  val aspectRatio: String? = null,
+  val contentScale: String? = null,
+  val tapToFocus: Boolean? = null,
+  val pinchToZoom: Boolean? = null,
+  val mode: String? = null,
 ) : PrototypeNode()
 
 @Serializable

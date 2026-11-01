@@ -1,0 +1,115 @@
+{
+  "id": "platform-camera-live",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "data": {
+    "draft": {
+      "photo": {},
+      "clip": {}
+    }
+  },
+  "state": {
+    "camStatus": "",
+    "lens": "back",
+    "flash": "off",
+    "zoom": 0
+  },
+  "requires": {
+    "platform": ["camera"],
+    "permissions": [
+      {
+        "name": "camera",
+        "purpose": "Take a photo for your story"
+      }
+    ]
+  },
+  "platform": {
+    "on": {
+      "camera.statusChanged": [
+        {
+          "type": "emit",
+          "name": "camera_status"
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "cameraPreview",
+        "id": "vf",
+        "lensKey": "lens",
+        "flashKey": "flash",
+        "zoomKey": "zoom",
+        "aspectRatio": "4:3",
+        "contentScale": "crop",
+        "tapToFocus": true,
+        "pinchToZoom": true,
+        "mode": "photo",
+        "contentDescription": "Camera viewfinder"
+      },
+      {
+        "type": "text",
+        "text": "{platform:/camera/status} {platform:/camera/recordingMs}"
+      },
+      {
+        "type": "button",
+        "label": "Shoot",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "camera.takePhoto",
+            "args": {
+              "preview": {
+                "value": "vf"
+              }
+            },
+            "into": "/data/draft/photo",
+            "statusKey": "camStatus"
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "Record",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "camera.startRecording",
+            "args": {
+              "preview": {
+                "value": "vf"
+              },
+              "audio": {
+                "value": false
+              },
+              "maxDurationMs": {
+                "value": 15000
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "button",
+        "label": "Stop",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "camera.stopRecording",
+            "args": {
+              "preview": {
+                "value": "vf"
+              }
+            },
+            "into": "/data/draft/clip"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -24,12 +24,12 @@ function destroyedResponse(): TeardownToolResponse {
     TEARDOWN_ARGS,
     "destroyed",
     { stop: "accepted", destroy: "accepted" },
-    { notRunning: "confirmed", inventory: "complete_absence_confirmed" },
+    { verification: { notRunning: "confirmed", inventory: "complete_absence_confirmed" } },
   );
 }
 
 function failedResponse(message: string): TeardownToolResponse {
-  return createTeardownFailureResponse(TEARDOWN_ARGS, "stop", "operation_failed", message);
+  return createTeardownFailureResponse(TEARDOWN_ARGS, "stop", "operation_failed", { message });
 }
 
 describe("WorkflowBindingDeviceDeleter", () => {
@@ -93,7 +93,9 @@ describe("WorkflowBindingDeviceDeleter", () => {
     "target_identity_unresolved",
     "target_not_destroyable",
   ])("pre-native refusal %s is not attempted", async (code) => {
-    const response = createTeardownFailureResponse(TEARDOWN_ARGS, "precondition", code, "refused");
+    const response = createTeardownFailureResponse(TEARDOWN_ARGS, "precondition", code, {
+      message: "refused",
+    });
     const deleter = new WorkflowBindingDeviceDeleter(timer, () => async () => response);
     expect(await deleter.deleteAndVerifyAbsence(target)).toMatchObject({
       kind: "failed",
@@ -109,7 +111,9 @@ describe("WorkflowBindingDeviceDeleter", () => {
     ["precondition", "operation_failed"],
     ["precondition", "unknown_refusal"],
   ] as const)("%s %s remains counted", async (phase, code) => {
-    const response = createTeardownFailureResponse(TEARDOWN_ARGS, phase, code, "failed");
+    const response = createTeardownFailureResponse(TEARDOWN_ARGS, phase, code, {
+      message: "failed",
+    });
     const deleter = new WorkflowBindingDeviceDeleter(timer, () => async () => response);
     const result = await deleter.deleteAndVerifyAbsence(target);
     expect(result).toMatchObject({ kind: "failed" });
@@ -123,8 +127,7 @@ describe("WorkflowBindingDeviceDeleter", () => {
         "emulator still running",
         "still-running",
         "emulator-5554",
-        3,
-        4242,
+        { softAttempts: 3, pid: 4242 },
       ),
       undefined,
       "stop",

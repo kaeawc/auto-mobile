@@ -90,8 +90,7 @@ describe("DevicePool", () => {
           "restarted-session",
           devicePool,
           "android",
-          undefined,
-          true,
+          { requireIssuedSession: true },
         );
 
         expect(recovered).toMatchObject({
@@ -110,7 +109,7 @@ describe("DevicePool", () => {
           async (sessionId, reason) => {
             reaped.push({ sessionId, reason });
           },
-          fakeTimer,
+          { timer: fakeTimer },
         );
         fakeTimer.advanceTime(5_001);
         await monitor.tick();
@@ -153,8 +152,7 @@ describe("DevicePool", () => {
         persisted.session_uuid,
         devicePool,
         "android",
-        undefined,
-        true,
+        { requireIssuedSession: true },
       );
 
       expect(recovered).toMatchObject({
@@ -175,7 +173,7 @@ describe("DevicePool", () => {
         async (sessionId, reason) => {
           reaped.push({ sessionId, reason });
         },
-        fakeTimer,
+        { timer: fakeTimer },
       );
       fakeTimer.advanceTime(60_001);
       await monitor.tick();
@@ -192,7 +190,7 @@ describe("DevicePool", () => {
         async upsertActiveSession() {
           throw new Error("same-serial replacement must not create a recovered session");
         },
-        async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+        async markReleased(_sessionUuid, _status, _releasedAtMs, { reason: releaseReason }) {
           releaseReasons.push(releaseReason);
           persisted.release_reason = releaseReason;
         },
@@ -206,8 +204,7 @@ describe("DevicePool", () => {
         persisted.session_uuid,
         devicePool,
         "android",
-        undefined,
-        true,
+        { requireIssuedSession: true },
       );
       await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
         description: "identity recovery retry sleep",
@@ -259,7 +256,7 @@ describe("DevicePool", () => {
           async upsertActiveSession() {
             throw new Error("an absent recovery target must not create a recovered session");
           },
-          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+          async markReleased(_sessionUuid, _status, _releasedAtMs, { reason: releaseReason }) {
             releaseReasons.push(releaseReason);
             persisted.release_reason = releaseReason;
           },
@@ -272,8 +269,7 @@ describe("DevicePool", () => {
           persisted.session_uuid,
           devicePool,
           platform,
-          undefined,
-          true,
+          { requireIssuedSession: true },
         );
         await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
           description: "absent target recovery retry sleep",
@@ -299,13 +295,9 @@ describe("DevicePool", () => {
       await initializeLiveDevices([createBootedDevice("Original_AVD", "android", "Pixel 9")]);
 
       await expect(
-        sessionManager.getOrCreateSession(
-          "restarted-session",
-          devicePool,
-          "android",
-          undefined,
-          true,
-        ),
+        sessionManager.getOrCreateSession("restarted-session", devicePool, "android", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow(/cannot safely recover/i);
       expect(devicePool.getDevice("Original_AVD")).toMatchObject({
         sessionId: null,
@@ -324,13 +316,9 @@ describe("DevicePool", () => {
       ]);
 
       await expect(
-        sessionManager.getOrCreateSession(
-          "restarted-session",
-          devicePool,
-          "android",
-          undefined,
-          true,
-        ),
+        sessionManager.getOrCreateSession("restarted-session", devicePool, "android", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow(/cannot safely recover/i);
       expect(devicePool.getDevice("emulator-5554")).toMatchObject({
         sessionId: null,
@@ -351,7 +339,9 @@ describe("DevicePool", () => {
       ]);
 
       await expect(
-        sessionManager.getOrCreateSession("restarted-session", devicePool, "ios", undefined, true),
+        sessionManager.getOrCreateSession("restarted-session", devicePool, "ios", {
+          requireIssuedSession: true,
+        }),
       ).rejects.toThrow(/cannot safely recover/i);
       expect(devicePool.getDevice("replacement-simulator-uuid")).toMatchObject({
         sessionId: null,

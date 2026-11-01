@@ -41,7 +41,8 @@ function setup(
     },
     planLifecycleManager: { async afterExecution() {} },
   });
-  registry.registerDeviceAware("statusProbe", "Records status", z.object({}), handler, {
+  registry.registerDeviceAware("statusProbe", "Records status", z.object({}), {
+    handler,
     shouldEnsureDevice: () => false,
     nonDeviceHandler: handler,
   });

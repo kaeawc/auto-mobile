@@ -1,3 +1,4 @@
+import type { IosSdkWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { ScrollSearchSession } from "./ScrollSearchSession";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { withSwipeObservationReadScope } from "./freshSwipeHierarchy";
@@ -21,6 +22,8 @@ import {
   SwipeOnResult,
   SwipeResult,
   ViewHierarchyResult,
+  type AndroidOrIosPlatform,
+  requireAndroidOrIosPlatform,
 } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -106,6 +109,8 @@ export interface ScrollUntilVisibleDependencies {
   overlayDetector: OverlayAnalyzer;
   talkBackExecutor: TalkBackSwipeRunner;
   voiceOverExecutor?: VoiceOverSwipeRunner;
+  /** Scrolls a WKWebView DOM element into view before any swipe (#5162); iOS only. */
+  webScrollIntoView?: IosSdkWebScrollIntoView;
   timer: Timer;
   getDuration: (options: SwipeOnResolvedOptions) => number;
   resolveBoomerangConfig: (options: SwipeOnResolvedOptions) => BoomerangConfig | undefined;
@@ -170,6 +175,11 @@ export class ScrollUntilVisible {
 
   constructor(private readonly deps: ScrollUntilVisibleDependencies) {
     this.resolver = deps.resolver ?? new ElementResolver();
+  }
+
+  /** swipeOn drives only Android and iOS; a watch is rejected before any platform-specific step. */
+  private swipePlatform(): AndroidOrIosPlatform {
+    return requireAndroidOrIosPlatform(this.deps.device.platform, "swipeOn");
   }
 
   /**
@@ -390,9 +400,7 @@ export class ScrollUntilVisible {
     const element = await this.findElementInHierarchy(
       options.lookFor!,
       observation.viewHierarchy!,
-      options.container,
-      container,
-      options.layer,
+      { container: options.container, containerElement: container, layer: options.layer },
     );
     return element && this.isElementWithinContainer(element, container.bounds, observation)
       ? element
@@ -632,9 +640,7 @@ export class ScrollUntilVisible {
     const element = await this.findElementInHierarchy(
       options.lookFor!,
       observation.viewHierarchy!,
-      options.container,
-      container,
-      options.layer,
+      { container: options.container, containerElement: container, layer: options.layer },
     );
     if (element && this.isElementWithinContainer(element, container.bounds, observation)) {
       return element;
@@ -785,7 +791,7 @@ export class ScrollUntilVisible {
     observation: ObserveResult;
     includeSystemInsets?: boolean;
   }): Element {
-    const insetOptions = { observation, platform: this.deps.device.platform, includeSystemInsets };
+    const insetOptions = { observation, platform: this.swipePlatform(), includeSystemInsets };
     const screenSize = swipeScreenSize(insetOptions) || { width: 1080, height: 1920 };
     return {
       bounds: getScreenBounds(screenSize, effectiveSwipeInsets(insetOptions)),
@@ -796,9 +802,15 @@ export class ScrollUntilVisible {
   async findElementInHierarchy(
     lookFor: NonNullable<SwipeOnOptions["lookFor"]>,
     viewHierarchy: ViewHierarchyResult,
-    container?: SwipeOnOptions["container"],
-    containerElement?: Element,
-    layer?: SwipeOnOptions["layer"],
+    {
+      container,
+      containerElement,
+      layer,
+    }: {
+      container?: SwipeOnOptions["container"];
+      containerElement?: Element;
+      layer?: SwipeOnOptions["layer"];
+    } = {},
   ): Promise<Element | null> {
     if (!lookFor.text && !lookFor.elementId) {
       return null;
@@ -840,7 +852,7 @@ export class ScrollUntilVisible {
           return;
         }
 
-        await this.deps.accessibilityService.requestAction("focus", resourceId, 5000, perf);
+        await this.deps.accessibilityService.requestAction("focus", resourceId, 5000, { perf });
         logger.info(`[SwipeOn] Set accessibility focus on element: ${resourceId}`);
       });
     } catch (error) {
@@ -993,7 +1005,7 @@ export class ScrollUntilVisible {
   ): Element["bounds"] {
     return insetSwipeBounds({
       observation,
-      platform: this.deps.device.platform,
+      platform: this.swipePlatform(),
       includeSystemInsets: options.includeSystemInsets,
       bounds: containerElement.bounds,
     });
@@ -1012,7 +1024,7 @@ export class ScrollUntilVisible {
       viewHierarchy,
       containerElement,
       observeResult,
-      platform: this.deps.device.platform,
+      platform: this.swipePlatform(),
     });
   }
 }

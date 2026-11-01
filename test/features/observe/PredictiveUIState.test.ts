@@ -67,7 +67,7 @@ describe("PredictiveUIState characterization", () => {
 
   beforeEach(async () => {
     await harness.db.deleteFrom("prediction_transition_stats").execute();
-    historyRepository = new PredictionHistoryRepository(harness.db);
+    historyRepository = new PredictionHistoryRepository({ db: harness.db });
     parser = new FakeElementParser();
     parser.nextFlattenedElements = [{ element: button, index: 0, depth: 0 }];
     state = new PredictiveUIState(undefined, { elementParser: parser, historyRepository });

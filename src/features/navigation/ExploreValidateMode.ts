@@ -481,6 +481,12 @@ export function findElementMatchingEdge(
     : null;
 }
 
+/** How a validate-mode step reports back: the tapped element's confidence and the stop sink. */
+export interface ValidateNavigationOptions {
+  elementConfidence: number;
+  setStopReason: (reason: string) => void;
+}
+
 /**
  * Validate that navigation matched expected edge in validate mode
  * Returns true if navigation succeeded, false if it diverged
@@ -489,9 +495,7 @@ export async function validateNavigation(
   expectedEdge: NavigationEdge,
   state: GraphTraversalState,
   navigationManager: Pick<NavigationGraphService, "getCurrentScreen">,
-  timer: Timer,
-  elementConfidence: number,
-  setStopReason: (reason: string) => void,
+  { timer, elementConfidence, setStopReason }: ValidateNavigationOptions & { timer: Timer },
 ): Promise<boolean> {
   // Wait a bit for navigation to complete
   await timer.sleep(EXPLORE_VALIDATION_SETTLE_MS);

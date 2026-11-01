@@ -27,9 +27,11 @@ import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager
 import { resolveIosAppListBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import {
   applyLauncherPackages,
+  applyLeanbackPackages,
   catalogFromPackageRecords,
   launcherProbeFallbackReason,
   launcherActivitiesCommand,
+  leanbackActivitiesCommand,
   mergeSystemAppCatalogEntry,
   needsLauncherProbe,
   parseLauncherPackages,
@@ -397,6 +399,7 @@ export class ListInstalledApps {
         signal?.throwIfAborted();
         await this.topUpLaunchability(catalog, packageNames, userId, signal);
       }
+      await this.topUpLeanbackLaunchability(catalog, packageNames, userId, signal);
     }
     return catalogByUser;
   }
@@ -414,6 +417,20 @@ export class ListInstalledApps {
   }
 
   /** Explain when the label-capable CtrlProxy catalog must be topped up by adb. */
+  /** Top up a CtrlProxy-derived catalog: the LAUNCHER probe where it is incomplete, then Leanback. */
+  private async completeCtrlProxyCatalog(
+    proxy: AndroidInstalledPackagesRequest,
+    catalog: AndroidAppCatalog,
+    packageNames: string[],
+    { userId, signal }: { userId: number; signal?: AbortSignal },
+  ): Promise<void> {
+    if (needsLauncherProbe(catalog, packageNames)) {
+      this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, packageNames);
+      await this.topUpLaunchability(catalog, packageNames, userId, signal);
+    }
+    await this.topUpLeanbackLaunchability(catalog, packageNames, userId, signal);
+  }
+
   private warnCtrlProxyCatalogFallback(
     proxy: AndroidInstalledPackagesRequest,
     userId: number,
@@ -449,8 +466,7 @@ export class ListInstalledApps {
     systemAppsMap: Map<string, SystemInstalledApp>,
     packageName: string,
     userId: number,
-    isForeground: boolean,
-    entry: AndroidAppCatalogEntry | undefined,
+    { isForeground, entry }: { isForeground: boolean; entry?: AndroidAppCatalogEntry },
   ): void {
     const existing = systemAppsMap.get(packageName);
     if (existing) {
@@ -488,7 +504,7 @@ export class ListInstalledApps {
 
       const entry = catalogByUser.get(row.user_id)?.get(row.package_name);
       if (row.is_system) {
-        this.upsertSystemApp(systemAppsMap, row.package_name, row.user_id, isForeground, entry);
+        this.upsertSystemApp(systemAppsMap, row.package_name, row.user_id, { isForeground, entry });
       } else {
         installedApps.profiles[row.user_id] = installedApps.profiles[row.user_id] || [];
         installedApps.profiles[row.user_id].push({
@@ -749,13 +765,10 @@ export class ListInstalledApps {
     catalog: AndroidAppCatalog,
   ): void {
     for (const packageName of packageNames) {
-      this.upsertSystemApp(
-        accumulator.systemAppsMap,
-        packageName,
-        user.userId,
-        this.isForegroundFor(accumulator, packageName, user.userId),
-        catalog.get(packageName),
-      );
+      this.upsertSystemApp(accumulator.systemAppsMap, packageName, user.userId, {
+        isForeground: this.isForegroundFor(accumulator, packageName, user.userId),
+        entry: catalog.get(packageName),
+      });
       this.recordCacheEntry(accumulator, user, packageName, 1);
     }
   }
@@ -791,9 +804,8 @@ export class ListInstalledApps {
           ? (new Map() as AndroidAppCatalog)
           : catalogFromPackageRecords(records);
         const listedPackages = [...userPackages, ...systemPackages];
-        if (!options.namesOnly && needsLauncherProbe(catalog, listedPackages)) {
-          this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, listedPackages);
-          await this.topUpLaunchability(catalog, listedPackages, userId, signal);
+        if (!options.namesOnly) {
+          await this.completeCtrlProxyCatalog(proxy, catalog, listedPackages, { userId, signal });
         }
         return { userPackages, systemPackages, catalog };
       }
@@ -811,8 +823,36 @@ export class ListInstalledApps {
       const listedPackages = [...userPackages, ...systemPackages];
       this.warnCtrlProxyCatalogFallback(proxy, userId, catalog, listedPackages);
       await this.topUpLaunchability(catalog, listedPackages, userId, signal);
+      await this.topUpLeanbackLaunchability(catalog, listedPackages, userId, signal);
     }
     return { userPackages, systemPackages, catalog };
+  }
+
+  /**
+   * Android TV apps such as Settings expose only MAIN/LEANBACK_LAUNCHER, which the LAUNCHER
+   * catalog reports unlaunchable (#15957). Runs only on a device known to be a TV, so
+   * phones and tablets keep their single launcher probe.
+   */
+  private async topUpLeanbackLaunchability(
+    catalog: AndroidAppCatalog,
+    packageNames: string[],
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (this.device.formFactor !== "tv") {
+      return;
+    }
+    try {
+      const result = await this.adb.executeCommand(leanbackActivitiesCommand(userId), { signal });
+      signal?.throwIfAborted();
+      applyLeanbackPackages(catalog, packageNames, parseLauncherPackages(result.stdout));
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Best-effort enrichment: without it a LEANBACK-only app keeps the LAUNCHER answer.
+      logger.debug(
+        `[ListInstalledApps] Leanback activity probe failed for user ${userId}: ${error}`,
+      );
+    }
   }
 
   /**

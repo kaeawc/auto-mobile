@@ -1,0 +1,2109 @@
+{
+  "id": "huddle-today",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "workspace": "acme",
+    "workspaceName": "Acme Studio",
+    "drawerOpen": false,
+    "dnd": false,
+    "channelId": "",
+    "channelName": "",
+    "draft": "",
+    "sendStatus": "sent",
+    "typing": false,
+    "threadId": "",
+    "threadRoot": "",
+    "linkText": "",
+    "linkKind": "",
+    "huddleOpen": false,
+    "huddleSeconds": 0,
+    "muted": false,
+    "unread_general": true,
+    "unread_design": true,
+    "unread_random": false,
+    "unread_picks": false,
+    "mentions_general": 1,
+    "mentions_design": 0,
+    "mentions_random": 0,
+    "mentions_picks": 0,
+    "reacted_m1": false,
+    "reacted_m2": false,
+    "reacted_m3": false,
+    "reacted_m4": false,
+    "reacted_m5": false,
+    "reacted_m6": false,
+    "hasThread_m1": false,
+    "hasThread_m2": true,
+    "hasThread_m3": false,
+    "hasThread_m4": false,
+    "hasThread_m5": false,
+    "hasThread_m6": false
+  },
+  "data": {
+    "messages": [
+      {
+        "channel": "general",
+        "rows": [
+          {
+            "id": "m1",
+            "from": "Mia",
+            "time": "09:02",
+            "text": "Morning! Standup moved to 10, see https://example.com/standup",
+            "thumbs": 3,
+            "replies": 0
+          },
+          {
+            "id": "m2",
+            "from": "Leo",
+            "time": "09:15",
+            "text": "@you can you review the #launch checklist?",
+            "thumbs": 1,
+            "replies": 2
+          },
+          {
+            "id": "m3",
+            "from": "Ana",
+            "time": "09:40",
+            "text": "Coffee is on the third floor today",
+            "thumbs": 5,
+            "replies": 0
+          }
+        ]
+      },
+      {
+        "channel": "design",
+        "rows": [
+          {
+            "id": "m4",
+            "from": "Jun",
+            "time": "08:55",
+            "text": "New icons are up for #feedback, @mia take a look",
+            "thumbs": 2,
+            "replies": 0
+          }
+        ]
+      },
+      {
+        "channel": "random",
+        "rows": [
+          {
+            "id": "m5",
+            "from": "Bo",
+            "time": "Yesterday",
+            "text": "Who left a plant on my desk?",
+            "thumbs": 7,
+            "replies": 0
+          }
+        ]
+      },
+      {
+        "channel": "picks",
+        "rows": [
+          {
+            "id": "m6",
+            "from": "Priya",
+            "time": "Mon",
+            "text": "Next pick is due Friday",
+            "thumbs": 1,
+            "replies": 0
+          }
+        ]
+      }
+    ],
+    "threads": {
+      "m2": [
+        {
+          "id": "r1",
+          "from": "You",
+          "text": "Looking now"
+        },
+        {
+          "id": "r2",
+          "from": "Leo",
+          "text": "Thanks! Two items left"
+        }
+      ]
+    },
+    "pending": {
+      "text": ""
+    },
+    "reply": {
+      "text": ""
+    }
+  },
+  "root": {
+    "type": "stack",
+    "id": "nav",
+    "start": "home",
+    "style": {
+      "width": "fill",
+      "height": "fill",
+      "background": "surface"
+    },
+    "screens": {
+      "home": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "home_bar",
+            "title": "{workspaceName}",
+            "navigationIcon": {
+              "icon": "menu",
+              "label": "Workspaces",
+              "onTap": [
+                {
+                  "type": "setState",
+                  "key": "drawerOpen",
+                  "value": true
+                }
+              ]
+            }
+          },
+          {
+            "type": "scroll",
+            "testTag": "channels_scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "children": [
+                {
+                  "type": "column",
+                  "testTag": "workspace_acme",
+                  "visibleWhen": {
+                    "key": "workspace",
+                    "equals": "acme"
+                  },
+                  "children": [
+                    {
+                      "type": "row",
+                      "testTag": "channel_row",
+                      "contentDescription": "Channel general",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 12,
+                          "bottom": 12
+                        },
+                        "spacing": 8,
+                        "alignment": "center",
+                        "minHeight": 48
+                      },
+                      "onTap": [
+                        {
+                          "type": "cancelTimer",
+                          "id": "huddle"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleSeconds",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "draft",
+                          "value": ""
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "sent"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "typing"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "reply"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "typing",
+                          "value": false
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/pending/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/reply/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setState",
+                          "key": "channelId",
+                          "value": "general"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "channelName",
+                          "value": "general"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "unread_general",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "mentions_general",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "drawerOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "push",
+                          "stack": "nav",
+                          "screen": "channel"
+                        }
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "# general",
+                          "style": {
+                            "weight": 1,
+                            "textStyle": "bodyLarge"
+                          },
+                          "styleWhen": [
+                            {
+                              "when": {
+                                "key": "unread_general",
+                                "equals": true
+                              },
+                              "style": {
+                                "fontWeight": 700
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "testTag": "mention_badge",
+                          "text": "{mentions_general}",
+                          "visibleWhen": {
+                            "key": "mentions_general",
+                            "gt": 0
+                          },
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onError",
+                            "background": "error",
+                            "cornerRadius": "full",
+                            "padding": {
+                              "start": 8,
+                              "end": 8,
+                              "top": 2,
+                              "bottom": 2
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "testTag": "channel_row",
+                      "contentDescription": "Channel design",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 12,
+                          "bottom": 12
+                        },
+                        "spacing": 8,
+                        "alignment": "center",
+                        "minHeight": 48
+                      },
+                      "onTap": [
+                        {
+                          "type": "cancelTimer",
+                          "id": "huddle"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleSeconds",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "draft",
+                          "value": ""
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "sent"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "typing"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "reply"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "typing",
+                          "value": false
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/pending/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/reply/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setState",
+                          "key": "channelId",
+                          "value": "design"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "channelName",
+                          "value": "design"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "unread_design",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "mentions_design",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "drawerOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "push",
+                          "stack": "nav",
+                          "screen": "channel"
+                        }
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "# design",
+                          "style": {
+                            "weight": 1,
+                            "textStyle": "bodyLarge"
+                          },
+                          "styleWhen": [
+                            {
+                              "when": {
+                                "key": "unread_design",
+                                "equals": true
+                              },
+                              "style": {
+                                "fontWeight": 700
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "testTag": "mention_badge",
+                          "text": "{mentions_design}",
+                          "visibleWhen": {
+                            "key": "mentions_design",
+                            "gt": 0
+                          },
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onError",
+                            "background": "error",
+                            "cornerRadius": "full",
+                            "padding": {
+                              "start": 8,
+                              "end": 8,
+                              "top": 2,
+                              "bottom": 2
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "row",
+                      "testTag": "channel_row",
+                      "contentDescription": "Channel random",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 12,
+                          "bottom": 12
+                        },
+                        "spacing": 8,
+                        "alignment": "center",
+                        "minHeight": 48
+                      },
+                      "onTap": [
+                        {
+                          "type": "cancelTimer",
+                          "id": "huddle"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleSeconds",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "draft",
+                          "value": ""
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "sent"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "typing"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "reply"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "typing",
+                          "value": false
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/pending/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/reply/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setState",
+                          "key": "channelId",
+                          "value": "random"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "channelName",
+                          "value": "random"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "unread_random",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "mentions_random",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "drawerOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "push",
+                          "stack": "nav",
+                          "screen": "channel"
+                        }
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "# random",
+                          "style": {
+                            "weight": 1,
+                            "textStyle": "bodyLarge"
+                          },
+                          "styleWhen": [
+                            {
+                              "when": {
+                                "key": "unread_random",
+                                "equals": true
+                              },
+                              "style": {
+                                "fontWeight": 700
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "testTag": "mention_badge",
+                          "text": "{mentions_random}",
+                          "visibleWhen": {
+                            "key": "mentions_random",
+                            "gt": 0
+                          },
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onError",
+                            "background": "error",
+                            "cornerRadius": "full",
+                            "padding": {
+                              "start": 8,
+                              "end": 8,
+                              "top": 2,
+                              "bottom": 2
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "workspace_club",
+                  "visibleWhen": {
+                    "key": "workspace",
+                    "equals": "club"
+                  },
+                  "children": [
+                    {
+                      "type": "row",
+                      "testTag": "channel_row",
+                      "contentDescription": "Channel picks",
+                      "style": {
+                        "padding": {
+                          "start": 16,
+                          "end": 16,
+                          "top": 12,
+                          "bottom": 12
+                        },
+                        "spacing": 8,
+                        "alignment": "center",
+                        "minHeight": 48
+                      },
+                      "onTap": [
+                        {
+                          "type": "cancelTimer",
+                          "id": "huddle"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleSeconds",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "draft",
+                          "value": ""
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "sent"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "typing"
+                        },
+                        {
+                          "type": "cancelTimer",
+                          "id": "reply"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "typing",
+                          "value": false
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/pending/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setData",
+                          "path": "/data/reply/text",
+                          "value": {
+                            "value": ""
+                          }
+                        },
+                        {
+                          "type": "setState",
+                          "key": "channelId",
+                          "value": "picks"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "channelName",
+                          "value": "picks"
+                        },
+                        {
+                          "type": "setState",
+                          "key": "unread_picks",
+                          "value": false
+                        },
+                        {
+                          "type": "setState",
+                          "key": "mentions_picks",
+                          "value": 0
+                        },
+                        {
+                          "type": "setState",
+                          "key": "drawerOpen",
+                          "value": false
+                        },
+                        {
+                          "type": "push",
+                          "stack": "nav",
+                          "screen": "channel"
+                        }
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "text": "# picks",
+                          "style": {
+                            "weight": 1,
+                            "textStyle": "bodyLarge"
+                          },
+                          "styleWhen": [
+                            {
+                              "when": {
+                                "key": "unread_picks",
+                                "equals": true
+                              },
+                              "style": {
+                                "fontWeight": 700
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "testTag": "mention_badge",
+                          "text": "{mentions_picks}",
+                          "visibleWhen": {
+                            "key": "mentions_picks",
+                            "gt": 0
+                          },
+                          "style": {
+                            "textStyle": "labelSmall",
+                            "color": "onError",
+                            "background": "error",
+                            "cornerRadius": "full",
+                            "padding": {
+                              "start": 8,
+                              "end": 8,
+                              "top": 2,
+                              "bottom": 2
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "drawer",
+            "testTag": "workspace_drawer",
+            "edge": "start",
+            "openWhen": {
+              "key": "drawerOpen",
+              "equals": true
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 8
+              },
+              "children": [
+                {
+                  "type": "text",
+                  "text": "Workspaces",
+                  "semantics": {
+                    "heading": true
+                  },
+                  "style": {
+                    "textStyle": "titleMedium"
+                  }
+                },
+                {
+                  "type": "listItem",
+                  "testTag": "switch_acme",
+                  "headline": "Acme Studio",
+                  "leadingIcon": "groups",
+                  "onTap": [
+                    {
+                      "type": "setState",
+                      "key": "workspace",
+                      "value": "acme"
+                    },
+                    {
+                      "type": "setState",
+                      "key": "workspaceName",
+                      "value": "Acme Studio"
+                    },
+                    {
+                      "type": "setState",
+                      "key": "drawerOpen",
+                      "value": false
+                    }
+                  ]
+                },
+                {
+                  "type": "listItem",
+                  "testTag": "switch_club",
+                  "headline": "Book Club",
+                  "leadingIcon": "groups",
+                  "onTap": [
+                    {
+                      "type": "setState",
+                      "key": "workspace",
+                      "value": "club"
+                    },
+                    {
+                      "type": "setState",
+                      "key": "workspaceName",
+                      "value": "Book Club"
+                    },
+                    {
+                      "type": "setState",
+                      "key": "drawerOpen",
+                      "value": false
+                    }
+                  ]
+                },
+                {
+                  "type": "divider"
+                },
+                {
+                  "type": "listItem",
+                  "testTag": "pause_notifications",
+                  "headline": "Pause notifications",
+                  "leadingIcon": "notifications_off",
+                  "trailing": {
+                    "type": "switch",
+                    "stateKey": "dnd"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "channel": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "channel_bar",
+            "title": "# {channelName}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "cancelTimer",
+                  "id": "huddle"
+                },
+                {
+                  "type": "setState",
+                  "key": "huddleOpen",
+                  "value": false
+                },
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            },
+            "actions": [
+              {
+                "icon": "headset",
+                "label": "Start a huddle",
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "huddleOpen",
+                    "value": true
+                  },
+                  {
+                    "type": "setState",
+                    "key": "huddleSeconds",
+                    "value": 0
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "huddle",
+                    "afterMs": 1000,
+                    "everyMs": 1000,
+                    "maxRuns": 3600,
+                    "actions": [
+                      {
+                        "type": "increment",
+                        "key": "huddleSeconds"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "scroll",
+            "testTag": "messages_scroll",
+            "style": {
+              "weight": 1
+            },
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 12
+              },
+              "children": [
+                {
+                  "type": "column",
+                  "testTag": "messages_general",
+                  "visibleWhen": {
+                    "key": "channelId",
+                    "equals": "general"
+                  },
+                  "style": {
+                    "spacing": 12
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Today",
+                      "semantics": {
+                        "heading": true
+                      },
+                      "style": {
+                        "textStyle": "labelMedium",
+                        "textAlign": "center"
+                      }
+                    },
+                    {
+                      "type": "column",
+                      "style": {
+                        "spacing": 12
+                      },
+                      "repeat": {
+                        "items": {
+                          "path": "/messages/0/rows"
+                        },
+                        "as": "msg",
+                        "key": "id"
+                      },
+                      "children": [
+                        {
+                          "type": "column",
+                          "testTag": "message",
+                          "style": {
+                            "spacing": 4
+                          },
+                          "children": [
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "text": "{msg.from}",
+                                  "style": {
+                                    "textStyle": "titleSmall"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{msg.time}",
+                                  "style": {
+                                    "textStyle": "labelSmall"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "message_text",
+                              "text": "{msg.text}",
+                              "linkify": {
+                                "kinds": ["mention", "hashtag", "url"],
+                                "style": {
+                                  "color": "primary",
+                                  "fontWeight": 600
+                                },
+                                "onTap": [
+                                  {
+                                    "type": "setState",
+                                    "key": "linkText",
+                                    "value": {
+                                      "match": "text"
+                                    }
+                                  },
+                                  {
+                                    "type": "setState",
+                                    "key": "linkKind",
+                                    "value": {
+                                      "match": "kind"
+                                    }
+                                  },
+                                  {
+                                    "type": "push",
+                                    "stack": "nav",
+                                    "screen": "link"
+                                  }
+                                ]
+                              },
+                              "style": {
+                                "textStyle": "bodyLarge"
+                              }
+                            },
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "button",
+                                  "testTag": "reaction",
+                                  "label": "👍 {msg.thumbs}",
+                                  "variant": "outlined",
+                                  "styleWhen": [
+                                    {
+                                      "when": {
+                                        "key": "reacted_{msg.id}",
+                                        "equals": true
+                                      },
+                                      "style": {
+                                        "background": "secondaryContainer"
+                                      }
+                                    }
+                                  ],
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "reacted_{msg.id}"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "button",
+                                  "testTag": "thread_button",
+                                  "label": "{msg.replies} replies",
+                                  "variant": "text",
+                                  "visibleWhen": {
+                                    "key": "hasThread_{msg.id}",
+                                    "equals": true
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "setState",
+                                      "key": "threadId",
+                                      "value": "{msg.id}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "threadRoot",
+                                      "value": "{msg.text}"
+                                    },
+                                    {
+                                      "type": "push",
+                                      "stack": "nav",
+                                      "screen": "thread"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "messages_design",
+                  "visibleWhen": {
+                    "key": "channelId",
+                    "equals": "design"
+                  },
+                  "style": {
+                    "spacing": 12
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Today",
+                      "semantics": {
+                        "heading": true
+                      },
+                      "style": {
+                        "textStyle": "labelMedium",
+                        "textAlign": "center"
+                      }
+                    },
+                    {
+                      "type": "column",
+                      "style": {
+                        "spacing": 12
+                      },
+                      "repeat": {
+                        "items": {
+                          "path": "/messages/1/rows"
+                        },
+                        "as": "msg",
+                        "key": "id"
+                      },
+                      "children": [
+                        {
+                          "type": "column",
+                          "testTag": "message",
+                          "style": {
+                            "spacing": 4
+                          },
+                          "children": [
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "text": "{msg.from}",
+                                  "style": {
+                                    "textStyle": "titleSmall"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{msg.time}",
+                                  "style": {
+                                    "textStyle": "labelSmall"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "message_text",
+                              "text": "{msg.text}",
+                              "linkify": {
+                                "kinds": ["mention", "hashtag", "url"],
+                                "style": {
+                                  "color": "primary",
+                                  "fontWeight": 600
+                                },
+                                "onTap": [
+                                  {
+                                    "type": "setState",
+                                    "key": "linkText",
+                                    "value": {
+                                      "match": "text"
+                                    }
+                                  },
+                                  {
+                                    "type": "setState",
+                                    "key": "linkKind",
+                                    "value": {
+                                      "match": "kind"
+                                    }
+                                  },
+                                  {
+                                    "type": "push",
+                                    "stack": "nav",
+                                    "screen": "link"
+                                  }
+                                ]
+                              },
+                              "style": {
+                                "textStyle": "bodyLarge"
+                              }
+                            },
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "button",
+                                  "testTag": "reaction",
+                                  "label": "👍 {msg.thumbs}",
+                                  "variant": "outlined",
+                                  "styleWhen": [
+                                    {
+                                      "when": {
+                                        "key": "reacted_{msg.id}",
+                                        "equals": true
+                                      },
+                                      "style": {
+                                        "background": "secondaryContainer"
+                                      }
+                                    }
+                                  ],
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "reacted_{msg.id}"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "button",
+                                  "testTag": "thread_button",
+                                  "label": "{msg.replies} replies",
+                                  "variant": "text",
+                                  "visibleWhen": {
+                                    "key": "hasThread_{msg.id}",
+                                    "equals": true
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "setState",
+                                      "key": "threadId",
+                                      "value": "{msg.id}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "threadRoot",
+                                      "value": "{msg.text}"
+                                    },
+                                    {
+                                      "type": "push",
+                                      "stack": "nav",
+                                      "screen": "thread"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "messages_random",
+                  "visibleWhen": {
+                    "key": "channelId",
+                    "equals": "random"
+                  },
+                  "style": {
+                    "spacing": 12
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Today",
+                      "semantics": {
+                        "heading": true
+                      },
+                      "style": {
+                        "textStyle": "labelMedium",
+                        "textAlign": "center"
+                      }
+                    },
+                    {
+                      "type": "column",
+                      "style": {
+                        "spacing": 12
+                      },
+                      "repeat": {
+                        "items": {
+                          "path": "/messages/2/rows"
+                        },
+                        "as": "msg",
+                        "key": "id"
+                      },
+                      "children": [
+                        {
+                          "type": "column",
+                          "testTag": "message",
+                          "style": {
+                            "spacing": 4
+                          },
+                          "children": [
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "text": "{msg.from}",
+                                  "style": {
+                                    "textStyle": "titleSmall"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{msg.time}",
+                                  "style": {
+                                    "textStyle": "labelSmall"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "message_text",
+                              "text": "{msg.text}",
+                              "linkify": {
+                                "kinds": ["mention", "hashtag", "url"],
+                                "style": {
+                                  "color": "primary",
+                                  "fontWeight": 600
+                                },
+                                "onTap": [
+                                  {
+                                    "type": "setState",
+                                    "key": "linkText",
+                                    "value": {
+                                      "match": "text"
+                                    }
+                                  },
+                                  {
+                                    "type": "setState",
+                                    "key": "linkKind",
+                                    "value": {
+                                      "match": "kind"
+                                    }
+                                  },
+                                  {
+                                    "type": "push",
+                                    "stack": "nav",
+                                    "screen": "link"
+                                  }
+                                ]
+                              },
+                              "style": {
+                                "textStyle": "bodyLarge"
+                              }
+                            },
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "button",
+                                  "testTag": "reaction",
+                                  "label": "👍 {msg.thumbs}",
+                                  "variant": "outlined",
+                                  "styleWhen": [
+                                    {
+                                      "when": {
+                                        "key": "reacted_{msg.id}",
+                                        "equals": true
+                                      },
+                                      "style": {
+                                        "background": "secondaryContainer"
+                                      }
+                                    }
+                                  ],
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "reacted_{msg.id}"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "button",
+                                  "testTag": "thread_button",
+                                  "label": "{msg.replies} replies",
+                                  "variant": "text",
+                                  "visibleWhen": {
+                                    "key": "hasThread_{msg.id}",
+                                    "equals": true
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "setState",
+                                      "key": "threadId",
+                                      "value": "{msg.id}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "threadRoot",
+                                      "value": "{msg.text}"
+                                    },
+                                    {
+                                      "type": "push",
+                                      "stack": "nav",
+                                      "screen": "thread"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "messages_picks",
+                  "visibleWhen": {
+                    "key": "channelId",
+                    "equals": "picks"
+                  },
+                  "style": {
+                    "spacing": 12
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Today",
+                      "semantics": {
+                        "heading": true
+                      },
+                      "style": {
+                        "textStyle": "labelMedium",
+                        "textAlign": "center"
+                      }
+                    },
+                    {
+                      "type": "column",
+                      "style": {
+                        "spacing": 12
+                      },
+                      "repeat": {
+                        "items": {
+                          "path": "/messages/3/rows"
+                        },
+                        "as": "msg",
+                        "key": "id"
+                      },
+                      "children": [
+                        {
+                          "type": "column",
+                          "testTag": "message",
+                          "style": {
+                            "spacing": 4
+                          },
+                          "children": [
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "text": "{msg.from}",
+                                  "style": {
+                                    "textStyle": "titleSmall"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "text": "{msg.time}",
+                                  "style": {
+                                    "textStyle": "labelSmall"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "text",
+                              "testTag": "message_text",
+                              "text": "{msg.text}",
+                              "linkify": {
+                                "kinds": ["mention", "hashtag", "url"],
+                                "style": {
+                                  "color": "primary",
+                                  "fontWeight": 600
+                                },
+                                "onTap": [
+                                  {
+                                    "type": "setState",
+                                    "key": "linkText",
+                                    "value": {
+                                      "match": "text"
+                                    }
+                                  },
+                                  {
+                                    "type": "setState",
+                                    "key": "linkKind",
+                                    "value": {
+                                      "match": "kind"
+                                    }
+                                  },
+                                  {
+                                    "type": "push",
+                                    "stack": "nav",
+                                    "screen": "link"
+                                  }
+                                ]
+                              },
+                              "style": {
+                                "textStyle": "bodyLarge"
+                              }
+                            },
+                            {
+                              "type": "row",
+                              "style": {
+                                "spacing": 8
+                              },
+                              "children": [
+                                {
+                                  "type": "button",
+                                  "testTag": "reaction",
+                                  "label": "👍 {msg.thumbs}",
+                                  "variant": "outlined",
+                                  "styleWhen": [
+                                    {
+                                      "when": {
+                                        "key": "reacted_{msg.id}",
+                                        "equals": true
+                                      },
+                                      "style": {
+                                        "background": "secondaryContainer"
+                                      }
+                                    }
+                                  ],
+                                  "onTap": [
+                                    {
+                                      "type": "toggle",
+                                      "key": "reacted_{msg.id}"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "button",
+                                  "testTag": "thread_button",
+                                  "label": "{msg.replies} replies",
+                                  "variant": "text",
+                                  "visibleWhen": {
+                                    "key": "hasThread_{msg.id}",
+                                    "equals": true
+                                  },
+                                  "onTap": [
+                                    {
+                                      "type": "setState",
+                                      "key": "threadId",
+                                      "value": "{msg.id}"
+                                    },
+                                    {
+                                      "type": "setState",
+                                      "key": "threadRoot",
+                                      "value": "{msg.text}"
+                                    },
+                                    {
+                                      "type": "push",
+                                      "stack": "nav",
+                                      "screen": "thread"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "pending_message",
+                  "visibleWhen": {
+                    "data": "/pending/text",
+                    "empty": false
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "You",
+                      "style": {
+                        "textStyle": "titleSmall"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "testTag": "pending_text",
+                      "text": "{data:/pending/text}",
+                      "style": {
+                        "textStyle": "bodyLarge"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "testTag": "pending_status",
+                      "text": "Sending…",
+                      "visibleWhen": {
+                        "key": "sendStatus",
+                        "equals": "sending"
+                      },
+                      "style": {
+                        "textStyle": "labelSmall"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "column",
+                  "testTag": "teammate_reply",
+                  "visibleWhen": {
+                    "data": "/reply/text",
+                    "empty": false
+                  },
+                  "semantics": {
+                    "liveRegion": "polite"
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "text": "Mia",
+                      "style": {
+                        "textStyle": "titleSmall"
+                      }
+                    },
+                    {
+                      "type": "text",
+                      "text": "{data:/reply/text}",
+                      "style": {
+                        "textStyle": "bodyLarge"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "testTag": "typing_indicator",
+            "visibleWhen": {
+              "key": "typing",
+              "equals": true
+            },
+            "text": "Mia is typing…",
+            "semantics": {
+              "liveRegion": "polite"
+            },
+            "style": {
+              "textStyle": "labelSmall",
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 4,
+                "bottom": 4
+              }
+            }
+          },
+          {
+            "type": "row",
+            "safeAreaPadding": {
+              "edges": ["bottom"],
+              "types": ["ime", "systemBars"]
+            },
+            "style": {
+              "padding": {
+                "start": 8,
+                "end": 8,
+                "top": 4,
+                "bottom": 4
+              },
+              "spacing": 4,
+              "alignment": "center"
+            },
+            "children": [
+              {
+                "type": "textField",
+                "testTag": "composer",
+                "stateKey": "draft",
+                "placeholder": "Message",
+                "imeAction": "send",
+                "checks": [
+                  {
+                    "message": "Type a message first",
+                    "required": true
+                  }
+                ],
+                "validateOn": "submit",
+                "style": {
+                  "weight": 1
+                },
+                "onSubmit": [
+                  {
+                    "type": "setData",
+                    "path": "/data/pending/text",
+                    "value": {
+                      "state": "draft"
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "sendStatus",
+                    "value": "sending"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "message_sent",
+                    "requireValid": ["draft"],
+                    "context": {
+                      "channel": {
+                        "state": "channelId"
+                      },
+                      "text": {
+                        "state": "draft"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "draft",
+                    "value": ""
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "sent",
+                    "afterMs": 500,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "sendStatus",
+                        "value": "sent"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "typing",
+                    "afterMs": 1500,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "typing",
+                        "value": true
+                      }
+                    ]
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "reply",
+                    "afterMs": 4000,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "typing",
+                        "value": false
+                      },
+                      {
+                        "type": "setData",
+                        "path": "/data/reply/text",
+                        "value": {
+                          "value": "Thanks, on it!"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "iconButton",
+                "testTag": "send_button",
+                "icon": "send",
+                "contentDescription": "Send",
+                "enabledWhen": {
+                  "key": "draft",
+                  "lengthGt": 0
+                },
+                "onTap": [
+                  {
+                    "type": "setData",
+                    "path": "/data/pending/text",
+                    "value": {
+                      "state": "draft"
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "sendStatus",
+                    "value": "sending"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "message_sent",
+                    "requireValid": ["draft"],
+                    "context": {
+                      "channel": {
+                        "state": "channelId"
+                      },
+                      "text": {
+                        "state": "draft"
+                      }
+                    }
+                  },
+                  {
+                    "type": "setState",
+                    "key": "draft",
+                    "value": ""
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "sent",
+                    "afterMs": 500,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "sendStatus",
+                        "value": "sent"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "typing",
+                    "afterMs": 1500,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "typing",
+                        "value": true
+                      }
+                    ]
+                  },
+                  {
+                    "type": "startTimer",
+                    "id": "reply",
+                    "afterMs": 4000,
+                    "actions": [
+                      {
+                        "type": "setState",
+                        "key": "typing",
+                        "value": false
+                      },
+                      {
+                        "type": "setData",
+                        "path": "/data/reply/text",
+                        "value": {
+                          "value": "Thanks, on it!"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "bottomSheet",
+            "testTag": "huddle_sheet",
+            "openWhen": {
+              "key": "huddleOpen",
+              "equals": true
+            },
+            "detents": ["half"],
+            "child": {
+              "type": "column",
+              "style": {
+                "padding": {
+                  "start": 16,
+                  "end": 16,
+                  "top": 16,
+                  "bottom": 16
+                },
+                "spacing": 12
+              },
+              "children": [
+                {
+                  "type": "text",
+                  "text": "Huddle in # {channelName}",
+                  "semantics": {
+                    "heading": true
+                  },
+                  "style": {
+                    "textStyle": "titleMedium"
+                  }
+                },
+                {
+                  "type": "text",
+                  "testTag": "huddle_clock",
+                  "text": "With Mia · {huddleSeconds} s",
+                  "style": {
+                    "textStyle": "bodyMedium"
+                  }
+                },
+                {
+                  "type": "row",
+                  "style": {
+                    "spacing": 8
+                  },
+                  "children": [
+                    {
+                      "type": "iconButton",
+                      "testTag": "mute_button",
+                      "icon": "mic",
+                      "variant": "tonal",
+                      "contentDescription": "Mute",
+                      "visibleWhen": {
+                        "key": "muted",
+                        "equals": false
+                      },
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": true
+                        }
+                      ]
+                    },
+                    {
+                      "type": "iconButton",
+                      "testTag": "unmute_button",
+                      "icon": "mic_off",
+                      "variant": "filled",
+                      "contentDescription": "Unmute",
+                      "visibleWhen": {
+                        "key": "muted",
+                        "equals": true
+                      },
+                      "onTap": [
+                        {
+                          "type": "setState",
+                          "key": "muted",
+                          "value": false
+                        }
+                      ]
+                    },
+                    {
+                      "type": "button",
+                      "testTag": "leave_huddle",
+                      "label": "Leave",
+                      "icon": "call_end",
+                      "onTap": [
+                        {
+                          "type": "cancelTimer",
+                          "id": "huddle"
+                        },
+                        {
+                          "type": "emit",
+                          "name": "huddle_left",
+                          "context": {
+                            "seconds": {
+                              "state": "huddleSeconds"
+                            }
+                          }
+                        },
+                        {
+                          "type": "setState",
+                          "key": "huddleOpen",
+                          "value": false
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "thread": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "thread_bar",
+            "title": "Thread",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "column",
+            "style": {
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              },
+              "spacing": 12
+            },
+            "children": [
+              {
+                "type": "text",
+                "testTag": "thread_root",
+                "text": "{threadRoot}",
+                "style": {
+                  "textStyle": "bodyLarge"
+                }
+              },
+              {
+                "type": "divider"
+              },
+              {
+                "type": "column",
+                "visibleWhen": {
+                  "key": "threadId",
+                  "equals": "m2"
+                },
+                "style": {
+                  "spacing": 8
+                },
+                "repeat": {
+                  "items": {
+                    "path": "/threads/m2"
+                  },
+                  "as": "reply",
+                  "key": "id"
+                },
+                "children": [
+                  {
+                    "type": "listItem",
+                    "testTag": "thread_reply",
+                    "headline": "{reply.from}",
+                    "supporting": "{reply.text}",
+                    "leadingIcon": "account_circle"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "link": {
+        "type": "column",
+        "children": [
+          {
+            "type": "topAppBar",
+            "testTag": "link_bar",
+            "title": "{linkText}",
+            "navigationIcon": {
+              "icon": "arrow_back",
+              "label": "Back",
+              "onTap": [
+                {
+                  "type": "pop",
+                  "stack": "nav"
+                }
+              ]
+            }
+          },
+          {
+            "type": "text",
+            "testTag": "link_kind",
+            "text": "Opened a {linkKind}",
+            "style": {
+              "textStyle": "bodyLarge",
+              "padding": {
+                "start": 16,
+                "end": 16,
+                "top": 16,
+                "bottom": 16
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

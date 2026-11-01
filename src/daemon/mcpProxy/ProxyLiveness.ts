@@ -375,7 +375,7 @@ export class ProxyLiveness {
         sessionUuid,
         attemptedClient,
         releaseReason,
-        daemonInstanceFromError(error),
+        { daemonInstance: daemonInstanceFromError(error) },
       );
       this.runtime.recoveryNotFoundOutcomes.set(sessionUuid, {
         outcome,

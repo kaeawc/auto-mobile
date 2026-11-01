@@ -11,9 +11,11 @@ import dev.jasonpearson.automobile.protocol.PrototypeBottomNavNode
 import dev.jasonpearson.automobile.protocol.PrototypeBottomSheetNode
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeCameraPreviewNode
 import dev.jasonpearson.automobile.protocol.PrototypeCancelTimerAction
 import dev.jasonpearson.automobile.protocol.PrototypeCardNode
 import dev.jasonpearson.automobile.protocol.PrototypeCarouselNode
+import dev.jasonpearson.automobile.protocol.PrototypeCastButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeChartNode
 import dev.jasonpearson.automobile.protocol.PrototypeCheck
 import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
@@ -40,6 +42,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
 import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
 import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
 import dev.jasonpearson.automobile.protocol.PrototypeListNode
+import dev.jasonpearson.automobile.protocol.PrototypeMapNode
 import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
 import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
 import dev.jasonpearson.automobile.protocol.PrototypeNode
@@ -79,6 +82,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTooltipNode
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
+import dev.jasonpearson.automobile.protocol.PrototypeVideoPlayerNode
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -730,6 +734,44 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         shared = shared,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
+      )
+    // Contract only (#14253, #14239, #14202): no renderer draws these media nodes yet.
+    is PrototypeVideoPlayerNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
+    is PrototypeCastButtonNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
+    // Contract only (#14309): no renderer draws a map yet.
+    is PrototypeMapNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
+      )
+    is PrototypeCameraPreviewNode ->
+      copy(
+        semantics = semantics,
+        onAppear = onAppear,
+        onTap = onTap,
+        styleWhen = styleWhen,
+        shared = shared,
+        visibleWhen = visibleWhen,
       )
     is PrototypeListNode -> this // Nested lists in repeat templates are rejected by validation.
     is PrototypeChartNode ->

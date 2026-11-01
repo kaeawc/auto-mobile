@@ -30,7 +30,9 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
     const deviceId = await hunt.acquire();
     const { sessionManager, pool } = hunt.daemon();
     // This suite covers plan-owned bases: the UUID was issued, but is not live at plan entry.
-    await releaseSessionAndDevice(sessionManager, pool, deviceId, BASE, "plan-auto-release");
+    await releaseSessionAndDevice({ manager: sessionManager, pool }, deviceId, BASE, {
+      reason: "plan-auto-release",
+    });
   };
 
   // The first executePlan pays the plan pipeline's one-time module and schema cost.
@@ -60,7 +62,9 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
       hunt.setProbeStep(async (device) => {
         const { sessionManager, pool } = hunt.daemon();
         expect(sessionManager.getSession(LABEL_B)?.assignedDevice).toBe(device.deviceId);
-        await releaseSessionAndDevice(sessionManager, pool, device.deviceId, LABEL_B, reason);
+        await releaseSessionAndDevice({ manager: sessionManager, pool }, device.deviceId, LABEL_B, {
+          reason,
+        });
       });
       await hunt.runPlan(twoDevicePlan(["B"]));
       hunt.setProbeStep(async () => undefined);
@@ -90,7 +94,9 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
       let lateCallOfTheRun: Promise<unknown> | undefined;
       hunt.setProbeStep(async (device) => {
         const { sessionManager, pool } = hunt.daemon();
-        await releaseSessionAndDevice(sessionManager, pool, device.deviceId, LABEL_B, reason);
+        await releaseSessionAndDevice({ manager: sessionManager, pool }, device.deviceId, LABEL_B, {
+          reason,
+        });
         // The same run's next call on label B: its session ended, and is not minted again.
         lateCallOfTheRun = sessionManager.getOrCreateSession(LABEL_B, pool, "ios");
         await lateCallOfTheRun.catch(() => undefined);
@@ -105,7 +111,7 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
         TerminalSessionError,
       );
       await expect(
-        sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true),
+        sessionManager.getOrCreateSession(LABEL_B, pool, "ios", { requireIssuedSession: true }),
       ).rejects.toBeInstanceOf(TerminalSessionError);
       expect(sessionManager.getSession(LABEL_B)).toBeNull();
       expect(hunt.poolHolder(deviceB.deviceId)).toBeUndefined();
@@ -120,7 +126,9 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
 
     const { sessionManager, pool } = hunt.daemon();
     // The row is re-issuable by name for a base session; for a label session only a plan run mints.
-    const refused = sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true);
+    const refused = sessionManager.getOrCreateSession(LABEL_B, pool, "ios", {
+      requireIssuedSession: true,
+    });
     await expect(refused).rejects.toBeInstanceOf(TerminalSessionError);
     await expect(refused).rejects.toThrow("is terminal after plan-auto-release");
     await expect(sessionManager.getOrCreateSession(LABEL_B, pool, "ios")).rejects.toBeInstanceOf(
@@ -143,14 +151,21 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
     hunt.setProbeStep(async (device) => {
       const { sessionManager, pool } = hunt.daemon();
       const reason = deviceRestartReleaseReason(device.deviceId);
-      await releaseSessionAndDevice(sessionManager, pool, device.deviceId, LABEL_B, reason);
+      await releaseSessionAndDevice({ manager: sessionManager, pool }, device.deviceId, LABEL_B, {
+        reason,
+      });
       // The plan's next call on label B, with the device back: the same session, as for any
       // session waiting out a device restart.
-      recovered = (await sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true))
-        .assignedDevice;
+      recovered = (
+        await sessionManager.getOrCreateSession(LABEL_B, pool, "ios", {
+          requireIssuedSession: true,
+        })
+      ).assignedDevice;
       expect(recovered).toBe(device.deviceId);
       // The device restarts again, and the plan ends before any call brings the session back.
-      await releaseSessionAndDevice(sessionManager, pool, device.deviceId, LABEL_B, reason);
+      await releaseSessionAndDevice({ manager: sessionManager, pool }, device.deviceId, LABEL_B, {
+        reason,
+      });
     });
     await hunt.runPlan(twoDevicePlan(["B"]));
     hunt.setProbeStep(async () => undefined);
@@ -162,7 +177,7 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
     );
     // The plan is over: the handoff row is no longer recovered by name.
     await expect(
-      sessionManager.getOrCreateSession(LABEL_B, pool, "ios", undefined, true),
+      sessionManager.getOrCreateSession(LABEL_B, pool, "ios", { requireIssuedSession: true }),
     ).rejects.toBeInstanceOf(TerminalSessionError);
     expect(hunt.poolHolder(recovered ?? "")).toBeUndefined();
   });
@@ -170,13 +185,9 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
   test("a label mint is open only for the allocation of the plan run that asked for it", async () => {
     const { sessionManager, pool } = hunt.daemon();
     hunt.setProbeStep(async (device) => {
-      await releaseSessionAndDevice(
-        sessionManager,
-        pool,
-        device.deviceId,
-        LABEL_B,
-        "device-killed",
-      );
+      await releaseSessionAndDevice({ manager: sessionManager, pool }, device.deviceId, LABEL_B, {
+        reason: "device-killed",
+      });
     });
     await hunt.runPlan(twoDevicePlan(["B"]));
     hunt.setProbeStep(async () => undefined);
@@ -194,11 +205,12 @@ describe("a plan re-run after a label device was lost mid-plan", () => {
     expect(assigned.get(LABEL_B)).toBeDefined();
     closeOverlapping();
     await releaseSessionAndDevice(
-      sessionManager,
-      pool,
+      { manager: sessionManager, pool },
       assigned.get(LABEL_B) ?? null,
       LABEL_B,
-      "device-killed",
+      {
+        reason: "device-killed",
+      },
     );
     await expect(pool.assignMultipleDevices([LABEL_B], 1_000, "ios")).rejects.toBeInstanceOf(
       TerminalSessionError,

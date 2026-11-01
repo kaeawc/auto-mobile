@@ -161,7 +161,8 @@ describe("a nested plain control call naming a session another connection owns (
       return { content: [{ type: "text" as const, text: JSON.stringify({ success: true }) }] };
     };
     ToolRegistry.register(PLAIN_CONTROL, "probe", probeSchema, probe(PLAIN_CONTROL));
-    ToolRegistry.register(PLAIN_READ, "probe", probeSchema, probe(PLAIN_READ), {
+    ToolRegistry.register(PLAIN_READ, "probe", probeSchema, {
+      handler: probe(PLAIN_READ),
       readOnly: true,
     });
     ToolRegistry.register(

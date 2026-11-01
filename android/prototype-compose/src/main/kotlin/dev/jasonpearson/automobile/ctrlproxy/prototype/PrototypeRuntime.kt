@@ -1390,10 +1390,9 @@ class PrototypeRuntime(
 
   /** `{data:/pointer}` and `{key}` placeholders read the committed data and state at the action. */
   private fun requestText(text: String): String =
-    interpolatePrototypeText(
-      PrototypeRequests.bindDataText(text, current.spec.data),
-      current.state,
-    )
+    PrototypeRequests.bindText(text, current.spec.data) {
+      interpolatePrototypeText(it, current.state)
+    }
 
   private fun requestEntries(entries: Map<String, JsonElement>?): Map<String, JsonElement>? =
     entries?.mapValues { (_, entry) ->

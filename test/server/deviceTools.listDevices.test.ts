@@ -470,13 +470,11 @@ describe("listDevices tool (#5870)", () => {
       expect(noteText).toContain("resources/list");
     } finally {
       for (const resource of inventory) {
-        ResourceRegistry.register(
-          resource.uri,
-          resource.name,
-          resource.description ?? "",
-          resource.mimeType ?? "application/json",
-          resource.handler,
-        );
+        ResourceRegistry.register(resource.uri, resource.name, {
+          description: resource.description ?? "",
+          mimeType: resource.mimeType ?? "application/json",
+          handler: resource.handler,
+        });
       }
     }
   });
@@ -484,10 +482,14 @@ describe("listDevices tool (#5870)", () => {
   test("recommends registered inventory resources without a device session", async () => {
     const uri = "automobile:devices/booted";
     const previous = ResourceRegistry.getResource(uri);
-    ResourceRegistry.register(uri, "booted", "booted devices", "application/json", async () => ({
-      uri,
-      text: "[]",
-    }));
+    ResourceRegistry.register(uri, "booted", {
+      description: "booted devices",
+      mimeType: "application/json",
+      handler: async () => ({
+        uri,
+        text: "[]",
+      }),
+    });
     try {
       const payload = await callListDevices();
       expect(payload.note.resources).toContain(uri);
@@ -498,13 +500,11 @@ describe("listDevices tool (#5870)", () => {
     } finally {
       ResourceRegistry.unregister(uri);
       if (previous) {
-        ResourceRegistry.register(
-          previous.uri,
-          previous.name,
-          previous.description ?? "",
-          previous.mimeType ?? "application/json",
-          previous.handler,
-        );
+        ResourceRegistry.register(previous.uri, previous.name, {
+          description: previous.description ?? "",
+          mimeType: previous.mimeType ?? "application/json",
+          handler: previous.handler,
+        });
       }
     }
   });

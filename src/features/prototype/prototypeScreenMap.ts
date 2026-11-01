@@ -14,6 +14,8 @@ export interface PrototypeScreenMapNode {
   label?: string;
   /** True for the start screen of a stack and the first page of a pager. */
   start?: true;
+  /** The testTag of the node that draws the screen, matched as a real screen's identifier. */
+  testTag?: string;
 }
 
 export type PrototypeScreenEdgeAction = "push" | "replace" | "pop" | "popToRoot" | "setPage";
@@ -43,6 +45,11 @@ const MAX_DEPTH = 200;
 
 const text = (value: unknown): string | undefined =>
   typeof value === "string" && value !== "" ? value : undefined;
+
+const testTagOf = (value: unknown): { testTag?: string } => {
+  const testTag = text(record(value)?.testTag);
+  return testTag ? { testTag } : {};
+};
 
 class Builder {
   readonly nodes: PrototypeScreenMapNode[] = [];
@@ -133,7 +140,12 @@ class Builder {
   }
 }
 
-function walk(builder: Builder, value: unknown, path: string, screen: string, depth: number): void {
+function walk(
+  builder: Builder,
+  value: unknown,
+  path: string,
+  { screen, depth }: { screen: string; depth: number },
+): void {
   const node = record(value);
   if (!node || depth > MAX_DEPTH) {
     return;
@@ -145,6 +157,7 @@ function walk(builder: Builder, value: unknown, path: string, screen: string, de
       id: `${node.type === "dialog" ? "dialog" : "sheet"}:${id}`,
       kind: node.type === "dialog" ? "dialog" : "sheet",
       path,
+      ...testTagOf(node),
     });
   }
   if (node.type === "stack" && record(node.screens)) {
@@ -155,8 +168,12 @@ function walk(builder: Builder, value: unknown, path: string, screen: string, de
         kind: "stackScreen",
         path: `${path}.screens[${JSON.stringify(name)}]`,
         ...(name === node.start ? { start: true as const } : {}),
+        ...testTagOf(child),
       });
-      walk(builder, child, `${path}.screens[${JSON.stringify(name)}]`, screenId, depth + 1);
+      walk(builder, child, `${path}.screens[${JSON.stringify(name)}]`, {
+        screen: screenId,
+        depth: depth + 1,
+      });
     }
     return;
   }
@@ -171,10 +188,11 @@ function walk(builder: Builder, value: unknown, path: string, screen: string, de
         path: `${path}${child.suffix}`,
         ...(label ? { label } : {}),
         ...(index === 0 ? { start: true as const } : {}),
+        ...testTagOf(child.value),
       });
-      walk(builder, child.value, `${path}${child.suffix}`, pageId, depth + 1);
+      walk(builder, child.value, `${path}${child.suffix}`, { screen: pageId, depth: depth + 1 });
     } else {
-      walk(builder, child.value, `${path}${child.suffix}`, screen, depth + 1);
+      walk(builder, child.value, `${path}${child.suffix}`, { screen, depth: depth + 1 });
     }
   });
 }
@@ -202,7 +220,7 @@ export function buildPrototypeScreenMap(spec: unknown): PrototypeScreenMap {
   const roots = prototypeSpecNodeRoots(spec);
   roots.forEach((root) => registerStatics(builder, root.node, 0));
   builder.addNode({ id: "root", kind: "root", path: "root" });
-  roots.forEach((root) => walk(builder, root.node, root.path, "root", 0));
+  roots.forEach((root) => walk(builder, root.node, root.path, { screen: "root", depth: 0 }));
   return { nodes: builder.nodes, edges: builder.edges };
 }
 

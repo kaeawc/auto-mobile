@@ -28,6 +28,7 @@ import { registerMeasureStartupTools } from "./measureStartupTools";
 import { registerProfilingTools } from "./profilingTools";
 import { registerMediaSessionTools } from "./mediaSessionTools";
 import { registerRotaryScrollTools } from "./rotaryScrollTool";
+import { registerRotateCrownTools } from "./rotateCrownTool";
 import { registerWindowModeTools } from "./windowModeTools";
 import { registerPrototypeTools } from "./prototypeTools";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
@@ -50,6 +51,7 @@ import { registerNetworkTools } from "./networkTools";
 import { registerKillProfileTools } from "./killProfileTools";
 import { registerSystemAlertTools } from "./systemAlertTools";
 import { registerSensorTools } from "./sensorTools";
+import { registerAudioTools } from "./audioTools";
 import { registerDisplayProfileTools } from "./displayProfileTools";
 import { registerPersonaTools } from "./personaTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
@@ -116,6 +118,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerMediaSessionTools();
   registerWindowModeTools();
   registerRotaryScrollTools();
+  registerRotateCrownTools();
   registerHighlightTools();
   registerPrototypeTools({
     agentConnections: new CompositePrototypeAgentConnections(
@@ -137,6 +140,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerKillProfileTools();
   registerSystemAlertTools();
   registerSensorTools();
+  registerAudioTools();
   registerDisplayProfileTools();
   registerPersonaTools();
   if (options.includeToolSelection ?? true) {

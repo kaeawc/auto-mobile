@@ -4,6 +4,7 @@ import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionMa
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
+import { warmedTests } from "../helpers/warmedTests";
 import {
   original,
   image,
@@ -53,22 +54,35 @@ function trackSettlement<T>(promise: Promise<T>): {
   return { result, settled: () => settled };
 }
 
-async function advanceSecondsUntil(timer: FakeTimer, untilMs: number): Promise<void> {
+async function advanceUntil(timer: FakeTimer, untilMs: number, stepMs = 1_000): Promise<void> {
   while (timer.now() < untilMs) {
-    timer.advanceTime(Math.min(1_000, untilMs - timer.now()));
+    timer.advanceTime(Math.min(stepMs, untilMs - timer.now()));
     await flush();
   }
 }
 
-test("an in-flight caller keeps device-restart recovery past the idle window", async () => {
+// Each fake-time step runs a real pass of the pool's one-second recovery assignment poll, with a
+// real device refresh once the refresh cache's TTL has lapsed: at one-second steps that is ~150
+// passes, the bulk of the test's time (#15841). The in-flight scenario only needs fake time to
+// cross the idle deadline while the call waits, so it steps 30 s at a time: the pending poll still
+// fires on every step, and a step lands exactly on the two-minute idle deadline, where the pool's
+// idle hold rechecks the row.
+const IN_FLIGHT_STEP_MS = 30_000;
+
+// The first restart-recovery scenario in this file pays one-time module and first-use compilation
+// (~70 ms) for the recovery, persistence and pool paths: run it once in beforeAll, outside the
+// per-test budget, before it runs again as the measured test.
+const warmed = warmedTests(() => {});
+
+warmed("an in-flight caller keeps device-restart recovery past the idle window", async () => {
   const { timer, sessions, manager, pool } = await setupPassiveRestartWithIdleWindow();
   try {
     const resume = trackSettlement(
-      sessions.getOrCreateSession("session", pool, "android", undefined, true),
+      sessions.getOrCreateSession("session", pool, "android", { requireIssuedSession: true }),
     );
     await flush();
     // The call is in flight, so it is activity: the two-minute idle deadline does not apply.
-    await advanceSecondsUntil(timer, 150_000);
+    await advanceUntil(timer, 150_000, IN_FLIGHT_STEP_MS);
     expect(resume.settled()).toBe(false);
     // The row's idle deadline has passed, but the recovery is still running: a heartbeat or
     // session-info lookup keeps naming the handoff, never `expired` (#11361).
@@ -92,23 +106,25 @@ test("a client retrying through a cold boot keeps its session past the idle wind
     // Each call gives up at its own request deadline; the daemon records each call's end.
     for (const requestDeadlineMs of [60_000, 120_000]) {
       const attempt = trackSettlement(
-        sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+        sessions.getOrCreateSession("session", pool, "android", {
+          requireIssuedSession: true,
           requestDeadlineMs,
         }),
       );
       await flush();
-      await advanceSecondsUntil(timer, requestDeadlineMs);
+      await advanceUntil(timer, requestDeadlineMs);
       expect(String(await attempt.result)).toContain("Cannot safely recover session");
       sessions.recordToolCallEnded("session");
     }
     // Past the idle deadline recorded at the device loss, the retrying client is still admitted.
     const retry = trackSettlement(
-      sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+      sessions.getOrCreateSession("session", pool, "android", {
+        requireIssuedSession: true,
         requestDeadlineMs: 180_000,
       }),
     );
     await flush();
-    await advanceSecondsUntil(timer, 170_000);
+    await advanceUntil(timer, 170_000);
     expect(retry.settled()).toBe(false);
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
@@ -126,12 +142,13 @@ test("restart-recovery activity survives a daemon restart during the device rest
   const { timer, persistence, sessions, pool } = await setupPassiveRestartWithIdleWindow();
   try {
     const attempt = trackSettlement(
-      sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+      sessions.getOrCreateSession("session", pool, "android", {
+        requireIssuedSession: true,
         requestDeadlineMs: 60_000,
       }),
     );
     await flush();
-    await advanceSecondsUntil(timer, 60_000);
+    await advanceUntil(timer, 60_000);
     expect(String(await attempt.result)).toContain("Cannot safely recover session");
     sessions.recordToolCallEnded("session");
     await flush();
@@ -157,23 +174,24 @@ test("a quiet client loses device-restart recovery two minutes after its last ca
   const { timer, persistence, sessions, manager, pool } = await setupPassiveRestartWithIdleWindow();
   try {
     const attempt = trackSettlement(
-      sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+      sessions.getOrCreateSession("session", pool, "android", {
+        requireIssuedSession: true,
         requestDeadlineMs: 30_000,
       }),
     );
     await flush();
-    await advanceSecondsUntil(timer, 30_000);
+    await advanceUntil(timer, 30_000);
     expect(String(await attempt.result)).toContain("Cannot safely recover session");
     sessions.recordToolCallEnded("session");
     const lastCallEndedAt = timer.now();
 
     // The client goes quiet; the device comes back inside the cold-boot window but too late.
-    await advanceSecondsUntil(timer, lastCallEndedAt + RESTART_TEST_IDLE_MS);
+    await advanceUntil(timer, lastCallEndedAt + RESTART_TEST_IDLE_MS);
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
     // The lapsed recovery is the typed terminal refusal, not an untyped not-found (#11361).
     const lapsed = await sessions
-      .getOrCreateSession("session", pool, "android", undefined, true)
+      .getOrCreateSession("session", pool, "android", { requireIssuedSession: true })
       .catch((error: unknown) => error);
     expect(lapsed).toBeInstanceOf(TerminalSessionError);
     expect((lapsed as TerminalSessionError).release.releaseReason).toBe("expired");
@@ -196,7 +214,7 @@ test("a resolved old-serial replacement keeps recovery pending despite another u
     ];
     await pool.refreshDevices();
     await expect(
-      sessions.getOrCreateSession("session", pool, "android", undefined, true),
+      sessions.getOrCreateSession("session", pool, "android", { requireIssuedSession: true }),
     ).rejects.toMatchObject({
       name: "SessionRecoveryAssignmentError",
       details: { code: "session_recovery_pending", retryable: true },

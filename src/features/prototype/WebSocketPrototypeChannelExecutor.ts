@@ -42,14 +42,11 @@ export class WebSocketPrototypeChannelExecutor implements PrototypeChannelExecut
     sink: PrototypeChannelSink,
     signal: AbortSignal,
   ): PrototypeChannelHandle {
-    const channel = new PrototypeWebSocketChannel(
-      request,
-      onceClosedSink(sink),
-      signal,
-      this.options.timer,
-      this.socketFactory,
-      { policy: this.policy, resolver: this.resolver, timer: this.options.timer },
-    );
+    const channel = new PrototypeWebSocketChannel(request, onceClosedSink(sink), signal, {
+      timer: this.options.timer,
+      socketFactory: this.socketFactory,
+      pinning: { policy: this.policy, resolver: this.resolver, timer: this.options.timer },
+    });
     void channel.start();
     return channel;
   }

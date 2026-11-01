@@ -26,26 +26,20 @@ describe("live acceptance destructive tool selection", () => {
     // setting up. Replace only this test's registry after both fresh clients
     // are connected, so dispatch uses the production availability gate.
     ToolRegistry.clearTools();
-    ToolRegistry.register(
-      "provisionDevice",
-      "provision",
-      z.object({}),
-      async () => {
+    ToolRegistry.register("provisionDevice", "provision", z.object({}), {
+      handler: async () => {
         provisionCalls++;
         return { content: [{ type: "text" as const, text: "provisioned" }] };
       },
-      { defaultEnabled: false },
-    );
-    ToolRegistry.register(
-      "deleteDevice",
-      "delete",
-      z.object({}),
-      async () => {
+      defaultEnabled: false,
+    });
+    ToolRegistry.register("deleteDevice", "delete", z.object({}), {
+      handler: async () => {
         deleteCalls++;
         return { content: [{ type: "text" as const, text: "deleted" }] };
       },
-      { defaultEnabled: false },
-    );
+      defaultEnabled: false,
+    });
     registerToolSelectionTools();
   });
 

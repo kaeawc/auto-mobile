@@ -12,6 +12,7 @@ import type {
   DiscoveryReconcileOptions,
   PooledDevice,
   SystemUiAnrRecoveryHandoff,
+  SystemUiAnrReplacementOptions,
 } from "./devicePool";
 import type { DeviceRuntimeIdentity } from "./deviceRuntimeIdentity";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
@@ -127,9 +128,11 @@ export class DeviceReplacement {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
-    childProcess?: ChildProcess | null,
-    beforeReplacementPublishes?: () => void,
-    excludeExecutionId?: string,
+    {
+      childProcess,
+      beforeReplacementPublishes,
+      excludeExecutionId,
+    }: SystemUiAnrReplacementOptions & { childProcess?: ChildProcess | null } = {},
   ): Promise<SystemUiAnrRecoveryHandoff> {
     return await this.port.assignmentMutex.runExclusive(async () => {
       // The caller's marker must cover the entire visible replacement
@@ -157,8 +160,7 @@ export class DeviceReplacement {
           expectedDevice,
           replacement,
           sourceImage,
-          beforeReplacementPublishes,
-          excludeExecutionId,
+          { beforeReplacementPublishes, excludeExecutionId },
         );
         await this.port.trackStartedDeviceProcess(replacement, childProcess);
         if (!this.port.isPooledEntryCurrent(replacementDevice)) {
@@ -387,8 +389,10 @@ export class DeviceReplacement {
     expectedDevice: PooledDevice,
     replacement: BootedDevice,
     sourceImage: DeviceInfo,
-    beforeReplacementPublishes?: () => void,
-    excludeExecutionId?: string,
+    {
+      beforeReplacementPublishes,
+      excludeExecutionId,
+    }: { beforeReplacementPublishes?: () => void; excludeExecutionId?: string } = {},
   ): Promise<PooledDevice> {
     const priorAssignmentCount = expectedDevice.assignmentCount;
     const priorLastUsedAt = expectedDevice.lastUsedAt;

@@ -96,8 +96,8 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
 
     androidSetPreference = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
         }
       },
     );
@@ -116,8 +116,8 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
       },
     );
     iosSetPreference = mock(async (...args: Parameters<IOSCtrlProxyClient["setPreference"]>) => {
-      if (typeof args[5] === "object") {
-        args[5].onDispatch?.();
+      if (typeof args[3] === "object") {
+        args[3].onDispatch?.();
       }
     });
     iosRemovePreference = mock(
@@ -190,8 +190,8 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     const resolution = { resolvedStore: "custom-suite", effectiveValueDiffers: true };
     iosSetPreference.mockImplementation(
       async (...args: Parameters<IOSCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
         }
         return resolution;
       },
@@ -269,9 +269,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     expect(iosSetPreference).toHaveBeenCalledWith(
       "com.example.app",
       "prefs",
-      "theme",
-      "dark",
-      "STRING",
+      { key: "theme", value: "dark", type: "STRING" },
       { onDispatch: expect.any(Function) },
     );
     expect(androidSetPreference).not.toHaveBeenCalled();
@@ -340,9 +338,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     expect(androidSetPreference).toHaveBeenCalledWith(
       "com.example.app",
       "prefs",
-      "theme",
-      "dark",
-      "STRING",
+      { key: "theme", value: "dark", type: "STRING" },
       { onDispatch: expect.any(Function) },
     );
     expect(iosSetPreference).not.toHaveBeenCalled();
@@ -476,7 +472,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
         const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
           androidDevice,
           new FakeAdbExecutor(),
-          new FakeTimer(),
+          { timer: new FakeTimer() },
         );
         spyOn(manager, "ensureCompatibleVersion").mockImplementation(ensure);
         managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(manager);
@@ -525,8 +521,8 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
       spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
         createAndroidTestClient(androidDevice, {
           setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-            if (typeof args[5] === "object") {
-              args[5].onDispatch?.();
+            if (typeof args[3] === "object") {
+              args[3].onDispatch?.();
             }
             if (overrides.setPreference) {
               return overrides.setPreference();

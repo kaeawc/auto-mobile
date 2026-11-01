@@ -17,7 +17,7 @@ describe("device session release fence (#11418)", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -46,13 +46,13 @@ describe("device session release fence (#11418)", () => {
       override async markReleased(
         ...args: Parameters<DeviceSessionRepository["markReleased"]>
       ): Promise<void> {
-        if (args[3] === "expired") {
-          await super.markReleased(SESSION, "released", 2_000, peerReason);
+        if (args[3].reason === "expired") {
+          await super.markReleased(SESSION, "released", 2_000, { reason: peerReason });
         }
         return await super.markReleased(...args);
       }
     }
-    return new RacingRepository(db, timer);
+    return new RacingRepository({ db, timer });
   }
 
   // none < non-terminal < idle terminal < other terminal; an equal strength replaces.
@@ -74,9 +74,9 @@ describe("device session release fence (#11418)", () => {
     for (const candidate of CANDIDATES) {
       test(`${candidate} over ${held} matches releaseReasonMayReplace`, async () => {
         await seedRow();
-        await repo.markReleased(SESSION, "released", 1_500, held);
+        await repo.markReleased(SESSION, "released", 1_500, { reason: held });
 
-        await repo.markReleased(SESSION, "released", 2_000, candidate);
+        await repo.markReleased(SESSION, "released", 2_000, { reason: candidate });
 
         const expected = releaseReasonMayReplace(candidate, held) ? candidate : held;
         expect((await repo.getSession(SESSION))?.release_reason).toBe(expected);
@@ -86,13 +86,13 @@ describe("device session release fence (#11418)", () => {
 
   test("a release replaces an active row with no reason", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 2_000, "expired");
+    await repo.markReleased(SESSION, "released", 2_000, { reason: "expired" });
     expect((await repo.getSession(SESSION))?.release_reason).toBe("expired");
   });
 
   test("the expired-row sweep does not overwrite a terminal release that lands after its select", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 1_500, "daemon-shutdown");
+    await repo.markReleased(SESSION, "released", 1_500, { reason: "daemon-shutdown" });
 
     await racingRepository("explicit-release").listRecoverableSessions(20_000_000);
 
@@ -101,7 +101,7 @@ describe("device session release fence (#11418)", () => {
 
   test("the sweep leaves a row re-released as a non-recoverable reason alone", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 1_500, "daemon-shutdown");
+    await repo.markReleased(SESSION, "released", 1_500, { reason: "daemon-shutdown" });
 
     await racingRepository("plan-auto-release").listRecoverableSessions(20_000_000);
 
@@ -110,7 +110,7 @@ describe("device session release fence (#11418)", () => {
 
   test("the sweep still terminalizes an expired recoverable row", async () => {
     await seedRow();
-    await repo.markReleased(SESSION, "released", 1_500, "daemon-shutdown");
+    await repo.markReleased(SESSION, "released", 1_500, { reason: "daemon-shutdown" });
 
     await repo.listRecoverableSessions(20_000_000);
 

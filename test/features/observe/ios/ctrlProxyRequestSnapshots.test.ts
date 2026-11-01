@@ -43,6 +43,14 @@ import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { requestSdkTrigger } from "../../../../src/features/observe/ios/CtrlProxySdkTrigger";
+import {
+  requestSdkAction,
+  requestSdkObservation,
+} from "../../../../src/features/observe/ios/CtrlProxySdkObservation";
+import {
+  requestSdkWebAction,
+  requestSdkWebSnapshot,
+} from "../../../../src/features/observe/ios/CtrlProxySdkWebView";
 import { requestAccessibilityAudit } from "../../../../src/features/observe/ios/CtrlProxyAccessibilityAudit";
 import { CtrlProxyClipboard } from "../../../../src/features/observe/ios/CtrlProxyClipboard";
 import { CtrlProxyDatabase } from "../../../../src/features/observe/ios/CtrlProxyDatabase";
@@ -158,10 +166,12 @@ async function withClient(
   const client = IOSCtrlProxyClient.createForTesting(
     { deviceId: "snapshot-device", platform: "ios", name: "fixture" },
     8765,
-    () => {
-      throw new Error("snapshot must never open a socket");
+    {
+      wsFactory: () => {
+        throw new Error("snapshot must never open a socket");
+      },
+      timer: h.context.timer,
     },
-    h.context.timer,
   );
   client.getSdkCapabilityTestHooks().sdkCapabilityGate = async () => null;
   client.sendMessage = (data) => {
@@ -200,6 +210,28 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_magic_tap",
     builder: "CtrlProxyVoiceOver.requestMagicTap",
     invoke: (h) => new CtrlProxyVoiceOver(h.context).requestMagicTap(),
+  },
+  {
+    name: "request_sdk_observation",
+    builder: "requestSdkObservation",
+    invoke: (h) => requestSdkObservation(h.context),
+  },
+  {
+    name: "request_sdk_action",
+    builder: "requestSdkAction",
+    invoke: (h) =>
+      requestSdkAction(h.context, { tap: { observationIdentity: 41, elementId: "submit" } }),
+  },
+  {
+    name: "request_sdk_web_snapshot",
+    builder: "requestSdkWebSnapshot",
+    invoke: (h) => requestSdkWebSnapshot(h.context, { webViewId: "main" }),
+  },
+  {
+    name: "request_sdk_web_action",
+    builder: "requestSdkWebAction",
+    invoke: (h) =>
+      requestSdkWebAction(h.context, "main", { click: { snapshotId: "s1", elementId: "submit" } }),
   },
   {
     name: "request_sdk_trigger",
@@ -337,7 +369,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
           { x: 40.75, y: 80.5, offsetMs: 700 },
         ],
         5000,
-        "frame-42",
+        { frameContext: "frame-42" },
       ),
   },
   {
@@ -367,7 +399,9 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_append_text",
     builder: "CtrlProxyText.requestAppendText",
     invoke: (h) =>
-      new CtrlProxyText(h.context).requestAppendText("a", 5000, undefined, "frame-context"),
+      new CtrlProxyText(h.context).requestAppendText("a", 5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_clear_text",
@@ -398,24 +432,25 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_press_button",
     builder: "CtrlProxyNavigation.requestPressButton",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestPressButton(
-        "volume_up",
-        5000,
-        undefined,
-        "frame-context",
-      ),
+      new CtrlProxyNavigation(h.context).requestPressButton("volume_up", 5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_press_home",
     builder: "CtrlProxyNavigation.requestPressHome",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestPressHome(5000, undefined, "frame-context"),
+      new CtrlProxyNavigation(h.context).requestPressHome(5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_press_back",
     builder: "CtrlProxyNavigation.requestPressBack",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestPressBack(5000, undefined, "frame-context"),
+      new CtrlProxyNavigation(h.context).requestPressBack(5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_shake",
@@ -426,7 +461,9 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_recent_apps",
     builder: "CtrlProxyNavigation.requestRecentApps",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestRecentApps(5000, undefined, "frame-context"),
+      new CtrlProxyNavigation(h.context).requestRecentApps(5000, undefined, {
+        frameContext: "frame-context",
+      }),
   },
   {
     name: "request_action",
@@ -452,12 +489,9 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
     name: "request_launch_app",
     builder: "CtrlProxyNavigation.requestLaunchApp",
     invoke: (h) =>
-      new CtrlProxyNavigation(h.context).requestLaunchApp(
-        "com.example.app",
-        10000,
-        undefined,
-        true,
-      ),
+      new CtrlProxyNavigation(h.context).requestLaunchApp("com.example.app", 10000, undefined, {
+        coldBoot: true,
+      }),
   },
   {
     name: "request_rotate",
@@ -563,9 +597,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
       new CtrlProxyStorage(h.context, () => "fixture-session-id").setPreference(
         "com.example.app",
         "Standard",
-        "launch_count",
-        "42",
-        "INT",
+        { key: "launch_count", value: "42", type: "INT" },
       ),
     resolveWith: { success: true },
   },
@@ -642,8 +674,7 @@ const SNAPSHOT_SPECS: SnapshotSpec[] = [
         "com.example.app",
         "/Documents/app.sqlite",
         "users",
-        25,
-        10,
+        { limit: 25, offset: 10 },
       ),
     resolveWith: { success: true, totalTimeMs: 1, columns: [], rows: [], total: 0 },
   },
@@ -870,13 +901,9 @@ describe("iOS integer millisecond request boundary", () => {
         name: "action",
         builder: "action",
         invoke: (h) =>
-          new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate(
-            "Row",
-            "long_press",
-            5000,
-            undefined,
-            { duration: 250.5 },
-          ),
+          new CtrlProxyVoiceOver(h.context).requestVoiceOverActivate("Row", "long_press", 5000, {
+            duration: 250.5,
+          }),
       },
       {
         name: "drag",

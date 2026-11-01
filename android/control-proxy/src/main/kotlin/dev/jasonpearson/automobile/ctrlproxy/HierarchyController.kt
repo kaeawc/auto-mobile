@@ -542,6 +542,18 @@ internal class HierarchyController(
   }
 
   /**
+   * Waits for the UI to settle after an input, then extracts the hierarchy of [displayId] (the
+   * active display when null). Null when the extraction failed.
+   */
+  internal suspend fun settledHierarchy(displayId: Int? = null): ViewHierarchy? =
+    debouncer.extractAfterQuiescenceSuspending(
+      quiescenceMs = HierarchyQuiescence.POLL_MS,
+      maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+      pollIntervalMs = 10L,
+      snapshotOptions = HierarchySnapshotOptions(displayId = displayId),
+    )
+
+  /**
    * Broadcast hierarchy update to WebSocket clients (suspend function for proper ordering).
    *
    * @param sync If true, enqueues for each client in call order; each client's sender drains its
@@ -801,4 +813,47 @@ internal abstract class HierarchyRequestController(
     }
     Log.d(TAG, "Hierarchy broadcast interval set to ${resolvedIntervalMs}ms")
   }
+}
+
+/**
+ * Owns the "serialize once → write file → broadcast → always release the frame-context entry"
+ * sequence for a single hierarchy delivery (issue #5469 follow-up).
+ *
+ * Serialization was hoisted out of the writer/broadcaster's own try/catch so a change is serialized
+ * at most once (the one [serialize] result is reused for both [write] and [broadcast]). That move
+ * exposed a leak: [HierarchyController.extractedHierarchyFrameContexts] is a strong-keyed identity
+ * map that only the broadcaster removed from, so an encode failure (e.g. a NaN/Infinity
+ * `textSizeInPx`) before the broadcast would retain a full hierarchy forever. Centralizing the
+ * sequence guarantees [releaseFrameContext] runs in a `finally` even when [serialize] throws, so no
+ * call site can serialize-then-leak.
+ *
+ * A failure in [serialize] (or [write]/[broadcast]) skips the remaining steps and rethrows so the
+ * caller drops just that one frame; the frame-context entry is released regardless. This function
+ * is pure over its injected seams — no Android or service state — so it is unit-testable with a
+ * counting serializer and fake writer/broadcaster.
+ */
+internal suspend fun deliverHierarchyFrame(
+  serialize: () -> String,
+  write: (String) -> Unit,
+  broadcast: suspend (String) -> Unit,
+  releaseFrameContext: () -> Unit,
+) {
+  try {
+    val serialized = serialize()
+    write(serialized)
+    broadcast(serialized)
+  } finally {
+    // Runs on every path: on success the broadcaster already removed the entry (this is a no-op
+    // safety net); on a serialize/write/broadcast failure this is the only removal, closing the
+    // leak. remove() is idempotent, so the redundant success-path call is harmless.
+    releaseFrameContext()
+  }
+}
+
+/**
+ * Settles, then publishes the fresh hierarchy in call order before the caller acknowledges its
+ * action. Nothing is sent when the extraction failed.
+ */
+internal suspend fun HierarchyController.publishSettledHierarchy() {
+  settledHierarchy()?.let { broadcastHierarchyUpdate(it, sync = true) }
 }

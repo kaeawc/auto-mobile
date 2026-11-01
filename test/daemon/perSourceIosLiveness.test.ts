@@ -22,6 +22,7 @@ import {
   loadDerivedDevicectlListing,
   derivePhysicalDevicectlRecord,
 } from "../helpers/devicectlListFixtures";
+import { DeviceLossMisses } from "../../src/daemon/deviceLossMisses";
 
 /**
  * Issue #5683: iOS has two independent discovery sources behind one platform
@@ -104,20 +105,20 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
         options.simctlOk ? [SIMULATOR] : new Error("simctl list devices failed"),
       ),
       bootedEmulator(),
-      undefined,
-      undefined,
       {
-        listConnectedDevices: async () =>
-          options.devicectlOk
-            ? { devices: [PHYSICAL], complete: true }
-            : {
-                devices: options.retainedPhysical ? [PHYSICAL] : [],
-                complete: false,
-                error: {
-                  code: "failed",
-                  message: "devicectl could not list physical iOS devices (failed): fake",
+        physicalIosDevices: {
+          listConnectedDevices: async () =>
+            options.devicectlOk
+              ? { devices: [PHYSICAL], complete: true }
+              : {
+                  devices: options.retainedPhysical ? [PHYSICAL] : [],
+                  complete: false,
+                  error: {
+                    code: "failed",
+                    message: "devicectl could not list physical iOS devices (failed): fake",
+                  },
                 },
-              },
+        },
       },
     );
 
@@ -177,17 +178,17 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
       null,
       new FakeBootedSimctl([SIMULATOR]),
       bootedEmulator(),
-      undefined,
-      undefined,
       {
-        listConnectedDevices: async () => ({
-          devices: [PHYSICAL],
-          complete: false,
-          error: {
-            code: "failed",
-            message: "devicectl could not list physical iOS devices (failed): fake",
-          },
-        }),
+        physicalIosDevices: {
+          listConnectedDevices: async () => ({
+            devices: [PHYSICAL],
+            complete: false,
+            error: {
+              code: "failed",
+              message: "devicectl could not list physical iOS devices (failed): fake",
+            },
+          }),
+        },
       },
     );
 
@@ -332,9 +333,7 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
         null,
         new FakeBootedSimctl([SIMULATOR]),
         bootedEmulator(),
-        undefined,
-        undefined,
-        lister,
+        { physicalIosDevices: lister },
       );
       expect((await lister.listConnectedDevices()).complete).toBe(true);
       const originalPlatform = listing.result.devices[0].properties.hardware.platform;
@@ -427,7 +426,7 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
 
 describe("disconnect monitor ages out only devices whose own source succeeded (#5683)", () => {
   const evaluate = (succeededSources: Array<"ios-simulator" | "ios-physical">) => {
-    const misses = new Map<string, number>();
+    const misses = new DeviceLossMisses();
     const result = evaluateDeviceDisconnects({
       deviceDisconnectMisses: misses,
       confirmedDisconnectedDeviceIds: new Set<string>(),

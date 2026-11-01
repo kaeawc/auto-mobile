@@ -6,6 +6,7 @@ import {
 } from "../../../../src/features/prototype/protoViewer/protoViewerSaved";
 import {
   ProtoViewerEntryPointMissingError,
+  ProtoViewerInboxUnsupportedError,
   ProtoViewerStorageError,
   type ProtoViewerDevice,
 } from "../../../../src/features/prototype/protoViewer/protoViewerDevice";
@@ -496,3 +497,15 @@ describe("requested display on a multi-screen device", () => {
     expect(out?.warning).toContain("did not report which one");
   });
 });
+
+test.each(["save", "open"])(
+  "%s reports old iOS inbox builds as unsupported rather than falling back",
+  async (action) => {
+    const device = new FakeProtoViewerDevice();
+    device.importResult = new ProtoViewerInboxUnsupportedError();
+    device.openResult = new ProtoViewerInboxUnsupportedError();
+    const out = await routeToProtoViewer({ action, spec, id: LIBRARY_ID }, deps(device));
+    expect(out).toMatchObject({ success: false, errorCode: "unsupported_capability" });
+    expect(out?.error).toContain("Install a newer ProtoViewer");
+  },
+);

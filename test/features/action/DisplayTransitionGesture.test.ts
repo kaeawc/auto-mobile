@@ -20,7 +20,7 @@ test("a raw swipe can dispatch coordinates after a completed display transition"
   const gesture = new ExecuteGesture(transitionDevice, adb, new FakeTimer());
   displayTransitions.notifyTransition(transitionDevice.deviceId, "fold");
   try {
-    const result = await gesture.swipe(10, 10, 90, 90);
+    const result = await gesture.swipe({ x1: 10, y1: 10, x2: 90, y2: 90 });
     expect(result.success).toBe(true);
     expect(adb.getExecutedCommands()).toContain("shell input swipe 10 10 90 90 300");
   } finally {
@@ -29,12 +29,11 @@ test("a raw swipe can dispatch coordinates after a completed display transition"
 });
 
 test("a coordinate action rejects a transition already detected before it starts", async () => {
-  const action = new BaseVisualChange(
-    transitionDevice,
-    new FakeAdbExecutor(),
-    new FakeTimer(),
-    () => 0,
-  );
+  const action = new BaseVisualChange(transitionDevice, {
+    adb: new FakeAdbExecutor(),
+    timer: new FakeTimer(),
+    renderedDisplayRevision: () => 0,
+  });
   displayTransitions.notifyTransition(transitionDevice.deviceId, "fold found by discovery");
   let dispatched = false;
   await expect(

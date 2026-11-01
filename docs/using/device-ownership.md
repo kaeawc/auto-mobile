@@ -50,19 +50,37 @@ takes calls from anyone.
 
 Other refusals you may meet, and what to do:
 
-| Code                                                 | Meaning and next step                                                                                                   |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `ambiguous_session_selector`                         | Several of your sessions match; pass `sessionUuid` or `deviceId`.                                                       |
-| `ambiguous_device_target`                            | An unnamed call matched several devices; reads pass `deviceId`, control calls acquire a session and pass `sessionUuid`. |
-| `device_outside_bound_session`                       | The call names a `deviceId` other than the session's device.                                                            |
-| `plan_execution_in_progress` (retryable)             | A plan is running; retry when it finishes. Reads stay allowed.                                                          |
-| `session_ownership_lost`, `no_active_device_session` | The session is gone for good (`retryable: false`, `nextAction: "acquire_new_session"`). Acquire a new session.          |
-| `session_released_during_creation`                   | The session was released before it finished creating. Acquire a new one.                                                |
-| `daemon_session_suspect` (retryable)                 | The owner's heartbeat is late; retry now.                                                                               |
-| `session_held_by_recovery` (retryable)               | Device recovery is in flight; retry after `retryAfterMs`.                                                               |
-| `discovery_incomplete` (retryable)                   | `adb` or `simctl` listing failed, so AutoMobile will not boot or adopt a device blind. Retry.                           |
-| `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                              |
-| `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                  |
+| Code                                                 | Meaning and next step                                                                                                                                                           |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ambiguous_session_selector`                         | Several of your sessions match; pass `sessionUuid` or `deviceId`.                                                                                                               |
+| `ambiguous_device_target`                            | An unnamed call matched several devices; reads pass `deviceId`, control calls acquire a session and pass `sessionUuid`.                                                         |
+| `device_outside_bound_session`                       | The call names a `deviceId` other than the session's device.                                                                                                                    |
+| `plan_execution_in_progress` (retryable)             | A plan is running; retry when it finishes. Reads stay allowed.                                                                                                                  |
+| `session_ownership_lost`, `no_active_device_session` | The session is gone for good (`retryable: false`, `nextAction: "acquire_new_session"`). Acquire a new session.                                                                  |
+| `session_released_during_creation`                   | The session was released before it finished creating. Acquire a new one.                                                                                                        |
+| `daemon_session_suspect` (retryable)                 | The owner's heartbeat is late; retry now.                                                                                                                                       |
+| `session_held_by_recovery` (retryable)               | Device recovery is in flight; retry after `retryAfterMs`.                                                                                                                       |
+| `discovery_incomplete` (retryable)                   | `adb` or `simctl` listing failed, so AutoMobile will not boot or adopt a device blind. Retry.                                                                                   |
+| `registry_schema_unsupported` (not retryable)        | A strict ownership read found unknown migrations; `dbPath`, `unknownMigrations` and recorded `writerVersions` identify the registry and builds. Upgrade the daemons sharing it. |
+| `device_owned_by_other_daemon` (retryable)           | Another AutoMobile daemon holds the device. Stop it there, wait, or choose another device.                                                                                      |
+| `device_assigned_to_binding`                         | A broker binding holds the device; use another device.                                                                                                                          |
+
+A daemon warning about unknown registry migrations means a newer release has updated
+shared ownership data. Allocation claim files alone decide ownership, and this daemon
+skips the shared claims table until restart. This `files_only` mode does not enforce
+managed bindings: this daemon can allocate a device held only by a managed binding.
+The warning names writer versions when recorded. Upgrade the daemons sharing managed
+devices to a release that includes these migrations, then restart older daemons.
+
+To check versions, run `auto-mobile --daemon capabilities --json`. In session-broker
+mode, an already-open registry adds `bindingRegistry`: `schemaVersion` is the latest
+recorded migration, `knownSchemaVersion` is the latest migration this daemon knows,
+`supported` says whether all recorded migrations are known, and `writerVersion`
+identifies the build that recorded the latest migration. A null version means it is
+unknown; the block is omitted when no registry is open or a read fails unexpectedly.
+The refusal's `writerVersions` maps migration names to the builds that applied them;
+older migrations without a recorded writer are left out. Use these versions to
+choose an upgrade that understands every recorded migration.
 
 ### Choosing a device when a call is ambiguous
 
@@ -289,8 +307,103 @@ the device really should be stopped out from under its holder.
   `device_owned_by_other_daemon`: stop it through that daemon, wait for it to
   release the device, or pass `force: true`.
 - For a wedged Android emulator, `force` also skips the AVD-name comparison.
+- `killDevice` stops an Apple Watch simulator too: pass `platform: "watchos"`
+  and its UDID. A UDID that is not a watch simulator is refused.
+- `deleteDevice` deletes an Apple Watch simulator with
+  `target.platform: "watchos"` and the watch's UDID as `target.stableId`. A
+  running watch is stopped first, which also releases any session on it. The
+  call succeeds only once a fresh watch listing no longer shows the watch. A
+  UDID that no watch simulator has reports `already_absent` and deletes
+  nothing, even when it names another simulator. A `target.stableName` that
+  differs from the watch's name fails with `identity_conflict`, a failed
+  `simctl delete` with `watch_delete_failed`, and running out of `timeoutMs`
+  with `teardown_deadline_exceeded`.
 - A refused `deleteDevice` carries the same typed fields as a refused
   `killDevice`.
+
+## Apple TV simulators
+
+Call `listDevices` with `platform: "tvos"` to list booted Apple TV simulators, or
+`listDeviceImages` with `platform: "tvos"` to list configured ones. Read
+`automobile:devices/images/tvos` for configured Apple TVs, installed tvOS runtimes,
+Apple TV models and their compatible runtimes. Check inventory completeness before
+treating an empty result as no devices; retry a failed listing.
+General device and image listings continue to cover Android and iOS.
+
+`provisionDevice` with `device.platform: "tvos"` takes an exact `name`, optional
+`deviceId` (UDID), and `spec: { runtime, deviceType }` identifiers from that
+catalog. It adopts an exact match or creates a simulator; a name clash, missing
+UDID or incompatible runtime/model is refused. A missing tvOS runtime must be
+installed with `xcodebuild -downloadPlatform tvOS`; the tool never downloads it.
+With `boot` (the default), it boots and binds a session at readiness `booted`;
+a simulator it created is deleted again if boot or binding fails; if deleting it
+again fails, the error says so and tells you to delete it with `deleteDevice`. `boot: false`
+creates or adopts without a session. `resources`, `enableTools` and
+`readiness: "automation"` are unsupported.
+
+`deleteDevice` takes `target: { platform: "tvos", isVirtual: true, stableId: "<UDID>" }`,
+`mode: "destroy"` and `verifyAbsence: true`. It stops a running simulator and
+releases its session before deletion, then confirms absence with a fresh listing.
+An absent UDID returns `already_absent`; a mismatched `target.stableName` fails
+with `identity_conflict`, and an unsuccessful deletion with `tv_delete_failed`.
+
+## Apple Watch simulators
+
+A watch is reached only by naming it: `platform: "watchos"`, or the
+`sessionUuid` of a watch session. A call without a platform never lands on a
+watch, even after one was selected.
+
+- `setActiveDevice` selects a watch only with `platform: "watchos"`; a bare
+  watch `deviceId` is not found. With a `sessionUuid` it binds the watch to that
+  session, otherwise it makes the watch the connection's active watch, which
+  only calls naming `platform: "watchos"` use.
+- `installApp`, `uninstallApp`, `listApps`, `launchApp` and `terminateApp`
+  work on a watch. `installApp` takes a `.app` bundle built for the watchOS
+  simulator; `.ipa`, `.apk` and the Android-only options are refused by name.
+  `uninstallApp` refuses `keepData: true`, because uninstalling always removes
+  the app's data.
+- `launchApp` on a watch accepts `coldBoot`, `clearAppData` (wipes the app's
+  Documents, Library and tmp before launching) and `launchArguments`, and
+  returns the app's `pid`. `intent`, `activityName`, `userId` and
+  `prototype: true` are refused. An app that is not installed fails with
+  `App is not installed`.
+- `provisionDevice` with `device.platform: "watchos"` takes the watch's exact
+  `name`, optional `deviceId`, and `spec.runtime` and `spec.deviceType`
+  identifiers from the host's watchOS runtimes and Apple Watch device types. It
+  adopts a watch that matches all of them, or creates one; a near match, an
+  unknown identifier or a `deviceId` that names no watch is refused. With
+  `boot` (the default) it boots the watch and returns a `sessionId`; a watch it
+  created is deleted again if that fails. `resources`, `enableTools` and
+  `readiness: "automation"` are refused; `readiness` is always `"none"`.
+- `startDevice` with `platform: "watchos"` boots the watch, starts its automation
+  runner, then binds a session. If the session ends before runner startup completes,
+  the call fails; retry `startDevice`. A second start reuses a connected runner. If the
+  runner cannot start, the call still returns a booted session and explains why
+  in `message`. Set `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` to a prebuilt watch runner
+  artifact if automatic discovery or building is unavailable, then retry.
+- With its runner connected, `observe` returns the watch hierarchy and screenshot;
+  `tapOn`, `tapAt`, directional `swipeOn` and `pressButton` with home are available.
+  Without a runner, observation returns a fresh screenshot (`screenshotPath`,
+  `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note.
+  Hierarchy fields are absent, not empty; use the screenshot and retry `startDevice`
+  before acting. Apple TV observation remains screenshot-only.
+- A session request (`--session-config` / `AUTOMOBILE_SESSION_CONFIG`) asks for
+  a watch with `device: { "schemaVersion": 1, "platform": "watchos", "spec": {
+  "runtime": "...", "deviceType": "..." } }`: the exact watchOS runtime and Apple
+  Watch device type identifiers, as for `provisionDevice`. An unknown device type
+  fails with `unsupported_hardware` and an unknown or unavailable runtime with
+  `missing_installed_runtime`, both naming the available ones; a host that is not
+  a Mac fails with `unsupported_hardware`, and an unreadable simulator catalog with
+  retryable `catalog_unavailable`. A ready result carries the watch's `profile`
+  and `readiness: { "mode": "none", "status": "device_ready" }`: the watch is
+  booted, with no automation runner. A watch counts against the same device limit
+  as every other device. On release the host's iOS reuse mode decides what
+  happens to the watch: `erase` erases and reboots it for the next request with
+  the same runtime and device type, `keep-booted` erases it (or destroys it when
+  its fallback is `destroy`), and `minimal` or no reuse deletes it.
+- Unsupported device tools refuse a watch with `<tool> does not support watchOS
+  yet`. `killDevice` stops a watch named with `platform: "watchos"` and releases
+  its runner. Ending the owning session or stopping the daemon also stops the runner.
 
 ## A device that drops off
 
@@ -385,6 +498,7 @@ never readied: reads use what is already installed, and control is refused.
 | Tool                    | Android                                     | iOS simulator                               |
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |
 | `accessibility`         | Yes                                         | Yes                                         |
+| `captureAudio`          | No: booted-only verification                | No: booted-only verification                |
 | `clipboard`             | Yes                                         | Yes                                         |
 | `compareScreenshot`     | Yes                                         | Yes                                         |
 | `displayConfig`         | Yes                                         | Yes                                         |

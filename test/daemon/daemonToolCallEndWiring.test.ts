@@ -25,7 +25,10 @@ describe("Daemon tool-call-end idle wiring", () => {
       {},
       {
         timer,
-        deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+        deviceSessionRepository: new DeviceSessionRepository({
+          db: await createTestDatabase(),
+          timer,
+        }),
       },
     );
     const sessionManager = daemon.getSessionManager();

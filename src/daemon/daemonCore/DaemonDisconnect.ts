@@ -1,5 +1,6 @@
 import type { DaemonCoreServices, DaemonLifecycleState } from "./DaemonCoreState";
 import { logger } from "../../utils/logger";
+import type { Platform } from "../../models";
 import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
 import { type Session } from "../sessionManager";
 import { SingleFlightInterval } from "../SingleFlightInterval";
@@ -46,6 +47,8 @@ import type { DaemonRecordingHost } from "../daemonStartHost";
 import {
   getProcessWideAdbServerResetCohort,
   type CapturedDisconnectCleanup,
+  type CapturedDisconnectRecovery,
+  type CapturedDisconnectTarget,
 } from "./disconnectTargets";
 export type { CapturedDisconnectCleanup } from "./disconnectTargets";
 import { isProcessWideAdbServerReset } from "./disconnectTargets";
@@ -70,10 +73,7 @@ export type { DisconnectMonitorCadence } from "../disconnectMonitorCadence";
 
 interface DisconnectSweep {
   adbServerResetCohort: readonly PooledDevice[];
-  selectPlatform: (
-    platforms: ("android" | "ios")[],
-    planOnTracked: boolean,
-  ) => "android" | "ios" | "either";
+  selectPlatform: (platforms: Platform[], planOnTracked: boolean) => "android" | "ios" | "either";
   idleSignature?: string;
 }
 
@@ -173,12 +173,15 @@ export class DaemonDisconnect {
 
   async recordAndTryRecoverCapturedDisconnect(
     deviceId: string,
-    pooledDevice: PooledDevice | null,
-    assignmentCount: number,
-    sessionId: string | null | undefined,
-    session: Session | null,
-    forceGeneration: number | undefined,
+    captured: CapturedDisconnectRecovery,
   ): Promise<{ incidentId: string | undefined; handled: boolean }> {
+    const {
+      pooledDeviceAtDisconnect: pooledDevice,
+      assignmentCountAtDisconnect,
+      sessionIdAtDisconnect: sessionId,
+      sessionAtDisconnect: session,
+      forceGenerationAtDisconnect: forceGeneration,
+    } = captured;
     if (await this.host.services.devicePool().isShutdownReservationHeld(deviceId)) {
       // killDevice owns intentional disappearance. Leave misses at the threshold
       // so the next poll rechecks the fence if shutdown fails and releases it.
@@ -208,13 +211,12 @@ export class DaemonDisconnect {
           deviceId,
           forceGeneration,
         )) ||
-        !this.host.isCapturedDisconnectTargetCurrent(
-          deviceId,
-          pooledDevice,
-          assignmentCount,
-          sessionId,
-          session,
-        );
+        !this.host.isCapturedDisconnectTargetCurrent(deviceId, {
+          pooledDeviceAtDisconnect: pooledDevice,
+          assignmentCountAtDisconnect,
+          sessionIdAtDisconnect: sessionId,
+          sessionAtDisconnect: session,
+        });
       if (staleDisconnect) {
         await this.host.services
           .devicePool()
@@ -278,13 +280,10 @@ export class DaemonDisconnect {
               schedule.selectPlatform(platforms, this.host.services.timer().now(), planOnTracked),
           };
           try {
-            await this.checkDisconnects(
-              deviceManager,
-              listRecordings,
-              transportRestarts,
+            await this.checkDisconnects(deviceManager, listRecordings, transportRestarts, {
               checkPlanDeviceLoss,
               sweep,
-            );
+            });
             schedule.recordSuccess(sweep.idleSignature);
           } catch (error) {
             schedule.recordFailure();
@@ -437,8 +436,10 @@ export class DaemonDisconnect {
         this.host.offlineRecoveryAttemptedDeviceIds(),
         candidateDeviceIds,
         offlineDeviceIds,
-        this.host.offlineRecoveryAttemptedIncarnations(),
-        candidateIncarnations,
+        {
+          attemptedIncarnations: this.host.offlineRecoveryAttemptedIncarnations(),
+          candidateIncarnations,
+        },
       ),
     );
     // A serial that is mid-provisionDevice/startDevice already has its
@@ -529,7 +530,7 @@ export class DaemonDisconnect {
     forceGenerationAtDisconnect: number | undefined,
   ): void {
     this.host.confirmedDisconnectedDeviceIds().add(deviceId);
-    this.host.lifecycle.deviceDisconnectMisses().delete(deviceId);
+    this.host.lifecycle.deviceDisconnectMisses().reset(deviceId);
     this.host.deviceDisconnectMissIncarnations().delete(deviceId);
     this.host.offlineRecoveryAttemptedDeviceIds().delete(deviceId);
     this.host.offlineRecoveryAttemptedIncarnations().delete(deviceId);
@@ -613,23 +614,24 @@ export class DaemonDisconnect {
     // fast instead of waiting for the full MCP request timeout.
     const { incidentId, handled } = await this.host.recordAndTryRecoverCapturedDisconnect(
       deviceId,
-      pooledDeviceAtDisconnect,
-      assignmentCountAtDisconnect ?? 0,
-      sessionIdAtDisconnect,
-      sessionAtDisconnect,
-      forceGenerationAtDisconnect,
+      {
+        pooledDeviceAtDisconnect,
+        assignmentCountAtDisconnect: assignmentCountAtDisconnect ?? 0,
+        sessionIdAtDisconnect,
+        sessionAtDisconnect,
+        forceGenerationAtDisconnect,
+      },
     );
     if (handled) {
       return;
     }
     if (
-      !this.host.isCapturedDisconnectTargetCurrent(
-        deviceId,
+      !this.host.isCapturedDisconnectTargetCurrent(deviceId, {
         pooledDeviceAtDisconnect,
         assignmentCountAtDisconnect,
         sessionIdAtDisconnect,
         sessionAtDisconnect,
-      )
+      })
     ) {
       await this.host.services.devicePool().finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
@@ -646,11 +648,10 @@ export class DaemonDisconnect {
     }
 
     if (
-      !this.host.isCapturedDisconnectTargetCurrent(
-        deviceId,
+      !this.host.isCapturedDisconnectTargetCurrent(deviceId, {
         pooledDeviceAtDisconnect,
         assignmentCountAtDisconnect,
-      )
+      })
     ) {
       await this.host.services.devicePool().finishEmulatorLossIncident(incidentId, "not-attempted");
       return;
@@ -728,7 +729,7 @@ export class DaemonDisconnect {
     forceGenerationAtDisconnect: number | undefined,
   ): void {
     this.host.lifecycle.socketServer()?.evictDeviceInputCache(deviceId);
-    this.host.lifecycle.deviceDisconnectMisses().delete(deviceId);
+    this.host.lifecycle.deviceDisconnectMisses().reset(deviceId);
     this.host.deviceDisconnectMissIncarnations().delete(deviceId);
     this.host.confirmedDisconnectedDeviceIds().delete(deviceId);
     if (
@@ -758,7 +759,7 @@ export class DaemonDisconnect {
       if (!this.host.services.devicePool().getDevice(deviceId)) {
         return false;
       }
-      this.host.lifecycle.deviceDisconnectMisses().delete(deviceId);
+      this.host.lifecycle.deviceDisconnectMisses().reset(deviceId);
       this.host.deviceDisconnectMissIncarnations().delete(deviceId);
       this.host.confirmedDisconnectedDeviceIds().delete(deviceId);
       if (
@@ -784,7 +785,7 @@ export class DaemonDisconnect {
       );
       return true;
     }
-    this.host.lifecycle.deviceDisconnectMisses().delete(deviceId);
+    this.host.lifecycle.deviceDisconnectMisses().reset(deviceId);
     this.host.deviceDisconnectMissIncarnations().delete(deviceId);
     this.host.confirmedDisconnectedDeviceIds().delete(deviceId);
     if (
@@ -799,20 +800,8 @@ export class DaemonDisconnect {
     return true;
   }
 
-  isCapturedDisconnectTargetCurrent(
-    deviceId: string,
-    pooledDeviceAtDisconnect: PooledDevice | null,
-    assignmentCountAtDisconnect: number | undefined,
-    sessionIdAtDisconnect?: string | null,
-    sessionAtDisconnect?: Session | null,
-  ): boolean {
-    return this.host.isCapturedDisconnectTargetCurrent(
-      deviceId,
-      pooledDeviceAtDisconnect,
-      assignmentCountAtDisconnect,
-      sessionIdAtDisconnect,
-      sessionAtDisconnect,
-    );
+  isCapturedDisconnectTargetCurrent(deviceId: string, target: CapturedDisconnectTarget): boolean {
+    return this.host.isCapturedDisconnectTargetCurrent(deviceId, target);
   }
 
   startAdbMissingDeviceListener(): void {
@@ -852,8 +841,13 @@ export class DaemonDisconnect {
     >,
     listRecordings: DaemonDisconnectHost["listActiveVideoRecordings"],
     transportRestarts: AdbTransportRestartLookup,
-    checkPlanDeviceLoss: ReturnType<DaemonDisconnect["createPlanDeviceLossCheck"]>,
-    sweep: DisconnectSweep,
+    {
+      checkPlanDeviceLoss,
+      sweep,
+    }: {
+      checkPlanDeviceLoss: ReturnType<DaemonDisconnect["createPlanDeviceLossCheck"]>;
+      sweep: DisconnectSweep;
+    },
   ): Promise<void> {
     this.startDeferredSessionRecoverySweep();
     const activeRecordings = await listRecordings();
@@ -902,14 +896,11 @@ export class DaemonDisconnect {
     const listed =
       platform === "ios"
         ? {}
-        : await probeListedAndroidStates(
-            this.host.services.devicePool(),
-            deviceManager,
-            false,
-            ordinaryCandidateIds,
+        : await probeListedAndroidStates(this.host.services.devicePool(), deviceManager, false, {
+            candidateDeviceIds: ordinaryCandidateIds,
             bootedDeviceIds,
             candidatePlatforms,
-          );
+          });
     if (
       await this.recoverOfflineCandidates(
         deviceManager,
@@ -949,8 +940,7 @@ export class DaemonDisconnect {
         candidateDeviceIds,
         candidatePlatforms,
         bootedDeviceIds,
-        listed.listedNonDeviceIds,
-        transportRestarts,
+        { listedNonDeviceIds: listed.listedNonDeviceIds, transportRestarts },
       ),
     });
     if (disconnectResult.skippedAllDiscoveryFailed) {
@@ -975,27 +965,31 @@ export class DaemonDisconnect {
       discovery.succeededPlatforms,
       this.host.lifecycle.deviceDisconnectMisses().size,
       candidateDeviceIds,
-      bootedDeviceIds,
-      this.host.services
-        .devicePool()
-        .getAllDevices()
-        .map((device) => device.id),
+      {
+        bootedDeviceIds,
+        pooledDeviceIds: this.host.services
+          .devicePool()
+          .getAllDevices()
+          .map((device) => device.id),
+      },
     );
-    await this.cleanupDisconnects(
-      bootedDeviceIds,
-      succeededPlatforms,
-      missingByDevice,
+    await this.cleanupDisconnects(bootedDeviceIds, succeededPlatforms, missingByDevice, {
       activeRecordings,
       sweep,
-    );
+    });
   }
 
   private async cleanupDisconnects(
     bootedDeviceIds: Set<string>,
-    succeededPlatforms: Set<"android" | "ios">,
+    succeededPlatforms: Set<Platform>,
     missingByDevice: Map<string, string[]>,
-    activeRecordings: Awaited<ReturnType<DaemonDisconnectHost["listActiveVideoRecordings"]>>,
-    sweep: { adbServerResetCohort: readonly PooledDevice[] },
+    {
+      activeRecordings,
+      sweep,
+    }: {
+      activeRecordings: Awaited<ReturnType<DaemonDisconnectHost["listActiveVideoRecordings"]>>;
+      sweep: { adbServerResetCohort: readonly PooledDevice[] };
+    },
   ): Promise<void> {
     const resetCohort = getProcessWideAdbServerResetCohort(
       bootedDeviceIds,

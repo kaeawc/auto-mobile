@@ -78,7 +78,7 @@ function readAccess(device: BootedDevice, avdConfigReader: AvdConfigReader, with
       ? {
           listBootedWithStatus: async () => ({
             devices: [device],
-            scanned: { android: true, ios: true },
+            scanned: { android: true, ios: true, watchos: false, tvos: false },
           }),
         }
       : {}),
@@ -121,7 +121,7 @@ async function observe(device: BootedDevice) {
         }),
       },
     },
-    timer,
+    { timer },
   );
   const result = await screen.executeDeviceRead();
   return { result, commands: adb.getExecutedCommands() };

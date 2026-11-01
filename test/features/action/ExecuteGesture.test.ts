@@ -34,10 +34,10 @@ describe("ExecuteGesture", () => {
     const requestSwipe = spyOn(fakeClient, "requestSwipe");
     getInstanceSpy = spyOnIosClientInstance(fakeClient);
     const gesture = new ExecuteGesture(iosDevice, null, new FakeTimer());
-    await gesture.swipe(1, 2, 3, 4, { lockScreen: true, timeoutMs: 4200 });
+    await gesture.swipe({ x1: 1, y1: 2, x2: 3, y2: 4 }, { lockScreen: true, timeoutMs: 4200 });
     expect(requestSwipe.mock.calls[0]?.[0].timeoutMs).toBe(4200);
     expect(requestSwipe.mock.calls[0]?.[0].contextOptions).toEqual({ lockScreen: true });
-    await gesture.swipe(1, 2, 3, 4);
+    await gesture.swipe({ x1: 1, y1: 2, x2: 3, y2: 4 });
     expect(requestSwipe.mock.calls[1]?.[0].contextOptions).toBeUndefined();
   });
 
@@ -51,7 +51,12 @@ describe("ExecuteGesture", () => {
       const fakeClient = new FakeIOSCtrlProxy();
       fakeClient.setSwipeResult({ success: false, totalTimeMs: 5000, ...reply });
       getInstanceSpy = spyOnIosClientInstance(fakeClient);
-      return new ExecuteGesture(iosDevice, null, new FakeTimer()).swipe(1, 2, 3, 4);
+      return new ExecuteGesture(iosDevice, null, new FakeTimer()).swipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+      });
     }
 
     test("the typed code marks the acknowledged reply indeterminate", async () => {
@@ -91,7 +96,12 @@ describe("ExecuteGesture", () => {
       const fakeClient = new FakeIOSCtrlProxy();
       fakeClient.setSwipeResult({ success: false, totalTimeMs: 4500, ...reply });
       getInstanceSpy = spyOnIosClientInstance(fakeClient);
-      return new ExecuteGesture(iosDevice, null, new FakeTimer()).swipe(1, 2, 3, 4);
+      return new ExecuteGesture(iosDevice, null, new FakeTimer()).swipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+      });
     }
 
     test("the typed code marks the acknowledged reply indeterminate", async () => {
@@ -157,10 +167,7 @@ describe("ExecuteGesture", () => {
     adb.abortAfterCommand("shell input swipe", controller);
     await expect(
       new ExecuteGesture(androidDevice, adb, new FakeTimer()).swipe(
-        0,
-        0,
-        10,
-        10,
+        { x1: 0, y1: 0, x2: 10, y2: 10 },
         {},
         { signal: controller.signal },
       ),
@@ -186,7 +193,7 @@ describe("ExecuteGesture", () => {
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
 
     const gesture = new ExecuteGesture(androidDevice, factory);
-    const result = await gesture.swipe(0, 0, 100, 100, { scrollMode: "a11y" });
+    const result = await gesture.swipe({ x1: 0, y1: 0, x2: 100, y2: 100 }, { scrollMode: "a11y" });
 
     expect(result.success).toBe(true);
     expect(getInstanceSpy).toHaveBeenCalled();
@@ -198,18 +205,23 @@ describe("ExecuteGesture", () => {
   test("returns a typed failure when the default ADB swipe command fails", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError("shell input swipe", new Error("device offline"));
-    const result = await new ExecuteGesture(androidDevice, adb).swipe(0, 0, 100, 100);
+    const result = await new ExecuteGesture(androidDevice, adb).swipe({
+      x1: 0,
+      y1: 0,
+      x2: 100,
+      y2: 100,
+    });
     expect(result.success).toBe(false);
     expect(result.error).toContain("device offline");
   });
 
   test("keeps the default ADB swipe successful when its command resolves", async () => {
-    const result = await new ExecuteGesture(androidDevice, new FakeAdbExecutor()).swipe(
-      0,
-      0,
-      100,
-      100,
-    );
+    const result = await new ExecuteGesture(androidDevice, new FakeAdbExecutor()).swipe({
+      x1: 0,
+      y1: 0,
+      x2: 100,
+      y2: 100,
+    });
     expect(result.success).toBe(true);
   });
 
@@ -223,9 +235,12 @@ describe("ExecuteGesture", () => {
       error: "a11y dispatch rejected",
     }));
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
-    const result = await new ExecuteGesture(androidDevice, adb).swipe(0, 0, 100, 100, {
-      scrollMode: "a11y",
-    });
+    const result = await new ExecuteGesture(androidDevice, adb).swipe(
+      { x1: 0, y1: 0, x2: 100, y2: 100 },
+      {
+        scrollMode: "a11y",
+      },
+    );
     expect(result.success).toBe(false);
     expect(result.error).toContain("a11y dispatch rejected");
     expect(result.error).toContain("ADB device offline");

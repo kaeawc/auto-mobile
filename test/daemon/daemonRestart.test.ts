@@ -271,7 +271,7 @@ describe("restartExpectedGeneration deferral bound (#13792)", () => {
   }
 
   function attempt(host: FakeRestartHost, recovering: boolean): Promise<"restarted" | "joined"> {
-    return restartExpectedGeneration(host, host.status, host.status, {}, recovering);
+    return restartExpectedGeneration(host, host.status, host.status, { options: {}, recovering });
   }
 
   function guidance(

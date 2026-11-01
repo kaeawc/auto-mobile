@@ -103,9 +103,7 @@ export interface KeyboardOpenClient {
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: undefined,
-    signal?: AbortSignal,
+    options?: { timeoutMs?: number; perf?: undefined; signal?: AbortSignal },
   ): Promise<A11yActionResult>;
   requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }>;
 }
@@ -535,7 +533,7 @@ export class Keyboard {
     let result: A11yActionResult;
     try {
       result = selector
-        ? await client.requestNodeAction("click", selector, undefined, undefined, signal)
+        ? await client.requestNodeAction("click", selector, { signal })
         : await client.requestClickFocusedInput(undefined, undefined, signal);
     } catch (error) {
       throwIfAborted(signal);

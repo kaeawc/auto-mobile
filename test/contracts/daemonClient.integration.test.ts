@@ -59,7 +59,9 @@ async function realHarness(options: DaemonClientHarnessOptions): Promise<DaemonC
   }
 
   const timer = new FakeTimer();
-  const client = new DaemonClient(socketPath, 1000, timer, {}, null, {
+  const client = new DaemonClient(socketPath, 1000, timer, {
+    recoveryOptions: {},
+    clientIdentity: null,
     idGenerator: new FakeIdGenerator(),
     platformOverride: "linux",
   });

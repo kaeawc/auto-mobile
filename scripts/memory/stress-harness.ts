@@ -276,7 +276,7 @@ export async function createStressHarness(): Promise<StressHarness> {
     accessibilityService: fakeA11yClient,
     featureFlags: FeatureFlagService.getInstance(),
     executeGesture: {
-      async swipe(x1, y1, x2, y2, options) {
+      async swipe({ x1, y1, x2, y2 }, options) {
         return {
           success: true,
           totalTimeMs: 1,
@@ -307,7 +307,7 @@ export async function createStressHarness(): Promise<StressHarness> {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         "resource-id": "com.example:id/button",
       };
-      await tapOnElement.executeAndroidTap("tap", 10, 10, 50, element);
+      await tapOnElement.executeAndroidTap("tap", { x: 10, y: 10 }, 50, { element });
     },
     swipeOn: async () => {
       await swipeExecutor.executeSwipeGesture({

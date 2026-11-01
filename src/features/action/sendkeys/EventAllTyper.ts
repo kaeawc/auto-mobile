@@ -23,6 +23,7 @@ import { readBackWithSettle } from "./readBackWithSettle";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 import type { Timer } from "../../../utils/SystemTimer";
 import { passwordTextPlaceholder } from "../imeFailureDiagnostics";
+import type { KeyEventLetterCaseCheck } from "./KeyEventSupport";
 interface AndroidEventAllProgress {
   mutated: boolean;
   committedGraphemes: number;
@@ -65,10 +66,7 @@ export interface EventAllTyperHost {
   verifyKeyEventLetterCase(
     text: string,
     typed: TextActionResult,
-    mode: "eventAll" | "eventOnly" | "eventLast",
-    signal?: AbortSignal,
-    display?: string,
-    before?: string,
+    check: KeyEventLetterCaseCheck,
   ): Promise<TextActionResult>;
   checkAbort(signal?: AbortSignal, error?: unknown): void;
   getEventAllKeyEventPlan(grapheme: string): Promise<KeyEventPlan | null>;
@@ -92,22 +90,24 @@ export class EventAllTyper implements AndroidModeTyper {
   }: AndroidModeTypeRequest): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }
   > {
-    return this.executeAndroidEventAll(text, operation, signal, focusedInputVerified, display);
+    return this.executeAndroidEventAll(text, operation, { signal, focusedInputVerified, display });
   }
 
   private async executeAndroidEventAll(
     text: string,
     operation: SendKeysOperation,
-    signal?: AbortSignal,
-    focusedInputVerified = false,
-    display?: string,
+    {
+      signal,
+      focusedInputVerified,
+      display,
+    }: { signal?: AbortSignal; focusedInputVerified?: boolean; display?: string } = {},
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const graphemes = segmentGraphemes(text);
     if (this.host.session.androidCaretUnsafe || !(await this.hasAndroidKeyEvent(graphemes))) {
       const result =
         operation === "replace"
           ? await this.host.textClient.replace(text)
-          : await this.insertGraphemeRun(graphemes, 0, false, undefined, signal);
+          : await this.insertGraphemeRun(graphemes, 0, false, { signal });
       return { ...result, resolvedMode: "a11y" };
     }
 
@@ -141,22 +141,22 @@ export class EventAllTyper implements AndroidModeTyper {
       graphemes,
       operation === "replace",
       operation === "replace",
-      outcome,
-      signal,
+      { outcome, signal },
     );
     if (!typed.success) {
       return typed;
     }
     const confirmed = unchangedWarning
-      ? await this.confirmReplaceAfterUnchangedClear(text, unchangedWarning, typed, signal, display)
+      ? await this.confirmReplaceAfterUnchangedClear(text, unchangedWarning, typed, {
+          signal,
+          display,
+        })
       : typed;
-    const caseChecked = await this.host.verifyKeyEventLetterCase(
-      text,
-      confirmed,
-      "eventAll",
+    const caseChecked = await this.host.verifyKeyEventLetterCase(text, confirmed, {
+      mode: "eventAll",
       signal,
       display,
-    );
+    });
     return outcome.batchedKeyRun
       ? this.verifyPre31Delivery(graphemes, caseChecked, signal, display)
       : caseChecked;
@@ -236,8 +236,7 @@ export class EventAllTyper implements AndroidModeTyper {
     text: string,
     unchangedWarning: string,
     typed: TextActionResult,
-    signal?: AbortSignal,
-    display?: string,
+    { signal, display }: { signal?: AbortSignal; display?: string } = {},
   ): Promise<TextActionResult> {
     let field: string | undefined;
     try {
@@ -260,8 +259,7 @@ export class EventAllTyper implements AndroidModeTyper {
     graphemes: string[],
     previouslyMutated: boolean,
     replacing: boolean,
-    outcome: { batchedKeyRun: boolean },
-    signal?: AbortSignal,
+    { outcome, signal }: { outcome: { batchedKeyRun: boolean }; signal?: AbortSignal },
   ): Promise<TextActionResult> {
     const progress: AndroidEventAllProgress = {
       mutated: previouslyMutated,
@@ -417,13 +415,15 @@ export class EventAllTyper implements AndroidModeTyper {
       run,
       progress.committedGraphemes,
       progress.mutated,
-      progress.pendingKeyText
-        ? {
-            expectedSuffix: progress.pendingKeyText,
-            ...(progress.precedingState ? { precedingState: progress.precedingState } : {}),
-          }
-        : undefined,
-      signal,
+      {
+        options: progress.pendingKeyText
+          ? {
+              expectedSuffix: progress.pendingKeyText,
+              ...(progress.precedingState ? { precedingState: progress.precedingState } : {}),
+            }
+          : undefined,
+        signal,
+      },
     );
     if (result.success) {
       progress.mutated = true;
@@ -488,8 +488,10 @@ export class EventAllTyper implements AndroidModeTyper {
     run: string[],
     committedGraphemes: number,
     previouslyMutated: boolean,
-    options?: Parameters<SendKeysTextClient["insert"]>[1],
-    signal?: AbortSignal,
+    {
+      options,
+      signal,
+    }: { options?: Parameters<SendKeysTextClient["insert"]>[1]; signal?: AbortSignal } = {},
   ): Promise<TextActionResult> {
     const text = run.join("");
     const codePoints = this.describeGraphemes(run);

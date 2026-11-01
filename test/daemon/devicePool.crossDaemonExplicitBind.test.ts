@@ -9,7 +9,11 @@ import {
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   IOS_SIMULATOR_CLAIM_SCOPE,
+  WATCH_SIMULATOR_CLAIM_SCOPE,
+  TV_SIMULATOR_CLAIM_SCOPE,
   iosDeviceAllocationClaimPath,
+  watchDeviceAllocationClaimPath,
+  tvDeviceAllocationClaimPath,
   type ForeignDeviceOwnership,
 } from "../../src/daemon/foreignDeviceOwnership";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
@@ -51,12 +55,29 @@ class SharedClaimStore {
   }
 }
 
+/** The pool dependency that carries `platform`'s claim store. */
+function ownershipDependency(platform: Platform, ownership: ForeignDeviceOwnership) {
+  switch (platform) {
+    case "android":
+      return { foreignDeviceOwnership: ownership };
+    case "ios":
+      return { iosForeignDeviceOwnership: ownership };
+    case "watchos":
+      return { watchForeignDeviceOwnership: ownership };
+    case "tvos":
+      return { tvForeignDeviceOwnership: ownership };
+  }
+}
+
 const DAEMON_A_PID = 1111;
 const DAEMON_B_PID = 2222;
 
 for (const [platform, deviceId] of [
   ["android", "emulator-5554"],
   ["ios", "8F2C1A9E-4B1D-4C3E-9A55-0D6E1F2A3B4C"],
+  // #14908: a watch is claimed by UDID too, so a second daemon can neither bind nor stop it.
+  ["watchos", "3D4E5F60-7182-4A93-B4C5-D6E7F8091A2B"],
+  ["tvos", "4D4E5F60-7182-4A93-B4C5-D6E7F8091A2B"],
 ] as const satisfies readonly (readonly [Platform, string])[]) {
   describe(`explicit binds across daemons on ${platform} (#10980)`, () => {
     let timer: FakeTimer;
@@ -72,9 +93,7 @@ for (const [platform, deviceId] of [
       const pool = makePool(sessions, `daemon-${pid}`, {
         timer,
         deviceManager: devices,
-        ...(platform === "android"
-          ? { foreignDeviceOwnership: ownership }
-          : { iosForeignDeviceOwnership: ownership }),
+        ...ownershipDependency(platform, ownership),
       });
       await pool.initializeWithDevices([device]);
       return { sessions, pool };
@@ -114,7 +133,9 @@ for (const [platform, deviceId] of [
       expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       expect(b.sessions.getSession("b-session")).toBeNull();
 
-      await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "a-session", "explicit-release");
+      await releaseSessionAndDevice({ manager: a.sessions, pool: a.pool }, deviceId, "a-session", {
+        reason: "explicit-release",
+      });
       expect(store.claims.has(deviceId)).toBe(false);
 
       await b.pool.bindOrReuseDeviceSession({ sessionId: "b-session", deviceId, platform });
@@ -185,7 +206,9 @@ for (const [platform, deviceId] of [
       expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
       expect(b.pool.getDevice(deviceId)?.autolockSessionId).toBeUndefined();
 
-      await releaseSessionAndDevice(a.sessions, a.pool, deviceId, aSession!, "explicit-release");
+      await releaseSessionAndDevice({ manager: a.sessions, pool: a.pool }, deviceId, aSession!, {
+        reason: "explicit-release",
+      });
       const bSession = await autolock(b.pool, "mcp-b");
       expect(b.pool.getDevice(deviceId)?.sessionId).toBe(bSession!);
       expect(store.claims.get(deviceId)).toBe(DAEMON_B_PID);
@@ -362,7 +385,9 @@ for (const [platform, deviceId] of [
           const a = await daemon(DAEMON_A_PID);
           const receipt: AcquisitionReceipt = {};
           const first = (await acquire(a.pool, receipt))!;
-          await releaseSessionAndDevice(a.sessions, a.pool, deviceId, first, "explicit-release");
+          await releaseSessionAndDevice({ manager: a.sessions, pool: a.pool }, deviceId, first, {
+            reason: "explicit-release",
+          });
           await bind(a.pool, "second");
           const released = countReleases(a.sessions);
 
@@ -394,7 +419,9 @@ for (const [platform, deviceId] of [
 
         const first = bind(a.pool, "first", receipt);
         await untilPending(pending, 1);
-        await releaseSessionAndDevice(a.sessions, a.pool, deviceId, "first", "explicit-release");
+        await releaseSessionAndDevice({ manager: a.sessions, pool: a.pool }, deviceId, "first", {
+          reason: "explicit-release",
+        });
         const second = bind(a.pool, "second");
         await untilPending(pending, 2);
         pending[1]();
@@ -419,4 +446,102 @@ test("iOS claims are keyed by UDID under one host-wide scope (#10980)", () => {
   expect(iosDeviceAllocationClaimPath("ABC-123", { AUTOMOBILE_COORDINATION_DIR: "/x" }, "/h")).toBe(
     iosDeviceAllocationClaimPath("ABC-123", {}, "/h"),
   );
+});
+
+test("watch claims are keyed by UDID under their own host-wide scope (#14908)", () => {
+  const path = watchDeviceAllocationClaimPath("ABC-123", {}, "/home/someone");
+  expect(path).toContain(WATCH_SIMULATOR_CLAIM_SCOPE);
+  expect(path).not.toBe(iosDeviceAllocationClaimPath("ABC-123", {}, "/home/someone"));
+  expect(path.startsWith(resolve("/home/someone", ".auto-mobile") + sep)).toBe(true);
+  expect(
+    watchDeviceAllocationClaimPath("ABC-123", { AUTOMOBILE_COORDINATION_DIR: "/x" }, "/h"),
+  ).toBe(watchDeviceAllocationClaimPath("ABC-123", {}, "/h"));
+});
+
+test("TV claims are keyed by UDID under their own host-wide scope", () => {
+  const path = tvDeviceAllocationClaimPath("ABC-123", {}, "/home/someone");
+  expect(path).toContain(TV_SIMULATOR_CLAIM_SCOPE);
+  expect(path).not.toBe(iosDeviceAllocationClaimPath("ABC-123", {}, "/home/someone"));
+  expect(path.startsWith(resolve("/home/someone", ".auto-mobile") + sep)).toBe(true);
+  expect(tvDeviceAllocationClaimPath("ABC-123", { AUTOMOBILE_COORDINATION_DIR: "/x" }, "/h")).toBe(
+    tvDeviceAllocationClaimPath("ABC-123", {}, "/h"),
+  );
+});
+
+test("an inventory refresh re-reads which idle watches another daemon claims (#14908)", async () => {
+  const timer = new FakeTimer();
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  const watch = { deviceId: "WATCH-UDID-14908", name: "Apple Watch", platform: "watchos" as const };
+  const peerClaims = new Map<string, number>();
+  const seen = new Map<string, number>();
+  // Like the claim-file reader: a peer's claim is visible only once a refresh has read it.
+  const ownership: ForeignDeviceOwnership = {
+    async refresh(ids) {
+      for (const id of ids) {
+        const owner = peerClaims.get(id);
+        if (owner === undefined) {
+          seen.delete(id);
+        } else {
+          seen.set(id, owner);
+        }
+      }
+    },
+    foreignOwnerPid: (id) => seen.get(id),
+    claim: async () => true,
+    release: () => {},
+  };
+  try {
+    const pool = makePool(sessions, "daemon-watch-refresh", {
+      timer,
+      watchForeignDeviceOwnership: ownership,
+    });
+    await pool.initializeWithDevices([watch]);
+    peerClaims.set(watch.deviceId, DAEMON_A_PID);
+
+    await pool.refreshInventoryOwnership();
+
+    expect(pool.genericAvailability(watch.deviceId)).not.toBe("free");
+  } finally {
+    sessions.stopCleanupTimer();
+    timer.reset();
+  }
+});
+
+test("an inventory refresh re-reads which idle TVs another daemon claims", async () => {
+  const timer = new FakeTimer();
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  const tv = { deviceId: "TV-UDID", name: "Apple TV", platform: "tvos" as const };
+  const peerClaims = new Map<string, number>();
+  const seen = new Map<string, number>();
+  // Like the claim-file reader: a peer's claim is visible only once a refresh has read it.
+  const ownership: ForeignDeviceOwnership = {
+    async refresh(ids) {
+      for (const id of ids) {
+        const owner = peerClaims.get(id);
+        if (owner === undefined) {
+          seen.delete(id);
+        } else {
+          seen.set(id, owner);
+        }
+      }
+    },
+    foreignOwnerPid: (id) => seen.get(id),
+    claim: async () => true,
+    release: () => {},
+  };
+  try {
+    const pool = makePool(sessions, "daemon-tv-refresh", {
+      timer,
+      tvForeignDeviceOwnership: ownership,
+    });
+    await pool.initializeWithDevices([tv]);
+    peerClaims.set(tv.deviceId, DAEMON_A_PID);
+
+    await pool.refreshInventoryOwnership();
+
+    expect(pool.genericAvailability(tv.deviceId)).not.toBe("free");
+  } finally {
+    sessions.stopCleanupTimer();
+    timer.reset();
+  }
 });

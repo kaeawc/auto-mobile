@@ -192,11 +192,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     sessionManager.setDeviceReadiness(agent, "automationReady");
 
     // A read-only probe whose handler records how it was reached.
-    ToolRegistry.registerDeviceAware(
-      "readProbe",
-      "Read-only probe",
-      probeSchema,
-      async (device: BootedDevice, args: Record<string, unknown>) => {
+    ToolRegistry.registerDeviceAware("readProbe", "Read-only probe", probeSchema, {
+      handler: async (device: BootedDevice, args: Record<string, unknown>) => {
         reads.push({
           deviceId: device.deviceId,
           readPath: isSessionlessDeviceRead(),
@@ -204,8 +201,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
         });
         return { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
       },
-      { deviceReadOnly: true },
-    );
+      deviceReadOnly: true,
+    });
   }
   // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
   function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
@@ -350,11 +347,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     "an observer-session read of a tool with its own device read uses it on a free device",
     async () => {
       const resolved: string[] = [];
-      ToolRegistry.registerDeviceAware(
-        "observeProbe",
-        "Observe-like probe",
-        probeSchema,
-        async (device: BootedDevice, args: Record<string, unknown>) => {
+      ToolRegistry.registerDeviceAware("observeProbe", "Observe-like probe", probeSchema, {
+        handler: async (device: BootedDevice, args: Record<string, unknown>) => {
           reads.push({
             deviceId: device.deviceId,
             readPath: isSessionlessDeviceRead(),
@@ -362,17 +356,15 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
           });
           return { success: true };
         },
-        {
-          deviceReadOnly: true,
-          sessionlessDeviceRead: {
-            resolve: async (deviceId: string) => {
-              resolved.push(deviceId);
-              return free;
-            },
-            assertAuthorized: () => {},
+        deviceReadOnly: true,
+        sessionlessDeviceRead: {
+          resolve: async (deviceId: string) => {
+            resolved.push(deviceId);
+            return free;
           },
+          assertAuthorized: () => {},
         },
-      );
+      });
 
       await call("observeProbe", { sessionUuid: "observer-session", deviceId: free.deviceId });
 
@@ -1120,9 +1112,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     arrangedNested3("a plan with a read step stays a control call", async () => {
       await underExecution("executePlan", () =>
-        ToolRegistry.callInternal("readProbe", { sessionUuid: agent }, undefined, undefined, {
-          forPlan: true,
-        }),
+        ToolRegistry.callInternal("readProbe", { sessionUuid: agent }, { forPlan: true }),
       );
 
       expect(reads).toHaveLength(1);
@@ -1131,15 +1121,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     arrangedNested3("a plan's failure observe leaves it a control call", async () => {
       await underExecution("executePlan", async () => {
-        await ToolRegistry.callInternal(
-          "controlProbe",
-          { sessionUuid: agent },
-          undefined,
-          undefined,
-          {
-            forPlan: true,
-          },
-        );
+        await ToolRegistry.callInternal("controlProbe", { sessionUuid: agent }, { forPlan: true });
         // PlanStepExecutor's failure observe: an internal read with no plan options.
         await ToolRegistry.callInternal("readProbe", { sessionUuid: agent });
       });

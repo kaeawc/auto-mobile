@@ -16,17 +16,13 @@ describe("CtrlProxyClipboard dispatch acknowledgement", () => {
       const h = createIosDelegateHarness();
       const controller = new AbortController();
       let dispatches = 0;
-      const pending = new CtrlProxyClipboard(h.context).requestClipboard(
-        "paste",
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-        () => {
+      const pending = new CtrlProxyClipboard(h.context).requestClipboard("paste", undefined, 5000, {
+        signal: controller.signal,
+        onDispatch: () => {
           expect(h.sentMessages).toHaveLength(1);
           dispatches++;
         },
-      );
+      });
       await flush();
       expect(dispatches).toBe(1);
       if (outcome === "timeout") {
@@ -56,16 +52,12 @@ describe("CtrlProxyClipboard dispatch acknowledgement", () => {
     controller.abort(reason);
     let dispatches = 0;
     await expect(
-      new CtrlProxyClipboard(h.context).requestClipboard(
-        "paste",
-        undefined,
-        5000,
-        undefined,
-        controller.signal,
-        () => {
+      new CtrlProxyClipboard(h.context).requestClipboard("paste", undefined, 5000, {
+        signal: controller.signal,
+        onDispatch: () => {
           dispatches++;
         },
-      ),
+      }),
     ).rejects.toBe(reason);
     expect(h.sentMessages).toEqual([]);
     expect(dispatches).toBe(0);
@@ -79,10 +71,10 @@ describe("CtrlProxyClipboard dispatch acknowledgement", () => {
       "paste",
       undefined,
       5000,
-      undefined,
-      undefined,
-      () => {
-        dispatches++;
+      {
+        onDispatch: () => {
+          dispatches++;
+        },
       },
     );
     expect(result.success).toBe(false);

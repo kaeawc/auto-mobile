@@ -1,3 +1,4 @@
+import { watchTapOn } from "../watch/WatchActions";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { TapDisplayRouter } from "./TapDisplayRouter";
@@ -9,7 +10,9 @@ import { TapSemanticLinks } from "./TapSemanticLinks";
 import { TapTargetResolver } from "./TapTargetResolver";
 import { type TapFocusFailure } from "./tapTargetSupport";
 import { TapElementFinder } from "./tapElementFinder";
-import { TapPointPlanner } from "./tapPointPlanner";
+import { TapPointPlanner, type PrototypeTapAgentConnections } from "./tapPointPlanner";
+import { prototypeAgentRegistry } from "../prototype/ios/prototypeAgentInjection";
+import { prototypeViewerConnections } from "../prototype/ios/prototypeViewerAttach";
 import { FocusVerifier } from "./tapFocusVerifier";
 import { PostTapSettler } from "./tapPostTapSettler";
 import { withObservationReadScope } from "../observe/observationReadScope";
@@ -21,8 +24,13 @@ import {
   type DisplayTransitionReader,
   type DisplayTransitionTracker,
 } from "../observe/DisplayTransition";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { ActionableError, BootedDevice, ObserveResult } from "../../models";
+import { BaseVisualChange } from "./BaseVisualChange";
+import {
+  ActionableError,
+  BootedDevice,
+  ObserveResult,
+  requireAndroidOrIosPlatform,
+} from "../../models";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -57,13 +65,14 @@ import { accessibilityDetector as defaultAccessibilityDetector } from "../../ctr
 import { resolveTapAccessibilityDependencies } from "./tapAccessibilityDependencies";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { type RenderedObservationReader } from "./TargetDisplayAction";
-import { resolveTapOnCall, type TapOnCall } from "./ActionCall";
+import type { TapOnCall } from "./ActionCall";
 import { tapPlatformTraits, type TapPlatformTraits } from "./strategies/tapPlatformTraits";
 
 /**
  * Dependencies for TapOnElement that can be injected for testing.
  */
 export interface TapOnElementDependencies extends DisplayFenceDependencies {
+  prototypeAgents?: PrototypeTapAgentConnections;
   displayTransitions?: DisplayTransitionReader &
     Pick<DisplayTransitionTracker, "checkIdentity" | "record">;
   lastRenderedObservation?: RenderedObservationReader;
@@ -328,7 +337,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     device: this.device,
     geometry: () => this.geometry,
     strategy: () => this.strategy,
+    prototypeAgents: { get: (deviceId, bundleId) => this.prototypeAgents.get(deviceId, bundleId) },
   });
+  private readonly prototypeAgents: PrototypeTapAgentConnections;
   private readonly finder = new TapElementFinder({
     device: this.device,
     elementSelector: () => this.elementSelector,
@@ -385,9 +396,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     adb: AdbExecutor | null = null,
     options: TapOnElementDependencies = {},
   ) {
-    super(device, adb, options.timer, options.renderedDisplayRevision, options);
+    super(device, {
+      adb,
+      timer: options.timer,
+      displayFence: options,
+    });
     this.refreshedDisplayTransitions = options.displayTransitions ?? displayTransitions;
     this.lastRenderedObservation = options.lastRenderedObservation;
+    this.prototypeAgents = options.prototypeAgents ?? {
+      get: (deviceId, bundleId) =>
+        prototypeViewerConnections.get(deviceId, bundleId) ??
+        prototypeAgentRegistry.getRecord(deviceId, bundleId)?.client,
+    };
     this.waitForCondition =
       options.waitForCondition ?? new RealWaitForCondition(this.observeScreen, this.timer);
     this.geometry = new DefaultElementGeometry();
@@ -444,14 +464,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       });
     this.accessibilityDetector = options.accessibilityDetector || defaultAccessibilityDetector;
     this.elementSelector = this.createElementSelector(options);
-    const accessibility = resolveTapAccessibilityDependencies(
-      options,
+    const accessibility = resolveTapAccessibilityDependencies(options, {
       device,
-      this.adbFactory,
-      this.adb,
-      this.timer,
-      this.accessibilityDetector,
-    );
+      adbFactory: this.adbFactory,
+      adb: this.adb,
+      timer: this.timer,
+      accessibilityDetector: this.accessibilityDetector,
+    });
     this.talkBackDriverFactory = accessibility.talkBackDriverFactory;
     this.talkBackStrategy = accessibility.talkBackStrategy;
     this.iosVoiceOverDetector = accessibility.iosVoiceOverDetector;
@@ -469,9 +488,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return (
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
-        platform: this.device.platform,
+        // Watch trees use iOS attribute/geometry conventions; watch dispatch stays separate.
+        platform:
+          this.device.platform === "watchos"
+            ? "ios"
+            : requireAndroidOrIosPlatform(this.device.platform, "tapOn"),
         iosMultiPanel:
-          this.platformTraits.panelAwareSelection && (this.device.displays?.panels.length ?? 0) > 1,
+          this.device.platform !== "watchos" &&
+          this.platformTraits.panelAwareSelection &&
+          (this.device.displays?.panels.length ?? 0) > 1,
       })
     );
   }
@@ -494,9 +519,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         this.validateOptions = validate;
       },
       /** Replaces the iOS coordinate-tap transport so the VoiceOver fallback is observable. */
-      setIosCoordinateTap: (
-        tap: (action: string, x: number, y: number, durationMs: number) => Promise<void>,
-      ): void => {
+      setIosCoordinateTap: (tap: TapGestureDispatcher["executeiOSTapWithCoordinates"]): void => {
         this.executeiOSTapWithCoordinates = tap;
       },
       /** Replaces the terminal-screenshot capture performed after effect polling. */
@@ -820,27 +843,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   /**
    * Execute a tap on text
    * @param options - Command options
-   * @param progress - Optional progress callback
+   * @param call - Optional progress callback, cancellation, recovery policy and deadline
    * @returns Result of the command
    */
-  async execute(options: TapOnElementOptions, call?: TapOnCall): Promise<TapOnFocusResult>;
-  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
-  async execute(
-    options: TapOnElementOptions,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    recovery?: { throwOnKeyboardOcclusion?: boolean },
-    request?: { requestDeadlineMs?: number },
-  ): Promise<TapOnFocusResult>;
-
-  async execute(
-    options: TapOnElementOptions,
-    progressOrCall?: ProgressCallback | TapOnCall,
-    signalArg?: AbortSignal,
-    recoveryArg?: { throwOnKeyboardOcclusion?: boolean },
-    requestArg?: { requestDeadlineMs?: number },
-  ): Promise<TapOnFocusResult> {
-    const call = resolveTapOnCall(progressOrCall, signalArg, recoveryArg, requestArg);
+  async execute(options: TapOnElementOptions, call: TapOnCall = {}): Promise<TapOnFocusResult> {
+    if (this.device.platform === "watchos") {
+      return watchTapOn(this.device.deviceId, options, call.signal);
+    }
     return withObservationReadScope(() => this.executeWithReadScope(options, call));
   }
 

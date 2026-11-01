@@ -69,6 +69,23 @@ const importedPrototypeContentSchema = z
 // silently accepting it under the wrong arm. The server itself never emits
 // `isDiff: false` explicitly (absence is the real-world full-observation
 // shape); the literal exists purely to close this validation gap.
+/** iOS SDK observation-bridge routing fields shared by observe and tapOn results (#5159). */
+export const observationBackendFields = {
+  backend: z
+    .enum(["sdk", "xctest"])
+    .optional()
+    .describe(
+      "iOS only, when the app registered an AutoMobile SDK observation bridge: sdk when its " +
+        "nodes were used, xctest when XCTest stood in.",
+    ),
+  fallbackReason: z
+    .enum(["unavailable", "unsupported"])
+    .optional()
+    .describe(
+      "Why XCTest stood in for the bridge: it did not answer, or it does not support the action.",
+    ),
+};
+
 export const observationSummarySchema = z
   .object({
     isDiff: z.literal(false).optional(),
@@ -86,6 +103,7 @@ export const observationSummarySchema = z
     accessibilityFocusedElement: elementSchema.optional(),
     activeWindow: activeWindowSchema.optional(),
     screenIdentity: screenIdentitySchema.optional(),
+    ...observationBackendFields,
     hierarchyServiceStarted: z
       .boolean()
       .optional()
@@ -355,6 +373,7 @@ export const observeDiffSchema = z
     changed: z.array(observeDiffNodeChangeSchema),
     fields: z.record(z.string(), layoutWarningsDiffFieldSchema).optional(),
     importedPrototypeContent: importedPrototypeContentSchema.optional(),
+    ...observationBackendFields,
   })
   .passthrough();
 requireObservationJoinKeysOnTheWire(observeDiffSchema);
@@ -435,6 +454,14 @@ export const observeResultSchema = z
       .describe(
         "Wear OS (watch devices) only: true when the display is round, so the corners are cut off.",
       ),
+    hierarchyUnavailable: z
+      .object({ platform: z.union([z.literal("watchos"), z.literal("tvos")]), message: z.string() })
+      .optional()
+      .describe(
+        "Apple Watch and Apple TV simulators: this observation is a screenshot with screenSize; the view " +
+          "hierarchy is not available on watchOS or tvOS yet. viewHierarchy, skeleton, context, elements " +
+          "and the other element fields are absent, not empty: their absence does not mean an empty screen.",
+      ),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),
     diagnostics: z
@@ -485,6 +512,7 @@ export const observeResultSchema = z
       ),
     activeWindow: activeWindowSchema.optional(),
     screenIdentity: screenIdentitySchema.optional(),
+    ...observationBackendFields,
     elements: observeElementsSchema.optional(),
     selectedElements: z.array(selectedElementSchema).optional(),
     focusedElement: elementSchema.optional(),

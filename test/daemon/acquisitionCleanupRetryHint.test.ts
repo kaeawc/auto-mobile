@@ -322,7 +322,7 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     await arrangeHarness();
     warn = spyOn(logger, "warn").mockImplementation(() => {});
     const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
-    state.startSimulation(DEVICE.deviceId, "timeout", 30, null);
+    state.startSimulation(DEVICE.deviceId, "timeout", 30, { limit: null });
     const cleanup = createOwnerlessNetworkStateAcquisitionCleanup(manager, {
       timer,
       state: () => state,

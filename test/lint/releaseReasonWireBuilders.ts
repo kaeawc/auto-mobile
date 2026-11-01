@@ -105,6 +105,14 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "src/daemon/planLabelRegistry.ts#PlanLabelRegistry.takeDerivedLabelSessions",
     "Retains a base's in-memory terminal end for its published labels; nothing is serialized here.",
   ],
+  [
+    "src/daemon/sessionRowWriter.ts#write",
+    "Passes the release snapshot's reason to DeviceSessionPersistence.markReleased, a row write, not a wire answer.",
+  ],
+  [
+    "src/daemon/sessionManager/releasePersistence.ts#SessionReleasePersistence.issueReleaseRow",
+    "Passes the release snapshot's reason to DeviceSessionPersistence.markReleased, a row write, not a wire answer.",
+  ],
 ];
 
 function unwrap(expression: Expression): Expression {

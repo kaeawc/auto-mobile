@@ -24,8 +24,8 @@
           "type": "platform",
           "call": "contacts.pick",
           "args": {
-            "fields": {
-              "value": "name"
+            "limit": {
+              "value": 3
             }
           },
           "into": "/data/recipient",
@@ -34,5 +34,5 @@
       ]
     }
   },
-  "expectedPath": "root.onTap[0].args.fields"
+  "expectedPath": "root.onTap[0].args.limit"
 }

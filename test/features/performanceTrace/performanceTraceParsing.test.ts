@@ -1,6 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createExecResult } from "../../../src/utils/execResult";
+import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
+import { summarizeXctrace } from "../../../src/features/performanceTrace/XctraceRecorder";
 import {
   parseTraceProcessorCsv,
   summarizePerfettoTrace,
@@ -14,10 +17,25 @@ import {
   parseXctraceTable,
   parseXctraceToc,
   summarizeXctraceTable,
+  type XctraceRow,
 } from "../../../src/features/performanceTrace/xctraceExport";
 
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, "../../fixtures/performanceTrace", name), "utf8");
+
+let timeProfileXcode27Rows: XctraceRow[];
+let timeProfilerToc: string;
+beforeAll(async () => {
+  timeProfileXcode27Rows = await parseXctraceTable(fixture("xctrace-time-profile-xcode27-sim.xml"));
+  timeProfilerToc = fixture("xctrace-toc.xml");
+});
+
+function summarizeTimeProfile(xml: string) {
+  const host = new FakeHostCommandExecutor();
+  host.setCommandResponse("--toc", createExecResult(timeProfilerToc, ""));
+  host.setCommandResponse("--xpath", createExecResult(xml, ""));
+  return summarizeXctrace(host, "/out/t.trace", "timeProfiler");
+}
 
 const base = { deviceId: "SIM", outputPath: "/out/t.trace", timeLimitMs: 30_000 };
 
@@ -151,6 +169,81 @@ describe("xctrace export parsing (#14102)", () => {
     });
   });
 
+  test("counts symbolicated functions from the direct Xcode 27 tagged backtraces", () => {
+    const rows = timeProfileXcode27Rows;
+    expect(rows).toHaveLength(200);
+    const counts = new Map<string, number>();
+    // Independently scan the captured direct shape, resolving its shared frames.
+    for (const row of rows) {
+      const tagged = row("tagged-backtrace");
+      if (!tagged) {
+        continue;
+      }
+      expect(tagged?.backtrace).toBeUndefined();
+      const frames = tagged?.frame;
+      expect(Array.isArray(frames)).toBe(true);
+      if (!Array.isArray(frames)) {
+        throw new Error("Expected direct frame children in the captured export");
+      }
+      for (const frame of frames) {
+        const name = row.resolve(frame)?.$?.name;
+        if (!name || name === "<deduplicated_symbol>" || /^0x[0-9a-f]+$/i.test(name)) {
+          continue;
+        }
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+        break;
+      }
+    }
+    const expected = [...counts]
+      .sort(
+        ([leftName, leftCount], [rightName, rightCount]) =>
+          rightCount - leftCount || leftName.localeCompare(rightName),
+      )
+      .slice(0, 10)
+      .map(([name, samples]) => ({ name, samples }));
+    expect(expected.length).toBeGreaterThan(0);
+    expect(summarizeXctraceTable("timeProfiler", rows)).toEqual({ topFunctions: expected });
+  });
+
+  test("resolves both backtrace shapes and prefers wrapped frames, skipping hex addresses", async () => {
+    const xml = `<trace-query-result><node>
+      <row><tagged-backtrace id="direct">
+        <frame name="0x187bc00a0"/>
+        <frame id="symbol" name="symbolicatedFunction"/>
+      </tagged-backtrace></row>
+      <row><tagged-backtrace ref="direct"/></row>
+      <row><tagged-backtrace><backtrace ref="wrapped"/>
+        <frame name="mustNotWin"/>
+      </tagged-backtrace></row>
+      <row><backtrace id="wrapped"><frame ref="symbol"/></backtrace></row>
+    </node></trace-query-result>`;
+    const rows = await parseXctraceTable(xml);
+    const expected = {
+      topFunctions: [{ name: "symbolicatedFunction", samples: 4 }],
+    };
+    expect(summarizeXctraceTable("timeProfiler", rows)).toEqual(expected);
+    const result = await summarizeTimeProfile(xml);
+    expect(result.summary.topFunctions).toEqual(expected.topFunctions);
+    expect(result.warnings).toEqual([]);
+  });
+
+  test("warns when time-profile rows contain no readable function names", async () => {
+    const result = await summarizeTimeProfile(`<trace-query-result><node>
+      <row><tagged-backtrace><frame name="&lt;deduplicated_symbol&gt;"/></tagged-backtrace></row>
+      <row><tagged-backtrace><frame/></tagged-backtrace></row>
+    </node></trace-query-result>`);
+    expect(result.summary.topFunctions).toEqual([]);
+    expect(result.warnings).toEqual([
+      "performanceTrace timeProfiler: 2 samples exported but no function names could be read; the Xcode export shape may be unsupported.",
+    ]);
+  });
+
+  test("does not warn for a time-profile table with zero rows", async () => {
+    const result = await summarizeTimeProfile("<trace-query-result><node/></trace-query-result>");
+    expect(result.summary.topFunctions).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
   test("summarises hangs longest first, resolving ref cells", async () => {
     const rows = await parseXctraceTable(fixture("xctrace-potential-hangs.xml"));
     expect(summarizeXctraceTable("hangs", rows)).toEqual({
@@ -213,12 +306,9 @@ describe("Perfetto trace processor summaries (#14102)", () => {
       },
     };
 
-    const result = await summarizePerfettoTrace(
-      processor,
-      "/t.pftrace",
-      "hitches",
-      "com.example.app",
-    );
+    const result = await summarizePerfettoTrace(processor, "/t.pftrace", "hitches", {
+      appId: "com.example.app",
+    });
 
     expect(result).toEqual({
       summary: { durationMs: 5_250, hitches: { count: 2, totalDurationMs: 60, maxDurationMs: 40 } },
@@ -234,7 +324,9 @@ describe("Perfetto trace processor summaries (#14102)", () => {
         return [{ dur: "1000000000" }];
       },
     };
-    expect(await summarizePerfettoTrace(failing, "/t", "appLaunch", "com.example.app")).toEqual({
+    expect(
+      await summarizePerfettoTrace(failing, "/t", "appLaunch", { appId: "com.example.app" }),
+    ).toEqual({
       summary: { durationMs: 1_000 },
       warnings: [expect.stringContaining("no such table: android_startups")],
     });
@@ -245,10 +337,10 @@ describe("Perfetto trace processor summaries (#14102)", () => {
     const processor: PerfettoTraceProcessor = {
       query: async (_path, query) => (sql.push(query), []),
     };
-    await summarizePerfettoTrace(processor, "/t", "hangs", "com.o'brien");
+    await summarizePerfettoTrace(processor, "/t", "hangs", { appId: "com.o'brien" });
     expect(sql[1]).toContain("'com.o''brien'");
 
-    const result = await summarizePerfettoTrace(processor, "/t", "hangs", undefined);
+    const result = await summarizePerfettoTrace(processor, "/t", "hangs");
     expect(result.warnings).toEqual([expect.stringContaining("limited to duration")]);
   });
 });

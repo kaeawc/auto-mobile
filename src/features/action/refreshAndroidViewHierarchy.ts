@@ -24,7 +24,7 @@ export async function refreshAndroidViewHierarchy(
     new NoOpPerformanceTracker(),
     serverConfig.isRawElementSearchEnabled(),
     signal,
-    timeoutMs,
+    { timeoutMs },
   );
 
   const rawHierarchy = syncResult

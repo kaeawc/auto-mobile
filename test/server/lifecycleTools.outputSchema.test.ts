@@ -39,7 +39,11 @@ const createObserveResult = (): ObserveResult =>
     viewHierarchy: { hierarchy: { node: {} } },
   });
 
-const device: BootedDevice = { name: "fake", deviceId: "emulator-5554", platform: "android" };
+const device = {
+  name: "fake",
+  deviceId: "emulator-5554",
+  platform: "android",
+} satisfies BootedDevice;
 
 beforeEach(() => {
   ToolRegistry.clearTools();

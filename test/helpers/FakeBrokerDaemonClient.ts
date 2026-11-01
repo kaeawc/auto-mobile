@@ -1,3 +1,4 @@
+import type { SessionBrokerPoolDrainResult } from "../../src/daemon/sessionBroker/broker";
 import type { BrokerDaemonClient } from "../../scripts/manual-test/brokerDaemonClient";
 import type {
   SessionBrokerReleaseResult,
@@ -11,6 +12,7 @@ export class FakeBrokerDaemonClient implements BrokerDaemonClient {
   statusResults: Reply<SessionBrokerResult | undefined>[] = [undefined];
   abandonResults: Reply<SessionBrokerResult>[] = [];
   releaseResults: Reply<SessionBrokerReleaseResult>[] = [];
+  drainResults: Reply<SessionBrokerPoolDrainResult>[] = [{ resources: [] }];
   infoResults: Reply<unknown>[] = [];
   capabilityResults: Reply<readonly string[]>[] = [["session-broker/v1"]];
   private next<T>(method: keyof BrokerDaemonClient, args: string[], replies: Reply<T>[]): T {
@@ -32,6 +34,9 @@ export class FakeBrokerDaemonClient implements BrokerDaemonClient {
   }
   async release(...args: [string, string]): Promise<SessionBrokerReleaseResult> {
     return this.next("release", args, this.releaseResults);
+  }
+  async drainPool(): Promise<SessionBrokerPoolDrainResult> {
+    return this.next("drainPool", [], this.drainResults);
   }
   async info(sessionUuid: string): Promise<unknown> {
     return this.next("info", [sessionUuid], this.infoResults);

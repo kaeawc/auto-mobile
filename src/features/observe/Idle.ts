@@ -150,8 +150,10 @@ export class Idle {
     targetRotation: number,
     startTime: number,
     timeoutMs: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
+    {
+      perf = new NoOpPerformanceTracker(),
+      signal,
+    }: { perf?: PerformanceTracker; signal?: AbortSignal } = {},
   ): Promise<RotationCheckResult> {
     try {
       // Check the current rotation through window manager service
@@ -238,7 +240,7 @@ export class Idle {
         // No previous frame counters
         { missedVsync: null, slowUiThread: null, frameDeadlineMissed: null, totalFrames: null },
         false, // Not first log since we just reset
-        perf,
+        { perf },
       );
     } catch (err) {
       logger.info(`[Idle] Error measuring UI idle: ${err}`);
@@ -404,8 +406,10 @@ export class Idle {
     stdout: string,
     prevMissedVsync: number | null,
     prevSlowUiThread: number | null,
-    prevFrameDeadlineMissed: number | null,
-    prevTotalFrames: number | null,
+    {
+      prevFrameDeadlineMissed,
+      prevTotalFrames,
+    }: { prevFrameDeadlineMissed: number | null; prevTotalFrames: number | null },
   ): {
     isStable: boolean;
     noFrameData?: boolean;
@@ -610,8 +614,10 @@ export class Idle {
     packageName: string,
     baseline: UiStabilityBaseline,
     firstGfxInfoLog: boolean,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    {
+      perf = new NoOpPerformanceTracker(),
+      ...options
+    }: { timeoutMs?: number; signal?: AbortSignal } & { perf?: PerformanceTracker } = {},
   ): Promise<UiStabilityResult> {
     const {
       missedVsync: prevMissedVsync,
@@ -664,13 +670,10 @@ export class Idle {
       }
 
       // Process frame stats and determine stability
-      const result = this.processFrameStatsForStability(
-        stdout,
-        prevMissedVsync,
-        prevSlowUiThread,
+      const result = this.processFrameStatsForStability(stdout, prevMissedVsync, prevSlowUiThread, {
         prevFrameDeadlineMissed,
         prevTotalFrames,
-      );
+      });
 
       return {
         isStable: result.isStable,

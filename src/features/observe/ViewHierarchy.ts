@@ -6,6 +6,7 @@ import { androidCtrlProxyClientForPlatform } from "./android/androidCtrlProxyCli
 import {
   BootedDevice,
   Element,
+  requireAndroidOrIosPlatform,
   ScreenIdentity,
   ViewHierarchyQueryOptions,
   ViewHierarchyResult,
@@ -35,14 +36,16 @@ import { WEBSOCKET_NOT_CONNECTED_MESSAGE } from "./DeviceServiceUtils";
 import { findAccessibilityFocusedElement, findFocusedElement } from "./HierarchyFocus";
 import {
   filterOffscreenNodes,
+  type IosHierarchyNormalization,
   normalizeIosHierarchy,
   projectActionableHierarchy,
 } from "./HierarchyNormalization";
-import { resolveViewHierarchyReadArgs, type ViewHierarchyReadRequest } from "./hierarchyReadArgs";
-import type {
-  HierarchyReadOptions,
-  ViewHierarchy as ViewHierarchyInterface,
-} from "./interfaces/ViewHierarchy";
+import {
+  resolveViewHierarchyReadArgs,
+  type ResolvedViewHierarchyRead,
+  type ViewHierarchyReadRequest,
+} from "./hierarchyReadArgs";
+import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
 import { IOSCtrlProxyClient } from "./ios";
 import { IosRunnerStalledError } from "./ios/IosRunnerStalledError";
 import type { CtrlProxyHierarchyResponse } from "./ios/types";
@@ -70,6 +73,27 @@ export const MAX_FILTERED_CHILDREN_PER_NODE = 64;
 /** Reserve enough time for one useful device re-fetch after recovery. */
 export const MIN_RECOVERY_REFETCH_BUDGET_MS = 100;
 
+function androidReadDefaults({
+  perf = new NoOpPerformanceTracker(),
+  skipWaitForFresh = false,
+  minTimestamp = 0,
+  signal,
+  readOptions,
+}: ResolvedViewHierarchyRead = {}): ResolvedViewHierarchyRead & {
+  perf: PerformanceTracker;
+  skipWaitForFresh: boolean;
+  minTimestamp: number;
+} {
+  return { perf, skipWaitForFresh, minTimestamp, signal, readOptions };
+}
+
+/** Optional collaborators for {@link ViewHierarchy}; each defaults to the shared production one. */
+export interface ViewHierarchyCollaborators {
+  timer?: Timer;
+  observeAccessibilityManagerFactory?: ObserveAccessibilityManagerFactory;
+  launchQueue?: IosRunnerLaunchQueueView;
+}
+
 export class ViewHierarchy implements ViewHierarchyInterface {
   private device: BootedDevice;
   private parser: ElementParser;
@@ -85,14 +109,17 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * @param device - Device to get view hierarchy from
    * @param adbFactory - Factory for creating AdbClient instances
    * @param accessibilityServiceClient - Optional AndroidCtrlProxyClient instance for testing
+   * @param options.timer - Injected clock; other seams are {@link ViewHierarchyCollaborators}
    */
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     accessibilityServiceClient: ViewHierarchyAndroidCtrlProxy | null = null,
-    timer: Timer = defaultTimer,
-    observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory = defaultObserveAccessibilityManagerFactory,
-    launchQueue: IosRunnerLaunchQueueView = getSharedIosRunnerLaunchQueueView(),
+    {
+      timer = defaultTimer,
+      observeAccessibilityManagerFactory = defaultObserveAccessibilityManagerFactory,
+      launchQueue = getSharedIosRunnerLaunchQueueView(),
+    }: ViewHierarchyCollaborators = {},
   ) {
     this.device = device;
     this.parser = new DefaultElementParser();
@@ -137,18 +164,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   /**
    * Retrieve the view hierarchy of the current screen
    * @param queryOptions - Optional query options for targeted element retrieval
-   * @param perf - Performance tracker for timing data
-   * @param skipWaitForFresh - If true, skip WebSocket wait and go straight to sync method
-   * @param minTimestamp - If provided, cached data must have updatedAt >= this value
+   * @param request - Performance tracker, freshness floor, abort signal and read budget
    * @returns Promise with parsed XML view hierarchy
    */
   async getViewHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perfOrRequest?: PerformanceTracker | ViewHierarchyReadRequest,
-    skipWaitForFreshArg?: boolean,
-    minTimestampArg?: number,
-    signalArg?: AbortSignal,
-    readOptionsArg?: number | HierarchyReadOptions,
+    request?: ViewHierarchyReadRequest,
   ): Promise<ViewHierarchyResult> {
     const {
       perf = new NoOpPerformanceTracker(),
@@ -156,13 +177,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       minTimestamp = 0,
       signal,
       readOptions,
-    } = resolveViewHierarchyReadArgs(
-      perfOrRequest,
-      skipWaitForFreshArg,
-      minTimestampArg,
-      signalArg,
-      readOptionsArg,
-    );
+    } = resolveViewHierarchyReadArgs(request);
     if (this.device.platform !== "ios" && this.device.platform !== "android") {
       throw new Error("Unsupported platform");
     }
@@ -170,15 +185,19 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     const deadline = timeoutMs === undefined ? undefined : this.timer.now() + timeoutMs;
     const result =
       this.device.platform === "ios"
-        ? await this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs, signal)
-        : await this.getAndroidViewHierarchy(
-            queryOptions,
+        ? await this.getiOSViewHierarchy(perf, {
+            skipWaitForFresh,
+            minTimestamp,
+            timeoutMs,
+            signal,
+          })
+        : await this.getAndroidViewHierarchy(queryOptions, {
             perf,
             skipWaitForFresh,
             minTimestamp,
             signal,
             readOptions,
-          );
+          });
     return this.retryAfterTransportRecovery(result, {
       queryOptions,
       perf,
@@ -255,13 +274,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       }
       return result;
     }
-    return this.getiOSViewHierarchy(
-      context.perf,
-      context.skipWaitForFresh,
-      context.minTimestamp,
-      this.remainingRecoveryBudget(context),
-      context.signal,
-    );
+    return this.getiOSViewHierarchy(context.perf, {
+      skipWaitForFresh: context.skipWaitForFresh,
+      minTimestamp: context.minTimestamp,
+      timeoutMs: this.remainingRecoveryBudget(context),
+      signal: context.signal,
+    });
   }
 
   private async retryAndroidAfterRecovery(
@@ -292,19 +310,18 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     if (!this.hasRecoveryRefetchBudget(context)) {
       return result;
     }
-    return this.getAndroidViewHierarchy(
-      context.queryOptions,
-      context.perf,
-      context.skipWaitForFresh,
-      context.minTimestamp,
-      context.signal,
-      context.requireFreshExtraction
+    return this.getAndroidViewHierarchy(context.queryOptions, {
+      perf: context.perf,
+      skipWaitForFresh: context.skipWaitForFresh,
+      minTimestamp: context.minTimestamp,
+      signal: context.signal,
+      readOptions: context.requireFreshExtraction
         ? {
             timeoutMs: this.remainingRecoveryBudget(context),
             requireFreshExtraction: context.requireFreshExtraction,
           }
         : this.remainingRecoveryBudget(context),
-    );
+    });
   }
 
   /**
@@ -350,19 +367,18 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       )) &&
       this.hasRecoveryRefetchBudget(context)
     ) {
-      return this.getAndroidViewHierarchy(
-        context.queryOptions,
-        context.perf,
-        context.skipWaitForFresh,
-        context.minTimestamp,
-        context.signal,
-        context.requireFreshExtraction
+      return this.getAndroidViewHierarchy(context.queryOptions, {
+        perf: context.perf,
+        skipWaitForFresh: context.skipWaitForFresh,
+        minTimestamp: context.minTimestamp,
+        signal: context.signal,
+        readOptions: context.requireFreshExtraction
           ? {
               timeoutMs: this.remainingRecoveryBudget(context),
               requireFreshExtraction: context.requireFreshExtraction,
             }
           : this.remainingRecoveryBudget(context),
-      );
+      });
     }
     return null;
   }
@@ -382,10 +398,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    */
   async getiOSViewHierarchy(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    timeoutMs?: number,
-    signal?: AbortSignal,
+    {
+      skipWaitForFresh = false,
+      minTimestamp = 0,
+      timeoutMs,
+      signal,
+    }: Omit<ViewHierarchyReadRequest, "perf" | "requireFreshExtraction"> = {},
   ): Promise<ViewHierarchyResult> {
     const startTime = this.timer.now();
     logger.info(
@@ -403,9 +421,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
           !skipWaitForFresh, // waitForFresh = opposite of skipWaitForFresh
           timeoutMs ?? 15000, // timeout: caller budget when supplied
           perf,
-          skipWaitForFresh,
-          minTimestamp,
-          signal,
+          { skipWaitForFresh, minTimestamp, signal },
         );
       } catch (error) {
         if (!(error instanceof IosRunnerStalledError)) {
@@ -448,13 +464,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       // device on this call or served a host-side cache entry unverified; carry
       // it so ObserveScreen can report freshness instead of assuming it.
       return Object.assign(
-        this.normalizeIosHierarchy(
-          xcTestClient.convertToViewHierarchyResult(result.hierarchy),
-          result.updatedAt,
-          result.reconnectStatus,
-          result.frameContext,
-          result.fresh,
-        ),
+        this.normalizeIosHierarchy(xcTestClient.convertToViewHierarchyResult(result.hierarchy), {
+          updatedAt: result.updatedAt,
+          ctrlProxyReconnect: result.reconnectStatus,
+          frameContext: result.frameContext,
+          fresh: result.fresh,
+        }),
         { [iosHierarchyAcquisition]: result[iosHierarchyAcquisition] },
       );
     });
@@ -473,44 +488,32 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    */
   normalizeIosHierarchy(
     hierarchy: ViewHierarchyResult,
-    updatedAt?: number,
-    ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"],
-    frameContext?: string,
-    fresh?: boolean,
+    metadata: IosHierarchyNormalization = {},
   ): ViewHierarchyResult {
-    return normalizeIosHierarchy(
-      hierarchy,
-      updatedAt ?? hierarchy.updatedAt ?? this.timer.now(),
-      ctrlProxyReconnect,
-      frameContext,
-      fresh,
-    );
+    const updatedAt = metadata.updatedAt ?? hierarchy.updatedAt ?? this.timer.now();
+    return normalizeIosHierarchy(hierarchy, { ...metadata, updatedAt });
   }
 
   projectActionableHierarchy(hierarchy: ViewHierarchyResult): ViewHierarchyResult {
+    const platform = requireAndroidOrIosPlatform(this.device.platform, "Observing the hierarchy");
     return projectActionableHierarchy(
-      this.device.platform,
+      platform,
       hierarchy,
-      this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+      platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
     );
   }
 
   /**
    * Retrieve the view hierarchy of the current screen
    * @param queryOptions - Optional query options for targeted element retrieval
-   * @param perf - Performance tracker for timing data
-   * @param skipWaitForFresh - If true, skip WebSocket wait and go straight to sync method
-   * @param minTimestamp - If provided, cached data must have updatedAt >= this value
+   * @param read - Performance tracker, freshness floor, abort signal and read budget
    * @returns Promise with parsed view hierarchy
    */
   async getAndroidViewHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    signal?: AbortSignal,
-    readOptions?: number | HierarchyReadOptions,
+    read?: ResolvedViewHierarchyRead,
   ): Promise<ViewHierarchyResult> {
+    const { perf, skipWaitForFresh, minTimestamp, signal, readOptions } = androidReadDefaults(read);
     const timeoutMs = typeof readOptions === "number" ? readOptions : readOptions?.timeoutMs;
     const startTime = this.timer.now();
     logger.debug(

@@ -34,6 +34,15 @@ export const ANDROID_BASELINE_FILE_ROOTS = [
   "/sdcard/Documents",
 ] as const;
 
+/** The Downloads root Android `user_files` namespaces live directly under for user 0. */
+export const ANDROID_USER_FILES_ROOT = "/sdcard/Download";
+
+/**
+ * `shared-file` observation listing every direct entry (any type) of the Downloads root, so
+ * cleaning can prove a `user_files` namespace path did not exist when the baseline was captured.
+ */
+export const ANDROID_DOWNLOAD_ENTRIES_KEY = "download-entries";
+
 export function isAndroidResetFile(path: string): boolean {
   return (
     path.startsWith("/sdcard/") &&
@@ -62,18 +71,12 @@ export async function captureAndroidMutationBaseline(
   await captureDisplay(command, observe);
   observe("device-setting", "locale", await command("shell getprop persist.sys.locale"));
   observe("clock", "timezone", await command("shell getprop persist.sys.timezone"));
-  const accounts = await command("shell dumpsys account");
-  if (
-    users.some(
-      (user) =>
-        !new RegExp(`^User UserInfo\\{${user}:[^\\n]+\\}:\\s*\\n\\s*Accounts: \\d+\\s*$`, "m").test(
-          accounts,
-        ),
-    )
-  ) {
-    throw new ActionableError("Android baseline account inventory is unreadable");
+  for (const [user, digest] of parseAndroidAccountDigests(
+    await command("shell dumpsys account"),
+    users,
+  )) {
+    observe("account", androidAccountKey(user), digest);
   }
-  observe("account", "inventory", createHash("sha256").update(accounts).digest("hex"));
   await captureFiles(command, observe);
   const unobservable = DEVICE_MUTATION_KINDS.filter(
     (kind) => !ANDROID_CERTIFIABLE_KINDS.some((complete) => complete === kind),
@@ -90,6 +93,47 @@ export async function captureAndroidMutationBaseline(
       ]),
     ),
   };
+}
+
+/** The `account` observation key holding one user's AccountManager account-set digest. */
+export function androidAccountKey(user: number): string {
+  return `user:${user}`;
+}
+
+/**
+ * Per-user digests of the AccountManager account set in `dumpsys account`: each listed user's
+ * section must open with `Accounts: N` followed by exactly N `Account {...}` rows. Only a SHA-256
+ * of the sorted rows is kept, so account names never reach the journal. Any unreadable section
+ * throws: an account set that cannot be read is never assumed unchanged.
+ */
+export function parseAndroidAccountDigests(
+  output: string,
+  users: readonly number[],
+): Map<number, string> {
+  const lines = output.split(/\r?\n/);
+  const digests = new Map<number, string>();
+  for (const user of users) {
+    const header = lines.findIndex((line) =>
+      new RegExp(`^User UserInfo\\{${user}:[^\\n]*\\}:\\s*$`).test(line),
+    );
+    const count = /^\s*Accounts: (\d+)\s*$/.exec(lines[header + 1] ?? "")?.[1];
+    if (header < 0 || count === undefined) {
+      throw new ActionableError(`Android account inventory is unreadable for user ${user}`);
+    }
+    const rows = lines.slice(header + 2, header + 2 + Number(count)).map((line) => line.trim());
+    if (rows.length !== Number(count) || rows.some((row) => !/^Account \{.+\}$/.test(row))) {
+      throw new ActionableError(`Android account inventory is malformed for user ${user}`);
+    }
+    digests.set(user, androidAccountDigest(rows));
+  }
+  return digests;
+}
+
+/** The digest of one user's `Account {...}` rows; `[]` gives a user with no accounts. */
+export function androidAccountDigest(rows: readonly string[]): string {
+  return createHash("sha256")
+    .update(JSON.stringify([...rows].sort()))
+    .digest("hex");
 }
 
 async function captureSettings(
@@ -163,6 +207,7 @@ async function captureFiles(
     throw new ActionableError("Android baseline shared-storage root inventory is malformed");
   }
   observe("shared-file", "roots", createHash("sha256").update(JSON.stringify(paths)).digest("hex"));
+  await captureDownloadEntries(command, observe);
   for (const root of ANDROID_BASELINE_FILE_ROOTS) {
     const script = `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -type f -exec sha256sum {} \\;; elif [ -e ${shellQuote(root)} ]; then exit 1; fi`;
     const output = await command(`shell sh -c ${shellQuote(script)}`, 30_000);
@@ -175,6 +220,30 @@ async function captureFiles(
       observe("shared-file", path, match[1].toLowerCase());
     }
   }
+}
+
+async function captureDownloadEntries(
+  command: AndroidBaselineCommand,
+  observe: AndroidObservationSink,
+): Promise<void> {
+  const root = ANDROID_USER_FILES_ROOT;
+  const script = `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -mindepth 1 -maxdepth 1 -print; elif [ -e ${shellQuote(root)} ]; then exit 1; fi`;
+  const entries = (await command(`shell sh -c ${shellQuote(script)}`))
+    .split("\n")
+    .filter(Boolean)
+    .sort();
+  if (
+    new Set(entries).size !== entries.length ||
+    entries.some(
+      (path) =>
+        !path.startsWith(`${root}/`) ||
+        !isAndroidResetFile(path) ||
+        path.slice(root.length + 1).includes("/"),
+    )
+  ) {
+    throw new ActionableError("Android baseline Downloads entry inventory is malformed");
+  }
+  observe("shared-file", ANDROID_DOWNLOAD_ENTRIES_KEY, JSON.stringify(entries));
 }
 
 export async function captureAndroidUsers(command: AndroidBaselineCommand): Promise<number[]> {

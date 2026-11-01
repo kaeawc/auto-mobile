@@ -39,9 +39,11 @@ export class FakeKeyboardOpenClient implements KeyboardOpenClient {
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs?: number,
-    perf?: undefined,
-    signal?: AbortSignal,
+    {
+      timeoutMs,
+      perf,
+      signal,
+    }: { timeoutMs?: number; perf?: undefined; signal?: AbortSignal } = {},
   ): Promise<A11yActionResult> {
     void timeoutMs;
     void perf;

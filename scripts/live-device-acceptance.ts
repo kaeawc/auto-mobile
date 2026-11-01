@@ -2447,9 +2447,11 @@ async function defaultCreateDaemonClient(
   build: BuildIdentity,
   signal: AbortSignal,
 ): Promise<DaemonSessionClient> {
-  const client = new DaemonClient(SOCKET_PATH, undefined, undefined, undefined, {
-    version: DAEMON_VERSION,
-    build,
+  const client = new DaemonClient(SOCKET_PATH, undefined, undefined, {
+    clientIdentity: {
+      version: DAEMON_VERSION,
+      build,
+    },
   });
   const abort = () => void client.close();
   signal.addEventListener("abort", abort, { once: true });

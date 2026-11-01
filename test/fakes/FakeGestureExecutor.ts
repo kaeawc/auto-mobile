@@ -1,6 +1,7 @@
 import { GestureOptions } from "../../src/models";
 import { SwipeResult } from "../../src/models/SwipeResult";
 import type { ActionCall } from "../../src/features/action/ActionCall";
+import type { SwipeLine } from "../../src/features/action/ExecuteGesture";
 import { GestureExecutor } from "../../src/features/action/swipeon";
 import { throwIfAborted } from "../../src/utils/toolUtils";
 
@@ -23,10 +24,7 @@ export class FakeGestureExecutor implements GestureExecutor {
   }
 
   async swipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
+    { x1, y1, x2, y2 }: SwipeLine,
     options: GestureOptions = {},
     call: ActionCall | undefined = undefined,
   ): Promise<SwipeResult> {

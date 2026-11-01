@@ -1,3 +1,4 @@
+import { rejectWatchAction } from "../watch/WatchActions";
 import {
   DefaultSendKeysCommandExecutor,
   type SendKeysPlatformDependencies,
@@ -10,7 +11,11 @@ import {
 import { TargetFocus } from "./sendkeys/TargetFocus";
 import { TargetState } from "./sendkeys/TargetState";
 import { CommandRunner } from "./sendkeys/CommandRunner";
-import { SendKeysRequestBudget, isSendKeysBudgetExhausted } from "./sendkeys/SendKeysRequestBudget";
+import {
+  SendKeysRequestBudget,
+  isSendKeysBudgetExhausted,
+  type BoundedIosImeOptions,
+} from "./sendkeys/SendKeysRequestBudget";
 import { FocusKeyboardRecovery } from "./sendkeys/FocusKeyboardRecovery";
 import { ActionableError } from "../../models/ActionableError";
 import type { BaseActionResult } from "../../models/BaseActionResult";
@@ -53,6 +58,8 @@ import {
 import { Keyboard } from "./Keyboard";
 import type { RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
+import { iosSdkBridgeTarget } from "../observe/ios/iosSdkObservationMerge";
+import { iosSdkWebValueTarget } from "../observe/ios/iosSdkWebMerge";
 import { type KeyboardIdentity } from "./AndroidImeCatalog";
 
 export { DefaultSendKeysCommandExecutor };
@@ -67,6 +74,7 @@ export {
   segmentGraphemes,
 } from "./sendkeys/AndroidTypingConstants";
 import type { ProgressCallback } from "./BaseVisualChange";
+import type { ActionCall } from "./ActionCall";
 
 export const SEND_KEYS_TYPING_MODES = [
   "auto",
@@ -134,6 +142,12 @@ export interface SendKeysFocusOptions {
   layer?: HierarchyLayer;
 }
 
+/** `ActionCall` for sendKeys: also carries the target display and the focus scope. */
+export interface SendKeysCall extends ActionCall {
+  display?: string;
+  focus?: SendKeysFocusOptions;
+}
+
 export interface SendKeysTypeCommand {
   action: "type";
   text: string;
@@ -177,7 +191,14 @@ export interface SendKeysCommandResult extends BaseActionResult {
   retryable?: boolean;
   verified?: boolean;
   warning?: string;
-  backend?: "autoMobileIme";
+  /**
+   * `autoMobileIme` on Android IME typing. On iOS, for a field merged from the app's SDK
+   * observation bridge (#5159): `sdk` when the bridge entered or cleared the text, `xctest` when
+   * XCTest stood in.
+   */
+  backend?: "autoMobileIme" | import("../../models/ObserveResult").ObservationBackend;
+  /** Why XCTest stood in for the bridge: it was unavailable, or it does not support the action. */
+  fallbackReason?: import("../../models/ObserveResult").ObservationFallbackReason;
   capability?: "semanticText";
   keyboard?: KeyboardIdentity;
 }
@@ -214,6 +235,10 @@ export interface SendKeysCommandExecutor {
   setTargetLayer?(layer: HierarchyLayer | undefined): void;
   /** The focuser reported the target as a password field; honoured for prototype-layer targets. */
   setTargetPasswordField?(passwordField: boolean): void;
+  /** iOS: the focused field's SDK observation-bridge identity, when it is a bridge node (#5159). */
+  setIosSdkTextTarget?(
+    target: import("./sendkeys/IosSdkTextRouting").IosSdkTextTarget | undefined,
+  ): void;
   isPasswordTarget?(): boolean;
   resetCaretState?(): void;
   withImeSpan?(action: () => Promise<SendKeysCommandExecution>): Promise<SendKeysCommandExecution>;
@@ -238,6 +263,7 @@ export interface SendKeysCommandExecutor {
     retryable?: boolean;
     warning?: string;
     partialApplication?: boolean;
+    iosBackend?: import("./IosSdkBridgeTapRouter").IosSdkTapOutcome;
   }>;
 }
 
@@ -254,6 +280,8 @@ export interface SendKeysTargetFocuser {
       identifiers?: readonly string[];
       /** Layer of the resolved element, when known. */
       layer?: HierarchyLayer;
+      /** iOS: the resolved element's SDK observation-bridge identity (#5159). */
+      sdkTarget?: import("./sendkeys/IosSdkTextRouting").IosSdkTextTarget;
     }
   >;
 }
@@ -319,6 +347,8 @@ export type TextActionResult = {
   /** Device upper bound; this is not the verified committedGraphemes count. */
   committedUnits?: number;
   sessionUnsafe?: boolean;
+  /** Internal: the iOS SDK bridge outcome, mapped to `backend` / `fallbackReason` (#5159). */
+  iosBackend?: import("./IosSdkBridgeTapRouter").IosSdkTapOutcome;
 };
 
 export interface SendKeysTextClient {
@@ -355,8 +385,7 @@ export interface SendKeysTextClient {
     text: string,
     priorImeId: string | null,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents" | "clearField",
-    trace?: boolean,
+    options?: { delivery?: "commit" | "keyEvents" | "clearField"; trace?: boolean },
   ): Promise<TextActionResult>;
 }
 
@@ -365,7 +394,7 @@ export interface SendKeysInputKey {
     key: InputKeyName,
     timeoutMs?: number,
     frameContext?: string,
-    modifiers?: readonly InputKeyModifier[],
+    options?: { modifiers?: readonly InputKeyModifier[] },
   ): Promise<{
     success: boolean;
     error?: string;
@@ -373,6 +402,19 @@ export interface SendKeysInputKey {
     verified?: boolean;
     warning?: string;
   }>;
+}
+
+/** The focused element's SDK bridge identity, so text entry can follow it to the bridge (#5159). */
+export function sdkTargetField(
+  device: Pick<BootedDevice, "platform">,
+  element: Record<string, unknown> | undefined,
+): { sdkTarget?: import("./sendkeys/IosSdkTextRouting").IosSdkTextTarget } {
+  if (device.platform !== "ios" || !element) {
+    return {};
+  }
+  // A native bridge node, else a DOM input or textarea merged from an opted-in web view (#5162).
+  const sdkTarget = iosSdkBridgeTarget(element) ?? iosSdkWebValueTarget(element);
+  return sdkTarget ? { sdkTarget } : {};
 }
 
 export class SendKeys {
@@ -396,6 +438,7 @@ export class SendKeys {
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
     dependencies: SendKeysDependencies = {},
   ) {
+    rejectWatchAction(device.platform, "text input");
     this.timer = dependencies.timer ?? defaultTimer;
     this.keyboard = dependencies.keyboard;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
@@ -428,9 +471,7 @@ export class SendKeys {
           });
           const result = await tap.execute(
             { ...selector, ...options, action: "focus", display },
-            undefined,
-            signal,
-            { throwOnKeyboardOcclusion: true },
+            { signal, recovery: { throwOnKeyboardOcclusion: true } },
           );
           return {
             success: result.success,
@@ -446,14 +487,15 @@ export class SendKeys {
             ...(result.element && new FieldTypeDetector().isPasswordField(result.element)
               ? { passwordField: true }
               : {}),
+            ...sdkTargetField(device, result.element),
           };
         },
       } satisfies SendKeysTargetFocuser);
     this.requestBudget = new SendKeysRequestBudget({
       platform: () => this.device.platform,
       timer: this.timer,
-      executeUnbounded: (commands, selector, progress, signal, routing) =>
-        this.executeUnbounded(commands, selector, progress, signal, routing),
+      executeUnbounded: (commands, selector, progress, routing) =>
+        this.executeUnbounded(commands, selector, progress, routing),
     });
     this.focusRecovery = new FocusKeyboardRecovery({
       platform: () => this.device.platform,
@@ -477,6 +519,7 @@ export class SendKeys {
       setTargetLayer: (layer) => this.executor.setTargetLayer?.(layer),
       setTargetPasswordField: (passwordField) =>
         this.executor.setTargetPasswordField?.(passwordField),
+      setIosSdkTextTarget: (target) => this.executor.setIosSdkTextTarget?.(target),
     });
     this.commandRunner = new CommandRunner({
       device: this.device,
@@ -492,11 +535,9 @@ export class SendKeys {
   async execute(
     commands: SendKeysCommand[],
     selector?: SendKeysSelector,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    display?: string,
-    options?: SendKeysFocusOptions,
+    call: SendKeysCall = {},
   ): Promise<SendKeysResult> {
+    const options = call.focus;
     this.target.focusedPassword = false;
     this.target.prototypeIdentifiers = [selector?.elementId, selector?.testTag].filter(
       (id): id is string => !!id,
@@ -504,25 +545,17 @@ export class SendKeys {
     this.target.effectiveLayer = options?.layer;
     this.executor.setTargetLayer?.(this.target.effectiveLayer);
     this.executor.setTargetPasswordField?.(false);
-    const result = await this.executeFocused(
-      commands,
-      selector,
-      progress,
-      signal,
-      display,
-      options,
-    );
+    this.executor.setIosSdkTextTarget?.(undefined);
+    const result = await this.executeFocused(commands, selector, call);
     return redactPasswordCommandResults(result, commands, this.target.focusedPassword);
   }
 
   private async executeFocused(
     commands: SendKeysCommand[],
-    selector?: SendKeysSelector,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    display?: string,
-    options?: SendKeysFocusOptions,
+    selector: SendKeysSelector | undefined,
+    call: SendKeysCall,
   ): Promise<SendKeysResult> {
+    const { progress, signal, display, focus: options } = call;
     const focusOptionsError = this.validateFocusOptions(selector, options);
     if (focusOptionsError) {
       return {
@@ -548,13 +581,10 @@ export class SendKeys {
         };
       }
       try {
-        const target = await this.prepareExplicitDisplay(
-          commands,
-          selector,
-          display,
+        const target = await this.prepareExplicitDisplay(commands, selector, display, {
           signal,
-          options,
-        );
+          ...options,
+        });
         displayId = target.displayId;
         selector = target.selector;
         assertCurrent = target.assertCurrent;
@@ -567,10 +597,11 @@ export class SendKeys {
         ? commands[0].key
         : undefined;
     if (this.device.platform === "ios" && semanticKey) {
-      return this.executeBoundedIosIme(commands, selector, progress, signal, semanticKey, {
-        ...options,
-        display,
-        assertCurrent,
+      return this.executeBoundedIosIme(commands, semanticKey, {
+        selector,
+        progress,
+        signal,
+        target: { ...options, display, assertCurrent },
       });
     }
     const routing = { ...options, display, displayId, assertCurrent };
@@ -623,36 +654,27 @@ export class SendKeys {
     commands: SendKeysCommand[],
     selector: SendKeysSelector | undefined,
     display: string,
-    signal?: AbortSignal,
-    options: SendKeysFocusOptions = {},
+    { signal, ...options }: SendKeysFocusOptions & { signal?: AbortSignal } = {},
   ): Promise<{ displayId?: number; selector?: SendKeysSelector; assertCurrent: () => void }> {
-    return this.targetFocus.prepareExplicitDisplay(commands, selector, display, signal, options);
+    return this.targetFocus.prepareExplicitDisplay(commands, selector, display, {
+      signal,
+      ...options,
+    });
   }
 
   private executeBoundedIosIme(
     commands: SendKeysCommand[],
-    selector: SendKeysSelector | undefined,
-    progress: ProgressCallback | undefined,
-    signal: AbortSignal | undefined,
     key: SendKeysSemanticKey,
-    target: Pick<SendKeysRouting, "display" | "assertCurrent" | "container" | "selectionStrategy">,
+    options: BoundedIosImeOptions,
   ): Promise<SendKeysResult> {
-    return this.requestBudget.executeBoundedIosIme(
-      commands,
-      selector,
-      progress,
-      signal,
-      key,
-      target,
-    );
+    return this.requestBudget.executeBoundedIosIme(commands, key, options);
   }
 
   private async executeUnbounded(
     commands: SendKeysCommand[],
     selector?: SendKeysSelector,
     progress?: ProgressCallback,
-    signal?: AbortSignal,
-    routing: SendKeysRouting = {},
+    { signal, ...routing }: SendKeysRouting & { signal?: AbortSignal } = {},
   ): Promise<SendKeysResult> {
     signal?.throwIfAborted();
     const preflight = this.preflightCommands(commands);
@@ -669,10 +691,10 @@ export class SendKeys {
       if (
         capture &&
         !deferTerminalScreenshot(observation, (chosen, requestSignal) =>
-          capture(undefined, requestSignal ?? signal, chosen),
+          capture(undefined, { signal: requestSignal ?? signal, observation: chosen }),
         )
       ) {
-        await capture(undefined, signal, observation);
+        await capture(undefined, { signal, observation });
       }
       return observation;
     };

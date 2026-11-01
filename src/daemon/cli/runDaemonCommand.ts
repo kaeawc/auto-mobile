@@ -698,9 +698,11 @@ async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): 
   const printReleased = (
     alreadyReleased: boolean,
     message: string,
-    device?: string,
-    known?: boolean,
-    cleanup?: "pending" | "failed",
+    {
+      device,
+      known,
+      cleanup,
+    }: { device?: string; known?: boolean; cleanup?: "pending" | "failed" } = {},
   ) => {
     if (json) {
       console.log(
@@ -739,10 +741,10 @@ async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): 
       const session = requireDaemonSession(sessionManager, sessionId);
       const deviceId = session.assignedDevice;
       // Preserve the CLI's ordering: a rejected session release never frees the device.
-      await releaseSessionAndDevice(sessionManager, pool, deviceId, sessionId, undefined, {
+      await releaseSessionAndDevice({ manager: sessionManager, pool }, deviceId, sessionId, {
         deferFailureFallback: true,
       });
-      printReleased(false, `Session ${sessionId} released`, deviceId);
+      printReleased(false, `Session ${sessionId} released`, { device: deviceId });
       return;
     }
     {
@@ -764,9 +766,7 @@ async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): 
             printReleased(
               result.alreadyReleased,
               result.alreadyReleased ? result.message : `Session ${sessionId} released`,
-              result.device,
-              result.known,
-              result.cleanup,
+              { device: result.device, known: result.known, cleanup: result.cleanup },
             );
           });
       } catch (error) {

@@ -17,7 +17,10 @@ import {
   type ResolvedTool,
   type RoutingScope,
 } from "../../../../src/server/pipeline/ingress/routing";
-import { SessionToolBinding } from "../../../../src/server/SessionToolBinding";
+import {
+  SessionToolBinding,
+  type DeviceSessionRouting,
+} from "../../../../src/server/SessionToolBinding";
 import { ToolRegistry } from "../../../../src/server/toolRegistry";
 import { SELECTS_ACTIVE_DEVICE } from "../../../../src/server/toolRegistryTypes";
 import { registerUtilityTools } from "../../../../src/server/utilityTools";
@@ -42,9 +45,13 @@ beforeAll(() => {
   const schema = z.object({ sessionUuid: z.string().optional() });
   const ok = async () => ({ content: [{ type: "text" as const, text: "{}" }] });
   ToolRegistry.registerDeviceAware(DEVICE_CONTROL, "control", schema, ok);
-  ToolRegistry.registerDeviceAware(DEVICE_READ, "read", schema, ok, { deviceReadOnly: true });
+  ToolRegistry.registerDeviceAware(DEVICE_READ, "read", schema, {
+    handler: ok,
+    deviceReadOnly: true,
+  });
   ToolRegistry.register(PLAIN, "plain", schema, ok);
-  ToolRegistry.register(READ_ONLY_SELECTION, "selection", schema, ok, {
+  ToolRegistry.register(READ_ONLY_SELECTION, "selection", schema, {
+    handler: ok,
     readOnly: true,
     ...SELECTS_ACTIVE_DEVICE,
   });
@@ -88,9 +95,7 @@ class RecordingBinding extends SessionToolBinding {
     mcpSessionId: string | undefined,
     params: Record<string, unknown>,
     lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
-    selectingActiveDevice?: boolean,
-    deferForeignDevice?: boolean,
-    readOnly?: boolean,
+    { selectingActiveDevice, deferForeignDevice, readOnly }: DeviceSessionRouting = {},
   ): string | undefined {
     this.resolveCalls.push({ selectingActiveDevice, deferForeignDevice, readOnly });
     return "binding-routed";

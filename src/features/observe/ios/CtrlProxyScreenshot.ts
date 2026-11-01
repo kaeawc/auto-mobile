@@ -157,9 +157,13 @@ export async function captureIosPanelScreenshot(
   device: BootedDevice,
   hierarchy: XCTestHierarchy | null,
   simctl: Pick<SimCtl, "screenshot">,
-  runnerCapture: () => Promise<CtrlProxyScreenshotResult>,
-  signal?: AbortSignal,
-  activePanelKey?: string,
+  {
+    runnerCapture,
+    signal,
+    activePanelKey,
+  }: Pick<IosPanelScreenshotRequest, "signal" | "activePanelKey"> & {
+    runnerCapture: () => Promise<CtrlProxyScreenshotResult>;
+  },
 ): Promise<CtrlProxyScreenshotResult> {
   return captureIosPanelScreenshotWith({
     device,

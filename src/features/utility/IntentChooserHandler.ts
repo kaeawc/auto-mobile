@@ -42,6 +42,24 @@ interface ChooserMatch {
   signature: string;
 }
 
+/** Context for matching one app row in a chooser capture. */
+interface ChooserSearchOptions {
+  /** The capture's host package; defaults to each root's own package. */
+  hierarchyPackage?: string;
+  /** A label already resolved for the app; `undefined` resolves and refreshes, `null` means none. */
+  resolvedLabel?: string | null;
+  originalUpdatedAt?: number;
+  url?: string;
+}
+
+/** The device-clock evidence a post-tap observation is checked against. */
+interface PostTapFreshness {
+  tappedAt: number;
+  deviceSeconds: boolean;
+  latestObservedAt: number;
+  floor: number;
+}
+
 // HandleIntentChooser has a 500ms action timeout; leave time for its observation.
 const POST_TAP_VERIFY_BUDGET_MS = 200;
 
@@ -66,14 +84,25 @@ export class IntentChooserHandler {
   private readonly chooserMetadata: ChooserAppMetadata | undefined;
   private readonly timer: Timer;
   private readonly chooserSignal: AbortSignal | undefined;
+  private readonly adbFactory: AdbClientFactory;
+  private readonly detectChooser: (hierarchy: ViewHierarchyResult) => boolean;
+
   constructor(
     private device: BootedDevice | null = null,
-    private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    dependencies: DeepLinkManagerDependencies = {},
-    private readonly detectChooser: (hierarchy: ViewHierarchyResult) => boolean = (hierarchy) =>
-      this.detectIntentChooser(hierarchy),
-    executor: AdbExecutor = adbFactory.create(device),
+    {
+      adbFactory = defaultAdbClientFactory,
+      dependencies = {},
+      detectChooser = (hierarchy) => this.detectIntentChooser(hierarchy),
+      executor = adbFactory.create(device),
+    }: {
+      adbFactory?: AdbClientFactory;
+      dependencies?: DeepLinkManagerDependencies;
+      detectChooser?: (hierarchy: ViewHierarchyResult) => boolean;
+      executor?: AdbExecutor;
+    } = {},
   ) {
+    this.adbFactory = adbFactory;
+    this.detectChooser = detectChooser;
     this.adbUtils = executor;
     ({ parser: this.parser, geometry: this.geometry } = resolveElementServices(
       dependencies.elementServices ?? {},
@@ -273,13 +302,10 @@ export class IntentChooserHandler {
       try {
         throwIfAborted(this.chooserSignal);
         observed = await awaitWhileRequestIsLive(
-          metadata.getFreshHierarchy(
-            this.device!,
-            this.adbFactory,
-            floor,
-            readBudget,
-            this.chooserSignal,
-          ),
+          metadata.getFreshHierarchy(this.device!, this.adbFactory, floor, {
+            timeoutMs: readBudget,
+            signal: this.chooserSignal,
+          }),
           this.chooserSignal,
         );
       } catch (error) {
@@ -288,14 +314,12 @@ export class IntentChooserHandler {
         return false;
       }
       if (
-        this.isConfirmedPostTapPackage(
-          observed,
-          appPackage,
+        this.isConfirmedPostTapPackage(observed, appPackage, {
           tappedAt,
           deviceSeconds,
           latestObservedAt,
           floor,
-        )
+        })
       ) {
         return true;
       }
@@ -317,10 +341,7 @@ export class IntentChooserHandler {
   private isConfirmedPostTapPackage(
     observed: ViewHierarchyResult,
     appPackage: string,
-    tappedAt: number,
-    deviceSeconds: boolean,
-    latestObservedAt: number,
-    floor: number,
+    { tappedAt, deviceSeconds, latestObservedAt, floor }: PostTapFreshness,
   ): boolean {
     return (
       observed.updatedAt !== undefined &&
@@ -398,11 +419,9 @@ export class IntentChooserHandler {
   async findAppInChooser(
     nodes: ViewHierarchyNode[],
     appPackage: string,
-    hierarchyPackage?: string,
-    resolvedLabel?: string | null,
-    originalUpdatedAt?: number,
-    url?: string,
+    options: ChooserSearchOptions = {},
   ): Promise<ChooserMatch> {
+    const { hierarchyPackage, resolvedLabel, originalUpdatedAt, url } = options;
     const packageRows = new Set<ViewHierarchyNode>();
     const labelRows = new Map<ViewHierarchyNode, Set<string>>();
     const rowsWithPackageMetadata = new Set<ViewHierarchyNode>();
@@ -457,14 +476,11 @@ export class IntentChooserHandler {
     }
     const candidates = [...packageRows];
     if (candidates.length === 0 && this.device) {
-      return this.findChooserLabelFallback(
-        appPackage,
-        labelRows,
-        rowsWithPackageMetadata,
+      return this.findChooserLabelFallback(appPackage, labelRows, rowsWithPackageMetadata, {
         resolvedLabel,
         originalUpdatedAt,
         url,
-      );
+      });
     }
     return this.selectUniqueChooserRow(candidates, labelRows, appPackage, true);
   }
@@ -487,21 +503,15 @@ export class IntentChooserHandler {
       currentPage = page;
       const roots = this.parser.extractRootNodes(hierarchy);
       try {
-        const match = await this.findAppInChooser(
-          roots,
-          appPackage,
-          hierarchy.packageName,
-          undefined,
-          hierarchy.updatedAt,
+        const match = await this.findAppInChooser(roots, appPackage, {
+          hierarchyPackage: hierarchy.packageName,
+          originalUpdatedAt: hierarchy.updatedAt,
           url,
-        );
-        previousMatch = this.recordChooserMatch(
-          matches,
-          previousMatch,
-          match,
+        });
+        previousMatch = this.recordChooserMatch(matches, previousMatch, match, {
           page,
           observedDisplacement,
-        );
+        });
         matchingPage = page;
       } catch (error) {
         throwIfAborted(this.chooserSignal);
@@ -517,16 +527,13 @@ export class IntentChooserHandler {
       if (page === CHOOSER_SCAN_PAGES - 1) {
         break;
       }
-      const next = await this.scrollChooserList(
-        hierarchy,
-        roots,
-        metadata,
+      const next = await this.scrollChooserList(hierarchy, roots, metadata, {
         appPackage,
-        Math.max(
+        capturedAt: Math.max(
           missing?.capturedAt ?? 0,
           ...[...matches.values()].map((match) => match.capturedAt ?? 0),
         ),
-      );
+      });
       if (!next) {
         break;
       }
@@ -541,15 +548,14 @@ export class IntentChooserHandler {
     if (matchingPage === currentPage) {
       return unique;
     }
-    return this.restoreChooserPage(hierarchy, appPackage, unique, metadata, url);
+    return this.restoreChooserPage(hierarchy, appPackage, unique, { metadata, url });
   }
 
   private recordChooserMatch(
     matches: Map<string, ChooserMatch>,
     previous: { page: number; key: string; match: ChooserMatch } | undefined,
     match: ChooserMatch,
-    page: number,
-    observedDisplacement?: number,
+    { page, observedDisplacement }: { page: number; observedDisplacement?: number },
   ): { page: number; key: string; match: ChooserMatch } {
     const sameRow =
       previous?.page === page - 1 &&
@@ -696,10 +702,7 @@ export class IntentChooserHandler {
       const match = await this.findAppInChooser(
         this.parser.extractRootNodes(hierarchy),
         appPackage,
-        hierarchy.packageName,
-        undefined,
-        hierarchy.updatedAt,
-        url,
+        { hierarchyPackage: hierarchy.packageName, originalUpdatedAt: hierarchy.updatedAt, url },
       );
       if (
         expected.stableId
@@ -724,8 +727,7 @@ export class IntentChooserHandler {
     hierarchy: ViewHierarchyResult,
     appPackage: string,
     expected: ChooserMatch,
-    metadata: ChooserAppMetadata,
-    url?: string,
+    { metadata, url }: { metadata: ChooserAppMetadata; url?: string },
   ): Promise<ChooserMatch> {
     let capturedAt = expected.capturedAt;
     for (let page = 0; page < CHOOSER_SCAN_PAGES; page += 1) {
@@ -733,9 +735,7 @@ export class IntentChooserHandler {
         hierarchy,
         this.parser.extractRootNodes(hierarchy),
         metadata,
-        appPackage,
-        capturedAt,
-        "down",
+        { appPackage, capturedAt, direction: "down" },
       );
       if (!previous) {
         break;
@@ -757,9 +757,11 @@ export class IntentChooserHandler {
     hierarchy: ViewHierarchyResult,
     roots: ViewHierarchyNode[],
     metadata: ChooserAppMetadata,
-    appPackage: string,
-    capturedAt?: number,
-    direction: "up" | "down" = "up",
+    {
+      appPackage,
+      capturedAt,
+      direction = "up",
+    }: { appPackage: string; capturedAt?: number; direction?: "up" | "down" },
   ): Promise<{ hierarchy: ViewHierarchyResult } | null> {
     const list = this.findChooserList(roots);
     if (!list || list.bounds.bottom - list.bounds.top < 40) {
@@ -783,13 +785,9 @@ export class IntentChooserHandler {
     const nextTimestamp = Math.max(hierarchy.updatedAt ?? 0, capturedAt ?? 0) + 1;
     throwIfAborted(this.chooserSignal);
     const fresh = await awaitWhileRequestIsLive(
-      metadata.getFreshHierarchy(
-        this.device!,
-        this.adbFactory,
-        nextTimestamp,
-        undefined,
-        this.chooserSignal,
-      ),
+      metadata.getFreshHierarchy(this.device!, this.adbFactory, nextTimestamp, {
+        signal: this.chooserSignal,
+      }),
       this.chooserSignal,
     );
     this.validateScrolledChooser(fresh, nextTimestamp, appPackage);
@@ -837,9 +835,11 @@ export class IntentChooserHandler {
     appPackage: string,
     labelRows: Map<ViewHierarchyNode, Set<string>>,
     rowsWithPackageMetadata: Set<ViewHierarchyNode>,
-    resolvedLabel: string | null | undefined,
-    originalUpdatedAt?: number,
-    url?: string,
+    {
+      resolvedLabel,
+      originalUpdatedAt,
+      url,
+    }: Pick<ChooserSearchOptions, "resolvedLabel" | "originalUpdatedAt" | "url">,
   ): Promise<ChooserMatch> {
     if (resolvedLabel === undefined) {
       if (originalUpdatedAt === undefined) {
@@ -851,13 +851,9 @@ export class IntentChooserHandler {
       const labels = await this.resolveChooserLabels(metadata, appPackage, url);
       throwIfAborted(this.chooserSignal);
       const freshHierarchy = await awaitWhileRequestIsLive(
-        metadata.getFreshHierarchy(
-          this.device!,
-          this.adbFactory,
-          originalUpdatedAt + 1,
-          undefined,
-          this.chooserSignal,
-        ),
+        metadata.getFreshHierarchy(this.device!, this.adbFactory, originalUpdatedAt + 1, {
+          signal: this.chooserSignal,
+        }),
         this.chooserSignal,
       );
       if (freshHierarchy.updatedAt === undefined || freshHierarchy.updatedAt <= originalUpdatedAt) {
@@ -894,7 +890,10 @@ export class IntentChooserHandler {
     let missing: ChooserRowMissingError | undefined;
     for (const label of labels) {
       try {
-        return await this.findAppInChooser(roots, appPackage, hierarchy.packageName, label);
+        return await this.findAppInChooser(roots, appPackage, {
+          hierarchyPackage: hierarchy.packageName,
+          resolvedLabel: label,
+        });
       } catch (error) {
         throwIfAborted(this.chooserSignal);
         if (!(error instanceof ChooserRowMissingError)) {
@@ -919,13 +918,10 @@ export class IntentChooserHandler {
       try {
         throwIfAborted(this.chooserSignal);
         activity = await awaitWhileRequestIsLive(
-          metadata.getActivityLabel(
-            this.device!,
-            appPackage,
-            url,
-            this.adbUtils,
-            this.chooserSignal,
-          ),
+          metadata.getActivityLabel(this.device!, appPackage, url, {
+            adb: this.adbUtils,
+            signal: this.chooserSignal,
+          }),
           this.chooserSignal,
         );
       } catch (error) {

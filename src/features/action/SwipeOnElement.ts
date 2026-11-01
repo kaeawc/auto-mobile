@@ -1,5 +1,5 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, GestureOptions } from "../../models";
 import { Element } from "../../models";
 import { ExecuteGesture } from "./ExecuteGesture";
@@ -10,7 +10,7 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { resolveActionCall, type ActionCall } from "./ActionCall";
+import type { ActionCall } from "./ActionCall";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 /**
@@ -26,7 +26,7 @@ export class SwipeOnElement extends BaseVisualChange {
     geometry: ElementGeometry = new DefaultElementGeometry(),
     executeGesture?: Pick<ExecuteGesture, "swipe">,
   ) {
-    super(device, adb);
+    super(device, { adb });
     this.executeGesture = executeGesture ?? new ExecuteGesture(device, adb);
     this.geometry = geometry;
   }
@@ -36,31 +36,15 @@ export class SwipeOnElement extends BaseVisualChange {
    * @param element - The element to swipe on
    * @param direction - Direction to swipe ('up', 'down', 'left', 'right')
    * @param options - Additional gesture options
-   * @param progress - Optional progress callback
+   * @param call - Optional progress callback and cancellation signal
    * @returns Result of the swipe operation
    */
   async execute(
     element: Element,
     direction: "up" | "down" | "left" | "right",
-    options?: GestureOptions,
-    call?: ActionCall,
-  ): Promise<SwipeResult>;
-  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
-  async execute(
-    element: Element,
-    direction: "up" | "down" | "left" | "right",
-    options?: GestureOptions,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ): Promise<SwipeResult>;
-  async execute(
-    element: Element,
-    direction: "up" | "down" | "left" | "right",
     options: GestureOptions = {},
-    progressOrCall?: ProgressCallback | ActionCall,
-    signalArg?: AbortSignal,
+    { progress, signal }: ActionCall = {},
   ): Promise<SwipeResult> {
-    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     const perf = createGlobalPerformanceTracker();
     perf.serial("swipeOnElement");
 
@@ -97,10 +81,7 @@ export class SwipeOnElement extends BaseVisualChange {
         try {
           const result = await perf.track("executeSwipe", () =>
             this.executeGesture.swipe(
-              flooredStartX,
-              flooredStartY,
-              flooredEndX,
-              flooredEndY,
+              { x1: flooredStartX, y1: flooredStartY, x2: flooredEndX, y2: flooredEndY },
               options,
               { perf, signal },
             ),

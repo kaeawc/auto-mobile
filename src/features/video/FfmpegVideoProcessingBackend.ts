@@ -557,8 +557,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         (signal) => simctl.enumerateDisplays(device.deviceId, probeBudgetMs, signal),
         this.timer.now() + probeBudgetMs,
         this.timer,
-        undefined,
-        "Timed out enumerating iOS simulator recording displays",
+        { timeoutMessage: "Timed out enumerating iOS simulator recording displays" },
       );
     } catch (error) {
       // Older simctl versions may not expose enumerate; preserve their recording command.
@@ -589,8 +588,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         () => this.liveScreenPixels(device, probeBudgetMs),
         this.timer.now() + probeBudgetMs,
         this.timer,
-        undefined,
-        "Timed out probing the live iOS simulator display",
+        { timeoutMessage: "Timed out probing the live iOS simulator display" },
       );
       const selected = live ? selectLiveSimulatorDisplay(displays, live.width, live.height) : null;
       if (selected?.name) {
@@ -642,8 +640,10 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         }),
       startDeadlineMs,
       this.timer,
-      config.abortSignal,
-      `Timed out checking simctl availability within ${this.iosRecordingStartTimeoutMs}ms`,
+      {
+        callerSignal: config.abortSignal,
+        timeoutMessage: `Timed out checking simctl availability within ${this.iosRecordingStartTimeoutMs}ms`,
+      },
     );
     throwIfRecordingStartAborted(config.abortSignal, "iOS");
     if (this.timer.now() >= startDeadlineMs) {
@@ -755,7 +755,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
             `Failed to clean up iOS recording after startup failed: ${failedAttempt.description}`,
             "xcrun simctl",
             args,
-            captureTracker,
+            { tracker: captureTracker },
           );
           throw new VideoCaptureStartCleanupError(
             message,
@@ -781,7 +781,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
               `Failed to start iOS recording after ${maxAttempts} attempt(s): ${attemptFailures.join(" | ")}`,
               "xcrun simctl",
               args,
-              captureTracker,
+              { tracker: captureTracker },
             ),
           );
         }
@@ -841,8 +841,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       input.simctl,
       input.device,
       input.startDeadlineMs,
-      input.attempt >= input.maxAttempts,
-      input.config.abortSignal,
+      { isFinalAttempt: input.attempt >= input.maxAttempts, abortSignal: input.config.abortSignal },
     );
     logger.warn(
       `[FfmpegVideo] iOS recording start attempt ${input.attempt}/${input.maxAttempts} failed: ${input.error} (${diagnostics})`,
@@ -875,8 +874,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     simctl: VideoSimCtl,
     device: BootedDevice,
     startDeadlineMs: number,
-    isFinalAttempt: boolean,
-    abortSignal: AbortSignal | undefined,
+    { isFinalAttempt, abortSignal }: { isFinalAttempt: boolean; abortSignal?: AbortSignal },
   ): Promise<string> {
     if (isFinalAttempt) {
       // No retry is left to protect, so the probe is deliberately NOT clipped to the

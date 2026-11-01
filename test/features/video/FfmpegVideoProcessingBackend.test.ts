@@ -1405,10 +1405,12 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         "FFmpeg output file missing",
         ["-i", "/tmp/raw.mov", "-c", "copy", "-y", "/tmp/out.mp4"],
         {
-          exitState: { exitCode: null, signal: "SIGINT" },
-          stderr: ["moov atom not found\n"],
+          tracker: {
+            exitState: { exitCode: null, signal: "SIGINT" },
+            stderr: ["moov atom not found\n"],
+          },
+          outputPath: "/tmp/out.mp4",
         },
-        "/tmp/out.mp4",
       );
 
       expect(message).toContain("FFmpeg output file missing");
@@ -1425,8 +1427,10 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         "FFmpeg post-processing failed",
         ["-i", "/tmp/raw.mov", "-y", "/tmp/out.mp4"],
         {
-          exitState: { exitCode: 1, signal: null },
-          stderr: ["Invalid argument\n"],
+          tracker: {
+            exitState: { exitCode: 1, signal: null },
+            stderr: ["Invalid argument\n"],
+          },
         },
       );
 

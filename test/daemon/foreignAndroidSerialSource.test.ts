@@ -267,3 +267,37 @@ test("inventory probe policy is injectable and explicit binds bypass its cached 
   expect(await h.claims.foreignSerials(["foreign"])).toEqual(new Set());
   expect(attempts).toEqual([1, 2, 1]);
 });
+
+for (const platform of ["ios", "watchos", "tvos"] as const) {
+  test(`${platform} claims refresh and refuse a foreign-owned UDID`, async () => {
+    const refreshed: string[][] = [];
+    const ownership = {
+      claim: async () => true,
+      release: () => {},
+      refresh: async (ids: readonly string[]) => {
+        refreshed.push([...ids]);
+      },
+      foreignOwnerPid: () => 42,
+    };
+    const claims = new ForeignClaims({
+      timer: new FakeTimer(),
+      foreignDeviceOwnership: undefined,
+      iosForeignDeviceOwnership: platform === "ios" ? ownership : undefined,
+      watchForeignDeviceOwnership: platform === "watchos" ? ownership : undefined,
+      tvForeignDeviceOwnership: platform === "tvos" ? ownership : undefined,
+      getDevice: () => undefined,
+      getDevicesByPlatform: () => [],
+    });
+    expect(claims.foreignOwnershipFor(platform)).toBe(ownership);
+    expect(claims.tracksForeignOwnership(platform)).toBe(true);
+    expect(claims.tracksForeignOwnership()).toBe(true);
+    await expect(claims.assertNotClaimedByForeignDaemon("ABC-123", platform)).rejects.toMatchObject(
+      {
+        code: "device_owned_by_other_daemon",
+        deviceId: "ABC-123",
+        ownerPid: 42,
+      },
+    );
+    expect(refreshed).toEqual([["ABC-123"]]);
+  });
+}

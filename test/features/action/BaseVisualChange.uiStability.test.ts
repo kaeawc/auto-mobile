@@ -30,10 +30,14 @@ describe("BaseVisualChange UI stability platform guard", () => {
 
   function createVisualChange(platform: "android" | "ios"): BaseVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
-    const instance = new BaseVisualChange(device, fakeAdb, fakeTimer, undefined, {
-      awaitIdle: fakeAwaitIdle,
-      observeScreen: fakeObserveScreen,
-      window: fakeWindow,
+    const instance = new BaseVisualChange(device, {
+      adb: fakeAdb,
+      timer: fakeTimer,
+      displayFence: {
+        awaitIdle: fakeAwaitIdle,
+        observeScreen: fakeObserveScreen,
+        window: fakeWindow,
+      },
     });
     return instance;
   }
@@ -173,7 +177,10 @@ describe("BaseVisualChange UI stability platform guard", () => {
       platform: "android",
       deviceId: "device-123",
     };
-    const instance = new BaseVisualChange(device, fakeAdb, fakeTimer);
+    const instance = new BaseVisualChange(device, {
+      adb: fakeAdb,
+      timer: fakeTimer,
+    });
     instance.observeScreen = fakeObserveScreen;
     instance.window.getCachedActiveWindow = fakeWindow.getCachedActiveWindow.bind(fakeWindow);
 

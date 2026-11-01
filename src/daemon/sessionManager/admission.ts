@@ -29,6 +29,7 @@ import {
 } from "../sessionManager";
 import { ForcedStuckRelease } from "../sessionManager/forcedStuckRelease";
 import {
+  type GetOrCreateSessionOptions,
   type ResolvedSessionAcquisition,
   type SessionAcquisitionOptions,
   type TerminalReleaseReservation,
@@ -58,9 +59,7 @@ export interface SessionAdmissionHost {
     sessionId: string,
     devicePool?: SessionDeviceAssigner,
     platform?: Platform,
-    execution?: SessionExecutionMetadata,
-    requireIssuedSession?: boolean,
-    accessOptions?: SessionAccess | SessionAcquisitionOptions,
+    options?: GetOrCreateSessionOptions,
   ): Promise<Session>;
   getSessionForNewExecution(
     sessionId: string,
@@ -92,8 +91,7 @@ export interface SessionAdmissionHost {
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
-    requireIssuedSession: boolean,
-    acquisition: ResolvedSessionAcquisition,
+    acquisition: ResolvedSessionAcquisition & { requireIssuedSession: boolean },
   ): Promise<Session>;
   preFenceIdleReleaseReason(
     sessionId: string,
@@ -210,29 +208,15 @@ export class SessionAdmission {
     sessionId: string,
     devicePool?: SessionDeviceAssigner,
     platform?: Platform,
-    execution?: SessionExecutionMetadata,
-    // #6069: when true, a NEW session (no live in-memory session) may only be
-    // minted for an id this daemon already issued — i.e. a persisted, non-terminal
-    // row (live-during-restart recovery). This is set on the device-tool path so a
-    // fabricated/never-issued sessionUuid can never be auto-assigned a pooled
-    // device just because a device pool is in scope. Internal fresh mints
-    // (device-label derived sessions) leave it false and keep minting.
-    requireIssuedSession = false,
-    accessOptions: SessionAccess | SessionAcquisitionOptions = "acquire",
+    options: GetOrCreateSessionOptions = {},
   ): Promise<Session> {
+    const { execution, requireIssuedSession = false, ...accessOptions } = options;
     const { access, requestDeadlineMs, callerExecutionId, signal } =
       this.host.resolveSessionAcquisitionOptions(accessOptions);
     const pendingRebind = this.host.sessionSlots.getRebind(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
-      return await this.host.getOrCreateSession(
-        sessionId,
-        devicePool,
-        platform,
-        execution,
-        requireIssuedSession,
-        accessOptions,
-      );
+      return await this.host.getOrCreateSession(sessionId, devicePool, platform, options);
     }
 
     const existing = this.host.getSessionForNewExecution(sessionId, execution);
@@ -240,14 +224,10 @@ export class SessionAdmission {
       const inFlightRelease = this.host.sessionSlots.getReleaseOp(sessionId);
       if (this.host.sessionSlots.isReleasing(existing) && inFlightRelease?.session === existing) {
         await inFlightRelease.promise;
-        return await this.host.getOrCreateSession(
-          sessionId,
-          devicePool,
-          platform,
-          undefined,
+        return await this.host.getOrCreateSession(sessionId, devicePool, platform, {
+          ...accessOptions,
           requireIssuedSession,
-          accessOptions,
-        );
+        });
       }
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
@@ -284,23 +264,18 @@ export class SessionAdmission {
       (currentSession === undefined || inFlightRelease.session === currentSession)
     ) {
       await inFlightRelease.promise;
-      return await this.host.getOrCreateSession(
-        sessionId,
-        devicePool,
-        platform,
-        undefined,
+      return await this.host.getOrCreateSession(sessionId, devicePool, platform, {
+        ...accessOptions,
         requireIssuedSession,
-        accessOptions,
-      );
+      });
     }
 
-    return await this.host.startOrJoinUnseenAssignment(
-      sessionId,
-      devicePool,
-      platform,
+    return await this.host.startOrJoinUnseenAssignment(sessionId, devicePool, platform, {
       requireIssuedSession,
-      { access, requestDeadlineMs, signal },
-    );
+      access,
+      requestDeadlineMs,
+      signal,
+    });
   }
 
   /**

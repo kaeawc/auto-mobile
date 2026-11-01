@@ -7,6 +7,8 @@ import { AppearanceMutationPriorReader } from "./deviceMutationAppearancePriorRe
 import { InteractionMutationPriorReader } from "./deviceMutationInteractionPriorReader";
 import { LifecycleMutationPriorReader } from "./deviceMutationLifecyclePriorReader";
 import { OrchestrationMutationPriorReader } from "./deviceMutationOrchestrationPriorReader";
+import { LocalizationMutationPriorReader } from "./deviceMutationLocalizationPriorReader";
+import { PermissionMutationPriorReader } from "./deviceMutationPermissionPriorReader";
 
 /**
  * Asks each tool family's reader in turn; the first that observes a prior wins. A reader reports
@@ -20,6 +22,8 @@ export class FamilyMutationPriorReader implements MutationPriorReader {
       new LifecycleMutationPriorReader(),
       new InteractionMutationPriorReader(),
       new OrchestrationMutationPriorReader(),
+      new PermissionMutationPriorReader(),
+      new LocalizationMutationPriorReader(),
     ],
   ) {}
 

@@ -14,6 +14,7 @@ import {
 } from "../features/action/swipeon/swipeTiming";
 import { hierarchyLayerSchema } from "../models/elementSelectorSchemas";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
+import { internalSwipeAtRecordingContext } from "./internalToolParams";
 import { pointerSchema } from "./pointerSchema";
 import {
   addDeviceTargetingToSchema,
@@ -198,7 +199,7 @@ export function createSwipeAtHandler({
         display: args.display,
         pointer: args.pointer,
       } as SwipeAtOptions,
-      { progress, signal, recordingContext: args.__swipeAtRecordingContext },
+      { progress, signal, recordingContext: internalSwipeAtRecordingContext(args) },
     );
     const message = result.success
       ? `Swiped from (${result.x1}, ${result.y1}) to (${result.x2}, ${result.y2})`
@@ -223,8 +224,8 @@ export function registerSwipeAtTools() {
     "swipeAt",
     "Swipe from one screen point to another, including diagonals, in native, normalized, or percent units.",
     swipeAtSchema,
-    swipeAtHandler,
     {
+      handler: swipeAtHandler,
       defaultEnabled: false,
       supportsProgress: true,
       ...ANSWERS_SYSTEM_ALERTS,

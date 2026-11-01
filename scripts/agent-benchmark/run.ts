@@ -395,14 +395,10 @@ const realFs: HarnessFs = {
 async function claimForBenchmark(
   serial: string,
 ): Promise<{ release(): void } | { refused: string }> {
-  const ownership = new ForwardLeaseForeignDeviceOwnership(
-    process.pid,
-    undefined,
-    undefined,
-    () => undefined,
-    undefined,
-    createForeignCtrlProxyForwardEvidence(),
-  );
+  const ownership = new ForwardLeaseForeignDeviceOwnership(process.pid, undefined, undefined, {
+    ownerSocketPath: () => undefined,
+    forwardEvidence: createForeignCtrlProxyForwardEvidence(),
+  });
   const holder = async () => {
     await ownership.refresh([serial]);
     const pid = ownership.foreignOwnerPid(serial);

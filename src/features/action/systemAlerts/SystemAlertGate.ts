@@ -193,7 +193,7 @@ export class SystemAlertGate {
         );
         return warnings;
       }
-      const tapped = await this.answer(device, alert, policy, signal, warnings);
+      const tapped = await this.answer(device, alert, policy, { signal, warnings });
       if (!tapped) {
         return warnings;
       }
@@ -254,8 +254,7 @@ export class SystemAlertGate {
     device: BootedDevice,
     detected: DetectedSystemAlert,
     policy: SystemAlertPolicy,
-    signal: AbortSignal | undefined,
-    warnings: string[],
+    { signal, warnings }: { signal?: AbortSignal; warnings: string[] },
   ): Promise<string | undefined> {
     let alert = detected;
     let decision = chooseSystemAlertButton(alert, policy.policy, policy.match);

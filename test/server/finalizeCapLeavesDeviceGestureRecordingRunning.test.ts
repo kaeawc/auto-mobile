@@ -48,11 +48,8 @@ class FakeSessionManager implements CleanupManager {
   }
   release(sessionId: string, deviceId: string): void {
     for (const callback of this.releaseCallbacks) {
-      callback(
-        sessionId,
-        deviceId,
-        "idle-timeout",
-        {
+      callback(sessionId, deviceId, "idle-timeout", {
+        snapshot: {
           sessionId,
           deviceId,
           releaseReason: "idle-timeout",
@@ -60,8 +57,7 @@ class FakeSessionManager implements CleanupManager {
           terminal: true,
           heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
         },
-        {},
-      );
+      });
     }
   }
 }
@@ -123,8 +119,7 @@ describe("finalize cap with a wedged video stage and the released session's devi
       device,
       timer,
       new CountingIdGenerator("recording"),
-      recorder,
-      OLD_HOLDER,
+      { recorderFactory: recorder, ownerSessionUuid: OLD_HOLDER },
     );
     const manager = new FakeSessionManager();
     const deps: RecordingSessionCleanupDeps = {
@@ -155,13 +150,10 @@ describe("finalize cap with a wedged video stage and the released session's devi
   test("the next holder's start gets its own recording, not the released session's", async () => {
     const oldRecordingId = await releaseWithWedgedVideoStage();
 
-    const next = await startDeviceGestureRecording(
-      device,
-      timer,
-      new CountingIdGenerator("next"),
-      recorder,
-      NEW_HOLDER,
-    );
+    const next = await startDeviceGestureRecording(device, timer, new CountingIdGenerator("next"), {
+      recorderFactory: recorder,
+      ownerSessionUuid: NEW_HOLDER,
+    });
 
     expect(next.recordingId).not.toBe(oldRecordingId);
     expect(isDeviceGestureRecordingOwnedBy(NEW_HOLDER, device.deviceId)).toBe(true);

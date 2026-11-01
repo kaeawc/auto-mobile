@@ -10,6 +10,13 @@ import {
 } from "./sharedStorageReadService";
 import type { Platform } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
+import type { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
+import {
+  parseIosStorageDiscovery,
+  unavailableIosStorageDiscovery,
+  type IosStorageDiscoverer,
+  type IosStorageDiscovery,
+} from "../features/storage/iosStorageDiscovery";
 import type {
   KeystoreDiscovery,
   KeystoreDiscoveryState,
@@ -17,7 +24,7 @@ import type {
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { serverConfig } from "../utils/ServerConfig";
-import { BootedDevice } from "../models";
+import { BootedDevice, requireAndroidOrIosPlatform } from "../models";
 import { logger } from "../utils/logger";
 import {
   computeStorageCapabilities,
@@ -76,6 +83,7 @@ export interface StorageCapabilityDependencies {
   adbFactory?: AdbClientFactory;
   probeDebuggableBuild?: (adb: AdbExecutor, appId: string) => Promise<boolean | undefined>;
   createKeystoreDiscovery?: (device: BootedDevice) => KeystoreDiscovery;
+  createIosStorageDiscovery?: (device: BootedDevice) => IosStorageDiscoverer;
   createUserResolver?: (adb: AdbExecutor) => StorageCapabilityUserResolver;
 }
 
@@ -87,7 +95,7 @@ export function resolveStorageCapabilityContext(
   debuggableBuild?: boolean,
 ): StorageCapabilityContext {
   return {
-    platform: device.platform,
+    platform: requireAndroidOrIosPlatform(device.platform, "Storage capability resolution"),
     deviceType: resolveDeviceType(device),
     embeddedSdk: serverConfig.isEmbeddedSdkEnabled(),
     // A resolved booted device implies a live runner session for the SDK path.
@@ -168,6 +176,35 @@ async function resolveKeystoreDiscovery(
   }
 }
 
+/** The iOS runner call that returns the SDK's storage capability payload. */
+export type IosStorageCapabilitiesSource = Pick<IOSCtrlProxyClient, "getStorageCapabilitiesForIos">;
+
+/** Reads the SDK's storage capability payload through the device's iOS runner. */
+export function runnerIosStorageDiscovery(
+  runner: IosStorageCapabilitiesSource,
+): IosStorageDiscoverer {
+  return {
+    discoverIosStorage: async (appId) =>
+      parseIosStorageDiscovery(await runner.getStorageCapabilitiesForIos(appId)),
+  };
+}
+
+async function resolveIosStorageDiscovery(
+  device: BootedDevice,
+  appId: string,
+  dependencies: StorageCapabilityDependencies,
+): Promise<IosStorageDiscovery> {
+  if (!dependencies.createIosStorageDiscovery) {
+    return unavailableIosStorageDiscovery();
+  }
+  try {
+    return await dependencies.createIosStorageDiscovery(device).discoverIosStorage(appId);
+  } catch (error) {
+    logger.warn("[StorageCapabilityResources] iOS storage discovery unavailable", error);
+    return unavailableIosStorageDiscovery();
+  }
+}
+
 function buildUri(deviceId: string, appId?: string): string {
   const base = `automobile:devices/${deviceId}/storage/capabilities`;
   return appId ? `${base}?appId=${encodeUriSegment(appId)}` : base;
@@ -242,6 +279,9 @@ export async function getStorageCapabilitiesResource(
     if (device.platform === "android" && appId && context.embeddedSdk) {
       context.keystore = await resolveKeystoreDiscovery(device, appId, dependencies);
     }
+    if (device.platform === "ios" && appId && context.embeddedSdk) {
+      context.iosStorage = await resolveIosStorageDiscovery(device, appId, dependencies);
+    }
     const report = computeStorageCapabilities(context);
 
     return {
@@ -272,13 +312,12 @@ export async function getStorageCapabilitiesResource(
 export function registerStorageCapabilityResources(
   dependencies: StorageCapabilityDependencies = {},
 ): void {
-  ResourceRegistry.registerTemplate(
-    STORAGE_CAPABILITIES_TEMPLATE,
-    "Storage Capabilities",
-    "Versioned descriptor of which storage operations (list, read, write, namespace reset, media indexing, observation) are available per logical domain (app containers, user-visible files, media library, key-value state, databases, secure state) for a device and optional app context. Clients negotiate capabilities instead of inferring them from platform names.",
-    "application/json",
-    (params) => getStorageCapabilitiesResource(params, dependencies),
-  );
+  ResourceRegistry.registerTemplate(STORAGE_CAPABILITIES_TEMPLATE, "Storage Capabilities", {
+    description:
+      "Versioned descriptor of which storage operations (list, read, write, namespace reset, media indexing, observation) are available per logical domain (app containers, user-visible files, media library, key-value state, databases, secure state) for a device and optional app context. Clients negotiate capabilities instead of inferring them from platform names.",
+    mimeType: "application/json",
+    handler: (params) => getStorageCapabilitiesResource(params, dependencies),
+  });
 
   logger.info("[StorageCapabilityResources] Registered storage capability resources");
 }

@@ -135,6 +135,7 @@ interface Row {
 }
 
 interface SessionRowWriterOptions {
+  logger: Pick<Logger, "warn" | "debug">;
   timeoutMs: number;
   timeoutError: (snapshot: SessionReleaseSnapshot) => Error;
 }
@@ -160,7 +161,8 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
       timeoutMs,
       timeoutError: TimeoutError,
     } = collaborators;
-    return new SerializedSessionRowWriter(persistence, timer, backoff, logger, {
+    return new SerializedSessionRowWriter(persistence, timer, backoff, {
+      logger,
       timeoutMs,
       timeoutError: (snapshot) =>
         new TimeoutError(snapshot.sessionId, snapshot.releaseReason, timeoutMs),
@@ -192,13 +194,25 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   private draining = false;
   readonly superseded: SupersededRowReasserts;
 
+  private readonly logger: Pick<Logger, "warn" | "debug">;
+  private readonly options: Omit<SessionRowWriterOptions, "logger">;
+
+  /**
+   * @param persistence - Durable session-row store
+   * @param timer - Clock for retries and write deadlines
+   * @param backoff - Retry backoff policy
+   * @param options.logger - Warn/debug sink
+   * @param options.timeoutMs - Per-release write deadline
+   * @param options.timeoutError - Builds the error a timed-out write rejects with
+   */
   constructor(
     private readonly persistence: DeviceSessionPersistence,
     private readonly timer: Timer,
     private backoff: BackoffPolicy,
-    private readonly logger: Pick<Logger, "warn" | "debug">,
-    private readonly options: SessionRowWriterOptions,
+    { logger, ...options }: SessionRowWriterOptions,
   ) {
+    this.logger = logger;
+    this.options = options;
     this.superseded = new SupersededRowReasserts({
       timer,
       logger,
@@ -539,7 +553,9 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
         parked = true;
         row.parked++;
         const finish = entry.desired.parked?.();
-        this.track(this.finishParked(uuid, row, entry, write.catch(issue.fallback), finish));
+        this.track(
+          this.finishParked(uuid, row, entry, { physical: write.catch(issue.fallback), finish }),
+        );
       };
       try {
         await this.bounded(write, entry, onTimeout);
@@ -558,7 +574,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
       await this.landed(entry, false, false);
       this.complete(uuid, row, entry);
     } catch (error) {
-      await this.failed(uuid, row, entry, error);
+      await this.failed(uuid, row, entry, { error });
     } finally {
       // The SQL generation guard protects against parked writes after this slot is reused.
       this.unlock(uuid, row, entry);
@@ -599,8 +615,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
         snapshot.sessionId,
         releasedRowStatus(snapshot.releaseReason),
         snapshot.releasedAtMs,
-        snapshot.releaseReason,
-        conditions,
+        { reason: snapshot.releaseReason, ...conditions },
       );
     };
     let refusedWrite: Promise<void> | undefined;
@@ -639,8 +654,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
     uuid: string,
     row: Row,
     entry: Desire,
-    error: unknown,
-    late = false,
+    { error, late = false }: { error: unknown; late?: boolean },
   ): Promise<void> {
     if (error instanceof DeviceSessionRowNotReleasableError) {
       if (!entry.desired.terminal && (await entry.desired.skipped?.())) {
@@ -665,15 +679,14 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
     uuid: string,
     row: Row,
     entry: Desire,
-    physical: Promise<void>,
-    finish?: () => void,
+    { physical, finish }: { physical: Promise<void>; finish?: () => void },
   ): Promise<void> {
     try {
       await physical;
       await this.landed(entry, true, false);
       this.complete(uuid, row, entry);
     } catch (error) {
-      await this.failed(uuid, row, entry, error, true);
+      await this.failed(uuid, row, entry, { error, late: true });
     } finally {
       finish?.();
       row.parked--;

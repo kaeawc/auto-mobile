@@ -9,22 +9,30 @@ The host binding registry database gains a `device_claims` table: one row per cl
 written beside the allocation claim files and read as an extra source of device ownership. The
 claim files still decide when the table cannot be read.
 
-## Older daemons refuse the registry after the upgrade
+## Older daemons run files-only after the upgrade
 
-The first daemon of this release to open the registry runs the two migrations. A daemon from an
-earlier release that opens the registry afterwards sees migrations it does not know and refuses it
-(`BindingRegistrySchemaUnsupportedError`), the same behaviour earlier registry migrations had. Such a
-daemon keeps honouring the claim files, so devices an older and a newer daemon share stay exclusive,
-but it cannot use the registry (session broker bindings, execution owners) until it is upgraded.
+The first daemon of this release to open the registry runs the two migrations. A daemon
+that does not know those migrations runs generic acquisition in files-only mode: allocation
+claim files alone decide ownership. Managed bindings are not enforced by files-only
+daemons, so they can allocate a device held only by a managed binding. The device-claims
+mirror skips reads, writes, opens and retries until restart. A warning names the registry
+and unknown migrations once per process per registry path. Registry writers and ownership readers that
+require current evidence still refuse with non-retryable `registry_schema_unsupported`.
 
-Upgrade every daemon on a host together. `auto-mobile doctor` from an older release reads a migrated
-registry as unreadable and reports no exec owners rather than failing.
+Upgrade the daemons sharing managed devices to a release that includes these migrations.
+The exclusion diagnostic exposes the degraded mode and remedy.
 
 ## Verification
 
 Live multi-daemon acceptance on a shared adb server is tracked in #15542 (`needs-device-verify`).
 
 ## Known limits until the claim files stop deciding
+
+- Files-only daemons do not enforce managed bindings: they can allocate a device held
+  only by a managed binding because allocation claim files alone decide ownership.
+  Allocation claim files guard active executions, but idle bindings do not retain them.
+  Upgrade the daemons sharing managed devices to a release that includes these migrations.
+  The mirror remains skipped until restart.
 
 - A local daemon never creates the registry. If it starts without one, claim and release writes
   probe for it on their retry ladder (1 s, 5 s, 30 s, 2 min, 5 min). Once the file appears, a

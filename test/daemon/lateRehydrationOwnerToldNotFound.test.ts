@@ -109,7 +109,7 @@ async function ownerOutcomeAfterRestart(recovery: "lands-before-owner" | "lands-
       heartbeatTimeoutSource: "default",
       hasReceivedHeartbeat: true,
     });
-    await persistence.markReleased(SESSION, "released", timer.now(), "daemon-shutdown");
+    await persistence.markReleased(SESSION, "released", timer.now(), { reason: "daemon-shutdown" });
     restarted = new SessionManager(timer, persistence);
     restarted.stopCleanupTimer();
     const manager = restarted;
@@ -145,7 +145,7 @@ async function ownerOutcomeAfterRestart(recovery: "lands-before-owner" | "lands-
       async (sessionId, reason) => {
         await manager.releaseSession(sessionId, reason, { allowExpired: true });
       },
-      timer,
+      { timer },
     );
     manager.startRehydratedOwnerWindows();
     monitor.start();

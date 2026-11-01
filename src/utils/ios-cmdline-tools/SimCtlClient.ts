@@ -1,4 +1,4 @@
-import { SimCtlShutdown } from "./SimCtlShutdown";
+import { SimCtlShutdown, type SimctlArgvOptions } from "./SimCtlShutdown";
 import { SimCtlScreenshot } from "./SimCtlScreenshot";
 import { SimCtlInventory } from "./SimCtlInventory";
 import { SimCtlBoot } from "./SimCtlBoot";
@@ -16,6 +16,7 @@ import {
   launchEnvironment,
   SimCtl,
   execAsync,
+  type SimctlExecAsync,
   defaultSpawnProcess,
   splitCommandArgs,
   SimulatorList,
@@ -186,13 +187,7 @@ export class SimCtlClient implements SimCtl {
   private readonly deviceTypeProfiles: SimulatorDeviceTypeProfileSource;
   private readonly hostArchitecture = process.arch;
   device: BootedDevice | null;
-  execAsync: (
-    file: string,
-    args: string[],
-    maxBuffer?: number,
-    signal?: AbortSignal,
-    env?: NodeJS.ProcessEnv,
-  ) => Promise<ExecResult>;
+  execAsync: SimctlExecAsync;
   private timer: Timer;
   private platform: NodeJS.Platform;
   private readonly plist: PlistReader;
@@ -223,15 +218,7 @@ export class SimCtlClient implements SimCtl {
    */
   constructor(
     device: BootedDevice | null = null,
-    execAsyncFn:
-      | ((
-          file: string,
-          args: string[],
-          maxBuffer?: number,
-          signal?: AbortSignal,
-          env?: NodeJS.ProcessEnv,
-        ) => Promise<ExecResult>)
-      | null = null,
+    execAsyncFn: SimctlExecAsync | null = null,
     dependencies: SimCtlClientDependencies = {},
   ) {
     const {
@@ -314,7 +301,7 @@ export class SimCtlClient implements SimCtl {
     signal?: AbortSignal,
   ): Promise<ExecResult> {
     const hostArgs = splitCommandArgs(command);
-    return this.executeCommandArgv(hostArgs, timeoutMs, command, signal);
+    return this.executeCommandArgv(hostArgs, timeoutMs, command, { signal });
   }
 
   async executeCommandArgs(
@@ -322,7 +309,7 @@ export class SimCtlClient implements SimCtl {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<ExecResult> {
-    return this.executeCommandArgv(args, timeoutMs, args.join(" "), signal);
+    return this.executeCommandArgv(args, timeoutMs, args.join(" "), { signal });
   }
 
   async startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess> {
@@ -339,33 +326,23 @@ export class SimCtlClient implements SimCtl {
     args: string[],
     timeoutMs = SIMCTL_COMMAND_TIMEOUT_MS,
     displayCommand?: string,
-    explicitSignal?: AbortSignal,
-    waitForTimedOutCommandSettlement = false,
-    env?: NodeJS.ProcessEnv,
+    options: SimctlArgvOptions = {},
   ): Promise<ExecResult> {
     // One span per simctl invocation, named by the leading subcommand so spans
     // aggregate (e.g. `simctl boot`), recorded against the ambient
     // device-lifecycle tracker when one is in scope (see PerfContext).
     return trackAmbient(`simctl ${args[0] ?? ""}`.trimEnd(), () =>
-      this.executeCommandArgvInner(
-        args,
-        timeoutMs,
-        displayCommand,
-        explicitSignal,
-        waitForTimedOutCommandSettlement,
-        env,
-      ),
+      this.executeCommandArgvInner(args, timeoutMs, displayCommand, options),
     );
   }
 
   private async executeCommandArgvInner(
     args: string[],
-    timeoutMs?: number,
-    displayCommand?: string,
-    explicitSignal?: AbortSignal,
-    waitForTimedOutCommandSettlement = false,
-    env?: NodeJS.ProcessEnv,
+    timeoutMs: number | undefined,
+    displayCommand: string | undefined,
+    options: SimctlArgvOptions,
   ): Promise<ExecResult> {
+    const { signal: explicitSignal, waitForTimedOutCommandSettlement, env } = options;
     if (args.length === 0) {
       throw new Error("Command cannot be empty");
     }
@@ -383,8 +360,8 @@ export class SimCtlClient implements SimCtl {
       try {
         // Pass env only when set, so existing exec fakes see an unchanged call shape.
         return env === undefined
-          ? await this.execAsync("xcrun", localArgs, undefined, signal)
-          : await this.execAsync("xcrun", localArgs, undefined, signal, env);
+          ? await this.execAsync("xcrun", localArgs, { signal })
+          : await this.execAsync("xcrun", localArgs, { signal, env });
       } catch (error) {
         const tokenIndex = args.indexOf("--automobile-mutation-token");
         const token = tokenIndex >= 0 ? args[tokenIndex + 1] : undefined;
@@ -501,7 +478,7 @@ export class SimCtlClient implements SimCtl {
     const signal = options?.signal
       ? AbortSignal.any([options.signal, controller.signal])
       : controller.signal;
-    const probe = this.execAsync("xcrun", ["--find", "simctl"], undefined, signal);
+    const probe = this.execAsync("xcrun", ["--find", "simctl"], { signal });
     try {
       return await raceWithDeadline(
         probe.then(
@@ -607,12 +584,9 @@ export class SimCtlClient implements SimCtl {
     signal: AbortSignal | undefined,
     expectedOwnerToken?: object,
   ): Promise<void> {
-    return this.simCtlShutdown.shutdownSimulatorCoordinated(
-      udid,
-      timeoutMs,
-      signal,
+    return this.simCtlShutdown.shutdownSimulatorCoordinated(udid, timeoutMs, signal, {
       expectedOwnerToken,
-    );
+    });
   }
 
   killSimulator(
@@ -830,9 +804,7 @@ export class SimCtlClient implements SimCtl {
         launchArgs,
         DEFAULT_DEVICE_READY_TIMEOUT_MS,
         `launch ${targetDevice} ${bundleId} [app arguments redacted]`,
-        undefined,
-        false,
-        launchEnvironment(options?.environment),
+        { waitForTimedOutCommandSettlement: false, env: launchEnvironment(options?.environment) },
       );
 
       // Parse the output to extract PID if available
@@ -938,7 +910,7 @@ export class SimCtlClient implements SimCtl {
     const result = await this.executeCommandArgs(["io", deviceId, "enumerate"], timeoutMs, signal);
     return parseSimulatorDisplays(result.stdout);
   }
-  screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer> {
+  screenshot(deviceId: string, display?: string, signal?: AbortSignal): Promise<Buffer> {
     return this.simCtlScreenshot.screenshot(deviceId, display, signal);
   }
 
@@ -997,7 +969,7 @@ export class SimCtlClient implements SimCtl {
     // Direct `open`/`osascript` bypass the executeCommandArgv funnel, so give
     // them their own ambient leaves (see PerfContext).
     await trackAmbient("open -a Simulator", () =>
-      this.execAsync("open", ["-a", "Simulator"], undefined, signal),
+      this.execAsync("open", ["-a", "Simulator"], { signal }),
     );
     // The start presenter already limits this to one call per boot. `open -a`
     // presents the app; activating it again would steal focus a second time.
@@ -1059,7 +1031,7 @@ export class SimCtlClient implements SimCtl {
       // Direct launchctl (not a simctl subcommand), so it bypasses the
       // executeCommandArgv funnel; give it its own ambient leaf (see PerfContext).
       const result = await trackAmbient("launchctl managername", () =>
-        this.execAsync("launchctl", ["managername"], undefined, signal),
+        this.execAsync("launchctl", ["managername"], { signal }),
       );
       const managerName = (result.stdout || "").trim();
       // "Aqua" is the GUI login session manager; "System"/"Background" are not.

@@ -5,6 +5,10 @@ import { registerLocationRouteSessionCleanup } from "../features/utility/Locatio
 import { registerStatusBarSessionCleanup } from "./statusBarSessionCleanup";
 import { registerKillProfileSessionCleanup } from "./killProfileSessionCleanup";
 import { registerEmulatorSensorSessionCleanup } from "./emulatorSensorSessionCleanup";
+import {
+  createOwnerlessAudioAcquisitionCleanup,
+  registerEmulatorAudioSessionCleanup,
+} from "./emulatorAudioSessionCleanup";
 import { registerDisplayProfileSessionCleanup } from "./displayProfileSessionCleanup";
 import { registerKeyboardProfileSessionCleanup } from "./keyboardProfileSessionCleanup";
 import { registerDeviceConditionSessionCleanup } from "./deviceConditionSessionCleanup";
@@ -130,6 +134,7 @@ export function wireSessionLifecycle(
   registerAppLinksSessionCleanup(sessionManager);
   registerKillProfileSessionCleanup(sessionManager);
   registerEmulatorSensorSessionCleanup(sessionManager);
+  registerEmulatorAudioSessionCleanup(sessionManager);
   registerDisplayProfileSessionCleanup(sessionManager);
   registerKeyboardProfileSessionCleanup(sessionManager);
   registerDeviceConditionSessionCleanup(sessionManager);
@@ -177,13 +182,15 @@ export function wireSessionLifecycle(
   const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(sessionManager, {
     timer: timer,
   });
+  // Sessionless emulator microphone feeds are stopped the same way.
+  const stopOwnerlessAudio = createOwnerlessAudioAcquisitionCleanup(sessionManager);
   // Display/system settings a previous session changed are reset to the recorded device
   // defaults when a different session acquires the device (#11145).
   const settingDefaults = new DeviceSettingDefaults(
     new DeviceSettingDefaultsRepository(),
     new DefaultDeviceSettingsAccess(),
     (deviceId) => sessionManager.getSessionForDevice(deviceId),
-    timer,
+    { timer },
   );
   installDeviceSettingDefaults(settingDefaults);
   registerDeviceSettingDefaultsIdentityListener(settingDefaults);
@@ -200,6 +207,7 @@ export function wireSessionLifecycle(
     host.socketServer()?.liftSessionlessStrokesOn(deviceId);
     adoptOwnerlessRecordings(deviceId, sessionId);
     clearOwnerlessNetworkState(deviceId);
+    stopOwnerlessAudio(deviceId);
     resetSettingDefaults(deviceId, sessionId);
   });
   sessionManager.onSessionCreated((session) => {
@@ -211,7 +219,7 @@ export function wireSessionLifecycle(
   // The device a session is created on or rebound to takes that session's appearance (#11363).
   registerAppearanceClaimSync(sessionManager, host);
   // Register centralized cleanup for session-scoped state
-  sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
+  sessionManager.onSessionRelease((sessionId, deviceId, _reason, options) => {
     // A terminal upgrade of an already-cleaned-up release must not touch the device's next
     // owner: its pin, caches and CtrlProxy binding (#10825).
     if (options?.upgradeOnly) {
@@ -263,7 +271,7 @@ export function wireSessionLifecycle(
   // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires
   // for every released key — base and derived `${base}:${label}` alike; the
   // proxy matches its bound (base) UUID by exact equality (issue #4610).
-  sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot, opts) => {
+  sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, { snapshot, ...opts }) => {
     // Name the recordings this release is finalizing so the previous owner can fetch them
     // (#10958); the recording cleanup captured them when the release began.
     announceSessionRelease(
@@ -271,14 +279,16 @@ export function wireSessionLifecycle(
         takeRecordingIds: takeRecordingIdsFinalizedByRelease,
         emit: (...args) => SessionReleaseBroadcaster.emit(...args),
       },
-      {
-        fallbacks: host.shutdownFallbackReleaseNotifications(),
-        announced: host.shutdownReleaseNotifications(),
-      },
       sessionId,
       releaseReason,
-      snapshot,
-      { upgradeOnly: opts?.upgradeOnly },
+      {
+        shutdown: {
+          fallbacks: host.shutdownFallbackReleaseNotifications(),
+          announced: host.shutdownReleaseNotifications(),
+        },
+        snapshot,
+        upgradeOnly: opts?.upgradeOnly,
+      },
     );
     if (host.shutdownFallbackReleaseNotifications()?.has(sessionId)) {
       return;

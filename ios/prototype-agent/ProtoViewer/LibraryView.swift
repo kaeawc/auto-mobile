@@ -7,6 +7,7 @@ struct LibraryView: View {
     let importService: PrototypeLibraryImportService
     let mcpInbox: PrototypeMcpInbox
     let networkSwitch: PrototypeLibraryNetworkSwitch
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var navigation = PrototypeLibraryNavigation()
     @State private var mcpOpen: PrototypeMcpRequest?
@@ -44,6 +45,28 @@ struct LibraryView: View {
             }
         }
         .onOpenURL(perform: receiveURL)
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            do { try await mcpInbox.ensureDirectories() }
+            catch {
+                libraryLog.warning("Cannot prepare MCP inbox: \(error.localizedDescription, privacy: .private)")
+                return
+            }
+            // SwiftUI cancels this task on deactivation/disappearance and restarts it on activation.
+            while !Task.isCancelled {
+                let consumed = await mcpInbox.receiveFiles(screen: ForegroundScreen.pixels())
+                for (command, entry) in consumed {
+                    if let entry { await openMcp(command, entry: entry) }
+                }
+                if !consumed.isEmpty { refresh() }
+                do { try await Task.sleep(for: .milliseconds(250)) }
+                catch is CancellationError { return }
+                catch {
+                    libraryLog.warning("MCP inbox polling failed: \(error.localizedDescription, privacy: .private)")
+                    return
+                }
+            }
+        }
         .alert("Prototype operation failed", isPresented: $showsError) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -209,14 +232,18 @@ struct LibraryView: View {
         }
         Task {
             if let entry = await mcpInbox.handle(command, screen: ForegroundScreen.pixels()) {
-                // Swap before awaiting: overlapping opens each supersede exactly one predecessor.
-                let previous = mcpOpen
-                mcpOpen = command
-                navigation.openMcp(entry, command: command)
-                if let previous { await mcpInbox.reportOpenFailed(previous) }
+                await openMcp(command, entry: entry)
             }
             refresh()
         }
+    }
+
+    private func openMcp(_ command: PrototypeMcpRequest, entry: PrototypeLibraryEntry) async {
+        // Swap before awaiting: overlapping opens each supersede exactly one predecessor.
+        let previous = mcpOpen
+        mcpOpen = command
+        navigation.openMcp(entry, command: command)
+        if let previous { await mcpInbox.reportOpenFailed(previous) }
     }
 
     private func reportMcpOpen(_ command: PrototypeMcpRequest, entry: PrototypeLibraryEntry, success: Bool) {

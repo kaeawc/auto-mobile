@@ -106,7 +106,10 @@ describe("retention keeps the most recently inserted rows (#10044)", () => {
       await insert(ts);
     }
 
-    await pruneEventTableByCount(db, "log_events", createAmortizedRetentionState(), 3, 1);
+    await pruneEventTableByCount(db, "log_events", createAmortizedRetentionState(), {
+      maxRows: 3,
+      checkInterval: 1,
+    });
 
     const rows = await db
       .selectFrom("log_events")

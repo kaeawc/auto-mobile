@@ -174,7 +174,7 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
         { deviceId: "sdk-identity-ios-test", platform: "ios", name: "Test iPhone" },
         new FakeAdbClientFactory(),
         makeViewHierarchyCtrlProxy(androidProxy),
-        timer,
+        { timer },
       );
       const ids: string[] = [];
       for (const root of [injected, notInjected]) {

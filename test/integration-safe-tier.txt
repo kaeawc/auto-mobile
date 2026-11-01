@@ -59,10 +59,12 @@ test/daemon/sessionBroker/brokerRestartHandoff.integration.test.ts | safe | :mem
 test/daemon/sessionBroker/brokerTiming.integration.test.ts | safe | private file-backed registry temp directory, FakeNativePort and FakeTimer, no processes or host tooling
 test/daemon/sessionBroker/exports.integration.test.ts | safe | file-backed registry in tracked harness temp directory with FakeNativePort and FakeTimer
 test/daemon/sessionBroker/provisioning/bindingRegistryAbsence.integration.test.ts | safe | temp-dir SQLite via bindFileBackedDbHarness L18, FakeTimer
+test/daemon/sessionBroker/provisioning/cachedRegistrySchema.integration.test.ts | safe | two SQLite registry handles over a private mkdtemp file with FakeTimer, closed and removed afterwards
 test/daemon/sessionBroker/provisioning/simctlCatalog.integration.test.ts | safe | real resolver and SimCtlClient over injected exec seam and FakeTimer; no host commands
 test/daemon/sessionBroker/registry/bindingJournal.integration.test.ts | unsafe | Bun.spawn of a crash child process L93
 test/daemon/sessionBroker/registry/bindingRegistryBusyBound.integration.test.ts | safe | real SQLite handles on useScratchRoot temp files and a file-backed harness, explicit dbPath, no host tooling
 test/daemon/sessionBroker/registry/sqliteBindingRegistry.integration.test.ts | unsafe | Bun.spawn of a registry child process L134
+test/daemon/sessionBroker/registry/staleRegistryHandleWriteRefusal.integration.test.ts | safe | two SQLite registry handles over a private mkdtemp file with FakeTimer, closed and removed afterwards
 test/daemon/sessionBroker/sqliteStore.integration.test.ts | unsafe | Bun.spawn of competing admission children with owned process cancellation
 test/daemon/socketRequestCancel.integration.test.ts | safe | tmpdir sockets L55, UnixSocketServer with fake timer
 test/daemon/socketServer/BaseSocketServerBindGuard.integration.test.ts | safe | mkdtemp socket dirs L52 and L96
@@ -236,6 +238,7 @@ test/server/deviceLabelSessionReleaseOrdering.integration.test.ts | safe | in-me
 test/server/deviceLossOutcomeWire.integration.test.ts | safe | FakeDeviceManager installed; in-memory McpTestFixture L29
 test/server/explicitSessionUuidBinding.daemon.integration.test.ts | safe | Registry device session manager replaced with FakeDeviceReadiness L67; UnixSocketServer never started, fake pool and :memory: DB
 test/server/finalizeToolResponse.outputSchema.integration.test.ts | safe | FakeDeviceManager and FakeArtifactWriter L19/L142
+test/server/identifyInteractions.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; FakeObserveScreen, spied NavigationGraphManager.getInstance and IdentifyInteractions.analyze
 test/server/interactionTools.wireEnvelope.integration.test.ts | safe | hermetic fixture and in-memory McpTestFixture; fake action factories, spied HomeScreen/SystemTray execute
 test/server/internalToolPayloads.integration.test.ts | safe | read-only scan of src files L8
 test/server/liveAcceptanceDestructiveToolSelection.integration.test.ts | safe | hermetic fixture; tools are in-test stubs L1
@@ -273,6 +276,7 @@ test/server/unissuedSessionBoundConnection.integration.test.ts | safe | hermetic
 test/setup/realDeviceToolSpawnGuardPreload.integration.test.ts | unsafe | Bun.spawnSync of bun test and adb devices fixtures L26/L40/L94
 test/utils/FileDownloader.integration.test.ts | safe | fake response streams, no network or spawn; writes only under cwd/scratch L186
 test/utils/FileDownloaderNodeHttp.integration.test.ts | safe | loopback 127.0.0.1:0 server, curl/wget stubbed unavailable L36/L52
+test/utils/android-cmdline-tools/emulatorGrpc/Http2GrpcTransport.integration.test.ts | safe | in-process node:http2 fake emulator on a 127.0.0.1 ephemeral port; no files, processes or devices
 test/utils/deviceSnapshotStore.integration.test.ts | safe | store rooted in mkdtemp tmpdir L12
 test/utils/image/backend/JimpBackend.integration.test.ts | safe | in-process Jimp image processing only
 test/utils/image/backend/JimpCliBackend.integration.test.ts | safe | FakeWebpCodec injected, no CLI spawn L42

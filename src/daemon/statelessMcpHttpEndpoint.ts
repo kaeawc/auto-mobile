@@ -339,7 +339,7 @@ export class StatelessMcpHttpEndpoint<
     };
 
     if (this.isModernRequest(req, parsedBody)) {
-      await this.handleModern(req, res, parsedBody, scope, headerSessionKey, sendJsonRpcError);
+      await this.handleModern(req, res, parsedBody, { scope, headerSessionKey, sendJsonRpcError });
       return;
     }
 
@@ -352,7 +352,7 @@ export class StatelessMcpHttpEndpoint<
       return;
     }
     const transport = this.deps.createTransport();
-    const request = this.track(scope, headerSessionKey, parsedBody, server, transport);
+    const request = this.track(scope, headerSessionKey, parsedBody, { server, transport });
     // The response ends (finish), the response is torn down (close), or the client
     // drops the connection (socket close; on a keep-alive socket the listener is
     // removed once the response ends, so reused connections do not accumulate it).
@@ -375,7 +375,7 @@ export class StatelessMcpHttpEndpoint<
       await request.close();
       return;
     }
-    await this.dispatch(req, res, transport, parsedBody, sendJsonRpcError);
+    await this.dispatch(req, res, transport, { parsedBody, sendJsonRpcError });
   }
 
   private isModernRequest(req: Req, parsedBody: unknown): boolean {
@@ -427,9 +427,15 @@ export class StatelessMcpHttpEndpoint<
     req: Req,
     res: Res,
     parsedBody: unknown,
-    scope: StatelessMcpRequestScope,
-    headerSessionKey: string | undefined,
-    sendJsonRpcError: (message: string, error?: unknown) => void,
+    {
+      scope,
+      headerSessionKey,
+      sendJsonRpcError,
+    }: {
+      scope: StatelessMcpRequestScope;
+      headerSessionKey: string | undefined;
+      sendJsonRpcError: (message: string, error?: unknown) => void;
+    },
   ): Promise<void> {
     const bus = this.getModernBus();
     const slot = this.openListenSlot(parsedBody, res);
@@ -445,10 +451,13 @@ export class StatelessMcpHttpEndpoint<
       slot.release();
       throw error;
     }
-    const request = this.track(scope, headerSessionKey, parsedBody, handler, {
-      close: async () => {
-        controller.abort();
-        slot.release();
+    const request = this.track(scope, headerSessionKey, parsedBody, {
+      server: handler,
+      transport: {
+        close: async () => {
+          controller.abort();
+          slot.release();
+        },
       },
     });
     const socket = req.socket ?? undefined;
@@ -538,8 +547,10 @@ export class StatelessMcpHttpEndpoint<
     scope: StatelessMcpRequestScope,
     headerSessionKey: string | undefined,
     parsedBody: unknown,
-    server: Pick<StatelessMcpServer<T>, "close">,
-    transport: Pick<T, "close">,
+    {
+      server,
+      transport,
+    }: { server: Pick<StatelessMcpServer<T>, "close">; transport: Pick<T, "close"> },
   ): InFlightRequest {
     const { requestScopeId } = scope;
     // A `notifications/cancelled` carries no in-band arguments, so the header key indexes
@@ -703,8 +714,10 @@ export class StatelessMcpHttpEndpoint<
     req: Req,
     res: Res,
     transport: T,
-    parsedBody: unknown,
-    sendJsonRpcError: (message: string, error?: unknown) => void,
+    {
+      parsedBody,
+      sendJsonRpcError,
+    }: { parsedBody: unknown; sendJsonRpcError: (message: string, error?: unknown) => void },
   ): Promise<void> {
     const clearKeepalive = this.startKeepalive(res);
     try {

@@ -32,9 +32,13 @@ describe("ToolRegistry.getToolDefinitions", () => {
         ["debugTool", { debugOnly: true }],
         ["hiddenTool", { hidden: true }],
       ] as const) {
-        ToolRegistry.register(name, name, z.object({}), async () => ({}), options);
+        ToolRegistry.register(name, name, z.object({}), {
+          handler: async () => ({}),
+          ...options,
+        });
       }
-      ToolRegistry.registerDeviceAware("planTool", "Plan only", z.object({}), async () => ({}), {
+      ToolRegistry.registerDeviceAware("planTool", "Plan only", z.object({}), {
+        handler: async () => ({}),
         planOnly: true,
       });
       const choices = () => {
@@ -71,8 +75,10 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "cachedTool",
       "A tool with schemas worth caching",
       z.object({ value: z.string() }),
-      async () => ({ content: [{ type: "text", text: "ok" }] }),
-      { outputSchema: z.object({ ok: z.boolean() }) },
+      {
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+        outputSchema: z.object({ ok: z.boolean() }),
+      },
     );
 
     const first = ToolRegistry.getToolDefinitions()[0];
@@ -87,8 +93,8 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "appIdSchemaTool",
       "A tool with appId fields in both schemas",
       z.object({ appId: z.string() }),
-      async () => ({ content: [{ type: "text", text: "ok" }] }),
       {
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
         outputSchema: z.object({
           appId: z.string(),
           nested: z.object({ appId: z.string() }),
@@ -125,8 +131,10 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "invalidateTool",
       "A tool that should be reconverted after invalidation",
       z.object({ value: z.string() }),
-      async () => ({ content: [{ type: "text", text: "ok" }] }),
-      { outputSchema: z.object({ ok: z.boolean() }) },
+      {
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+        outputSchema: z.object({ ok: z.boolean() }),
+      },
     );
 
     const cached = ToolRegistry.getToolDefinitions()[0];
@@ -279,8 +287,10 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "selectionTool",
       "A tool whose schemas a selection change cannot affect",
       z.object({ value: z.string() }),
-      async () => ({ content: [{ type: "text", text: "ok" }] }),
-      { outputSchema: z.object({ ok: z.boolean() }) },
+      {
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+        outputSchema: z.object({ ok: z.boolean() }),
+      },
     );
     const cached = ToolRegistry.getToolDefinitions()[0];
     const built = ToolRegistry.schemaBuildCountForTesting();
@@ -310,8 +320,10 @@ describe("ToolRegistry.getToolDefinitions", () => {
       "boundsTool",
       "A tool whose output schema follows runtime flags",
       z.object({}),
-      async () => ({ content: [{ type: "text", text: "ok" }] }),
-      { outputSchema: boundsSchema },
+      {
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+        outputSchema: boundsSchema,
+      },
     );
 
     // Bounds compaction is now an unconditional default, so the positional tuple

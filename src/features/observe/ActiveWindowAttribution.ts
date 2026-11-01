@@ -1,4 +1,10 @@
-import type { BootedDevice, ObserveResult, ViewHierarchyWindowInfo } from "../../models";
+import type {
+  AndroidOrIosPlatform,
+  BootedDevice,
+  ObserveResult,
+  ViewHierarchyWindowInfo,
+} from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { appendObserveError } from "./ObserveError";
@@ -251,6 +257,10 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
   private get platformValidator() {
     return this.dependencies.platformValidator();
   }
+  /** Recaptures validate against the device's own platform; a watch has no hierarchy path. */
+  private get hierarchyPlatform(): AndroidOrIosPlatform {
+    return requireAndroidOrIosPlatform(this.device.platform, "Observing the view hierarchy");
+  }
   private get resolveObservationTimestampMs() {
     return this.dependencies.resolveObservationTimestampMs;
   }
@@ -377,8 +387,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
       result,
       activeWindow,
       backStackAttribution,
-      bootstrapAttribution,
-      { signal, readOnly },
+      { bootstrapAttribution, signal, readOnly },
     );
     result.activeWindow = confirmedWindow;
     // The recapture replaced the tree AFTER the focused-SystemUI check ran. A
@@ -620,7 +629,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
       !hierarchy ||
       !hasUsableHierarchy(hierarchy) ||
       hierarchy.fresh !== true ||
-      !this.platformValidator.validate(this.device.platform, hierarchy).valid
+      !this.platformValidator.validate(this.hierarchyPlatform, hierarchy).valid
     ) {
       return false;
     }
@@ -785,8 +794,10 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
     result: ObserveResult,
     activeWindow: NonNullable<ObserveResult["activeWindow"]>,
     expected: { packageName: string; activityName: string },
-    bootstrapAttribution: boolean,
-    options: { signal?: AbortSignal; readOnly?: boolean } = {},
+    {
+      bootstrapAttribution,
+      ...options
+    }: { signal?: AbortSignal; readOnly?: boolean } & { bootstrapAttribution: boolean },
   ): Promise<NonNullable<ObserveResult["activeWindow"]>> {
     const { signal, readOnly = false } = options;
     delete result.deviceLock;
@@ -849,7 +860,7 @@ export class DefaultActiveWindowAttributionReconciler implements ActiveWindowAtt
       hasUsableHierarchy(hierarchy) &&
       hierarchy.fresh === true &&
       hierarchy.packageName === expected.packageName &&
-      this.platformValidator.validate(this.device.platform, hierarchy).valid
+      this.platformValidator.validate(this.hierarchyPlatform, hierarchy).valid
     );
   }
 

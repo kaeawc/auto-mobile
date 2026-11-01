@@ -239,12 +239,10 @@ describe("DragAndDrop - iOS", () => {
 
   test("iOS client forwards drag cancellation and dispatch to the shared gesture delegate", async () => {
     const controller = new AbortController();
-    const client = IOSCtrlProxyClient.createForTesting(
-      IOS_DEVICE,
-      8765,
-      createSuccessWebSocketFactory(fakeTimer),
-      fakeTimer,
-    );
+    const client = IOSCtrlProxyClient.createForTesting(IOS_DEVICE, 8765, {
+      wsFactory: createSuccessWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+    });
     const delegate = spyOn(client["gestures"], "requestDrag").mockResolvedValue({
       success: true,
       totalTimeMs: 1850,
@@ -435,7 +433,9 @@ describe("DragAndDrop - iOS", () => {
     const controller = new AbortController();
     spyOn(dragAndDrop["hierarchyCapture"], "capture").mockImplementation(async (request) => {
       expect(request.signal).toBe(controller.signal);
-      const snapshot = identifyObservedHierarchy("ios", createHierarchy(), "fresh", fakeTimer);
+      const snapshot = identifyObservedHierarchy("ios", createHierarchy(), "fresh", {
+        timer: fakeTimer,
+      });
       // Model the legacy null-on-abort boundary despite the capture's non-null type contract.
       Object.defineProperty(snapshot, "hierarchy", { value: null });
       controller.abort();
@@ -685,14 +685,11 @@ describe("DragAndDrop - iOS", () => {
     expect(cachedSpy).not.toHaveBeenCalled();
     expect(latestSpy).not.toHaveBeenCalled();
     // Uses the 15s iOS budget (XCUITest extraction can take 5-15s), not the 5s Android value.
-    expect(syncSpy).toHaveBeenCalledWith(
-      expect.anything(),
-      false,
-      undefined,
-      15000,
-      expect.any(Object),
-      undefined,
-    );
+    expect(syncSpy).toHaveBeenCalledWith(expect.anything(), false, undefined, {
+      timeoutMs: 15000,
+      diagnostics: expect.any(Object),
+      displayId: undefined,
+    });
   });
 
   test("drags against the freshly-refreshed hierarchy, not the stale observe cache", async () => {

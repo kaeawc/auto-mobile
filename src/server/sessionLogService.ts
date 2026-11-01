@@ -48,8 +48,10 @@ export function createSessionLogService(
         deps.simctlFactory ?? ((device) => new SimCtlClient(device)),
         fileSystem,
         timer,
-        deps.unifiedLogTimeoutMs ?? UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
-        deps.containerOwnership,
+        {
+          unifiedLogTimeoutMs: deps.unifiedLogTimeoutMs ?? UNIFIED_LOG_DEFAULT_TIMEOUT_MS,
+          ownership: deps.containerOwnership,
+        },
       ),
       createPhysicalIosProvider(deps.physicalIos, fileSystem, timer),
     ),

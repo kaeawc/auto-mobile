@@ -134,9 +134,14 @@ struct PrototypeSession {
     private(set) var feedbackLog = PrototypeFeedbackLog()
     private var platformCalls: [String: PrototypeInFlightPlatformCall] = [:]
     private var platformCommands: [PrototypePlatformCommand] = []
+    private var platformRateLimiter: PrototypePlatformRateLimiter
     private var platformLifecycleEvents: [PrototypeEvent] = []
     private var timerCommands: [PrototypeTimerCommand] = []
     private var appeared: Set<String> = []
+
+    init(clock: PrototypeClock = SystemPrototypeClock()) {
+        platformRateLimiter = PrototypePlatformRateLimiter(clock: clock)
+    }
 
     private func visibleAppearances() -> [(String, [PrototypeAction])] {
         guard let root = spec?.root else { return [] }
@@ -777,7 +782,7 @@ struct PrototypeSession {
 
     var stackPopTarget: String? {
         guard let spec else { return nil }
-        return PrototypeStacks.popTarget(root: spec.root, state: state, pages: pages, stacks: stacks)
+        return PrototypeStacks.popTarget(root: spec.root, state: state, pages: pages, stacks: stacks, data: data)
     }
 
     func stackTransition(_ id: String) -> PrototypeStackTransition {
@@ -785,7 +790,7 @@ struct PrototypeSession {
     }
 
     mutating func popTopmostStack() -> [PrototypeEvent] {
-        if let drawer = spec?.root.openModals(state: state, pages: pages, stacks: stacks)
+        if let drawer = spec?.root.openModals(state: state, pages: pages, stacks: stacks, data: data)
             .last(where: { $0.type == "drawer" }) { return closeModal(drawer) }
         guard let id = stackPopTarget else { return [] }
         return changeStack(id, direction: .pop) { _, path in Array(path.dropLast()) }
@@ -1390,10 +1395,17 @@ extension PrototypeSession {
             job: job, action: action, eventData: platformEventData,
             nodeId: PrototypeNode.owningNodeId(of: action, in: spec.root)
         )
+        if failure == nil { failure = PrototypePlatformDriver.invalidArguments(call) }
+        if failure == nil, let refusal = platformRateLimiter.refusal(for: call.call) {
+            return events + finishPlatform(pending, refusal, durationMs: 0)
+        }
         if platformCalls.count >= PrototypeContractValidator.limit("MAX_PROTOTYPE_PLATFORM_CALLS_IN_FLIGHT") {
-            failure = .failure(.tooManyInFlight, "Too many platform calls in flight")
+            return events + finishPlatform(
+                pending, .failure(.tooManyInFlight, "Too many platform calls in flight"), durationMs: 0
+            )
         }
         if let failure { return events + finishPlatform(pending, failure, durationMs: 0) }
+        platformRateLimiter.recordAdmission(for: call.call)
         platformCalls[call.callId] = pending
         platformCommands.append(.start(job))
         return events + writeRequestStatus(action.statusKey, "loading")

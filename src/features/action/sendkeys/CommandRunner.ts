@@ -1,3 +1,4 @@
+import { iosBackendFields } from "./IosSdkTextRouting";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { withStaleDisplay } from "../../observe/StaleDisplayError";
@@ -81,8 +82,7 @@ export class CommandRunner {
     command: SendKeysCommand,
     result: SendKeysCommandResult,
     routing: SendKeysRouting,
-    signal?: AbortSignal,
-    before?: PrototypeTextReading,
+    { signal, before }: { signal?: AbortSignal; before?: PrototypeTextReading } = {},
   ): Promise<SendKeysCommandResult> {
     if (
       this.deps.target.effectiveLayer !== "prototype" ||
@@ -214,13 +214,10 @@ export class CommandRunner {
       if (!command) {
         continue;
       }
-      const result = await this.executeCommandResult(
-        command,
-        index,
-        signal,
+      const result = await this.executeCommandResult(command, index, signal, {
         routing,
-        this.needsEnterReadBack(command, commands[index + 1], results),
-      );
+        verifyEnter: this.needsEnterReadBack(command, commands[index + 1], results),
+      });
       this.checkBudgetCommandResult(result, signal);
       result.index = index;
       this.addImeFailureGuidance(command, result, results);
@@ -263,8 +260,7 @@ export class CommandRunner {
     command: SendKeysCommand,
     index: number,
     signal: AbortSignal | undefined,
-    routing: SendKeysRouting,
-    verifyEnter = false,
+    { routing, verifyEnter = false }: { routing: SendKeysRouting; verifyEnter?: boolean },
   ): Promise<SendKeysCommandResult> {
     try {
       routing.assertCurrent?.();
@@ -274,18 +270,17 @@ export class CommandRunner {
       routing.onCommandStart?.();
       const before = await this.readPrototypeBefore(command, routing, signal);
       const action = () =>
-        this.executeCommand(
-          command,
+        this.executeCommand(command, {
           signal,
-          routing.onDispatch,
-          routing.displayId,
-          routing.display,
-        );
+          onDispatch: routing.onDispatch,
+          displayId: routing.displayId,
+          display: routing.display,
+        });
       const result =
         verifyEnter && this.deps.executor.withEnterReadBack
           ? await this.deps.executor.withEnterReadBack(action, signal, routing.display)
           : await action();
-      return this.verifyPrototypeCommand(command, result, routing, signal, before);
+      return this.verifyPrototypeCommand(command, result, routing, { signal, before });
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(`[SendKeys] ${command.action} command ${index} failed`, error);
@@ -303,10 +298,12 @@ export class CommandRunner {
 
   async executeCommand(
     command: SendKeysCommand,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-    displayId?: number,
-    display?: string,
+    {
+      signal,
+      onDispatch,
+      displayId,
+      display,
+    }: { signal?: AbortSignal; onDispatch?: () => void; displayId?: number; display?: string } = {},
   ): Promise<SendKeysCommandResult> {
     switch (command.action) {
       case "type":
@@ -314,13 +311,14 @@ export class CommandRunner {
       case "key":
         if (displayId !== undefined && !this.deps.isSemanticKey(command.key)) {
           this.deps.executor.resetCaretState?.();
-          const result = await new InputKey(this.deps.device, this.deps.adbFactory).press(
-            command.key,
-            undefined,
-            undefined,
-            command.modifiers,
-            { displayId, signal, onDispatch },
-          );
+          const result = await new InputKey(this.deps.device, {
+            adbFactory: this.deps.adbFactory,
+          }).press(command.key, undefined, undefined, {
+            modifiers: command.modifiers,
+            displayId,
+            signal,
+            onDispatch,
+          });
           return {
             index: -1,
             action: "key",
@@ -340,6 +338,7 @@ export class CommandRunner {
           ...(result.retryable === false ? { retryable: false } : {}),
           ...(result.warning === undefined ? {} : { warning: result.warning }),
           ...(result.error ? { error: result.error } : {}),
+          ...iosBackendFields(result.iosBackend),
         }));
     }
   }

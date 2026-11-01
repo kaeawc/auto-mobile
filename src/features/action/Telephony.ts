@@ -55,13 +55,27 @@ export interface SendSmsOptions {
 export class Telephony {
   private readonly adb: AdbExecutor;
 
+  private readonly consoleFactory: EmulatorConsoleClientFactory;
+  private readonly iosSdkTriggers: IosSdkTriggerSenderFactory;
+  private readonly deviceTraits: DeviceTraits;
+
   constructor(
     private readonly device: BootedDevice,
-    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    private readonly consoleFactory: EmulatorConsoleClientFactory = defaultEmulatorConsoleClientFactory,
-    private readonly iosSdkTriggers: IosSdkTriggerSenderFactory = defaultIosSdkTriggerSenderFactory,
-    private readonly deviceTraits: DeviceTraits = defaultDeviceTraits,
+    {
+      adbFactoryOrExecutor = defaultAdbClientFactory,
+      consoleFactory = defaultEmulatorConsoleClientFactory,
+      iosSdkTriggers = defaultIosSdkTriggerSenderFactory,
+      deviceTraits = defaultDeviceTraits,
+    }: {
+      adbFactoryOrExecutor?: AdbClientFactory | AdbExecutor | null;
+      consoleFactory?: EmulatorConsoleClientFactory;
+      iosSdkTriggers?: IosSdkTriggerSenderFactory;
+      deviceTraits?: DeviceTraits;
+    } = {},
   ) {
+    this.consoleFactory = consoleFactory;
+    this.iosSdkTriggers = iosSdkTriggers;
+    this.deviceTraits = deviceTraits;
     if (
       adbFactoryOrExecutor &&
       typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"

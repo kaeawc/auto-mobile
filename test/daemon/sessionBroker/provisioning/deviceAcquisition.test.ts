@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { BindingRegistrySchemaUnsupportedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import {
   BrokerDeviceAcquisition,
   type BrokerDeviceAcquisitionSessions,
@@ -213,6 +214,70 @@ describe("BrokerDeviceAcquisition", () => {
     });
     expect(assignment).toMatchObject({ state: "ready", execOwner: null });
     expect(assignment?.stableDeviceId).not.toBeNull();
+  });
+
+  test("a schema refusal during the second reconcile resolves failed and backs out the first session", async () => {
+    const first = configFor();
+    const config = buildBrokerProvisionRequest({
+      ...first,
+      localBindingCapacity: 2,
+      requests: [...first.requests, { ...first.requests[0]!, bindingIndex: 1 }],
+    });
+    const error = new BindingRegistrySchemaUnsupportedError("slots.sqlite", [
+      "2099_01_01_016_future_schema",
+    ]);
+    const reconcile = spyOn(reconciler, "reconcile");
+    reconcile.mockImplementationOnce((request) =>
+      BindingReconciler.prototype.reconcile.call(reconciler, request),
+    );
+    reconcile.mockRejectedValueOnce(error);
+    const releaseExecution = spyOn(registry, "releaseExecution");
+    const releaseSession = spyOn(sessions, "releaseSession");
+    try {
+      const pending = acquisition.acquire(config, { livenessOwnerToken: TOKEN });
+      await expect(pending).resolves.toMatchObject({
+        outcome: "failed",
+        failure: {
+          code: "registry_schema_unsupported",
+          message: error.message,
+          retryable: false,
+          nextAction:
+            "Upgrade this daemon and every daemon sharing the registry to the build that migrated it, restarting older daemons; nothing was changed.",
+        },
+      });
+      expect(reconcile).toHaveBeenCalledTimes(2);
+      expect(sessions.claims).toEqual([["session-1", TOKEN]]);
+      expect(releaseSession).toHaveBeenCalledWith("session-1");
+      expect(releaseExecution).toHaveBeenCalledWith(
+        { scopeKey: computeBindingScopeKey(config), bindingIndex: 0 },
+        "session-1",
+      );
+      const result = await pending;
+      expect(result.bindings[0]?.sessionUuid).toBeNull();
+      expect(result.bindings[1]).toMatchObject({
+        bindingIndex: 1,
+        sessionUuid: null,
+        failure: result.failure,
+      });
+    } finally {
+      acquisition.close();
+      reconcile.mockRestore();
+      releaseExecution.mockRestore();
+      releaseSession.mockRestore();
+    }
+  });
+
+  test("an unrelated reconcile error still rejects unchanged", async () => {
+    const error = new Error("unexpected reconcile failure");
+    const reconcile = spyOn(reconciler, "reconcile").mockRejectedValueOnce(error);
+    try {
+      await expect(acquisition.acquire(configFor(), { livenessOwnerToken: TOKEN })).rejects.toBe(
+        error,
+      );
+    } finally {
+      acquisition.close();
+      reconcile.mockRestore();
+    }
   });
 
   test("a cancelled acquisition releases the session it prepared", async () => {

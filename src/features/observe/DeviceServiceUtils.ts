@@ -397,8 +397,10 @@ function dispatchCommand<T>(
   context: DelegateContext,
   options: SendCommandOptions<T>,
   requestId: string,
-  msg: string,
-  responseErrorFactory: (error: string, totalTimeMs: number) => T,
+  {
+    msg,
+    responseErrorFactory,
+  }: { msg: string; responseErrorFactory: (error: string, totalTimeMs: number) => T },
 ): void {
   try {
     if (!options.abortSignal?.aborted) {
@@ -486,18 +488,15 @@ export async function sendCommand<T>(
             error,
           } as T);
 
-  const promise = context.requestManager.register<T>(
-    requestId,
-    options.responseType,
-    timeoutMs,
-    timeoutFactory,
+  const promise = context.requestManager.register<T>(requestId, options.responseType, timeoutMs, {
+    timeoutErrorFactory: timeoutFactory,
     responseErrorFactory,
-  );
+  });
 
   const abortListener = registerCommandAbort(context, options, requestId);
 
   const msg = serializeCommand(context, options, requestId, timeoutMs);
-  dispatchCommand(context, options, requestId, msg, responseErrorFactory);
+  dispatchCommand(context, options, requestId, { msg, responseErrorFactory });
 
   try {
     return await (options.perf

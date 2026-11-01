@@ -16,9 +16,8 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
         // #13722: Intentional gaps in the iOS advertisement, each with its reason; remove them
         // when supported. The platform vocabulary (#14294) runs on the module registry (#14296),
         // and the `test` module is a placeholder no production runtime ever advertises.
-        // motion v2 (#14208) is Android-only until the SwiftUI side lands (#14684), and so is
-        // transition choreography (#15247). Android window and
-        // modal motion (#15113) is Android-only (iOS is #14684). The haptics and sound platform
+        // Transition choreography (#15247), motion v3 and Android window and modal motion
+        // (#15113) remain Android-only. The haptics and sound platform
         // modules (#14329) are advertised through the platform registry the agent builds at launch,
         // not through the static list this test reads.
         // no renderer yet, and so do device media items (#14192).
@@ -33,7 +32,7 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             // Contract only; the device status readers are owed (#14323).
             "prototype_platform_battery_v1", "prototype_platform_power_v1",
             "prototype_platform_audio_v1",
-            // Contract only; the connectivity runtimes are owed (#14273).
+            // Registered by the agent and Viewer registries (#14273), not the static list.
             "prototype_platform_connectivity_v1",
             // Contract only; the biometric prompt runtime is owed (#14328).
             "prototype_platform_biometric_v1",
@@ -43,18 +42,46 @@ final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
             "prototype_platform_links_v1",
             // Contract only; the system picker runtimes are owed (#14318).
             "prototype_platform_contacts_v1", "prototype_platform_calendar_v1",
+            // Contract only; the motion and sensor runtimes are owed (#14327).
+            "prototype_platform_sensors_v1",
+            // Contract only; the map renderers are owed (#14310, #14311).
+            "prototype_platform_map_v1",
             // Contract only; the location runtimes are owed (#14325, #14326).
             "prototype_platform_location_v1",
             // Contract only; the system media picker and camera runtimes are owed (#14197).
             "prototype_platform_mediaLibrary_v1", "prototype_platform_camera_v1",
+            // Contract only; the fake store runtime is owed (#14314).
+            "prototype_platform_commerce_v1",
             // Contract only; the window controls runtime is owed (#14320).
             "prototype_platform_window_controls_v1",
+            // Contract only; the keyboard dismiss runtime is owed (#14320).
+            "prototype_hide_keyboard_v1",
+            // Contract only; the cast sender and route runtimes are owed (#14240, #14241, #14242).
+            "prototype_platform_cast_v1",
+            // Contract only; the media queue runtime is owed (#14249).
+            "prototype_platform_media_queue_v1",
+            // Contract only; the photo library runtime is owed (#14195).
+            "prototype_platform_mediaLibrary_query_v1",
+            "prototype_platform_mediaLibrary_save_v1",
             // Contract only; the fake identity provider runtime is owed (#14303).
             "prototype_platform_auth_v1",
+            // Contract only; the Keychain-backed secure storage runtime is owed (#14321).
+            "prototype_platform_secureStorage_v1",
+            // Contract only; the voice-note recorder runtimes are owed (#14194).
+            "prototype_platform_audioRecorder_v1",
+            // Contract only; the Viewer notification runtime is owed (#14282).
+            "prototype_platform_notifications_v1",
+            // Contract only; the scheduled notification runtimes are owed (#14283).
+            "prototype_platform_notifications_scheduled_v1",
+            // Contract only; the media players and video renderers are owed (#14255, #14256).
+            "prototype_platform_media_v1",
+            "prototype_platform_camera_capture_v1",
+            // Contract only; the live camera runtime is owed (#14203, #14204).
+            "prototype_platform_camera_video_v1",
             // #15131: custom AGSL shaders are Android-only by owner decision.
             "prototype_custom_shaders_v1",
-            "prototype_motion_v2", "prototype_choreography_v1",
-            "prototype_motion_v3", // Android only until #14684.
+            "prototype_choreography_v1",
+            "prototype_motion_v3", // Motion v2 does not include motion v3 or window choreography.
             "prototype_window_motion_v1",
             "prototype_platform_haptics_v1", "prototype_platform_sound_v1",
             "prototype_platform_media_items_v1",

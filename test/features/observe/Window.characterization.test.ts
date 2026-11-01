@@ -30,7 +30,7 @@ function setup() {
     { deviceId: "characterization", name: "Test", platform: "android" },
     new FakeAdbClientFactory(adb),
     timer,
-    { NODE_ENV: "test" },
+    { env: { NODE_ENV: "test" } },
   );
   return { adb, timer, window };
 }

@@ -285,15 +285,15 @@ export class InMemoryDaemonClient extends DaemonClient {
     idGenerator: IdGenerator,
     maxInboundFrameBytes?: number,
   ) {
-    super(
-      assertNotHostDaemonPath("client socket path", IN_MEMORY_SOCKET_PATH),
-      undefined,
-      timer,
+    super(assertNotHostDaemonPath("client socket path", IN_MEMORY_SOCKET_PATH), undefined, timer, {
       // The stale-socket hint must never read the host's PID file.
-      { pidFilePath: `${IN_MEMORY_DATA_DIR}/no-daemon.pid`, isProcessRunning: () => true },
-      undefined,
-      { idGenerator, maxInboundFrameBytes },
-    );
+      recoveryOptions: {
+        pidFilePath: `${IN_MEMORY_DATA_DIR}/no-daemon.pid`,
+        isProcessRunning: () => true,
+      },
+      idGenerator,
+      maxInboundFrameBytes,
+    });
   }
 
   override async connect(): Promise<void> {

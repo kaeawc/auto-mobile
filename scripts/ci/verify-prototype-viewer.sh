@@ -13,6 +13,8 @@ fi
 for tool in ditto lipo plutil codesign zipinfo; do
   command -v "${tool}" >/dev/null || { echo "ERROR: ${tool} is required" >&2; exit 1; }
 done
+# shellcheck source=scripts/lib/lipo-verify-arch.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/lipo-verify-arch.sh"
 archive_entries="$(zipinfo -1 "${archive}")"
 while IFS= read -r entry; do
   case "${entry}" in
@@ -37,7 +39,7 @@ if [[ ! -s "${executable}" || ! -x "${executable}" ]]; then
   echo "ERROR: PrototypeViewer executable missing or not executable" >&2
   exit 1
 fi
-lipo "${executable}" -verify_arch arm64 x86_64
+lipo_verify_archs "${executable}" arm64 x86_64
 minos="$(plutil -extract MinimumOSVersion raw -o - "${app}/Info.plist")"
 if [[ "${minos}" != "${expected_min}" ]]; then
   echo "ERROR: MinimumOSVersion must be ${expected_min}, got '${minos}'" >&2

@@ -104,11 +104,14 @@ struct PrototypeSpec: Decodable {
     let authoredRoot: JSONValue
     /// Declarations retained for contract validation; no realtime transport is installed.
     let channels: JSONValue?
+    /// Declared media players (#14253), retained for contract validation; no player is created.
+    let media: JSONValue?
     let platformHandlers: [String: JSONValue]
     private(set) var platformState: [String: JSONValue] = [:]
 
     private enum CodingKeys: String, CodingKey {
         case id, window, state, data, theme, motion, root, storage, requires, platform, strings, derive, channels, auth
+        case commerce, location, media, notifications, sensors
     }
 
     // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
@@ -133,6 +136,7 @@ struct PrototypeSpec: Decodable {
         if let data { try PrototypeLimits.guardData(data) }
         derive = try container.decodeIfPresent([String: PrototypeDerivedEntry].self, forKey: .derive)
         channels = try container.decodeIfPresent(JSONValue.self, forKey: .channels)
+        media = try container.decodeIfPresent(JSONValue.self, forKey: .media)
         id = try container.decode(String.self, forKey: .id)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         // The host validator owns the strict shape; a malformed block means "no storage" here.
@@ -152,6 +156,12 @@ struct PrototypeSpec: Decodable {
             handlers: container.decodeIfPresent(JSONValue.self, forKey: .platform),
             channels: channels,
             auth: container.decodeIfPresent(JSONValue.self, forKey: .auth),
+            commerce: container.decodeIfPresent(JSONValue.self, forKey: .commerce),
+            storage: container.decodeIfPresent(JSONValue.self, forKey: .storage),
+            location: container.decodeIfPresent(JSONValue.self, forKey: .location),
+            sensors: container.decodeIfPresent(JSONValue.self, forKey: .sensors),
+            notifications: container.decodeIfPresent(JSONValue.self, forKey: .notifications),
+            media: media,
             root: raw,
             state: menuState ?? [:]
         )
@@ -237,6 +247,7 @@ struct PrototypeSpec: Decodable {
         authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil
     ) {
         channels = spec.channels
+        media = spec.media
         platformHandlers = spec.platformHandlers
         platformState = spec.platformState
         id = spec.id
@@ -623,6 +634,11 @@ struct StyleWhen: Decodable {
     let style: Style
 }
 
+/// The image's pinch, pan and double-tap zoom bounds, validated by the shared contract.
+struct PrototypeImageZoomable: Decodable {
+    let maxScale: Double
+}
+
 struct PrototypeRouteEntry: Decodable, Sendable {
     let screen: String
     let params: [String: JSONValue]?
@@ -795,6 +811,7 @@ final class PrototypeNode: Decodable {
     let edgeEffect: String?
     let ios: IosNamespace?
     let contentScale: String?
+    let zoomable: PrototypeImageZoomable?
     let effect: IconEffect?
     let name: String?
     /// `button`/`chip`/extended `fab` text, and the optional `switch`/`checkbox`/`slider` label.
@@ -845,6 +862,8 @@ final class PrototypeNode: Decodable {
     let refresh: PrototypeScrollRefresh?
     let listRepeat: PrototypeListRepeat?
     let listRowTemplate: JSONValue?
+    /// Decoded modal nodes of this lazy list's rows, kept so their identity survives re-renders.
+    let lazyModalRows = PrototypeLazyModalRows()
     let header: PrototypeNode?
     let footer: PrototypeNode?
     let spacing: Double?
@@ -923,7 +942,8 @@ final class PrototypeNode: Decodable {
         case scrollTransition, scrollLinked
         case into, type, id, testTag, onAppear, onTap, style, styleWhen, press, visibleWhen, shared, sharedKey,
              transition, keyframes, animate
-        case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, semantics
+        case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale, zoomable,
+             semantics
         case kind, selectionKey, openKey, list, detail, content, main
         case effect, name, label, variant, stateKey, placeholder, axis, items, pager
         case anchorTo, caret, spotlight, onDismiss, edge
@@ -984,6 +1004,7 @@ final class PrototypeNode: Decodable {
         edgeEffect = try container.decodeIfPresent(String.self, forKey: .edgeEffect)
         ios = try container.decodeIfPresent(IosNamespace.self, forKey: .ios)
         contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)
+        zoomable = try container.decodeIfPresent(PrototypeImageZoomable.self, forKey: .zoomable)
         effect = try container.decodeIfPresent(IconEffect.self, forKey: .effect)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         label = try container.decodeIfPresent(String.self, forKey: .label)

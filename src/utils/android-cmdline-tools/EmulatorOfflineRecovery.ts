@@ -23,6 +23,30 @@ export interface OfflineProbeOptions {
   signal?: AbortSignal;
 }
 
+/** The readiness wait a fresh-offline recovery runs inside. */
+export interface FreshOfflineRecoveryContext {
+  avdName: string;
+  signal: AbortSignal | undefined;
+  /** When the readiness wait started, on the host timer. */
+  startTime: number;
+  /** The readiness wait's whole budget, measured from {@link startTime}. */
+  timeoutMs: number;
+}
+
+/** The current time, the configured polling cadence and what is left of the readiness budget. */
+export interface PollingDelayBudget {
+  now: number;
+  pollingIntervalMs: number;
+  remainingPollingTimeMs: number;
+}
+
+/** When the stuck fresh-offline episode began and how much budget a reconnect may use. */
+interface FreshOfflineEpisode {
+  now: number;
+  offlineSince: number;
+  remainingMs: number;
+}
+
 /**
  * Members resolved through the client at call time, so reassigned fields keep taking effect
  * (the same convention as the other extracted units).
@@ -38,17 +62,13 @@ export interface EmulatorOfflineRecovery {
     tracker: OfflineTracker,
     options: AndroidEmulatorReadinessOptions | undefined,
     deviceId: string | undefined,
-    startTime: number,
-    timeoutMs: number,
-    context: { avdName: string; signal: AbortSignal | undefined },
+    context: FreshOfflineRecoveryContext,
   ): Promise<void>;
   nextPollingDelayMs(
     tracker: OfflineTracker,
     options: AndroidEmulatorReadinessOptions | undefined,
     deviceId: string | undefined,
-    now: number,
-    pollingIntervalMs: number,
-    remainingPollingTimeMs: number,
+    budget: PollingDelayBudget,
   ): number;
   getOfflineDeviceIdsAmong(
     candidateIds: Iterable<string>,
@@ -79,11 +99,9 @@ export class DefaultEmulatorOfflineRecovery implements EmulatorOfflineRecovery {
     tracker: OfflineTracker,
     options: AndroidEmulatorReadinessOptions | undefined,
     deviceId: string | undefined,
-    startTime: number,
-    timeoutMs: number,
-    context: { avdName: string; signal: AbortSignal | undefined },
+    context: FreshOfflineRecoveryContext,
   ): Promise<void> {
-    const { avdName, signal } = context;
+    const { avdName, signal, startTime, timeoutMs } = context;
     if (!this.isFreshOfflineEpisode(tracker, options, deviceId)) {
       return;
     }
@@ -99,9 +117,7 @@ export class DefaultEmulatorOfflineRecovery implements EmulatorOfflineRecovery {
         await this.dispatchFreshOfflineReconnect(
           tracker,
           deviceId!,
-          now,
-          offlineSince,
-          remainingMs,
+          { now, offlineSince, remainingMs },
           { avdName, signal },
         );
       }
@@ -126,9 +142,7 @@ export class DefaultEmulatorOfflineRecovery implements EmulatorOfflineRecovery {
     tracker: OfflineTracker,
     options: AndroidEmulatorReadinessOptions | undefined,
     deviceId: string | undefined,
-    now: number,
-    pollingIntervalMs: number,
-    remainingPollingTimeMs: number,
+    { now, pollingIntervalMs, remainingPollingTimeMs }: PollingDelayBudget,
   ): number {
     const currentDelayMs = Math.min(pollingIntervalMs, remainingPollingTimeMs);
     // After the one-shot recovery, keep polling at this cadence for the rest
@@ -152,10 +166,8 @@ export class DefaultEmulatorOfflineRecovery implements EmulatorOfflineRecovery {
   private async dispatchFreshOfflineReconnect(
     tracker: OfflineTracker,
     deviceId: string,
-    now: number,
-    offlineSince: number,
-    remainingMs: number,
-    context: { avdName: string; signal: AbortSignal | undefined },
+    { now, offlineSince, remainingMs }: FreshOfflineEpisode,
+    context: Pick<FreshOfflineRecoveryContext, "avdName" | "signal">,
   ): Promise<void> {
     const { avdName, signal } = context;
     tracker.recoveryAttempted = true;

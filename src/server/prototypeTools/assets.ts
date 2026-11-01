@@ -55,11 +55,19 @@ export async function stageAssets(
   target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
   readers: AssetReaders,
-  signal: AbortSignal | undefined,
-  cached?: {
-    serial: string;
-    cache: Pick<import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache, "get">;
-  },
+  {
+    signal,
+    cached,
+  }: {
+    signal?: AbortSignal;
+    cached?: {
+      serial: string;
+      cache: Pick<
+        import("../../features/prototype/prototypeAssetCache").PrototypeAssetCache,
+        "get"
+      >;
+    };
+  } = {},
 ): Promise<AssetStage> {
   const optIn = prototypeShaderOptInProblem(args.spec, readers.env);
   if (optIn) {
@@ -167,9 +175,17 @@ async function retryMissingAssets(
   target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
   stage: AssetStage,
-  first: PrototypeResult,
-  signal: AbortSignal | undefined,
-  { displayId, env }: { displayId: number | undefined; env?: NodeJS.ProcessEnv },
+  {
+    first,
+    signal,
+    displayId,
+    env,
+  }: {
+    first: PrototypeResult;
+    signal: AbortSignal | undefined;
+    displayId: number | undefined;
+    env?: NodeJS.ProcessEnv;
+  },
 ): Promise<MissingAssetRetry | undefined> {
   const missing = new Set(first.missingAssets);
   const again = stage.prepared.filter((asset) => missing.has(asset.id));
@@ -224,16 +240,16 @@ export async function sendPrototype(
   target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
   stage: AssetStage,
-  signal: AbortSignal | undefined,
-  displayId: number | undefined,
-  hooks: {
+  send: {
+    signal: AbortSignal | undefined;
+    displayId: number | undefined;
     superseded?: () => boolean;
     beforeSend?: () => Promise<void>;
     env?: NodeJS.ProcessEnv;
-  } = {},
+  },
 ): Promise<MutationOutcome> {
-  const superseded = hooks.superseded ?? (() => false);
-  const { beforeSend } = hooks;
+  const superseded = send.superseded ?? (() => false);
+  const { signal, displayId, beforeSend } = send;
   if (stage.failure) {
     return { result: stage.failure };
   }
@@ -245,9 +261,11 @@ export async function sendPrototype(
   if (!needsAssetResend(first, superseded)) {
     return { result: first };
   }
-  const retry = await retryMissingAssets(target, args, stage, first, signal, {
+  const retry = await retryMissingAssets(target, args, stage, {
+    first,
+    signal,
     displayId,
-    env: hooks.env,
+    env: send.env,
   });
   const result = retry?.result ?? first;
   if (!result.missingAssets?.length) {

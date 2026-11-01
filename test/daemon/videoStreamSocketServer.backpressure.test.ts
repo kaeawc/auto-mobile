@@ -68,8 +68,7 @@ function createHarness(): {
     },
     "/unused/video-stream.sock",
     timer,
-    { authorize: () => {} },
-    permissiveDeviceAdmissionGate,
+    { authenticator: { authorize: () => {} }, admissionGate: permissiveDeviceAdmissionGate },
   );
   return { server, timer, source, emit: (chunk) => emit(chunk) };
 }

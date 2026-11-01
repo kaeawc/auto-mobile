@@ -54,9 +54,22 @@ class SetTextAcknowledgementOrderTest {
     )
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     assertTrue(
-      "the service's settled-hierarchy hook must wait for quiescence",
-      "hierarchyController.debouncer.extractAfterQuiescenceSuspending(" in
+      "the service's settled-hierarchy hook must publish through the hierarchy controller",
+      "hierarchyController.publishSettledHierarchy()" in
         functionBody(serviceSource, "override suspend fun publishSettledHierarchy()"),
+    )
+    val hierarchySource = KotlinSourceScan.maskLiteralsAndComments(readHierarchySource())
+    assertTrue(
+      "the published hierarchy must be extracted after quiescence",
+      "settledHierarchy()" in
+        functionBody(hierarchySource, "fun HierarchyController.publishSettledHierarchy()"),
+    )
+    assertTrue(
+      "the settled hierarchy must wait for quiescence",
+      "debouncer.extractAfterQuiescenceSuspending(" in
+        hierarchySource
+          .substringAfter("fun settledHierarchy(")
+          .substringBefore("fun broadcastHierarchyUpdate("),
     )
 
     val broadcaster = functionBody(source, "suspend fun broadcastSetTextResult(")
@@ -154,13 +167,14 @@ class SetTextAcknowledgementOrderTest {
   private fun assertCaretResetHooks() {
     val forget = "textInputController.forgetRememberedInsert()"
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    for (signature in
-      listOf(
-        "private fun performGlobalActionRequest(",
-        "override suspend fun requestClickFocusedInput(",
-      )) {
-      assertTrue("$signature clears caret", functionBody(serviceSource, signature).contains(forget))
-    }
+    // Global actions moved to GlobalActionController (#11876); its Host seam reaches the caret.
+    val globalActionSource =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("GlobalActionController.kt").readText())
+    assertTrue(
+      "performGlobalActionRequest clears caret",
+      functionBody(globalActionSource, "fun performGlobalActionRequest(")
+        .contains("host.forgetRememberedInsert()"),
+    )
     // The commit path moved to ImeController (#11876); its Host seam is wired to the same caret.
     val imeSource =
       KotlinSourceScan.maskLiteralsAndComments(locateSource("ImeController.kt").readText())
@@ -176,6 +190,11 @@ class SetTextAcknowledgementOrderTest {
       functionBody(nodeActionSource, "suspend fun performNodeAction(")
         .contains("host.forgetRememberedInsert()"),
     )
+    assertTrue(
+      "clickFocusedInputRequest clears caret",
+      functionBody(nodeActionSource, "suspend fun clickFocusedInputRequest(")
+        .contains("host.forgetRememberedInsert()"),
+    )
     // Gestures reach the caret through GestureController.Host, which the service wires to it.
     assertTrue(serviceSource.contains("override fun forgetRememberedInsert() = $forget"))
     val gestureSource = KotlinSourceScan.maskLiteralsAndComments(readGestureSource())
@@ -189,12 +208,31 @@ class SetTextAcknowledgementOrderTest {
     val gestureStart = gestureSource.indexOf("private fun dispatchGestureWithResult(")
     val gestureLifecycle = gestureSource.indexOf("val lifecycle", gestureStart)
     assertTrue(gestureSource.substring(gestureStart, gestureLifecycle).contains(hostForget))
-    val events = functionBody(serviceSource, "override fun onAccessibilityEvent(")
-    assertTrue(events.indexOf(forget) in 0 until events.indexOf("val connectionCount"))
-    assertTrue(events.contains("AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED"))
+    assertEventCaretHooks(serviceSource, forget, hostForget)
+  }
+
+  /** Accessibility events reach the caret through AccessibilityEventDispatcher.Host. */
+  private fun assertEventCaretHooks(serviceSource: String, forget: String, hostForget: String) {
     assertTrue(
-      events.contains("textInputController.onTextSelectionChanged(event.fromIndex, event.toIndex)"),
+      functionBody(serviceSource, "override fun onAccessibilityEvent(")
+        .contains("accessibilityEvents.dispatch(event)"),
     )
+    assertTrue(serviceSource.contains("override fun forgetRememberedInsert() = $forget"))
+    assertTrue(
+      serviceSource.contains(
+        "textInputController.onTextSelectionChanged(fromIndex, toIndex)",
+      ),
+    )
+    val dispatcherSource =
+      KotlinSourceScan.maskLiteralsAndComments(
+        locateSource("AccessibilityEventDispatcher.kt").readText(),
+      )
+    val events = functionBody(dispatcherSource, "fun dispatch(")
+    assertTrue(
+      events.indexOf(hostForget) in 0 until events.indexOf("accessibilityEventWorkFor("),
+    )
+    assertTrue(events.contains("AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED"))
+    assertTrue(events.contains("host.onTextSelectionChanged(event.fromIndex, event.toIndex)"))
   }
 
   @Test
@@ -338,6 +376,8 @@ class SetTextAcknowledgementOrderTest {
   private fun readCtrlProxySource(): String = locateSource("CtrlProxy.kt").readText()
 
   private fun readTextInputSource(): String = locateSource("TextInputController.kt").readText()
+
+  private fun readHierarchySource(): String = locateSource("HierarchyController.kt").readText()
 
   private fun readGestureSource(): String = locateSource("GestureController.kt").readText()
 

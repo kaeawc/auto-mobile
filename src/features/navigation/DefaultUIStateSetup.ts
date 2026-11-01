@@ -60,6 +60,12 @@ export function createDefaultObserveScreen(
   return create(device, { create: () => adb });
 }
 
+/** The session a setup runs in and the seam it calls internal tools through. */
+export interface DefaultUIStateSetupOptions {
+  sessionUuid?: string;
+  internalToolCaller?: InternalToolCaller;
+}
+
 export class DefaultUIStateSetup implements UIStateSetup {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -72,9 +78,11 @@ export class DefaultUIStateSetup implements UIStateSetup {
     device: BootedDevice,
     adb: AdbExecutor,
     observeScreenProvider?: () => ObserveScreenLike,
-    timer: Timer = defaultTimer,
-    sessionUuid?: string,
-    internalToolCaller: InternalToolCaller = registeredInternalToolCaller,
+    {
+      timer = defaultTimer,
+      sessionUuid,
+      internalToolCaller = registeredInternalToolCaller,
+    }: DefaultUIStateSetupOptions & { timer?: Timer } = {},
   ) {
     this.internalTools = internalToolCaller;
     this.device = device;
@@ -125,7 +133,10 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
     // Step 2: Handle selected elements (tabs, menu items, etc.)
     if (requiredState.selectedElements?.length) {
-      await this.setupSelectedElements(requiredState, currentState, setupActions, platform, signal);
+      await this.setupSelectedElements(requiredState, currentState, setupActions, {
+        platform,
+        signal,
+      });
     }
 
     if (setupActions.length === 0) {
@@ -143,8 +154,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     requiredState: UIState,
     currentState: UIState,
     setupActions: string[],
-    platform: string,
-    signal?: AbortSignal,
+    { platform, signal }: { platform: string; signal?: AbortSignal },
   ): Promise<void> {
     // Get current state again after modal stack changes if modals were dismissed
     const updatedState =
@@ -855,12 +865,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // Modal recovery belongs to this instance's injected ADB/timer boundary.
       // Calling press() avoids a nested observed interaction while preserving
       // the accessibility-service then ADB fallback behavior.
-      const result = await new PressButton(this.device, this.adb, this.timer).press(
-        "back",
-        undefined,
-        undefined,
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back", {
         signal,
-      );
+      });
       throwIfAborted(signal);
       if (!result.success) {
         throw new Error(result.error ?? "Android back navigation failed");

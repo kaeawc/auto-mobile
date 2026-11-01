@@ -5,6 +5,7 @@ import {
   type SessionBrokerHostConfig,
 } from "../../src/daemon/sessionBroker/hostConfig";
 import { parseSessionConfig, type SessionConfig } from "../../src/devices/sessionConfig";
+import type { DefaultedSessionDeviceRequirement } from "../../src/devices/sessionRequirements";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 
 const clientSchema = z
@@ -36,6 +37,13 @@ export type BrokerBatch = Omit<HostConfig, "contractVersion" | "limits"> & {
   limits: HostLimits & RequiredCaps;
   clients: BrokerBatchClient[];
 };
+/** Manual-test broker batches drive only iOS and Android clients; a watch request is refused. */
+export function batchClientDevice(config: SessionConfig): DefaultedSessionDeviceRequirement {
+  if (config.device.platform === "watchos") {
+    throw new Error("Manual-test broker batches drive only iOS and Android clients.");
+  }
+  return config.device;
+}
 export interface BrokerBatchOptions {
   maxDevices?: number;
   allowReuse?: boolean;

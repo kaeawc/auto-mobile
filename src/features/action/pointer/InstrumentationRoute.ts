@@ -21,13 +21,16 @@ export class InstrumentationRoute extends DispatchingRoute {
     if (features.toolType === "finger") {
       return unsupported("finger touches use the accessibility route");
     }
+    if (features.toolType === "eraser") {
+      return unsupported("the instrumentation runner does not inject an eraser");
+    }
     const needed = features.hover ? HOVER_INPUT_CAPABILITY : STYLUS_INPUT_CAPABILITY;
     if (device.capabilities.has(needed)) {
       return SUPPORTED;
     }
     const old =
       device.apiLevel !== undefined && device.apiLevel < POINTER_INSTRUMENTATION_MIN_SDK
-        ? `: this device runs Android API ${device.apiLevel} and the route needs Android 13 (API ${POINTER_INSTRUMENTATION_MIN_SDK})`
+        ? `: this device runs Android API ${device.apiLevel} and the route needs Android 12 (API ${POINTER_INSTRUMENTATION_MIN_SDK})`
         : "";
     return unsupported(`the connected runner does not advertise ${needed}${old}`, needed);
   }

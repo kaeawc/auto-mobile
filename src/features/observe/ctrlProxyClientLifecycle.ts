@@ -16,18 +16,30 @@ export interface CtrlProxyClientLifecycle {
 
 class DefaultCtrlProxyClientLifecycle implements CtrlProxyClientLifecycle {
   resumeAfterDeviceStart(platform: Platform, deviceId: string): void {
-    if (platform === "android") {
-      AndroidCtrlProxyClient.resumeAfterDeviceStart(deviceId);
-    } else {
-      IOSCtrlProxyClient.resumeAfterDeviceStart(deviceId);
+    switch (platform) {
+      case "android":
+        AndroidCtrlProxyClient.resumeAfterDeviceStart(deviceId);
+        return;
+      case "ios":
+        IOSCtrlProxyClient.resumeAfterDeviceStart(deviceId);
+        return;
+      case "watchos":
+        // A watch has no CtrlProxy client yet (#14899), so there is nothing to re-admit.
+        return;
     }
   }
 
   async retireForShutdown(platform: Platform, deviceId: string): Promise<void> {
-    if (platform === "android") {
-      AndroidCtrlProxyClient.retireForShutdown(deviceId);
-    } else {
-      await IOSCtrlProxyClient.retireInstance(deviceId);
+    switch (platform) {
+      case "android":
+        AndroidCtrlProxyClient.retireForShutdown(deviceId);
+        return;
+      case "ios":
+        await IOSCtrlProxyClient.retireInstance(deviceId);
+        return;
+      case "watchos":
+        // A watch has no CtrlProxy client yet (#14899), so there is nothing to fence.
+        return;
     }
   }
 }

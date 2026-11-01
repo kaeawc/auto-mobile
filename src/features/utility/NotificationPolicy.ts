@@ -8,6 +8,7 @@ import {
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
+import { requireAndroidOrIosPlatform } from "../../models";
 import { SetAndroidNotificationPolicyAccess } from "../action/SetAndroidNotificationPolicyAccess";
 import {
   defaultBulletinBoardReader,
@@ -201,7 +202,11 @@ export class NotificationPolicy {
   }
 
   async getPolicy(appId: string): Promise<NotificationPolicyResult> {
-    if (this.device.platform === "ios") {
+    const platform = requireAndroidOrIosPlatform(
+      this.device.platform,
+      "Notification policy access",
+    );
+    if (platform === "ios") {
       const reader = this.iosReader ?? defaultBulletinBoardReader();
       const policyAccess = await reader.read(this.device.deviceId, appId);
       return {
@@ -211,23 +216,6 @@ export class NotificationPolicy {
         platform: "ios",
         policyAccess,
         ...(policyAccess.error ? { error: policyAccess.error } : {}),
-      };
-    }
-
-    if (this.device.platform !== "android") {
-      const error =
-        "iOS does not expose app notification policy access for simulators or physical devices";
-      return {
-        success: false,
-        appId,
-        deviceId: this.device.deviceId,
-        platform: this.device.platform,
-        policyAccess: {
-          supported: false,
-          method: "unsupported",
-          error,
-        },
-        error,
       };
     }
 
@@ -248,7 +236,7 @@ export class NotificationPolicy {
         success: !policyAccess.error,
         appId,
         deviceId: this.device.deviceId,
-        platform: this.device.platform,
+        platform,
         policyAccess,
         ...(policyAccess.error ? { error: policyAccess.error } : {}),
       };
@@ -259,7 +247,7 @@ export class NotificationPolicy {
         success: false,
         appId,
         deviceId: this.device.deviceId,
-        platform: this.device.platform,
+        platform,
         policyAccess: {
           supported: true,
           method: "android_dumpsys_notification",
@@ -274,14 +262,18 @@ export class NotificationPolicy {
     appId: string,
     input: SetNotificationPolicyInput,
   ): Promise<NotificationPolicyResult> {
-    if (this.device.platform !== "android") {
+    const platform = requireAndroidOrIosPlatform(
+      this.device.platform,
+      "Notification policy access",
+    );
+    if (platform !== "android") {
       const error =
         "iOS does not expose app notification policy access for simulators or physical devices";
       return {
         success: false,
         appId,
         deviceId: this.device.deviceId,
-        platform: this.device.platform,
+        platform,
         policyAccess: {
           supported: false,
           allowed: null,
@@ -302,16 +294,19 @@ export class NotificationPolicy {
     // Never echo the request: read the policy-access state back (one extra
     // `shell dumpsys notification`) and report what the device now says.
     const observed = await this.getPolicy(appId);
-    return this.buildSetResult(appId, input, result, observed);
+    return this.buildSetResult(platform, appId, input, { command: result, observed });
   }
 
   private buildSetResult(
+    platform: "android",
     appId: string,
     input: SetNotificationPolicyInput,
-    command: AndroidDeviceShellToolResult,
-    observed: NotificationPolicyResult,
+    {
+      command,
+      observed,
+    }: { command: AndroidDeviceShellToolResult; observed: NotificationPolicyResult },
   ): NotificationPolicyResult {
-    const base = { appId, deviceId: this.device.deviceId, platform: this.device.platform };
+    const base = { appId, deviceId: this.device.deviceId, platform };
     const readBack = observed.policyAccess;
     const allowed = observed.success ? (readBack.allowed ?? null) : null;
     const policyAccess: NotificationPolicyAccessState = {
@@ -320,7 +315,7 @@ export class NotificationPolicy {
       method: observed.success ? "android_dumpsys_notification" : "android_cmd_notification",
     };
 
-    const verdict = classifySetOutcome(appId, input, command, allowed, readBack);
+    const verdict = classifySetOutcome(appId, input, command, { allowed, readBack });
     if (verdict.error) {
       const { error } = verdict;
       return { ...base, success: false, policyAccess: { ...policyAccess, error }, error };
@@ -338,8 +333,7 @@ function classifySetOutcome(
   appId: string,
   input: SetNotificationPolicyInput,
   command: AndroidDeviceShellToolResult,
-  allowed: boolean | null,
-  readBack: NotificationPolicyAccessState,
+  { allowed, readBack }: { allowed: boolean | null; readBack: NotificationPolicyAccessState },
 ): { error?: string; warning?: string } {
   if (!command.success) {
     const commandError = command.error ?? "cmd notification failed";

@@ -4,7 +4,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { ActionableError, BootedDevice, DeviceInfo } from "../../models";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
+import { runWithAbortSignal } from "../../utils/AbortContext";
 import { UnconfirmedRecoveryShutdownError } from "../UnconfirmedRecoveryShutdownError";
 import type { PooledDevice } from "../devicePoolTypes";
 import { ANDROID_OFFLINE_PROBE_TIMEOUT_MS, StopDiscoveredEmulatorOptions } from "./contracts";
@@ -27,8 +27,7 @@ export interface EmulatorLifecycleOperations {
     avdName: string,
     deviceId: string,
     discover: () => Promise<BootedDevice[]>,
-    signal: AbortSignal,
-    deadlineMs: number,
+    options: { signal: AbortSignal; deadlineMs: number },
   ): Promise<"stopped">;
   isAndroidSerialHeldOffline(
     avdName: string,
@@ -90,11 +89,11 @@ export class DevicePoolEmulatorLifecycle {
       handoffOwner,
       preservedSessionId,
       preservedSession,
+      signal: callerSignal,
     } = options;
     const timeoutMs = 30000;
     const deadlineMs = this.state.timer.now() + timeoutMs;
     const deadlineController = new AbortController();
-    const callerSignal = getAbortSignal();
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, deadlineController.signal])
       : deadlineController.signal;
@@ -180,13 +179,10 @@ export class DevicePoolEmulatorLifecycle {
           signal,
         });
         signal.throwIfAborted();
-        return await this.confirmRecoveryStop(
-          avdName,
-          matchingAvd.deviceId,
-          discover,
+        return await this.confirmRecoveryStop(avdName, matchingAvd.deviceId, discover, {
           signal,
           deadlineMs,
-        );
+        });
       }));
     try {
       return await raceWithDeadline(startShutdown, {
@@ -248,15 +244,14 @@ export class DevicePoolEmulatorLifecycle {
       },
     );
     signal.throwIfAborted();
-    return await this.confirmRecoveryStop(avdName, deviceId, discover, signal, deadlineMs);
+    return await this.confirmRecoveryStop(avdName, deviceId, discover, { signal, deadlineMs });
   }
 
   async confirmRecoveryStop(
     avdName: string,
     deviceId: string,
     discover: () => Promise<BootedDevice[]>,
-    signal: AbortSignal,
-    deadlineMs: number,
+    { signal, deadlineMs }: { signal: AbortSignal; deadlineMs: number },
   ): Promise<"stopped"> {
     for (;;) {
       const devices = await discover();

@@ -92,9 +92,13 @@ export function applicationWindowSafeTapPoint(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
-  point: { x: number; y: number },
-  imeBounds?: ElementBounds,
-  ownWindows: OwnPrototypeCoverRule = "none",
+  {
+    point,
+    imeBounds,
+    ownWindows = "none",
+  }: { imeBounds?: ElementBounds; ownWindows?: OwnPrototypeCoverRule } & {
+    point: { x: number; y: number };
+  },
 ): { point: { x: number; y: number } | null; coveredBy?: string } {
   return safeTapPoint({
     hierarchy,
@@ -265,8 +269,10 @@ export function isFullyCoveredByApplicationWindow(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
-  ownWindows: OwnPrototypeCoverRule = "none",
-  index: ApplicationWindowCoverIndex = applicationWindowCoverIndex(hierarchy),
+  {
+    ownWindows = "none",
+    index = applicationWindowCoverIndex(hierarchy),
+  }: { ownWindows?: OwnPrototypeCoverRule; index?: ApplicationWindowCoverIndex } = {},
 ): boolean {
   const center = {
     x: Math.floor((bounds.left + bounds.right) / 2),

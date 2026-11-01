@@ -145,8 +145,7 @@ function setup(
       lost,
       "incident",
       { preserveSessionId: "session-s" },
-      new AbortController().signal,
-      () => {},
+      { signal: new AbortController().signal, retainLeaseUntil: () => {} },
     );
   return { timer, host, port, recover };
 }

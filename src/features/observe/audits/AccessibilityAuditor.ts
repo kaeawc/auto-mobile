@@ -113,9 +113,7 @@ export class AccessibilityAuditor {
         const auditResult = await wcagAudit.audit(
           allElements,
           result.viewHierarchy!.hierarchy,
-          screenshotPath,
-          result.activeWindow!.appId,
-          auditConfig,
+          { screenshotPath, packageName: result.activeWindow!.appId, config: auditConfig },
           {
             density: result.viewHierarchy!.density,
             windows: result.viewHierarchy!.windows,

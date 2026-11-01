@@ -1,3 +1,4 @@
+import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -23,7 +24,11 @@ import {
   type BindingScopeIdentity,
   type BindingExecOwnerLiveness,
 } from "./registry/bindingRegistry";
-import { type BrokerProvisionRequest } from "./provisioning/provisionRequest";
+import {
+  type BrokerDeviceSpecRequest,
+  type BrokerProvisionRequest,
+} from "./provisioning/provisionRequest";
+import { WATCH_BOOTED_READINESS } from "./provisioning/bindingReadiness";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { DeviceIncarnationScope } from "./mutations/types";
 import type { DeviceMutationResetContext } from "./mutations/reset";
@@ -38,7 +43,7 @@ import {
   type ResetBootRunner,
   type SessionPreparationTiming,
 } from "./devicePort";
-import { nativeProfile, type BrokerNativeProfile } from "./profile";
+import { nativeProfile, brokerReceiptProfile, type BrokerNativeProfile } from "./profile";
 import type { BrokerResourceRecord } from "./store";
 import { preparationTiming } from "./preparationTiming";
 import {
@@ -59,6 +64,7 @@ type BrokerDeviceAcquisitionEntry = BrokerDeviceAcquisitionResult["bindings"][nu
 type DestructionProgress = "absent" | "pending";
 
 export interface ManagedDevicePortDependencies {
+  androidConfigReader?: Pick<AvdConfigReader, "readConfig">;
   bindMutationRecorder?: (scope: DeviceMutationScope) => void;
   /** Stable provider-owned identity. Consumer requests never choose this scope or a binding index. */
   scope: BindingScopeIdentity;
@@ -79,14 +85,23 @@ export interface ManagedDevicePortDependencies {
       device: BootedDevice,
       profile: Extract<BrokerNativeProfile, { platform: "ios" }>,
       assertOwned: () => Promise<void>,
-      signal?: AbortSignal,
-      context?: {
-        resource: BrokerResourceRecord;
-        scope: DeviceIncarnationScope;
-        runResetBoot?: ResetBootRunner;
+      options?: {
+        signal?: AbortSignal;
+        context?: {
+          resource: BrokerResourceRecord;
+          scope: DeviceIncarnationScope;
+          runResetBoot?: ResetBootRunner;
+        };
       },
     ) => Promise<"clean" | ResetOutcome>;
     android?: Pick<AndroidBaselineReset, "canCapture" | "capture" | "reset" | "forget">;
+    /** Apple Watch simulators follow the iOS reuse mode (#15882); see `WatchSimulatorReset`. */
+    watch?: (
+      device: BootedDevice,
+      profile: Extract<BrokerNativeProfile, { platform: "watchos" }>,
+      assertOwned: () => Promise<void>,
+      options?: { signal?: AbortSignal; runResetBoot?: ResetBootRunner },
+    ) => Promise<ResetOutcome>;
   };
   captureIosBaseline?: (context: DeviceMutationResetContext) => Promise<void>;
   /** Durable request/revision fence; a stale reset must not act on a later session's resource. */
@@ -133,12 +148,12 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       throw new ActionableError("A broker device reservation must belong to a session request");
     }
     const profile = nativeProfile(resource);
-    const requestedSpec = this.requestedSpec(profile);
+    const requestedDevice = this.requestedDevice(profile);
     const timer = this.dependencies.timer ?? defaultTimer;
     const deadlineMs =
       timer.now() + (options.preparationTimeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
     const acquire = (preparationTimeoutMs: number, createRetryReserveMs = 0) => {
-      const config = this.bindingConfig(resource, profile, requestedSpec, {
+      const config = this.bindingConfig(resource, requestedDevice, {
         ...options,
         preparationTimeoutMs: Math.max(1, preparationTimeoutMs),
       });
@@ -172,7 +187,8 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       }
     }
     const sessionId = await this.readySessionId(result, resource, profile);
-    await this.captureBaselinesHoldingLease(resource, result, profile, sessionId, {
+    await this.captureBaselinesHoldingLease(resource, result, profile, {
+      sessionId,
       signal: options.signal,
       deadlineMs,
       deviceProfileOptions: options,
@@ -180,7 +196,11 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     const binding = result.bindings.find(
       (entry) => entry.bindingIndex === resource.allocationIndex,
     );
-    return { sessionId, profile, timing: preparationTiming(binding?.lifecycle) };
+    return {
+      sessionId,
+      profile: await brokerReceiptProfile(profile, binding, this.dependencies.androidConfigReader),
+      timing: preparationTiming(binding?.lifecycle),
+    };
   }
 
   /**
@@ -216,20 +236,22 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     resource: BrokerResourceRecord,
     result: BrokerDeviceAcquisitionResult,
     profile: BrokerNativeProfile,
-    sessionId: string,
     options: {
+      sessionId: string;
       signal?: AbortSignal;
       deadlineMs: number;
       deviceProfileOptions: SessionDevicePreparationOptions;
     },
   ): Promise<void> {
+    const { sessionId } = options;
     const release = this.dependencies.leaseKeepalive?.hold({
       taskId: resource.requestId!,
       ownerKey: "session-broker",
       sessionUuid: sessionId,
     });
     try {
-      await this.captureAndroidBaseline(resource, result, profile, sessionId, options);
+      await this.captureAndroidBaseline(resource, result, profile, options);
+      // A watch has no pool-entry baseline: no watch reset replays a mutation journal against one.
       if (profile.platform === "ios" && this.dependencies.captureIosBaseline) {
         await this.capturePoolEntryBaseline(resource, sessionId, options);
       }
@@ -244,9 +266,9 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     resource: BrokerResourceRecord,
     result: BrokerDeviceAcquisitionResult,
     profile: BrokerNativeProfile,
-    sessionId: string,
-    options: { signal?: AbortSignal; deadlineMs: number },
+    options: { sessionId: string; signal?: AbortSignal; deadlineMs: number },
   ): Promise<void> {
+    const { sessionId } = options;
     const android = this.dependencies.resetBaseline?.android;
     if (profile.platform !== "android" || !android || !android.canCapture) {
       return;
@@ -269,7 +291,8 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         stableDeviceId: binding.stableId,
       });
       const captured = await runAsBindingReconciler(this.key(resource), () =>
-        android.capture(resource.resourceId, device, profile, sessionId, {
+        android.capture(resource.resourceId, device, profile, {
+          sessionId,
           fresh: entry.disposition === "created" || entry.disposition === "replaced",
           signal: options.signal,
           timeoutMs: Math.max(
@@ -498,7 +521,9 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     profile: BrokerNativeProfile,
     bootId: string | null = null,
   ): void {
-    if (!this.dependencies.bindMutationRecorder) {
+    // A watch session records no device mutations: the watch reset is an erase, which needs no
+    // journal, and the iOS/Android mutation scopes and prior-value readers do not apply to it.
+    if (!this.dependencies.bindMutationRecorder || profile.platform === "watchos") {
       return;
     }
     try {
@@ -531,12 +556,18 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     if (typeof binding.sessionUuid !== "string" || binding.sessionUuid.length === 0) {
       return false;
     }
+    // A watch is ready once booted (provisionDevice's watch readiness); Android and iOS need
+    // their automation runner.
+    const ready =
+      profile.platform === "watchos"
+        ? WATCH_BOOTED_READINESS
+        : ({ mode: "automation", status: "automation_ready" } as const);
     return [
       binding.platform === profile.platform,
       binding.failure === undefined,
       binding.device !== null,
-      binding.readiness.mode === "automation",
-      binding.readiness.status === "automation_ready",
+      binding.readiness.mode === ready.mode,
+      binding.readiness.status === ready.status,
     ].every(Boolean);
   }
 
@@ -562,8 +593,9 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     const profile = nativeProfile(resource);
     const ios = this.dependencies.resetBaseline?.ios;
     const android = this.dependencies.resetBaseline?.android;
+    const watch = this.dependencies.resetBaseline?.watch;
     const isCurrent = this.dependencies.isCurrentReset;
-    if (!isCurrent || (profile.platform === "ios" ? !ios : !android)) {
+    if (!isCurrent || !this.hasReset(profile.platform)) {
       return "pending";
     }
     const key = this.key(resource);
@@ -596,13 +628,26 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
     };
     await assertOwned();
     const result = await runAsBindingReconciler(key, async () => {
+      if (profile.platform === "watchos" && watch) {
+        return watch(
+          { platform: "watchos", deviceId: expected.stableDeviceId, name },
+          profile,
+          assertOwned,
+          {
+            signal,
+            runResetBoot,
+          },
+        );
+      }
       if (profile.platform === "ios" && ios) {
         return ios(
           { platform: "ios", deviceId: expected.stableDeviceId, name },
           profile,
           assertOwned,
-          signal,
-          { resource, scope: this.mutationScope(resource, assignment), runResetBoot },
+          {
+            signal,
+            context: { resource, scope: this.mutationScope(resource, assignment), runResetBoot },
+          },
         );
       }
       if (!android || profile.platform !== "android") {
@@ -616,10 +661,22 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         );
       }
       const device = this.androidResetTarget(resource, assignment, name);
-      return android.reset(resource.resourceId, device, profile, assertOwned);
+      return android.reset(resource.resourceId, device, profile, { assertOwned, signal });
     });
     await assertOwned();
     return result;
+  }
+
+  private hasReset(platform: BrokerNativeProfile["platform"]): boolean {
+    const resets = this.dependencies.resetBaseline;
+    switch (platform) {
+      case "ios":
+        return resets?.ios !== undefined;
+      case "android":
+        return resets?.android !== undefined;
+      case "watchos":
+        return resets?.watch !== undefined;
+    }
   }
 
   private androidResetTarget(
@@ -850,8 +907,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
 
   private bindingConfig(
     resource: BrokerResourceRecord,
-    profile: BrokerNativeProfile,
-    requestedSpec: BrokerProvisionRequest["requests"][number]["requestedSpec"],
+    requestedSpec: BrokerDeviceSpecRequest,
     options: SessionDevicePreparationOptions,
   ): BrokerProvisionRequest {
     return {
@@ -862,8 +918,7 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
         {
           bindingIndex: resource.allocationIndex,
           role: BROKER_BINDING_ROLE,
-          platform: profile.platform,
-          requestedSpec,
+          ...requestedSpec,
         },
       ],
       ...(options.preparationTimeoutMs === undefined
@@ -879,10 +934,24 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
   private requestedSpec(
     profile: BrokerNativeProfile,
   ): BrokerProvisionRequest["requests"][number]["requestedSpec"] {
+    return this.requestedDevice(profile).requestedSpec;
+  }
+
+  private requestedDevice(profile: BrokerNativeProfile): BrokerDeviceSpecRequest {
+    if (profile.platform === "watchos") {
+      // Part 2's watch binding spec: the exact runtime and device type, never paired (#15882).
+      return {
+        platform: "watchos",
+        requestedSpec: { runtime: profile.runtime, deviceType: profile.deviceType },
+      };
+    }
     if (profile.platform === "ios") {
       return {
-        runtime: profile.runtimeId,
-        deviceType: profile.simulatorDeviceTypeIdentifier,
+        platform: "ios",
+        requestedSpec: {
+          runtime: profile.runtimeId,
+          deviceType: profile.simulatorDeviceTypeIdentifier,
+        },
       };
     }
     const runtime = parseAndroidSystemImageRuntime(profile.systemImagePackage);
@@ -897,9 +966,14 @@ export class ManagedDevicePort implements SessionBrokerDevicePort {
       );
     }
     return {
-      runtime: runtime.systemImagePackage,
-      deviceType: profile.profileId,
-      ...(profile.memoryMb === undefined ? {} : { configuration: { memoryMb: profile.memoryMb } }),
+      platform: "android",
+      requestedSpec: {
+        runtime: runtime.systemImagePackage,
+        deviceType: profile.profileId,
+        ...(profile.memoryMb === undefined
+          ? {}
+          : { configuration: { memoryMb: profile.memoryMb } }),
+      },
     };
   }
 

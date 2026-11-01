@@ -235,7 +235,8 @@ const methods: Array<{
     operation: "set_preference",
     label: "Set preference",
     write: true,
-    invoke: (s: CtrlProxyStorage) => s.setPreference("pkg", "prefs", "key", null, "STRING", 50),
+    invoke: (s: CtrlProxyStorage) =>
+      s.setPreference("pkg", "prefs", { key: "key", value: null, type: "STRING" }, 50),
     frame: (requestId: string) =>
       ctrlProxyRequests.setPreference({
         requestId,
@@ -488,9 +489,7 @@ test("legacy undefined preference values stay omitted, while null remains explic
   const pending: Promise<void> = Reflect.apply(h.storage.setPreference, h.storage, [
     "pkg",
     "prefs",
-    "key",
-    undefined,
-    "STRING",
+    { key: "key", value: undefined, type: "STRING" },
     50,
   ]);
   await flushDispatch();

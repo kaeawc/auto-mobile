@@ -1,6 +1,7 @@
 import type { Platform } from "../models";
 import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
 import type { ToolMutation } from "./deviceMutationAdapters";
+import { launchedAppIntentKey } from "../daemon/sessionBroker/mutations/launchedApp";
 
 /** App-scoped effects no revert and no baseline clean undoes: the first fallback key part. */
 export const APP_FALLBACK_TOOLS = [
@@ -27,14 +28,15 @@ export function appFallback(
 
 /**
  * App lifecycle tools (#14359).
- * - `terminateApp`, `crashApp`, `appLifecycle`, `performanceTrace`, `videoRecording` and
- *   `recordDeviceGestures` act on a process or leave only host-side artifacts (a device-side
- *   recording or trace file is removed after the pull), so they change no persistent device state.
+ * - Process-only and host-artifact tools (`terminateApp`, `performanceTrace`, ...) are
+ *   `notJournaled` in `DEVICE_MUTATION_TOOL_COVERAGE` and never reach this adapter.
  * - `launchApp` is `am start` / `simctl launch`, except `clearAppData`, which destroys app data
  *   nothing restores, so it records a `fallback:` intent.
  * - `measureStartup` with a compilation mode other than `asIs` runs `cmd package compile`, which
  *   persists across reboots, so it records a `fallback:` intent. Every other call only force-stops,
  *   drops caches and launches.
+ * - On Android both also record a non-fallback launch row (`launchedAppIntentKey`): the started
+ *   app may write its own data, which keep-booted cleaning clears for a preinstalled app.
  * - `installApp` and `uninstallApp` keep the `installed-app` row the baseline clean reverts for a
  *   session-installed app. They also record a `fallback:` intent: the clean cannot reinstall an app
  *   the baseline held, nor undo an APK replacement or restore its data. The recording layer drops
@@ -42,17 +44,6 @@ export function appFallback(
  *   (`withoutSessionCoveredFallbacks`). An uninstall that keeps data always retains its fallback:
  *   the package inventory cannot see removed packages whose data remains.
  */
-const PROCESS_ONLY_TOOLS: ReadonlySet<string> = new Set([
-  "terminateApp",
-  "crashApp",
-  "appLifecycle",
-  "performanceTrace",
-  "captureTrace",
-  "heapDump",
-  "videoRecording",
-  "recordDeviceGestures",
-]);
-
 function installMutations(args: Record<string, unknown>): ToolMutation[] {
   return [
     ...(typeof args.appId === "string"
@@ -62,15 +53,25 @@ function installMutations(args: Record<string, unknown>): ToolMutation[] {
   ];
 }
 
+function launched(args: Record<string, unknown>, platform?: Platform): ToolMutation[] {
+  return platform === "android" && typeof args.appId === "string" && args.appId.length > 0
+    ? [{ kind: "opaque", key: launchedAppIntentKey(args.appId) }]
+    : [];
+}
+
 const APP_TOOL_MUTATIONS: Readonly<
-  Record<string, (args: Record<string, unknown>) => ToolMutation[]>
+  Record<string, (args: Record<string, unknown>, platform?: Platform) => ToolMutation[]>
 > = {
-  launchApp: (args) =>
-    args.clearAppData === true ? [appFallback("clearAppData", args.appId)] : [],
-  measureStartup: (args) =>
-    args.compilation !== undefined && args.compilation !== "asIs"
+  launchApp: (args, platform) => [
+    ...(args.clearAppData === true ? [appFallback("clearAppData", args.appId)] : []),
+    ...launched(args, platform),
+  ],
+  measureStartup: (args, platform) => [
+    ...(args.compilation !== undefined && args.compilation !== "asIs"
       ? [appFallback("measureStartup", args.appId)]
-      : [],
+      : []),
+    ...launched(args, platform),
+  ],
   installApp: installMutations,
   uninstallApp: (args) => [
     { kind: "installed-app", key: String(args.appId) },
@@ -81,10 +82,9 @@ const APP_TOOL_MUTATIONS: Readonly<
 export function lifecycleToolMutations(
   name: string,
   args: Record<string, unknown>,
-  _platform?: Platform,
+  platform?: Platform,
 ): ToolMutation[] | undefined {
-  if (PROCESS_ONLY_TOOLS.has(name)) {
-    return [];
-  }
-  return Object.hasOwn(APP_TOOL_MUTATIONS, name) ? APP_TOOL_MUTATIONS[name](args) : undefined;
+  return Object.hasOwn(APP_TOOL_MUTATIONS, name)
+    ? APP_TOOL_MUTATIONS[name](args, platform)
+    : undefined;
 }

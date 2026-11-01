@@ -32,7 +32,8 @@ describe("getCliHelpSchemaShape", () => {
     expect(getCliHelpParameterInfo(shape?.clearAppData)).toMatchObject({
       isOptional: true,
       typeName: "boolean",
-      description: "Clear app data before launch (default false)",
+      description:
+        "Clear app data before launch (default false); on watchOS wipes the app's data container",
     });
   });
 });

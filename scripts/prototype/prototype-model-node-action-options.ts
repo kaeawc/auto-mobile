@@ -67,6 +67,14 @@ export const nodeModelOptions = {
     "stack.screens": {
       kotlin: "Map<String, PrototypeNode>",
     },
+    // A one-key media source union (#14253); the contract walk validates it.
+    "videoPlayer.source": { kotlin: "JsonObject" },
+    // `true`, `false` or `"whenVisible"` (#14253).
+    "videoPlayer.autoplay": { kotlin: "JsonElement" },
+    // A literal camera or a `{data}` pointer to one (#14309); the contract walk validates it.
+    "map.camera": { kotlin: "JsonObject" },
+    // Caption tracks (#14259); the contract walk validates each one.
+    "videoPlayer.captions": { kotlin: "List<JsonObject>" },
   },
   fieldDefaults: {
     "image.contentScale": {
@@ -237,5 +245,12 @@ export const nodeActionTypeRefs = {
   },
   chartSeries: {
     kotlin: "PrototypeChartSeries",
+  },
+  // The map node's markers and polylines (#14309) stay JSON until a renderer types them.
+  mapMarkers: {
+    kotlin: "JsonObject",
+  },
+  mapPolyline: {
+    kotlin: "JsonObject",
   },
 } as const satisfies TypeRefs;

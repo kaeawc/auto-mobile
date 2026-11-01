@@ -48,6 +48,22 @@ describe("requires.playStore picks a Play Store image (#14302)", () => {
   });
 });
 
+describe("the no-Play refusal names the Play image of the requested family", () => {
+  it.each([
+    ["phone", "google_apis", "google_apis_playstore"],
+    ["tv", "android-tv", "google-tv"],
+    ["automotive", "android-automotive", "android-automotive-playstore"],
+  ] as const)("%s", (formFactor, installed, suggested) => {
+    let message = "";
+    try {
+      pickAndroidSystemImage([image(34, installed, "x86_64")], { ...playStore, formFactor }, "x64");
+    } catch (error) {
+      message = String(error);
+    }
+    expect(message).toContain(`system-images;android-<api>;${suggested};<abi>`);
+  });
+});
+
 describe("requires.playStore matches only Play Store emulators", () => {
   const avd = (runtimeId?: string): DeviceInfo => ({
     name: "Pixel",

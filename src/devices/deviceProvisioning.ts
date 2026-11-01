@@ -573,14 +573,22 @@ function handheldImagesOrThrow(
   return handheld;
 }
 
+/** The Play image to install for each family: the phone, Google TV and Play car images. */
+const PLAY_STORE_TAG_BY_FAMILY: Record<AndroidImageFamily["kind"], string> = {
+  handheld: "google_apis_playstore",
+  tv: "google-tv",
+  automotive: "android-automotive-playstore",
+};
+
 /** `requires.playStore` (#14302): only Play Store images, or a refusal naming the image to install. */
-function playStoreImagesOrThrow(images: SystemImage[]): SystemImage[] {
+function playStoreImagesOrThrow(images: SystemImage[], family: AndroidImageFamily): SystemImage[] {
   const play = images.filter((image) => isPlayStoreSystemImageTag(image.tag));
   if (play.length === 0) {
+    const tag = PLAY_STORE_TAG_BY_FAMILY[family.kind];
     throw new ActionableError(
       "requires.playStore needs a Google Play system image, and none is installed for this request: " +
         `${describeInstalled(images)}. ` +
-        "Install one with 'sdkmanager \"system-images;android-<api>;google_apis_playstore;<abi>\"'. " +
+        `Install one with 'sdkmanager "system-images;android-<api>;${tag};<abi>"'. ` +
         "Play Store images refuse adb root, so root-dependent features will report that they need a non-Play image.",
     );
   }
@@ -697,7 +705,7 @@ export function pickAndroidSystemImage(
 
   const preferences = preferredAbis(architecture);
   const allowed = criteria.requires?.playStore
-    ? playStoreImagesOrThrow(familyImages)
+    ? playStoreImagesOrThrow(familyImages, family)
     : familyImages;
   const runnable = allowed.filter((image) => preferences.includes(image.abi));
   const candidates = runnable.length > 0 ? runnable : allowed;

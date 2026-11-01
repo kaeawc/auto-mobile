@@ -48,9 +48,11 @@ final class TVCommandRouter {
                 guard request.frameContext == nil else {
                     throw CommandError.invalidParameter("frameContext", "unsupported on tvOS")
                 }
+                let startTime = Date()
                 press(button)
                 return try JSONEncoder().encode(WebSocketResponse.success(
-                    type: "press_button_result", requestId: requestId, totalTimeMs: 0
+                    type: "press_button_result", requestId: requestId,
+                    totalTimeMs: Int64(Date().timeIntervalSince(startTime) * 1000)
                 ))
             default:
                 // The allowlist is exhaustive; do not silently execute newly advertised commands.

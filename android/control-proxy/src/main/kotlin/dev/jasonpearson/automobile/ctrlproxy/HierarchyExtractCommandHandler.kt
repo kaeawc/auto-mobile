@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.content.Intent
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.protocol.ErrorResponse
@@ -11,6 +12,35 @@ internal data class ExtractHierarchyCommand(
   val textFilter: String?,
   val disableAllFiltering: Boolean,
 )
+
+/**
+ * The command an ADB broadcast carries: an `EXTRACT_HIERARCHY` broadcast's extras, or null for any
+ * other action, which only triggers the uuid-file cleanup.
+ */
+internal fun extractHierarchyCommand(intent: Intent): ExtractHierarchyCommand? =
+  if (intent.action == CtrlProxy.ACTION_EXTRACT_HIERARCHY) {
+    ExtractHierarchyCommand(
+      uuid = intent.getStringExtra("uuid"),
+      textFilter = intent.getStringExtra("text"),
+      disableAllFiltering = intent.getBooleanExtra("disableAllFiltering", false),
+    )
+  } else {
+    null
+  }
+
+/** The legacy `OPERATION_RESULT` ADB broadcast; absent data or error extras are left out. */
+internal fun operationResultIntent(
+  success: Boolean,
+  data: String?,
+  error: String?,
+  timestampMs: Long,
+): Intent =
+  Intent(CtrlProxy.ACTION_OPERATION_RESULT).apply {
+    putExtra("success", success)
+    putExtra("timestamp", timestampMs)
+    data?.let { putExtra("data", it) }
+    error?.let { putExtra("error", it) }
+  }
 
 /**
  * Answers the daemon's ADB-broadcast hierarchy fallback: extract, write `hierarchy_<uuid>.json`,

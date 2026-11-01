@@ -79,10 +79,7 @@ export interface TapOnArgs {
 
 // The parsed wire schema; its exclusivity refinement (image xor x/y) is narrowed where the
 // options are built.
-export type TapAtArgs = z.output<typeof tapAtSchema> & {
-  __tapAtPlanContext?: import("../models/TapAtGeometry").TapAtPlanContext;
-  __tapAtRecordingContext?: import("../models/TapAtGeometry").TapAtPlanContext;
-};
+export type TapAtArgs = z.output<typeof tapAtSchema>;
 
 export type TapAnyArgs = z.output<typeof tapAnySchema>;
 

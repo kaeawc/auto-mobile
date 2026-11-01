@@ -474,13 +474,24 @@
 }
 
 @test "pull_request.yml lints on Ubuntu with a larger heap and not in the Windows job (#11577)" {
-  windows_job="$(sed -n '/^  mcp-build-and-test:$/,/^  ts-build-and-test:$/p' ".github/workflows/pull_request.yml")"
-  ubuntu_job="$(sed -n '/^  ts-build-and-test:$/,/^  [a-z0-9-]*:$/p' ".github/workflows/pull_request.yml")"
+  wiring_requires_yq
+  local workflow=".github/workflows/pull_request.yml"
 
-  [[ "$windows_job" == *"windows-latest"* ]]
-  [[ "$windows_job" != *"turbo run lint"* ]]
-  [[ "$ubuntu_job" == *"turbo run lint"* ]]
-  [[ "$ubuntu_job" == *"NODE_OPTIONS: \"--max-old-space-size=4096\""* ]]
+  run yq -r '.jobs."mcp-build-and-test".strategy.matrix.os[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"windows-latest"* ]]
+
+  run yq -r '.jobs."mcp-build-and-test".steps[].run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"turbo run lint"* ]]
+
+  run yq -r '.jobs."ts-build-and-test".steps[] | select(.name == "Run Lint") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "turbo run lint "* ]]
+
+  run yq -r '.jobs."ts-build-and-test".steps[] | select(.name == "Run Lint") | .env.NODE_OPTIONS' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "--max-old-space-size=4096" ]
 }
 
 @test "prepare-release.yml runs the release-integrity gate" {

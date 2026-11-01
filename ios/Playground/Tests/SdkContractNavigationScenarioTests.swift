@@ -18,7 +18,7 @@ final class SdkContractNavigationScenarioTests: XCTestCase {
         XCTAssertTrue(host.webView.navigationDelegate === host)
         host.webView(host.webView, didCommit: nil)
         host.webView(host.webView, didFinish: nil)
-        XCTAssertEqual(names.withLock { $0 }, ["navigation_committed", "navigation_finished"])
+        XCTAssertEqual(names.withLock { $0 }, ["bridge_attached", "navigation_committed", "navigation_finished"])
         XCTAssertTrue(host.webView.navigationDelegate === host)
     }
 }

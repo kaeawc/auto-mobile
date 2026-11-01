@@ -182,7 +182,7 @@ protocol PrototypeTimerHandle: AnyObject {
 }
 
 /// Wall-clock timers behind an interface so snackbar timeouts run without real time in tests.
-protocol PrototypeClock {
+protocol PrototypeClock: PrototypeMonotonicClock {
     var nowMilliseconds: Int { get }
     func schedule(afterMilliseconds: Int, _ fire: @escaping () -> Void) -> PrototypeTimerHandle
 }

@@ -21,6 +21,81 @@ const request = (followUp: string) => ({
 });
 
 describe("side-effecting calls need a user gesture", () => {
+  test("a button onTap allows a share", () => {
+    expect(
+      validatePrototypeSpec(spec({ type: "button", label: "Share", onTap: [share] })).success,
+    ).toBe(true);
+  });
+
+  test("a topAppBar action onTap allows a share", () => {
+    expect(
+      validatePrototypeSpec(
+        spec({
+          type: "topAppBar",
+          title: "Share",
+          actions: [{ icon: "share", label: "Share", onTap: [share] }],
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
+  test("a dialog confirm onTap allows a share", () => {
+    expect(
+      validatePrototypeSpec({
+        ...spec({
+          type: "dialog",
+          openWhen: { key: "open", equals: true },
+          confirm: { label: "Share", onTap: [share] },
+        }),
+        state: { open: true },
+      }).success,
+    ).toBe(true);
+  });
+
+  test("a topAppBar action onAppear refuses a share at its action path", () => {
+    // The contract rejects this owner handler; also pin the scanner's gesture policy.
+    expect(
+      prototypePlatformError(
+        spec({
+          type: "topAppBar",
+          title: "Share",
+          actions: [{ icon: "share", label: "Share", onAppear: [share] }],
+        }),
+        [],
+        () => undefined,
+      ),
+    ).toEqual({ path: "root.actions[0].onAppear[0]", message });
+  });
+
+  test("a nested owner's onTap cannot regain a gesture under onAppear", () => {
+    // This shape is outside the contract, so exercise the policy seam directly.
+    expect(
+      prototypePlatformError(
+        spec({
+          type: "text",
+          text: "Share",
+          onAppear: [{ onTap: [share] }],
+        }),
+        [],
+        () => undefined,
+      ),
+    ).toEqual({ path: "root.onAppear[0].onTap[0]", message });
+  });
+
+  test("a nested owner's onTap cannot regain a gesture under a timer", () => {
+    expect(
+      prototypePlatformError(
+        spec({
+          type: "button",
+          label: "Share",
+          onTap: [{ type: "startTimer", id: "tick", afterMs: 100, actions: [{ onTap: [share] }] }],
+        }),
+        [],
+        () => undefined,
+      ),
+    ).toEqual({ path: "root.onTap[0].actions[0].onTap[0]", message });
+  });
+
   test("onAppear refuses a share at its action path", () => {
     refused(spec({ type: "text", text: "Hi", onAppear: [share] }), "root.onAppear[0]");
   });
@@ -145,21 +220,41 @@ describe("platform event gesture provenance", () => {
       expect(validatePrototypeSpec(input(event)).success).toBe(true);
     });
   }
-  test("event bindings retain handler scope through a timer without granting a gesture", () => {
+  test("event bindings under platform.on are refused through a timer", () => {
     const value = input("notifications.opened");
+    const action = {
+      type: "platform",
+      call: "biometric.authenticate",
+      args: { title: { event: "/title" } },
+    };
+    value.requires.platform.push("biometric");
+    expect(
+      validatePrototypeSpec({
+        ...value,
+        platform: { on: { "notifications.opened": [action] } },
+      }).success,
+    ).toBe(true);
     const timer = {
       type: "startTimer",
       id: "tick",
       afterMs: 100,
-      actions: [{ ...post, args: { ...post.args, title: { event: "/title" } } }],
+      actions: [action],
     };
     const timed = { ...value, platform: { on: { "notifications.opened": [timer] } } };
     expect(prototypePlatformUses(timed)).toContainEqual({
       kind: "event",
       path: 'platform.on["notifications.opened"][0].actions[0].args.title.event',
       inHandler: true,
+      inTimer: true,
     });
-    expect(validatePrototypeSpec(timed).success).toBe(false);
+    expect(validatePrototypeSpec(timed)).toEqual({
+      success: false,
+      error: {
+        path: 'platform.on["notifications.opened"][0].actions[0].args.title.event',
+        message:
+          "{event} is unavailable in startTimer actions: copy the needed event fields into data or state before starting the timer",
+      },
+    });
   });
 });
 
@@ -169,7 +264,7 @@ describe("platform contract rate-limit loader", () => {
     expect(loadPrototypePlatformModules(modules)).toBe(modules);
   });
   for (const field of ["calls", "windowMs"]) {
-    for (const invalid of [0, -1, 1.5, Infinity, NaN]) {
+    for (const invalid of [0, -1, 1.5, Infinity, NaN, 2 ** 63]) {
       test(`${field} refuses ${invalid}`, () => {
         expect(() =>
           loadPrototypePlatformModules({
@@ -184,6 +279,17 @@ describe("platform contract rate-limit loader", () => {
       });
     }
   }
+  test("budgets accept the largest representable integer below the Swift Int limit", () => {
+    // The preceding IEEE-754 number is 1024 below 2 ** 63; subtracting 1 rounds back up.
+    const largest = 2 ** 63 - 1024;
+    const modules = {
+      share: {
+        ...PROTOTYPE_PLATFORM_MODULES.share,
+        rateLimit: { calls: largest, windowMs: largest },
+      },
+    };
+    expect(loadPrototypePlatformModules(modules)).toBe(modules);
+  });
   test("the contract pins exactly the side-effecting calls and user-initiated events", () => {
     const flagged = Object.entries(PROTOTYPE_PLATFORM_MODULES).flatMap(([name, module]) =>
       Object.entries(module.calls)

@@ -142,7 +142,10 @@ export function loadPrototypePlatformModules(
       !limit ||
       Object.keys(limit).some((key) => key !== "calls" && key !== "windowMs") ||
       !numberValid(limit.calls, positiveInteger) ||
-      !numberValid(limit.windowMs, positiveInteger)
+      !numberValid(limit.windowMs, positiveInteger) ||
+      // Swift converts these values to a signed 64-bit Int.
+      !(Number(limit.calls) < 2 ** 63) ||
+      !(Number(limit.windowMs) < 2 ** 63)
     ) {
       throw new Error(
         `platformModules.${name}.rateLimit must contain positive integer calls and windowMs`,
@@ -245,10 +248,12 @@ export type PrototypePlatformUse =
   | { kind: "handler"; path: string; event: string; userGesture: boolean }
   | { kind: "call"; path: string; action: Raw; userGesture: boolean }
   | { kind: "read"; path: string; pointer: string; condition?: Raw }
-  | { kind: "event"; path: string; inHandler: boolean };
+  | { kind: "event"; path: string; inHandler: boolean; inTimer: boolean };
 
 interface ScanContext {
   inHandler: boolean;
+  inTimer: boolean;
+  inNode: boolean;
   userGesture: boolean;
 }
 const USER_GESTURE_KEYS = new Set(["onTap", "onLongPress", "onDoubleTap", "onSubmit"]);
@@ -281,8 +286,32 @@ function ownUses(object: Raw, path: string, context: ScanContext, uses: Prototyp
     });
   }
   if (typeof object.event === "string") {
-    uses.push({ kind: "event", path: `${path}.event`, inHandler: context.inHandler });
+    uses.push({
+      kind: "event",
+      path: `${path}.event`,
+      inHandler: context.inHandler,
+      inTimer: context.inTimer,
+    });
   }
+}
+
+/** Gesture provenance for a node handler, nested UI owner or action continuation. */
+function memberContext(object: Raw, key: string, context: ScanContext): ScanContext {
+  const node =
+    typeof object.type === "string" &&
+    Object.hasOwn(contract.definitions.node.variants, object.type);
+  const gesture = USER_GESTURE_KEYS.has(key);
+  const deferred =
+    object.type === "startTimer" ||
+    (key.startsWith("on") && !gesture && key !== "onSuccess" && key !== "onError");
+  // Nested UI owners can start gestures, but lifecycle and timer chains cannot regain one.
+  // Request completion handlers retain the enclosing chain's provenance.
+  return {
+    inHandler: context.inHandler,
+    inTimer: context.inTimer || object.type === "startTimer",
+    inNode: !deferred && (node || context.inNode),
+    userGesture: node ? gesture : !deferred && ((gesture && context.inNode) || context.userGesture),
+  };
 }
 
 /** Members in sorted order; stack screens are named in brackets, as the screen-map walk does. */
@@ -292,17 +321,8 @@ function scanMembers(
   context: ScanContext,
   uses: PrototypePlatformUse[],
 ) {
-  const node =
-    typeof object.type === "string" &&
-    Object.hasOwn(contract.definitions.node.variants, object.type);
   for (const key of sortedKeys(object)) {
-    // Node handlers start a fresh chain; deferred timer actions never inherit a gesture.
-    const next = {
-      inHandler: context.inHandler,
-      userGesture: node
-        ? USER_GESTURE_KEYS.has(key)
-        : object.type !== "startTimer" && context.userGesture,
-    };
+    const next = memberContext(object, key, context);
     const screens = key === "screens" ? record(object.screens) : undefined;
     if (screens) {
       for (const name of sortedKeys(screens)) {
@@ -373,13 +393,28 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
     const at = `platform.on[${JSON.stringify(event)}]`;
     const userGesture = prototypePlatformEvent(event)?.definition.userInitiated === true;
     uses.push({ kind: "handler", path: at, event, userGesture });
-    scanValue(handlers![event], at, { inHandler: true, userGesture }, uses);
+    scanValue(
+      handlers![event],
+      at,
+      { inHandler: true, inTimer: false, inNode: false, userGesture },
+      uses,
+    );
   }
   for (const handler of prototypeChannelHandlers(root)) {
-    scanValue(handler.value, handler.path, { inHandler: true, userGesture: false }, uses);
+    scanValue(
+      handler.value,
+      handler.path,
+      { inHandler: true, inTimer: false, inNode: false, userGesture: false },
+      uses,
+    );
   }
   for (const { node, path } of prototypeSpecNodeRoots(root)) {
-    scanValue(node, path, { inHandler: false, userGesture: false }, uses);
+    scanValue(
+      node,
+      path,
+      { inHandler: false, inTimer: false, inNode: false, userGesture: false },
+      uses,
+    );
   }
   placeholderUses(root, uses);
   // A map node draws through the map module (#14309), so its gate names the node. Only node
@@ -647,9 +682,19 @@ function useError(
     case "read":
       return readError(use, context) ?? comparisonError(use, check);
     case "event":
-      return use.inHandler
-        ? undefined
-        : { path: use.path, message: "{event} is only available inside a platform.on handler" };
+      if (!use.inHandler) {
+        return {
+          path: use.path,
+          message: "{event} is only available inside a platform.on handler",
+        };
+      }
+      return use.inTimer
+        ? {
+            path: use.path,
+            message:
+              "{event} is unavailable in startTimer actions: copy the needed event fields into data or state before starting the timer",
+          }
+        : undefined;
     default:
       return undefined;
   }

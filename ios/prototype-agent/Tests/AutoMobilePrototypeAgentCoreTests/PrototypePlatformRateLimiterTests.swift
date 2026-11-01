@@ -3,6 +3,7 @@ import XCTest
 
 private final class RateLimitClock: PrototypeClock {
     var nowMilliseconds = 0
+    var monotonicMilliseconds = 0
 
     func schedule(afterMilliseconds _: Int, _: @escaping () -> Void) -> PrototypeTimerHandle {
         XCTFail("Rate limiting must not schedule timers")
@@ -43,15 +44,29 @@ final class PrototypePlatformRateLimiterTests: XCTestCase {
         XCTAssertEqual(admit("share.open", using: &limiter), shareRefusal)
     }
 
+    func testBackwardWallClockStepDoesNotResetBudget() {
+        let clock = RateLimitClock()
+        clock.nowMilliseconds = 100000
+        var limiter = PrototypePlatformRateLimiter(clock: clock)
+        for _ in 0 ..< 5 {
+            XCTAssertNil(admit("share.open", using: &limiter))
+        }
+        clock.nowMilliseconds = 90000
+        clock.monotonicMilliseconds = 9999
+        XCTAssertEqual(admit("share.open", using: &limiter), shareRefusal)
+        clock.monotonicMilliseconds = 10000
+        XCTAssertNil(admit("share.open", using: &limiter))
+    }
+
     func testWindowExpiresAtExactBoundary() {
         let clock = RateLimitClock()
         var limiter = PrototypePlatformRateLimiter(clock: clock)
         for _ in 0 ..< 5 {
             XCTAssertNil(admit("share.open", using: &limiter))
         }
-        clock.nowMilliseconds = 9999
+        clock.monotonicMilliseconds = 9999
         XCTAssertEqual(admit("share.open", using: &limiter), shareRefusal)
-        clock.nowMilliseconds = 10000
+        clock.monotonicMilliseconds = 10000
         XCTAssertNil(admit("share.open", using: &limiter))
     }
 
@@ -59,14 +74,14 @@ final class PrototypePlatformRateLimiterTests: XCTestCase {
         let clock = RateLimitClock()
         var limiter = PrototypePlatformRateLimiter(clock: clock)
         XCTAssertNil(admit("share.open", using: &limiter))
-        clock.nowMilliseconds = 5000
+        clock.monotonicMilliseconds = 5000
         for _ in 0 ..< 4 {
             XCTAssertNil(admit("share.open", using: &limiter))
         }
-        clock.nowMilliseconds = 10000
+        clock.monotonicMilliseconds = 10000
         XCTAssertNil(admit("share.open", using: &limiter))
         XCTAssertEqual(admit("share.open", using: &limiter), shareRefusal)
-        clock.nowMilliseconds = 15000
+        clock.monotonicMilliseconds = 15000
         for _ in 0 ..< 4 {
             XCTAssertNil(admit("share.open", using: &limiter))
         }
@@ -79,11 +94,11 @@ final class PrototypePlatformRateLimiterTests: XCTestCase {
         for _ in 0 ..< 5 {
             XCTAssertNil(admit("share.open", using: &limiter))
         }
-        clock.nowMilliseconds = 9999
+        clock.monotonicMilliseconds = 9999
         for _ in 0 ..< 3 {
             XCTAssertEqual(admit("share.open", using: &limiter), shareRefusal)
         }
-        clock.nowMilliseconds = 10000
+        clock.monotonicMilliseconds = 10000
         for _ in 0 ..< 5 {
             XCTAssertNil(admit("share.open", using: &limiter))
         }
@@ -116,9 +131,9 @@ final class PrototypePlatformRateLimiterTests: XCTestCase {
             .tooManyInFlight, "Rate limit exceeded for notifications: at most 10 calls per 60000 ms"
         )
         XCTAssertEqual(admit("notifications.setBadge", using: &limiter), refusal)
-        clock.nowMilliseconds = 59999
+        clock.monotonicMilliseconds = 59999
         XCTAssertEqual(admit("notifications.post", using: &limiter), refusal)
-        clock.nowMilliseconds = 60000
+        clock.monotonicMilliseconds = 60000
         for _ in 0 ..< 10 {
             XCTAssertNil(admit("notifications.setBadge", using: &limiter))
         }
@@ -174,7 +189,7 @@ final class PrototypePlatformRateLimiterTests: XCTestCase {
         XCTAssertTrue(session.takePlatformCommands().isEmpty)
         let refusedId = try XCTUnwrap(payload["callId"]?.stringValue)
         XCTAssertTrue(session.completePlatformCall(refusedId, .success(.null), durationMs: 1).isEmpty)
-        clock.nowMilliseconds = 10000
+        clock.monotonicMilliseconds = 10000
         for _ in 0 ..< 5 {
             let id = try start(action, in: &session)
             _ = session.completePlatformCall(id, .success(.null), durationMs: 0)

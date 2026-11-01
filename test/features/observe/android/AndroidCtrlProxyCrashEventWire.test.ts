@@ -56,7 +56,7 @@ describe("Android CtrlProxy crash/ANR wire persistence", () => {
           throw new Error("WebSocket connection is not needed for wire dispatch tests");
         },
         timer,
-        crashEventSink: new FailureEventRepository(db, timer),
+        crashEventSink: new FailureEventRepository({ db, timer }),
         sdkEventIngestor: ingestor,
       },
     );

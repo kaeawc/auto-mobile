@@ -254,6 +254,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "watchOS-only readiness (#14908) lists booted watches to resolve a call naming watchOS; " +
         "it never lists Android and never consults pooled identity.",
     },
+    "src/daemon/readiness/appleTvReadiness.ts": {
+      calls: 1,
+      reason:
+        "tvOS-only readiness (#15890) lists booted Apple TVs to resolve a call naming tvOS; " +
+        "it never lists Android or iOS and never consults pooled identity.",
+    },
     "src/devices/deviceBootRevalidation.ts": {
       calls: 1,
       reason:

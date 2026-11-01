@@ -30,12 +30,12 @@ describe("NavigationGraphManager tool-call dispatch window (#10196)", () => {
     harness = await installInMemoryNavManager();
   });
   beforeEach(async () => {
-    repository = new NavigationRepository(harness.db);
+    repository = new NavigationRepository({ db: harness.db });
     await repository.clearAppGraph(APP);
     timer = new FakeTimer();
     timer.setCurrentTime(T0 - 100_000);
     manager = NavigationGraphManager.createForTesting(repository, {
-      testCoverageRepository: new TestCoverageRepository(harness.db),
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
     });
     await navigate("Login", T0 - 100_000);

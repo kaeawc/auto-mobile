@@ -1,3 +1,4 @@
+import { watchSwipeOn } from "../../watch/WatchActions";
 import { iosWebScrollIntoView } from "./IosSdkWebScrollIntoView";
 import { androidCtrlProxyClientForPlatform } from "../../observe/android/androidCtrlProxyClientFor";
 import { SwipeOnAutoTargeting } from "./SwipeOnAutoTargeting";
@@ -80,9 +81,8 @@ import { OverlayDetector } from "./OverlayDetector";
 import { AutoTargetSelector } from "./AutoTargetSelector";
 import { TalkBackSwipeExecutor } from "./TalkBackSwipeExecutor";
 import { SwipeOutcomeIndeterminateError } from "./SwipeOutcomeIndeterminateError";
-import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
+import { createDefaultVoiceOverSwipeRunner } from "./VoiceOverSwipeExecutor";
 import { iosGestureFailureError, swipeMayHaveMoved } from "./iosSwipeOutcome";
-import { deviceIosSdkBridgeSwipeRunner } from "../IosSdkBridgeSwipeRouter";
 import { ScrollUntilVisible } from "./ScrollUntilVisible";
 import { isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
@@ -233,20 +233,15 @@ export class SwipeOn extends BaseVisualChange {
       timer: this.timer,
       featureFlags,
     });
-    const iosVoiceOverDetector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.voiceOverExecutor =
       dependencies.voiceOverExecutor ??
-      deviceIosSdkBridgeSwipeRunner(
+      createDefaultVoiceOverSwipeRunner({
         device,
-        new VoiceOverSwipeExecutor({
-          device,
-          executeGesture: this.executeGesture,
-          iosClient: IOSCtrlProxyClient.getInstance(device),
-          iosVoiceOverDetector,
-          timer: this.timer,
-          featureFlags,
-        }),
-      );
+        executeGesture: this.executeGesture,
+        iosVoiceOverDetector: dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector,
+        timer: this.timer,
+        featureFlags,
+      });
     this.scrollUntilVisible = new ScrollUntilVisible({
       device,
       resolver: dependencies.resolver,
@@ -378,6 +373,9 @@ export class SwipeOn extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<SwipeOnResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
+    if (this.device.platform === "watchos") {
+      return watchSwipeOn(this.device.deviceId, options, signal);
+    }
     const result = await withSwipeObservationReadScope(() =>
       this.executeWithReadScope(options, progress, signal),
     );

@@ -1,4 +1,5 @@
 import AutoMobileSDK
+import AutoMobileSdkWire
 import Foundation
 import Network
 
@@ -201,34 +202,37 @@ struct SdkContractNetworkScenario {
     }
 
     static func waitUntilReady(_ connection: NWConnection, queue: DispatchQueue) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let once = SdkContractResumeOnce()
+        try await withCancellableCheckedContinuation { (continuation: SdkContinuationResumeOnce<Void>) in
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    once.run { continuation.resume() }
+                    continuation.resume(returning: ())
                 case let .waiting(error), let .failed(error):
                     // Loopback never needs to wait for a path; waiting means nothing is listening.
-                    once.run { continuation.resume(throwing: error) }
+                    continuation.resume(throwing: error)
                 case .cancelled:
-                    once.run { continuation.resume(throwing: SdkContractError.listenerFailed("connection cancelled")) }
+                    continuation.resume(throwing: SdkContractError.listenerFailed("connection cancelled"))
                 default:
                     break
                 }
             }
             connection.start(queue: queue)
+        } onCancel: {
+            connection.cancel()
         }
     }
 
     static func send(_ data: Data, on connection: NWConnection) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        try await withCancellableCheckedContinuation { (continuation: SdkContinuationResumeOnce<Void>) in
             connection.send(content: data, completion: .contentProcessed { error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
-                    continuation.resume()
+                    continuation.resume(returning: ())
                 }
             })
+        } onCancel: {
+            connection.cancel()
         }
     }
 
@@ -244,7 +248,7 @@ struct SdkContractNetworkScenario {
     }
 
     private static func receiveChunk(_ connection: NWConnection) async throws -> (Data, Bool) {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCancellableCheckedContinuation { continuation in
             connection.receive(minimumIncompleteLength: 1, maximumLength: 16 * 1024) { data, _, isComplete, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -252,6 +256,8 @@ struct SdkContractNetworkScenario {
                     continuation.resume(returning: (data ?? Data(), isComplete || data == nil))
                 }
             }
+        } onCancel: {
+            connection.cancel()
         }
     }
 }
@@ -341,14 +347,16 @@ struct SdkContractFaultScenario {
         let started = Date()
         var clientError: String?
         do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            try await withCancellableCheckedContinuation { (continuation: SdkContinuationResumeOnce<Void>) in
                 adapter.send(message, on: task, connectionId: connectionId) { error in
                     if let error {
                         continuation.resume(throwing: error)
                     } else {
-                        continuation.resume()
+                        continuation.resume(returning: ())
                     }
                 }
+            } onCancel: {
+                task.cancel(with: .normalClosure, reason: nil)
             }
         } catch {
             clientError = Self.errorCode(error)
@@ -408,15 +416,16 @@ struct SdkContractFaultScenario {
         endpoint: String,
         connectionId: String,
         requestId: String
-    ) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let once = SdkContractResumeOnce()
+    )
+        async throws
+    {
+        try await withCancellableCheckedContinuation { (continuation: SdkContinuationResumeOnce<Void>) in
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    once.run { continuation.resume() }
+                    continuation.resume(returning: ())
                 case let .waiting(error), let .failed(error):
-                    once.run { continuation.resume(throwing: error) }
+                    continuation.resume(throwing: error)
                 default:
                     break
                 }
@@ -425,8 +434,10 @@ struct SdkContractFaultScenario {
                 connection, queue: queue, endpoint: endpoint,
                 connectionId: connectionId, requestId: requestId
             ) { error in
-                once.run { continuation.resume(throwing: error) }
+                continuation.resume(throwing: error)
             }
+        } onCancel: {
+            connection.cancel()
         }
     }
 

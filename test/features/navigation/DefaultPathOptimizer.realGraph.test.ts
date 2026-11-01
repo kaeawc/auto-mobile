@@ -140,9 +140,9 @@ describe("DefaultPathOptimizer adjacency reads", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repository = new NavigationRepository(db);
+    repository = new NavigationRepository({ db });
     manager = NavigationGraphManager.createForTesting(repository, {
-      testCoverageRepository: new TestCoverageRepository(db),
+      testCoverageRepository: new TestCoverageRepository({ db }),
     });
     TelemetryRecorder.resetInstance();
     telemetrySpy = spyOn(

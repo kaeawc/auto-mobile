@@ -89,7 +89,7 @@ describe("DB RMW follow-up fixes (#3415)", () => {
 
   test("feature flag initialization is idempotent under concurrent first initialization", async () => {
     const db = await openDb();
-    const repository = new SqliteFeatureFlagRepository(db);
+    const repository = new SqliteFeatureFlagRepository({ db });
 
     await runConcurrentSameKeyStress({
       count: N,
@@ -105,7 +105,7 @@ describe("DB RMW follow-up fixes (#3415)", () => {
 
   test("feature flag upsert is atomic under concurrent first writes", async () => {
     const db = await openDb();
-    const repository = new SqliteFeatureFlagRepository(db);
+    const repository = new SqliteFeatureFlagRepository({ db });
 
     await runConcurrentSameKeyStress({
       count: N,
@@ -120,7 +120,7 @@ describe("DB RMW follow-up fixes (#3415)", () => {
 
   test("feature flag upsert preserves existing config when config is omitted", async () => {
     const db = await openDb();
-    const repository = new SqliteFeatureFlagRepository(db);
+    const repository = new SqliteFeatureFlagRepository({ db });
 
     await repository.upsertFlag("debug", true, { writer: "initial" });
     await repository.upsertFlag("debug", false);
@@ -186,7 +186,7 @@ describe("DB RMW follow-up fixes (#3415)", () => {
 
   test("direct suggestion promotion rolls back the fingerprint when linking fails", async () => {
     const db = await openDb();
-    const repository = new NavigationRepository(db);
+    const repository = new NavigationRepository({ db });
     await repository.getOrCreateApp("com.example.app");
     const node = await repository.getOrCreateNode("com.example.app", "Settings", 1000);
     const suggestion = await repository.addOrUpdateSuggestion(

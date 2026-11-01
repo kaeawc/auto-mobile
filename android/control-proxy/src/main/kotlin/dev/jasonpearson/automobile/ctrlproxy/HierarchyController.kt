@@ -542,6 +542,18 @@ internal class HierarchyController(
   }
 
   /**
+   * Waits for the UI to settle after an input, then extracts the hierarchy of [displayId] (the
+   * active display when null). Null when the extraction failed.
+   */
+  internal suspend fun settledHierarchy(displayId: Int? = null): ViewHierarchy? =
+    debouncer.extractAfterQuiescenceSuspending(
+      quiescenceMs = HierarchyQuiescence.POLL_MS,
+      maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+      pollIntervalMs = 10L,
+      snapshotOptions = HierarchySnapshotOptions(displayId = displayId),
+    )
+
+  /**
    * Broadcast hierarchy update to WebSocket clients (suspend function for proper ordering).
    *
    * @param sync If true, enqueues for each client in call order; each client's sender drains its
@@ -836,4 +848,12 @@ internal suspend fun deliverHierarchyFrame(
     // leak. remove() is idempotent, so the redundant success-path call is harmless.
     releaseFrameContext()
   }
+}
+
+/**
+ * Settles, then publishes the fresh hierarchy in call order before the caller acknowledges its
+ * action. Nothing is sent when the extraction failed.
+ */
+internal suspend fun HierarchyController.publishSettledHierarchy() {
+  settledHierarchy()?.let { broadcastHierarchyUpdate(it, sync = true) }
 }

@@ -20,6 +20,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -107,6 +108,7 @@ class HierarchyControllerTest {
 
   private fun TestScope.controller(
     host: FakeHost,
+    debouncerTimer: TimeProvider = FakeTimer(),
     extract: (HierarchySnapshotOptions) -> ViewHierarchy?,
   ): HierarchyController =
     HierarchyController(
@@ -126,7 +128,7 @@ class HierarchyControllerTest {
         it.debouncer =
           HierarchyDebouncer(
             scope = backgroundScope,
-            timeProvider = FakeTimer(),
+            timeProvider = debouncerTimer,
             dependencies =
               HierarchyDebouncerDependencies(
                 extractHierarchy = { _, options -> extract(options) },
@@ -206,6 +208,59 @@ class HierarchyControllerTest {
     controller.requestHierarchy(RequestHierarchy(requestId = "req_2"))
 
     assertEquals(listOf(100 to 10_000), seen.map { it.maxDepth to it.maxNodes })
+  }
+
+  /** Virtual time, so the quiescence wait elapses without real sleeps. */
+  private fun TestScope.virtualTimer() =
+    object : TimeProvider {
+      override fun currentTimeMillis() = testScheduler.currentTime
+    }
+
+  @Test
+  fun `a settled hierarchy is published as one in-order update`() = runTest {
+    val host = FakeHost(tmp.newFolder())
+    val seen = mutableListOf<HierarchySnapshotOptions>()
+    val controller =
+      controller(host, virtualTimer()) {
+        seen += it
+        ViewHierarchy(packageName = "com.example.settled")
+      }
+
+    controller.publishSettledHierarchy()
+
+    assertEquals(listOf<Int?>(null), seen.map { it.displayId })
+    val frame = Json.parseToJsonElement(host.syncFrames.single()).jsonObject
+    assertEquals("hierarchy_update", frame["type"]?.jsonPrimitive?.content)
+    assertTrue("a settled publish is never fire-and-forget", host.asyncFrames.isEmpty())
+  }
+
+  @Test
+  fun `nothing is published when the settled extraction fails`() = runTest {
+    val host = FakeHost(tmp.newFolder())
+    val controller = controller(host, virtualTimer()) { null }
+
+    controller.publishSettledHierarchy()
+
+    assertTrue(host.syncFrames.isEmpty() && host.asyncFrames.isEmpty())
+    assertTrue(host.errorFrames.isEmpty())
+  }
+
+  @Test
+  fun `a settled hierarchy is extracted from the requested display`() = runTest {
+    val host = FakeHost(tmp.newFolder())
+    val seen = mutableListOf<Int?>()
+    val tree = ViewHierarchy(packageName = "com.example.display")
+    val controller =
+      controller(host, virtualTimer()) {
+        seen += it.displayId
+        tree
+      }
+
+    assertSame(tree, controller.settledHierarchy(displayId = 2))
+    controller.settledHierarchy()
+
+    assertEquals(listOf<Int?>(2, null), seen)
+    assertTrue("settling alone publishes nothing", host.syncFrames.isEmpty())
   }
 
   @Test

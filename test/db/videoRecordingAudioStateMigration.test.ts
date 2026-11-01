@@ -63,7 +63,7 @@ test("the audio state migration adds two nullable columns idempotently and down 
 
 test("a completed stop's audio state and warnings round-trip through the row", async () => {
   await up(db);
-  const repo = new VideoRecordingRepository(db);
+  const repo = new VideoRecordingRepository({ db });
   await repo.insertRecording(record);
   await repo.updateRecording("rec", {
     status: "completed",
@@ -86,7 +86,7 @@ test("a completed stop's audio state and warnings round-trip through the row", a
 
 test("a recording that never asked for audio reads with no audio state", async () => {
   await up(db);
-  const repo = new VideoRecordingRepository(db);
+  const repo = new VideoRecordingRepository({ db });
   await repo.insertRecording(record);
   const stored = await repo.getRecording("rec");
   expect(stored).not.toHaveProperty("hasAudioTrack");
@@ -95,7 +95,7 @@ test("a recording that never asked for audio reads with no audio state", async (
 
 test("malformed stored warnings warn and read as absent", async () => {
   await up(db);
-  const repo = new VideoRecordingRepository(db);
+  const repo = new VideoRecordingRepository({ db });
   await repo.insertRecording(record);
   await sql`UPDATE video_recordings SET warnings_json=${'{"not":"a list"}'}`.execute(db);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});

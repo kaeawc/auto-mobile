@@ -321,6 +321,32 @@ the device really should be stopped out from under its holder.
 - A refused `deleteDevice` carries the same typed fields as a refused
   `killDevice`.
 
+## Apple TV simulators
+
+Call `listDevices` with `platform: "tvos"` to list booted Apple TV simulators, or
+`listDeviceImages` with `platform: "tvos"` to list configured ones. Read
+`automobile:devices/images/tvos` for configured Apple TVs, installed tvOS runtimes,
+Apple TV models and their compatible runtimes. Check inventory completeness before
+treating an empty result as no devices; retry a failed listing.
+General device and image listings continue to cover Android and iOS.
+
+`provisionDevice` with `device.platform: "tvos"` takes an exact `name`, optional
+`deviceId` (UDID), and `spec: { runtime, deviceType }` identifiers from that
+catalog. It adopts an exact match or creates a simulator; a name clash, missing
+UDID or incompatible runtime/model is refused. A missing tvOS runtime must be
+installed with `xcodebuild -downloadPlatform tvOS`; the tool never downloads it.
+With `boot` (the default), it boots and binds a session at readiness `booted`;
+a simulator it created is deleted again if boot or binding fails; if deleting it
+again fails, the error says so and tells you to delete it with `deleteDevice`. `boot: false`
+creates or adopts without a session. `resources`, `enableTools` and
+`readiness: "automation"` are unsupported.
+
+`deleteDevice` takes `target: { platform: "tvos", isVirtual: true, stableId: "<UDID>" }`,
+`mode: "destroy"` and `verifyAbsence: true`. It stops a running simulator and
+releases its session before deletion, then confirms absence with a fresh listing.
+An absent UDID returns `already_absent`; a mismatched `target.stableName` fails
+with `identity_conflict`, and an unsuccessful deletion with `tv_delete_failed`.
+
 ## Apple Watch simulators
 
 A watch is reached only by naming it: `platform: "watchos"`, or the
@@ -349,13 +375,18 @@ watch, even after one was selected.
   `boot` (the default) it boots the watch and returns a `sessionId`; a watch it
   created is deleted again if that fails. `resources`, `enableTools` and
   `readiness: "automation"` are refused; `readiness` is always `"none"`.
-- `observe` on a watch returns only a fresh screenshot (`screenshotPath`,
-  `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note:
-  the view hierarchy is not available on watchOS yet. `viewHierarchy`,
-  `skeleton`, `elements` and the other element fields are absent, not empty, so
-  read the screenshot rather than treating the screen as empty. Options that
-  need a hierarchy (`waitFor`, `raw`, `project`, `scope`, `layer`, `crop` and
-  the like), `screenshot: "none"` and `screenshotOptions` are refused by name.
+- `startDevice` with `platform: "watchos"` boots the watch, starts its automation
+  runner, then binds a session. If the session ends before runner startup completes,
+  the call fails; retry `startDevice`. A second start reuses a connected runner. If the
+  runner cannot start, the call still returns a booted session and explains why
+  in `message`. Set `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` to a prebuilt watch runner
+  artifact if automatic discovery or building is unavailable, then retry.
+- With its runner connected, `observe` returns the watch hierarchy and screenshot;
+  `tapOn`, `tapAt`, directional `swipeOn` and `pressButton` with home are available.
+  Without a runner, observation returns a fresh screenshot (`screenshotPath`,
+  `screenshotExpiresAt`) and `screenSize`, with a `hierarchyUnavailable` note.
+  Hierarchy fields are absent, not empty; use the screenshot and retry `startDevice`
+  before acting. Apple TV observation remains screenshot-only.
 - A session request (`--session-config` / `AUTOMOBILE_SESSION_CONFIG`) asks for
   a watch with `device: { "schemaVersion": 1, "platform": "watchos", "spec": {
   "runtime": "...", "deviceType": "..." } }`: the exact watchOS runtime and Apple
@@ -370,9 +401,9 @@ watch, even after one was selected.
   happens to the watch: `erase` erases and reboots it for the next request with
   the same runtime and device type, `keep-booted` erases it (or destroys it when
   its fallback is `destroy`), and `minimal` or no reuse deletes it.
-- Every other device tool refuses a watch with `<tool> does not support watchOS
-  yet`. `startDevice` and `killDevice` start and stop a watch named with
-  `platform: "watchos"`.
+- Unsupported device tools refuse a watch with `<tool> does not support watchOS
+  yet`. `killDevice` stops a watch named with `platform: "watchos"` and releases
+  its runner. Ending the owning session or stopping the daemon also stops the runner.
 
 ## A device that drops off
 

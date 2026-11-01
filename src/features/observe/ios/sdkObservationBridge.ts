@@ -40,6 +40,7 @@ const nodeSchema: z.ZodType<IosSdkObservationNode> = z.lazy(() =>
 );
 
 export const iosSdkObservationSchema = z.object({
+  bundleId: z.string().optional(),
   /** Changes with every capture. A Swift UInt64; values above 2^53 lose precision. */
   captureIdentity: z.number().int().nonnegative(),
   orientation: z.string(),

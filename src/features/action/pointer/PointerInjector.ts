@@ -15,7 +15,7 @@ export type PointerRouteId =
   | "uinput"
   | "emulator-grpc";
 
-export type PointerToolType = "finger" | "stylus" | "mouse";
+export type PointerToolType = "finger" | "stylus" | "eraser" | "mouse";
 
 /** What a request needs from the injector. */
 export interface PointerFeatures {
@@ -37,6 +37,8 @@ export interface PointerEnvironment {
   apiLevel?: number;
   /** CtrlProxy capability flags from the handshake (`stylus_input_v1`, `hover_input_v1`, ...). */
   capabilities: ReadonlySet<string>;
+  /** True when `adb shell` runs as root (uid 0), as after `adb root`; unread counts as false. */
+  rootShell?: boolean;
 }
 
 export type PointerSupport =
@@ -116,8 +118,8 @@ export function invalidPointerFeatures(features: PointerFeatures): string | unde
     return invalidHover(features);
   }
   const stylusOnly = features.variablePressure || features.extendedAxes || features.path;
-  if (stylusOnly && features.toolType !== "stylus") {
-    return `${features.toolType} input has no variable pressure, tilt, buttons or stroke; only a stylus does`;
+  if (stylusOnly && features.toolType !== "stylus" && features.toolType !== "eraser") {
+    return `${features.toolType} input has no variable pressure, tilt, buttons or stroke; only a stylus or eraser does`;
   }
   if (features.toolType === "mouse") {
     return "mouse input is supported for hover only";

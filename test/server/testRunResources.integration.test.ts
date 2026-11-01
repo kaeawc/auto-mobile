@@ -69,7 +69,7 @@ describe("testRunResources deviceId scoping", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new TestExecutionRepository(db, new FakeTimer());
+    repo = new TestExecutionRepository({ db, timer: new FakeTimer() });
   });
 
   afterEach(async () => {

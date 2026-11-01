@@ -193,6 +193,7 @@
     "platform-location.json",
     "platform-media-library-pick.json",
     "platform-media-library-query-save.json",
+    "platform-media-queue-combining-mark.json",
     "platform-media-queue.json",
     "platform-reads.json",
     "platform-repeat.json",
@@ -3269,6 +3270,12 @@
     "notify-channels-block.json": ["prototype_platform_notifications_v1", "prototype_platform_v1"],
     "media-video-player-captions.json": [
       "prototype_data_model_v1",
+      "prototype_platform_media_v1",
+      "prototype_platform_v1"
+    ],
+    "platform-media-queue-combining-mark.json": [
+      "prototype_data_model_v1",
+      "prototype_platform_media_queue_v1",
       "prototype_platform_media_v1",
       "prototype_platform_v1"
     ],

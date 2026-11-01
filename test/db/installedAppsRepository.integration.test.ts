@@ -10,7 +10,7 @@ describe("InstalledAppsRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new InstalledAppsRepository(db);
+    repo = new InstalledAppsRepository({ db });
   });
 
   afterEach(async () => {

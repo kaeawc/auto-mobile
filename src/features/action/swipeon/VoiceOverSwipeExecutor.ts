@@ -1,3 +1,6 @@
+import { unsupportedWatchAction } from "../../watch/WatchActions";
+import { IOSCtrlProxyClient } from "../../observe/ios";
+import { deviceIosSdkBridgeSwipeRunner } from "../IosSdkBridgeSwipeRouter";
 import type {
   SwipeGestureRequest,
   BoomerangGestureRequest,
@@ -250,4 +253,20 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       duration,
     };
   }
+}
+
+/** Watch gestures never construct an iOS client; its dedicated action path dispatches them. */
+export function createDefaultVoiceOverSwipeRunner(
+  options: Omit<VoiceOverSwipeExecutorDependencies, "iosClient">,
+): VoiceOverSwipeRunner {
+  if (options.device.platform === "watchos") {
+    return { executeSwipeGesture: async () => unsupportedWatchAction("VoiceOver swipe") };
+  }
+  return deviceIosSdkBridgeSwipeRunner(
+    options.device,
+    new VoiceOverSwipeExecutor({
+      ...options,
+      iosClient: IOSCtrlProxyClient.getInstance(options.device),
+    }),
+  );
 }

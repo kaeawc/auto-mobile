@@ -30,7 +30,7 @@ beforeEach(async () => {
   await sql`INSERT INTO device_sessions VALUES ('peer-owner', 'released', 'peer-daemon')`.execute(
     db,
   );
-  repo = new VideoRecordingRepository(db);
+  repo = new VideoRecordingRepository({ db });
 });
 afterEach(async () => {
   await db.destroy();

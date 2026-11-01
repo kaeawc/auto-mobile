@@ -17,6 +17,7 @@ import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulat
 import { WatchSimulatorProvisioner } from "../utils/ios-cmdline-tools/WatchSimulatorProvisioner";
 import { logger } from "../utils/logger";
 import type { z } from "zod/v4";
+import { getWatchRunnerLifecycle } from "../features/watch/WatchRunnerLifecycle";
 
 /** A deleteDevice request as registered; it may name an Apple Watch simulator. */
 export type RegisteredTeardownArgs = z.output<typeof teardownDeviceRegistrationSchema>;
@@ -90,6 +91,7 @@ async function runWatchDelete(
   const udid = args.target.stableId;
   const watch = await provisioner.find(udid, signal);
   if (!watch) {
+    (deps.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(udid);
     return createTeardownResponse(
       args,
       "already_absent",
@@ -174,6 +176,7 @@ async function destroyUnderLease(
       );
     }
     signal.throwIfAborted();
+    (deps.watchRunnerLifecycleFactory ?? getWatchRunnerLifecycle)().stop(device.deviceId);
     await provisioner.deleteAndConfirmAbsent(device.deviceId, signal);
   } finally {
     lease.release();

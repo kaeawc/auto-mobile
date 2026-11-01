@@ -32,7 +32,7 @@ const row = {
 let db: Kysely<Database>, repository: PrototypeTestSessionRepository;
 beforeEach(async () => {
   db = await createTestDatabase({ foreignKeys: true });
-  repository = new PrototypeTestSessionRepository(db);
+  repository = new PrototypeTestSessionRepository({ db });
 });
 afterEach(async () => {
   await db.destroy();

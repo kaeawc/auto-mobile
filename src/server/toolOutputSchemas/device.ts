@@ -45,7 +45,7 @@ const watchStartDeviceReadinessSchema = z.object({
 export const startDeviceOutputSchema = z
   .object({
     ...deviceDescriptionSchema.partial().shape,
-    platform: z.enum(["android", "ios", "watchos"]).optional(),
+    platform: z.enum(["android", "ios", "watchos", "tvos"]).optional(),
     message: z.string(),
     deviceIdentity: z.unknown().optional(),
     processId: z.number().nullable().optional(),

@@ -89,7 +89,7 @@ describe("session broker provider restart handoff", () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1_700_000_000_000);
     db = await createTestDatabase();
-    const repository = new DeviceSessionRepository(db, timer);
+    const repository = new DeviceSessionRepository({ db, timer });
     const live = new Set<string>([FIRST.daemonId]);
     const opened = await openSqliteBindingRegistry({
       dbPath: ":memory:",

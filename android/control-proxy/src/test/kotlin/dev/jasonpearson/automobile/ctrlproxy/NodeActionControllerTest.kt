@@ -8,6 +8,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.ActionResult
+import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -49,6 +51,8 @@ class NodeActionControllerTest {
     var view: View? = null
     val events = mutableListOf<String>()
     val results = mutableListOf<Result>()
+    val envelopes = mutableListOf<ActionResult>()
+    var failSend: RuntimeException? = null
 
     override fun launchRequestScope(requestId: String?, block: suspend CoroutineScope.() -> Unit) {
       scope.launch { block() }
@@ -56,9 +60,14 @@ class NodeActionControllerTest {
 
     override fun activeWindowRoot(): AccessibilityNodeInfo? = root
 
+    var failLookup: RuntimeException? = null
+
     override fun findNodeInDisplayWindows(
       find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
-    ) = node
+    ): AccessibilityNodeInfo? {
+      failLookup?.let { throw it }
+      return node
+    }
 
     override fun screenDimensions(displayId: Int): ScreenDimensions? = null
 
@@ -71,16 +80,23 @@ class NodeActionControllerTest {
     override fun forgetRememberedInsert() {
       events += "forget"
     }
+  }
 
-    override suspend fun sendActionResult(outcome: NodeActionResult) {
-      events += "result"
-      results +=
+  /** Puts each `action_result` on the host's event log, so ordering against settling is visible. */
+  private class RecordingTransport(private val host: FakeHost) : FakeResultTransport() {
+    override suspend fun send(response: WebSocketResponse) {
+      host.failSend?.let { throw it }
+      super.send(response)
+      val result = response as ActionResult
+      host.envelopes += result
+      host.events += "result"
+      host.results +=
         Result(
-          outcome.requestId,
-          outcome.action,
-          outcome.success,
-          outcome.error,
-          outcome.alreadySatisfied,
+          result.requestId,
+          result.action!!,
+          result.success,
+          result.error,
+          result.alreadySatisfied,
         )
     }
   }
@@ -89,7 +105,15 @@ class NodeActionControllerTest {
 
   private fun TestScope.setup(): Pair<NodeActionController, FakeHost> {
     val host = FakeHost(this)
-    return NodeActionController(host, PerfProvider.createForTesting(timer), timer) to host
+    val sender =
+      guardedResultSender(
+        RecordingTransport(host),
+        ResultBroadcaster(
+          broadcastError = { host.events += "error:${it.requestId}" },
+          logError = { _, _ -> },
+        ),
+      )
+    return NodeActionController(host, PerfProvider.createForTesting(timer), timer, sender) to host
   }
 
   private fun node(focused: Boolean = false, actions: List<Int> = emptyList()) =
@@ -99,6 +123,33 @@ class NodeActionControllerTest {
         actions.map { AccessibilityNodeInfo.AccessibilityAction(it, null) }
       every { node.performAction(any()) } returns true
     }
+
+  @Test
+  fun `the action result is one timestamped envelope with no perf timing in tests`() = runTest {
+    val (controller, host) = setup()
+
+    controller.performNodeAction("r0", "click", null, null)
+    advanceUntilIdle()
+
+    val envelope = host.envelopes.single()
+    assertEquals("r0", envelope.requestId)
+    assertEquals("click", envelope.action)
+    assertEquals(5_000L, envelope.timestamp)
+    assertEquals(0L, envelope.totalTimeMs)
+    assertFalse(envelope.alreadySatisfied)
+    assertNull(envelope.perfTiming)
+  }
+
+  @Test
+  fun `a failed result send becomes an error correlated to the request`() = runTest {
+    val (controller, host) = setup()
+    host.failSend = IllegalStateException("socket closed")
+
+    controller.performNodeAction("r-x", "click", null, null)
+    advanceUntilIdle()
+
+    assertEquals(listOf("forget", "error:r-x"), host.events)
+  }
 
   @Test
   fun `an action without a resource id or selector is refused`() = runTest {
@@ -233,5 +284,56 @@ class NodeActionControllerTest {
     assertEquals("activate_accessibility_link", result.action)
     assertFalse(result.success)
     assertEquals("Semantic link activation failed: span failed", result.error)
+  }
+
+  @Test
+  fun `clicking the focused input settles before acknowledging and recycles the node`() = runTest {
+    val (controller, host) = setup()
+    val input = node(actions = listOf(AccessibilityNodeInfo.ACTION_CLICK))
+    host.node = input
+
+    controller.clickFocusedInputRequest("r9")
+
+    assertEquals(listOf("forget", "publish", "result"), host.events)
+    assertEquals(Result("r9", "click", true, null, false), host.results.single())
+    verify { input.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+    verify { input.recycle() }
+  }
+
+  @Test
+  fun `clicking with no focused input reports it without settling`() = runTest {
+    val (controller, host) = setup()
+
+    controller.clickFocusedInputRequest("r10")
+
+    assertEquals(listOf("forget", "result"), host.events)
+    assertEquals(
+      Result("r10", "click", false, "No focused editable input", false),
+      host.results.single(),
+    )
+  }
+
+  @Test
+  fun `a focused input that offers no click is refused without performing it`() = runTest {
+    val (controller, host) = setup()
+    val input = node(actions = listOf(AccessibilityNodeInfo.ACTION_FOCUS))
+    host.node = input
+
+    controller.clickFocusedInputRequest("r11")
+
+    assertEquals("Focused input click returned false", host.results.single().error)
+    verify(exactly = 0) { input.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+    verify { input.recycle() }
+  }
+
+  @Test
+  fun `a failing focused input lookup still answers the request`() = runTest {
+    val (controller, host) = setup()
+    host.failLookup = IllegalStateException("window gone")
+
+    controller.clickFocusedInputRequest("r12")
+
+    assertEquals(listOf("forget", "result"), host.events)
+    assertEquals(Result("r12", "click", false, "window gone", false), host.results.single())
   }
 }

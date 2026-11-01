@@ -541,30 +541,31 @@ or holding a launch slot (#15291). Retry the observe shortly.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                         | Use and accepted values                                                                             | Default                                 |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `AUTOMOBILE_PROJECT_ROOT`                        | Root used by local iOS CtrlProxy source builds; filesystem path.                                    | process working directory               |
-| `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`         | Derived-data root for local iOS CtrlProxy builds; filesystem path.                                  | data directory `derived-data`           |
-| `AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`            | iOS CtrlProxy bundle cache; filesystem path.                                                        | coordination directory `ctrl-proxy-ios` |
-| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL`           | Custom iOS bundle download URL; HTTPS unless the insecure asset URL opt-in is set.                  | release bundle URL                      |
-| `AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`             | Local iOS archive or bundle; filesystem path. Wins over the bundle-path override.                   | released bundle                         |
-| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`          | Local iOS runner bundle or archive; filesystem path.                                                | released bundle                         |
-| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256`        | Expected 64-character hex SHA256 of a local or custom runner executable.                            | release checksum                        |
-| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET` | Which executable the checksum applies to: exact `runner` or `xctest`.                               | release target                          |
-| `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD`      | Pin the hash of a local build after it is built, and reverify it before launch; `1`/`true` enables. | off                                     |
-| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH`             | Expected device app bundle hash; the device-specific variable wins.                                 | released device app hash                |
-| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_DEVICE`      | Expected device app bundle hash.                                                                    | generic override or released hash       |
-| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_SIMULATOR`   | Expected simulator app bundle hash.                                                                 | unset; not verified                     |
-| `AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH`        | Skip iOS app bundle hash checks; `1`/`true` enables.                                                | off                                     |
-| `AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN`         | Make codesign, Gatekeeper or Team ID failures fatal; `1`/`true` enables.                            | off; failures warn                      |
-| `AUTOMOBILE_IOS_HELPER_TEAM_ID`                  | Apple Team ID to verify on the downloaded runner bundle.                                            | unset                                   |
-| `AUTOMOBILE_IOS_TEAM_IDS`                        | Comma-separated signing Team IDs; wins over the single Team ID.                                     | auto-detected                           |
-| `AUTOMOBILE_IOS_TEAM_ID`                         | Single signing Team ID (a comma-separated list also works).                                         | auto-detected                           |
-| `AUTOMOBILE_IOS_PROFILE_UUID`                    | Provisioning profile UUID; wins over name and specifier.                                            | automatic discovery                     |
-| `AUTOMOBILE_IOS_PROFILE_NAME`                    | Provisioning profile name; wins over specifier.                                                     | automatic discovery                     |
-| `AUTOMOBILE_IOS_PROFILE_SPECIFIER`               | Provisioning profile specifier.                                                                     | automatic discovery                     |
-| `AUTOMOBILE_IOS_CODE_SIGN_IDENTITY`              | Signing identity.                                                                                   | auto-detected                           |
-| `AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH`     | Entitlements file for signing; filesystem path.                                                     | automatic discovery                     |
+| Variable                                         | Use and accepted values                                                                                            | Default                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `AUTOMOBILE_PROJECT_ROOT`                        | Root used by local iOS CtrlProxy source builds; filesystem path.                                                   | process working directory                                                     |
+| `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`         | Derived-data root for local iOS CtrlProxy builds; filesystem path.                                                 | data directory `derived-data`                                                 |
+| `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN`              | Prebuilt watchOS simulator runner xctestrun path used by `startDevice`; its containing directory must be writable. | discovered or built from a source checkout; required in the published package |
+| `AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`            | iOS CtrlProxy bundle cache; filesystem path.                                                                       | coordination directory `ctrl-proxy-ios`                                       |
+| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL`           | Custom iOS bundle download URL; HTTPS unless the insecure asset URL opt-in is set.                                 | release bundle URL                                                            |
+| `AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`             | Local iOS archive or bundle; filesystem path. Wins over the bundle-path override.                                  | released bundle                                                               |
+| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`          | Local iOS runner bundle or archive; filesystem path.                                                               | released bundle                                                               |
+| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256`        | Expected 64-character hex SHA256 of a local or custom runner executable.                                           | release checksum                                                              |
+| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET` | Which executable the checksum applies to: exact `runner` or `xctest`.                                              | release target                                                                |
+| `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD`      | Pin the hash of a local build after it is built, and reverify it before launch; `1`/`true` enables.                | off                                                                           |
+| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH`             | Expected device app bundle hash; the device-specific variable wins.                                                | released device app hash                                                      |
+| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_DEVICE`      | Expected device app bundle hash.                                                                                   | generic override or released hash                                             |
+| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_SIMULATOR`   | Expected simulator app bundle hash.                                                                                | unset; not verified                                                           |
+| `AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH`        | Skip iOS app bundle hash checks; `1`/`true` enables.                                                               | off                                                                           |
+| `AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN`         | Make codesign, Gatekeeper or Team ID failures fatal; `1`/`true` enables.                                           | off; failures warn                                                            |
+| `AUTOMOBILE_IOS_HELPER_TEAM_ID`                  | Apple Team ID to verify on the downloaded runner bundle.                                                           | unset                                                                         |
+| `AUTOMOBILE_IOS_TEAM_IDS`                        | Comma-separated signing Team IDs; wins over the single Team ID.                                                    | auto-detected                                                                 |
+| `AUTOMOBILE_IOS_TEAM_ID`                         | Single signing Team ID (a comma-separated list also works).                                                        | auto-detected                                                                 |
+| `AUTOMOBILE_IOS_PROFILE_UUID`                    | Provisioning profile UUID; wins over name and specifier.                                                           | automatic discovery                                                           |
+| `AUTOMOBILE_IOS_PROFILE_NAME`                    | Provisioning profile name; wins over specifier.                                                                    | automatic discovery                                                           |
+| `AUTOMOBILE_IOS_PROFILE_SPECIFIER`               | Provisioning profile specifier.                                                                                    | automatic discovery                                                           |
+| `AUTOMOBILE_IOS_CODE_SIGN_IDENTITY`              | Signing identity.                                                                                                  | auto-detected                                                                 |
+| `AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH`     | Entitlements file for signing; filesystem path.                                                                    | automatic discovery                                                           |
 
 </div>
 

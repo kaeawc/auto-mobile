@@ -60,8 +60,8 @@ describe("session persistence guards live in the statement, not in a prior read"
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    peer = new DeviceSessionRepository(db, timer);
-    racing = new RacingRepository(db, timer);
+    peer = new DeviceSessionRepository({ db, timer });
+    racing = new RacingRepository({ db, timer });
   });
 
   afterEach(async () => {

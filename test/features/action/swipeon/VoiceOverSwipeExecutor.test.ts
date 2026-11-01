@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { VoiceOverSwipeExecutor } from "../../../../src/features/action/swipeon/VoiceOverSwipeExecutor";
+import {
+  VoiceOverSwipeExecutor,
+  createDefaultVoiceOverSwipeRunner,
+} from "../../../../src/features/action/swipeon/VoiceOverSwipeExecutor";
 import { FakeIosVoiceOverDetector } from "../../../fakes/FakeIosVoiceOverDetector";
 import { FakeIOSCtrlProxy } from "../../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -67,6 +70,28 @@ describe("VoiceOverSwipeExecutor", () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     perf = new NoOpPerformanceTracker();
+  });
+
+  test("watch default runner refuses VoiceOver without constructing an iOS client", async () => {
+    const { executor: gesture, calls } = makeFakeGestureExecutor();
+    const runner = createDefaultVoiceOverSwipeRunner({
+      device: { platform: "watchos", deviceId: "watch", name: "Watch" },
+      executeGesture: gesture,
+      iosVoiceOverDetector: fakeVoiceOverDetector,
+      timer: fakeTimer,
+    });
+    await expect(
+      runner.executeSwipeGesture({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        direction: "up",
+        containerElement: null,
+      }),
+    ).rejects.toThrow("VoiceOver swipe");
+    expect(calls).toEqual([]);
+    expect(fakeTimer.getSleepHistory()).toEqual([]);
   });
 
   test("unsafe return duration rejects before either gesture", async () => {

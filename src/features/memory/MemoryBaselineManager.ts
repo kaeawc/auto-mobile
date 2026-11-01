@@ -18,7 +18,7 @@ export class MemoryBaselineManager {
    * for tests that exercise the query paths (issue #3067).
    */
   constructor(db?: Kysely<Database>) {
-    this.repository = new MemoryBaselineRepository(db);
+    this.repository = new MemoryBaselineRepository({ db });
   }
 
   /**

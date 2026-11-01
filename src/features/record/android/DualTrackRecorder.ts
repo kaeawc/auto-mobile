@@ -964,11 +964,11 @@ function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): Pla
 
 /**
  * A pen contact replays only as a coordinate step that carries its pointer: an element tap or a
- * swipe direction cannot say "stylus", so either would replay as a finger. A swipe keeps only its
- * endpoints. Only a stylus can be injected, so any other tool (an eraser) has no step.
+ * swipe direction cannot say "stylus" or "eraser", so either would replay as a finger. A swipe keeps
+ * only its endpoints.
  */
 function buildPenStep(gesture: GestureEvent): PlanStep | null {
-  if (gesture.toolType !== "stylus") {
+  if (gesture.toolType !== "stylus" && gesture.toolType !== "eraser") {
     return null;
   }
   if (gesture.type === "swipe") {

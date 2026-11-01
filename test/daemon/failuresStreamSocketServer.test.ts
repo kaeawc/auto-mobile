@@ -231,7 +231,7 @@ describe("failures poll in-memory repository", () => {
     const server = new TestableServer(
       "/fake/failures.sock",
       timer,
-      new FailureAnalyticsRepository(db, timer),
+      new FailureAnalyticsRepository({ db, timer }),
       { authenticator: { authorize() {} } },
     );
     const response = await server.run({

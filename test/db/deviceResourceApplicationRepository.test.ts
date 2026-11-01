@@ -18,7 +18,7 @@ describe("DeviceResourceApplicationRepository", () => {
   let repository: DeviceResourceApplicationRepository;
   beforeEach(async () => {
     db = await createTestDatabase();
-    repository = new DeviceResourceApplicationRepository(db);
+    repository = new DeviceResourceApplicationRepository({ db });
   });
   afterEach(async () => {
     await db.destroy();

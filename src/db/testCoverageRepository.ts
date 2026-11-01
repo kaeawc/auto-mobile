@@ -15,6 +15,7 @@ import type {
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /**
  * Repository for test coverage tracking database operations.
@@ -24,7 +25,7 @@ export class TestCoverageRepository {
   private timer: Timer;
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>, timer: Timer = defaultTimer) {
+  constructor({ db, timer = defaultTimer }: Pick<RepositoryDeps, "db" | "timer"> = {}) {
     this.timer = timer;
     this.db = db ?? null;
   }
@@ -59,7 +60,7 @@ export class TestCoverageRepository {
    * bun:sqlite connection deadlocks the daemon (see `NavigationRepository.withExecutor`).
    */
   withExecutor(executor: Kysely<Database>): TestCoverageRepository {
-    return new TestCoverageRepository(executor, this.timer);
+    return new TestCoverageRepository({ db: executor, timer: this.timer });
   }
 
   /**

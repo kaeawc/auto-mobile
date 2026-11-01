@@ -1,3 +1,4 @@
+import { watchTapOn } from "../watch/WatchActions";
 import { androidCtrlProxyClientForPlatform } from "../observe/android/androidCtrlProxyClientFor";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { TapDisplayRouter } from "./TapDisplayRouter";
@@ -9,7 +10,9 @@ import { TapSemanticLinks } from "./TapSemanticLinks";
 import { TapTargetResolver } from "./TapTargetResolver";
 import { type TapFocusFailure } from "./tapTargetSupport";
 import { TapElementFinder } from "./tapElementFinder";
-import { TapPointPlanner } from "./tapPointPlanner";
+import { TapPointPlanner, type PrototypeTapAgentConnections } from "./tapPointPlanner";
+import { prototypeAgentRegistry } from "../prototype/ios/prototypeAgentInjection";
+import { prototypeViewerConnections } from "../prototype/ios/prototypeViewerAttach";
 import { FocusVerifier } from "./tapFocusVerifier";
 import { PostTapSettler } from "./tapPostTapSettler";
 import { withObservationReadScope } from "../observe/observationReadScope";
@@ -69,6 +72,7 @@ import { tapPlatformTraits, type TapPlatformTraits } from "./strategies/tapPlatf
  * Dependencies for TapOnElement that can be injected for testing.
  */
 export interface TapOnElementDependencies extends DisplayFenceDependencies {
+  prototypeAgents?: PrototypeTapAgentConnections;
   displayTransitions?: DisplayTransitionReader &
     Pick<DisplayTransitionTracker, "checkIdentity" | "record">;
   lastRenderedObservation?: RenderedObservationReader;
@@ -333,7 +337,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     device: this.device,
     geometry: () => this.geometry,
     strategy: () => this.strategy,
+    prototypeAgents: { get: (deviceId, bundleId) => this.prototypeAgents.get(deviceId, bundleId) },
   });
+  private readonly prototypeAgents: PrototypeTapAgentConnections;
   private readonly finder = new TapElementFinder({
     device: this.device,
     elementSelector: () => this.elementSelector,
@@ -397,6 +403,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     });
     this.refreshedDisplayTransitions = options.displayTransitions ?? displayTransitions;
     this.lastRenderedObservation = options.lastRenderedObservation;
+    this.prototypeAgents = options.prototypeAgents ?? {
+      get: (deviceId, bundleId) =>
+        prototypeViewerConnections.get(deviceId, bundleId) ??
+        prototypeAgentRegistry.getRecord(deviceId, bundleId)?.client,
+    };
     this.waitForCondition =
       options.waitForCondition ?? new RealWaitForCondition(this.observeScreen, this.timer);
     this.geometry = new DefaultElementGeometry();
@@ -477,9 +488,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return (
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
-        platform: requireAndroidOrIosPlatform(this.device.platform, "tapOn"),
+        // Watch trees use iOS attribute/geometry conventions; watch dispatch stays separate.
+        platform:
+          this.device.platform === "watchos"
+            ? "ios"
+            : requireAndroidOrIosPlatform(this.device.platform, "tapOn"),
         iosMultiPanel:
-          this.platformTraits.panelAwareSelection && (this.device.displays?.panels.length ?? 0) > 1,
+          this.device.platform !== "watchos" &&
+          this.platformTraits.panelAwareSelection &&
+          (this.device.displays?.panels.length ?? 0) > 1,
       })
     );
   }
@@ -830,6 +847,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @returns Result of the command
    */
   async execute(options: TapOnElementOptions, call: TapOnCall = {}): Promise<TapOnFocusResult> {
+    if (this.device.platform === "watchos") {
+      return watchTapOn(this.device.deviceId, options, call.signal);
+    }
     return withObservationReadScope(() => this.executeWithReadScope(options, call));
   }
 

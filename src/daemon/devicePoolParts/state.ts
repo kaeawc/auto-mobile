@@ -221,6 +221,7 @@ export class DevicePoolState {
   foreignDeviceOwnership!: ForeignDeviceOwnership | undefined;
   iosForeignDeviceOwnership!: ForeignDeviceOwnership | undefined;
   watchForeignDeviceOwnership!: ForeignDeviceOwnership | undefined;
+  tvForeignDeviceOwnership!: ForeignDeviceOwnership | undefined;
   managedExecutionOwnership!: DevicePoolDependencies["managedExecutionOwnership"];
   bindingExclusion!: BindingExclusion | undefined;
   /** Devices held for the persisted rows restart recovery is working through (#11294). */

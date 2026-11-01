@@ -487,7 +487,7 @@ describe("MemoryAudit - Unit Tests", function () {
       try {
         const store = new MemoryAuditResultStore(
           "test-device",
-          new MemoryAuditResultRepository(db),
+          new MemoryAuditResultRepository({ db }),
         );
         const snapshot = { javaHeapMb: 1, nativeHeapMb: 1, totalPssMb: 1, timestamp: 0, raw: "" };
         const metrics: MemoryMetrics = {

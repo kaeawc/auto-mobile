@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as net from "node:net";
+import type { Duplex } from "node:stream";
+import {
+  type DaemonSocketConnectorHost,
+  openDaemonSocket,
+} from "../../src/daemon/client/clientSocketConnector";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { connectionListenerOf } from "../helpers/netConnectionListener";
@@ -75,6 +80,47 @@ function responseFrame(id: string, result: string): Buffer {
 }
 
 describe("DaemonClient connect deduplication and socket ownership", () => {
+  test("a timeout inside createConnection destroys the returned socket without installing it", async () => {
+    const connectionTimeout = 100;
+    let installedSocket: net.Socket | Duplex | null = null;
+    const host: DaemonSocketConnectorHost = {
+      timer,
+      socketPath: "/fake/socket",
+      getSocket: () => installedSocket,
+      setSocket: (socket) => {
+        installedSocket = socket;
+      },
+      setConnected: () => {},
+      resetInbound: () => {},
+      handleData: () => {},
+      handleSocketClosed: () => {},
+      hasClosedSocket: () => false,
+      hasPendingRequests: () => false,
+      rejectPendingRequests: () => {},
+    };
+    createConnectionSpy.mockImplementation((...args: unknown[]) => {
+      const socket = new DeferredSocket(connectionListenerOf(args)!);
+      sockets.push(socket);
+      timer.advanceTime(connectionTimeout + 1);
+      socket.completeConnect();
+      return socket;
+    });
+
+    const outcome = await observe(openDaemonSocket(host, connectionTimeout));
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status === "rejected") {
+      expect(outcome.reason).toBeInstanceOf(DaemonUnavailableError);
+      expect(outcome.reason).toHaveProperty(
+        "message",
+        `Failed to connect to daemon within ${connectionTimeout}ms`,
+      );
+    }
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0].destroyed).toBe(true);
+    expect(host.getSocket()).toBeNull();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("concurrent connects share one socket and release the slot after success", async () => {
     const first = observe(client.connect());
     const second = observe(client.connect());

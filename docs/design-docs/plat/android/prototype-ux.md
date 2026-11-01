@@ -1402,9 +1402,24 @@ Nodes are the root, each `stack` screen (`stack:<id>/<screen>`, `start` on the s
 `pager` page (`pager:<id>/<index>`, labelled from a `tabBar` or `bottomNav` that names the pager),
 `bottomSheet` and `dialog`. Edges are `push`, `replace`, `pop`, `popToRoot` and `setPage` actions, from
 the enclosing screen, each tagged with the `testTag`, `id` and text or label of the node that runs it
-and its spec path. A `pop` targets `back` (the previous screen is runtime state), and `setPage` with
-`next` or `prev` keeps the authored word. `visibleWhen` alternatives and sheet or dialog opening by
-state are not resolved. The dynamic cross-check and the diff against `getNavigationGraph` are not built.
+and its spec path. A screen node carries the `testTag` of the node that draws it. A `pop` targets
+`back` (the previous screen is runtime state), and `setPage` with `next` or `prev` keeps the authored
+word. `visibleWhen` alternatives and sheet or dialog opening by state are not resolved.
+
+`getNavigationGraph` (debug-gated with the rest of that tool) diffs the map against the app's recorded
+graph when given `prototypeSpec` or `prototypeSpecPath`, and returns `prototypeDiff`. A prototype screen
+matches a real screen through, in order: an explicit `screenMapping` (or `screenMappingPath`) entry from
+prototype screen id to real screen name; its `testTag` equal to the real screen name; or its stack
+screen key (whole, slashes included), tab label or sheet/dialog id equal to the real name ignoring
+case and punctuation, with or without a trailing `Screen`, `Activity`, `Fragment`, `Page`, `View` or
+`Controller` on either side, so `Overview` still meets `OverviewActivity`. Letters of any script count;
+a name with none never matches. A mapped screen never falls
+back to the other rules, and a mapping to a name the graph lacks reports `mappedScreenMissing`. The root
+is a destination only when the mapping names it. The result lists `matched` screens,
+`unmatchedPrototypeScreens`, `unmatchedRealScreens`, `observedTransitions`, `unobservedTransitions`
+(`unmatchedScreen`, `dynamicTarget` for `back` and `next`/`prev`, or `notObserved`) and
+`ignoredMappings` (keys naming no prototype screen). The live cross-check against `screen_changed`
+events from an explored prototype is not built.
 
 ### Route contract
 
@@ -1509,8 +1524,10 @@ uses the default visibility animation; wrap the stack in a box to give that a cu
   directly.
 
 Android draws scale and rotation with a `graphicsLayer`, animates with `animateFloatAsState` and
-`animateColorAsState`, and zooms with `transformable`. The iOS agent does not implement motion v2
-yet and does not advertise the capability (#14684), so the host refuses these fields there.
+`animateColorAsState`, and zooms with `transformable`. The iOS agent supports and advertises
+`prototype_motion_v2`: `animate`, style `scale`/`rotation`, `slideStart`/`slideEnd`/`scale`
+transitions, and `image.zoomable`. Motion v3 requirements are detected, but iOS does not advertise
+`prototype_motion_v3`, so the host refuses motion v3 features until iOS advertises that capability.
 
 ### Transition choreography (#15247, `prototype_choreography_v1`, not device-verified)
 

@@ -8,7 +8,14 @@ import type { Database, NewRecompositionMetrics } from "./types";
  * file-backed database (issue #3067).
  */
 export class RecompositionMetricsRepository {
-  constructor(private readonly database: () => Kysely<Database> = getDatabase) {}
+  private readonly database: () => Kysely<Database>;
+
+  /** `resolveDatabase` is called per query, so construction never opens the default database. */
+  constructor({
+    resolveDatabase = getDatabase,
+  }: { resolveDatabase?: () => Kysely<Database> } = {}) {
+    this.database = resolveDatabase;
+  }
 
   async insertMany(rows: NewRecompositionMetrics[]): Promise<void> {
     if (rows.length === 0) {

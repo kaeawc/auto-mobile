@@ -7,6 +7,7 @@ import { SessionBroker, type SessionBrokerOptions } from "../../../src/daemon/se
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { ResetFailureError } from "../../../src/daemon/sessionBroker/ResetFailureError";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
+import { BindingRegistrySchemaUnsupportedError } from "../../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
 import { ClientRequestCancellation } from "../../../src/daemon/socketServerParts/ClientRequestCancellation";
 import * as brokerSupport from "../../../src/daemon/sessionBroker/brokerSupport";
 import { SessionBrokerService } from "../../../src/daemon/sessionBroker/service";
@@ -686,8 +687,16 @@ describe("session-only broker lifecycle", () => {
     const failed = await broker.prepare(config("catalog-failure"), "owner-token");
     expect(failed).toMatchObject({
       outcome: "failed",
-      failure: { message: "Catalog temporarily unavailable" },
+      failure: {
+        code: "session_preparation_failed",
+        message: "Catalog temporarily unavailable",
+        retryable: false,
+      },
       cleanupPending: false,
+    });
+    expect(await options.store.getRequest("catalog-failure")).toMatchObject({
+      state: "failed",
+      errorCode: "session_preparation_failed",
     });
     expect(await broker.ownedStatus("catalog-failure", "owner-token")).toEqual(failed);
     expect(await options.store.listResources()).toHaveLength(0);
@@ -786,6 +795,57 @@ describe("session-only broker lifecycle", () => {
     expect(devices.prepared).toHaveLength(1);
     expect(await options.store.listResources()).toHaveLength(1);
   });
+
+  test.each(["admit", "receipt"] as const)(
+    "schema refusal from %s returns an unpersisted typed failure",
+    async (path) => {
+      const timer = new FakeTimer();
+      options.timer = timer;
+      const refusal = new BindingRegistrySchemaUnsupportedError(":memory:", ["future-migration"], {
+        "future-migration": "future-writer",
+      });
+      if (path === "receipt") {
+        options.catalog = async () => {
+          throw new Error("Catalog temporarily unavailable");
+        };
+      }
+      const admit = spyOn(options.store, "admit");
+      if (path === "admit") {
+        admit.mockRejectedValue(refusal);
+      }
+      const persist = spyOn(options.store, "recordPreAdmissionFailure").mockRejectedValue(refusal);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const requestId = `schema-refusal-${path}`;
+      try {
+        const result = await broker.prepare(config(requestId), "owner-token");
+        expect(result).toEqual({
+          contractVersion: 1,
+          requestId,
+          outcome: "failed",
+          sessionUuid: null,
+          profile: null,
+          cleanupPending: false,
+          failure: {
+            code: "registry_schema_unsupported",
+            message: refusal.message,
+            retryable: false,
+            remedy: refusal.remedy,
+            writerVersions: refusal.writerVersions,
+          },
+        });
+        expect(await options.store.getRequest(requestId)).toBeUndefined();
+        expect(admit).toHaveBeenCalledTimes(path === "admit" ? 1 : 0);
+        expect(persist).toHaveBeenCalledTimes(path === "receipt" ? 1 : 0);
+        expect(warn).toHaveBeenCalledWith(expect.any(String), refusal);
+        expect(devices.prepared).toHaveLength(0);
+        expect(timer.getSleepHistory()).toEqual([]);
+      } finally {
+        admit.mockRestore();
+        persist.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
 
   test("failure to persist a refusal is an error, not an unrecorded terminal receipt", async () => {
     options.catalog = async () => {

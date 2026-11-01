@@ -1,3 +1,4 @@
+import { unsupportedWatchAction } from "../watch/WatchActions";
 import {
   dispatchRichStylus,
   pointerNeedsInstrumentation,
@@ -437,6 +438,9 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     options: SwipeAtOptions,
     call: ActionCall & { recordingContext?: SwipeAtRecordingContext } = {},
   ): Promise<SwipeResult> {
+    if (this.device.platform === "watchos") {
+      unsupportedWatchAction("coordinate swipe; use swipeOn with a direction");
+    }
     const { progress, signal } = resolveActionCall(call);
     const perf = createGlobalPerformanceTracker();
     perf.serial(TOOL_NAME);

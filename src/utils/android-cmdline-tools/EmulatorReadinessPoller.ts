@@ -40,6 +40,11 @@ import type {
   ReadinessPollingState,
 } from "./EmulatorReadinessTypes";
 import { AMBIENT_ENV, readEnvRaw } from "../../config/env";
+import {
+  ambientDeviceExecutionBinding,
+  type DeviceExecutionBinding,
+} from "../deviceExecutionBinding";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../deviceAdmissionGate";
 
 const DEFAULT_EMULATOR_POLLING_INTERVAL_MS = 500;
 export const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
@@ -68,11 +73,19 @@ export function resolveEmulatorPollingInterval(value: string | undefined): numbe
 
 export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
   private readonly bootUnlock: EmulatorBootUnlock;
+  private readonly executionBinding: DeviceExecutionBinding;
+  private readonly admissionGate: DeviceAdmissionGate;
 
   constructor(
     private readonly host: EmulatorReadinessHost,
     bootUnlock?: EmulatorBootUnlock,
+    options: {
+      executionBinding?: DeviceExecutionBinding;
+      admissionGate?: DeviceAdmissionGate;
+    } = {},
   ) {
+    this.executionBinding = options.executionBinding ?? ambientDeviceExecutionBinding;
+    this.admissionGate = options.admissionGate ?? daemonDeviceAdmissionGate;
     this.bootUnlock =
       bootUnlock ??
       new DefaultEmulatorBootUnlock({
@@ -282,6 +295,20 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     return (
       targetDeviceId ?? this.host.getLaunchTargetDeviceId(childProcess) ?? resolvedTargetDeviceId
     );
+  }
+
+  private bindCorrelatedTarget(deviceId: string | undefined): void {
+    if (!deviceId) {
+      return;
+    }
+    try {
+      this.admissionGate.assertDeviceActionable(deviceId, "to verify Android device readiness");
+    } catch (error) {
+      // Correlation may identify a quarantined serial; leave its existing readiness path intact.
+      logger.debug(`Not binding readiness target ${deviceId}: ${errorMessage(error)}`);
+      return;
+    }
+    this.executionBinding.bindDeviceExecution(deviceId);
   }
 
   /**
@@ -508,6 +535,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
         emulator = correlation.emulator;
         state.correlationFailure = correlation.failure;
         state.resolvedTargetDeviceId = emulator?.deviceId;
+        this.bindCorrelatedTarget(state.resolvedTargetDeviceId);
       }
 
       return emulator;
@@ -743,6 +771,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
       childProcess,
       state.resolvedTargetDeviceId,
     );
+    this.bindCorrelatedTarget(correlatedTargetDeviceId);
     cycle.correlatedTargetDeviceId = correlatedTargetDeviceId;
     const remainingTimeoutMs = timeoutMs - (this.timer.now() - startTime);
     if (remainingTimeoutMs <= 0) {

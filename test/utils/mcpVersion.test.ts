@@ -61,11 +61,7 @@ describe("getMcpServerVersion laziness", () => {
     const commands: string[][] = [];
     const timer = new FakeTimer();
     const handles: NodeJS.Timeout[] = [];
-    const schedule = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) => {
-      const handle = timer.setTimeout(callback, ms);
-      handles.push(handle);
-      return handle;
-    });
+    let schedule: { mockRestore(): void } | undefined;
     const root = resolve(fileURLToPath(new URL("../../", import.meta.url)));
     const fs = new FakeGitMetadataReader({
       [join(root, ".git")]: null,
@@ -84,11 +80,20 @@ describe("getMcpServerVersion laziness", () => {
       {},
     );
     try {
-      const version: typeof import("../../src/utils/mcpVersion") = await import(
-        `${versionModulePath}?lazy-cache`
+      const pendingVersion = import(`${versionModulePath}?lazy-cache`);
+      const unrelated = defaultTimer.setTimeout(() => {}, 2000);
+      const version: typeof import("../../src/utils/mcpVersion") = await pendingVersion.finally(
+        () => defaultTimer.clearTimeout(unrelated),
       );
       expect(commands).toEqual([]);
+      schedule = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) => {
+        const handle = timer.setTimeout(callback, ms);
+        handles.push(handle);
+        return handle;
+      });
       const first = version.getMcpServerVersion();
+      schedule.mockRestore();
+      schedule = undefined;
       expect(first).toMatch(/^\d+\.\d+\.\d+\+gabcdef123456$/);
       expect(commands).toEqual([]);
       expect(version.getMcpServerVersion()).toBe(first);
@@ -104,7 +109,7 @@ describe("getMcpServerVersion laziness", () => {
       expect(version.getMcpServerVersion()).toBe(first);
     } finally {
       testOverrides.gitMetadataClient = original;
-      schedule.mockRestore();
+      schedule?.mockRestore();
     }
   });
 

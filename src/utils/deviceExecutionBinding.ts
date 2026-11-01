@@ -15,6 +15,15 @@ export function runWithDeviceExecutionBinding<T>(
   return executionBinding.run({ binding }, fn);
 }
 
+/** Fleet reads retain admission, but only an explicitly requested target may bind. */
+export function runWithTargetDeviceExecutionBinding<T>(
+  deviceId: string,
+  targetDeviceId: string | undefined,
+  fn: () => T,
+): T {
+  return deviceId === targetDeviceId ? fn() : runWithDeviceExecutionBinding(undefined, fn);
+}
+
 export const ambientDeviceExecutionBinding: DeviceExecutionBinding = {
   bindDeviceExecution(deviceId): void {
     executionBinding.getStore()?.binding?.bindDeviceExecution(deviceId);

@@ -9,6 +9,7 @@
  * unsolicited `prototype_event` pushes. Same-id `show_prototype` is the update path.
  */
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../prototypeSpec";
+import { z } from "zod";
 import { createConnection } from "node:net";
 import { ActionableError } from "../../../models/ActionableError";
 import type { IdGenerator } from "../../../utils/IdGenerator";
@@ -63,6 +64,19 @@ export interface PrototypeAgentResult extends PrototypeAgentMessage {
   error?: string;
   /** A show of a spec with `window.backdrop` (`prototype_backdrop_v1`): `blur` or `fallback`. */
   backdrop?: string;
+  status?: PrototypeAgentStatus;
+}
+
+const prototypeAgentStatusSchema = z
+  .object({ safeAreaTop: z.number().finite().nonnegative().optional().catch(undefined) })
+  .passthrough();
+
+export type PrototypeAgentStatus = z.infer<typeof prototypeAgentStatusSchema>;
+
+/** Older agents omit the inset; malformed values are unverified, never a guessed bar height. */
+export function parsePrototypeAgentStatus(value: unknown): PrototypeAgentStatus | undefined {
+  const parsed = prototypeAgentStatusSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 export interface PrototypeAgentHandshake {

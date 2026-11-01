@@ -1,3 +1,4 @@
+import { rejectWatchAction } from "../watch/WatchActions";
 import {
   DefaultSendKeysCommandExecutor,
   type SendKeysPlatformDependencies,
@@ -437,6 +438,7 @@ export class SendKeys {
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
     dependencies: SendKeysDependencies = {},
   ) {
+    rejectWatchAction(device.platform, "text input");
     this.timer = dependencies.timer ?? defaultTimer;
     this.keyboard = dependencies.keyboard;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;

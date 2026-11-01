@@ -27,12 +27,16 @@ import {
 } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { resolveIosLifecycleBackend } from "../utils/ios-cmdline-tools/IosLifecycleBackend";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { AppleTvSimulatorInventory } from "../utils/ios-cmdline-tools/AppleTvSimulatorInventory";
+import { discoverAppleTvDeviceImages, resolveSimulatorKillTarget } from "./appleTvDiscovery";
 import { WatchSimulatorInventory } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import { WatchSimulatorLifecycle } from "../utils/ios-cmdline-tools/WatchSimulatorLifecycle";
 import {
   appendAndroidBootedDiscovery,
   appendIosBootedDiscovery,
   appendWatchBootedDiscovery,
+  appendTvOsBootedDiscovery,
+  discoverBootedAppleTvs,
   bootedSweepsFor,
   discoverBootedWatches,
 } from "./bootedDiscoveryAppend";
@@ -58,6 +62,7 @@ import {
   androidDiscoveryErrorCode,
   assertAndroidImageRunningStateKnown,
   mergeIosDevices,
+  mergeDeviceImageDiscoveries,
   presentBootedDevices,
   simulatorDiscoveryErrorCode,
   skippedPhysicalIosDiscovery,
@@ -102,6 +107,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorForDeviceManager;
   private simctl: DeviceManagerSimCtl;
+  private appleTvSimulators?: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators">;
   private watchSimulators?: Pick<WatchSimulatorInventory, "listWatchSimulators">;
   private readonly physicalIosDevices: IosPhysicalDeviceLister;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
@@ -135,11 +141,18 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.simctl = simctl || new SimCtlClient();
     if (this.simctl instanceof SimCtlClient) {
       this.watchSimulators = new WatchSimulatorInventory(this.simctl);
+      this.appleTvSimulators = new AppleTvSimulatorInventory(this.simctl);
     }
     this.emulator = emulator || new AndroidEmulatorClient();
     this.physicalIosDevices = physicalIosDevices || getSharedDevicectlDeviceLister();
     this.lifecycleCoordinator = lifecycleCoordinator;
     this.timer = timer;
+  }
+
+  /** Apple TV inventory over the same simctl; injectable for unit tests. */
+  withAppleTvSimulators(source: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators">): this {
+    this.appleTvSimulators = source;
+    return this;
   }
 
   /** Booted Apple Watch simulators; read only when a caller asks for watchOS (#14908). */
@@ -277,6 +290,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
   /** List the device images available for a platform, or both for `"either"`. */
   async listDeviceImages(platform: SomePlatform, signal?: AbortSignal): Promise<DeviceInfo[]> {
+    if (platform === "tvos") {
+      if (!this.appleTvSimulators) {
+        throw new ActionableError("Apple TV simulator inventory is unavailable on this host.");
+      }
+      return this.appleTvSimulators.listAppleTvSimulators(signal);
+    }
     switch (requireAndroidOrIosSelector(platform, "Listing device images")) {
       case "android":
         return this.listAndroidDeviceImages({ signal });
@@ -417,10 +436,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const transitional: { simulators?: TransitionalSimulator[] } = {};
 
     const sweeps = bootedSweepsFor(platform, options);
-    const [android, ios, watch] = await Promise.all([
+    const [android, ios, watch, tv] = await Promise.all([
       sweeps.android ? this.discoverBootedAndroidDevices(options) : undefined,
       sweeps.ios ? this.discoverBootedIosDevices(options) : undefined,
       sweeps.watchos ? discoverBootedWatches(this.watchSimulators, options.signal) : undefined,
+      sweeps.tvos ? discoverBootedAppleTvs(this.appleTvSimulators, options.signal) : undefined,
     ]);
     const result = {
       devices,
@@ -436,6 +456,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     if (ios) {
       transitional.simulators = ios.transitionalSimulators;
       appendIosBootedDiscovery(ios, result);
+    }
+    if (tv) {
+      appendTvOsBootedDiscovery(tv, result);
     }
     if (watch) {
       appendWatchBootedDiscovery(watch, result);
@@ -493,9 +516,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     platform: SomePlatform,
     options: DeviceImageDiscoveryOptions = {},
   ): Promise<DeviceImageDiscovery> {
-    const devices: DeviceInfo[] = [];
-    const succeededPlatforms = new Set<Platform>();
-    const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
+    if (platform === "tvos") {
+      return discoverAppleTvDeviceImages(
+        () => this.listDeviceImages("tvos", options.signal),
+        options.signal,
+      );
+    }
 
     const [android, ios] = await Promise.all([
       platform === "android" || platform === "either"
@@ -506,27 +532,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         : undefined,
     ]);
 
-    if (android) {
-      devices.push(...android.devices);
-      if (android.error) {
-        discoveryErrors.android = android.error;
-      }
-      if (android.succeeded) {
-        succeededPlatforms.add("android");
-      }
-    }
-
-    if (ios) {
-      devices.push(...ios.devices);
-      if (ios.error) {
-        discoveryErrors.ios = ios.error;
-      }
-      if (ios.succeeded) {
-        succeededPlatforms.add("ios");
-      }
-    }
-
-    return { devices, succeededPlatforms, discoveryErrors };
+    return mergeDeviceImageDiscoveries({ android, ios });
   }
 
   private async discoverAndroidDeviceImages(options: DeviceImageDiscoveryOptions): Promise<{
@@ -893,6 +899,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     );
   }
 
+  /** Resolve the simulator family before lifecycle admission and shutdown. */
+  resolveKillDeviceTarget(device: BootedDevice, signal?: AbortSignal): Promise<BootedDevice> {
+    return resolveSimulatorKillTarget(device, this.simctl, this.appleTvSimulators, signal);
+  }
+
   /**
    * Kill a running device
    * @param device - The device to kill
@@ -902,7 +913,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     device: BootedDevice,
     options?: DeviceShutdownOptions,
   ): Promise<BootedDevice | void> {
+    device = await this.resolveKillDeviceTarget(device, options?.signal);
     switch (device.platform) {
+      case "tvos":
+        await this.simctl.killSimulator(device, options);
+        return device;
       case "android":
         return this.emulator.killDevice(device, options);
       case "ios":

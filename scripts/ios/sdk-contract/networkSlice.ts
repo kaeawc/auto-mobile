@@ -1,6 +1,11 @@
+import { decodeSdkEventBatches } from "../../../src/features/observe/ios/decodeSdkEventBatches";
 import { isDeepStrictEqual } from "node:util";
 import type { ContractBoundary, ContractFinding } from "./boundaries";
 import type { ExpectedNetworkEvent, SdkContractManifest } from "./manifest";
+
+export const PLAYGROUND_BUNDLE_ID = "dev.jasonpearson.automobile.Playground";
+/** The scenario's Authorization value must never appear unredacted. */
+export const FORBIDDEN_SUBSTRINGS = ["contract-secret"];
 
 export const NETWORK_SLICE = "network";
 export const REDACTED = "<redacted>";
@@ -132,6 +137,16 @@ function judgeDownstreamOfSdk(observation: NetworkCaseObservation): ContractFind
     );
   }
   if (!live) {
+    if (observation.queuedInCtrlProxy === undefined) {
+      return {
+        ...finding(
+          observation,
+          "sdk-endpoint",
+          "the live record is missing and CtrlProxy's queue could not be probed",
+        ),
+        verdict: "inconclusive",
+      };
+    }
     return observation.queuedInCtrlProxy
       ? finding(
           observation,
@@ -219,6 +234,25 @@ export function networkRecordKey(record: JsonRecord): string | undefined {
   return undefined;
 }
 
+/** Checks all decoded payloads, including events no expected case matches. */
+export function judgeSdkPayloads(
+  payloads: readonly JsonRecord[],
+  slice: string,
+): ContractFinding[] {
+  return payloads.flatMap((payload, index) =>
+    FORBIDDEN_SUBSTRINGS.some((secret) => JSON.stringify(payload).includes(secret))
+      ? [
+          {
+            slice,
+            caseName: "run",
+            boundary: "sdk-serialization" as const,
+            message: `SDK payload ${index} carries an unredacted forbidden value`,
+          },
+        ]
+      : [],
+  );
+}
+
 /** Findings that concern the whole run rather than one case. */
 export function judgeManifest(
   manifest: SdkContractManifest,
@@ -239,6 +273,43 @@ export function judgeManifest(
       message: `the ${slice} scenario completed without recording any cases`,
     });
   }
+  if (manifest.status === "complete") {
+    if (
+      (slice === NETWORK_SLICE || slice === "faults" || manifest.bundleId !== undefined) &&
+      manifest.bundleId !== PLAYGROUND_BUNDLE_ID
+    ) {
+      findings.push({
+        ...runCase,
+        boundary: "fixture-host",
+        message: `expected manifest bundleId ${PLAYGROUND_BUNDLE_ID}, got ${String(manifest.bundleId)}`,
+      });
+    }
+    if (slice === NETWORK_SLICE) {
+      for (const caseName of [
+        "urlsession",
+        "websocket-sent",
+        "websocket-received",
+        "nwconnection",
+      ]) {
+        if (!manifest.network.some((record) => record.caseName === caseName)) {
+          findings.push({
+            ...runCase,
+            boundary: "fixture-host",
+            message: `missing required network case ${caseName}`,
+          });
+        }
+      }
+    }
+  }
+  findings.push(
+    ...judgeSdkPayloads(
+      decodeSdkEventBatches(
+        [{ bundleId: manifest.bundleId, events: manifest.events }],
+        () => 0,
+      ).events.map((event) => event.payload),
+      slice,
+    ),
+  );
   if (manifest.undecodableBatches > 0) {
     findings.push({
       ...runCase,

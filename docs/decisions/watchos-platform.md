@@ -9,9 +9,13 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
 (`src/models/Platform.ts`), not an iOS device with a family flag. The same rule covers every
 non-iOS Apple platform (`NonIosApplePlatform`): an Apple TV simulator is `platform: "tvos"`, and
 everything below that says "watch" applies to it unless a section names watchOS specifically.
-`tvos` supports no tool yet: discovery lists no Apple TVs (no discovery source sweeps them), a
-broker binding never reuses one, a boot is admitted through the simulator gate, and no tool schema
-offers it.
+`tvos` supports `listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`,
+`startDevice`, `setActiveDevice`, `killDevice`, `installApp`, `uninstallApp`, `launchApp`,
+`terminateApp` and `listApps`. Discovery and selection require an explicit
+tvOS request. Boot uses simctl readiness and the simulator gate; start binds at `booted`
+readiness without an automation runner, keyboard, biometric or prototype setup. A broker binding
+never reuses a TV. Unlike watchOS,
+`tvos` is advertised in tool input schemas ahead of support (see the schema rule below).
 
 - **Fail closed at the tool boundary.** Every device-aware tool rejects a watch or an Apple TV with
   an `ActionableError` naming the platform (`<tool> does not support watchOS yet`, `<tool> does
@@ -30,10 +34,17 @@ offers it.
   Android `else` or an iPhone branch. Maps from platform to an implementation are keyed by
   `AndroidOrIosPlatform`. Bookkeeping that only records a device's platform (bindings,
   reservations, sessions) holds the full `Platform`.
-- **Schemas advertise watchOS only where it works.** MCP tool input and output schemas keep
-  `["android", "ios"]` until a tool supports watchOS, so agents are not offered a value the tool
-  rejects. A tool that opts in gets its own platform enum (the shared `platformSchema` stays
-  Android/iOS).
+- **Schemas advertise watchOS only where it works; tvOS everywhere.** A tool's input `platform`
+  enum lists `watchos` only when the tool supports a watch, so agents are not offered a watch value
+  the tool rejects; such a tool gets its own enum. Every input `platform` enum lists `tvos`,
+  including the shared `platformSchema` (owner decision 2026-10-31, #15886), so clients can name an
+  Apple TV explicitly. Device-aware tools refuse a requested non-iOS Apple platform they
+  have not opted in to before resolving a target (`assertRequestedPlatformSupported`), because
+  resolution replaces the requested platform with a session's own, and refuse an unsupported
+  resolved platform at the registry gate. Plain tools look up tvOS targets through their own
+  platform-specific paths; unsupported plain tools refuse tvOS before lookup
+  (`assertRequestNotTvos`). `provisionDevice` uses a per-platform union with platform-specific
+  spec fields, including a tvOS branch. Output schemas list `tvos` only where they already list `watchos`.
 - **Allowlisted app tools.** `installApp`, `uninstallApp`, `listApps`, `launchApp` and
   `terminateApp` route a watch to `WatchAppManager` (`simctl install|uninstall|listapps|launch|
   terminate` on the watch UDID) through their executor factories; Android and iOS keep their
@@ -44,16 +55,37 @@ offers it.
   confined to the watch's device-set directory, remove Documents, Library and tmp), and a failed
   wipe launches nothing. `prototype: true` is refused before any agent preparation. A
   `terminateApp` whose process is already gone is a success with `wasRunning: false`.
-- **Screenshot-only observe.** `observe` on a watch (`src/server/observeWatch.ts`) captures with
-  `simctl io <udid> screenshot` through `SimCtlClient.screenshot`, writes the PNG into the shared
-  retained screenshot cache, and returns the screenshot with the PNG header's `screenSize` and a
-  `hierarchyUnavailable` note. No CtrlProxy, hierarchy, element matching, snapshot reference or
-  observation resource runs. Hierarchy fields are absent, not empty, so "no elements" is never
-  read as an empty screen; for the same reason the response finalizer neither projects a watch
-  observation to a skeleton nor makes it a session diff baseline. Options that need a hierarchy
-  or an Android/iOS pipeline (`waitFor`, `settled`, `raw`, `includeExtras`, `project`, `scope`,
-  `layer`, `skipBackStack`, `crop`, `screenshotOptions`, `screenshot: "none"`, another display)
-  are refused by name before any capture.
+- **Runner-backed watch observation and actions.** `observe` retains a simctl PNG. When an
+  explicitly registered watch runner is connected, it also returns the hierarchy normalized
+  through the iOS observation model; bounds and `screenSize` use XCTest points while
+  `screenshotImageSize` uses physical pixels. Without a runner it returns the screenshot,
+  physical `screenSize` and `hierarchyUnavailable`, with hierarchy fields absent. Advanced
+  observe options (`waitFor`, `settled`, `raw`, `includeExtras`, `scope`, `layer`,
+  `skipBackStack`, `crop`, `screenshotOptions`, `screenshot: "none"`, another display) are refused.
+  `project` uses the existing full/skeleton rendering when connected and is refused otherwise.
+  `tapOn` accepts an exact identifier or text, with optional index; an identifier is sent directly,
+  otherwise the node center is tapped. Only wholly on-screen nodes qualify. `tapAt` accepts
+  absolute XCTest points. `swipeOn` uses directional runner swipes and optionally searches for
+  exact text/identifier, bounded by `maxSwipes` (default 10, maximum 100). Runner swipes have no
+  host-controlled coordinates or duration. `pressButton` accepts home only. Other targeting,
+  timed gestures, long press, double tap, focus, pinch, multi-touch and text input fail before
+  runner commands.
+- **Explicit runner ownership.** `XcodebuildWatchRunnerLauncher` takes a prebuilt xctestrun,
+  watch UDID and reserved localhost port; it launches only the watch service test, forwards
+  `TEST_RUNNER_AM_PORT`, and registers the device after a successful watchOS handshake and
+  hierarchy read. Startup retries connection/readiness for a bounded budget. Process exit or
+  the returned stop handle closes the client and removes the registration. After boot, before session
+  binding, `startDevice` discovers a watchsimulator xctestrun in the configured CtrlProxy derived
+  data, building the `CtrlProxyWatch` scheme with `build-for-testing` if absent.
+  `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` selects an explicit prebuilt artifact. A per-launch copy
+  injects `AM_PORT` for the allocated localhost port. The lifecycle owner reuses a registered
+  runner and attaches its own runner to the newly bound session. It stops its own handle on
+  device stop/deletion, session release/unbinding and daemon shutdown/exit. A failed or cancelled
+  bind stops only a runner launched by that call. Missing artifacts or failed startup warn and
+  leave readiness at `booted`, with
+  the reason in the response message and screenshot-only observation available.
+  The WebSocket client correlates request IDs and bounds
+  handshake plus command time with the injectable timer, refusing non-watchOS handshakes.
 - **Explicit resolution.** A watch session resolves through the pooled-session path (readiness
   setup and keep-awake are Android-only). A sessionless call reaches a watch only with
   `platform: "watchos"`: readiness then resolves a watch a fresh watchOS listing shows booted (by
@@ -64,7 +96,7 @@ offers it.
   behind the registry gate. They reach a watch only through watch inventory, so each decides
   watches explicitly. `startDevice` with `platform: "watchos"` takes an exact UDID or exact name
   only (every other option is refused), boots or adopts the watch under its stable lifecycle lease
-  and binds a pooled session at readiness `booted`; no automation runner step runs. `killDevice`
+  and prepares its automation runner before binding a pooled session at readiness `booted`. `killDevice`
   takes a watch through the same holder checks and stops it with `simctl shutdown`. Both resolve
   the target from the watch listing, so a non-watch UDID is refused before any simctl command.
   `provisionDevice` with `device.platform: "watchos"` (its own branch of the request union, so

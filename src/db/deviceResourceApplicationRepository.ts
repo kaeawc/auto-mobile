@@ -13,12 +13,17 @@ import {
   simulatorResourceIdentityKey,
   type DeviceResourceApplicationStore,
 } from "../utils/deviceResourceApplicationStore";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 const resourcesSchema = z.record(z.string(), z.enum(["enabled", "disabled"]));
 
 /** SQLite-backed store of AutoMobile-applied simulator service overrides. */
 export class DeviceResourceApplicationRepository implements DeviceResourceApplicationStore {
-  constructor(private readonly db?: Kysely<Database>) {}
+  private readonly db?: Kysely<Database>;
+
+  constructor({ db }: Pick<RepositoryDeps, "db"> = {}) {
+    this.db = db;
+  }
 
   // Resolve lazily so construction never opens the default database.
   private getDb(): Kysely<Database> {

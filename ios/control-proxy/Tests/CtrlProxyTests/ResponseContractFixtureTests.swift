@@ -124,6 +124,7 @@ final class ResponseContractFixtureTests: XCTestCase {
                 requestId: requestId,
                 outcome: .success(AutoMobileObservationSnapshot(
                     captureIdentity: 41,
+                    bundleId: "fixture.app",
                     orientation: .portrait,
                     coordinateSpace: .screen,
                     bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),

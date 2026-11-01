@@ -50,11 +50,11 @@ describe("expired-row sweep vs. restart-recovery activity", () => {
         return await super.markReleased(...args);
       }
     }
-    return new RacingRepository(db, timer);
+    return new RacingRepository({ db, timer });
   }
 
   test("a row whose deadline was extended after the sweep selected it stays recoverable", async () => {
-    const repo = new DeviceSessionRepository(db, timer);
+    const repo = new DeviceSessionRepository({ db, timer });
     await repo.upsertActiveSession({
       sessionUuid: SESSION,
       deviceId: "emulator-5554",

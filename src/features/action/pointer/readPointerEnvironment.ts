@@ -8,10 +8,48 @@ import {
   HOVER_INPUT_CAPABILITY,
   STYLUS_INPUT_CAPABILITY,
 } from "../../observe/android/ctrlProxyProtocol/capabilities";
-import type { PointerEnvironment } from "./PointerInjector";
+import type { PointerEnvironment, PointerToolType } from "./PointerInjector";
 import { pointerCapabilities } from "./selectPointerRoute";
 
 const API_READ_TIMEOUT_MS = 5000;
+const ROOT_READ_TIMEOUT_MS = 5000;
+
+/**
+ * The uinput route only carries what the runner cannot: with both pointer capabilities advertised
+ * it is never chosen for a stylus, so the extra `id -u` round trip is skipped. The runner never
+ * injects an eraser, so an eraser always needs the uid.
+ */
+export function needsRootProbe(
+  advertised: ReadonlySet<string>,
+  toolType?: PointerToolType,
+): boolean {
+  return (
+    toolType === "eraser" ||
+    !advertised.has(STYLUS_INPUT_CAPABILITY) ||
+    !advertised.has(HOVER_INPUT_CAPABILITY)
+  );
+}
+
+/**
+ * Whether `adb shell` runs as root, as after `adb root` on an emulator or userdebug build. The uinput
+ * route needs it to open `/dev/uinput`. AutoMobile never runs `adb root` itself: it restarts adbd.
+ */
+export async function readRootShell(adb: AdbExecutor, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const { stdout } = await adb.executeCommand("shell id -u", {
+      timeoutMs: ROOT_READ_TIMEOUT_MS,
+      noRetry: true,
+      signal,
+    });
+    return stdout.trim() === "0";
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    logger.warn(`[pointer] could not read the adb shell uid: ${errorMessage(error)}`, error);
+    return false;
+  }
+}
 
 /**
  * The device facts the pointer routes decide on: the Android API level and the pointer capability
@@ -22,6 +60,8 @@ export async function readPointerEnvironment(
   device: BootedDevice,
   adb: AdbExecutor,
   signal?: AbortSignal,
+  /** The requested tool, when known: it decides whether the root shell matters. */
+  toolType?: PointerToolType,
 ): Promise<PointerEnvironment> {
   // An established runner connection only: with none, no capability is advertised.
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
@@ -57,5 +97,8 @@ export async function readPointerEnvironment(
     platform: "android",
     apiLevel: apiLevel ?? undefined,
     capabilities: pointerCapabilities((name) => advertised.has(name)),
+    ...(needsRootProbe(advertised, toolType)
+      ? { rootShell: await readRootShell(adb, signal) }
+      : {}),
   };
 }

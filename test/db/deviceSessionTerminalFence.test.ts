@@ -17,7 +17,7 @@ describe("device session release fence (#11418)", () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   afterEach(async () => {
@@ -52,7 +52,7 @@ describe("device session release fence (#11418)", () => {
         return await super.markReleased(...args);
       }
     }
-    return new RacingRepository(db, timer);
+    return new RacingRepository({ db, timer });
   }
 
   // none < non-terminal < idle terminal < other terminal; an equal strength replaces.

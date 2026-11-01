@@ -12,6 +12,7 @@ import type { NotificationUIDetector } from "../../utils/interfaces/Notification
 import {
   getHierarchyRoots,
   hasIosCoverSheetNotificationCenter,
+  hierarchyShowsIosLockScreen,
   nodeHasIosNotificationCenterHint,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
   traverseForHint,
@@ -67,6 +68,9 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
     }
     const packageName = viewHierarchy.packageName ?? "";
     if (!packageName.includes("springboard")) {
+      return false;
+    }
+    if (hierarchyShowsIosLockScreen(viewHierarchy)) {
       return false;
     }
     const rootNodes = getHierarchyRoots(viewHierarchy);

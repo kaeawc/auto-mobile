@@ -69,6 +69,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Read-only runner bundle.",
   },
   { name: "AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH", kind: "input", reason: "Read-only IPA artifact." },
+  {
+    name: "AUTOMOBILE_WATCH_RUNNER_XCTESTRUN",
+    kind: "input",
+    reason: "Read-only prebuilt watchOS runner artifact.",
+  },
   { name: "AUTOMOBILE_CWEBP_PATH", kind: "input", reason: "Read-only codec executable." },
   {
     name: "AUTOMOBILE_TRACE_PROCESSOR",

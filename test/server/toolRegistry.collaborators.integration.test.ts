@@ -300,7 +300,7 @@ describe("DefaultPlanLifecycleManager server-side binding teardown (issue #4611 
     // ~/.auto-mobile file DB (CLAUDE.md unit-test guard, issue #3067).
     sessionManager = new SessionManager(
       timer,
-      new DeviceSessionRepository(await createTestDatabase()),
+      new DeviceSessionRepository({ db: await createTestDatabase() }),
     );
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);

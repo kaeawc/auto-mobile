@@ -31,7 +31,7 @@ describe("NavigateTo replay through navigation recording", () => {
 
   beforeAll(async () => {
     harness = await installInMemoryNavManager();
-    repository = new NavigationRepository(harness.db);
+    repository = new NavigationRepository({ db: harness.db });
     const cache = spyOn(RealObserveScreen, "getRecentCachedResult").mockReturnValue(undefined);
     const deviceCache = spyOn(RealObserveScreen, "getRecentCachedResultForDevice").mockReturnValue(
       undefined,
@@ -87,7 +87,7 @@ describe("NavigateTo replay through navigation recording", () => {
     timer = new FakeTimer();
     timer.setCurrentTime(100_000);
     manager = NavigationGraphManager.createForTesting(repository, {
-      testCoverageRepository: new TestCoverageRepository(harness.db),
+      testCoverageRepository: new TestCoverageRepository({ db: harness.db }),
       timer,
     });
     NavigationGraphManager.setInstanceForTesting(manager);

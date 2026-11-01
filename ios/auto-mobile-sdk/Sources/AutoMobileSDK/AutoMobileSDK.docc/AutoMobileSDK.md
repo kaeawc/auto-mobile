@@ -38,6 +38,8 @@ AutoMobileSDK.shared.initialize(configuration: config)
 
 ### Navigation
 
+- ``AutoMobileNavigation``
+
 - ``NavigationEvent``
 - ``NavigationSource``
 - ``NavigationListener``

@@ -44,7 +44,7 @@ describe("DeviceSnapshotRepository", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new DeviceSnapshotRepository(db);
+    repo = new DeviceSnapshotRepository({ db });
   });
 
   afterEach(async () => {

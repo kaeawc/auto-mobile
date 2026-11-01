@@ -53,7 +53,7 @@ async function world() {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_700_000_000_000);
   db = await createTestDatabase();
-  const repository = new DeviceSessionRepository(db, timer);
+  const repository = new DeviceSessionRepository({ db, timer });
   const daemon = () => {
     const manager = new SessionManager(timer, repository);
     managers.push(manager);

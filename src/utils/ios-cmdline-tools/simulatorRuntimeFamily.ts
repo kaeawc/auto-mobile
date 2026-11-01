@@ -3,6 +3,8 @@ import type { AppleDeviceType } from "./SimCtlSupport";
 
 const IOS_RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.iOS-";
 const WATCH_OS_RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.watchOS-";
+const TV_OS_RUNTIME_PREFIX = "com.apple.CoreSimulator.SimRuntime.tvOS-";
+const APPLE_TV_PRODUCT_FAMILY = "Apple TV";
 const APPLE_WATCH_PRODUCT_FAMILY = "Apple Watch";
 const IOS_PRODUCT_FAMILIES: ReadonlySet<string> = new Set(["iPhone", "iPad"]);
 
@@ -49,4 +51,23 @@ export function isAppleWatchDeviceType(
   deviceType: Pick<AppleDeviceType, "productFamily">,
 ): boolean {
   return deviceType.productFamily === APPLE_WATCH_PRODUCT_FAMILY;
+}
+
+/** Whether a CoreSimulator runtime identifier is a tvOS runtime. */
+export function isTvOsSimulatorRuntime(runtimeId: string): boolean {
+  return runtimeId.startsWith(TV_OS_RUNTIME_PREFIX);
+}
+
+/** The tvOS version in a runtime identifier: `...SimRuntime.tvOS-26-5` is `26.5`. */
+export function tvOsVersionFromRuntimeId(runtimeId: string): string | undefined {
+  if (!isTvOsSimulatorRuntime(runtimeId)) {
+    return undefined;
+  }
+  const version = runtimeId.slice(TV_OS_RUNTIME_PREFIX.length);
+  return /^\d+(?:-\d+)*$/.test(version) ? version.replace(/-/g, ".") : undefined;
+}
+
+/** Whether a `simctl list devicetypes` entry is an Apple TV model. */
+export function isAppleTvDeviceType(deviceType: Pick<AppleDeviceType, "productFamily">): boolean {
+  return deviceType.productFamily === APPLE_TV_PRODUCT_FAMILY;
 }

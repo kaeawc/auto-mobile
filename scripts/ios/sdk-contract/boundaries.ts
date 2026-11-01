@@ -20,6 +20,8 @@ export interface ContractFinding {
   caseName: string;
   boundary: ContractBoundary;
   message: string;
+  /** Absent means a conclusive failure; inconclusive findings still fail the run. */
+  verdict?: "inconclusive";
 }
 
 export function formatFindings(findings: readonly ContractFinding[]): string {
@@ -28,7 +30,7 @@ export function formatFindings(findings: readonly ContractFinding[]): string {
   }
   const lines = findings.map(
     (finding) =>
-      `FAIL [${finding.boundary}] ${finding.slice}/${finding.caseName}: ${finding.message}\n` +
+      `${finding.verdict === "inconclusive" ? "INCONCLUSIVE" : "FAIL"} [${finding.boundary}] ${finding.slice}/${finding.caseName}: ${finding.message}\n` +
       `     (${CONTRACT_BOUNDARIES[finding.boundary]})`,
   );
   return [`${findings.length} contract finding(s):`, ...lines].join("\n");

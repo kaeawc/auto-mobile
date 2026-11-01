@@ -1,5 +1,6 @@
 import AutoMobileSdkWire
 import Foundation
+import os
 
 public struct SdkHierarchyServerInfo: Codable, Sendable {
     public let status: String
@@ -32,13 +33,30 @@ public struct SdkHierarchyServerInfo: Codable, Sendable {
     }
 
     public init(from decoder: any Decoder) throws {
+        try self.init(from: decoder, warning: {
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyServerInfo")
+                .warning("\($0, privacy: .public)")
+        })
+    }
+
+    init(from decoder: any Decoder, warning: (String) -> Void) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         status = try values.decode(String.self, forKey: .status)
         bundleId = try values.decodeIfPresent(String.self, forKey: .bundleId)
         capabilities = try values.decodeIfPresent(Set<String>.self, forKey: .capabilities) ?? []
         simulatorUdid = try values.decodeIfPresent(String.self, forKey: .simulatorUdid)
         // A malformed bridge object degrades to "absent" rather than hiding the whole SDK.
-        observationBridge = try? values.decodeIfPresent(ObservationBridgeState.self, forKey: .observationBridge)
-        webViewBridge = try? values.decodeIfPresent(WebViewBridgeState.self, forKey: .webViewBridge)
+        do {
+            observationBridge = try values.decodeIfPresent(ObservationBridgeState.self, forKey: .observationBridge)
+        } catch {
+            warning("SDK health observationBridge decode failed; treating bridge as absent: \(error)")
+            observationBridge = nil
+        }
+        do {
+            webViewBridge = try values.decodeIfPresent(WebViewBridgeState.self, forKey: .webViewBridge)
+        } catch {
+            warning("SDK health webViewBridge decode failed; treating bridge as absent: \(error)")
+            webViewBridge = nil
+        }
     }
 }

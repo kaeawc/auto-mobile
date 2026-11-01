@@ -61,6 +61,7 @@ export type {
   NavigationNodeProvenanceRow,
   NavigationEdgeTool,
 } from "./navigationRepositoryTypes";
+import type { RepositoryDeps } from "./repositoryDeps";
 
 /** The build/device/session an observation was made under, and when it was seen. */
 type ObservedAt = ObservationSource & { seenAt: number };
@@ -73,10 +74,10 @@ export class NavigationRepository {
   private db: Kysely<Database> | null;
   private readonly ctx: NavigationQueryContext;
 
-  constructor(
-    db?: Kysely<Database>,
-    private readonly timer: Timer = defaultTimer,
-  ) {
+  private readonly timer: Timer;
+
+  constructor({ db, timer = defaultTimer }: Pick<RepositoryDeps, "db" | "timer"> = {}) {
+    this.timer = timer;
     this.db = db ?? null;
     this.ctx = { timer: this.timer, repository: this, getDb: () => this.getDb() };
   }
@@ -112,7 +113,7 @@ export class NavigationRepository {
    * busy_timeout escape (the in-process JS mutex, not SQLite's lock).
    */
   withExecutor(executor: Kysely<Database>): NavigationRepository {
-    return new NavigationRepository(executor, this.timer);
+    return new NavigationRepository({ db: executor, timer: this.timer });
   }
 
   /**

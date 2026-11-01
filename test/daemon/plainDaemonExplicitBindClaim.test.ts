@@ -18,7 +18,7 @@ beforeAll(async () => {
   db = await createTestDatabase();
   const timer = new FakeTimer();
   world = new TwoDaemonWorld(
-    new DeviceSessionRepository(db, timer),
+    new DeviceSessionRepository({ db, timer }),
     async () => [],
     new Set(),
     timer,

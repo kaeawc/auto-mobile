@@ -104,6 +104,104 @@ private actor RejectingSdkDatabaseClient: SdkDatabaseFetching {
 
 @MainActor
 final class SdkCapabilitiesCommandTests: XCTestCase {
+    private struct HealthWithWarnings: Decodable {
+        let info: SdkHierarchyServerInfo
+        let warnings: [String]
+
+        init(from decoder: any Decoder) throws {
+            var messages: [String] = []
+            info = try SdkHierarchyServerInfo(from: decoder, warning: { messages.append($0) })
+            warnings = messages
+        }
+    }
+
+    func testMalformedCapturedBridgeLogsDecodeErrorBeforeDegrading() throws {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "sdk-health-observation-bridge", withExtension: "json", subdirectory: "Fixtures"
+        ))
+        let data = try Data(contentsOf: url)
+        let capture = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        for key in ["observationBridge", "webViewBridge"] {
+            var malformed = capture
+            // Deliberately corrupt only this field of the real capture, retaining the other bridge.
+            malformed[key] = "invalid bridge"
+            let decoded = try JSONDecoder().decode(
+                HealthWithWarnings.self, from: JSONSerialization.data(withJSONObject: malformed)
+            )
+            XCTAssertEqual(decoded.info.bundleId, capture["bundleId"] as? String)
+            XCTAssertEqual(decoded.warnings.count, 1)
+            XCTAssertTrue(decoded.warnings.first?.contains(key) == true)
+            XCTAssertTrue(decoded.warnings.first?.contains("typeMismatch") == true)
+            if key == "observationBridge" {
+                XCTAssertNil(decoded.info.observationBridge)
+                XCTAssertNotNil(decoded.info.webViewBridge)
+            } else {
+                XCTAssertNil(decoded.info.webViewBridge)
+                XCTAssertEqual(decoded.info.observationBridge?.available, true)
+            }
+        }
+    }
+
+    func testCapturedAndAbsentBridgesDoNotWarn() throws {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "sdk-health-observation-bridge", withExtension: "json", subdirectory: "Fixtures"
+        ))
+        let data = try Data(contentsOf: url)
+        let valid = try JSONDecoder().decode(HealthWithWarnings.self, from: data)
+        XCTAssertTrue(valid.warnings.isEmpty)
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacy.removeValue(forKey: "observationBridge")
+        legacy["webViewBridge"] = NSNull()
+        let absent = try JSONDecoder().decode(
+            HealthWithWarnings.self, from: JSONSerialization.data(withJSONObject: legacy)
+        )
+        XCTAssertNil(absent.info.observationBridge)
+        XCTAssertNil(absent.info.webViewBridge)
+        XCTAssertTrue(absent.warnings.isEmpty)
+    }
+
+    func testCapturedHealthDecodesAndRelaysObservationBridge() async throws {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "sdk-health-observation-bridge", withExtension: "json", subdirectory: "Fixtures"
+        ))
+        let data = try Data(contentsOf: url)
+        let info = try JSONDecoder().decode(SdkHierarchyServerInfo.self, from: data)
+        let bridge = try XCTUnwrap(info.observationBridge)
+        XCTAssertTrue(bridge.available)
+        XCTAssertNil(bridge.reason)
+        XCTAssertEqual(bridge.supportedActions, ["clearText", "insertText", "tap"])
+
+        let transport = StubHTTPTransport(Array(repeating: .respond(status: 200, body: data), count: 2))
+        let resolver = try SdkEndpointResolver(
+            environment: ["SIMULATOR_UDID": XCTUnwrap(info.simulatorUdid)], healthTransport: transport
+        )
+        let client = try SdkHierarchyClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
+            transport: transport, healthTransport: transport, endpointResolver: resolver
+        )
+        let locator = FakeElementLocator()
+        locator.foregroundBundleId = info.bundleId
+        let handler = CommandHandler(
+            elementLocator: locator, gesturePerformer: FakeGesturePerformer(),
+            perf: PerfProvider(), sdkHierarchyClient: client
+        )
+        let result = try await handler.handle(request(#"{"type":"get_sdk_capabilities","requestId":"capture"}"#))
+        let response = try XCTUnwrap(result as? SdkCapabilitiesResponse)
+        let relayed = try JSONDecoder().decode(SdkCapabilitiesResponse.self, from: JSONEncoder().encode(response))
+        XCTAssertTrue(relayed.available)
+        XCTAssertEqual(relayed.bundleId, info.bundleId)
+        XCTAssertEqual(relayed.observationBridge, bridge)
+        XCTAssertEqual(transport.recordedRequests.map { $0.url?.path }, ["/health", "/health"])
+    }
+
+    func testCapturedNotRegisteredHealthPreservesReason() throws {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "sdk-health-not-registered", withExtension: "json", subdirectory: "Fixtures"
+        ))
+        let info = try JSONDecoder().decode(SdkHierarchyServerInfo.self, from: Data(contentsOf: url))
+        XCTAssertEqual(info.observationBridge, .notRegistered)
+    }
+
     func testLaunchAppNotifiesSdkLifecycleOnceForEachSuccessfulStrategy() async throws {
         for state: ObservedAppState in [
             .notRunning,

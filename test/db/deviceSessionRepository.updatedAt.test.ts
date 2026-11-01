@@ -27,7 +27,7 @@ describe("DeviceSessionRepository injected timestamp clock", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     timer.advanceTime(initialMs);
-    repo = new DeviceSessionRepository(db, timer);
+    repo = new DeviceSessionRepository({ db, timer });
   });
 
   function record(sessionUuid: string): DeviceSessionRecord {

@@ -258,13 +258,19 @@ async function requestedPoolDevice(
       throw discoveryIncomplete;
     }
   }
-  if (!device || (device.platform === "watchos") !== (platform === "watchos")) {
-    // A watch is selected only when the call names watchOS, and naming it selects only a watch.
+  if (
+    !device ||
+    (device.platform === "watchos") !== (platform === "watchos") ||
+    (device.platform === "tvos") !== (platform === "tvos")
+  ) {
+    // Non-iOS Apple simulators are selected only when the call names their platform.
     throw new ActionableError(
       `Device '${deviceId}' not found in device pool` +
         (device?.platform === "watchos"
           ? '; pass platform "watchos" to select an Apple Watch'
-          : ""),
+          : device?.platform === "tvos"
+            ? '; pass platform "tvos" to select an Apple TV'
+            : ""),
     );
   }
   return device;
@@ -397,7 +403,9 @@ async function selectSessionDevice(input: {
   // its admitted attempt, which a caller that does not hold the device must not do (#11651).
   pool.assertNotPreparedForOtherRequest(args.deviceId);
   assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions, pool });
-  await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
+  if (device.platform !== "tvos") {
+    await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
+  }
   // Checked again: another session may have bound the device while the resume listed devices.
   assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions, pool });
   // A request cancelled before the bind changes nothing.
@@ -483,7 +491,12 @@ async function selectLegacyDevice(input: {
   signal?.throwIfAborted();
   assertNotPreparedForOtherRequest(readyDevice.deviceId);
   const resolvedPlatform = args.platform ?? readyDevice.platform;
-  await resumeCtrlProxy(readyDevice.deviceId, resolvedPlatform);
+  if ((readyDevice.platform === "tvos") !== (args.platform === "tvos")) {
+    throw new ActionableError('Pass platform "tvos" to select an Apple TV');
+  }
+  if (resolvedPlatform !== "tvos") {
+    await resumeCtrlProxy(readyDevice.deviceId, resolvedPlatform);
+  }
   signal?.throwIfAborted();
   assertNotPreparedForOtherRequest(readyDevice.deviceId);
   if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {

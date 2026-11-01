@@ -91,7 +91,6 @@ aux_root=""
 # shellcheck source=scripts/ios/run_with_timeout.sh
 source "${script_dir}/run_with_timeout.sh"
 inflight_dir="$(mktemp -d "${log_dir}/inflight.XXXXXX")"
-export AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="${inflight_dir}/pgid"
 
 terminate() {
   trap - INT TERM
@@ -255,7 +254,7 @@ udid="$("${XCRUN_BIN}" simctl create "prototype-mcp-smoke-${runtime_version}-${r
 derived_data="$(mktemp -d "${TMPDIR:-/tmp}/auto-mobile-prototype-mcp.XXXXXX")"
 # Debug, because Playground's SDK integration is enabled in Debug builds.
 set +e
-run_with_timeout 600 "${xcodebuild_bin}" \
+AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="${inflight_dir}/pgid" run_with_timeout 600 "${xcodebuild_bin}" \
   -project "${repo_root}/ios/Playground/Playground.xcodeproj" \
   -scheme Playground \
   -configuration Debug \

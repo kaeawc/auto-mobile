@@ -194,6 +194,13 @@ class IntegrityStateInjector implements DeviceConditionInjector {
         signal,
       );
     }
+    // This mutation's own stubs are released before the read-back, so a retained one another
+    // fixture still needs is read as that fixture's (#16275).
+    for (const path of mutation.paths) {
+      if (!mutation.before.paths.has(path)) {
+        this.artifacts.release(this, path);
+      }
+    }
     // Read the device and the baseline the same way: stubs another fixture still needs are not
     // this mutation's to restore or count (#16275).
     const state = await this.ownState(mutation.id, signal);
@@ -290,12 +297,17 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       const paths = ROOT_ARTIFACT_PATHS.filter(
         (path) => pathsFor(mutation.id).includes(path) && !mutation.before.paths.has(path),
       );
-      // mutation.paths records each path before its write, so a rollback removes a
-      // half-planted file; ownership is registered only once every write has succeeded.
-      await plantArtifacts(this.adb, paths, mutation.paths, signal);
-      for (const path of mutation.paths) {
-        this.planted.add(path);
-        this.artifacts.plant(this, path);
+      try {
+        // mutation.paths records each path before its write, so a rollback removes a
+        // half-planted file.
+        await plantArtifacts(this.adb, paths, mutation.paths, signal);
+      } finally {
+        // Provenance for every attempted write, even one whose rollback later fails, so another
+        // fixture never reads a leftover stub as the image's; never for an unattempted path.
+        for (const path of mutation.paths) {
+          this.planted.add(path);
+          this.artifacts.plant(this, path);
+        }
       }
     } else {
       for (const path of mutation.before.paths) {

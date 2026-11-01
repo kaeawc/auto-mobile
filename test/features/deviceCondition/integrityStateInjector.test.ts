@@ -348,6 +348,52 @@ describe("integrityState injector", () => {
     expect(await integrity.isClean()).toBe(true);
   });
 
+  test("a later integrity baseline keeps stubs integrity itself still holds (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    adb.mode = "Permissive";
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-later-frame" };
+    const owner = { device, deviceId: device.deviceId };
+    const root = resolve(owner, "rootState")!;
+    const integrityController = new DeviceConditionController(() =>
+      resolve(owner, "integrityState")!,
+    );
+    await integrityController.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    const rootOutcome = await root.apply("rooted-detectable");
+    await integrityController.apply({
+      integrityState: { signals: { "selinux-permissive": "off" } },
+    });
+    await rootOutcome.reset?.();
+    const report = await integrityController.restore();
+    expect(report).toMatchObject({ verifiedClean: true, failures: [] });
+    expect(adb.files.size).toBe(0);
+    expect(adb.mode).toBe("Permissive");
+  });
+
+  test("a failed plant whose rollback also fails keeps its fixture provenance (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-owed-plant" };
+    const owner = { device, deviceId: device.deviceId };
+    const root = resolve(owner, "rootState")!;
+    const integrityController = new DeviceConditionController(() =>
+      resolve(owner, "integrityState")!,
+    );
+    adb.failures.add("shell chmod 06755 /system/xbin/su");
+    adb.failures.add("shell rm");
+    await integrityController.apply({ integrityState: { signals: { "su-binary": "on" } } });
+    expect(adb.files.has("/system/xbin/su")).toBe(true);
+    adb.failures.clear();
+    const rootOutcome = await root.apply("rooted-detectable");
+    // Integrity clears independently while rootState still needs the leftover stub.
+    expect((await integrityController.restore()).verifiedClean).toBe(true);
+    expect(adb.files.has("/system/xbin/su")).toBe(true);
+    await rootOutcome.reset?.();
+    expect(adb.files.size).toBe(0);
+    expect(await root.isClean()).toBe(true);
+    expect(await resolve(owner, "integrityState")!.isClean()).toBe(true);
+  });
+
   test("factory-local SELinux owners isolate the same device id across adb clients", async () => {
     const firstAdb = new IntegrityAdb();
     const secondAdb = new IntegrityAdb();

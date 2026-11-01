@@ -24,12 +24,16 @@ export class ArtifactOwner {
     return [...(this.holders.get(path) ?? [])].some((holder) => holder !== token);
   }
 
+  heldBy(token: object, path: string): boolean {
+    return this.holders.get(path)?.has(token) === true;
+  }
+
   /**
-   * A fixture-planted file another fixture still needs: not `token`'s to report or remove. An
-   * image-shipped file is never one, even while another fixture depends on it.
+   * A fixture-planted file that only other fixtures still need: not `token`'s to report or
+   * remove. An image-shipped file is never one, and neither is a file `token` itself holds.
    */
   plantedForOther(token: object, path: string): boolean {
-    return this.planted.has(path) && this.heldByOther(token, path);
+    return this.planted.has(path) && this.heldByOther(token, path) && !this.heldBy(token, path);
   }
 
   /** Whether `token` releasing `path` leaves a fixture-planted file nobody needs, to delete. */

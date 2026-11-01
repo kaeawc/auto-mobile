@@ -9,7 +9,11 @@ import {
   ambientDeviceExecutionBinding,
   runWithDeviceExecutionBinding,
 } from "../utils/deviceExecutionBinding";
-import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
+import {
+  assertCreatableRequirements,
+  describeDisplayRequirements,
+  matchesDeviceCriteria,
+} from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import { DeviceBootExecution } from "./DeviceBootExecution";
 import {
@@ -636,15 +640,7 @@ export class DeviceBootService {
     if (!this.dependencies.deviceCreationGate.isCreationAllowed(request.createIfMissing)) {
       throw noMatchingDeviceError(request, criteria, images, describedCandidates);
     }
-    if (criteria.requires?.panels !== undefined || criteria.requires?.posture !== undefined) {
-      throw new ActionableError(describeDisplayRequirements(criteria, describedCandidates));
-    }
-    // A simulator cannot satisfy it, so creating one would leave the request unmatched (#14302).
-    if (criteria.requires?.playStore === true && criteria.platform !== "android") {
-      throw new ActionableError(
-        "requires.playStore applies to Android emulators only: no device was created. Remove it for an iOS request.",
-      );
-    }
+    assertCreatableRequirements(criteria, describedCandidates);
     // Nothing running or warm can serve the request, so it would create and cold-boot: refuse
     // before creating when that boot would be refused anyway (#11236).
     const checkBootCapacity =

@@ -1,4 +1,4 @@
-import type { BootedDevice, DeviceInfo, Platform } from "../models";
+import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import {
   isPlayStoreSystemImageTag,
   parseAndroidSystemImageRuntime,
@@ -560,6 +560,24 @@ export class DefaultDeviceMatcher implements DeviceMatcher {
       images.filter((image) => matchesDeviceCriteria(image, criteria)),
       strategy,
       this.random,
+    );
+  }
+}
+
+/**
+ * Requirements no new device can satisfy: display capabilities (unknown until a device exists) and
+ * `requires.playStore` off Android, where a created simulator would still not match (#14302).
+ */
+export function assertCreatableRequirements(
+  criteria: DeviceMatchCriteria,
+  candidates: Parameters<typeof describeDisplayRequirements>[1],
+): void {
+  if (criteria.requires?.panels !== undefined || criteria.requires?.posture !== undefined) {
+    throw new ActionableError(describeDisplayRequirements(criteria, candidates));
+  }
+  if (criteria.requires?.playStore === true && criteria.platform !== "android") {
+    throw new ActionableError(
+      "requires.playStore applies to Android emulators only: no device was created. Remove it for an iOS request.",
     );
   }
 }

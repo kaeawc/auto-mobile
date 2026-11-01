@@ -77,6 +77,46 @@ export const prototypeModelSelection = {
   },
   routeEntry: { languages: ["kotlin"] },
   route: { languages: ["kotlin"] },
+  swipeAction: {
+    languages: ["kotlin"],
+    doc: "One swipe-revealed button: [label] is its text and accessibility name, [role] `destructive`\nselects error colours, [color] (hex or theme role) overrides the background.",
+  },
+  swipeActions: {
+    languages: ["kotlin"],
+    doc: "A right swipe reveals `start`, a left swipe `end`; [fullSwipe] runs the first entry.",
+  },
+  textSpan: { languages: ["kotlin"] },
+  textSpanStyle: {
+    languages: ["kotlin"],
+    fieldTypes: { fontFamily: { kotlin: "PrototypeFontFamily" } },
+    // Preserve the existing native fields; span stagger has no Kotlin model field.
+    omitKotlinFields: ["stagger"],
+  },
+  chartSeries: {
+    languages: ["kotlin"],
+    doc: "One chart series: the `/data` array at [path], its points' [y] and optional [x] members.",
+  },
+  // themeColors stays hand-written: its constructor places light/dark after the colour roles.
+  themeTypography: {
+    languages: ["kotlin"],
+    kotlinName: "PrototypeSpecThemeTypography",
+    doc: "`scale` multiplies every Material type role; `fontFamily` is sans, serif or mono.",
+  },
+  themeShapes: {
+    languages: ["kotlin"],
+    kotlinName: "PrototypeSpecThemeShapes",
+    doc: "`corner` picks one of the Material corner families (none, small, medium, large, full).",
+  },
+  theme: {
+    languages: ["kotlin"],
+    kotlinName: "PrototypeSpecTheme",
+    fieldTypes: { colors: { kotlin: "PrototypeSpecThemeColors" } },
+    omitKotlinFields: ["ios", "android"],
+  },
+  platformHandlers: {
+    languages: ["kotlin"],
+    doc: "Root `platform`: action lists keyed by `<module>.<event>`.",
+  },
   scrollEdge: {},
   scrollTransition: {},
   scrollLinked: {},

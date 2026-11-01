@@ -27,9 +27,12 @@ enum SdkContractRunner {
 
     static func run(_ launch: SdkContractLaunch) async {
         var manifest = SdkContractManifest(runId: launch.runId, scenario: launch.scenario)
-        let belongsToRun: @Sendable (SdkEventEnvelope) -> Bool = launch.scenario == "navigation"
-            ? { $0.eventType == .navigation || $0.eventType == .webView }
-            : SdkContractBatchTap.networkEvents(forRun: launch.runId)
+        let belongsToRun: @Sendable (SdkEventEnvelope) -> Bool
+        if launch.scenario == "navigation" {
+            belongsToRun = navigationEvent
+        } else {
+            belongsToRun = SdkContractBatchTap.networkEvents(forRun: launch.runId)
+        }
         let tap = SdkContractBatchTap(belongsToRun: belongsToRun)
         tap.start()
         defer { tap.stop() }
@@ -74,6 +77,11 @@ enum SdkContractRunner {
                 "manifest_write_failed run=\(launch.runId) error=\(error.localizedDescription)"
             )
         }
+    }
+
+    private static func navigationEvent(_ envelope: SdkEventEnvelope) -> Bool {
+        let type = envelope.eventType
+        return type == .navigation || type == .webView
     }
 
     private static func runScenario(

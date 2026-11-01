@@ -179,8 +179,11 @@ export class DeviceConditionRegistry {
     try {
       const report = await slot.controller.restore();
       if (!report.verifiedClean) {
+        const unrestored = report.failures
+          .map((failure) => `${failure.key} (${failure.error})`)
+          .join(", ");
         logger.warn(
-          `[deviceCondition] ${reason} for ${owner.deviceId} left ${report.failures.length} condition(s) unrestored`,
+          `[deviceCondition] ${reason} for ${owner.deviceId} left ${report.failures.length} condition(s) unrestored: ${unrestored}`,
         );
       }
       return report.verifiedClean;

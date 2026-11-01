@@ -9431,6 +9431,7 @@
               "resetKeychain",
               "rotaryScroll",
               "rotate",
+              "rotateCrown",
               "selectAllText",
               "sendBroadcast",
               "sendKeys",
@@ -9592,6 +9593,7 @@
               "resetKeychain",
               "rotaryScroll",
               "rotate",
+              "rotateCrown",
               "selectAllText",
               "sendBroadcast",
               "sendKeys",
@@ -41001,6 +41003,7 @@
               "resetKeychain",
               "rotaryScroll",
               "rotate",
+              "rotateCrown",
               "selectAllText",
               "sendBroadcast",
               "sendKeys",
@@ -47070,6 +47073,94 @@
           "additionalProperties": {}
         }
       }
+    }
+  },
+  {
+    "name": "rotateCrown",
+    "title": "Rotate Digital Crown",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "watchOS only: rotate the Apple Watch Digital Crown by a signed, non-zero delta, with optional positive velocity (default: 1). Target an Apple Watch session. Observe afterward to check the app's response.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "description": "Apple Watch only",
+          "type": "string",
+          "const": "watchos"
+        },
+        "delta": {
+          "description": "Signed, non-zero Digital Crown rotation delta",
+          "type": "number"
+        },
+        "velocity": {
+          "description": "Positive Digital Crown rotation velocity (default: 1)",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["delta"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "delta": {
+          "type": "number"
+        },
+        "velocity": {
+          "type": "number"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "delta", "velocity"],
+      "additionalProperties": false
     }
   },
   {
@@ -53402,6 +53493,7 @@
             "resetKeychain",
             "rotaryScroll",
             "rotate",
+            "rotateCrown",
             "selectAllText",
             "sendBroadcast",
             "sendKeys",
@@ -53525,6 +53617,7 @@
               "resetKeychain",
               "rotaryScroll",
               "rotate",
+              "rotateCrown",
               "selectAllText",
               "sendBroadcast",
               "sendKeys",

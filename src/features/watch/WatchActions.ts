@@ -1,6 +1,7 @@
 import { ActionableError } from "../../models/ActionableError";
 import type {
   Element,
+  BootedDevice,
   Platform,
   SwipeOnOptions,
   SwipeOnResult,
@@ -16,8 +17,41 @@ import { watchRunners } from "./WatchRunnerRegistry";
 
 export function unsupportedWatchAction(action: string): never {
   throw new ActionableError(
-    `${action} is not supported by the watchOS runner; use tap, directional swipe or home.`,
+    `${action} is not supported by the watchOS runner; use tap, directional swipe, rotateCrown or home.`,
   );
+}
+
+export interface WatchCrownOptions {
+  delta: number;
+  velocity?: number;
+}
+
+// Simulator crown rotation has not replied within the 5 s default.
+// This bounds when the call is reported as a timeout, not its expected duration.
+export const CROWN_REQUEST_TIMEOUT_MS = 30_000;
+
+export async function watchRotateCrown(
+  device: Pick<BootedDevice, "deviceId" | "platform">,
+  options: WatchCrownOptions,
+  signal?: AbortSignal,
+) {
+  if (device.platform !== "watchos") {
+    throw new ActionableError(
+      "rotateCrown requires a watchOS device; target an Apple Watch session.",
+    );
+  }
+  const { delta, velocity = 1 } = options;
+  if (typeof delta !== "number" || !Number.isFinite(delta) || delta === 0) {
+    throw new ActionableError("rotateCrown delta must be a finite non-zero number.");
+  }
+  if (typeof velocity !== "number" || !Number.isFinite(velocity) || velocity <= 0) {
+    throw new ActionableError("rotateCrown velocity must be a finite number greater than zero.");
+  }
+  signal?.throwIfAborted();
+  await watchRunners
+    .require(device.deviceId)
+    .request({ type: "crown", delta, velocity }, signal, { timeoutMs: CROWN_REQUEST_TIMEOUT_MS });
+  return { success: true, delta, velocity };
 }
 
 /** Shared early refusal for feature entry points that the watch runner cannot execute. */

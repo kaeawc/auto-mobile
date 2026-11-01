@@ -14,6 +14,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
   Record<NonIosApplePlatform, ReadonlySet<string>>
 > = {
   watchos: new Set<string>([
+    "rotateCrown",
     "tapOn",
     "tapAt",
     "swipeOn",

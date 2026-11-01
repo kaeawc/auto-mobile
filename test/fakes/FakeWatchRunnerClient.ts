@@ -4,6 +4,7 @@ import hierarchy from "../fixtures/watchos-xcuitest/sdk-hierarchy-live.json";
 
 export class FakeWatchRunnerClient implements WatchRunnerClient {
   readonly commands: WatchCommand[] = [];
+  readonly requestOptions: Parameters<WatchRunnerClient["request"]>[2][] = [];
   closed = false;
   failure?: Error;
   readonly tree: WatchHierarchy;
@@ -13,9 +14,14 @@ export class FakeWatchRunnerClient implements WatchRunnerClient {
     }
     this.tree = tree;
   }
-  async request(command: WatchCommand, signal?: AbortSignal): Promise<unknown> {
+  async request(
+    command: WatchCommand,
+    signal?: AbortSignal,
+    options?: Parameters<WatchRunnerClient["request"]>[2],
+  ): Promise<unknown> {
     signal?.throwIfAborted();
     this.commands.push(command);
+    this.requestOptions.push(options);
     if (this.failure) {
       throw this.failure;
     }

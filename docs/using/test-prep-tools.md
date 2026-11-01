@@ -139,8 +139,14 @@ be an emulator VM snapshot: on a physical device, an iOS simulator, or with
 `useVmSnapshot: false`, the capture is refused with
 `fixture_requires_vm_snapshot` and nothing is saved.
 
-Every restore of a fixture checks those inputs first. If any changed, the
-restore is refused and the device is left as it was:
+The identity is read again once the snapshot is saved. If it changed while the
+capture ran, the capture is refused with `fixture_invalidated` and nothing is
+recorded. When `AUTOMOBILE_EMULATOR_ARGS` redirects the userdata image with
+`-data`, the fixture tracks that image.
+
+Every restore of a fixture checks those inputs first, settings-only restores
+included. If any changed, the restore is refused and the device is left as it
+was:
 
 ```json
 {

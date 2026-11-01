@@ -1,0 +1,13 @@
+{
+  "code": "snapshot_not_a_fixture",
+  "builder": "SnapshotFixtureRefusedError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Snapshot 'signed-in' was not captured as a fixture. Capture it again with fixture: true.\",\"code\":\"snapshot_not_a_fixture\",\"snapshotName\":\"signed-in\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

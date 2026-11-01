@@ -119,7 +119,8 @@ describe("deviceSnapshot fixtures (#14065)", () => {
       fixture: true,
     });
 
-    expect(probe.reads).toEqual(["Pixel_8"]);
+    // Read before the save, and again after it to confirm nothing changed meanwhile.
+    expect(probe.reads).toEqual(["Pixel_8", "Pixel_8"]);
     expect(result.manifest.fixture).toEqual(IDENTITY);
     expect((await repository.getSnapshot("logged-in"))?.manifest.fixture).toEqual(IDENTITY);
   });
@@ -154,6 +155,41 @@ describe("deviceSnapshot fixtures (#14065)", () => {
       captureDeviceSnapshot(EMULATOR, { snapshotName: "f", useVmSnapshot: true, fixture: true }),
     ).rejects.toThrow(/not on this host/);
     expect(captures).toEqual([]);
+  });
+
+  test("an identity that changes while the VM snapshot is saved refuses the capture, recording no row", async () => {
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: (device) => ({
+        capture: async (args) => {
+          captures.push(args.snapshotName);
+          probe.identity = { ...IDENTITY, userdataGeneration: "77:1730000500000" };
+          const manifest: DeviceSnapshotManifest = {
+            snapshotName: args.snapshotName,
+            timestamp: new Date(timer.now()).toISOString(),
+            deviceId: device.deviceId,
+            deviceName: device.name,
+            platform: "android",
+            snapshotType: "vm",
+            includeAppData: true,
+            includeSettings: true,
+          };
+          return {
+            snapshotName: args.snapshotName,
+            timestamp: manifest.timestamp,
+            snapshotType: "vm",
+            manifest,
+          };
+        },
+      }),
+    });
+
+    const error = await refusal(
+      captureDeviceSnapshot(EMULATOR, { snapshotName: "f", useVmSnapshot: true, fixture: true }),
+    );
+
+    expect(error.code).toBe("fixture_invalidated");
+    expect(error.reasons).toEqual(["userdata-wiped"]);
+    expect((await repository.getSnapshot("f"))?.manifest.fixture).toBeUndefined();
   });
 
   test("an unchanged fixture reloads", async () => {
@@ -195,6 +231,23 @@ describe("deviceSnapshot fixtures (#14065)", () => {
       expect(restores).toEqual([]);
     },
   );
+
+  test("a settings-only restore of a changed fixture is refused too, applying nothing", async () => {
+    await captureDeviceSnapshot(EMULATOR, {
+      snapshotName: "f",
+      useVmSnapshot: true,
+      fixture: true,
+    });
+    probe.identity = { ...IDENTITY, avdConfigHash: "other" };
+
+    const error = await refusal(
+      restoreDeviceSnapshot(EMULATOR, { snapshotName: "f", useVmSnapshot: false }),
+    );
+
+    expect(error.code).toBe("fixture_invalidated");
+    expect(error.reasons).toEqual(["avd-config-changed"]);
+    expect(restores).toEqual([]);
+  });
 
   test("every changed input is reported", async () => {
     await captureDeviceSnapshot(EMULATOR, {

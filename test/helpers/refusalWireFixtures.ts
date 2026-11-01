@@ -143,6 +143,7 @@ import {
 } from "../../src/devices/exactDeviceProvisioning";
 import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
+import { SnapshotFixtureRefusedError } from "../../src/models/SnapshotFixtureRefusedError";
 import { DirectSessionNotActiveError } from "../../src/models/DirectSessionNotActiveError";
 import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
 import { deviceLossOutcomeFromError } from "../../src/utils/deviceLossOutcome";
@@ -507,6 +508,43 @@ const BUILDERS: readonly FixtureEntry[] = [
     "app_not_running",
     "AppNotRunningError via shapeToolCallError",
     () => shaped(new AppNotRunningError("com.example.app", DEVICE)),
+  ],
+  [
+    "fixture_invalidated",
+    "SnapshotFixtureRefusedError via shapeToolCallError",
+    () =>
+      shaped(
+        new SnapshotFixtureRefusedError(
+          "fixture_invalidated",
+          "signed-in",
+          "Fixture 'signed-in' no longer matches AVD 'Pixel_8' (userdata-wiped). Capture it again with fixture: true.",
+          ["userdata-wiped"],
+        ),
+      ),
+  ],
+  [
+    "fixture_requires_vm_snapshot",
+    "SnapshotFixtureRefusedError via shapeToolCallError",
+    () =>
+      shaped(
+        new SnapshotFixtureRefusedError(
+          "fixture_requires_vm_snapshot",
+          "signed-in",
+          "Snapshot 'signed-in' cannot be a fixture: fixtures are Android emulator VM snapshots only.",
+        ),
+      ),
+  ],
+  [
+    "snapshot_not_a_fixture",
+    "SnapshotFixtureRefusedError via shapeToolCallError",
+    () =>
+      shaped(
+        new SnapshotFixtureRefusedError(
+          "snapshot_not_a_fixture",
+          "signed-in",
+          "Snapshot 'signed-in' was not captured as a fixture. Capture it again with fixture: true.",
+        ),
+      ),
   ],
   [
     "direct_session_not_active",

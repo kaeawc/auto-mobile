@@ -53,8 +53,8 @@ import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import { logger } from "../utils/logger";
 import type { FixtureIdentityProbe } from "../features/snapshot/fixtureIdentity";
 import { createHostAvdFixtureIdentityProbe } from "../features/snapshot/hostAvdFixtureIdentityProbe";
-import type { FixtureIdentity } from "../models/FixtureIdentity";
 import { assertFixtureReloadable, readFixtureIdentityForCapture } from "./snapshotFixtureGuards";
+import type { CaptureFixture } from "./snapshotFixtureGuards";
 import { assertSnapshotMatchesDevice } from "./snapshotDeviceMatch";
 import {
   deviceSnapshotIncarnationInvalidator,
@@ -2134,7 +2134,7 @@ async function prepareCaptureName(
   snapshotName: string,
   useVmSnapshot: boolean,
   args: DeviceSnapshotCaptureArgs,
-): Promise<FixtureIdentity | undefined> {
+): Promise<CaptureFixture | undefined> {
   // Reject a traversal/absolute name before any filesystem operation or capture
   // command can act on it (issue #5705).
   assertSafeSnapshotName(snapshotName);
@@ -2230,7 +2230,7 @@ export async function captureDeviceSnapshot(
                 appBundleIds: args.appBundleIds,
               });
               vmSnapshotWasCaptured = captured.manifest.snapshotType === "vm";
-              captured.manifest.fixture ??= fixture;
+              captured.manifest.fixture ??= await fixture?.confirmUnchanged();
 
               const sizeBytes = await resolveSnapshotSizeBytes(
                 snapshotName,

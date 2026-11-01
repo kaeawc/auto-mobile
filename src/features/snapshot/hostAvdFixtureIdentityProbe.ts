@@ -1,11 +1,13 @@
 import { readFile, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
+import { ENV, readEnvRaw } from "../../config/env";
 import { ActionableError } from "../../models/ActionableError";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { getAndroidHomeWithSystemImages } from "../../utils/android-cmdline-tools/detection";
+import { parseExtraEmulatorArguments } from "../../utils/android-cmdline-tools/EmulatorLaunchSupport";
 import { logger } from "../../utils/logger";
-import { AvdFixtureIdentityProbe } from "./avdFixtureIdentityProbe";
+import { AvdFixtureIdentityProbe, USERDATA_IMAGE } from "./avdFixtureIdentityProbe";
 
 const EMULATOR_VERSION_TIMEOUT_MS = 10_000;
 
@@ -16,13 +18,15 @@ export function createHostAvdFixtureIdentityProbe(): AvdFixtureIdentityProbe {
   return new AvdFixtureIdentityProbe({
     config: avds,
     avdDirectory: avds,
-    imageMetadata: async (imagePath) => {
-      const sdk = getAndroidHomeWithSystemImages();
-      if (!sdk) {
-        throw new ActionableError("A snapshot fixture needs installed system-image metadata");
-      }
-      return readFile(resolve(sdk.androidHome, imagePath, "source.properties"), "utf8");
-    },
+    imageMetadata: async (imagePath) =>
+      readFile(
+        systemImageMetadataPath(
+          imagePath,
+          isAbsolute(imagePath) ? undefined : getAndroidHomeWithSystemImages()?.androidHome,
+        ),
+        "utf8",
+      ),
+    userdataImage: (avdDirectory) => userdataImagePath(avdDirectory, readEnvRaw(ENV.EMULATOR_ARGS)),
     emulatorVersion: async () => {
       const result = await emulator.executeCommand(["-version"], EMULATOR_VERSION_TIMEOUT_MS);
       return result.error ? "" : result.stdout;
@@ -47,4 +51,40 @@ export async function readFileIdentity(
     logger.debug(`[DeviceSnapshot] no userdata image at ${path}`);
     return null;
   }
+}
+
+/**
+ * The installed system image's `source.properties`. An absolute `image.sysdir.1` is read where it
+ * is; a relative one needs the SDK root it is relative to.
+ */
+export function systemImageMetadataPath(imagePath: string, sdkRoot: string | undefined): string {
+  if (isAbsolute(imagePath)) {
+    return join(imagePath, "source.properties");
+  }
+  if (!sdkRoot) {
+    throw new ActionableError("A snapshot fixture needs installed system-image metadata");
+  }
+  return resolve(sdkRoot, imagePath, "source.properties");
+}
+
+/**
+ * The userdata image the emulator runs, and `-wipe-data` re-creates: the AVD's own, unless
+ * `AUTOMOBILE_EMULATOR_ARGS` redirects it with `-data`, which every launch then follows.
+ */
+export function userdataImagePath(
+  avdDirectory: string,
+  rawEmulatorArgs: string | undefined,
+): string {
+  const args = rawEmulatorArgs ? parseExtraEmulatorArguments(rawEmulatorArgs) : [];
+  const flag = args.indexOf("-data");
+  if (flag === -1) {
+    return join(avdDirectory, USERDATA_IMAGE);
+  }
+  const override = args[flag + 1];
+  if (!override || override.startsWith("-")) {
+    throw new ActionableError(
+      "AUTOMOBILE_EMULATOR_ARGS passes -data without a path, so a fixture cannot tell which userdata image the emulator runs",
+    );
+  }
+  return override;
 }

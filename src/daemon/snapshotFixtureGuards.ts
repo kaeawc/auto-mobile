@@ -15,6 +15,16 @@ function isEmulatorVmCapture(device: BootedDevice, useVmSnapshot: boolean): bool
   return device.platform === "android" && device.deviceId.startsWith("emulator-") && useVmSnapshot;
 }
 
+/** A fixture capture's identity, read before the save and confirmed after it. */
+export interface CaptureFixture {
+  readonly identity: FixtureIdentity;
+  /**
+   * The identity to record, after re-reading it once the VM snapshot is saved. A change while the
+   * capture ran refuses the capture with `fixture_invalidated`, so no row records a stale identity.
+   */
+  confirmUnchanged(): Promise<FixtureIdentity>;
+}
+
 /**
  * The identity a fixture capture records (#14065), read before the capture so an AVD whose identity
  * cannot be read is refused without saving anything. Only an Android emulator VM snapshot can be a
@@ -28,7 +38,7 @@ export async function readFixtureIdentityForCapture(
     fixture: DeviceSnapshotCaptureArgs["fixture"];
   },
   probe: FixtureIdentityProbe,
-): Promise<FixtureIdentity | undefined> {
+): Promise<CaptureFixture | undefined> {
   const { device, snapshotName, useVmSnapshot, fixture } = capture;
   if (!fixture) {
     return undefined;
@@ -41,13 +51,37 @@ export async function readFixtureIdentityForCapture(
         "only. Capture on an emulator without useVmSnapshot: false.",
     );
   }
-  return probe.currentIdentity(device.name);
+  const identity = await probe.currentIdentity(device.name);
+  return {
+    identity,
+    confirmUnchanged: async () => {
+      await assertIdentityCurrent(identity, snapshotName, probe);
+      return identity;
+    },
+  };
+}
+
+async function assertIdentityCurrent(
+  recorded: FixtureIdentity,
+  snapshotName: string,
+  probe: FixtureIdentityProbe,
+): Promise<void> {
+  const validity = await checkFixtureValidity(recorded, probe);
+  if (!validity.valid) {
+    throw new SnapshotFixtureRefusedError(
+      "fixture_invalidated",
+      snapshotName,
+      `Fixture '${snapshotName}' no longer matches AVD '${recorded.avdName}' ` +
+        `(${validity.reasons.join(", ")}). Capture it again with fixture: true.`,
+      validity.reasons,
+    );
+  }
 }
 
 /**
  * Refuse a reload that would load a fixture built for a different AVD state (#14065). A snapshot
- * with a recorded identity is checked on every reload; `fixture: true` also requires that it has
- * one, and that the restore loads the VM state.
+ * with a recorded identity is checked on every restore, settings-only ones included; `fixture: true`
+ * also requires that it has one, and that the restore loads the VM state.
  */
 export async function assertFixtureReloadable(
   record: DeviceSnapshotRecord,
@@ -63,24 +97,15 @@ export async function assertFixtureReloadable(
       `Snapshot '${record.snapshotName}' was not captured as a fixture. Capture it again with fixture: true.`,
     );
   }
-  if (!recorded || !useVmSnapshot) {
-    if (args.fixture) {
-      throw new SnapshotFixtureRefusedError(
-        "fixture_requires_vm_snapshot",
-        record.snapshotName,
-        `Fixture '${record.snapshotName}' reloads its VM snapshot; restore it without useVmSnapshot: false.`,
-      );
-    }
+  if (!recorded) {
     return;
   }
-  const validity = await checkFixtureValidity(recorded, probe);
-  if (!validity.valid) {
+  if (args.fixture && !useVmSnapshot) {
     throw new SnapshotFixtureRefusedError(
-      "fixture_invalidated",
+      "fixture_requires_vm_snapshot",
       record.snapshotName,
-      `Fixture '${record.snapshotName}' no longer matches AVD '${recorded.avdName}' ` +
-        `(${validity.reasons.join(", ")}). Capture it again with fixture: true.`,
-      validity.reasons,
+      `Fixture '${record.snapshotName}' reloads its VM snapshot; restore it without useVmSnapshot: false.`,
     );
   }
+  await assertIdentityCurrent(recorded, record.snapshotName, probe);
 }

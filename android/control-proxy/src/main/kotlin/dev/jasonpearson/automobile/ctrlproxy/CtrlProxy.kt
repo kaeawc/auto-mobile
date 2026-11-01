@@ -281,43 +281,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     const val ACTION_OPERATION_RESULT = "dev.jasonpearson.automobile.OPERATION_RESULT"
 
     /**
-     * Pure bitmask computation for [applyAccessibilityFlags], extracted so the equality check that
-     * guards the disruptive `serviceInfo =` reassignment (see call site) is unit-testable without a
-     * live [AccessibilityService]/Robolectric harness.
-     */
-    internal fun computeAccessibilityServiceFlags(
-      currentFlags: Int,
-      includeNotImportantViews: Boolean,
-      reportViewIds: Boolean,
-      retrieveInteractiveWindows: Boolean,
-    ): Int {
-      var flags = currentFlags
-
-      flags =
-        if (includeNotImportantViews) {
-          flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-        } else {
-          flags and AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()
-        }
-
-      flags =
-        if (reportViewIds) {
-          flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
-        } else {
-          flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS.inv()
-        }
-
-      flags =
-        if (retrieveInteractiveWindows) {
-          flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-        } else {
-          flags and AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS.inv()
-        }
-
-      return flags
-    }
-
-    /**
      * Preserves the legacy `systemInsets` contract for gesture callers while typed categories
      * remain available under `insets`. Pre-CtrlProxy observation merged system-gesture edges into
      * this field, and swipe/pinch still use it to avoid Android's back-gesture region.
@@ -855,7 +818,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
 
-          override fun occlusionEnabled() = this@CtrlProxy.occlusionEnabled
+          override fun occlusionEnabled() = accessibilityFlags.occlusionEnabled
 
           override fun wakefulness() = deviceInfoController.getWakefulness()
 
@@ -1289,9 +1252,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun currentFrameContext(): String = frameContextGate.current()
 
-  // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
-  // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
-  @Volatile private var occlusionEnabled: Boolean = true
+  private val accessibilityFlags =
+    AccessibilityFlagsController(
+      object : AccessibilityFlagsController.Host {
+        override fun updateServiceFlags(compute: (currentFlags: Int) -> Int?): Boolean {
+          val info = serviceInfo ?: return false
+          val flags = compute(info.flags) ?: return true
+          info.flags = flags
+          serviceInfo = info
+          return true
+        }
+      },
+    )
 
   // Job for collecting navigation event updates
   private var navigationEventJob: Job? = null
@@ -2251,13 +2223,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     reportViewIds: Boolean,
     retrieveInteractiveWindows: Boolean,
     occlusionEnabled: Boolean,
-  ) =
-    applyAccessibilityFlags(
+  ) {
+    accessibilityFlags.apply(
       includeNotImportantViews = includeNotImportantViews,
       reportViewIds = reportViewIds,
       retrieveInteractiveWindows = retrieveInteractiveWindows,
       occlusionEnabled = occlusionEnabled,
     )
+  }
 
   override suspend fun setNetworkMockRules(requestId: String?, rulesJson: String) =
     sdkControlController.broadcastNetworkMockRules(requestId, rulesJson)
@@ -2482,55 +2455,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override suspend fun requestLaunchIntent(requestId: String?, packageName: String) =
     packageController.performLaunchIntent(requestId, packageName)
-
-  private fun applyAccessibilityFlags(
-    includeNotImportantViews: Boolean,
-    reportViewIds: Boolean,
-    retrieveInteractiveWindows: Boolean,
-    occlusionEnabled: Boolean,
-  ) {
-    // occlusionEnabled isn't an AccessibilityServiceInfo flag, so store it unconditionally —
-    // it must take effect even before serviceInfo is available (the early-return below).
-    this.occlusionEnabled = occlusionEnabled
-
-    val info =
-      serviceInfo
-        ?: run {
-          Log.w(TAG, "Cannot apply accessibility flags — serviceInfo is null")
-          return
-        }
-
-    val flags =
-      computeAccessibilityServiceFlags(
-        currentFlags = info.flags,
-        includeNotImportantViews = includeNotImportantViews,
-        reportViewIds = reportViewIds,
-        retrieveInteractiveWindows = retrieveInteractiveWindows,
-      )
-
-    // Skip the reassignment when the computed bitmask matches what's already applied.
-    // serviceInfo = info reconfigures a LIVE AccessibilityService on the system side, not a
-    // local no-op - the client now re-invokes this on every ensureConnected() (not just fresh
-    // connects), so without this guard every single tool call reconfigures the service even
-    // when nothing changed, which was observed to disrupt in-flight hierarchy capture
-    // (elements=0 on every observe for an entire run).
-    if (flags == info.flags) {
-      Log.d(TAG, "Accessibility flags unchanged (flags=$flags) - skipping serviceInfo reassignment")
-      return
-    }
-
-    info.flags = flags
-    serviceInfo = info
-
-    Log.i(
-      TAG,
-      "Applied accessibility flags: " +
-        "includeNotImportantViews=$includeNotImportantViews, " +
-        "reportViewIds=$reportViewIds, " +
-        "retrieveInteractiveWindows=$retrieveInteractiveWindows, " +
-        "occlusionEnabled=$occlusionEnabled",
-    )
-  }
 
   /** The application in front, from the accessibility windows; null when none qualifies. */
   private fun currentForegroundApp(): String? =

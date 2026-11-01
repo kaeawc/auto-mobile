@@ -5,6 +5,7 @@ import {
   parseUnifiedDiff,
   renderBoundaryResult,
   scanBoundary,
+  treeTooSmallMessage,
 } from "../../scripts/lib/boundaryScanner";
 
 function row(id: string): BoundaryRow {
@@ -294,5 +295,81 @@ describe("renderBoundaryResult", () => {
       stderr: "",
     });
     expect(renderBoundaryResult(row("xcodebuild"), []).stdout).toContain("xcodebuild-boundary:");
+  });
+});
+
+describe("archive-extraction row (#13219)", () => {
+  const treeFile = (path: string, source: string) => ({
+    path,
+    addedLines: new Set<number>(),
+    source,
+  });
+  const extract = 'spawn("tar", ["-xzf", archive]);\nexec("tar -xzf a.tar.gz -C d");';
+
+  test("flags a file that runs tar extraction once and skips the owner", () => {
+    const owner = treeFile("src/utils/ArchiveExtractor.ts", extract);
+    const other = treeFile("src/y.ts", extract);
+    const creates = treeFile("src/z.ts", 'spawn("tar", ["-czf", archive]);');
+
+    expect(scan("archive-extraction", [owner, other, creates]).map(({ file }) => file)).toEqual([
+      "src/y.ts",
+    ]);
+  });
+
+  test("keeps the checker's per-file failure lines and success message byte for byte", () => {
+    const violation = { file: "src/y.ts", line: 1, column: 1, text: "" };
+
+    expect(renderBoundaryResult(row("archive-extraction"), [violation, violation]).stderr).toBe(
+      "error: tar extraction must use src/utils/ArchiveExtractor.ts:\n" +
+        "src/y.ts directly runs tar extraction; route it through src/utils/ArchiveExtractor.ts instead.\n",
+    );
+    expect(renderBoundaryResult(row("archive-extraction"), []).stdout).toBe(
+      "archive-extraction-boundary: no direct production tar extraction.\n",
+    );
+  });
+
+  test("refuses a tree scan that found too few files to mean anything", () => {
+    expect(treeTooSmallMessage(row("archive-extraction"), 12)).toBe(
+      "error: archive-extraction-boundary scanned only 12 files under src; expected the full source tree.",
+    );
+    expect(treeTooSmallMessage(row("archive-extraction"), 100)).toBeUndefined();
+    expect(treeTooSmallMessage(row("ffmpeg"), 0)).toBeUndefined();
+  });
+});
+
+describe("host-shell row (#13219)", () => {
+  const changedFile = (path: string, source: string) => ({
+    path,
+    addedLines: new Set<number>(),
+    source,
+  });
+
+  test("reports every shell call in a changed file, not only added lines", () => {
+    const shell = changedFile(
+      "src/y.ts",
+      'import { exec, spawn } from "node:child_process";\nexec("curl $HOST");\nspawn("ls", ["-l"]);\nspawn("sh", ["-c", cmd]);',
+    );
+
+    expect(
+      scan("host-shell", [shell]).map(({ file, line, column, text }) => [file, line, column, text]),
+    ).toEqual([
+      ["src/y.ts", 2, 1, 'exec("curl $HOST")'],
+      ["src/y.ts", 4, 1, 'spawn("sh", ["-c", cmd])'],
+    ]);
+  });
+
+  test("keeps the checker's failure lines and success message byte for byte", () => {
+    const violation = { file: "src/y.ts", line: 2, column: 1, text: 'exec("curl $HOST")' };
+    const failed = renderBoundaryResult(row("host-shell"), [violation]);
+
+    expect(failed.exitCode).toBe(1);
+    expect(failed.stdout).toBe("");
+    expect(failed.stderr).toBe(
+      "New production shell execution must be reviewed and listed in check-host-shell-boundary.ts:\n" +
+        'src/y.ts:2:1: exec("curl $HOST")\n',
+    );
+    expect(renderBoundaryResult(row("host-shell"), []).stdout).toBe(
+      "host-shell-boundary: no new direct production shell execution.\n",
+    );
   });
 });

@@ -9308,7 +9308,7 @@
           "maximum": 890000
         },
         "requires": {
-          "description": "Required display capabilities from device inventory",
+          "description": "Required display capabilities from device inventory, and Google Play",
           "type": "object",
           "properties": {
             "panels": {
@@ -9329,6 +9329,10 @@
                 "tent",
                 "unknown"
               ]
+            },
+            "playStore": {
+              "description": "Android emulators only: true needs Google Play (Play Billing, Play-dependent SDKs). Matches only an emulator built from a Play Store system image, and a new emulator is created from one (google_apis_playstore). Play Store images refuse adb root, so root-dependent features report that they need a non-Play image",
+              "type": "boolean"
             }
           },
           "additionalProperties": false

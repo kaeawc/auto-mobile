@@ -3,6 +3,12 @@ export type FixtureIdentity = {
   systemImageId: string;
   avdConfigHash: string;
   emulatorVersion: string;
+  /**
+   * Which userdata image the AVD has: `-wipe-data` re-creates it, which discards the persisted
+   * writable-system overlay and the snapshots alike (owner decision 2026-10-31). `"none"` before
+   * the AVD's first boot.
+   */
+  userdataGeneration: string;
 };
 
 export interface FixtureIdentityProbe {
@@ -13,7 +19,8 @@ export type FixtureInvalidationReason =
   | "avd-changed"
   | "system-image-changed"
   | "avd-config-changed"
-  | "emulator-version-changed";
+  | "emulator-version-changed"
+  | "userdata-wiped";
 
 export async function checkFixtureValidity(
   recorded: FixtureIdentity,
@@ -33,6 +40,9 @@ export async function checkFixtureValidity(
   }
   if (current.emulatorVersion !== recorded.emulatorVersion) {
     reasons.push("emulator-version-changed");
+  }
+  if (current.userdataGeneration !== recorded.userdataGeneration) {
+    reasons.push("userdata-wiped");
   }
 
   return reasons.length === 0 ? { valid: true } : { valid: false, reasons };

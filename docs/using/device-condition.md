@@ -62,6 +62,8 @@ Every restorable condition is undone, newest first, when any of these happens:
 - its lease expires: `expiresInSeconds` (1 to 86,400) restores everything after that many seconds unless a later `deviceCondition` call renews it. Leases need a session;
 - you call `{ "deviceCondition": { "reset": true } }`.
 
+Conditions belong to the device, not to the caller that set them. When two sessions, or a session and a call without one, set the same condition on one device, they act on one shared device state. Only the caller that applied it first can undo it: its release or reset clears the condition for both, while the second caller's request reports `unchanged` and its release or reset leaves the condition in place. Give each condition-setting run its own device.
+
 After each reset, AutoMobile reads the device back to check the condition is gone. One-shot faults (`killApp`, `trimMemory`, `clearPackageData`) have nothing to restore, and `"unset"` on them does nothing.
 
 ## Result

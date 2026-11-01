@@ -105,10 +105,16 @@ export const startDeviceParametersSchema = z.object({
         .enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent", "unknown"])
         .optional()
         .describe("Supported device posture"),
+      playStore: z
+        .boolean()
+        .optional()
+        .describe(
+          "Android emulators only: true needs Google Play (Play Billing, Play-dependent SDKs). Matches only an emulator built from a Play Store system image, and a new emulator is created from one (google_apis_playstore). Play Store images refuse adb root, so root-dependent features report that they need a non-Play image",
+        ),
     })
     .strict()
     .optional()
-    .describe("Required display capabilities from device inventory"),
+    .describe("Required display capabilities from device inventory, and Google Play"),
   screenSize: z
     .object({
       width: z.number().positive().finite().describe("Screen width in pixels"),

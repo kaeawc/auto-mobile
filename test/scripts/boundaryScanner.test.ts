@@ -336,3 +336,40 @@ describe("archive-extraction row (#13219)", () => {
     expect(treeTooSmallMessage(row("ffmpeg"), 0)).toBeUndefined();
   });
 });
+
+describe("host-shell row (#13219)", () => {
+  const changedFile = (path: string, source: string) => ({
+    path,
+    addedLines: new Set<number>(),
+    source,
+  });
+
+  test("reports every shell call in a changed file, not only added lines", () => {
+    const shell = changedFile(
+      "src/y.ts",
+      'import { exec, spawn } from "node:child_process";\nexec("curl $HOST");\nspawn("ls", ["-l"]);\nspawn("sh", ["-c", cmd]);',
+    );
+
+    expect(
+      scan("host-shell", [shell]).map(({ file, line, column, text }) => [file, line, column, text]),
+    ).toEqual([
+      ["src/y.ts", 2, 1, 'exec("curl $HOST")'],
+      ["src/y.ts", 4, 1, 'spawn("sh", ["-c", cmd])'],
+    ]);
+  });
+
+  test("keeps the checker's failure lines and success message byte for byte", () => {
+    const violation = { file: "src/y.ts", line: 2, column: 1, text: 'exec("curl $HOST")' };
+    const failed = renderBoundaryResult(row("host-shell"), [violation]);
+
+    expect(failed.exitCode).toBe(1);
+    expect(failed.stdout).toBe("");
+    expect(failed.stderr).toBe(
+      "New production shell execution must be reviewed and listed in check-host-shell-boundary.ts:\n" +
+        'src/y.ts:2:1: exec("curl $HOST")\n',
+    );
+    expect(renderBoundaryResult(row("host-shell"), []).stdout).toBe(
+      "host-shell-boundary: no new direct production shell execution.\n",
+    );
+  });
+});

@@ -3,6 +3,7 @@ import { type BoundaryHit, type BoundaryRow, type BoundarySpan, spanOf } from ".
 import * as appBundle from "./appBundleMetadataBoundary";
 import * as archiveExtraction from "./archiveExtractionBoundary";
 import { ALLOWED_IMPORTERS, findChildProcessImports } from "./childProcessImportBoundary";
+import { findViolationsInSource as findHostShellCalls } from "./hostShellBoundary";
 import * as iosCtrlProxy from "./iosCtrlProxyProcessBoundary";
 import { findDirectEmulatorCalls } from "./androidEmulatorBoundary";
 import { findDirectFfmpegCalls } from "./ffmpegBoundary";
@@ -283,5 +284,18 @@ export const BOUNDARY_ROWS: readonly BoundaryRow[] = [
       archiveExtraction.directlyExtractsTar(source)
         ? [{ line: 1, column: 1, endLine: 1, text: "" }]
         : [],
+  },
+  {
+    id: "host-shell",
+    // No production file may run a host shell, so the owner is the checker itself (outside src/).
+    owner: "scripts/check-host-shell-boundary.ts",
+    skipPrefixes: [],
+    scope: "whole-file",
+    report: "bare-locations",
+    failureHeader:
+      "New production shell execution must be reviewed and listed in check-host-shell-boundary.ts:",
+    successMessage: "host-shell-boundary: no new direct production shell execution.",
+    detect: (source, file) =>
+      findHostShellCalls(file, source).map((hit) => ({ ...hit, endLine: hit.line })),
   },
 ];

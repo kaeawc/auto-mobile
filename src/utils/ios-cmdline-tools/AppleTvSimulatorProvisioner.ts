@@ -30,6 +30,8 @@ export interface AppleTvProvisionOptions {
   allowCreate: boolean;
   /** Runs immediately before `simctl create`, after every check passed. */
   onBeforeCreate?: () => void;
+  /** Lifecycle-fenced cleanup when the listing cannot confirm the newly created TV. */
+  discardUnconfirmed?: (tv: Pick<ListedAppleTv, "deviceId">) => Promise<AppleTvDiscardResult>;
   signal?: AbortSignal;
 }
 
@@ -77,14 +79,14 @@ export class AppleTvSimulatorProvisioner {
     }
     options.signal?.throwIfAborted();
     options.onBeforeCreate?.();
-    return { tv: await this.create(request, options.signal), created: true };
+    return { tv: await this.create(request, options), created: true };
   }
 
   /**
    * Deletes a TV this provision created, after a later step (boot, session bind) failed, so
    * a failed call leaves no new simulator behind. `simctl delete` also stops a booted TV.
    */
-  async discardCreated(tv: ListedAppleTv): Promise<AppleTvDiscardResult> {
+  async discardCreated(tv: Pick<ListedAppleTv, "deviceId">): Promise<AppleTvDiscardResult> {
     try {
       // Cleanup must outlive cancellation of the provision request.
       await this.creator.deleteSimulator(tv.deviceId, { signal: AbortSignal.timeout(30_000) });
@@ -147,7 +149,7 @@ export class AppleTvSimulatorProvisioner {
 
   private async create(
     request: AppleTvProvisionRequest,
-    signal: AbortSignal | undefined,
+    { signal, discardUnconfirmed }: AppleTvProvisionOptions,
   ): Promise<ListedAppleTv> {
     const { name, spec } = request;
     let udid: string;
@@ -156,14 +158,27 @@ export class AppleTvSimulatorProvisioner {
     } catch (error) {
       throw toActionableError(error, `Failed to create Apple TV simulator '${name}'`);
     }
-    const tv = (await this.listed(signal)).find((candidate) => candidate.deviceId === udid);
-    if (!tv) {
+    try {
+      const tv = (await this.listed(signal)).find((candidate) => candidate.deviceId === udid);
+      if (!tv) {
+        throw new ActionableError(
+          `simctl created Apple TV simulator ${udid} for '${name}', but the TV listing does not show it.`,
+        );
+      }
+      return tv;
+    } catch (error) {
+      const discarded = await discardUnconfirmed?.({ deviceId: udid });
       throw new ActionableError(
-        `simctl created Apple TV simulator ${udid} for '${name}', but the TV listing does ` +
-          "not show it. Retry provisionDevice; it adopts the TV once it is listed.",
+        `Could not confirm created Apple TV simulator ${udid}; ` +
+          (discarded?.deleted
+            ? "the TV was deleted again. Retry provisionDevice"
+            : "the TV was left in place; " +
+              (discarded ? `deleting it again failed (${discarded.error}); ` : "") +
+              "delete it with deleteDevice") +
+          `: ${errorMessage(error)}`,
+        { cause: error },
       );
     }
-    return tv;
   }
 
   private async listed(signal: AbortSignal | undefined): Promise<ListedAppleTv[]> {

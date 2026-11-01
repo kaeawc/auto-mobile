@@ -399,7 +399,14 @@ export class DevicePoolTargetDiscovery {
       ) {
         throw new ActionableError(unavailableMessage);
       }
-      return { capturedEntry, bootedDevices: discovery.devices };
+      return {
+        capturedEntry,
+        bootedDevices: discovery.devices,
+        iosLiveness:
+          targetPlatform === "tvos"
+            ? await this.state.idleDeviceReaper.getIosLivenessSnapshot({ discovery })
+            : undefined,
+      };
     }
     if (capturedEntry) {
       return {

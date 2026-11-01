@@ -50,19 +50,35 @@ export async function deleteAppleTvDevice(
   const deps = getDeviceToolsDependencies();
   const deadlineMs = deps.timer.now() + (args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS);
   const operation = tvDeleteOperation(deps.timer, deadlineMs, args, callerSignal);
+  let assertingCaller = false;
   try {
-    return await runAppleTvDelete(args, steps, operation.signal, deadlineMs);
+    return await runAppleTvDelete(
+      args,
+      {
+        assertCaller: async (device) => {
+          assertingCaller = true;
+          await steps.assertCaller(device);
+          assertingCaller = false;
+        },
+        stop: (device, signal) => steps.stop(device, signal),
+      },
+      operation.signal,
+      deadlineMs,
+    );
   } catch (error) {
+    logger.warn(
+      `[DeviceTools] deleteDevice tvos:${args.target.stableId} failed: ${errorMessage(error)}`,
+      error,
+    );
+    if (assertingCaller && error instanceof ActionableError) {
+      throw error;
+    }
     if (operation.timedOut()) {
       return createTeardownFailureResponse(args, "destroy", "teardown_deadline_exceeded", {
         message: `deleteDevice did not finish deleting Apple TV simulator ${args.target.stableId} within ${args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS}ms.`,
       });
     }
     operation.signal.throwIfAborted();
-    logger.warn(
-      `[DeviceTools] deleteDevice tvos:${args.target.stableId} failed: ${errorMessage(error)}`,
-      error,
-    );
     if (error instanceof ActionableError && Reflect.get(error, "code") !== undefined) {
       throw error;
     }
@@ -85,6 +101,12 @@ async function runAppleTvDelete(
   const udid = args.target.stableId;
   const tv = await provisioner.find(udid, signal);
   if (!tv) {
+    const pooled = initializedDevicePool()?.getDevice(udid);
+    if (pooled) {
+      const device: BootedDevice = { name: pooled.name, platform: "tvos", deviceId: udid };
+      await steps.assertCaller(device);
+      await steps.stop(device, signal);
+    }
     return createTeardownResponse(
       args,
       "already_absent",
@@ -163,7 +185,13 @@ async function destroyUnderLease(
     { operation: "teardown", deadlineMs, signal },
   );
   try {
-    if ((await provisioner.find(device.deviceId, signal))?.isRunning) {
+    const current = await provisioner.find(device.deviceId, signal);
+    if (current && current.name !== device.name) {
+      throw new ActionableError(
+        `Apple TV simulator ${device.deviceId} was renamed before it could be deleted; retry deleteDevice.`,
+      );
+    }
+    if (current?.isRunning) {
       throw new ActionableError(
         `Apple TV simulator ${device.deviceId} was started again before it could be deleted; retry deleteDevice.`,
       );

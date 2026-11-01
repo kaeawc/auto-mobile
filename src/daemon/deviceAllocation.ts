@@ -646,6 +646,44 @@ export class DeviceAllocation {
     );
   }
 
+  /** Capture idle entries before taking one fresh sweep per platform outside the assignment lock. */
+  private async takeAllocationSnapshots(
+    candidates: PooledDevice[],
+    signal?: AbortSignal,
+  ): Promise<AllocationDiscoverySnapshots> {
+    // Only entries idle before discovery may be judged by this pass. A newly
+    // released, added or replaced entry needs its own fresh snapshot.
+    const capturedEntries = new Set(candidates.filter((device) => isIdle(device)));
+    const [iosLiveness, androidPresence, tvosLiveness] = await raceWithDeadline(
+      () =>
+        Promise.all([
+          candidates.some((device) => isIdle(device) && device.platform === "ios")
+            ? this.port.idleDeviceReaper.getIosLivenessSnapshot()
+            : undefined,
+          candidates.some(
+            (device) => isIdle(device) && this.port.shouldValidatePooledDevicePresence(device),
+          )
+            ? this.port.takeFreshPresenceDiscovery("android")
+            : undefined,
+          candidates.some((device) => isIdle(device) && device.platform === "tvos")
+            ? this.port.idleDeviceReaper.getIosLivenessSnapshot({ platform: "tvos" })
+            : undefined,
+        ]),
+      { timer: this.port.timer, signal, label: "Device allocation discovery" },
+    );
+    if (iosLiveness && tvosLiveness) {
+      iosLiveness.tvosDiscoverySucceeded = tvosLiveness.tvosDiscoverySucceeded;
+      for (const id of tvosLiveness.bootedDeviceIds) {
+        iosLiveness.bootedDeviceIds.add(id);
+      }
+    }
+    return {
+      capturedEntries,
+      iosLiveness: iosLiveness ?? tvosLiveness,
+      androidPresence,
+    };
+  }
+
   /**
    * Shared single-attempt assignment body for platform- and criteria-based
    * allocation. Parameterized only by how candidate devices are selected and
@@ -685,24 +723,7 @@ export class DeviceAllocation {
     while (true) {
       throwIfRequestAborted();
       const candidatesBeforeDiscovery = selectCandidates();
-      // Only entries idle before discovery may be judged by this pass. A newly
-      // released, added or replaced entry needs its own fresh snapshot.
-      const capturedEntries = new Set(candidatesBeforeDiscovery.filter((device) => isIdle(device)));
-      const [iosLiveness, androidPresence] = await raceWithDeadline(
-        () =>
-          Promise.all([
-            candidatesBeforeDiscovery.some((device) => isIdle(device) && device.platform === "ios")
-              ? this.port.idleDeviceReaper.getIosLivenessSnapshot()
-              : undefined,
-            candidatesBeforeDiscovery.some(
-              (device) => isIdle(device) && this.port.shouldValidatePooledDevicePresence(device),
-            )
-              ? this.port.takeFreshPresenceDiscovery("android")
-              : undefined,
-          ]),
-        { timer: this.port.timer, signal, label: "Device allocation discovery" },
-      );
-      const snapshots = { capturedEntries, iosLiveness, androidPresence };
+      const snapshots = await this.takeAllocationSnapshots(candidatesBeforeDiscovery, signal);
 
       if (recoveryTarget && this.port.foreignOwnershipFor(recoveryTarget.platform)) {
         // Discovery may have added the target or its owner may have changed since preflight.

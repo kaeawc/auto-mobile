@@ -1,3 +1,4 @@
+import { deleteAppleTvDevice } from "../../src/server/deviceToolsAppleTvDelete";
 import { AppleTvSimulatorBoot } from "../../src/utils/ios-cmdline-tools/AppleTvSimulatorBoot";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
@@ -85,7 +86,13 @@ describe("deleteDevice on an Apple TV simulator", () => {
     simctl.onStateChange = publishBootedAppleTves;
     // killDevice's platform kill for a TV is simctl shutdown, which the listing then reflects.
     deviceUtils.killDevice = async (device) => {
-      await simctl.killSimulator(device);
+      if (
+        Object.values(simctl.listing.devices)
+          .flat()
+          .some((tv) => tv.udid === device.deviceId)
+      ) {
+        await simctl.killSimulator(device);
+      }
     };
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -283,6 +290,78 @@ describe("deleteDevice on an Apple TV simulator", () => {
       state: "already_absent",
       command: { stop: "not_required", destroy: "not_required" },
     });
+    expect(simctl.commands).toEqual([]);
+  });
+
+  test("an absent held TV propagates the caller refusal unchanged", async () => {
+    const tv = tvDevice({ name: NAME, state: "Booted" });
+    const { simctl } = await arrange([tv]);
+    simctl.listing.devices = {};
+    const refusal = new ActionableError("caller does not own this TV");
+    let stopped = false;
+    const error = await failure(
+      deleteAppleTvDevice(
+        {
+          target: { platform: "tvos", isVirtual: true, stableId: tv.udid },
+          mode: "destroy",
+          verifyAbsence: true,
+          force: false,
+        },
+        {
+          assertCaller: async () => {
+            throw refusal;
+          },
+          stop: async () => {
+            stopped = true;
+          },
+        },
+      ),
+    );
+    expect(error).toBe(refusal);
+    expect(stopped).toBe(false);
+  });
+
+  test("an absent TV releases its held pool entry after checking the caller", async () => {
+    const { simctl, pool, sessions, timer } = await arrange();
+    const { sessionId } = sessionSchema.parse(toolJson(await provision({ device: TV })));
+    const udid = createdUdid(simctl);
+    simctl.listing.devices = {};
+    simctl.onStateChange?.();
+    simctl.commands.length = 0;
+    const refused = await failure(remove(target(udid), "client-b"));
+    expect(refused).toBeInstanceOf(ActionableError);
+    expect(pool.getDevice(udid)?.sessionId).toBe(sessionId);
+    const result = toolJson(
+      await settleByFakeEvents(timer, remove({ ...target(udid), sessionUuid: sessionId }), {
+        description: "deleteDevice of an absent held TV",
+      }),
+    );
+    expect(result.state).toBe("already_absent");
+    expect(pool.getDevice(udid)).toBeNull();
+    expect(sessions.getSession(sessionId)?.assignedDevice ?? null).toBeNull();
+  });
+
+  test("a TV renamed while waiting for the teardown lease is not deleted", async () => {
+    const tv = tvDevice({ name: NAME });
+    const { simctl, timer, lifecycleCoordinator } = await arrange([tv]);
+    const hold = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "tvos", stableId: tv.udid },
+      { operation: "shutdown", deadlineMs: timer.now() + 60_000 },
+    );
+    setDeviceToolsDependencies({
+      lifecycleCoordinator: {
+        isReserved: lifecycleCoordinator.isReserved.bind(lifecycleCoordinator),
+        reserve: async (identity, options) => {
+          const pending = lifecycleCoordinator.reserve(identity, options);
+          tv.name = "Renamed TV";
+          hold.release();
+          return await pending;
+        },
+      },
+    });
+    const result = toolJson(await remove(target(tv.udid, { stableName: NAME })));
+    expect(result.state).toBe("failed");
+    expect(String(result.error)).toContain("renamed");
     expect(simctl.commands).toEqual([]);
   });
 

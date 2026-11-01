@@ -1,4 +1,10 @@
+import {
+  runWithAcquisitionReceipt,
+  type AcquisitionReceipt,
+} from "../../src/daemon/acquisitionReceipt";
+import { patchDeviceBinding } from "../helpers/patchDeviceBinding";
 import { provisionAppleTvDevice } from "../../src/server/deviceToolsAppleTvProvision";
+import { bindBootedDeviceSession } from "../../src/server/deviceToolsStartDevice";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { toolJson } from "../helpers/toolResponse";
@@ -25,7 +31,10 @@ import {
   type AppleTvBootAdmission,
 } from "../../src/utils/ios-cmdline-tools/AppleTvSimulatorBoot";
 import { AppleTvSimulatorProvisioner } from "../../src/utils/ios-cmdline-tools/AppleTvSimulatorProvisioner";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
+import {
+  type VirtualDeviceLifecycleCoordinator,
+  InMemoryVirtualDeviceLifecycleCoordinator,
+} from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { AppleDevice } from "../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -167,6 +176,92 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(pool.resolveAutolockSessionForMcpSession("client-a", "tvos")).toBe(sessionId);
   });
 
+  for (const caller of ["client-a", "client-b"] as const) {
+    test(`reprovisioning a held TV checks the caller's ownership (${caller})`, async () => {
+      const { simctl, timer } = await arrange();
+      const { sessionId } = sessionSchema.parse(toolJson(await provision({ device: TV })));
+      simctl.commands.length = 0;
+      let bindCalls = 0;
+      const outcome = await provisionAppleTvDevice(
+        { __mcpSessionId: caller, device: TV },
+        async (...args) => {
+          bindCalls++;
+          return await bindBootedDeviceSession(...args);
+        },
+      ).then(toolJson, (error: unknown) => error);
+
+      if (caller === "client-a") {
+        expect(outcome).toMatchObject({ sessionId, lifecycleState: "ready", adopted: true });
+        expect(bindCalls).toBe(1);
+      } else {
+        expect(outcome).toBeInstanceOf(ActionableError);
+        expect(String(outcome)).toContain(`held by session ${sessionId}`);
+        expect(bindCalls).toBe(0);
+      }
+      expect(simctl.commands).toEqual([]);
+      expect(timer.getSleepHistory()).toEqual([]);
+    });
+  }
+
+  for (const held of [true, false]) {
+    for (const confirmation of ["throws", "omits"] as const) {
+      test(`unconfirmed create respects a stable lifecycle holder (held=${held}, ${confirmation})`, async () => {
+        const { simctl, lifecycleCoordinator, timer } = await arrange();
+        const udid = "C0FFEE00-0000-4000-8000-000000000001";
+        const identity = { kind: "stable", platform: "tvos", stableId: udid } as const;
+        const foreign = held
+          ? await lifecycleCoordinator.reserve(identity, {
+              operation: "start",
+              deadlineMs: timer.now() + 60_000,
+            })
+          : undefined;
+        const inventory = new AppleTvSimulatorInventory(simctl, "arm64");
+        setDeviceToolsDependencies({
+          appleTvSimulatorProvisionerFactory: () =>
+            new AppleTvSimulatorProvisioner(
+              {
+                readCatalog: inventory.readCatalog.bind(inventory),
+                listAppleTvSimulators: async (signal) => {
+                  if (simctl.commands.length > 0) {
+                    if (confirmation === "omits") {
+                      return [];
+                    }
+                    throw new Error("inventory unavailable after create");
+                  }
+                  return await inventory.listAppleTvSimulators(signal);
+                },
+              },
+              simctl,
+            ),
+        });
+        try {
+          const error = await failure(provision({ device: TV }));
+          expect(error).toBeInstanceOf(ActionableError);
+          expect(String(error)).toContain("Could not confirm created Apple TV simulator");
+          expect(String(error)).toContain(
+            confirmation === "throws" ? "inventory unavailable after create" : "does not show it",
+          );
+          expect(simctl.commands.filter((cmd) => cmd.startsWith("delete "))).toEqual(
+            held ? [] : [`delete ${udid}`],
+          );
+          if (held) {
+            expect(String(error)).toContain("the TV was left in place");
+            expect(String(error)).toContain("deleteDevice");
+            expect(lifecycleCoordinator.isReserved(identity)).toBe(true);
+            expect(Object.values(simctl.listing.devices).flat()).toHaveLength(1);
+          } else {
+            expect(String(error)).toContain("the TV was deleted again");
+            expect(lifecycleCoordinator.isReserved(identity)).toBe(false);
+            expect(Object.values(simctl.listing.devices).flat()).toEqual([]);
+          }
+          expect(timer.getSleepHistory()).toEqual([]);
+        } finally {
+          foreign?.release();
+        }
+      });
+    }
+  }
+
   test("a TV shut down while provisioning waited for its lease is booted, not adopted as booted", async () => {
     const existing = tvDevice({ name: NAME, state: "Booted" });
     const { simctl, timer, lifecycleCoordinator } = await arrange([existing]);
@@ -192,7 +287,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
   test("a provision cancelled while its boot waits for admission cancels the admission", async () => {
     const request = new AbortController();
     const seen: Array<boolean | undefined> = [];
-    await arrange([], {
+    const { simctl } = await arrange([], {
       admission: {
         run: async (boot) => {
           seen.push(boot.signal?.aborted);
@@ -213,6 +308,7 @@ describe("provisionDevice on an Apple TV simulator", () => {
 
     expect(outcome).toBe("refused");
     expect(seen).toEqual([false, true]);
+    expect(simctl.commands.filter((cmd) => cmd.startsWith("delete "))).toHaveLength(1);
   });
 
   test("boot false adopts the existing TV and binds nothing", async () => {
@@ -249,6 +345,126 @@ describe("provisionDevice on an Apple TV simulator", () => {
     expect(simctl.commands).toEqual([]);
   });
 
+  test("cancelled boot false deletes the created TV through the acquisition receipt", async () => {
+    const { simctl } = await arrange();
+    const request = new AbortController();
+    const create = simctl.createSimulator.bind(simctl);
+    simctl.createSimulator = async (...args) => {
+      const udid = await create(...args);
+      request.abort(new Error("client cancelled after create"));
+      return udid;
+    };
+    const error = await failure(
+      ToolRegistry.getTool("provisionDevice")!.handler(
+        { __mcpSessionId: "client-a", device: TV, boot: false },
+        undefined,
+        request.signal,
+      ),
+    );
+    expect(String(error)).toContain("cancelled");
+    expect(simctl.commands.at(-1)).toBe("delete C0FFEE00-0000-4000-8000-000000000001");
+    expect(Object.values(simctl.listing.devices).flat()).toEqual([]);
+  });
+
+  for (const claim of ["none", "lifecycle", "session"] as const) {
+    test(`canonical bind failure cleans up only without a foreign claim (${claim})`, async () => {
+      const { simctl, pool, lifecycleCoordinator } = await arrange();
+      const coordinator: VirtualDeviceLifecycleCoordinator = {
+        isReserved: (identity) => identity.kind === "stable" && claim === "lifecycle",
+        reserve: async (identity, options) => {
+          const lease = await lifecycleCoordinator.reserve(identity, options);
+          if (identity.kind === "stable") {
+            return lease;
+          }
+          return {
+            ...lease,
+            bindCanonicalIdentity: async (canonical) => {
+              if (claim === "session") {
+                await pool.addDevice({
+                  name: NAME,
+                  platform: "tvos",
+                  deviceId: canonical.stableId,
+                });
+                patchDeviceBinding(pool.getDevice(canonical.stableId)!, {
+                  sessionId: "foreign-session",
+                  status: "busy",
+                });
+              }
+              throw new ActionableError("canonical bind failed");
+            },
+          };
+        },
+      };
+      setDeviceToolsDependencies({ lifecycleCoordinator: coordinator });
+      const error = await failure(provision({ device: TV, boot: false }));
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(String(error)).toContain("canonical bind failed");
+      expect(simctl.commands.some((cmd) => cmd.startsWith("delete "))).toBe(claim === "none");
+      if (claim !== "none") {
+        expect(String(error)).toContain("deleteDevice");
+      }
+    });
+  }
+
+  test("the acquisition receipt leaves a created TV another lifecycle acquired", async () => {
+    const { simctl, lifecycleCoordinator, timer } = await arrange();
+    const receipt: AcquisitionReceipt = {};
+    await runWithAcquisitionReceipt(receipt, () =>
+      provisionAppleTvDevice({ device: TV, boot: false }, async () => {
+        throw new Error("must not bind");
+      }),
+    );
+    const udid = Object.values(simctl.listing.devices).flat()[0]!.udid;
+    const foreign = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "tvos", stableId: udid },
+      { operation: "start", deadlineMs: timer.now() + 60_000 },
+    );
+    try {
+      expect(receipt.started).toBeDefined();
+      const error = await failure(receipt.started!.rollBack(new Error("cancelled delivery")));
+      expect(String(error)).toContain("deleteDevice");
+      expect(simctl.commands.some((cmd) => cmd.startsWith("delete "))).toBe(false);
+    } finally {
+      foreign.release();
+    }
+  });
+
+  for (const created of [false, true]) {
+    test(`a foreign pool holder refuses boot without deleting its TV (created=${created})`, async () => {
+      const existing = tvDevice({ name: NAME });
+      const { simctl, pool, lifecycleCoordinator } = await arrange(created ? [] : [existing]);
+      setDeviceToolsDependencies({
+        lifecycleCoordinator: {
+          isReserved: lifecycleCoordinator.isReserved.bind(lifecycleCoordinator),
+          reserve: async (identity, options) => {
+            const lease = await lifecycleCoordinator.reserve(identity, options);
+            return {
+              ...lease,
+              get identity() {
+                return lease.identity;
+              },
+              bindCanonicalIdentity: async (canonical, revalidate) => {
+                await lease.bindCanonicalIdentity(canonical, revalidate);
+                await pool.addDevice({
+                  name: NAME,
+                  platform: "tvos",
+                  deviceId: canonical.stableId,
+                });
+                const row = pool.getDevice(canonical.stableId)!;
+                patchDeviceBinding(row, { sessionId: "foreign-session", status: "busy" });
+              },
+            };
+          },
+        },
+      });
+      const error = await failure(provision({ device: TV }));
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(String(error)).toContain("held");
+      expect(simctl.commands.some((cmd) => cmd.startsWith("boot "))).toBe(false);
+      expect(simctl.commands.some((cmd) => cmd.startsWith("delete "))).toBe(false);
+    });
+  }
+
   test("a TV this call created is deleted again when its boot fails", async () => {
     const { simctl, pool } = await arrange();
     simctl.bootError = new Error("Unable to boot: CoreSimulator timed out");
@@ -270,6 +486,21 @@ describe("provisionDevice on an Apple TV simulator", () => {
         .map((d) => d.udid),
     ).not.toContain(udid);
     expect(pool.getDevice(udid)).toBeNull();
+  });
+
+  test("boot failure names deleteDevice when deleting the created TV also fails", async () => {
+    const { simctl } = await arrange();
+    const bootError = new ActionableError("CoreSimulator could not boot");
+    simctl.bootError = bootError;
+    simctl.deleteError = new Error("TV is busy");
+    const error = await failure(provision({ device: TV }));
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error instanceof Error && error.cause).toBe(bootError);
+    expect(String(error)).toContain("CoreSimulator could not boot");
+    expect(String(error)).toContain(
+      "deleting it again failed (TV is busy); delete it with deleteDevice",
+    );
+    expect(simctl.commands.map((cmd) => cmd.split(" ")[0])).toEqual(["create", "boot", "delete"]);
   });
 
   test("a TV this call created is deleted again when session binding fails", async () => {

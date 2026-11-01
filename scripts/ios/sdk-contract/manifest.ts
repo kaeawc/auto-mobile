@@ -5,7 +5,7 @@ import { z } from "zod";
  * (`ios/Playground/Sources/SdkContract/SdkContractManifest.swift`). Keep the two in step:
  * the Swift encoder omits nil optionals, so every optional here means "not asserted".
  */
-export const SDK_CONTRACT_MANIFEST_SCHEMA_VERSION = 3;
+export const SDK_CONTRACT_MANIFEST_SCHEMA_VERSION = 4;
 
 const expectedNetworkEventSchema = z.object({
   caseName: z.string().min(1),
@@ -98,6 +98,22 @@ const sdkContractManifestSchema = z.object({
   faults: z.array(faultCaseObservationSchema),
   capabilities: capabilityObservationSchema.optional(),
   observation: observationHostLogSchema.optional(),
+  navigation: z
+    .object({
+      deviceClass: z.enum(["ipad", "iphone"]),
+      multiScene: z.enum(["complete", "not-applicable"]),
+      sceneIdentifiers: z.array(z.string().min(1)),
+      events: z.array(
+        z.object({
+          source: z.string(),
+          destination: z.string(),
+          sequenceNumber: z.number().int().positive(),
+          sceneIdentifier: z.string().optional(),
+          transitionCompleted: z.boolean(),
+        }),
+      ),
+    })
+    .optional(),
   storage: storageRegistrationSchema.optional(),
   events: z.array(sdkEnvelopeSchema),
   undecodableBatches: z.number().int().nonnegative(),

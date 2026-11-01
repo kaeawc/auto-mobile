@@ -44,7 +44,7 @@ const defaults: StorageRegistration = {
 
 function manifest(scenario: string, storage?: StorageRegistration): SdkContractManifest {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId: "run-1",
     scenario,
     status: "complete",

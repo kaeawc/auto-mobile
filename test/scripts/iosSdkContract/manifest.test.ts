@@ -19,7 +19,7 @@ const swiftManifest = {
   ],
   runId: "run-1",
   scenario: "network",
-  schemaVersion: 3,
+  schemaVersion: 4,
   status: "complete",
   undecodableBatches: 0,
 };
@@ -70,7 +70,7 @@ test("parses URLProtocol records, fault observations and capability descriptors"
 });
 
 test("rejects a manifest from a newer schema", () => {
-  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 4 }));
+  const result = parseSdkContractManifest(JSON.stringify({ ...swiftManifest, schemaVersion: 5 }));
   expect(result).toMatchObject({ success: false });
   if (!result.success) {
     expect(result.error).toContain("schemaVersion");

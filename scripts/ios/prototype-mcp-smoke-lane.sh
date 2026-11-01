@@ -49,9 +49,13 @@ aux_root=""
 source "${script_dir}/run_with_timeout.sh"
 
 delete_simulator() {
-  local attempt
+  local attempt delete_status caller_options="$-"
   for attempt in 1 2 3; do
-    if run_with_timeout 120 "${XCRUN_BIN}" simctl delete "$1" > /dev/null 2>&1; then
+    set +e
+    run_with_timeout 120 "${XCRUN_BIN}" simctl delete "$1" > /dev/null 2>&1
+    delete_status=$?
+    if [[ "${caller_options}" == *e* ]]; then set -e; fi
+    if [[ ${delete_status} -eq 0 ]]; then
       return 0
     fi
     if [[ ${attempt} -lt 3 ]]; then
@@ -63,6 +67,7 @@ delete_simulator() {
 
 cleanup() {
   local result=$?
+  local cleanup_status
   trap - EXIT
   if [[ -n ${aux_root} ]]; then
     local -a words=(auto-mobile) cli_words=()
@@ -75,13 +80,27 @@ cleanup() {
         words+=("$word")
       done
     fi
-    if ! run_with_timeout 60 "${words[@]}" --daemon stop; then
+    set +e
+    run_with_timeout 60 "${words[@]+"${words[@]}"}" --daemon stop
+    cleanup_status=$?
+    set -e
+    if [[ ${cleanup_status} -ne 0 ]]; then
       echo "prototype-mcp-smoke-lane: daemon stop failed for ${aux_root}" >&2
     fi
   fi
   if [[ -n ${udid} ]]; then
-    run_with_timeout 60 "${XCRUN_BIN}" simctl shutdown "${udid}" > /dev/null 2>&1 || echo "prototype-mcp-smoke-lane: shutdown skipped (not booted?)"
-    if ! delete_simulator "${udid}"; then
+    set +e
+    run_with_timeout 60 "${XCRUN_BIN}" simctl shutdown "${udid}" > /dev/null 2>&1
+    cleanup_status=$?
+    set -e
+    if [[ ${cleanup_status} -ne 0 ]]; then
+      echo "prototype-mcp-smoke-lane: shutdown skipped (not booted?)"
+    fi
+    set +e
+    delete_simulator "${udid}"
+    cleanup_status=$?
+    set -e
+    if [[ ${cleanup_status} -ne 0 ]]; then
       echo "prototype-mcp-smoke-lane: FAIL: could not delete simulator ${udid}" >&2
       if [[ ${result} -eq 0 ]]; then result=1; fi
     fi
@@ -136,7 +155,11 @@ fi
 
 run_tag=runlocal
 if [[ ${GITHUB_RUN_ID:-} =~ ^[0-9]+$ ]]; then run_tag="run${GITHUB_RUN_ID}"; fi
-if devices_json="$(run_with_timeout 60 "${XCRUN_BIN}" simctl list devices --json)"; then
+set +e
+devices_json="$(run_with_timeout 60 "${XCRUN_BIN}" simctl list devices --json)"
+sweep_status=$?
+set -e
+if [[ ${sweep_status} -eq 0 ]]; then
   stale_udids="$(jq -r --arg tag "-${run_tag}-" '
     .devices[][] | select(.name | startswith("prototype-mcp-smoke-"))
     | select(.name | contains($tag) | not) | .udid' <<< "${devices_json}")" || {
@@ -145,8 +168,17 @@ if devices_json="$(run_with_timeout 60 "${XCRUN_BIN}" simctl list devices --json
   }
   while IFS= read -r stale_udid; do
     [[ -n ${stale_udid} ]] || continue
-    run_with_timeout 60 "${XCRUN_BIN}" simctl shutdown "${stale_udid}" > /dev/null 2>&1 || true
-    delete_simulator "${stale_udid}" || echo "prototype-mcp-smoke-lane: warning: could not delete stale simulator ${stale_udid}" >&2
+    set +e
+    run_with_timeout 60 "${XCRUN_BIN}" simctl shutdown "${stale_udid}" > /dev/null 2>&1
+    sweep_status=$?
+    set -e
+    set +e
+    delete_simulator "${stale_udid}"
+    sweep_status=$?
+    set -e
+    if [[ ${sweep_status} -ne 0 ]]; then
+      echo "prototype-mcp-smoke-lane: warning: could not delete stale simulator ${stale_udid}" >&2
+    fi
   done <<< "${stale_udids}"
 else
   echo 'prototype-mcp-smoke-lane: warning: could not list stale simulators' >&2

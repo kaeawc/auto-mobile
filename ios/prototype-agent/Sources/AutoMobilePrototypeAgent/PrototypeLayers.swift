@@ -401,7 +401,8 @@
             let placement = spec.window.placement
             // The boundary sits on the root itself, inside the placement's fill frames, so a lone
             // node keeps its own accessibility frame (#10898).
-            let root = NodeView(node: spec.root, model: model).prototypeLayerAccessibility(layer)
+            let root = NodeView(node: spec.root, model: model, rootPlacementType: placement.type)
+                .prototypeLayerAccessibility(layer)
             // There is no window to move onto an anchored root: the anchor layer places it, and an
             // empty sheet or floating slot must not catch touches meant for the app.
             let rootAnchored = spec.root.anchor != nil

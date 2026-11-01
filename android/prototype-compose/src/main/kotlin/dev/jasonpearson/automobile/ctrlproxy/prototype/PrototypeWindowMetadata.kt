@@ -113,12 +113,12 @@ fun prototypeWindowMetadata(
 
 /**
  * Whether a node with this style paints its background over all of its parent, as the renderer
- * (`prototypeNodeModifier`) applies it. An omitted dimension is wrap-content, so only an explicit
- * `fill` on both axes spans the parent. Everything else that can pull the drawn surface off an edge
- * rules it out: a `maxWidth`/`maxHeight` cap or an `aspectRatio` (they resize a filled node; the
- * window size is not known here, so any cap counts), an `offset` (it shifts the whole node), a
- * `cornerRadius` that rounds any corner (the background is clipped to it) and a `pressScale` below
- * one (the node shrinks while pressed).
+ * (`prototypeNodeModifier`) applies it. The mapped fullscreen root defaults omitted dimensions to
+ * `fill`; other roots need explicit `fill` on both axes to span the parent. Everything else that
+ * can pull the drawn surface off an edge rules it out: a `maxWidth`/`maxHeight` cap or an
+ * `aspectRatio` (they resize a filled node; the window size is not known here, so any cap counts),
+ * an `offset` (it shifts the whole node), a `cornerRadius` that rounds any corner (the background
+ * is clipped to it) and a `pressScale` below one (the node shrinks while pressed).
  */
 private fun PrototypeStyle.coversItsParent(): Boolean =
   width == PrototypeDimension.Fill &&

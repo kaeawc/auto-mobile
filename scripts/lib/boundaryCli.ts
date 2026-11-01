@@ -6,6 +6,7 @@ import {
   parseUnifiedDiff,
   renderBoundaryResult,
   scanBoundary,
+  treeTooSmallMessage,
 } from "./boundaryScanner";
 
 const SOURCE_ROOT = "src";
@@ -55,6 +56,11 @@ export function runBoundaryRowCli(rowId: string | undefined, diffPath?: string):
           addedLines: new Set<number>(),
         }))
       : parseUnifiedDiff(readFileSync(diffPath!, "utf8"));
+  const tooSmall = row.scope === "tree" ? treeTooSmallMessage(row, changed.length) : undefined;
+  if (tooSmall) {
+    console.error(tooSmall);
+    process.exit(1);
+  }
   const result = renderBoundaryResult(row, scanBoundary(row, changed, { readSource }));
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);

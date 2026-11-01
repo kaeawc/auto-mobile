@@ -61,7 +61,7 @@ final class NavigationAdaptersConcurrencyTests: XCTestCase {
         defer {
             hub.stop(owner: "reentrant")
             // Restore the factory as well as removing this owner's activation.
-            hub.start(owner: "reentrant")
+            hub.start(owner: "reentrant", redactor: NoOpNavigationRedactor())
             hub.stop(owner: "reentrant")
             sdk.clearNavigationListeners()
         }

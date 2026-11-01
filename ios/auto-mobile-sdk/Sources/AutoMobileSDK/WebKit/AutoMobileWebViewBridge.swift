@@ -313,27 +313,74 @@ extension AutoMobileWebAction {
             self.emitEvent = emitEvent
         }
 
-        public func attach(to webView: WKWebView) {
+        /// Register script capture without changing the host's navigation delegate. Forward
+        /// didCommit, didFinish, didFail and webViewWebContentProcessDidTerminate to this bridge.
+        /// May be called on any queue; WebKit installation runs synchronously on main.
+        public nonisolated func register(_ webView: WKWebView) {
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { self.install(on: webView) }
+            } else {
+                DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { self.install(on: webView) }
+                }
+            }
+            AutoMobileNavigation.shared.hostIntegrations.register(.wkWebView)
+        }
+
+        @MainActor
+        private func install(on webView: WKWebView) {
+            if self.webView === webView { return }
+            if self.webView != nil { detachOnMain() }
             self.webView = webView
             let url = webView.url
             pageState.withLock { $0.attached(url: url) }
             let controller = webView.configuration.userContentController
-            controller.removeScriptMessageHandler(forName: "automobile")
             let world = WKContentWorld.world(name: configuration.contentWorldName)
+            controller.removeScriptMessageHandler(forName: "automobile", contentWorld: world)
             controller.add(self, contentWorld: world, name: "automobile")
-            controller.addUserScript(WKUserScript(
-                source: Self.script,
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: false,
-                in: world
-            ))
-            webView.navigationDelegate = self
+            // WKUserScript does not expose its content world. A harmless string expression
+            // makes the source unique per world, so deduplication cannot skip a new world.
+            let script = AutoMobileWebActionScript.json(configuration.contentWorldName) + ";\n" + Self.script
+            if !controller.userScripts.contains(where: { $0.source == script }) {
+                controller.addUserScript(WKUserScript(
+                    source: script,
+                    injectionTime: .atDocumentStart,
+                    forMainFrameOnly: false,
+                    in: world
+                ))
+            }
             emit(name: "bridge_attached", url: webView.url)
         }
 
+        /// Legacy convenience that installs this bridge as navigationDelegate.
+        /// Use register(_:) when the host owns the delegate.
+        public func attach(to webView: WKWebView) {
+            register(webView)
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { webView.navigationDelegate = self }
+            } else {
+                DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { webView.navigationDelegate = self }
+                }
+            }
+        }
+
         public func detach() {
-            webView?.configuration.userContentController.removeScriptMessageHandler(forName: "automobile")
-            webView?.navigationDelegate = nil
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { self.detachOnMain() }
+            } else {
+                DispatchQueue.main.sync {
+                    MainActor.assumeIsolated { self.detachOnMain() }
+                }
+            }
+        }
+
+        @MainActor
+        private func detachOnMain() {
+            webView?.configuration.userContentController.removeScriptMessageHandler(
+                forName: "automobile", contentWorld: WKContentWorld.world(name: configuration.contentWorldName)
+            )
+            if webView?.navigationDelegate === self { webView?.navigationDelegate = nil }
             webView = nil
         }
 
@@ -536,12 +583,13 @@ extension AutoMobileWebAction {
             policy.forgetSnapshots()
         }
 
+        /// Recover script capture and reload while preserving the host's navigation delegate.
         public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             let url = webView.url
             pageState.withLock { $0.terminated(url: url) }
             policy.forgetSnapshots()
             emit(name: "content_process_terminated", url: url)
-            attach(to: webView)
+            register(webView)
             webView.reload()
         }
 

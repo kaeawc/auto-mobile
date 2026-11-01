@@ -619,6 +619,9 @@ chunk runners check the original lane owner before starting another group.
 Dead slot owners are reclaimed on the next acquisition. Slots with an owner
 not yet published are conservatively left alone to avoid stealing an active
 acquisition.
+`AUTOMOBILE_WATCHDOG_DEADLINE_SECONDS` is a test-only override: the portable
+watchdog fires after that many seconds (fractions allowed) instead of the
+budget, which callers still validate and report as whole seconds.
 
 A timed-out unit shard is not retried when one-minute host load exceeds the
 logical core count. `AUTOMOBILE_TEST_LOADAVG_FILE` can inject a load-average

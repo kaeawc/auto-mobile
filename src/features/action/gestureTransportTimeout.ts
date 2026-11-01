@@ -45,3 +45,6 @@ export function resolveVoiceOverActivateCtrlProxyTimeoutMs(
 ): number | undefined {
   return action === "long_press" ? resolveGestureCtrlProxyTimeoutMs(durationMs) : undefined;
 }
+
+/** Cover bounded App Switcher gestures, verification, and reply delivery on a loaded iOS host. */
+export const IOS_RECENT_APPS_TIMEOUT_MS = resolveGestureCtrlProxyTimeoutMs(8000);

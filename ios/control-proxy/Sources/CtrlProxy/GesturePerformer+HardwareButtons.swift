@@ -99,19 +99,22 @@ import os
             }
         }
 
-        public func pressButton(_ button: String) throws {
+        public func pressButton(_ button: String) async throws {
             switch button.lowercased() {
             case "home":
                 try pressHome()
             case "recent":
-                guard try openRecentApps() else {
-                    throw GestureError.gestureFailed("iOS App Switcher did not appear after recent apps invocation")
+                guard try await openRecentApps() else {
+                    throw GestureError
+                        .gestureFailed(
+                            "iOS App Switcher was not detected after the gesture. Observe the screen; call homeScreen then retry. On a physical device, swipe-up-and-hold requires an unlocked device."
+                        )
                 }
             case "back":
                 try pressBack()
             case "volume_up", "volume_down":
                 #if targetEnvironment(simulator)
-                    try pressConsumerKeyViaHID(
+                    try await pressConsumerKeyViaHID(
                         usage: Self.consumerUsage(for: button.lowercased()),
                         button: button
                     )
@@ -127,7 +130,7 @@ import os
                     }
                 #endif
             case "power":
-                try pressConsumerKeyViaHID(usage: Self.consumerUsage(for: "power"), button: button)
+                try await pressConsumerKeyViaHID(usage: Self.consumerUsage(for: "power"), button: button)
             case "action":
                 try pressOptionalHardwareButton(.action, name: "action", hardware: "an Action button")
             case "camera":
@@ -138,6 +141,12 @@ import os
                 throw GestureError.notSupported("Button: \(button)")
             }
         }
+
+        #if targetEnvironment(simulator)
+            func pressSimulatorHomeTwice() async throws {
+                try await pressConsumerKeyViaHID(usage: 0x40, button: "home", count: 2, interval: .milliseconds(120))
+            }
+        #endif
 
         private typealias IOHIDEventRef = CFTypeRef
         private typealias IOHIDEventSystemClientRef = CFTypeRef
@@ -160,7 +169,11 @@ import os
         )
             -> Void
 
-        private func pressConsumerKeyViaHID(usage: UInt32, button: String) throws {
+        private func pressConsumerKeyViaHID(
+            usage: UInt32, button: String, count: Int = 1, interval: Duration = .zero
+        )
+            async throws
+        {
             guard let handle = openIOKitHandle() else {
                 throw GestureError.notSupported("\(button) HID support unavailable")
             }
@@ -192,36 +205,19 @@ import os
             }
             let client = retainedClient.takeRetainedValue()
 
-            let consumerUsagePage: UInt32 = 0x0C
-            let eventTimestamp: UInt64 = 0
-            let eventOptions: UInt32 = 0
-
-            guard let retainedKeyDown = createKeyboardEvent(
-                nil,
-                eventTimestamp,
-                consumerUsagePage,
-                usage,
-                true,
-                eventOptions
-            ) else {
-                throw GestureError.notSupported("\(button) HID key-down event unavailable")
+            for index in 0 ..< count {
+                if index > 0 { try await keyboardClock.sleep(for: interval) }
+                guard let retainedKeyDown = createKeyboardEvent(nil, mach_absolute_time(), 0x0C, usage, true, 0) else {
+                    throw GestureError.notSupported("\(button) HID key-down event unavailable")
+                }
+                let keyDown = retainedKeyDown.takeRetainedValue()
+                guard let retainedKeyUp = createKeyboardEvent(nil, mach_absolute_time(), 0x0C, usage, false, 0) else {
+                    throw GestureError.notSupported("\(button) HID key-up event unavailable")
+                }
+                let keyUp = retainedKeyUp.takeRetainedValue()
+                dispatchEvent(client, keyDown)
+                dispatchEvent(client, keyUp)
             }
-            let keyDown = retainedKeyDown.takeRetainedValue()
-
-            guard let retainedKeyUp = createKeyboardEvent(
-                nil,
-                eventTimestamp,
-                consumerUsagePage,
-                usage,
-                false,
-                eventOptions
-            ) else {
-                throw GestureError.notSupported("\(button) HID key-up event unavailable")
-            }
-            let keyUp = retainedKeyUp.takeRetainedValue()
-
-            dispatchEvent(client, keyDown)
-            dispatchEvent(client, keyUp)
         }
 
         private func openIOKitHandle() -> UnsafeMutableRawPointer? {

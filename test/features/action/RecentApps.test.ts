@@ -1,6 +1,7 @@
 import { buildObserveResult } from "../../helpers/observeFixture";
 import { createExecResult } from "../../../src/utils/execResult";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 
@@ -232,11 +233,94 @@ describe("RecentApps", () => {
     });
 
     test("should use CtrlProxy requestRecentApps on iOS", async () => {
+      const request = spyOn(fakeIOSCtrlProxy, "requestRecentApps");
+      try {
+        const result = await iosRecentApps.execute();
+        expect(request).toHaveBeenCalledWith(10000, undefined, { signal: undefined });
+        expect(result.success).toBe(true);
+        expect(result.method).toBe("ios_swipe");
+        expect(fakeIOSCtrlProxy.getRecentAppsRequestCount()).toBe(1);
+      } finally {
+        request.mockRestore();
+      }
+    });
+
+    test("acknowledgement alone cannot replace runner verification", async () => {
+      fakeIOSCtrlProxy.setRecentAppsResult({
+        success: false,
+        totalTimeMs: 8400,
+        dispatched: true,
+        acknowledged: true,
+        recentAppsRoute: "sim-hid-home-double",
+      });
       const result = await iosRecentApps.execute();
-      expect(result.success).toBe(true);
-      expect(result.method).toBe("ios_swipe");
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Failed to open iOS recent apps");
       expect(fakeIOSCtrlProxy.getRecentAppsRequestCount()).toBe(1);
     });
+
+    test("a real timeout remains indeterminate and is never retried", async () => {
+      fakeIOSCtrlProxy.setRecentAppsResult({
+        success: false,
+        totalTimeMs: 10000,
+        dispatched: true,
+        acknowledged: false,
+        error: "Recent apps request timed out after 10000ms",
+      });
+      await expect(iosRecentApps.execute()).rejects.toThrow("outcome is indeterminate");
+      expect(fakeIOSCtrlProxy.getRecentAppsRequestCount()).toBe(1);
+    });
+
+    test("logs the runner route at info level", async () => {
+      fakeIOSCtrlProxy.setRecentAppsResult({
+        success: true,
+        totalTimeMs: 950,
+        recentAppsRoute: "already-open",
+      });
+      const info = spyOn(logger, "info");
+      try {
+        expect((await iosRecentApps.execute()).success).toBe(true);
+        expect(info).toHaveBeenCalledWith("iOS recentApps route: already-open");
+      } finally {
+        info.mockRestore();
+      }
+    });
+
+    test.each([
+      ["already-open", true, undefined, true, undefined],
+      ["sim-hid-home-double", true, undefined, false, "No visual change observed"],
+      [undefined, true, undefined, false, "No visual change observed"],
+      ["already-open", false, "No visual change observed", false, "No visual change observed"],
+      ["already-open", false, "Runner verification failed", false, "Runner verification failed"],
+    ] as const)(
+      "unchanged iOS screen with route %s, runner success %s and error %s yields success %s",
+      async (recentAppsRoute, success, error, expectedSuccess, expectedError) => {
+        // A fresh fake without auto-varying hierarchy exercises the real no-change verdict.
+        const unchangedScreen = new FakeObserveScreen();
+        unchangedScreen.setObserveResult(() =>
+          buildObserveResult({
+            ...observeResultFromFixture(capturedRecents),
+            updatedAt: fakeTimer.now(),
+          }),
+        );
+        iosRecentApps.observeScreen = unchangedScreen;
+        fakeIOSCtrlProxy.setRecentAppsResult({
+          success,
+          totalTimeMs: 0,
+          recentAppsRoute,
+          error,
+        });
+
+        const result = await iosRecentApps.execute();
+
+        expect(result.success).toBe(expectedSuccess);
+        expect(result.error).toBe(expectedError);
+        if (expectedSuccess) {
+          expect(result).not.toHaveProperty("error");
+        }
+        expect(fakeIOSCtrlProxy.getRecentAppsRequestCount()).toBe(1);
+      },
+    );
 
     test("should return observation on iOS", async () => {
       const result = await iosRecentApps.execute();
@@ -254,14 +338,17 @@ describe("RecentApps", () => {
       fakeIOSCtrlProxy.setRecentAppsResult({
         success: false,
         totalTimeMs: 100,
-        error: "iOS App Switcher did not appear after recent apps invocation",
+        error:
+          "iOS App Switcher was not detected after the gesture. Observe the screen; call homeScreen then retry. On a physical device, swipe-up-and-hold requires an unlocked device.",
       });
 
       const result = await iosRecentApps.execute();
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("ios_swipe");
-      expect(result.error).toBe("iOS App Switcher did not appear after recent apps invocation");
+      expect(result.error).toBe(
+        "iOS App Switcher was not detected after the gesture. Observe the screen; call homeScreen then retry. On a physical device, swipe-up-and-hold requires an unlocked device.",
+      );
       expect(result.observation).toBeDefined();
     });
   });

@@ -169,10 +169,11 @@ public protocol GesturePerforming: Sendable {
     func shake() throws
 
     /// Press a named hardware or keyboard-backed button.
-    func pressButton(_ button: String) throws
+    func pressButton(_ button: String) async throws
 
     /// Open recent apps (app switcher) and return whether the switcher was verified.
-    func openRecentApps() throws -> Bool
+    func openRecentApps() async throws -> Bool
+    func openRecentAppsReportingRoute() async throws -> RecentAppsOutcome
 
     // MARK: - App Control
 
@@ -198,7 +199,22 @@ public protocol GesturePerforming: Sendable {
     func resetAuthorizations(bundleId: String, resources: [String]) throws
 }
 
+public struct RecentAppsOutcome: Sendable {
+    public let visible: Bool
+    public let route: String?
+
+    public init(visible: Bool, route: String? = nil) {
+        self.visible = visible
+        self.route = route
+    }
+}
+
 extension GesturePerforming {
+    public func openRecentAppsReportingRoute() async throws -> RecentAppsOutcome {
+        let visible = try await openRecentApps()
+        return RecentAppsOutcome(visible: visible)
+    }
+
     public func invalidateCaretMemo() {}
 
     public func lockScreenSwipe(

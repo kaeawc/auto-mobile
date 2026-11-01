@@ -10,7 +10,31 @@ import os
 
 #if canImport(XCTest) && os(iOS)
     extension GesturePerformer {
-        public func openRecentApps() throws -> Bool {
+        public func openRecentApps() async throws -> Bool {
+            try await openRecentAppsReportingRoute().visible
+        }
+
+        public func openRecentAppsReportingRoute() async throws -> RecentAppsOutcome {
+            #if targetEnvironment(simulator)
+                return try await RecentAppsNavigation.openSimulator(
+                    clock: keyboardClock, isVisible: { self.isAppSwitcherVisible() },
+                    doubleHome: { try await self.pressSimulatorHomeTwice() }
+                )
+            #else
+                if isAppSwitcherVisible() {
+                    return RecentAppsOutcome(visible: true, route: "already-open")
+                }
+                return try openRecentAppsByDragging()
+            #endif
+        }
+
+        private func isAppSwitcherVisible() -> Bool {
+            catchingObjCExceptionNonThrowing({
+                AppSwitcherDetector.isVisible(in: springboard)
+            }, fallback: false)
+        }
+
+        private func openRecentAppsByDragging() throws -> RecentAppsOutcome {
             guard let app = resolveNavigationApp() else {
                 throw GestureError.noApplication
             }
@@ -36,9 +60,7 @@ import os
                 )
             }
 
-            return catchingObjCExceptionNonThrowing({
-                AppSwitcherDetector.isVisible(in: springboard)
-            }, fallback: false)
+            return RecentAppsOutcome(visible: isAppSwitcherVisible(), route: "xcui-drag")
         }
 
         // MARK: - App Control
@@ -101,3 +123,33 @@ import os
         }
     }
 #endif
+
+/// Simulator navigation is a toggle, so retries require a fresh negative visibility check.
+/// The clock and dispatch seam keep the bounded policy testable without XCTest UI or devices.
+@MainActor
+enum RecentAppsNavigation {
+    static func openSimulator<C: Clock>(
+        clock: C,
+        isVisible: () -> Bool,
+        doubleHome: () async throws -> Void
+    )
+        async throws -> RecentAppsOutcome where C.Duration == Duration
+    {
+        var dispatched = false
+        for _ in 0 ..< 2 {
+            try Task.checkCancellation()
+            if isVisible() {
+                return RecentAppsOutcome(visible: true, route: dispatched ? "sim-hid-home-double" : "already-open")
+            }
+            try await doubleHome()
+            dispatched = true
+            if try await KeyboardWait.visibility(
+                clock: clock, expected: true, timeout: .milliseconds(1500),
+                interval: .milliseconds(100), probe: isVisible
+            ) {
+                return RecentAppsOutcome(visible: true, route: "sim-hid-home-double")
+            }
+        }
+        return RecentAppsOutcome(visible: false, route: "sim-hid-home-double")
+    }
+}

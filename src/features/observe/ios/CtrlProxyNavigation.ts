@@ -1,3 +1,4 @@
+import { IOS_RECENT_APPS_TIMEOUT_MS } from "../../action/gestureTransportTimeout";
 import {
   sendIOSPressCommand,
   type IOSDispatchResult,
@@ -329,7 +330,7 @@ export class CtrlProxyNavigation {
    * Request to open recent apps (app switcher).
    */
   async requestRecentApps(
-    timeoutMs: number = 5000,
+    timeoutMs: number = IOS_RECENT_APPS_TIMEOUT_MS,
     perf?: PerformanceTracker,
     { frameContext, signal, onDispatch }: IosFrameDispatchOptions = {},
   ): Promise<IOSDispatchResult<CtrlProxyRecentAppsResult>> {

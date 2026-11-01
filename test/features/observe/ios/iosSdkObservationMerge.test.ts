@@ -1,3 +1,4 @@
+import { mergeIosSdkBridgeInto } from "../../../../src/features/observe/ios/IosSdkBridgeReader";
 import { describe, expect, test } from "bun:test";
 import {
   iosSdkBridgeTarget,
@@ -138,3 +139,21 @@ describe("mergeIosSdkObservation (#5159)", () => {
     ).toBeNull();
   });
 });
+
+for (const bundleId of ["com.example.other", "com.example.app", undefined]) {
+  test(`bridge merge checks snapshot app identity: ${bundleId}`, async () => {
+    const hierarchy = xctestHierarchy();
+    const before = structuredClone(hierarchy);
+    const snapshot = { ...observation(node({ id: "bridge" })), bundleId };
+    const result = await mergeIosSdkBridgeInto(hierarchy, {
+      observe: async () => ({ kind: "observation", observation: snapshot }),
+    });
+    if (bundleId === "com.example.other") {
+      expect(result).toEqual({ backend: "xctest", fallbackReason: "unavailable" });
+      expect(hierarchy).toEqual(before);
+    } else {
+      expect(result).toEqual({ backend: "sdk" });
+      expect(hierarchy).not.toEqual(before);
+    }
+  });
+}

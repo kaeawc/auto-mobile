@@ -321,6 +321,15 @@ the device really should be stopped out from under its holder.
 - A refused `deleteDevice` carries the same typed fields as a refused
   `killDevice`.
 
+## Apple TV simulator inventory
+
+Call `listDevices` with `platform: "tvos"` to list booted Apple TV simulators, or
+`listDeviceImages` with `platform: "tvos"` to list configured ones. Read
+`automobile:devices/images/tvos` for configured Apple TVs, installed tvOS runtimes,
+Apple TV models and their compatible runtimes. Check inventory completeness before
+treating an empty result as no devices; retry a failed listing.
+General device and image listings continue to cover Android and iOS.
+
 ## Apple Watch simulators
 
 A watch is reached only by naming it: `platform: "watchos"`, or the

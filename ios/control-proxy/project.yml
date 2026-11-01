@@ -18,6 +18,7 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "5.0"
+    SDKROOT: iphoneos
 
 targets:
   AutoMobileTest:
@@ -156,6 +157,37 @@ targets:
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete
 
+  CtrlProxyWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: CtrlProxyWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.watch
+        INFOPLIST_FILE: CtrlProxyWatch/Info.plist
+        CODE_SIGN_STYLE: Automatic
+
+  CtrlProxyWatchUITests:
+    type: bundle.ui-testing
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: Sources/CtrlProxyWatch
+      - path: Tests/CtrlProxyWatchUITests
+    dependencies:
+      - target: CtrlProxyWatch
+      - package: AutoMobileSdkWire
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.watch.uitests
+        TEST_TARGET_NAME: CtrlProxyWatch
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+
 schemes:
   AutoMobileTest:
     build:
@@ -184,3 +216,13 @@ schemes:
       config: Debug
       targets:
         - CtrlProxyTVUITests
+  CtrlProxyWatch:
+    build:
+      targets:
+        CtrlProxyWatch: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - CtrlProxyWatchUITests

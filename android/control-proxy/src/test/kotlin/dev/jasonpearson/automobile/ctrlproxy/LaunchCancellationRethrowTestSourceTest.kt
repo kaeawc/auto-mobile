@@ -217,6 +217,7 @@ internal class LaunchCancellationRethrowTestSourceTest {
         ScannedSource("WebSocketServer.kt", exemptSuspendFns = emptyList()),
         ScannedSource("DeviceEventBroadcaster.kt", exemptSuspendFns = emptyList()),
         ScannedSource("ScreenshotRequestHandler.kt", exemptSuspendFns = emptyList()),
+        ScannedSource("FrameContextGate.kt", exemptSuspendFns = emptyList()),
       )
   }
 

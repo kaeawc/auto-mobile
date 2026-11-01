@@ -373,6 +373,7 @@ export const observeDiffSchema = z
     changed: z.array(observeDiffNodeChangeSchema),
     fields: z.record(z.string(), layoutWarningsDiffFieldSchema).optional(),
     importedPrototypeContent: importedPrototypeContentSchema.optional(),
+    ...observationBackendFields,
   })
   .passthrough();
 requireObservationJoinKeysOnTheWire(observeDiffSchema);

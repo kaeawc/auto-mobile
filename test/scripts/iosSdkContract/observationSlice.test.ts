@@ -89,6 +89,18 @@ describe("observation slice (#5164 phase B)", () => {
     expect(judge()).toEqual([]);
   });
 
+  for (const [caseName, action] of [
+    ["tap", healthyActions[0]],
+    ["send-keys", healthyActions[2]],
+    ["arm-stale", healthyActions[3]],
+  ] as const) {
+    test(`${caseName} must execute exactly once`, () => {
+      expect(judge({}, [...healthyActions, action])).toContainEqual(
+        expect.objectContaining({ caseName, boundary: "sdk-adapter" }),
+      );
+    });
+  }
+
   test("observe without the bridge names the endpoint; without its nodes, the client", () => {
     expect(
       judge({ observe: { result: { backend: "xctest", fallbackReason: "unavailable" } } }),
@@ -150,9 +162,9 @@ describe("observation slice (#5164 phase B)", () => {
     expect(judge({ "stale-tap": { result: { success: true, backend: "xctest" } } })).toEqual([
       expect.objectContaining({ caseName: "stale-tap", boundary: "ios-client" }),
     ]);
-    expect(judge({}, [...healthyActions, hostTap("contract-save", 11)])).toEqual([
+    expect(judge({}, [...healthyActions, hostTap("contract-save", 11)])).toContainEqual(
       expect.objectContaining({ caseName: "stale-tap", boundary: "sdk-adapter" }),
-    ]);
+    );
     expect(judge({ "stale-tap": { error: "rejected the tap (unknown_element)" } })).toEqual([
       expect.objectContaining({ caseName: "stale-tap", boundary: "ios-client" }),
     ]);

@@ -1100,6 +1100,7 @@ public struct AutoMobileObservationNode: Codable, Sendable, Equatable
   public func contains(id: String) -> Bool
   public func node(id: String) -> AutoMobileObservationNode?
 public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
+  public let bundleId: String?
   public let captureIdentity: UInt64
   public let orientation: AutoMobileDeviceOrientation
   public let coordinateSpace: AutoMobileCoordinateSpace
@@ -1107,7 +1108,7 @@ public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
   public let root: AutoMobileObservationNode?
   public let focusedElementId: String?
   public let capabilities: Set<String>
-  public init( captureIdentity: UInt64, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
+  public init( captureIdentity: UInt64, bundleId: String? = Bundle.main.bundleIdentifier, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
   public func containsElement(id: String) -> Bool
 public enum AutoMobileAction: Codable, Sendable, Equatable
   case tap(observationIdentity: UInt64, elementId: String)
@@ -1147,6 +1148,13 @@ public struct SdkBounds: Codable, Sendable, Hashable
   public init(left: Int, top: Int, right: Int, bottom: Int)
   public var width: Int
   public var height: Int
+
+// sdk-wire/SdkCancellableContinuation.swift
+public final class SdkContinuationResumeOnce<Value: Sendable>: @unchecked Sendable
+  @discardableResult public func resume(returning value: Value) -> Bool
+  @discardableResult public func resume(throwing error: Error) -> Bool
+  public func withCancellableCheckedContinuation<Value: Sendable>( _ body: @Sendable (SdkContinuationResumeOnce<Value>) -> Void, onCancel: @escaping @Sendable () -> Void )
+  public func withSdkTimeout<Value: Sendable>( seconds: UInt64, timeoutError: Error, _ body: @escaping @Sendable () async throws -> Value, sleep: @escaping @Sendable (UInt64) async throws -> Void =
 
 // sdk-wire/SdkChromeModels.swift
 public struct SdkEdgeInsets: Codable, Sendable

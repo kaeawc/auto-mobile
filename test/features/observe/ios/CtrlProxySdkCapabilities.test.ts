@@ -12,6 +12,7 @@ import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrl
 import { SdkCapabilityProbeSupersededError } from "../../../../src/features/observe/ios/SdkCapabilityProbeSupersededError";
 import { SdkCapabilityQueryError } from "../../../../src/features/observe/ios/SdkCapabilityQueryError";
 import { CtrlProxySdkCapabilities } from "../../../../src/features/observe/ios/CtrlProxySdkCapabilities";
+import { observationBridgeUnavailable } from "../../../../src/features/observe/ios/observationBridgeState";
 import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { typedRefusalFields } from "../../../../src/models/typedRefusalFields";
@@ -26,6 +27,7 @@ interface ProbeReply {
   available?: boolean;
   bundleId?: string;
   capabilities?: string[];
+  observationBridge?: unknown;
   error?: string;
 }
 
@@ -564,6 +566,65 @@ describe("SDK capability transport uncertainty", () => {
     timer.advanceTime(1);
     expect(await probe.ensureSdkCapability("database")).toBe(false);
     expect(state.attempts).toBe(2);
+  });
+
+  test("re-probes an unavailable observation bridge after five seconds", async () => {
+    const { probe, state, timer } = createHarness(
+      () => ({
+        ...available,
+        observationBridge: { schemaVersion: 1, available: true, supportedActions: ["tap"] },
+      }),
+      false,
+    );
+    probe.seedForTesting(
+      "com.example.sdk",
+      ["database"],
+      observationBridgeUnavailable("NOT_REGISTERED"),
+    );
+    timer.advanceTime(5000);
+    expect(await probe.getObservationBridgeState("com.example.sdk")).toEqual({
+      status: "available",
+      schemaVersion: 1,
+      supportedActions: ["tap"],
+    });
+    expect(state.attempts).toBe(1);
+  });
+
+  test("caches an unavailable observation bridge before five seconds", async () => {
+    const { probe, state, timer } = createHarness(() => available, false);
+    const bridge = observationBridgeUnavailable("NOT_REGISTERED");
+    probe.seedForTesting("com.example.sdk", ["database"], bridge);
+    timer.advanceTime(4999);
+    expect(await probe.getObservationBridgeState("com.example.sdk")).toEqual(bridge);
+    expect(state.attempts).toBe(0);
+  });
+
+  test("keeps an available observation bridge cached after five seconds", async () => {
+    const { probe, state, timer } = createHarness(() => available, false);
+    probe.seedForTesting("com.example.sdk", ["database"], {
+      status: "available",
+      schemaVersion: 1,
+      supportedActions: ["tap"],
+    });
+    timer.advanceTime(5000);
+    expect(await probe.getObservationBridgeState("com.example.sdk")).toEqual({
+      status: "available",
+      schemaVersion: 1,
+      supportedActions: ["tap"],
+    });
+    expect(state.attempts).toBe(0);
+  });
+
+  test("keeps non-observation capabilities cached when the observation bridge is unavailable", async () => {
+    const { probe, state, timer } = createHarness(() => available, false);
+    probe.seedForTesting(
+      "com.example.sdk",
+      ["database"],
+      observationBridgeUnavailable("NOT_REGISTERED"),
+    );
+    timer.advanceTime(5000);
+    expect(await probe.ensureSdkCapability("database")).toBe(true);
+    expect(state.attempts).toBe(0);
   });
 
   test("retains definitive absence for a successful reply missing a capability", async () => {

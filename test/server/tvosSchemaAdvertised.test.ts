@@ -50,6 +50,7 @@ describe("tvOS is advertised in tool schemas and refused by every tool (#15886)"
     const plain = ToolRegistry.getEveryRegisteredTool().filter(
       (tool) =>
         tool.deviceAwareHandler === undefined &&
+        !["listDevices", "listDeviceImages"].includes(tool.name) &&
         JSON.stringify(toAdvertisedJsonSchema(tool.schema, { constrainAppIds: false })).includes(
           '"tvos"',
         ),
@@ -57,8 +58,6 @@ describe("tvOS is advertised in tool schemas and refused by every tool (#15886)"
     expect(plain.map((tool) => tool.name).sort()).toEqual([
       "deleteDevice",
       "killDevice",
-      "listDeviceImages",
-      "listDevices",
       "setActiveDevice",
       "startDevice",
     ]);

@@ -122,7 +122,6 @@ import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -1171,16 +1170,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       gestureThreadFactory = { gestureThreadFactory() },
     )
   @Volatile private var lastWindowClassName: String? = null
-  /**
-   * Changes immediately on a native UI event; capture and input share this device-owned context.
-   */
-  private val frameContext = AtomicLong(0)
-  /** Fresh for every service process, preventing a restarted runner from reusing an old token. */
-  private val frameContextEpoch = UUID.randomUUID().toString()
+  private val frameContextGate =
+    FrameContextGate(
+      epoch = UUID.randomUUID().toString(),
+      asyncActionRunner = asyncActionRunner,
+      timeProvider = timeProvider,
+      broadcast = { webSocketServer.broadcast(it) },
+    )
 
   private val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
 
-  private fun currentFrameContext(): String = "$frameContextEpoch:${frameContext.get()}"
+  private fun currentFrameContext(): String = frameContextGate.current()
 
   // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
   // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
@@ -2128,7 +2128,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     expected: String?,
     action: StaleFrameContextAction,
   ): Boolean {
-    if (expected == null || expected == currentFrameContext()) return false
+    if (!frameContextGate.isStale(expected)) return false
     val error =
       "Stale frame context for input/${action.wireName}; observe a fresh frame before retrying"
     launchRequestScope(requestId) { broadcastStaleFrameRejection(requestId, action, error) }
@@ -2315,25 +2315,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     globalActionController.performGlobalActionRequest(requestId, action)
   }
 
-  override suspend fun validateFrameContext(requestId: String?, frameContext: String) {
-    val matches = frameContext == currentFrameContext()
-    asyncActionRunner.launch(requestId, "validate_frame_context") {
-      webSocketServer.broadcast(
-        dev.jasonpearson.automobile.protocol.FrameContextValidationResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = requestId,
-          success = matches,
-          totalTimeMs = 0,
-          error =
-            if (matches) {
-              null
-            } else {
-              "Stale frame context for input/key; observe a fresh frame before retrying"
-            },
-        ),
-      )
-    }
-  }
+  override suspend fun validateFrameContext(requestId: String?, frameContext: String) =
+    frameContextGate.validate(requestId, frameContext)
 
   override suspend fun requestDeviceInfo(requestId: String?) =
     deviceInfoController.performDeviceInfoRequest(requestId)
@@ -2767,7 +2750,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // the screen changed during the gap, aiming an input action at the wrong UI state. This is a
       // cheap atomic increment maintaining the invariant; only the expensive work below is gated.
       if (advancesFrameContext(event.eventType)) {
-        frameContext.incrementAndGet()
+        frameContextGate.advance()
       }
 
       val connectionCount =

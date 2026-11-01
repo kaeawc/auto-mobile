@@ -1,3 +1,8 @@
+import { readFreshPlatformHierarchy } from "../../../src/features/action/tapHierarchyRead";
+import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { createIosSdkBridgeReader } from "../../../src/features/observe/ios/IosSdkBridgeReader";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyHierarchy";
@@ -207,4 +212,63 @@ describe("tapOn routes SDK bridge nodes through the bridge (#5159)", () => {
       h.restore();
     }
   });
+});
+
+test("tap hierarchy read gives stalled bridge discovery only the search time remaining", async () => {
+  const timer = new FakeTimer();
+  timer.setCurrentTime(1000);
+  const client = new FakeIOSCtrlProxy(timer);
+  client.setHierarchyData(raw);
+  const instance = spyOnIosClientInstance(client);
+  const convert = spyOn(client, "convertToViewHierarchyResult").mockImplementation((value) =>
+    converter.convertToViewHierarchyResult(value),
+  );
+  const sync = spyOn(client, "requestHierarchySync").mockImplementation(async () => {
+    timer.setCurrentTime(1060);
+    return { hierarchy: raw, totalTimeMs: 60 };
+  });
+  let discoveryTimeout: number | undefined;
+  let snapshots = 0;
+  const reader = createIosSdkBridgeReader({
+    timer,
+    enabled: () => true,
+    client: () => ({
+      getObservationBridgeStateForIos: async (_appId, timeoutMs) => {
+        discoveryTimeout = timeoutMs;
+        timer.setCurrentTime(timer.now() + (timeoutMs ?? 2000));
+        throw new Error("discovery timed out");
+      },
+      requestSdkObservationForIos: async () => {
+        snapshots++;
+        return { success: false, available: false, totalTimeMs: 0 };
+      },
+      requestSdkActionForIos: async () => {
+        throw new Error("not used");
+      },
+    }),
+  });
+  try {
+    const result = await readFreshPlatformHierarchy(
+      {
+        device,
+        timer,
+        adb: new FakeAdbClient(),
+        androidService: new FakeCtrlProxy(timer),
+        viewHierarchy: new ViewHierarchy(device, new FakeAdbClientFactory(), null, { timer }),
+        prepareForResponse: (hierarchy) => hierarchy,
+        actionLabel: "tapOn",
+        sdkBridge: reader,
+        sdkWeb: { snapshots: async () => [] },
+      },
+      { timeoutMs: 100, forceCapture: false },
+    );
+    expect(result).not.toBeNull();
+    expect(discoveryTimeout).toBe(40);
+    expect(snapshots).toBe(0);
+    expect(timer.now()).toBe(1100);
+  } finally {
+    instance.mockRestore();
+    convert.mockRestore();
+    sync.mockRestore();
+  }
 });

@@ -10,7 +10,8 @@ An Apple Watch simulator is `platform: "watchos"`, a third member of `Platform`
 non-iOS Apple platform (`NonIosApplePlatform`): an Apple TV simulator is `platform: "tvos"`, and
 everything below that says "watch" applies to it unless a section names watchOS specifically.
 `tvos` supports `listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`,
-`startDevice`, `setActiveDevice` and `killDevice`. Discovery and selection require an explicit
+`startDevice`, `setActiveDevice`, `killDevice`, `installApp`, `uninstallApp`, `launchApp`,
+`terminateApp` and `listApps`. Discovery and selection require an explicit
 tvOS request. Boot uses simctl readiness and the simulator gate; start binds at `booted`
 readiness without an automation runner, keyboard, biometric or prototype setup. A broker binding
 never reuses a TV. Unlike watchOS,

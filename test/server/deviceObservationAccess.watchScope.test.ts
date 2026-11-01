@@ -22,14 +22,18 @@ const IPHONE: BootedDevice = {
   platform: "ios",
 };
 
-function access(listings: Record<ReadListingScope, BootedResourceReadListing>) {
+function access(listings: Partial<Record<ReadListingScope, BootedResourceReadListing>>) {
   const scopes: ReadListingScope[] = [];
   const read: DeviceObservationAccess = {
     avdConfigReader: undefined,
     listBooted: async () => [],
     listBootedWithStatus: async (_signal, scope = "either") => {
       scopes.push(scope);
-      return listings[scope];
+      const listing = listings[scope];
+      if (!listing) {
+        throw new Error(`Unexpected read scope: ${scope}`);
+      }
+      return listing;
     },
     isAuthorized: () => true,
   };

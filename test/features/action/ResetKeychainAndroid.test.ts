@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { ResetKeychain } from "../../../src/features/action/ResetKeychain";
 import {
   keystoreResetSchema,
@@ -118,4 +119,15 @@ test("tool selectors retain exact declared identifiers", () => {
   expect(
     resetKeychainSchema.parse({ appId: "com.example", scope: " login ", alias: " token " }),
   ).toMatchObject({ scope: " login ", alias: " token " });
+});
+
+test("Android reset without an injected backend throws an actionable availability error", async () => {
+  const action = new ResetKeychain(device);
+  const reset = action.execute({
+    appId: "com.example",
+    scope: "login",
+    explicitlyTargeted: true,
+  });
+  await expect(reset).rejects.toBeInstanceOf(ActionableError);
+  await expect(reset).rejects.toThrow("Android Keystore reset is unavailable in this entry point.");
 });

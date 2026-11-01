@@ -10,6 +10,7 @@ import {
   type InstallGuardOptions,
 } from "../features/action/InstallApp";
 import { ResetKeychain } from "../features/action/ResetKeychain";
+import type { KeystoreResetBackend } from "../features/storage/keystoreReset";
 import type { TerminateAppCall } from "../features/action/TerminateApp";
 import { type UninstallAppCall, type UninstallGuardOptions } from "../features/action/UninstallApp";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
@@ -719,6 +720,7 @@ function subscribePrototypeAgentLifecycle(
 
 /** Overrides for the collaborators `registerAppTools` wires into its handlers (tests, embedders). */
 export interface AppToolsDependencies {
+  keystoreReset?: (device: BootedDevice) => KeystoreResetBackend;
   listApps?: Partial<ListAppsToolDependencies>;
   launchApp?: Partial<LaunchAppToolDependencies>;
   terminateApp?: Partial<TerminateAppToolDependencies>;
@@ -803,23 +805,6 @@ const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermis
   return withIsErrorOnFailure(response, result.success);
 };
 
-const resetKeychainHandler = async (device: BootedDevice, args: ResetKeychainArgs) => {
-  // A destructive, device-wide reset must target an explicitly selected device.
-  // deviceId/device-label/sessionUuid are the device-bound selectors; if none is
-  // present the device was ambiently resolved and the action refuses to run.
-  const explicitlyTargeted = Boolean(args.deviceId || args.device || args.sessionUuid);
-  const action = new ResetKeychain(device);
-  const result = await action.execute({
-    appId: args.appId,
-    confirm: args.confirm,
-    scope: args.scope,
-    alias: args.alias,
-    explicitlyTargeted,
-  });
-
-  return withIsErrorOnFailure(createStructuredToolResponse({ ...result }), result.success);
-};
-
 export function registerAppTools(dependencies: AppToolsDependencies = {}) {
   const {
     listAppsHandler,
@@ -833,6 +818,22 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     inspectPackageSigningToolDependencies,
     setAppPermissionsHandler,
   } = createAppToolHandlers(dependencies);
+  const resetKeychainHandler = async (device: BootedDevice, args: ResetKeychainArgs) => {
+    // A destructive, device-wide reset must target an explicitly selected device.
+    // deviceId/device-label/sessionUuid are the device-bound selectors; if none is
+    // present the device was ambiently resolved and the action refuses to run.
+    const explicitlyTargeted = Boolean(args.deviceId || args.device || args.sessionUuid);
+    const action = new ResetKeychain(device, null, dependencies.keystoreReset?.(device));
+    const result = await action.execute({
+      appId: args.appId,
+      confirm: args.confirm,
+      scope: args.scope,
+      alias: args.alias,
+      explicitlyTargeted,
+    });
+
+    return withIsErrorOnFailure(createStructuredToolResponse({ ...result }), result.success);
+  };
   unsubscribePrototypeAgentLifecycle?.();
   unsubscribePrototypeAgentLifecycle = subscribePrototypeAgentLifecycle(launchAppDependencies);
   const inspectPackageSigningHandler = async (

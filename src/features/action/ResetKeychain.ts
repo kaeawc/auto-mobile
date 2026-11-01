@@ -1,5 +1,4 @@
 import type { KeystoreResetBackend } from "../storage/keystoreReset";
-import { AndroidCtrlProxyClient } from "../observe/android";
 import { ActionableError, toActionableError } from "../../models";
 import type { BootedDevice, ExecResult, ResetKeychainResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -140,7 +139,10 @@ export class ResetKeychain {
     if (!options.scope?.trim() && !options.alias?.trim()) {
       throw new ActionableError("Android Keystore reset requires a scope or alias selector.");
     }
-    const backend = this.keystore ?? AndroidCtrlProxyClient.getInstance(this.device);
+    const backend = this.keystore;
+    if (!backend) {
+      throw new ActionableError("Android Keystore reset is unavailable in this entry point.");
+    }
     const state = await backend.resetKeystore(options.appId, options.scope, options.alias);
     return {
       ...state,

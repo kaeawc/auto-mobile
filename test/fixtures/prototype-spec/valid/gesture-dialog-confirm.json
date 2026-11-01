@@ -1,0 +1,35 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["share"]
+  },
+  "root": {
+    "type": "dialog",
+    "openWhen": {
+      "key": "open",
+      "equals": true
+    },
+    "confirm": {
+      "label": "Share",
+      "onTap": [
+        {
+          "type": "platform",
+          "call": "share.open",
+          "args": {
+            "text": {
+              "value": "Hello {name} {data:/post/title} {item.name} {index}"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "state": {
+    "open": true
+  }
+}

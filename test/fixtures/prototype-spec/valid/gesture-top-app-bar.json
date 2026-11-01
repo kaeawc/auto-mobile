@@ -1,0 +1,32 @@
+{
+  "id": "share",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "requires": {
+    "platform": ["share"]
+  },
+  "root": {
+    "type": "topAppBar",
+    "title": "Share",
+    "actions": [
+      {
+        "icon": "share",
+        "label": "Share",
+        "onTap": [
+          {
+            "type": "platform",
+            "call": "share.open",
+            "args": {
+              "text": {
+                "value": "Hello {name} {data:/post/title} {item.name} {index}"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

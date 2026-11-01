@@ -1,5 +1,11 @@
 import Foundation
 
+/// The status-bar band in window points. Missing windows and hidden bars have no band.
+func prototypeStatusSafeAreaTop(windowInsets: PrototypeSafeInsets?, statusBarHidden: Bool) -> CGFloat {
+    guard !statusBarHidden, let top = windowInsets?.top, top.isFinite else { return 0 }
+    return max(0, top)
+}
+
 // Pure, UIKit-free connection protocol for the prototype agent (#10566): launch configuration,
 // newline framing and the hello/auth gate. Part of the UIKit-free core target, so `swift test`
 // covers it on macOS; scripts/ios/prototype-agent-build.sh compiles it into the simulator dylib

@@ -26,6 +26,88 @@ describe.each(["android", "ios"] as const)("tapOn duration action on %s", (platf
     factory.mockClear();
   });
 
+  describe("schema inferred action", () => {
+    test.each([1, 499])("refuses inferred longPress duration %i below the minimum", (duration) => {
+      const result = tapOnSchema.safeParse({
+        platform,
+        selector: { text: "Target" },
+        duration,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toContainEqual(
+          expect.objectContaining({
+            code: "custom",
+            path: ["duration"],
+            message: "longPress duration must be 0 (platform default) or at least 500 ms",
+          }),
+        );
+      }
+    });
+
+    test.each([0, 500, undefined])("accepts duration %s", (duration) => {
+      expect(
+        tapOnSchema.safeParse({ platform, selector: { text: "Target" }, duration }).success,
+      ).toBe(true);
+    });
+  });
+
+  test.each([0, 1, 200, 499, 500, undefined])(
+    "accepts explicit longPress duration %s",
+    (duration) => {
+      expect(
+        tapOnSchema.safeParse({
+          platform,
+          selector: { text: "Target" },
+          action: "longPress",
+          duration,
+        }).success,
+      ).toBe(true);
+    },
+  );
+
+  test.each([true, false])("refuses inferred longPress with ensureChecked=%s", (ensureChecked) => {
+    const result = tapOnSchema.safeParse({
+      platform,
+      selector: { text: "Target" },
+      duration: 750,
+      ensureChecked,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(
+        expect.objectContaining({
+          code: "custom",
+          path: ["ensureChecked"],
+          message: 'ensureChecked requires action "tap"',
+        }),
+      );
+    }
+  });
+
+  test.each([
+    ["direct accessibilityLink", { selector: { accessibilityLink: "Terms of Service" } }],
+    [
+      "owner-scoped semantic link",
+      { selector: { text: "Legal" }, subtext: { text: "Terms of Service" } },
+    ],
+  ] as const)("refuses inferred longPress with %s", (_label, options) => {
+    const result = tapOnSchema.safeParse({ platform, duration: 750, ...options });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toContainEqual(
+        expect.objectContaining({
+          code: "custom",
+          path: ["action"],
+          message: "semantic link activation supports only the tap action",
+        }),
+      );
+    }
+  });
+
   test.each([
     ["positive duration without action infers longPress", { duration: 750 }, "longPress"],
     ["explicit longPress keeps its duration", { action: "longPress", duration: 750 }, "longPress"],

@@ -23,8 +23,22 @@ import { imageRelativePointSchema } from "../imageRelativePointSchema";
 import type { TapOnArgs } from "../interactionToolTypes";
 import { pointerSchema } from "../pointerSchema";
 
-function validateEnsureCheckedSchema(
-  value: Pick<TapOnArgs, "ensureChecked" | "action" | "selectionStrategy">,
+function validateLongPressDuration(
+  action: string | undefined,
+  duration: number,
+  ctx: z.RefinementCtx,
+): void {
+  if (action === undefined && duration > 0 && duration < LONG_PRESS_MIN_MS) {
+    ctx.addIssue({
+      code: "custom",
+      message: `longPress duration must be 0 (platform default) or at least ${LONG_PRESS_MIN_MS} ms`,
+      path: ["duration"],
+    });
+  }
+}
+
+function validateTapOnSelectionSchema(
+  value: Pick<TapOnArgs, "ensureChecked" | "action" | "selectionStrategy" | "sibling" | "selector">,
   ctx: z.RefinementCtx,
 ): void {
   if (value.ensureChecked !== undefined && (value.action ?? "tap") !== "tap") {
@@ -39,6 +53,17 @@ function validateEnsureCheckedSchema(
       code: z.ZodIssueCode.custom,
       message: "ensureChecked cannot use random selection; use a unique selector or index",
       path: ["ensureChecked"],
+    });
+  }
+  if (
+    value.selectionStrategy === "unique" &&
+    (value.sibling || "accessibilityLink" in value.selector)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead",
+      path: ["selectionStrategy"],
     });
   }
 }
@@ -140,7 +165,10 @@ export const tapOnSchema = withJsonSchemaOverride(
       })
       .strict(),
   ).superRefine((value, ctx) => {
-    validateEnsureCheckedSchema(value, ctx);
+    const { duration = 0 } = value;
+    const action = value.action ?? (duration > 0 ? "longPress" : "tap");
+    validateLongPressDuration(value.action, duration, ctx);
+    validateTapOnSelectionSchema({ ...value, action }, ctx);
     const isDirectLink = "accessibilityLink" in value.selector;
     const addIssue = (invalid: unknown, message: string, path: (string | number)[]) => {
       if (!invalid) {
@@ -152,11 +180,6 @@ export const tapOnSchema = withJsonSchemaOverride(
         path,
       });
     };
-    addIssue(
-      value.selectionStrategy === "unique" && (value.sibling || isDirectLink),
-      "unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead",
-      ["selectionStrategy"],
-    );
     if (!isDirectLink && !value.subtext) {
       return;
     }
@@ -165,11 +188,7 @@ export const tapOnSchema = withJsonSchemaOverride(
       "accessibilityLink and subtext cannot be used together",
       ["subtext"],
     );
-    addIssue(
-      (value.action ?? "tap") !== "tap",
-      "semantic link activation supports only the tap action",
-      ["action"],
-    );
+    addIssue(action !== "tap", "semantic link activation supports only the tap action", ["action"]);
     addIssue(value.sibling, "semantic link activation cannot use sibling", ["sibling"]);
     addIssue(
       value.retryIfNoChange || value.ensureTap,
@@ -330,6 +349,7 @@ export const tapAnySchema = withJsonSchemaOverride(
       .strict(),
   )
     .superRefine((value, context) => {
+      validateLongPressDuration(value.action, value.duration ?? 0, context);
       if (
         value.duration !== undefined &&
         value.action !== undefined &&

@@ -953,6 +953,9 @@ describe("HomeScreen", () => {
         });
         const pressBudgets: number[] = [];
         spyOn(client, "requestPressHome").mockImplementation(async (timeoutMs) => {
+          if (timeoutMs === undefined) {
+            throw new Error("Expected a Home press timeout budget");
+          }
           pressBudgets.push(timeoutMs);
           fakeTimer.advanceTime(1000);
           return { success: true, totalTimeMs: 1000 };

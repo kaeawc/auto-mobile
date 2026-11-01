@@ -166,6 +166,7 @@ const CLASSIFICATION: Classification = {
     "putAppFile",
     "recentApps",
     "rotaryScroll",
+    "rotateCrown",
     "reconcileDeviceResources",
     "recordDeviceGestures",
     "removeKeyValue",

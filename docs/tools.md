@@ -117,6 +117,7 @@ A read never writes settings on a device another session holds. A sessionless re
 | 📶 <code>statusBar</code>                   | Pin status-bar time, battery, and signal for clean screenshots                       |
 | 🪟 <code>windowMode</code>                  | Fullscreen, PiP, or split-screen an Android task                                     |
 | 🎛️ <code>rotaryScroll</code>                | Wear OS crown scroll with read-back; reports every attempted method                  |
+| ⌚ <code>rotateCrown</code>                 | watchOS: rotate the Digital Crown by a signed delta with optional velocity           |
 | 🌍 <code>openLink</code>                    | Open URL in browser                                                                  |
 | 🏠 <code>homeScreen</code>                  | Go to home screen                                                                    |
 | 🕘 <code>recentApps</code>                  | Open recent apps                                                                     |

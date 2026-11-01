@@ -11,6 +11,12 @@ import { FakeDisplayInventorySource } from "../fakes/FakeDisplayInventoryProvide
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { AdmittingAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import {
+  ambientDeviceExecutionBinding,
+  runWithDeviceExecutionBinding,
+} from "../../src/utils/deviceExecutionBinding";
+import { FakeDeviceExecutionBinding } from "../fakes/FakeDeviceExecutionBinding";
 import { createExecResult } from "../../src/utils/execResult";
 import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import { DefaultDeviceMatcher, describeDisplayRequirements } from "../../src/utils/deviceMatcher";
@@ -25,6 +31,45 @@ const displays = {
 };
 
 describe("CachingDisplayInventoryProvider", () => {
+  test.each([false, true])(
+    "display reads preserve admission without binding an unrelated device (retry=%s)",
+    async (retry) => {
+      const unrelated: BootedDevice = { ...device, deviceId: "emulator-5556" };
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      const delegate = new FakeAdbClientFactory(adb);
+      const admitted: string[] = [];
+      const factory = new AdmittingAdbClientFactory(delegate, {
+        admissionGate: { assertDeviceActionable: (id) => void admitted.push(id) },
+        executionBinding: ambientDeviceExecutionBinding,
+      });
+      const provider = createDisplayInventoryProvider(
+        factory,
+        { readDeviceDisplays: async () => undefined },
+        timer,
+      );
+      if (retry) {
+        // Empty fake output is unreadable; the next caller starts the background retry.
+        expect((await provider.hydrate(unrelated, "boot-1"))[displayInventoryOutcome]?.kind).toBe(
+          "unreadable",
+        );
+        timer.advanceTime(30_000);
+        admitted.length = 0;
+      }
+      const binding = new FakeDeviceExecutionBinding();
+      await runWithDeviceExecutionBinding(binding, async () => {
+        await provider.hydrate(unrelated, "boot-1");
+        expect(admitted).toEqual([unrelated.deviceId]);
+        expect(delegate.wasCalledForDevice(unrelated.deviceId)).toBe(true);
+        expect(delegate.getCallCount()).toBe(retry ? 2 : 1);
+        // Target admission still binds after the shared inventory read restores the context.
+        factory.create(device);
+        expect(binding.deviceIds).toEqual([device.deviceId]);
+      });
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
   test("real phone capture confirms one panel without exposing displays", async () => {
     const fixture = (name: string): string =>
       readFileSync(join(import.meta.dir, "../fixtures/android-display", name), "utf8");

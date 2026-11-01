@@ -2479,6 +2479,7 @@ describe("provisionDevice handler", () => {
             listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
             isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
             avdManager: {
+              listInstalledSystemImages: async () => [],
               createAvd: async ({ name }) => {
                 createdAvds.push(name);
                 deviceManager.setDeviceImages("android", [
@@ -2534,6 +2535,7 @@ describe("provisionDevice handler", () => {
           listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
           isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
           avdManager: {
+            listInstalledSystemImages: async () => [],
             createAvd: async ({ name }) => {
               // A racing external create landed after the provisioner's listing.
               deviceManager.setDeviceImages("android", [
@@ -2587,6 +2589,7 @@ describe("provisionDevice handler", () => {
           listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
           isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
           avdManager: {
+            listInstalledSystemImages: async () => [],
             createAvd: async ({ name }) => {
               // avdmanager wrote the AVD, then was killed at its timeout.
               deviceManager.setDeviceImages("android", [
@@ -2656,6 +2659,7 @@ describe("provisionDevice handler", () => {
           listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
           isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
           avdManager: {
+            listInstalledSystemImages: async () => [],
             createAvd: async ({ name }) => {
               deviceManager.setDeviceImages("android", [
                 { name, platform: "android", isRunning: false },
@@ -2745,6 +2749,7 @@ describe("provisionDevice handler", () => {
           listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
           isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
           avdManager: {
+            listInstalledSystemImages: async () => [],
             createAvd: async ({ name }) => {
               deviceManager.setDeviceImages("android", [
                 { name, platform: "android", isRunning: false },
@@ -3351,6 +3356,7 @@ describe("provisionDevice handler", () => {
           listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
           isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
           avdManager: {
+            listInstalledSystemImages: async () => [],
             createAvd: async ({ name }) => {
               deviceManager.setDeviceImages("android", [
                 { name, platform: "android", isRunning: false },

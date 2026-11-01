@@ -30,7 +30,7 @@ import {
 import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "../utils/androidVersionBounds";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
-import { ProvisionDeviceCreateRejectedError } from "./exactDeviceProvisioning";
+import { ProvisionDeviceCreateRejectedError } from "./ProvisionDeviceCreateRejectedError";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import {
@@ -380,7 +380,7 @@ const HANDHELD_IMAGE_FAMILY: AndroidImageFamily = {
  * Google TV images ship the Play Store, whose builds usually refuse `adb root`. The order is a
  * provisional choice until the TV baseline (#15899) confirms root on each image.
  */
-const TV_ANDROID_TAGS = androidSystemImageTagsFor("tv");
+export const TV_ANDROID_TAGS = androidSystemImageTagsFor("tv");
 
 const TV_IMAGE_FAMILY: AndroidImageFamily = {
   kind: "tv",
@@ -571,6 +571,14 @@ function handheldImagesOrThrow(
   return handheld;
 }
 
+/** Shared installation wording for selected and exact Android TV provisioning. */
+export function androidTvImageInstallGuidance(packageName: string): string {
+  return (
+    "AutoMobile does not download system images. Install one with " +
+    `'sdkmanager "${packageName}"'`
+  );
+}
+
 /** TV images in range, or an error naming the exact sdkmanager command that installs one. */
 function tvImagesOrThrow(
   images: SystemImage[],
@@ -587,8 +595,8 @@ function tvImagesOrThrow(
   throw new ActionableError(
     `No installed Android TV system image (${TV_ANDROID_TAGS.join(", ")}) matches the requested ` +
       `API range ${describeRange(bounds)}. Installed images: ${describeInstalled(images)}. ` +
-      "AutoMobile does not download system images. Install one with " +
-      `'sdkmanager "system-images;android-${api};android-tv;${abis[0]}"' (or google-tv in place of ` +
+      androidTvImageInstallGuidance(`system-images;android-${api};android-tv;${abis[0]}`) +
+      " (or google-tv in place of " +
       `android-tv), then retry. This host runs ${abis.join(" or ")} images; 'sdkmanager --list' ` +
       "shows the ABIs published for each API level.",
   );

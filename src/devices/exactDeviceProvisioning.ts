@@ -24,7 +24,7 @@ import {
 } from "./FileAndroidAvdConfigWriter";
 import { DeviceAssignedToBindingError } from "../models/DeviceAssignedToBindingError";
 import type { DeviceInfo } from "../models";
-import { ActionableError, requireAndroidOrIosPlatform } from "../models";
+import { ActionableError, toActionableError, requireAndroidOrIosPlatform } from "../models";
 import type { DeviceCreationGate } from "./deviceCreationGate";
 import type { PlatformDeviceManager } from "./deviceUtils";
 import type { AvdConfigReader } from "../utils/android-cmdline-tools/AvdConfigReader";
@@ -37,7 +37,13 @@ import {
 } from "./deviceSpecMatching";
 import { AvdManagerClient } from "../utils/android-cmdline-tools/AvdManagerClient";
 import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
-import type { CreateAvdParams } from "../utils/android-cmdline-tools/avdmanager";
+import {
+  listInstalledSystemImages,
+  type CreateAvdParams,
+  type SystemImage,
+} from "../utils/android-cmdline-tools/avdmanager";
+import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
+import { TV_ANDROID_TAGS, androidTvImageInstallGuidance } from "./deviceProvisioning";
 import {
   SimCtlClient,
   type SimCtlCatalog,
@@ -112,6 +118,7 @@ export interface ExactProvisionedDevice {
 }
 
 export interface ExactAndroidAvdClient {
+  listInstalledSystemImages(signal?: AbortSignal): Promise<SystemImage[]>;
   createAvd(
     params: CreateAvdParams,
     options?: { signal?: AbortSignal },
@@ -529,6 +536,25 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     spec: AndroidDeviceSpecification,
     displayCutout: DisplayCutoutClassification,
   ): Promise<ExactProvisionedDevice> {
+    const runtime = parseAndroidSystemImageRuntime(spec.runtime);
+    if (runtime && TV_ANDROID_TAGS.includes(runtime.tag)) {
+      let installed: SystemImage[];
+      try {
+        installed = await this.dependencies.avdManager.listInstalledSystemImages(request.signal);
+      } catch (error) {
+        throw toActionableError(
+          error,
+          "Failed to list installed Android system images for AVD creation",
+        );
+      }
+      if (!installed.some((image) => image.packageName === spec.runtime)) {
+        throw new ActionableError(
+          `No installed Android TV system image matches the requested package '${spec.runtime}'. ` +
+            androidTvImageInstallGuidance(spec.runtime) +
+            ", then retry.",
+        );
+      }
+    }
     let created: Awaited<ReturnType<ExactAndroidAvdClient["createAvd"]>>;
     try {
       created = await this.dependencies.avdManager.createAvd(
@@ -666,11 +692,16 @@ export function createDefaultExactDeviceProvisioner(
     ios,
   }: DefaultExactDeviceProvisionerOptions = {},
 ): ExactDeviceProvisioner {
+  const avdManager = new AvdManagerClient();
   return new DefaultExactDeviceProvisioner({
     assertAdoptable,
     listDeviceImages: deviceManager.listDeviceImages.bind(deviceManager),
     isCreationAllowed: deviceCreationGate.isCreationAllowed.bind(deviceCreationGate),
-    avdManager: new AvdManagerClient(),
+    avdManager: {
+      listInstalledSystemImages: (signal) =>
+        listInstalledSystemImages(undefined, undefined, signal),
+      createAvd: (params, options) => avdManager.createAvd(params, options),
+    },
     androidConfigReader: new FileAvdConfigReader(),
     androidConfigWriter,
     simulatorCreation,

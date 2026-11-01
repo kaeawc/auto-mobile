@@ -71,7 +71,9 @@ never reuses a TV. Unlike watchOS,
 - **Runner-backed watch observation and actions.** `observe` retains a simctl PNG. When an
   explicitly registered watch runner is connected, it also returns the hierarchy normalized
   through the iOS observation model; bounds and `screenSize` use XCTest points while
-  `screenshotImageSize` uses physical pixels. Without a runner it returns the screenshot,
+  `screenshotImageSize` uses physical pixels. The runner snapshots its app only while it is
+  foreground; otherwise `app_not_foreground` produces the screenshot-only observation rather
+  than a retained app hierarchy. Without a runner it returns the screenshot,
   physical `screenSize` and `hierarchyUnavailable`, with hierarchy fields absent. Advanced
   observe options (`waitFor`, `settled`, `raw`, `includeExtras`, `scope`, `layer`,
   `skipBackStack`, `crop`, `screenshotOptions`, `screenshot: "none"`, another display) are refused.

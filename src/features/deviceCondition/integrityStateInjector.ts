@@ -80,8 +80,7 @@ class IntegrityStateInjector implements DeviceConditionInjector {
   ) {}
 
   /** A file signal's state without the stubs another fixture (rootState) still needs (#16275). */
-  private async ownState(id: ToggleId, signal?: AbortSignal): Promise<SignalState> {
-    const state = await this.readState(id, signal);
+  private withoutOthers(id: ToggleId, state: SignalState): SignalState {
     if (id === "selinux-permissive") {
       return state;
     }
@@ -89,6 +88,10 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       [...state.paths].filter((path) => !this.artifacts.heldByOther(this, path)),
     );
     return { active: paths.size > 0, paths };
+  }
+
+  private async ownState(id: ToggleId, signal?: AbortSignal): Promise<SignalState> {
+    return this.withoutOthers(id, await this.readState(id, signal));
   }
 
   private async readState(id: ToggleId, signal?: AbortSignal): Promise<SignalState> {
@@ -176,7 +179,7 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       await this.root(signal, true);
       // A stub another fixture still needs stays; that fixture's reset removes it (#16275).
       const remove = [...mutation.paths].filter(
-        (path) => !mutation.before.paths.has(path) && this.artifacts.removableBy(this, path),
+        (path) => !mutation.before.paths.has(path) && !this.artifacts.heldByOther(this, path),
       );
       const replace = [...mutation.paths].filter((path) => mutation.before.paths.has(path));
       if (remove.length > 0) {
@@ -253,7 +256,8 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       try {
         const state = await this.readState(id, signal);
         frame.baseline.set(id, state);
-        frame.expected.set(id, state.active);
+        // Read the way isClean reads: stubs another fixture still needs are not this baseline's.
+        frame.expected.set(id, this.withoutOthers(id, state).active);
       } catch (error) {
         logger.warn(`integrityState baseline for ${id} failed: ${errorMessage(error)}`, error);
         frame.failures.set(id, errorMessage(error));
@@ -283,13 +287,12 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       const paths = ROOT_ARTIFACT_PATHS.filter(
         (path) => pathsFor(mutation.id).includes(path) && !mutation.before.paths.has(path),
       );
-      // Registered before the write, so a rollback after a half-planted file removes it.
-      for (const path of paths) {
-        this.artifacts.plant(this, path);
-      }
+      // mutation.paths records each path before its write, so a rollback removes a
+      // half-planted file; ownership is registered only once every write has succeeded.
       await plantArtifacts(this.adb, paths, mutation.paths, signal);
       for (const path of mutation.paths) {
         this.planted.add(path);
+        this.artifacts.plant(this, path);
       }
     } else {
       for (const path of mutation.before.paths) {

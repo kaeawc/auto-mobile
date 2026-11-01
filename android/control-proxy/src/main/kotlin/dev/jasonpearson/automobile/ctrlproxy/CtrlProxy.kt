@@ -17,7 +17,6 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.SystemClock
-import android.provider.Settings
 import android.util.Base64
 import android.util.Log
 import android.view.Display
@@ -41,48 +40,36 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPinnedShortcutPlatform
-import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceAppearance
-import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceLocale
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeScreenShapeSource
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
-import dev.jasonpearson.automobile.ctrlproxy.prototype.DefaultPrototypeHost
 import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetStore
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdropSupport
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBackdrops
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeController
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEventSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundTracker
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHiddenCapture
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHostLink
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClients
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
-import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
-import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStores
-import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundOrUnscoped
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
-import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.GlobalActionResult
@@ -103,11 +90,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import okhttp3.OkHttpClient
 
 // AccessibilityEvent constants are inlined on every API level; preserve the subscribed values.
 private const val SPEECH_STATE_CHANGE_EVENT = 0x02000000 // TYPE_SPEECH_STATE_CHANGE, API 33.
@@ -277,7 +262,7 @@ class CtrlProxy : AccessibilityService() {
       ),
     )
   }
-  private val prototypePlatform by prototypePlatformDelegate
+  internal val prototypePlatform by prototypePlatformDelegate
 
   /**
    * Emits a `type:"error"` frame when a `serviceScope.launch { … }` throws uncaught. Correlation is
@@ -300,7 +285,7 @@ class CtrlProxy : AccessibilityService() {
       logError = { message, error -> Log.e(TAG, message, error) },
     )
 
-  private val serviceScope: CoroutineScope =
+  internal val serviceScope: CoroutineScope =
     CoroutineScope(Dispatchers.IO + SupervisorJob() + serviceScopeGuard.handler)
 
   // Prototype cleanup must finish on Main even after serviceScope is cancelled during teardown.
@@ -350,7 +335,7 @@ class CtrlProxy : AccessibilityService() {
    * running — there is then no socket to send the fallback on, so the awaiter falls back to its
    * timeout, the same as the double-failure tail. See [ResultBroadcaster].
    */
-  private val resultBroadcaster =
+  internal val resultBroadcaster =
     ResultBroadcaster(
       broadcastError = { response ->
         if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
@@ -396,7 +381,7 @@ class CtrlProxy : AccessibilityService() {
   private val recompositionStore = RecompositionStore()
   private val frameMetricsStore = FrameMetricsStore()
   internal val workStats = CtrlProxyWorkStats()
-  private val viewHierarchyExtractor =
+  internal val viewHierarchyExtractor =
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
@@ -433,7 +418,7 @@ class CtrlProxy : AccessibilityService() {
 
   private val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
-  private lateinit var webSocketServer: WebSocketServer
+  internal lateinit var webSocketServer: WebSocketServer
   private val webSocketLifecycle = ServerLifecycle<WebSocketServer> { it.stop() }
   private val deviceEvents =
     DeviceEventBroadcaster(
@@ -478,7 +463,7 @@ class CtrlProxy : AccessibilityService() {
   internal lateinit var prototypeController: PrototypeController
 
   /** `via: "host"` prototype requests: sent over the socket to the latest connected host. */
-  private val hostPrototypeHttp =
+  internal val hostPrototypeHttp =
     HostPrototypeHttpClient(
       PrototypeHostLink { frame ->
         if (::webSocketServer.isInitialized) webSocketServer.sendToHost(frame) else null
@@ -496,7 +481,7 @@ class CtrlProxy : AccessibilityService() {
       action = { prototypeController.onConfigurationChanged() },
     )
   // Hides the prototype while another app is in front, restores it on return (#10261).
-  private val prototypeForeground by lazy {
+  internal val prototypeForeground by lazy {
     PrototypeForegroundTracker(
       CoroutinePrototypeScheduler(serviceScope),
       ownPackage = packageName,
@@ -504,7 +489,7 @@ class CtrlProxy : AccessibilityService() {
       onChanged = { refreshPrototypeWindowNow() },
     )
   }
-  private val prototypeResultSink =
+  internal val prototypeResultSink =
     PrototypeResultBroadcaster(
       object : PrototypeResultTransport {
         override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
@@ -520,7 +505,7 @@ class CtrlProxy : AccessibilityService() {
   // Asset bytes live in the cache directory, never in the heap; cleared with the prototype session.
   // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
   // main-thread clear or lookup never touches the disk.
-  private val prototypeAssets by lazy {
+  internal val prototypeAssets by lazy {
     PrototypeAssetStore(
       PrototypeAssetDirectory(File(cacheDir, "prototype-assets")),
       session = {
@@ -530,7 +515,7 @@ class CtrlProxy : AccessibilityService() {
     )
   }
   // Decoded bitmaps of stored assets, dropped as soon as the store replaces, removes or clears one.
-  private val prototypeImages by lazy {
+  internal val prototypeImages by lazy {
     PrototypeImageCache(prototypeAssets, BitmapPrototypeImageDecoder()).also { images ->
       // The store has one listener slot, so fan a change out to both caches.
       prototypeAssets.setChangeListener { ids ->
@@ -540,12 +525,12 @@ class CtrlProxy : AccessibilityService() {
     }
   }
   // Loaded custom fonts (`fontFamily: {asset}`), dropped when the store changes an asset.
-  private val prototypeFonts by lazy {
+  internal val prototypeFonts by lazy {
     PrototypeFontCache(prototypeAssets, ComposePrototypeFontLoader())
   }
   // Values a spec's storage block keeps across shows (#12522); writes are coalesced on the service
   // scope and hit the disk on IO.
-  private val prototypeStorage by lazy {
+  internal val prototypeStorage by lazy {
     PrototypeStoragePersistence(
       PrototypeStorageStores.inDirectory(prototypeStorageRoot(filesDir)),
       CoroutinePrototypeScheduler(serviceScope),
@@ -572,7 +557,7 @@ class CtrlProxy : AccessibilityService() {
       PrototypeBase64Decoder { Base64.decode(it, Base64.DEFAULT) },
     )
   }
-  private lateinit var overlayManager: OverlayManager
+  internal lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
   internal val globalActionController by lazy {
     GlobalActionController(
@@ -1252,7 +1237,7 @@ class CtrlProxy : AccessibilityService() {
       },
     )
 
-  private val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
+  internal val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
 
   private fun currentFrameContext(): String = frameContextGate.current()
 
@@ -1413,7 +1398,7 @@ class CtrlProxy : AccessibilityService() {
   }
 
   // Lazy: needs the service context, and the controller built below outlives reconnects.
-  private val prototypeDisplays by lazy { AndroidPrototypeDisplays(this) }
+  internal val prototypeDisplays by lazy { AndroidPrototypeDisplays(this) }
 
   override fun onServiceConnected() {
     super.onServiceConnected()
@@ -1456,110 +1441,7 @@ class CtrlProxy : AccessibilityService() {
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
       if (!::prototypeController.isInitialized) {
-        // Locks are shared safety facts; foreground suspension is request-local per surface.
-        val windowBlocked = { this@CtrlProxy.prototypeWindowBlocked() }
-        val createPrototypeHost = {
-          DefaultPrototypeHost(
-            context = this,
-            displayWindows = prototypeDisplays,
-            onWindowAttached = {
-              ownWindowTypeMemo.clear()
-              overlayManager.setPrototypeAttached(true)
-            },
-            onWindowLost = ::refreshPrototypeWindow,
-            isBlocked = windowBlocked,
-            imeInset = PrototypeImeInset { displayId -> prototypeImeLiftPx(displayId) },
-            backScope = serviceScope,
-          )
-        }
-        prototypeController =
-          PrototypeController(
-            createPrototypeHost(),
-            prototypeResultSink,
-            onDismissed = {
-              ownWindowTypeMemo.clear()
-              withContext(Dispatchers.Main.immediate) {
-                overlayManager.setPrototypeAttached(false)
-              }
-            },
-            lifecycle =
-              PrototypeLifecycle(
-                CoroutinePrototypeScheduler(serviceScope),
-                isBlocked = windowBlocked,
-                observerSession = {
-                  if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
-                  else 0
-                },
-                clientCount = {
-                  // Unknown (server not up yet) counts as connected: never drop a prototype on a
-                  // guess.
-                  if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 1
-                },
-              ),
-            eventSink =
-              PrototypeEventSink { event ->
-                if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-                  resultBroadcaster.guard(null, "prototype_event") {
-                    webSocketServer.broadcastWithPerf { _ -> prototypeEventFrame(event) }
-                  }
-                }
-              },
-            storage = prototypeStorage,
-            backdropSupport =
-              PrototypeBackdropSupport {
-                // Cross-window blur can be switched off at runtime (battery saver, developer
-                // option).
-                Build.VERSION.SDK_INT >= PrototypeBackdrops.MIN_BLUR_SDK &&
-                  getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true
-              },
-            windowOnScreen =
-              PrototypeWindowProbe(
-                sdkInt = Build.VERSION.SDK_INT,
-                source =
-                  object : PrototypeWindowProbe.Source<AccessibilityWindowInfo> {
-                    override fun legacyWindows(): List<AccessibilityWindowInfo>? = windows
-
-                    override fun displayWindows(displayId: Int) =
-                      viewHierarchyExtractor.selectDisplayWindows(this@CtrlProxy, displayId).windows
-
-                    override fun hasTitle(window: AccessibilityWindowInfo) =
-                      hasPrototypeTitle(window.type, window.title)
-
-                    override fun rootPackage(window: AccessibilityWindowInfo): String? {
-                      val root = window.root
-                      return try {
-                        root?.packageName?.toString()
-                      } finally {
-                        root?.recycle()
-                      }
-                    }
-                  },
-                ownPackage = packageName,
-                onFailure = { Log.d(TAG, "Could not determine prototype window visibility", it) },
-              ),
-            displays = prototypeDisplays,
-            clearAssets = { prototypeAssets.clear() },
-            hasAsset = { prototypeAssets.lookup(it) != null },
-            validateShaders = { validatePrototypeShaderUniforms(it, prototypeAssets::lookup) },
-            images = prototypeImages,
-            // The host grants this appop before showing a window.layer "app" prototype.
-            appLayerPermitted = {
-              Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Settings.canDrawOverlays(this)
-            },
-            packageName = packageName,
-            fonts = prototypeFonts,
-            foreground = prototypeForeground,
-            deviceAppearance = AndroidPrototypeDeviceAppearance(this),
-            deviceLocale = AndroidPrototypeDeviceLocale(this),
-            hostFactory = createPrototypeHost,
-            httpClients =
-              PrototypeHttpClients(
-                host = hostPrototypeHttp,
-                device = RetrofitPrototypeHttpClient(OkHttpClient()),
-              ),
-            requestScope = serviceScope,
-            platform = prototypePlatform,
-          )
+        prototypeController = createPrototypeController()
         // Service start: drop anything a previous process left in the cache directory.
         prototypeAssets.purgeLeftovers()
       }
@@ -1832,6 +1714,10 @@ class CtrlProxy : AccessibilityService() {
     Log.d(TAG, "AutoMobile Accessibility Service destroyed")
   }
 
+  /** The WebSocket server once [onServiceConnected] has created it; null before then. */
+  internal val webSocketServerOrNull: WebSocketServer?
+    get() = if (::webSocketServer.isInitialized) webSocketServer else null
+
   /** The inbound WebSocket commands, dispatched by [CtrlProxyMessageHandler]. */
   internal val actions: CtrlProxyActions = CtrlProxyActionRouter(this)
 
@@ -1930,7 +1816,7 @@ class CtrlProxy : AccessibilityService() {
   }
 
   /** The keyboard's reach up from [displayId]'s bottom edge, from its accessibility window. */
-  private fun prototypeImeLiftPx(displayId: Int): Int {
+  internal fun prototypeImeLiftPx(displayId: Int): Int {
     val screen = displayController.getScreenDimensions(displayId) ?: return 0
     val windows =
       viewHierarchyExtractor.windowsForDisplay(this, displayId).map {
@@ -1945,7 +1831,7 @@ class CtrlProxy : AccessibilityService() {
     if (::prototypeController.isInitialized) prototypeController.onConfigurationChanged()
   }
 
-  private fun refreshPrototypeWindow() {
+  internal fun refreshPrototypeWindow() {
     if (::prototypeController.isInitialized) {
       prototypeRefreshCoalescer.request()
     }

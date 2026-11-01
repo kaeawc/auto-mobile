@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import capturedObservation from "../../fixtures/ios-contract/observation-localbuild3.json";
 import type {
   ObservationHostAction,
   SdkContractManifest,
@@ -47,9 +48,7 @@ function healthyOutcomes(): Map<string, ToolOutcome> {
       {
         result: {
           backend: "sdk",
-          viewHierarchy: {
-            node: { $: { "resource-id": "contract-save", "sdk-element-id": "contract-save" } },
-          },
+          skeleton: [{ elementId: "contract-save", testTag: "contract-save" }],
         },
       },
     ],
@@ -87,6 +86,38 @@ describe("observation slice (#5164 phase B)", () => {
 
   test("a healthy run has no findings", () => {
     expect(judge()).toEqual([]);
+  });
+
+  test("the captured public SDK observation is judged without internal hierarchy attributes", () => {
+    // Exact observation bytes extracted from scratch/contract-localbuild3.log's sendKeys reply.
+    expect(judge({ observe: { result: capturedObservation } })).toEqual([]);
+  });
+
+  test("mentions outside the public skeleton cannot stand in for a bridge node", () => {
+    expect(
+      judge({ observe: { result: { backend: "sdk", message: "contract-save sdk-element-id" } } }),
+    ).toEqual([expect.objectContaining({ caseName: "observe", boundary: "ios-client" })]);
+  });
+
+  test("unsupported long press uses the same visible node as the successful tap", () => {
+    const tap = OBSERVATION_STEPS.find((step) => step.caseName === "tap")!;
+    const hold = OBSERVATION_STEPS.find((step) => step.caseName === "unsupported-long-press")!;
+    expect(hold.args.selector).toBe(tap.args.selector);
+    const { elementId } = JSON.parse(hold.args.selector) as { elementId: string };
+    const target = capturedObservation.skeleton.find((node) => node.elementId === elementId);
+    expect(target?.bounds[1]).toBeGreaterThan(capturedObservation.systemInsets.top);
+  });
+
+  test("a failed XCTest long press does not pass on backend metadata alone", () => {
+    expect(
+      judge({
+        "unsupported-long-press": {
+          result: { success: false, backend: "xctest", fallbackReason: "unsupported" },
+        },
+      }),
+    ).toEqual([
+      expect.objectContaining({ caseName: "unsupported-long-press", boundary: "ios-client" }),
+    ]);
   });
 
   for (const [caseName, action] of [
@@ -143,7 +174,7 @@ describe("observation slice (#5164 phase B)", () => {
     expect(
       judge({}, [
         ...healthyActions,
-        { kind: "longPress", elementId: "contract-hold", observationIdentity: 7 },
+        { kind: "longPress", elementId: "contract-save", observationIdentity: 7 },
       ]),
     ).toEqual([
       expect.objectContaining({ caseName: "unsupported-long-press", boundary: "sdk-adapter" }),

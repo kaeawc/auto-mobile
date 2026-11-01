@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
+import path from "node:path";
 import { WatchRunnerArtifacts } from "../../../src/features/watch/WatchRunnerArtifacts";
 import { createExecResult } from "../../../src/utils/execResult";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
 function fixture() {
   let discovered: string | null = null;
@@ -57,7 +59,7 @@ test("builds the watch scheme only when watchsimulator discovery is empty", asyn
     [
       "build-for-testing",
       "-project",
-      "/repo/ios/control-proxy/CtrlProxy.xcodeproj",
+      path.join("/repo", "ios", "control-proxy", "CtrlProxy.xcodeproj"),
       "-scheme",
       "CtrlProxyWatch",
       "-destination",
@@ -84,4 +86,22 @@ test("reports missing watch artifacts after a build", async () => {
   const f = fixture();
   f.setAfterBuild(null);
   await expect(f.artifacts.resolve()).rejects.toThrow("watchsimulator");
+});
+
+test("resolves a relative override against the daemon launch directory", async () => {
+  const previousLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+  process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/launch");
+  try {
+    const f = fixture();
+    f.setOverride("prebuilt/Watch.xctestrun");
+    expect(await f.artifacts.resolve()).toBe(path.resolve("/launch", "prebuilt/Watch.xctestrun"));
+    expect(f.accesses).toEqual([path.resolve("/launch", "prebuilt/Watch.xctestrun")]);
+    expect(f.commands).toEqual([]);
+  } finally {
+    if (previousLaunchCwd === undefined) {
+      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    } else {
+      process.env[DAEMON_LAUNCH_CWD_ENV] = previousLaunchCwd;
+    }
+  }
 });

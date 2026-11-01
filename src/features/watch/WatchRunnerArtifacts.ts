@@ -6,6 +6,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { SingleFlight } from "../../utils/cache/SingleFlight";
 import { XcodebuildClient, type Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import { runWithAbortSignal } from "../../utils/AbortContext";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
 /** Finds local watch artifacts, building the checked-in watch scheme when necessary. */
 export class WatchRunnerArtifacts {
@@ -30,8 +31,9 @@ export class WatchRunnerArtifacts {
       this.dependencies.override ?? (() => readEnvTrimmed(ENV.WATCH_RUNNER_XCTESTRUN))
     )();
     if (override) {
-      await (this.dependencies.access ?? access)(override);
-      return override;
+      const resolvedOverride = resolvePathFromDaemonLaunchWorkingDirectory(override);
+      await (this.dependencies.access ?? access)(resolvedOverride);
+      return resolvedOverride;
     }
     const builder = this.dependencies.builder;
     const existing = await builder.getXctestrunPath("watchSimulator");

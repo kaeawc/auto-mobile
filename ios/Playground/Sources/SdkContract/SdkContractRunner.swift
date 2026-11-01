@@ -27,11 +27,10 @@ enum SdkContractRunner {
 
     static func run(_ launch: SdkContractLaunch) async {
         var manifest = SdkContractManifest(runId: launch.runId, scenario: launch.scenario)
-        let tap = SdkContractBatchTap(
-            belongsToRun: launch.scenario == "navigation"
-                ? { $0.eventType == .navigation || $0.eventType == .webView }
-                : SdkContractBatchTap.networkEvents(forRun: launch.runId)
-        )
+        let belongsToRun: @Sendable (SdkEventEnvelope) -> Bool = launch.scenario == "navigation"
+            ? { $0.eventType == .navigation || $0.eventType == .webView }
+            : SdkContractBatchTap.networkEvents(forRun: launch.runId)
+        let tap = SdkContractBatchTap(belongsToRun: belongsToRun)
         tap.start()
         defer { tap.stop() }
         let server = SdkContractLoopbackServer()

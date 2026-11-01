@@ -3069,7 +3069,12 @@ An origin change removes all authored headers. Host, connection/framing, Cookie,
 headers and Expect are not accepted from requests. Other RFC1918 destinations remain permitted
 on ordinary ports, including `10.1.2.3` and `192.168.1.10`.
 A policy refusal is `blocked_destination`: the destination
-is not permitted. Device requests retain their platform transport behavior.
+is not permitted. The same policy applies to host WebSocket and SSE channel transports.
+The WebSocket handshake connects to the validated pinned address with the authored Host and TLS
+server name, ignores proxy environment variables, and never follows a redirect: a handshake
+redirect is `handshake_failed`. SSE redirects are re-checked at each hop. A channel policy refusal
+is `blocked_destination`. Mock-origin channels never reach DNS, the policy or a socket.
+Device requests retain their platform transport behavior.
 
 The host transport makes a direct connection. Node uses a fresh agent with an empty `proxyEnv`,
 ignoring HTTP(S)_PROXY, ALL_PROXY and NO_PROXY routing configuration. Bun refuses the request

@@ -8,6 +8,8 @@ import {
   KindPrototypeChannelExecutor,
   type PrototypeChannelExecutor,
 } from "./PrototypeChannelExecutor";
+import type { PrototypeMockBackendRegistry } from "./PrototypeMockBackendRegistry";
+import { MockRoutingPrototypeChannelExecutor } from "./PrototypeMockChannelExecutor";
 import { PrototypeChannelCoordinator } from "./PrototypeChannelCoordinator";
 import { SsePrototypeChannelExecutor } from "./SsePrototypeChannelExecutor";
 import { WebSocketPrototypeChannelExecutor } from "./WebSocketPrototypeChannelExecutor";
@@ -23,12 +25,13 @@ type ChannelTimer = Pick<
 /** The WebSocket- and SSE-backed coordinator the daemon prototype host owns (`executor` for tests). */
 export function createPrototypeChannelCoordinator(
   timer: ChannelTimer,
+  mocks: PrototypeMockBackendRegistry,
   executor: PrototypeChannelExecutor = new KindPrototypeChannelExecutor(
     new WebSocketPrototypeChannelExecutor({ timer }),
     new SsePrototypeChannelExecutor({ timer }),
   ),
 ): PrototypeChannelCoordinator {
-  return new PrototypeChannelCoordinator(executor);
+  return new PrototypeChannelCoordinator(new MockRoutingPrototypeChannelExecutor(executor, mocks));
 }
 
 /** Ends a prototype's or a device's work in several coordinators with one call. */

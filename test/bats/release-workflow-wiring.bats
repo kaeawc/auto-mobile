@@ -473,12 +473,25 @@
   [[ "$retry_count" -eq 3 ]]
 }
 
-@test "pull_request.yml runs cross-platform TypeScript lint with bash and larger heap" {
-  lint_block="$(sed -n '/name: "Run Lint"/,/name: "Run Build"/p' ".github/workflows/pull_request.yml")"
+@test "pull_request.yml lints on Ubuntu with a larger heap and not in the Windows job (#11577)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/pull_request.yml"
 
-  [[ "$lint_block" == *"shell: bash"* ]]
-  [[ "$lint_block" == *"NODE_OPTIONS: \"--max-old-space-size=4096\""* ]]
-  [[ "$lint_block" == *"ci-logs/bun-lint-\${{ matrix.os }}.log"* ]]
+  run yq -r '.jobs."mcp-build-and-test".strategy.matrix.os[]' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"windows-latest"* ]]
+
+  run yq -r '.jobs."mcp-build-and-test".steps[].run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"turbo run lint"* ]]
+
+  run yq -r '.jobs."ts-build-and-test".steps[] | select(.name == "Run Lint") | .run' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "turbo run lint "* ]]
+
+  run yq -r '.jobs."ts-build-and-test".steps[] | select(.name == "Run Lint") | .env.NODE_OPTIONS' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = "--max-old-space-size=4096" ]
 }
 
 @test "prepare-release.yml runs the release-integrity gate" {

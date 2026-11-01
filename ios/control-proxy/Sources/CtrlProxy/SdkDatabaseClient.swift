@@ -60,6 +60,13 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
         )
     }
 
+    public func queryCoreData(store: String, entity: String, limit: Int?) async throws -> CoreDataQueryResult {
+        try await post(
+            path: SdkRoute.dbCoreDataQuery.path,
+            body: CoreDataQueryRequest(store: store, entity: entity, limit: limit)
+        )
+    }
+
     public func listDatabases() async throws -> [SdkDatabaseInfo] {
         let payload: ListDatabasesPayload = try await post(path: SdkRoute.dbList.path, body: EmptyRequest())
         return payload.databases

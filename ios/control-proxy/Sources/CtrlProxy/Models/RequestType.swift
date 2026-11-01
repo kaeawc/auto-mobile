@@ -80,6 +80,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case getSdkCapabilities = "get_sdk_capabilities"
 
     // Database inspection
+    case queryCoreData = "query_core_data"
     case executeSql = "execute_sql"
     case listDatabases = "list_databases"
     case storageCapabilities = "storage_capabilities"
@@ -150,6 +151,7 @@ extension RequestType {
         case .setNetworkFaultRules: return .setNetworkFaultRulesResult
         case .setNetworkErrorSimulation: return .setNetworkErrorSimulationResult
         case .getSdkCapabilities: return .sdkCapabilitiesResult
+        case .queryCoreData: return .executeSqlResult
         case .executeSql: return .executeSqlResult
         case .listDatabases: return .listDatabasesResult
         case .storageCapabilities: return .storageCapabilitiesResult

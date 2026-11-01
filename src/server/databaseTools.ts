@@ -6,7 +6,7 @@ import { ActionableError, BootedDevice } from "../models";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { sqlQueryResultSchema } from "./databaseToolOutputSchemas";
-import { iosSqlErrorMessage } from "../utils/storageSdkErrors";
+import { iosSqlErrorMessage, mapStorageSdkError } from "../utils/storageSdkErrors";
 import { isNonOwnerReaderOfHeldDevice } from "./sdkProviderReadAccess";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -20,24 +20,63 @@ import { resolveAndroidDatabasePath } from "../features/database/androidDatabase
 import { isReadOnlySqlQuery } from "../features/database/sqlQueryClassification";
 
 // Schema for sqlQuery tool
-const sqlQuerySchema = withAppIdAliases(
+export const sqlQuerySchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z
       .object({
         appId: z.string(),
         databasePath: z
           .string()
+          .optional()
           .describe(
-            "Absolute path under the app data directory, or on Android a bare file name in the app databases directory",
+            "Absolute path under the app data directory, or on Android a bare file name in the app databases directory; omit when store and entity are supplied",
           ),
-        query: z.string().describe("SQL query"),
+        query: z.string().optional().describe("SQL query; omit when store and entity are supplied"),
+        store: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Registered Core Data store identifier on iOS; supply with entity instead of databasePath and query",
+          ),
+        entity: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Registered Core Data entity to fetch on iOS; requires store"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "Maximum Core Data rows; only with store and entity, clamped to the host row limit",
+          ),
       })
       .strict(),
   ),
+).refine(
+  isValidSqlQueryMode,
+  "Supply exactly databasePath and query, or store and entity (with optional limit)",
 );
 
 // Type interface for tool arguments
 type SqlQueryArgs = z.output<typeof sqlQuerySchema>;
+
+function isValidSqlQueryMode(args: SqlQueryArgs): boolean {
+  return (
+    (typeof args.databasePath === "string" &&
+      typeof args.query === "string" &&
+      args.store === undefined &&
+      args.entity === undefined &&
+      args.limit === undefined) ||
+    (Boolean(args.store) &&
+      Boolean(args.entity) &&
+      args.databasePath === undefined &&
+      args.query === undefined &&
+      (args.limit === undefined || (Number.isSafeInteger(args.limit) && args.limit > 0)))
+  );
+}
 
 /**
  * Extract table names from SQL query for notification purposes.
@@ -103,16 +142,27 @@ export function registerDatabaseTools(
   // SQL Query handler
   const sqlQueryHandler = async (device: BootedDevice, args: SqlQueryArgs) => {
     try {
-      const databasePath =
-        device.platform === "android"
-          ? resolveAndroidDatabasePath(args.appId, args.databasePath)
-          : args.databasePath;
-      const result = await executeSqlForDevice(device, { ...args, databasePath }, iosClient);
+      // Device-aware dispatch carries internal metadata and does not parse the schema.
+      if (!isValidSqlQueryMode(args)) {
+        throw new ActionableError(
+          "Supply exactly databasePath and query, or store and entity (with optional positive integer limit)",
+        );
+      }
+      if (args.store !== undefined && args.entity !== undefined) {
+        return await queryCoreDataForDevice(
+          device,
+          { ...args, store: args.store, entity: args.entity },
+          iosClient,
+        );
+      }
+      const sqliteArgs = sqliteQueryArgs(device, args);
+      const { databasePath, query } = sqliteArgs;
+      const result = await executeSqlForDevice(device, sqliteArgs, iosClient);
 
       // The executed result type is authoritative; SQL text classification is
       // only an approximation for decisions that must happen before execution.
       if (result.type === "mutation") {
-        const affectedTables = extractAffectedTables(args.query);
+        const affectedTables = extractAffectedTables(query);
         await notifyDatabaseChanged(
           device.deviceId,
           args.appId,
@@ -141,7 +191,7 @@ export function registerDatabaseTools(
   // Register the sqlQuery tool
   ToolRegistry.registerDeviceAware(
     "sqlQuery",
-    "Execute SQL on app SQLite database.",
+    "Execute SQL on an app SQLite database, or read a registered Core Data entity on iOS using store and entity.",
     sqlQuerySchema,
     {
       handler: sqlQueryHandler,
@@ -151,9 +201,57 @@ export function registerDatabaseTools(
       // Only a single read-only statement watches (#10830); anything the classifier cannot prove
       // read-only needs the device's holder and is refused with device_owned_by_other_session.
       deviceReadOnly: (args: SqlQueryArgs) =>
-        typeof args.query === "string" && isReadOnlySqlQuery(args.query),
+        (args.store !== undefined && args.entity !== undefined) ||
+        (typeof args.query === "string" && isReadOnlySqlQuery(args.query)),
     },
   );
+}
+
+async function queryCoreDataForDevice(
+  device: BootedDevice,
+  args: SqlQueryArgs & { store: string; entity: string },
+  iosClient: IosDatabaseClientResolver,
+) {
+  if (device.platform !== "ios") {
+    throw new ActionableError(
+      "Core Data queries require an iOS app with a registered store and entity. Use databasePath and query for Android SQLite databases.",
+    );
+  }
+  try {
+    const result = await iosClient(device).queryCoreDataForIos(
+      args.appId,
+      args.store,
+      args.entity,
+      args.limit,
+    );
+    return createStructuredToolResponse({
+      message: `Query returned ${result.rows?.length ?? 0} row(s)`,
+      ...result,
+    });
+  } catch (error) {
+    if (error instanceof SdkCapabilityQueryError) {
+      throw error;
+    }
+    const message = mapStorageSdkError(error, { operation: "database" });
+    if (message) {
+      throw new ActionableError(message, { cause: error });
+    }
+    throw error;
+  }
+}
+
+function sqliteQueryArgs(
+  device: BootedDevice,
+  args: SqlQueryArgs,
+): SqlQueryArgs & { databasePath: string; query: string } {
+  if (args.databasePath === undefined || args.query === undefined) {
+    throw new ActionableError("Supply databasePath and query, or store and entity.");
+  }
+  const databasePath =
+    device.platform === "android"
+      ? resolveAndroidDatabasePath(args.appId, args.databasePath)
+      : args.databasePath;
+  return { ...args, databasePath, query: args.query };
 }
 
 /**
@@ -161,7 +259,7 @@ export function registerDatabaseTools(
  */
 async function executeSqlForDevice(
   device: BootedDevice,
-  args: SqlQueryArgs,
+  args: SqlQueryArgs & { databasePath: string; query: string },
   iosClient: IosDatabaseClientResolver,
 ): Promise<SQLResult> {
   if (device.platform === "android") {

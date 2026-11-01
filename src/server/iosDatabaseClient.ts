@@ -4,6 +4,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 /** The slice of the iOS CtrlProxy client the database tools and resources use. */
 export type IosDatabaseClient = Pick<
   IOSCtrlProxyClient,
+  | "queryCoreDataForIos"
   | "executeSQLForIos"
   | "listDatabasesForIos"
   | "listTablesForIos"

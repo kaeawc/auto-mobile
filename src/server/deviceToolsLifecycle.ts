@@ -75,6 +75,7 @@ import {
   pooledAvdNameRefusalMessage,
   reserveStableDeviceLifecycle,
   resolveKillDeviceStableTarget,
+  runWithinShutdownDeadline,
   resolveTeardownTarget,
   retireStoppedTeardownOwnership,
   refuseLiveStoppedAndroidTarget,
@@ -764,10 +765,18 @@ async function runDeleteDevice(
 async function resolveKillDeviceArgs(
   args: KillDeviceArgs,
   deps: DeviceToolsDependencies,
+  deadlineMs: number,
   signal?: AbortSignal,
 ): Promise<KillDeviceArgs> {
   const manager = deps.deviceManagerFactory();
-  const device = (await manager.resolveKillDeviceTarget?.(args.device, signal)) ?? args.device;
+  const device = await runWithinShutdownDeadline(args.device, deps.timer, deadlineMs, {
+    requestAbortSignal: signal,
+    operation: async (operationSignal) =>
+      (await manager.resolveKillDeviceTarget?.(args.device, operationSignal)) ?? args.device,
+    detail: "waiting for simulator platform resolution",
+    timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
+    phase: "to resolve platform",
+  });
   return { ...args, device };
 }
 
@@ -780,7 +789,7 @@ async function stopDevice(
   const deps = getDeviceToolsDependencies();
   const requestAbortSignal = abortSignal ?? getAbortSignal();
   const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
-  args = await resolveKillDeviceArgs(args, deps, requestAbortSignal);
+  args = await resolveKillDeviceArgs(args, deps, deadlineMs, requestAbortSignal);
   const stopIdentity = await assertKillDeviceCaller(args, deps, deadlineMs, requestAbortSignal);
   const { daemonState } = deps;
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;

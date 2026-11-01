@@ -68,6 +68,7 @@ type InitializationState = Pick<
   | "foreignDeviceOwnership"
   | "iosForeignDeviceOwnership"
   | "watchForeignDeviceOwnership"
+  | "tvForeignDeviceOwnership"
   | "bindingExclusion"
   | "managedExecutionOwnership"
   | "daemonSessionId"
@@ -198,6 +199,7 @@ export class DevicePoolInitialization {
     foreignDeviceOwnership,
     iosForeignDeviceOwnership,
     watchForeignDeviceOwnership,
+    tvForeignDeviceOwnership,
     bindingExclusion,
     managedExecutionOwnership,
   }: DevicePoolDependencies): void {
@@ -214,6 +216,7 @@ export class DevicePoolInitialization {
     this.state.foreignDeviceOwnership = foreignDeviceOwnership;
     this.state.iosForeignDeviceOwnership = iosForeignDeviceOwnership;
     this.state.watchForeignDeviceOwnership = watchForeignDeviceOwnership;
+    this.state.tvForeignDeviceOwnership = tvForeignDeviceOwnership;
     this.state.bindingExclusion = bindingExclusion;
     this.state.managedExecutionOwnership = managedExecutionOwnership;
     this.state.daemonSessionId = daemonSessionId;

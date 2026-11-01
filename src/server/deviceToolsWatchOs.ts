@@ -1,18 +1,16 @@
+import { bindBootedSimulatorSession } from "./deviceToolsSimulatorSession";
 import { z } from "zod/v4";
 import { describeDevice, projectBootedDevice } from "../daemon/deviceDescription";
 import {
-  bindUndoneIfUndelivered,
   getDeviceToolsDependencies,
   initializedDevicePool,
   mergeLegacyStartDevicePayload,
   reserveStableDeviceLifecycle,
-  runOperationWithinDeadline,
   watchStartDeviceSchema,
   type DeviceToolsDependencies,
   type WatchStartDeviceArgs,
   type WatchStartDeviceRequest,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
-import { lifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import { bootAdmissionServices } from "../devices/bootAdmissionServices";
 import { ActionableError } from "../models";
 import { runWithAbortSignal } from "../utils/AbortContext";
@@ -31,11 +29,7 @@ import {
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import type { bindBootedDeviceSession } from "./deviceToolsStartDevice";
-import {
-  internalMcpSessionId,
-  internalOneShotCli,
-  stripInternalToolParams,
-} from "./internalToolParams";
+import { stripInternalToolParams } from "./internalToolParams";
 
 /** startDevice's session binder, passed in so this module does not import its file at runtime. */
 export type BindBootedSession = typeof bindBootedDeviceSession;
@@ -103,31 +97,17 @@ export async function startWatchDevice(
  * session's UUID, so the session it minted (and its claim) is released again (#11565).
  */
 export async function bindWatchSession(
-  {
-    watch,
-    boot,
-    rawArgs,
-    operation,
-  }: { watch: ListedWatch; boot: WatchBootResult; rawArgs: object; operation: string },
+  args: { watch: ListedWatch; boot: WatchBootResult; rawArgs: object; operation: string },
   bindSession: BindBootedSession,
   timer: DeviceToolsDependencies["timer"],
-  { deadlineMs, signal }: { deadlineMs: number; signal: AbortSignal },
+  options: { deadlineMs: number; signal: AbortSignal },
 ): Promise<string> {
-  return await runOperationWithinDeadline(timer, deadlineMs, signal, {
-    operation: bindUndoneIfUndelivered(
-      async (receipt, bindSignal) =>
-        await bindSession(boot.device, sessionArgs(rawArgs), undefined, {
-          childProcess: null,
-          achievedReadiness: "booted",
-          receipt,
-          signal: bindSignal,
-        }),
-    ),
-    timeoutError: () =>
-      new ActionableError(
-        `${operation} timed out while binding the device session; target=watchos:${watch.deviceId}`,
-      ),
-  });
+  return await bindBootedSimulatorSession(
+    { ...args, device: args.watch },
+    bindSession,
+    timer,
+    options,
+  );
 }
 
 async function reserveWatchLifecycle(
@@ -147,15 +127,6 @@ async function reserveWatchLifecycle(
       coordinator: deps.lifecycleCoordinator,
     },
   );
-}
-
-/** The caller identity the shared binder reads; a watch start carries nothing else. */
-function sessionArgs(rawArgs: object) {
-  return {
-    __mcpSessionId: internalMcpSessionId(rawArgs),
-    __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
-    ...(internalOneShotCli(rawArgs) ? { __oneShotCli: true } : {}),
-  };
 }
 
 function watchStartResponse(

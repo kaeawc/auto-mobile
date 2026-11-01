@@ -126,10 +126,9 @@ export class IdleDeviceReaper {
     if (device.platform === "android") {
       return "assignable";
     }
-    if (device.platform === "watchos") {
-      // A watch never has an iOS liveness snapshot: an exact bind confirms it in a fresh watchOS
-      // listing before it gets here, and the pool's refresh sweep retires a watch that stops
-      // (#14908), so the pool row itself is the evidence.
+    if (device.platform === "watchos" || device.platform === "tvos") {
+      // Exact non-iOS Apple binds confirm booted presence with their own fresh listing
+      // before reaching this check; an iOS liveness snapshot does not describe them.
       return "assignable";
     }
 

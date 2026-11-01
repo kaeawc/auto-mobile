@@ -14,6 +14,8 @@ export interface ForeignClaimsPort {
   readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
   /** Apple Watch simulators, claimed by UDID in their own namespace (#14908). */
   readonly watchForeignDeviceOwnership?: ForeignDeviceOwnership;
+  /** Apple TV simulators, claimed by UDID in their own namespace. */
+  readonly tvForeignDeviceOwnership?: ForeignDeviceOwnership;
   readonly timer: Pick<Timer, "now">;
   readonly inventoryProbeBackoff?: BackoffPolicy;
   getDevice(deviceId: string): Pick<PooledDevice, "sessionId"> | undefined;
@@ -104,7 +106,7 @@ export class ForeignClaims {
     }
   }
 
-  /** Who else drives devices of `platform`: Android by adb server, iOS and watchOS by UDID. */
+  /** Who else drives devices of `platform`: Android by adb server, iOS, watchOS and tvOS by UDID. */
   foreignOwnershipFor(platform: Platform | undefined): ForeignDeviceOwnership | undefined {
     switch (platform) {
       case "android":
@@ -113,6 +115,8 @@ export class ForeignClaims {
         return this.port.iosForeignDeviceOwnership;
       case "watchos":
         return this.port.watchForeignDeviceOwnership;
+      case "tvos":
+        return this.port.tvForeignDeviceOwnership;
       default:
         return undefined;
     }
@@ -123,7 +127,8 @@ export class ForeignClaims {
     return platform === undefined
       ? this.port.foreignDeviceOwnership !== undefined ||
           this.port.iosForeignDeviceOwnership !== undefined ||
-          this.port.watchForeignDeviceOwnership !== undefined
+          this.port.watchForeignDeviceOwnership !== undefined ||
+          this.port.tvForeignDeviceOwnership !== undefined
       : this.foreignOwnershipFor(platform) !== undefined;
   }
 

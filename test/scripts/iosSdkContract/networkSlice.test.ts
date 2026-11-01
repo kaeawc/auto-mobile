@@ -356,6 +356,28 @@ describe("judgeManifest", () => {
     ).toEqual([]);
   });
 
+  test("requires a bundleId for a completed fault scenario", () => {
+    expect(
+      judgeManifest(
+        {
+          ...manifest,
+          scenario: "faults",
+          bundleId: undefined,
+          network: [],
+          faults: [{ caseName: "fault-urlsession-delay", url: expected.url, elapsedMs: 400 }],
+        },
+        "faults",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        slice: "faults",
+        caseName: "run",
+        boundary: "fixture-host",
+        message: expect.stringContaining("bundleId"),
+      }),
+    ]);
+  });
+
   test("requires a bundleId for a completed network scenario", () => {
     expect(judgeManifest({ ...manifest, bundleId: undefined })).toEqual([
       expect.objectContaining({

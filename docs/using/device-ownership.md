@@ -336,7 +336,8 @@ catalog. It adopts an exact match or creates a simulator; a name clash, missing
 UDID or incompatible runtime/model is refused. A missing tvOS runtime must be
 installed with `xcodebuild -downloadPlatform tvOS`; the tool never downloads it.
 With `boot` (the default), it boots and binds a session at readiness `booted`;
-a simulator it created is deleted again if boot or binding fails. `boot: false`
+a simulator it created is deleted again if boot or binding fails; if deleting it
+again fails, the error says so and tells you to delete it with `deleteDevice`. `boot: false`
 creates or adopts without a session. `resources`, `enableTools` and
 `readiness: "automation"` are unsupported.
 

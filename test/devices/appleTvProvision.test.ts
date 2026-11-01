@@ -104,6 +104,46 @@ describe("AppleTvSimulatorProvisioner", () => {
     expect(order).toEqual(["before 0"]);
   });
 
+  for (const mode of ["throws", "omits", "delete fails"] as const) {
+    test(`rolls back create when follow-up inventory ${mode}`, async () => {
+      const { simctl } = arrange([]);
+      const inventory = new AppleTvSimulatorInventory(simctl, "arm64");
+      const provisioner = new AppleTvSimulatorProvisioner(
+        {
+          readCatalog: inventory.readCatalog.bind(inventory),
+          listAppleTvSimulators: async (signal) => {
+            if (simctl.commands.length > 0) {
+              if (mode === "omits") {
+                return [];
+              }
+              throw new Error("inventory unavailable after create");
+            }
+            return await inventory.listAppleTvSimulators(signal);
+          },
+        },
+        simctl,
+      );
+      if (mode === "delete fails") {
+        simctl.deleteError = new Error("delete busy");
+      }
+      const error = await rejection(provisioner.provision(request(), { allowCreate: true }));
+      const udid = "C0FFEE00-0000-4000-8000-000000000001";
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(simctl.commands.at(-1)).toBe(`delete ${udid}`);
+      expect(String(error)).toContain(
+        mode === "omits" ? "does not show it" : "inventory unavailable after create",
+      );
+      expect(String(error)).not.toContain("it adopts the TV");
+      if (mode === "delete fails") {
+        expect(String(error)).toContain("delete busy");
+        expect(String(error)).toContain("deleteDevice");
+      } else {
+        expect(String(error)).toContain("the TV was deleted again");
+        expect(Object.values(simctl.listing.devices).flat()).toEqual([]);
+      }
+    });
+  }
+
   test("a missing tv is not created while device creation is disabled", async () => {
     const { simctl, provisioner } = arrange([]);
 

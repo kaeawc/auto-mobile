@@ -12,7 +12,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
@@ -1341,7 +1340,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     PackageEventReceiver(
       serviceScope,
       object : PackageEventHost {
-        override fun isSystemApp(packageName: String) = resolveSystemApp(packageName)
+        override fun isSystemApp(packageName: String) =
+          packageManager.systemAppFlag(packageName) {
+            Log.w(TAG, "Failed to resolve system flag for $packageName", it)
+          }
 
         override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
           deviceEvents.packageEvent(event)
@@ -2486,17 +2488,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun onInterrupt() {
     Log.w(TAG, "Accessibility service interrupted")
-  }
-
-  private fun resolveSystemApp(packageName: String): Boolean? {
-    return try {
-      val appInfo = packageManager.getApplicationInfo(packageName, 0)
-      (appInfo.flags and
-        (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to resolve system flag for $packageName", e)
-      null
-    }
   }
 
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId

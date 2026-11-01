@@ -112,6 +112,7 @@ printf 'bun %s\n' "$*" >> "${STUB_LOG}"
 printf 'cli aux=%s socket=%s pid=%s\n' "${AUTOMOBILE_AUX_SOCKET_DIR}" "${AUTOMOBILE_DAEMON_SOCKET_PATH-unset}" "${AUTO_MOBILE_DAEMON_PID_FILE_PATH-unset}" >> "${STUB_LOG}"
 [[ -d "${AUTOMOBILE_AUX_SOCKET_DIR}" ]] || exit 99
 if [[ " $* " == *' --daemon start '* ]]; then
+  printf 'db dir=%s path=%s legacy=%s\n' "${AUTOMOBILE_DB_DIR-unset}" "${AUTOMOBILE_DB_PATH-unset}" "${AUTO_MOBILE_DB_PATH-unset}" >> "${STUB_LOG}"
   [[ ${STUB_DAEMON_START_FAIL} == 0 ]]
   exit $?
 fi
@@ -406,4 +407,15 @@ assert_cleaned() {
   [ "$(grep -c -- '--daemon stop' "${STUB_LOG}")" -eq 1 ]
   ! grep -q '^smoke ' "${STUB_LOG}"
   assert_cleaned
+}
+
+@test "private daemon database overrides inherited exact paths and clears legacy alias" {
+  export AUTOMOBILE_DB_DIR="${BATS_TEST_TMPDIR}/resident"
+  export AUTOMOBILE_DB_PATH="${BATS_TEST_TMPDIR}/resident.db"
+  export AUTO_MOBILE_DB_PATH="${BATS_TEST_TMPDIR}/legacy-resident.db"
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  aux="$(sed -n 's/^daemon-stop aux=//p' "${STUB_LOG}")"
+  [ -n "${aux}" ]
+  grep -Fxq "db dir=${aux}/db path=${aux}/db/auto-mobile.db legacy=unset" "${STUB_LOG}"
 }

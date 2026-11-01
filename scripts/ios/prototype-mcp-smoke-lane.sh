@@ -142,6 +142,10 @@ while IFS= read -r name; do
 done < <(compgen -e)
 aux_root="$(mktemp -d "${PROTOTYPE_MCP_SMOKE_AUX_ROOT:-/tmp}/apm-aux.XXXXXX")" || fail 'could not allocate private aux socket dir'
 export AUTOMOBILE_AUX_SOCKET_DIR="${aux_root}"
+# Keep the private daemon off the operator database, including inherited exact paths.
+export AUTOMOBILE_DB_DIR="${aux_root}/db"
+export AUTOMOBILE_DB_PATH="${AUTOMOBILE_DB_DIR}/auto-mobile.db"
+unset AUTO_MOBILE_DB_PATH
 
 # Pick the newest installed iOS runtime matching the request ("26" matches 26.x).
 runtimes_json="$("${XCRUN_BIN}" simctl list runtimes available iOS --json)" || fail 'could not list runtimes'

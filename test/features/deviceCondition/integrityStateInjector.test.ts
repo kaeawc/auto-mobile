@@ -310,6 +310,44 @@ describe("integrityState injector", () => {
     expect(await integrity.isClean()).toBe(true);
   });
 
+  test("an image-shipped su held by rootState stays in the integrity baseline (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    adb.files.add("/system/xbin/su");
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-image-su" };
+    const owner = { device, deviceId: device.deviceId };
+    const root = resolve(owner, "rootState")!;
+    const integrityController = new DeviceConditionController(() =>
+      resolve(owner, "integrityState")!,
+    );
+    const rootOutcome = await root.apply("rooted-detectable");
+    await integrityController.apply({ integrityState: "maximally-detectable" });
+    await rootOutcome.reset?.();
+    expect([...adb.files]).toEqual(["/system/xbin/su"]);
+    expect((await integrityController.restore()).verifiedClean).toBe(true);
+    expect([...adb.files]).toEqual(["/system/xbin/su"]);
+  });
+
+  test("restoring an integrity off while rootState holds the stubs verifies (#16275)", async () => {
+    const adb = new IntegrityAdb();
+    const resolve = createDefaultInjectorResolver({ adbFactory: { create: () => adb } });
+    const device = { name: "e", platform: "android" as const, deviceId: "shared-off-restore" };
+    const owner = { device, deviceId: device.deviceId };
+    const integrity = resolve(owner, "integrityState")!;
+    const root = resolve(owner, "rootState")!;
+    const on = await integrity.apply("apply", undefined, { signals: { "su-binary": "on" } });
+    const off = await integrity.apply("apply", undefined, { signals: { "su-binary": "off" } });
+    const rootOutcome = await root.apply("rooted-detectable");
+    await off.reset?.();
+    await on.reset?.();
+    expect([...adb.files].sort()).toEqual([...ROOT_ARTIFACT_PATHS].sort());
+    expect(await integrity.isClean()).toBe(true);
+    await rootOutcome.reset?.();
+    expect(adb.files.size).toBe(0);
+    expect(await root.isClean()).toBe(true);
+    expect(await integrity.isClean()).toBe(true);
+  });
+
   test("factory-local SELinux owners isolate the same device id across adb clients", async () => {
     const firstAdb = new IntegrityAdb();
     const secondAdb = new IntegrityAdb();

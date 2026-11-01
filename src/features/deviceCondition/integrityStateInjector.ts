@@ -85,7 +85,7 @@ class IntegrityStateInjector implements DeviceConditionInjector {
       return state;
     }
     const paths = new Set(
-      [...state.paths].filter((path) => !this.artifacts.heldByOther(this, path)),
+      [...state.paths].filter((path) => !this.artifacts.plantedForOther(this, path)),
     );
     return { active: paths.size > 0, paths };
   }
@@ -194,11 +194,14 @@ class IntegrityStateInjector implements DeviceConditionInjector {
         signal,
       );
     }
+    // Read the device and the baseline the same way: stubs another fixture still needs are not
+    // this mutation's to restore or count (#16275).
     const state = await this.ownState(mutation.id, signal);
+    const before = this.withoutOthers(mutation.id, mutation.before);
     if (
       state.active !==
-        (mutation.id === "selinux-permissive" ? this.selinux.expected : mutation.before.active) ||
-      [...mutation.paths].some((path) => state.paths.has(path) !== mutation.before.paths.has(path))
+        (mutation.id === "selinux-permissive" ? this.selinux.expected : before.active) ||
+      [...mutation.paths].some((path) => state.paths.has(path) !== before.paths.has(path))
     ) {
       throw new ActionableError(`integrityState reset did not restore ${mutation.id} read-back`);
     }

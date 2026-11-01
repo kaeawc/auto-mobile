@@ -5,7 +5,6 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ClipboardManager
@@ -18,7 +17,6 @@ import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
-import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
@@ -1480,11 +1478,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayDrawer.attachOverlayManager(overlayManager)
       if (!::prototypeController.isInitialized) {
         // Locks are shared safety facts; foreground suspension is request-local per surface.
-        val prototypeWindowBlocked = {
-          val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-          val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
-          keyguard?.isKeyguardLocked != false || power?.isInteractive != true
-        }
+        val windowBlocked = { this@CtrlProxy.prototypeWindowBlocked() }
         val createPrototypeHost = {
           DefaultPrototypeHost(
             context = this,
@@ -1494,7 +1488,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               overlayManager.setPrototypeAttached(true)
             },
             onWindowLost = ::refreshPrototypeWindow,
-            isBlocked = prototypeWindowBlocked,
+            isBlocked = windowBlocked,
             imeInset = PrototypeImeInset { displayId -> prototypeImeLiftPx(displayId) },
             backScope = serviceScope,
           )
@@ -1512,7 +1506,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             lifecycle =
               PrototypeLifecycle(
                 CoroutinePrototypeScheduler(serviceScope),
-                isBlocked = prototypeWindowBlocked,
+                isBlocked = windowBlocked,
                 observerSession = {
                   if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
                   else 0

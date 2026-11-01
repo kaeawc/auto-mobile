@@ -117,7 +117,12 @@ export async function readFreshPlatformHierarchy(
         signal,
         Math.max(0, deadline - deps.timer.now()),
       );
-      await mergeIosSdkWebInto(prepared, deps.sdkWeb ?? deviceIosSdkWebReader(device), signal);
+      await mergeIosSdkWebInto(
+        prepared,
+        deps.sdkWeb ?? deviceIosSdkWebReader(device, deps.timer),
+        signal,
+        Math.max(0, deadline - deps.timer.now()),
+      );
       return prepared;
     }
     default:

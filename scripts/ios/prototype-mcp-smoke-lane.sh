@@ -90,6 +90,23 @@ derived_data=""
 aux_root=""
 # shellcheck source=scripts/ios/run_with_timeout.sh
 source "${script_dir}/run_with_timeout.sh"
+inflight_dir="$(mktemp -d "${log_dir}/inflight.XXXXXX")"
+export AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="${inflight_dir}/pgid"
+
+terminate() {
+  trap - INT TERM
+  local record command_pid watcher_pid _caller_pid
+  for record in "${inflight_dir}"/pgid.*; do
+    [[ -f ${record} ]] || continue
+    read -r command_pid watcher_pid _caller_pid < "${record}" || continue
+    # run_with_timeout gives the command and watchdog their own groups.
+    kill -TERM -"${command_pid}" -"${watcher_pid}" 2>/dev/null || true
+    sleep 0.1
+    kill -KILL -"${command_pid}" -"${watcher_pid}" 2>/dev/null || true
+    wait "${command_pid}" "${watcher_pid}" 2>/dev/null || true
+  done
+  exit 1
+}
 
 delete_simulator() {
   local attempt delete_status caller_options="$-"
@@ -144,9 +161,11 @@ cleanup() {
   if [[ -n ${derived_data} ]]; then
     rm -rf -- "${derived_data}" || true
   fi
+  rm -rf -- "${inflight_dir}"
   exit "${result}"
 }
 trap cleanup EXIT
+trap terminate INT TERM
 
 while IFS= read -r name; do
   case "${name}" in
@@ -235,13 +254,17 @@ udid="$("${XCRUN_BIN}" simctl create "prototype-mcp-smoke-${runtime_version}-${r
 
 derived_data="$(mktemp -d "${TMPDIR:-/tmp}/auto-mobile-prototype-mcp.XXXXXX")"
 # Debug, because Playground's SDK integration is enabled in Debug builds.
-"${xcodebuild_bin}" \
+set +e
+run_with_timeout 600 "${xcodebuild_bin}" \
   -project "${repo_root}/ios/Playground/Playground.xcodeproj" \
   -scheme Playground \
   -configuration Debug \
   -destination "platform=iOS Simulator,id=${udid}" \
   -derivedDataPath "${derived_data}" \
-  build || fail 'Playground build failed'
+  build
+command_status=$?
+set -e
+[[ ${command_status} -eq 0 ]] || fail 'Playground build failed'
 export PROTOTYPE_SMOKE_APP_BUNDLE="${derived_data}/Build/Products/Debug-iphonesimulator/Playground.app"
 [[ -d ${PROTOTYPE_SMOKE_APP_BUNDLE} ]] || fail "Playground build produced no app at ${PROTOTYPE_SMOKE_APP_BUNDLE}"
 

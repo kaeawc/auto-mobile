@@ -86,6 +86,10 @@ STUB
   cat > "${XCODEBUILD_BIN}" <<'STUB'
 #!/usr/bin/env bash
 printf 'build %s\n' "$*" >> "${STUB_LOG}"
+if [[ -n ${BLOCK_BUILD_PID_FILE:-} ]]; then
+  echo "$$" > "$BLOCK_BUILD_PID_FILE"
+  exec sleep 30
+fi
 [[ "${STUB_BUILD_MODE}" != fail ]] || exit 65
 [[ "$1" == -project && "$2" == */ios/Playground/Playground.xcodeproj ]] || exit 99
 shift 2
@@ -135,6 +139,54 @@ assert_cleaned() {
   if [[ -f "${BATS_TEST_TMPDIR}/derived-path" ]]; then
     [ ! -e "$(cat "${BATS_TEST_TMPDIR}/derived-path")" ]
   fi
+}
+
+teardown() {
+  if [[ -n ${lane_pid:-} ]]; then
+    local record command_pid watcher_pid _caller_pid
+    for record in "$BATS_TEST_TMPDIR"/pgid.* "$PROTOTYPE_MCP_SMOKE_LOG_DIR"/inflight.*/pgid.*; do
+      [[ -f "$record" ]] || continue
+      read -r command_pid watcher_pid _caller_pid < "$record"
+      kill -KILL -"$command_pid" -"$watcher_pid" 2>/dev/null || true
+    done
+    if [[ -s ${BLOCK_BUILD_PID_FILE:-} ]]; then
+      kill -KILL "$(cat "$BLOCK_BUILD_PID_FILE")" 2>/dev/null || true
+    fi
+    kill -KILL -"$lane_pid" 2>/dev/null || true
+    wait "$lane_pid" 2>/dev/null || true
+  fi
+}
+
+@test "SIGTERM during a blocking build stops the build and cleans the owned simulator" {
+  export BLOCK_BUILD_PID_FILE="$BATS_TEST_TMPDIR/build.pid"
+  export AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$BATS_TEST_TMPDIR/pgid"
+  set -m
+  bash "$script" 26 > "$BATS_TEST_TMPDIR/lane-output" 2>&1 &
+  lane_pid=$!
+  set +m
+  for ((attempt=0; attempt<100; attempt++)); do
+    [[ ! -s "$BLOCK_BUILD_PID_FILE" ]] || break
+    sleep 0.02
+  done
+  [ -s "$BLOCK_BUILD_PID_FILE" ]
+  kill -TERM "$lane_pid"
+  for ((attempt=0; attempt<100; attempt++)); do
+    kill -0 "$lane_pid" 2>/dev/null || break
+    sleep 0.02
+  done
+  if kill -0 "$lane_pid" 2>/dev/null; then
+    echo 'lane did not exit after SIGTERM'
+    return 1
+  fi
+  lane_status=0
+  wait "$lane_pid" || lane_status=$?
+  [ "$lane_status" -ne 0 ]
+  assert_cleaned
+  if kill -0 "$(cat "$BLOCK_BUILD_PID_FILE")" 2>/dev/null; then
+    echo 'build survived SIGTERM to the lane'
+    return 1
+  fi
+  [ -f "$PROTOTYPE_MCP_SMOKE_LOG_DIR/smoke.log" ]
 }
 
 @test "missing or unavailable runtime skips without creating a simulator" {

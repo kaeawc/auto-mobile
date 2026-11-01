@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Advisory watchOS smoke. Owns one fresh simulator and a private daemon namespace.
+# One shell owns logging and cleanup; interruption stops the active timed command.
 # Usage: watch-smoke-lane.sh <watchos-version|latest>
 # Seams: XCRUN_BIN, LSOF_BIN, AUTO_MOBILE_CMD (whitespace-separated argv), WATCH_SMOKE_LOG_DIR.
 # Exit: 0 pass, 1 setup/check failure, 2 usage/isolation refusal, 3 runtime unavailable.
@@ -28,12 +29,7 @@ xcrun_bin="${XCRUN_BIN:-xcrun}"
 log_dir="${WATCH_SMOKE_LOG_DIR:-scratch/watch-smoke-lane/${requested}}"
 mkdir -p "${log_dir}"
 log_dir="$(cd "${log_dir}" && pwd)"
-if [[ ${WATCH_SMOKE_LOGGING:-} != 1 ]]; then
-  set +e
-  WATCH_SMOKE_LOGGING=1 bash "${script_dir}/watch-smoke-lane.sh" "${requested}" 2>&1 | tee "${log_dir}/smoke.log"
-  result=${PIPESTATUS[0]}
-  exit "${result}"
-fi
+exec > >(tee -a "${log_dir}/smoke.log") 2>&1
 # shellcheck source=scripts/ios/run_with_timeout.sh
 source "${script_dir}/run_with_timeout.sh"
 export AUTO_MOBILE_CMD="${AUTO_MOBILE_CMD:-bun run src/index.ts --debug --embedded-sdk --cli}"
@@ -55,12 +51,27 @@ read -r -a cli_base <<< "${AUTO_MOBILE_CMD}"
 daemon_base=()
 daemon_flags=()
 in_flags=0
+has_entrypoint=0
+for word in ${cli_base[@]+"${cli_base[@]}"}; do
+  case "${word}" in
+    *.ts | *.js | *.mjs | *.cjs | *.mts | *.cts) has_entrypoint=1; break ;;
+  esac
+done
+after_entrypoint=0
 for word in ${cli_base[@]+"${cli_base[@]}"}; do
   # --cli is a command boundary: parseValueOptions stops there, hiding --port.
   # Preserve all startup flags so daemon and client reuse-critical options match.
   [[ ${word} == --cli ]] && continue
   daemon_base+=("${word}")
-  if [[ ${word} == --* ]]; then in_flags=1; fi
+  if [[ ${has_entrypoint} == 1 ]]; then
+    # Runtime options belong only in the executable prefix.
+    if [[ ${after_entrypoint} == 1 ]]; then in_flags=1; fi
+    case "${word}" in
+      *.ts | *.js | *.mjs | *.cjs | *.mts | *.cts) after_entrypoint=1 ;;
+    esac
+  elif [[ ${word} == --* ]]; then
+    in_flags=1
+  fi
   if [[ ${in_flags} == 1 ]]; then daemon_flags+=("${word}"); fi
 done
 [[ ${#daemon_base[@]} -gt 0 ]] || fail 'AUTO_MOBILE_CMD has no executable'
@@ -68,6 +79,22 @@ udid=""
 aux_dir=""
 daemon_started=0
 session_uuid=""
+inflight_dir="$(mktemp -d "${log_dir}/inflight.XXXXXX")"
+export AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="${inflight_dir}/pgid"
+terminate() {
+  trap - INT TERM
+  local record command_pid watcher_pid _caller_pid
+  for record in "${inflight_dir}"/pgid.*; do
+    [[ -f ${record} ]] || continue
+    read -r command_pid watcher_pid _caller_pid < "${record}" || continue
+    # run_with_timeout gives the command and watchdog their own groups.
+    kill -TERM -"${command_pid}" -"${watcher_pid}" 2>/dev/null || true
+    sleep 0.1
+    kill -KILL -"${command_pid}" -"${watcher_pid}" 2>/dev/null || true
+    wait "${command_pid}" "${watcher_pid}" 2>/dev/null || true
+  done
+  exit 1
+}
 cleanup() {
   local result=$? release_output cleanup_status
   trap - EXIT
@@ -112,10 +139,11 @@ cleanup() {
     fi
   fi
   [[ -z ${aux_dir} ]] || rm -rf -- "${aux_dir}"
+  rm -rf -- "${inflight_dir}"
   exit "${result}"
 }
 trap cleanup EXIT
-trap 'exit 1' INT TERM
+trap terminate INT TERM
 
 set +e
 runtimes="$(run_with_timeout 60 "${xcrun_bin}" simctl list runtimes available watchOS --json)"
@@ -229,7 +257,7 @@ session_uuid="$(jq -er '(.runtime.session.sessionUuid // .sessionUuid) | select(
 install_session_release_trap "${session_uuid}"
 # Compose release with owned-resource cleanup and preserve this lane's signal exit codes.
 trap cleanup EXIT
-trap 'exit 1' INT TERM
+trap terminate INT TERM
 check_identifier() {
   # Observe can put label-only watch rows in context; full nodes use resource-id.
   jq -e --arg id "$1" 'any(.context[]?; .elementId == $id or .label == $id) or

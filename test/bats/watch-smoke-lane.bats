@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 # All external commands are stubs. Never boots a simulator or starts a daemon.
+# Bats isolates exported fixture overrides in each test's subshell.
+# shellcheck disable=SC2030,SC2031
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SCRIPT="$ROOT/scripts/ios/watch-smoke-lane.sh"
@@ -29,6 +31,15 @@ STUB
   cat > "$BATS_TEST_TMPDIR/bin/cli" <<'STUB'
 #!/usr/bin/env bash
 printf 'cli %s aux=%s socket=%s\n' "$*" "$AUTOMOBILE_AUX_SOCKET_DIR" "$AUTOMOBILE_DAEMON_SOCKET_PATH" >> "$CALLS"
+if [[ ${1:-} == run ]]; then
+  if [[ ${2:-} == --silent ]]; then
+    [[ "$3" == src/index.ts ]] || exit 1
+    shift 3
+  else
+    # Session release strips startup options from the executable prefix.
+    shift
+  fi
+fi
 if [[ "$*" == *'--daemon start'* ]]; then
   [[ "$*" == "--debug --embedded-sdk --daemon start --debug --embedded-sdk --port "* ]] || exit 1
   if [[ ${CHECK_PRIVATE_DB:-} == 1 ]]; then
@@ -104,6 +115,10 @@ STUB
   cat > "$BATS_TEST_TMPDIR/bin/xcodebuild" <<'STUB'
 #!/usr/bin/env bash
 printf 'build %s\n' "$*" >> "$CALLS"
+if [[ -n ${BLOCK_BUILD_PID_FILE:-} ]]; then
+  echo "$$" > "$BLOCK_BUILD_PID_FILE"
+  exec sleep 30
+fi
 STUB
   cat > "$LSOF_BIN" <<'STUB'
 #!/usr/bin/env bash
@@ -111,6 +126,56 @@ printf 'lsof %s\n' "$*" >> "$CALLS"
 [[ ${PORT_IN_USE:-} == 1 ]]
 STUB
   chmod +x "$LSOF_BIN" "$XCRUN_BIN" "$BATS_TEST_TMPDIR/bin/cli" "$BATS_TEST_TMPDIR/bin/bun" "$BATS_TEST_TMPDIR/bin/xcodebuild"
+}
+
+teardown() {
+  if [[ -n ${lane_pid:-} ]]; then
+    # The test starts this private group; timeout commands have separate groups.
+    local record command_pid watcher_pid _caller_pid
+    for record in "$BATS_TEST_TMPDIR"/pgid.* "$WATCH_SMOKE_LOG_DIR"/inflight.*/pgid.*; do
+      [[ -f "$record" ]] || continue
+      read -r command_pid watcher_pid _caller_pid < "$record"
+      kill -KILL -"$command_pid" -"$watcher_pid" 2>/dev/null || true
+    done
+    if [[ -s ${BLOCK_BUILD_PID_FILE:-} ]]; then
+      kill -KILL "$(cat "$BLOCK_BUILD_PID_FILE")" 2>/dev/null || true
+    fi
+    kill -KILL -"$lane_pid" 2>/dev/null || true
+    wait "$lane_pid" 2>/dev/null || true
+  fi
+}
+
+@test "SIGTERM during a blocking build stops the build and cleans the owned simulator" {
+  export BLOCK_BUILD_PID_FILE="$BATS_TEST_TMPDIR/build.pid"
+  export AUTOMOBILE_RUN_WITH_TIMEOUT_PGID_FILE="$BATS_TEST_TMPDIR/pgid"
+  set -m
+  bash "$SCRIPT" latest > "$BATS_TEST_TMPDIR/lane-output" 2>&1 &
+  lane_pid=$!
+  set +m
+  for ((attempt=0; attempt<100; attempt++)); do
+    [[ ! -s "$BLOCK_BUILD_PID_FILE" ]] || break
+    sleep 0.02
+  done
+  [ -s "$BLOCK_BUILD_PID_FILE" ]
+  kill -TERM "$lane_pid"
+  for ((attempt=0; attempt<100; attempt++)); do
+    kill -0 "$lane_pid" 2>/dev/null || break
+    sleep 0.02
+  done
+  if kill -0 "$lane_pid" 2>/dev/null; then
+    echo 'lane did not exit after SIGTERM'
+    return 1
+  fi
+  lane_status=0
+  wait "$lane_pid" || lane_status=$?
+  [ "$lane_status" -ne 0 ]
+  grep -qx 'simctl shutdown 11111111-2222-3333-4444-555555555555' "$CALLS"
+  grep -qx 'simctl delete 11111111-2222-3333-4444-555555555555' "$CALLS"
+  if kill -0 "$(cat "$BLOCK_BUILD_PID_FILE")" 2>/dev/null; then
+    echo 'build survived SIGTERM to the lane'
+    return 1
+  fi
+  [ -f "$WATCH_SMOKE_LOG_DIR/smoke.log" ]
 }
 
 @test "usage rejects missing argument and invalid version before xcrun" {
@@ -150,6 +215,7 @@ STUB
   run bash "$SCRIPT" latest
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *watch-smoke-lane:\ PASS* ]]
+  grep -q 'watch-smoke-lane: PASS' "$WATCH_SMOKE_LOG_DIR/smoke.log"
   [ "$(grep -c '^simctl create ' "$CALLS")" -eq 1 ]
   grep -Eq 'watch-smoke-26.5-runlocal-epoch[0-9]+-[0-9]+ watch-type ' "$CALLS"
   ! grep -q getApple "$CALLS" || return 1
@@ -342,4 +408,13 @@ STUB
   run bash "$SCRIPT" latest
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -Eq -- '--daemon start --debug --embedded-sdk --port [0-9]{5} aux=' "$CALLS"
+}
+
+@test "silent runtime command repeats only startup options after daemon start" {
+  export AUTO_MOBILE_CMD="$BATS_TEST_TMPDIR/bin/cli run --silent src/index.ts --debug --embedded-sdk --cli"
+  run bash "$SCRIPT" latest
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  start="$(grep '^cli .*--daemon start' "$CALLS")"
+  [ "${start%% aux=*}" = 'cli run --silent src/index.ts --debug --embedded-sdk --daemon start --debug --embedded-sdk --port 45678' ]
+  grep -q '^cli run --silent src/index.ts --debug --embedded-sdk --daemon stop aux=' "$CALLS"
 }

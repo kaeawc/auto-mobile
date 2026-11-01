@@ -11,6 +11,7 @@ const recorded: FixtureIdentity = {
   systemImageId: "system-images;android-35;google_apis;arm64-v8a",
   avdConfigHash: "config-hash",
   emulatorVersion: "35.2.10",
+  userdataGeneration: "1234:1730000000000",
 };
 
 describe("checkFixtureValidity", () => {
@@ -26,6 +27,7 @@ describe("checkFixtureValidity", () => {
     ["systemImageId", "system-image-changed"],
     ["avdConfigHash", "avd-config-changed"],
     ["emulatorVersion", "emulator-version-changed"],
+    ["userdataGeneration", "userdata-wiped"],
   ];
 
   test.each(changes)("changing %s yields only %s", async (field, reason) => {
@@ -45,6 +47,7 @@ describe("checkFixtureValidity", () => {
       avdConfigHash: "different-config-hash",
       systemImageId: "system-images;android-36;google_apis;arm64-v8a",
       avdName: "different-avd",
+      userdataGeneration: "5678:1730000999999",
     });
 
     expect(await checkFixtureValidity(recorded, probe)).toEqual({
@@ -54,6 +57,7 @@ describe("checkFixtureValidity", () => {
         "system-image-changed",
         "avd-config-changed",
         "emulator-version-changed",
+        "userdata-wiped",
       ],
     });
     expect(probe.queriedAvdNames).toEqual([recorded.avdName]);

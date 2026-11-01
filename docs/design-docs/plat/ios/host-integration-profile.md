@@ -109,13 +109,13 @@ with reason `NOT_INITIALIZED`. These families have adapters and never report `UN
 `faultEnforcement` is always `NONE` and `faultActions` is empty. Network capture settings do not
 affect this matrix, and `transportCapabilities()` remains transport-only.
 
-| Family and capability id | Registration | Host forwarding |
-| --- | --- | --- |
-| WKWebView (`webview.wkwebview`) | `bridge.register(webView)` | Keep the host's `WKNavigationDelegate`; forward `didCommit`, `didFinish`, `didFail` and `webViewWebContentProcessDidTerminate` to the bridge's corresponding methods |
-| UIKit (`navigation.uikit`) | `AutoMobileNavigation.shared.registerUIKit()` | Call the returned adapter's completed push, pop, presentation, tab and split hooks from existing delegates; scene resolution runs on main |
-| SwiftUI (`navigation.swiftui`) | `AutoMobileNavigation.shared.registerSwiftUI()` | Use `.trackNavigation()` or the returned adapter's `track*` calls |
-| Deep links (`navigation.deeplink`) | `AutoMobileNavigation.shared.registerDeepLinks()` | Call the returned adapter's `record` from the host's URL handler; the host owns dispatch |
-| Custom routers (`navigation.custom`) | `AutoMobileNavigation.shared.registerCustomRouter()` | Call the returned adapter's `record` per completed transition; incomplete transitions are dropped |
+| Family and capability id             | Registration                                         | Host forwarding                                                                                                                                                      |
+| ------------------------------------ | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WKWebView (`webview.wkwebview`)      | `bridge.register(webView)`                           | Keep the host's `WKNavigationDelegate`; forward `didCommit`, `didFinish`, `didFail` and `webViewWebContentProcessDidTerminate` to the bridge's corresponding methods |
+| UIKit (`navigation.uikit`)           | `AutoMobileNavigation.shared.registerUIKit()`        | Call the returned adapter's completed push, pop, presentation, tab and split hooks from existing delegates; scene resolution runs on main                            |
+| SwiftUI (`navigation.swiftui`)       | `AutoMobileNavigation.shared.registerSwiftUI()`      | Use `.trackNavigation()` or the returned adapter's `track*` calls                                                                                                    |
+| Deep links (`navigation.deeplink`)   | `AutoMobileNavigation.shared.registerDeepLinks()`    | Call the returned adapter's `record` from the host's URL handler; the host owns dispatch                                                                             |
+| Custom routers (`navigation.custom`) | `AutoMobileNavigation.shared.registerCustomRouter()` | Call the returned adapter's `record` per completed transition; incomplete transitions are dropped                                                                    |
 
 Registration may precede SDK initialization. Navigation calls return the shared family adapter and
 start its owner in the shared hub. Repeated registration leaves descriptors and the installed

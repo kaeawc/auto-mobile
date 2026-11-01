@@ -341,6 +341,9 @@ describe("DefaultExactDeviceProvisioner", () => {
     async (tag) => {
       const runtime = `system-images;android-37;${tag};arm64-v8a`;
       const calls: unknown[] = [];
+      let creationStarted = false;
+      let capacityChecked = false;
+      let createdDeviceReported = false;
       const signal = new AbortController().signal;
       const provisioner = new DefaultExactDeviceProvisioner({
         listDeviceImages: async () => [],
@@ -368,14 +371,32 @@ describe("DefaultExactDeviceProvisioner", () => {
         androidConfigWriter: { setMemoryMb: async () => {} },
         iosSimulator: {} as ExactIosSimulatorClient,
       });
-      const result = provisioner.provision({
-        platform: "android",
-        name: "tv-37",
-        signal,
-        spec: { runtime, deviceType: "tv_1080p" },
-      });
+      const result = provisioner
+        .provision({
+          platform: "android",
+          name: "tv-37",
+          signal,
+          spec: { runtime, deviceType: "tv_1080p" },
+          assertCapacityBeforeCreate: async () => {
+            capacityChecked = true;
+          },
+          onBeforeCreate: () => {
+            creationStarted = true;
+          },
+        })
+        .then((provisioned) => {
+          createdDeviceReported = provisioned.created;
+          return provisioned;
+        });
       await expect(result).rejects.toBeInstanceOf(ActionableError);
-      await expect(result).rejects.toThrow(`sdkmanager "${runtime}"`);
+      await expect(result).rejects.toMatchObject({
+        message:
+          `No installed Android TV system image matches the requested package '${runtime}'. ` +
+          `AutoMobile does not download system images. Install one with 'sdkmanager "${runtime}"', then retry.`,
+      });
+      expect(capacityChecked).toBe(false);
+      expect(creationStarted).toBe(false);
+      expect(createdDeviceReported).toBe(false);
       expect(calls).toEqual([]);
     },
   );

@@ -355,7 +355,9 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       );
     }
 
-    if (request.platform === "ios") {
+    if (request.platform === "android") {
+      await this.assertAndroidTvImageInstalled(request, request.spec as AndroidDeviceSpecification);
+    } else {
       await this.assertIosPairCompatible(request, request.spec as IosDeviceSpecification);
     }
 
@@ -531,11 +533,10 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     }
   }
 
-  private async createAndroid(
+  private async assertAndroidTvImageInstalled(
     request: ExactDeviceProvisionRequest,
     spec: AndroidDeviceSpecification,
-    displayCutout: DisplayCutoutClassification,
-  ): Promise<ExactProvisionedDevice> {
+  ): Promise<void> {
     const runtime = parseAndroidSystemImageRuntime(spec.runtime);
     if (runtime && TV_ANDROID_TAGS.includes(runtime.tag)) {
       let installed: SystemImage[];
@@ -555,6 +556,13 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
         );
       }
     }
+  }
+
+  private async createAndroid(
+    request: ExactDeviceProvisionRequest,
+    spec: AndroidDeviceSpecification,
+    displayCutout: DisplayCutoutClassification,
+  ): Promise<ExactProvisionedDevice> {
     let created: Awaited<ReturnType<ExactAndroidAvdClient["createAvd"]>>;
     try {
       created = await this.dependencies.avdManager.createAvd(

@@ -46,6 +46,10 @@ class MainActivity : ComponentActivity() {
       AutoMobileSDK.registerCapability(
         SdkCapabilityDescriptor("network.control", SdkCapabilityState.SUPPORTED),
       )
+      // The playground opts in to scoped Keystore deletion.
+      AutoMobileSDK.registerCapability(
+        SdkCapabilityDescriptor("storage.mutation", SdkCapabilityState.SUPPORTED),
+      )
       AutoMobileSDK.updateCapturePolicy(SdkCapturePolicy(allowMutations = true))
     }
     // Enable storage and database inspection in debug builds

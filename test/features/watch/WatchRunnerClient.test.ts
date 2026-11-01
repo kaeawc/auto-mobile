@@ -5,7 +5,7 @@ import { WebSocketWatchRunnerClient } from "../../../src/features/watch/WatchRun
 import { WatchRunnerError } from "../../../src/features/watch/WatchRunnerError";
 import { FakeWatchSocket } from "../../fakes/FakeWatchSocket";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import hierarchy from "../../fixtures/watchos-xcuitest/hierarchy.json";
+import hierarchy from "../../fixtures/watchos-xcuitest/sdk-hierarchy-live.json";
 
 function arrange() {
   const timer = new FakeTimer();

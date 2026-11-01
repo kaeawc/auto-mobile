@@ -9,6 +9,7 @@ import {
   watchPress,
 } from "../../../src/features/watch/WatchActions";
 import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
+import hierarchy from "../../fixtures/watchos-xcuitest/sdk-hierarchy-live.json";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { defaultTapAtElementFactory } from "../../../src/server/interactionTools/tapHandlers";
@@ -29,17 +30,33 @@ beforeEach(() => {
 afterEach(() => unregister());
 
 describe("watch actions", () => {
+  test.each([false, true])(
+    "refuses ensureChecked=%s before any runner command",
+    async (ensureChecked) => {
+      await expect(
+        new TapOnElement(device, null, { timer: new FakeTimer() }).execute({
+          action: "tap",
+          elementId: "ctrlproxy-crown",
+          ensureChecked,
+        }),
+      ).rejects.toThrow("ensureChecked");
+      expect(client.commands).toEqual([]);
+    },
+  );
   test("taps by identifier through the tapOn entry point", async () => {
     const result = await new TapOnElement(device, null, { timer: new FakeTimer() }).execute({
       action: "tap",
-      elementId: "tapme",
+      elementId: "ctrlproxy-crown",
     });
     expect(result.success).toBe(true);
-    expect(client.commands).toEqual([{ type: "hierarchy" }, { type: "tap", identifier: "tapme" }]);
+    expect(client.commands).toEqual([
+      { type: "hierarchy" },
+      { type: "tap", identifier: "ctrlproxy-crown" },
+    ]);
   });
   test("text-only nodes dispatch their center in XCTest points", async () => {
-    await watchTapOn(device.deviceId, { action: "tap", text: "row 0" });
-    expect(client.commands[1]).toEqual({ type: "tap", x: 104, y: 179.05 });
+    await watchTapOn(device.deviceId, { action: "tap", text: "CtrlProxyWatch" });
+    expect(client.commands[1]).toEqual({ type: "tap", x: 92, y: 112 });
   });
   test("coordinate entry point routes without a hierarchy read", async () => {
     const result = await defaultTapAtElementFactory(device).execute({
@@ -62,10 +79,22 @@ describe("watch actions", () => {
       expect(client.commands).toEqual([]);
     },
   );
+  test("refuses zero-area text matches", async () => {
+    await expect(
+      watchTapOn(device.deviceId, { action: "tap", text: "Non-hittable fixture" }),
+    ).rejects.toThrow("No watch element matched");
+    expect(client.commands).toEqual([{ type: "hierarchy" }]);
+  });
   test("refuses offscreen text matches", async () => {
-    await expect(watchTapOn(device.deviceId, { action: "tap", text: "row 7" })).rejects.toThrow(
-      "No watch element matched",
-    );
+    unregister();
+    const tree = structuredClone(hierarchy);
+    tree.root.bounds.top = tree.screenHeight;
+    tree.root.bounds.bottom = tree.screenHeight * 2;
+    client = new FakeWatchRunnerClient(tree);
+    unregister = watchRunners.register(device.deviceId, client);
+    await expect(
+      watchTapOn(device.deviceId, { action: "tap", text: "CtrlProxyWatch" }),
+    ).rejects.toThrow("No watch element matched");
     expect(client.commands).toEqual([{ type: "hierarchy" }]);
   });
   test("swipeOn entry point sends direction and home entry point sends home", async () => {
@@ -78,14 +107,17 @@ describe("watch actions", () => {
   });
   test("lookFor matches identifiers and text with a bounded direction search", async () => {
     expect(
-      await watchSwipeOn(device.deviceId, { direction: "up", lookFor: { elementId: "tapme" } }),
+      await watchSwipeOn(device.deviceId, {
+        direction: "up",
+        lookFor: { elementId: "ctrlproxy-crown" },
+      }),
     ).toMatchObject({ found: true, scrollIterations: 0 });
     client.commands.length = 0;
     expect(
       await watchSwipeOn(device.deviceId, {
         direction: "up",
         gestureType: "scrollTowardsDirection",
-        lookFor: { text: "row 7", maxSwipes: 2 },
+        lookFor: { text: "Non-hittable fixture", maxSwipes: 2 },
       }),
     ).toMatchObject({ found: false, scrollIterations: 2 });
     expect(client.commands.filter((command) => command.type === "swipe")).toEqual([
@@ -96,7 +128,10 @@ describe("watch actions", () => {
   test("long press, pinch, multi-touch and text reject before any command", async () => {
     const timer = new FakeTimer();
     await expect(
-      new TapOnElement(device, null, { timer }).execute({ action: "longPress", text: "Tap me" }),
+      new TapOnElement(device, null, { timer }).execute({
+        action: "longPress",
+        text: "CtrlProxy Watch",
+      }),
     ).rejects.toThrow("longPress");
     await expect(
       defaultTapAtElementFactory(device).execute({ x: 1, y: 2, action: "longPress" }),
@@ -128,7 +163,7 @@ describe("watch actions", () => {
   });
   test("refuses unsupported targeting and non-absolute coordinates before commands", async () => {
     await expect(
-      watchTapOn(device.deviceId, { action: "doubleTap", text: "Tap me" }),
+      watchTapOn(device.deviceId, { action: "doubleTap", text: "CtrlProxy Watch" }),
     ).rejects.toThrow("doubleTap");
     await expect(
       watchTapAt(device.deviceId, { x: 1, y: 1, coordinateSpace: "normalized" }),

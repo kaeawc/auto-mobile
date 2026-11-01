@@ -24,7 +24,7 @@ test("existing tool schemas and registry admit watch tapOn, tapAt, swipeOn and h
   }
   await tapOnHandler(
     device,
-    tapOnSchema.parse({ selector: { text: "Tap me" }, platform: "watchos" }),
+    tapOnSchema.parse({ selector: { text: "CtrlProxy Watch" }, platform: "watchos" }),
   );
   await tapAtHandler(device, tapAtSchema.parse({ x: 10, y: 20, platform: "watchos" }));
   await swipeOnHandler(device, swipeOnSchema.parse({ direction: "up", platform: "watchos" }));
@@ -34,7 +34,7 @@ test("existing tool schemas and registry admit watch tapOn, tapAt, swipeOn and h
   );
   expect(client.commands).toEqual([
     { type: "hierarchy" },
-    { type: "tap", identifier: "tapme" },
+    { type: "tap", identifier: "ctrlproxy-crown" },
     { type: "tap", x: 10, y: 20 },
     { type: "swipe", direction: "up" },
     { type: "home" },
@@ -42,7 +42,7 @@ test("existing tool schemas and registry admit watch tapOn, tapAt, swipeOn and h
 });
 test("long press is refused by the real handler before hierarchy or input", async () => {
   await expect(
-    tapOnHandler(device, { selector: { text: "Tap me" }, duration: 1000 }),
+    tapOnHandler(device, { selector: { text: "CtrlProxy Watch" }, duration: 1000 }),
   ).rejects.toThrow("longPress");
   expect(client.commands).toEqual([]);
 });

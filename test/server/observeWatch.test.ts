@@ -245,8 +245,8 @@ test("connected watch hierarchy keeps the screenshot and uses XCTest point dimen
   const { observe, screenshots } = arrange(undefined, runner);
   const result = getStructuredPayload<import("../../src/models").ObserveResult>(await observe())!;
   expect(observeToolResultSchema.safeParse(result).success).toBe(true);
-  expect(result.viewHierarchy?.screenWidth).toBe(208);
-  expect(result.screenSize).toEqual({ width: 208, height: 248, units: "points" });
+  expect(result.viewHierarchy?.screenWidth).toBe(184);
+  expect(result.screenSize).toEqual({ width: 184, height: 224, units: "points" });
   expect(result.screenshotImageSize).toEqual({ width: 416, height: 496 });
   expect(result.screenshotPath).toBeDefined();
   expect(result).not.toHaveProperty("hierarchyUnavailable");

@@ -167,7 +167,7 @@ describe("observe on an Apple Watch simulator through the registry", () => {
     await arrange(runner);
     const response = await call("observe", { platform: "watchos", deviceId: watch.deviceId });
     const result = toolJson(response);
-    expect(JSON.stringify(result)).toContain("Tap me");
+    expect(JSON.stringify(result)).toContain("CtrlProxy Watch");
     expect(result).not.toHaveProperty("hierarchyUnavailable");
     expect(result.screenshotPath).toBeDefined();
     expect(runner.commands).toEqual([{ type: "hierarchy" }]);
@@ -175,7 +175,7 @@ describe("observe on an Apple Watch simulator through the registry", () => {
       await call("observe", { platform: "watchos", deviceId: watch.deviceId, project: "full" }),
     );
     expect(full.viewHierarchy).toBeDefined();
-    expect(JSON.stringify(full.viewHierarchy)).toContain("Tap me");
+    expect(JSON.stringify(full.viewHierarchy)).toContain("CtrlProxy Watch");
   });
 
   test("watch action tools dispatch through the registry to their bound runner", async () => {
@@ -184,13 +184,13 @@ describe("observe on an Apple Watch simulator through the registry", () => {
     cleanups.push(watchRunners.register(watch.deviceId, runner));
     registerInteractionTools();
     const target = { platform: "watchos", deviceId: watch.deviceId };
-    await call("tapOn", { ...target, selector: { elementId: "tapme" } });
+    await call("tapOn", { ...target, selector: { elementId: "ctrlproxy-crown" } });
     await call("tapAt", { ...target, x: 10, y: 20 });
     await call("swipeOn", { ...target, direction: "up" });
     await call("pressButton", { ...target, button: "home" });
     expect(runner.commands).toEqual([
       { type: "hierarchy" },
-      { type: "tap", identifier: "tapme" },
+      { type: "tap", identifier: "ctrlproxy-crown" },
       { type: "tap", x: 10, y: 20 },
       { type: "swipe", direction: "up" },
       { type: "home" },

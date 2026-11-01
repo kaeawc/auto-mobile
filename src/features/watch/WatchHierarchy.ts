@@ -3,53 +3,115 @@ import type { ViewHierarchyResult } from "../../models";
 import { convertToViewHierarchyResult } from "../observe/ios/IosHierarchyConverter";
 import type { CtrlProxyNode } from "../observe/ios/types";
 
-/** AutoMobileSdkWire's SdkViewHierarchy, as emitted by CtrlProxyWatch. */
+/** Fields consumed from AutoMobileSdkWire's SdkViewNode, including its decoding defaults. */
 export interface WatchHierarchyNode {
-  id: string;
-  label: string;
-  type: number;
-  enabled: boolean;
-  frame: [number, number, number, number];
-  children: WatchHierarchyNode[];
+  accessibilityIdentifier?: string | null;
+  accessibilityLabel?: string | null;
+  className: string;
+  bounds: NonNullable<CtrlProxyNode["bounds"]>;
+  children?: WatchHierarchyNode[] | null;
+  isHidden?: boolean | null;
+  isOccluded?: boolean | null;
+  alpha?: number | null;
+  isAccessibilityElement?: boolean | null;
+  isAccessibilityFocused?: boolean | null;
+  accessibilityTraits?: string[] | null;
+  hasTapTarget?: boolean | null;
+  isUserInteractionEnabled?: boolean | null;
 }
 
-export function isWatchHierarchy(value: unknown): value is WatchHierarchyNode {
+/** AutoMobileSdkWire's SdkViewHierarchy envelope emitted by CtrlProxyWatch. */
+export interface WatchHierarchy {
+  timestamp: number;
+  screenWidth: number;
+  screenHeight: number;
+  screenScale: number;
+  bundleId?: string | null;
+  root: WatchHierarchyNode;
+}
+
+export function isWatchHierarchy(value: unknown): value is WatchHierarchy {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const hierarchy = value as Record<string, unknown>;
+  return (
+    typeof hierarchy.timestamp === "number" &&
+    Number.isFinite(hierarchy.timestamp) &&
+    [hierarchy.screenWidth, hierarchy.screenHeight, hierarchy.screenScale].every(
+      (entry) => typeof entry === "number" && Number.isFinite(entry) && entry > 0,
+    ) &&
+    (hierarchy.bundleId === undefined ||
+      hierarchy.bundleId === null ||
+      typeof hierarchy.bundleId === "string") &&
+    isWatchNode(hierarchy.root)
+  );
+}
+
+function isWatchNode(value: unknown): value is WatchHierarchyNode {
   if (!value || typeof value !== "object") {
     return false;
   }
   const node = value as Record<string, unknown>;
   return (
-    typeof node.id === "string" &&
-    typeof node.label === "string" &&
-    typeof node.type === "number" &&
-    typeof node.enabled === "boolean" &&
-    Array.isArray(node.frame) &&
-    node.frame.length === 4 &&
-    node.frame.every((entry: unknown) => typeof entry === "number" && Number.isFinite(entry)) &&
-    Array.isArray(node.children) &&
-    node.children.every(isWatchHierarchy)
+    typeof node.className === "string" &&
+    isWatchBounds(node.bounds) &&
+    hasValidNodeProperties(node) &&
+    (node.children === undefined ||
+      node.children === null ||
+      (Array.isArray(node.children) && node.children.every(isWatchNode)))
   );
 }
 
+function isWatchBounds(value: unknown): value is WatchHierarchyNode["bounds"] {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const bounds = value as Record<string, unknown>;
+  return ["left", "top", "right", "bottom"].every(
+    (key) => typeof bounds[key] === "number" && Number.isFinite(bounds[key]),
+  );
+}
+
+function hasValidNodeProperties(node: Record<string, unknown>): boolean {
+  const traits = node.accessibilityTraits ?? [];
+  return (
+    [node.accessibilityIdentifier, node.accessibilityLabel].every(
+      (entry) => entry === undefined || entry === null || typeof entry === "string",
+    ) &&
+    [
+      node.isHidden,
+      node.isOccluded,
+      node.isAccessibilityElement,
+      node.isAccessibilityFocused,
+      node.hasTapTarget,
+      node.isUserInteractionEnabled,
+    ].every((entry) => entry === undefined || entry === null || typeof entry === "boolean") &&
+    Number.isFinite(node.alpha ?? 1) &&
+    Array.isArray(traits) &&
+    traits.every((trait: unknown) => typeof trait === "string")
+  );
+}
+
+// The iOS converter has no visibility attributes; omit invisible subtrees before conversion.
+function isVisible(node: WatchHierarchyNode): boolean {
+  return !node.isHidden && !node.isOccluded && (node.alpha ?? 1) > 0;
+}
+
 function convertNode(node: WatchHierarchyNode): CtrlProxyNode {
-  const [x, y, width, height] = node.frame;
-  const names: Record<number, string> = {
-    2: "Application",
-    4: "Window",
-    9: "Button",
-    25: "NavigationBar",
-    46: "ScrollView",
-    48: "StaticText",
-  };
   return {
-    text: node.label,
-    resourceId: node.id,
-    className: `XCUIElementType${names[node.type] ?? "Other"}`,
-    enabled: String(node.enabled),
-    clickable: String(node.type === 9),
-    scrollable: String(node.type === 46),
-    bounds: { left: x, top: y, right: x + width, bottom: y + height },
-    node: node.children.map(convertNode),
+    text: node.accessibilityLabel ?? undefined,
+    resourceId: node.accessibilityIdentifier ?? undefined,
+    className: node.className,
+    bounds: node.bounds,
+    enabled: String(node.isUserInteractionEnabled ?? true),
+    clickable: String(node.hasTapTarget ?? false),
+    focusable: String(node.isAccessibilityElement ?? false),
+    accessibilityFocused: String(node.isAccessibilityFocused ?? false),
+    extras: node.accessibilityTraits?.length
+      ? { "sdk.accessibilityTraits": node.accessibilityTraits.join(",") }
+      : undefined,
+    node: (node.children ?? []).filter(isVisible).map(convertNode),
   };
 }
 
@@ -60,14 +122,13 @@ export function normalizeWatchHierarchy(value: unknown): ViewHierarchyResult {
       "The watch runner returned an invalid hierarchy; reconnect the runner.",
     );
   }
-  const normalized = convertToViewHierarchyResult({
-    // The wire tree has no clock. Satisfy the iOS adapter input without publishing a fabricated timestamp.
-    updatedAt: 0,
-    hierarchy: convertNode(value),
-    packageName: "",
-    screenWidth: value.frame[2],
-    screenHeight: value.frame[3],
+  return convertToViewHierarchyResult({
+    updatedAt: value.timestamp,
+    hierarchy: isVisible(value.root) ? convertNode(value.root) : {},
+    packageName: value.bundleId ?? "",
+    screenWidth: value.screenWidth,
+    screenHeight: value.screenHeight,
+    // Metadata only: XCTest bounds and gesture coordinates remain in points.
+    screenScale: value.screenScale,
   });
-  delete normalized.updatedAt;
-  return normalized;
 }

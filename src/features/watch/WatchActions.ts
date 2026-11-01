@@ -29,7 +29,9 @@ export function rejectWatchAction(platform: Platform, action: string): void {
 
 function rejectOptions(options: object, allowed: readonly string[]): void {
   const refused = Object.entries(options).filter(
-    ([key, value]) => value !== undefined && value !== false && !allowed.includes(key),
+    // false requests a verified unchecked state; the watch runner cannot check either state.
+    ([key, value]) =>
+      value !== undefined && (value !== false || key === "ensureChecked") && !allowed.includes(key),
   );
   if (refused.length) {
     unsupportedWatchAction(`watchOS options ${refused.map(([key]) => key).join(", ")}`);

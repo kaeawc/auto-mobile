@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { isWatchHierarchy, type WatchHierarchyNode } from "./WatchHierarchy";
+import { isWatchHierarchy, type WatchHierarchy } from "./WatchHierarchy";
 
 export type WatchCommand =
   | { type: "hierarchy" | "home" }
@@ -13,7 +13,7 @@ export type WatchCommand =
 
 export interface WatchRunnerClient {
   request(command: WatchCommand, signal?: AbortSignal): Promise<unknown>;
-  hierarchy(signal?: AbortSignal): Promise<WatchHierarchyNode>;
+  hierarchy(signal?: AbortSignal): Promise<WatchHierarchy>;
   close(): void;
 }
 
@@ -181,7 +181,7 @@ export class WebSocketWatchRunnerClient implements WatchRunnerClient {
     }
   }
 
-  async hierarchy(signal?: AbortSignal): Promise<WatchHierarchyNode> {
+  async hierarchy(signal?: AbortSignal): Promise<WatchHierarchy> {
     const data = await this.request({ type: "hierarchy" }, signal);
     if (!isWatchHierarchy(data)) {
       throw new ActionableError("Invalid watch hierarchy; reconnect the runner.");

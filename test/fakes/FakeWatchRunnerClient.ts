@@ -1,12 +1,12 @@
 import type { WatchRunnerClient, WatchCommand } from "../../src/features/watch/WatchRunnerClient";
-import { isWatchHierarchy, type WatchHierarchyNode } from "../../src/features/watch/WatchHierarchy";
-import hierarchy from "../fixtures/watchos-xcuitest/hierarchy.json";
+import { isWatchHierarchy, type WatchHierarchy } from "../../src/features/watch/WatchHierarchy";
+import hierarchy from "../fixtures/watchos-xcuitest/sdk-hierarchy-live.json";
 
 export class FakeWatchRunnerClient implements WatchRunnerClient {
   readonly commands: WatchCommand[] = [];
   closed = false;
   failure?: Error;
-  readonly tree: WatchHierarchyNode;
+  readonly tree: WatchHierarchy;
   constructor(tree: unknown = hierarchy) {
     if (!isWatchHierarchy(tree)) {
       throw new Error("Invalid captured watch fixture");
@@ -21,7 +21,7 @@ export class FakeWatchRunnerClient implements WatchRunnerClient {
     }
     return command.type === "hierarchy" ? this.tree : undefined;
   }
-  async hierarchy(signal?: AbortSignal): Promise<WatchHierarchyNode> {
+  async hierarchy(signal?: AbortSignal): Promise<WatchHierarchy> {
     await this.request({ type: "hierarchy" }, signal);
     return this.tree;
   }

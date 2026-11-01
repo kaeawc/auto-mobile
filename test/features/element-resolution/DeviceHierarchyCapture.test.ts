@@ -452,7 +452,7 @@ test("watch capture uses only its runner and the existing iOS hierarchy projecti
       { timer },
     );
     const snapshot = await capture.capture({ freshness: "fresh" });
-    expect(snapshot.hierarchy.screenWidth).toBe(208);
+    expect(snapshot.hierarchy.screenWidth).toBe(184);
     expect(snapshot.nodes.length).toBeGreaterThan(0);
     expect(client.commands).toEqual([{ type: "hierarchy" }]);
     expect(timer.getSleepHistory()).toEqual([]);

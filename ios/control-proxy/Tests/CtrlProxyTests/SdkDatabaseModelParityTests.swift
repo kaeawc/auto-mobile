@@ -18,15 +18,17 @@ final class SdkDatabaseModelParityTests: XCTestCase {
     }
 
     func testCoreDataWireParity() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
         assertReencode({ data in
-            try JSONEncoder().encode(JSONDecoder().decode(CoreDataQueryRequest.self, from: data))
+            try encoder.encode(JSONDecoder().decode(CoreDataQueryRequest.self, from: data))
         }, #"{"store":"Main","entity":"Item","limit":2}"#, "CoreDataQueryRequest")
         assertReencode({ data in
-            try JSONEncoder().encode(JSONDecoder().decode(CoreDataQueryResult.self, from: data))
+            try encoder.encode(JSONDecoder().decode(CoreDataQueryResult.self, from: data))
         }, #"{"columns":["name"],"rows":[[null]],"truncated":true}"#, "CoreDataQueryResult")
         assertReencode(
             { data in
-                try JSONEncoder().encode(JSONDecoder().decode(RequestQueryCoreData.self, from: data))
+                try encoder.encode(JSONDecoder().decode(RequestQueryCoreData.self, from: data))
             },
             #"{"requestId":"r1","appId":"com.example.app","store":"Main","entity":"Item","limit":2}"#,
             "RequestQueryCoreData"

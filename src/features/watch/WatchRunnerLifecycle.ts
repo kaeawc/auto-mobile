@@ -21,7 +21,7 @@ interface OwnedRunner {
   port?: number;
 }
 
-/** Owns only runners launched here; a pre-registered runner is reused without taking ownership. */
+/** Owns only runners launched here; usable pre-registered runners are reused without taking ownership. */
 export class WatchRunnerLifecycle {
   private readonly runners = new Map<string, OwnedRunner>();
   private readonly observedSessions = new WeakSet<WatchRunnerSessions>();
@@ -54,10 +54,16 @@ export class WatchRunnerLifecycle {
     if (sessions) {
       this.observeSessions(sessions);
     }
-    if (watchRunners.get(deviceId)) {
+    const registered = watchRunners.get(deviceId);
+    if (registered?.isUsable()) {
       return {};
     }
     this.stop(deviceId);
+    if (watchRunners.get(deviceId)) {
+      return {
+        runnerUnavailable: `The watch runner for ${deviceId} is disconnected and was not started by AutoMobile; restart it before trying again.`,
+      };
+    }
     const entry: OwnedRunner = { controller: new AbortController() };
     const signal = combineAbortSignals(request.signal, entry.controller.signal)!;
     this.runners.set(deviceId, entry);

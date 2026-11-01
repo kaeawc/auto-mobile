@@ -19,6 +19,24 @@ function arrange() {
 }
 
 describe("watch runner protocol", () => {
+  test("a disconnected client is unusable and rejects later requests", async () => {
+    const { client, socket } = arrange();
+    socket.connected();
+    expect(client.isUsable()).toBe(true);
+    socket.disconnect();
+    expect(client.isUsable()).toBe(false);
+    await expect(client.request({ type: "home" })).rejects.toThrow("disconnected");
+    expect(socket.sent).toEqual([]);
+    client.close();
+  });
+  test("a closed client is unusable", () => {
+    const { client, socket } = arrange();
+    socket.connected();
+    expect(client.isUsable()).toBe(true);
+    client.close();
+    expect(client.isUsable()).toBe(false);
+    expect(socket.closed).toBe(true);
+  });
   test("correlates out-of-order replies and normal hierarchy payloads", async () => {
     const { client, socket, timer } = arrange();
     socket.connected();

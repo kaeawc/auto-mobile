@@ -166,7 +166,8 @@ export class WatchRunnerLifecycle {
 type WatchRunnerBuilder = Pick<
   IosCtrlProxyBuilder,
   "getXctestrunPath" | "getConfig" | "writeRunnerEnvironment"
->;
+> &
+  Partial<Pick<IosCtrlProxyBuilder, "runExclusiveOnDerivedData">>;
 let defaultBuilderFactory: (() => WatchRunnerBuilder) | undefined;
 
 /** The server composition root supplies the process builder without eager artifact work. */
@@ -189,6 +190,12 @@ export function getWatchRunnerLifecycle(): WatchRunnerLifecycle {
         builder: {
           getXctestrunPath: (platform) => getDefaultBuilder().getXctestrunPath(platform),
           getConfig: () => getDefaultBuilder().getConfig(),
+          runExclusiveOnDerivedData: (task) => {
+            const builder = getDefaultBuilder();
+            return builder.runExclusiveOnDerivedData
+              ? builder.runExclusiveOnDerivedData(task)
+              : task();
+          },
         },
       }),
       launcher: new XcodebuildWatchRunnerLauncher({

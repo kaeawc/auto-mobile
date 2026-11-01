@@ -37,7 +37,7 @@ export const ROOT_ARTIFACT_PATHS = [
 const STUB_SCRIPT = "#!/system/bin/sh\\nexit 1\\n";
 
 /** A Play image is a production build: not debuggable, and `adb root` is refused. */
-async function assertRootableImage(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+export async function assertRootableImage(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
   const debuggable = await shell(adb, ["getprop", "ro.debuggable"], signal);
   const buildType = await shell(adb, ["getprop", "ro.build.type"], signal);
   if (debuggable !== "1" || buildType === "user") {
@@ -47,6 +47,15 @@ async function assertRootableImage(adb: AdbExecutor, signal?: AbortSignal): Prom
         "For real root on a Play image, use the rootAVD/Magisk fixture (#14070).",
     );
   }
+}
+
+/** Start root adbd and wait for its restarted transport; refusal may exit successfully. */
+export async function ensureRootAdb(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
+  const output = await adbCommand(adb, ["root"], signal);
+  if (/cannot run as root|not allowed|refused|permission denied/i.test(output)) {
+    throw new ActionableError(`adb root refused: ${output}`);
+  }
+  await adbCommand(adb, ["wait-for-device"], signal);
 }
 
 /** `adb remount`, refusing with guidance when /system stays read-only. */
@@ -76,8 +85,7 @@ async function remountSystem(adb: AdbExecutor, signal?: AbortSignal): Promise<vo
 }
 
 async function remountWritable(adb: AdbExecutor, signal?: AbortSignal): Promise<void> {
-  await adbCommand(adb, ["root"], signal);
-  await adbCommand(adb, ["wait-for-device"], signal);
+  await ensureRootAdb(adb, signal);
   await remountSystem(adb, signal);
 }
 
@@ -138,8 +146,7 @@ export function createRootStateInjector(adb: AdbExecutor): DeviceConditionInject
   const reset = async (resetSignal?: AbortSignal): Promise<void> => {
     // Re-acquire the privileges the cleanup needs: an earlier reset (or a reboot) may
     // have un-rooted adbd. `adb root` is a no-op when it is already running as root.
-    await adbCommand(adb, ["root"], resetSignal);
-    await adbCommand(adb, ["wait-for-device"], resetSignal);
+    await ensureRootAdb(adb, resetSignal);
     let remaining = new Set<string>();
     if (planted.size > 0) {
       // A reboot can return /system to read-only while the planted files survive.

@@ -21,8 +21,8 @@ import { createSerializer, rejectValue, shell, unsupported } from "./injectorSup
  * "low" or "full", so apps can be tested for the I/O errors and install failures
  * (`INSTALL_FAILED_INSUFFICIENT_STORAGE`) that come with it.
  *
- * Read-only remounts and DB/preferences corruption need root and a target app, so
- * they are not part of this enum-valued surface yet.
+ * Device-wide read-only shared-storage remounts live in readOnlyFilesystemInjector;
+ * targeted app-file corruption lives in appFileFaultInjectors.
  */
 
 const MIB = 1024 * 1024;

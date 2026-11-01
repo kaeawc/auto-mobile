@@ -13,6 +13,7 @@ setup() {
   export STUB_LOG="${BATS_TEST_TMPDIR}/calls.log"
   : > "${STUB_LOG}"
   export XCRUN_BIN="${stubs}/xcrun"
+  export LSOF_BIN="${stubs}/lsof"
   export XCODEBUILD_BIN="${stubs}/xcodebuild"
   export PROTOTYPE_MCP_SMOKE_SCRIPT="${stubs}/smoke.sh"
   export PROTOTYPE_MCP_SMOKE_LOG_DIR="${BATS_TEST_TMPDIR}/out"
@@ -20,10 +21,16 @@ setup() {
   export PROTOTYPE_MCP_SMOKE_RETRY_SLEEP=0
   export PROTOTYPE_MCP_SMOKE_NOW_EPOCH=1800000000
   export PATH="${stubs}:${PATH}"
-  unset AUTO_MOBILE_CMD PROTOTYPE_SMOKE_DEVICE_TYPE GITHUB_RUN_ID
+  unset AUTO_MOBILE_CMD PROTOTYPE_SMOKE_DEVICE_TYPE GITHUB_RUN_ID PROTOTYPE_MCP_SMOKE_DAEMON_PORT
+  export STUB_PORT_IN_USE=0 STUB_DAEMON_START_FAIL=0
   export STUB_BUILD_MODE=ok STUB_SMOKE_EXIT=0 STUB_BOOT_FAIL=0 STUB_CLEANUP_FAIL=0
   export STUB_STALE_DEVICES=0 STUB_DELETE_FAIL_TIMES=0 STUB_LIST_FAIL=0 STUB_STALE_DELETE_FAIL=0 STUB_DAEMON_STOP_EXIT=0
 
+  cat > "${LSOF_BIN}" <<'STUB'
+#!/usr/bin/env bash
+printf 'lsof %s\n' "$*" >> "${STUB_LOG}"
+[[ ${STUB_PORT_IN_USE} == 1 ]]
+STUB
   cat > "${XCRUN_BIN}" <<'STUB'
 #!/usr/bin/env bash
 printf 'xcrun %s\n' "$*" >> "${STUB_LOG}"
@@ -104,12 +111,19 @@ STUB
 printf 'bun %s\n' "$*" >> "${STUB_LOG}"
 printf 'cli aux=%s socket=%s pid=%s\n' "${AUTOMOBILE_AUX_SOCKET_DIR}" "${AUTOMOBILE_DAEMON_SOCKET_PATH-unset}" "${AUTO_MOBILE_DAEMON_PID_FILE_PATH-unset}" >> "${STUB_LOG}"
 [[ -d "${AUTOMOBILE_AUX_SOCKET_DIR}" ]] || exit 99
+if [[ " $* " == *' --daemon start '* ]]; then
+  [[ ${STUB_DAEMON_START_FAIL} == 0 ]]
+  exit $?
+fi
+for arg in "$@"; do
+  case "$arg" in --port | --port=*) exit 99 ;; esac
+done
 if [[ " $* " == *' --daemon stop '* ]]; then
   printf 'daemon-stop aux=%s\n' "${AUTOMOBILE_AUX_SOCKET_DIR}" >> "${STUB_LOG}"
   exit "${STUB_DAEMON_STOP_EXIT}"
 fi
 STUB
-  chmod +x "${XCRUN_BIN}" "${XCODEBUILD_BIN}" "${stubs}/bun"
+  chmod +x "${LSOF_BIN}" "${XCRUN_BIN}" "${XCODEBUILD_BIN}" "${stubs}/bun"
 }
 
 assert_cleaned() {
@@ -124,7 +138,7 @@ assert_cleaned() {
 
 @test "missing or unavailable runtime skips without creating a simulator" {
   run bash "${script}" 27
-  [ "${status}" -eq 3 ]
+  [ "${status}" -eq 3 ] || { echo "${output}"; return 1; }
   [[ "${output}" == *"no installed iOS runtime matches '27'; skipping"* ]]
   run ! grep -q 'simctl create' "${STUB_LOG}"
   run ! grep -q '^build ' "${STUB_LOG}"
@@ -186,7 +200,7 @@ assert_cleaned() {
   [ "${status}" -eq 0 ]
   grep -q '^smoke aux=.* socket=unset pid=unset session=unset legacy-session=unset$' "${STUB_LOG}"
   run ! grep -q 'resident\|legacy-session=legacy' "${STUB_LOG}"
-  [ "$(grep -c '^cli aux=.* socket=unset pid=unset$' "${STUB_LOG}")" -eq 2 ]
+  [ "$(grep -c '^cli aux=.* socket=unset pid=unset$' "${STUB_LOG}")" -eq 3 ]
   assert_cleaned
 }
 
@@ -196,7 +210,7 @@ assert_cleaned() {
   aux="$(sed -n 's/^smoke aux=\([^ ]*\).*/\1/p' "${STUB_LOG}")"
   [ "$(grep -c '^daemon-stop ' "${STUB_LOG}")" -eq 1 ]
   grep -Fx "daemon-stop aux=${aux}" "${STUB_LOG}"
-  grep -qx 'bun run src/index.ts --daemon stop' "${STUB_LOG}"
+  grep -qx 'bun run src/index.ts --debug --embedded-sdk --daemon stop' "${STUB_LOG}"
   [[ "$(cat "${STUB_LOG}")" == *"daemon-stop aux=${aux}"*'xcrun simctl shutdown UDID-FRESH'* ]]
   assert_cleaned
 }
@@ -335,4 +349,61 @@ assert_cleaned() {
   run bash "${script}"
   [ "${status}" -eq 2 ]
   [ ! -s "${STUB_LOG}" ]
+}
+
+@test "refuses port 3000 before any xcrun call" {
+  export PROTOTYPE_MCP_SMOKE_DAEMON_PORT=3000
+  run bash "${script}" 26
+  [ "${status}" -eq 2 ] || { echo "${output}"; return 1; }
+  [[ "${output}" == *'never 3000'* ]]
+  ! grep -q '^xcrun ' "${STUB_LOG}"
+}
+
+@test "refuses nonnumeric and out-of-range ports before any xcrun call" {
+  for port in nope 39999 65536; do
+    export PROTOTYPE_MCP_SMOKE_DAEMON_PORT="${port}"
+    run bash "${script}" 26
+    [ "${status}" -eq 2 ]
+    ! grep -q '^xcrun ' "${STUB_LOG}"
+  done
+}
+
+@test "refuses a listening port before simulator creation or daemon start" {
+  export PROTOTYPE_MCP_SMOKE_DAEMON_PORT=45678 STUB_PORT_IN_USE=1
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *'port 45678 is already listening'* ]]
+  grep -qx 'lsof -nP -iTCP:45678 -sTCP:LISTEN' "${STUB_LOG}"
+  ! grep -Eq 'simctl create|--daemon start' "${STUB_LOG}"
+}
+
+@test "requires lsof before any xcrun call" {
+  export LSOF_BIN="${stubs}/missing-lsof"
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *'lsof is required'* ]]
+  ! grep -q '^xcrun ' "${STUB_LOG}"
+}
+
+@test "default private daemon starts after build before smoke with port only on start" {
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  calls="$(cat "${STUB_LOG}")"
+  start="$(grep '^bun .*--daemon start' "${STUB_LOG}")"
+  [[ "${start}" =~ ^bun\ run\ src/index.ts\ --debug\ --embedded-sdk\ --daemon\ start\ --debug\ --embedded-sdk\ --port\ ([0-9]+)$ ]]
+  port="${BASH_REMATCH[1]}"
+  (( port >= 40000 && port <= 65535 && port != 3000 ))
+  [[ "${calls}" == *'build '*"${start}"*'smoke UDID-FRESH'* ]]
+  [ "$(grep -c -- '--port' "${STUB_LOG}")" -eq 1 ]
+  assert_cleaned
+}
+
+@test "failed explicit daemon start stops once and deletes simulator" {
+  export STUB_DAEMON_START_FAIL=1
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *'private daemon start failed'* ]]
+  [ "$(grep -c -- '--daemon stop' "${STUB_LOG}")" -eq 1 ]
+  ! grep -q '^smoke ' "${STUB_LOG}"
+  assert_cleaned
 }

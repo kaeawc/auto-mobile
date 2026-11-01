@@ -2,10 +2,25 @@
 # iOS SDK contract suite (#5164): builds Playground (Debug) for a booted simulator, then
 # runs scripts/ios/sdk-contract/run.ts, which drives the SDK network adapters in Playground
 # and follows each event through CtrlProxy, the daemon's iOS client and the MCP network
-# resources. A failure names the boundary that disagreed. Needs a running daemon and a
-# CtrlProxy on the simulator, as the other simulator-lane integration scripts do.
+# resources. A failure names the boundary that disagreed. First build the runner with
+# bash scripts/ios/ctrl-proxy-build-for-testing.sh using AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA.
+# Then start the private daemon with that same path and AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true,
+# then run this suite. The daemon reads runner selection at its own start; do not rebuild afterward.
 
 set -euo pipefail
+
+if [[ "${AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD:-}" != true || -z "${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-}" ]]; then
+    echo 'error: requires AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true and nonempty AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA in the environment.' >&2
+    echo 'Source the private daemon env: source "<batch-dir>/daemon1/env.sh"; ensure it exports both variables, and start the private daemon with that env before running this suite.' >&2
+    exit 2
+fi
+
+runner_app="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA}/Build/Products/Debug-iphonesimulator/AutoMobileTest.app"
+if [[ ! -d "${runner_app}" ]]; then
+    echo "error: missing prebuilt CtrlProxy runner at ${runner_app}" >&2
+    echo 'Build the runner with bash scripts/ios/ctrl-proxy-build-for-testing.sh using the same AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA, then start the private daemon with the local-build env, then rerun this suite.' >&2
+    exit 2
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 device_id="${1:-}"

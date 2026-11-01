@@ -90,7 +90,6 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.validatePrototypeShaderUniforms
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
-import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.GlobalActionResult
 import dev.jasonpearson.automobile.protocol.NodeSelector
@@ -967,19 +966,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
 
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
-
-          override suspend fun sendActionResult(outcome: NodeActionResult) =
-            this@CtrlProxy.broadcastActionResult(
-              outcome.requestId,
-              outcome.action,
-              outcome.success,
-              outcome.error,
-              outcome.totalTimeMs,
-              outcome.alreadySatisfied,
-            )
         },
       perfProvider = perfProvider,
       timeProvider = timeProvider,
+      resultSender = resultSender,
     )
   }
   private val focusController by lazy {
@@ -2668,29 +2658,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.w(TAG, "Failed to enumerate display windows for node lookup", e)
       emptyList()
     }
-
-  /** Broadcast accessibility action result to WebSocket clients */
-  private suspend fun broadcastActionResult(
-    requestId: String?,
-    action: String,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    alreadySatisfied: Boolean = false,
-  ) {
-    resultSender.send(requestId, "action_result") { perfTiming ->
-      ActionResult(
-        timestamp = System.currentTimeMillis(),
-        requestId = requestId,
-        success = success,
-        action = action,
-        totalTimeMs = totalTimeMs,
-        error = error,
-        perfTiming = perfTiming,
-        alreadySatisfied = alreadySatisfied,
-      )
-    }
-  }
 
   /**
    * Hide-capture-restore in one device-side step (#9305), so a host that gives up mid-request can

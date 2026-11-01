@@ -803,7 +803,6 @@ async function preparePlatformShutdown(
   try {
     // Identity first: a refusal must leave a still-running device untouched.
     const target = await resolveRestartStopKillTarget(dependencies, context, options, devicePool);
-    stopWatchRunnerBeforeShutdown(context.device, dependencies);
     await stopVideoRecordingsBeforeShutdown(shutdownContext, perf);
     await stopIosCtrlProxyBeforeShutdown(shutdownContext, perf, dependencies.daemonState);
     const androidObserverState = await stopAndroidCtrlProxyBeforeShutdown(
@@ -812,6 +811,7 @@ async function preparePlatformShutdown(
       dependencies.stopAndroidObservers,
       dependencies.daemonState,
     );
+    stopWatchRunnerBeforeShutdown(context.device, dependencies);
     return { ...target, androidObserverState };
   } catch (error) {
     clearFence();

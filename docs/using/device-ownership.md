@@ -376,7 +376,8 @@ watch, even after one was selected.
   created is deleted again if that fails. `resources`, `enableTools` and
   `readiness: "automation"` are refused; `readiness` is always `"none"`.
 - `startDevice` with `platform: "watchos"` boots the watch, starts its automation
-  runner, then binds a session. A second start reuses a connected runner. If the
+  runner, then binds a session. If the session ends before runner startup completes,
+  the call fails; retry `startDevice`. A second start reuses a connected runner. If the
   runner cannot start, the call still returns a booted session and explains why
   in `message`. Set `AUTOMOBILE_WATCH_RUNNER_XCTESTRUN` to a prebuilt watch runner
   artifact if automatic discovery or building is unavailable, then retry.

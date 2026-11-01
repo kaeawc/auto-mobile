@@ -4,7 +4,7 @@ import { WatchRunnerArtifacts } from "../../../src/features/watch/WatchRunnerArt
 import { createExecResult } from "../../../src/utils/execResult";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
-function fixture() {
+function fixture({ missingProject = false } = {}) {
   let discovered: string | null = null;
   let afterBuild: string | null =
     "/derived/Build/Products/CtrlProxyWatch_watchsimulator26.0-arm64.xctestrun";
@@ -33,6 +33,9 @@ function fixture() {
     override: () => override,
     access: async (file) => {
       accesses.push(file);
+      if (missingProject) {
+        throw new Error("ENOENT");
+      }
     },
   });
   return {
@@ -104,4 +107,11 @@ test("resolves a relative override against the daemon launch directory", async (
       process.env[DAEMON_LAUNCH_CWD_ENV] = previousLaunchCwd;
     }
   }
+});
+
+test("a missing source project requires a prebuilt override without building", async () => {
+  const f = fixture({ missingProject: true });
+  await expect(f.artifacts.resolve()).rejects.toThrow("AUTOMOBILE_WATCH_RUNNER_XCTESTRUN");
+  expect(f.accesses).toEqual([path.join("/repo", "ios", "control-proxy", "CtrlProxy.xcodeproj")]);
+  expect(f.commands).toEqual([]);
 });

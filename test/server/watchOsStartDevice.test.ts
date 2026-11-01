@@ -279,17 +279,17 @@ describe("startDevice on an Apple Watch simulator", () => {
     expect(f.watchLauncher.stops).toBe(1);
   });
 
-  test("a session ending before attach returns booted readiness with an explanation", async () => {
+  test("a session ending before attach rejects and stops the runner", async () => {
     const f = await arrange();
-    const result = toolJson(
-      await startWatchDevice({ platform: "watchos", deviceId: WATCH_UDID }, async () => {
+    await expect(
+      startWatchDevice({ platform: "watchos", deviceId: WATCH_UDID }, async () => {
         await f.sessions.createSession("ended-session", WATCH_UDID, "watchos");
         await f.sessions.releaseSession("ended-session", "explicit-release");
         return "ended-session";
       }),
+    ).rejects.toThrow(
+      "The watch session ended before the watch runner started; retry startDevice.",
     );
-    expect(result).toMatchObject({ isReady: true, readiness: { level: "booted" } });
-    expect(result.message).toContain("the watch session ended before runner startup");
     expect(f.watchLauncher.stops).toBe(1);
   });
 

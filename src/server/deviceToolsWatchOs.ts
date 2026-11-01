@@ -121,9 +121,16 @@ export async function startWatchDevice(
               { deadlineMs, signal: lifecycleSignal },
             );
             if (runner && sessions) {
-              runnerUnavailable =
-                runner.attach({ deviceId: watch.deviceId, ownerSession: sessionId, sessions }) ??
-                runnerUnavailable;
+              const attachError = runner.attach({
+                deviceId: watch.deviceId,
+                ownerSession: sessionId,
+                sessions,
+              });
+              if (attachError) {
+                throw new ActionableError(
+                  "The watch session ended before the watch runner started; retry startDevice.",
+                );
+              }
             }
             lifecycleSignal.throwIfAborted();
             const response = watchStartResponse(watch, boot, sessionId, {

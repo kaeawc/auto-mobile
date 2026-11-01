@@ -45,11 +45,25 @@ export class WatchRunnerArtifacts {
       paths.derivedDataPath,
       async (buildSignal) =>
         await runWithAbortSignal(buildSignal, async () => {
+          const projectPath = join(
+            paths.projectRoot,
+            "ios",
+            "control-proxy",
+            "CtrlProxy.xcodeproj",
+          );
+          try {
+            await (this.dependencies.access ?? access)(projectPath);
+          } catch (cause) {
+            throw new ActionableError(
+              `Watch runner project is unavailable; set ${ENV.WATCH_RUNNER_XCTESTRUN.name} to a prebuilt watch runner xctestrun. The published package does not include the watch project.`,
+              { cause },
+            );
+          }
           await (this.dependencies.xcodebuild ?? new XcodebuildClient()).executeCommand(
             [
               "build-for-testing",
               "-project",
-              join(paths.projectRoot, "ios", "control-proxy", "CtrlProxy.xcodeproj"),
+              projectPath,
               "-scheme",
               "CtrlProxyWatch",
               "-destination",

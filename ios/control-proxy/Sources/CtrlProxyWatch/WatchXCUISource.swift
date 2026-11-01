@@ -130,13 +130,7 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
 
     func rotateCrown(delta: Double, velocity: Double) throws {
         try performGesture {
-            let identifier = "ctrlproxy-crown"
-            let element = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
-            guard element.exists else {
-                throw WatchCommandError.commandFailed("No watchOS element with identifier '\(identifier)'")
-            }
-            // Crown movement needs view focus and a private selector with unboxed Double arguments.
-            element.tap()
+            // Rotate the currently focused control using a private selector with unboxed Double arguments.
             let device = XCUIDevice.shared
             let selector = NSSelectorFromString("rotateDigitalCrownByDelta:withVelocity:")
             guard device.responds(to: selector) else {

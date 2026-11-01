@@ -222,7 +222,7 @@
     "reflect-metadata": "^0.2.2",
     "turbo": "^2.8.10",
     "typescript": "6.0.3",
-    "werift": "^0.25.0",
+    "werift": "^0.26.0",
     "ws": "^8.19.0",
     "xml2js": "^0.6.2",
     "zod-to-json-schema": "^3.25.1"

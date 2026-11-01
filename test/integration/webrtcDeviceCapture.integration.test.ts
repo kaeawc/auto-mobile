@@ -1257,6 +1257,9 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             id: streamId,
             streamId,
             platform: platform === "android" || platform === "ios" ? platform : undefined,
+            // Pin the simulator this job booted: the self-hosted Mac can carry another booted
+            // simulator, and an unpinned start then fails with "Multiple connected ios devices".
+            deviceId: platform === "ios" ? configuredIosSimulatorUdid(process.env) : undefined,
             whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip`,
             // Both peers are local to the CI worker. Suppress the public STUN
             // default so host-candidate negotiation cannot depend on runner DNS.

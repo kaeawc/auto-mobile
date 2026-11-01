@@ -4,7 +4,14 @@ import SwiftUI
 struct CtrlProxyWatchApp: App {
     var body: some Scene {
         WindowGroup {
-            Text("CtrlProxy Watch")
+            ZStack {
+                Text("CtrlProxy Watch")
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Non-hittable fixture")
+                    .accessibilityIdentifier("ctrlproxy-non-hittable")
+            }
         }
     }
 }

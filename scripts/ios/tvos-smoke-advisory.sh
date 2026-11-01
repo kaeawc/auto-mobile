@@ -25,7 +25,7 @@ runtime_id="$(jq -er '[.runtimes[] | select(.isAvailable == true and (.identifie
   exit 1
 }
 device_id=""
-# shellcheck disable=SC2329 # Invoked by the EXIT trap.
+# shellcheck disable=SC2317,SC2329 # Invoked by the EXIT trap.
 cleanup() {
   local exit_status=$?
   trap - EXIT
@@ -51,15 +51,22 @@ run_with_timeout "$timeout_seconds" xcrun simctl bootstatus "$device_id" -b
 # XCTest installs and launches AutoMobileTVTest via its UI-test target dependency.
 status=0
 result_dir="$(mktemp -d "${log_dir}/result.XXXXXX")"
-run_with_timeout "$timeout_seconds" xcodebuild test \
-  -project "${project_root}/ios/control-proxy/CtrlProxy.xcodeproj" \
-  -scheme AutoMobileTVTest -configuration Debug -destination "id=${device_id}" \
-  -only-testing:CtrlProxyTVUITests/TVCommandRouterSmokeTests \
-  -resultBundlePath "${result_dir}/smoke.xcresult" \
-  TEST_RUNNER_AM_TVOS_SMOKE=1 CODE_SIGNING_ALLOWED=NO \
-  > "${log_dir}/xcodebuild.log" 2>&1 || status=$?
+set +e
+(
+  export TEST_RUNNER_AM_TVOS_SMOKE=1
+  run_with_timeout "$timeout_seconds" xcodebuild test \
+    -project "${project_root}/ios/control-proxy/CtrlProxy.xcodeproj" \
+    -scheme AutoMobileTVTest -configuration Debug -destination "id=${device_id}" \
+    -only-testing:CtrlProxyTVUITests/TVCommandRouterSmokeTests \
+    -resultBundlePath "${result_dir}/smoke.xcresult" \
+    CODE_SIGNING_ALLOWED=NO \
+    > "${log_dir}/xcodebuild.log" 2>&1
+)
+status=$?
+set -e
 cat "${log_dir}/xcodebuild.log"
 echo "tvOS smoke exit status: ${status} (advisory)"
+summary=""
 if [[ "$status" -eq 124 ]]; then
   echo '::warning title=tvOS simulator smoke::Test run timed out (advisory)'
 elif [[ "$status" -ne 0 ]]; then
@@ -74,5 +81,10 @@ elif [[ "$status" -ne 0 ]]; then
     exit "$status"
   fi
   echo '::warning title=tvOS simulator smoke::Test run failed (advisory); inspect xcodebuild.log'
+else
+  summary="$(xcrun xcresulttool get test-results summary --path "${result_dir}/smoke.xcresult" --format json)" || summary=""
+fi
+if [[ -n "$summary" ]] && jq -e '.skippedTests > 0 or .passedTests == 0' <<< "$summary" >/dev/null; then
+  echo '::warning title=tvOS simulator smoke::Smoke test skipped or did not run (advisory)'
 fi
 exit 0

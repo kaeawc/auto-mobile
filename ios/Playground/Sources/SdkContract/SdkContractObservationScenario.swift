@@ -24,8 +24,8 @@ struct ObservationHostLog: Encodable, Equatable, Sendable {
 /// - `contract-save` counts taps into `contract-tap-count`'s value.
 /// - `contract-email` is always focused, so sendKeys needs no XCTest focus tap; its value is
 ///   whatever the bridge's `insertText` and `clearText` left.
-/// - `contract-hold` is placed over the status bar: the bridge does not support long press, so
-///   XCTest presses there, which changes nothing.
+/// - `contract-hold` is under the status bar and has no visible tap area. The unsupported
+///   long-press probe uses the visible `contract-save` node so it can reach bridge routing.
 /// - Tapping `contract-arm-stale` arms the stale trap: from then on every capture is replaced by
 ///   another one as soon as the bridge has committed it, so an action the daemon resolved against
 ///   it is stale when it arrives.

@@ -76,7 +76,15 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     /// Fetch lightweight SDK server metadata without walking or serializing the view tree.
     public func fetchServerInfo() async -> SdkHierarchyServerInfo? {
         guard let data = await getData(path: SdkRoute.health.path, transport: healthTransport) else { return nil }
-        return try? JSONDecoder().decode(SdkHierarchyServerInfo.self, from: data)
+        do {
+            return try JSONDecoder().decode(SdkHierarchyServerInfo.self, from: data)
+        } catch {
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
+                .warning(
+                    "SDK health decode failed; treating SDK as unavailable: \(String(describing: error), privacy: .public)"
+                )
+            return nil
+        }
     }
 
     /// Whether the SDK hierarchy server is reachable.

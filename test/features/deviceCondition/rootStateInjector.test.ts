@@ -54,7 +54,7 @@ describe("rootState injector (#14060)", () => {
   test("refuses a production (Play) image with guidance toward real root", async () => {
     const adb = adbWith({ "getprop ro.debuggable": "0", "getprop ro.build.type": "user" });
     await expect(createRootStateInjector(adb).apply("rooted-detectable")).rejects.toThrow(
-      /non-Play image[\s\S]*#14070/,
+      /rootState needs a non-Play image[\s\S]*#14070/,
     );
     expect(adb.getExecutedCommands().some((c) => c.includes("remount"))).toBe(false);
   });

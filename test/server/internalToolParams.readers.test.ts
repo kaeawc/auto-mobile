@@ -9,10 +9,8 @@ import {
   internalOneShotCli,
   internalRestartResumeSessionUuid,
   internalRestartResumeTargets,
-  internalSwipeAtRecordingContext,
-  internalTapAtContext,
 } from "../../src/server/internalToolParams";
-import type { SwipeAtRecordingContext } from "../../src/models/SwipeAtOptions";
+import { deviceCallRecording } from "../../src/server/pipeline/deviceCallDispatch";
 import type { TapAtPlanContext } from "../../src/models/TapAtGeometry";
 
 describe("internal call identity readers", () => {
@@ -85,26 +83,18 @@ describe("provisioning handoff readers", () => {
   });
 });
 
-describe("coordinate gesture context readers", () => {
-  test("tapAt prefers the plan step's context over the recording one", () => {
+describe("coordinate gesture recording context (#15663)", () => {
+  test("a tapAt records into the plan step's geometry context, by reference", () => {
     const plan: TapAtPlanContext = {};
-    const recording: TapAtPlanContext = {};
-    expect(
-      internalTapAtContext({ __tapAtPlanContext: plan, __tapAtRecordingContext: recording }),
-    ).toBe(plan);
+    expect(deviceCallRecording("tapAt", { tapAtPlanContext: plan })?.tapAt).toBe(plan);
   });
 
-  test("tapAt falls back to the recording context, by reference so the handler can fill it", () => {
-    const recording: TapAtPlanContext = {};
-    expect(internalTapAtContext({ __tapAtRecordingContext: recording })).toBe(recording);
-    expect(internalTapAtContext({})).toBeUndefined();
+  test("a tapAt outside a plan step gets a fresh context the handler fills", () => {
+    expect(deviceCallRecording("tapAt", undefined)).toEqual({ tapAt: {} });
   });
 
-  test("swipeAt reads its recording context by reference", () => {
-    const recording: SwipeAtRecordingContext = {};
-    expect(internalSwipeAtRecordingContext({ __swipeAtRecordingContext: recording })).toBe(
-      recording,
-    );
-    expect(internalSwipeAtRecordingContext({})).toBeUndefined();
+  test("a swipeAt gets a fresh screen context and other tools record nothing extra", () => {
+    expect(deviceCallRecording("swipeAt", { tapAtPlanContext: {} })).toEqual({ swipeAt: {} });
+    expect(deviceCallRecording("tapOn", { tapAtPlanContext: {} })).toBeUndefined();
   });
 });

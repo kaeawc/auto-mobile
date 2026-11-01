@@ -15,11 +15,13 @@ for (const platform of ["android", "ios"] as const) {
     await first.tapAt.execute(point, { planContext: context });
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recordPlanCall(recorder, "tapAt", {
-      ...point,
-      snapshotId: "ephemeral",
-      __tapAtRecordingContext: context,
-    });
+    recordPlanCall(
+      recorder,
+      "tapAt",
+      { ...point, snapshotId: "ephemeral" },
+      {},
+      { tapAt: context },
+    );
     const [step] = recorder.stop();
     expect(step.geometry).toEqual({
       platform,
@@ -101,11 +103,7 @@ test("recording persists resolved native pixels instead of image or normalized i
   await fake.tapAt.execute(input, { planContext: context });
   const recorder = new ToolCallRecorder();
   recorder.start();
-  recordPlanCall(recorder, "tapAt", {
-    ...input,
-    snapshotId: "ephemeral",
-    __tapAtRecordingContext: context,
-  });
+  recordPlanCall(recorder, "tapAt", { ...input, snapshotId: "ephemeral" }, {}, { tapAt: context });
   const [step] = recorder.stop();
   expect(step.params).toEqual({ x: 3, y: 5 });
   expect(step.geometry).toMatchObject({ x: 3, y: 5 });
@@ -121,7 +119,7 @@ test("missing rotation evidence records a legacy tap with an actionable warning"
   await fake.tapAt.execute({ x: 2, y: 3 }, { planContext: context });
   const recorder = new ToolCallRecorder();
   recorder.start();
-  recordPlanCall(recorder, "tapAt", { x: 2, y: 3, __tapAtRecordingContext: context });
+  recordPlanCall(recorder, "tapAt", { x: 2, y: 3 }, {}, { tapAt: context });
   const result = recorder.stopWithWarnings();
   expect(result.steps).toEqual([{ tool: "tapAt", params: { x: 2, y: 3 } }]);
   expect(result.steps[0]).not.toHaveProperty("geometry");

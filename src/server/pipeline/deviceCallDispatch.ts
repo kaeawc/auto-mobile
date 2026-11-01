@@ -34,7 +34,10 @@ import {
   assertInputRequesterHoldsDevice,
   TOOL_CALL_REMEDY,
 } from "../../daemon/inputDeviceOwnership";
-import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  type ToolCallRecordingContext,
+} from "../../features/toolSelection/toolSelectionContext";
 import {
   isControlCallOnNamedSession,
   refuseControlOnForeignOwnedSession,
@@ -148,14 +151,25 @@ export function deviceAwareHandlerArgs(
     nonBlankSessionUuid(routingSession),
     context?.execution,
   );
+  return handlerArgs;
+}
+
+/**
+ * The recording context a device-aware call's handler fills (#15663): a tapAt resolves against, and
+ * records into, a plan step's geometry or a fresh context; a swipeAt records the screen its
+ * endpoints resolved against (#12878). Other tools record nothing extra.
+ */
+export function deviceCallRecording(
+  name: string,
+  context: ReturnType<typeof getToolSelectionContext>,
+): ToolCallRecordingContext | undefined {
   if (name === "tapAt") {
-    handlerArgs.__tapAtRecordingContext = handlerArgs.__tapAtPlanContext ?? {};
+    return { tapAt: context?.tapAtPlanContext ?? {} };
   }
   if (name === "swipeAt") {
-    // Filled by the handler with the screen the endpoints resolved against (#12878).
-    handlerArgs.__swipeAtRecordingContext = {};
+    return { swipeAt: {} };
   }
-  return handlerArgs;
+  return undefined;
 }
 
 /**

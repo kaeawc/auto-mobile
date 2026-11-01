@@ -24,7 +24,7 @@ import {
 /**
  * Internal params a plan step inherits from its enclosing request. Listed once
  * so the "parent wins even when absent" strip in
- * `createInternalToolInvocationContext` cannot drift from the set it writes.
+ * `internalToolInvocationContext` cannot drift from the set it writes.
  */
 const INHERITED_PLAN_REQUEST_PARAMS = [
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,

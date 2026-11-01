@@ -43,7 +43,7 @@ import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypePlatformPlaceholders } from "./prototypeData";
 import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import { PROTOTYPE_REQUEST_EVENT_NAME, prototypeIntoError } from "./prototypeRequest";
-import type { Rule } from "./prototypeBindingValidation";
+import { numberValid, type Rule } from "./prototypeBindingValidation";
 import { mapBindableFields, record, type Raw } from "./prototypeTemplate";
 
 /**
@@ -92,6 +92,8 @@ export interface PrototypePlatformCall {
   background: string[];
   /** Calls and events touching personal data, for the threat model (#14293). */
   sensitive: boolean;
+  /** Side effects that require a user-initiated action chain. */
+  userGesture?: boolean;
   /**
    * A capability the call needs on top of its module's, so a runtime can offer a module but
    * refuse one of its operations (camera recording, media queues).
@@ -114,9 +116,11 @@ export interface PrototypePlatformModule {
   deviceCapability?: string;
   /** A test-only module (`test`) that no production runtime advertises. */
   placeholder?: boolean;
+  /** Shared runtime call budget; the host validates metadata but does not count calls. */
+  rateLimit?: { calls: number; windowMs: number };
   calls: Record<string, PrototypePlatformCall>;
   /** `debounceMs` coalesces bursts of the event into one delivery. */
-  events: Record<string, { sensitive: boolean; debounceMs?: number }>;
+  events: Record<string, { sensitive: boolean; debounceMs?: number; userInitiated?: boolean }>;
   /**
    * The keys `/platform/<module>/<key>` can read. A module without this table (the placeholder
    * `test`) accepts any pointer; one with it refuses a pointer that is not exactly one listed key.
@@ -124,9 +128,32 @@ export interface PrototypePlatformModule {
   state?: Record<string, PrototypePlatformStateEntry>;
 }
 
+/** Load the shared module table, refusing malformed optional runtime rate budgets. */
+export function loadPrototypePlatformModules(
+  modules: Record<string, PrototypePlatformModule>,
+): Record<string, PrototypePlatformModule> {
+  for (const [name, definition] of Object.entries(modules)) {
+    if (definition.rateLimit === undefined) {
+      continue;
+    }
+    const limit = record(definition.rateLimit);
+    const positiveInteger: Rule = { kind: "number", integer: true, min: 1 };
+    if (
+      !limit ||
+      Object.keys(limit).some((key) => key !== "calls" && key !== "windowMs") ||
+      !numberValid(limit.calls, positiveInteger) ||
+      !numberValid(limit.windowMs, positiveInteger)
+    ) {
+      throw new Error(
+        `platformModules.${name}.rateLimit must contain positive integer calls and windowMs`,
+      );
+    }
+  }
+  return modules;
+}
+
 /** The shared `platformModules` table: each module's calls, events and capability. */
-export const PROTOTYPE_PLATFORM_MODULES: Record<string, PrototypePlatformModule> =
-  contract.platformModules;
+export const PROTOTYPE_PLATFORM_MODULES = loadPrototypePlatformModules(contract.platformModules);
 
 export interface PrototypePlatformError {
   path: string;
@@ -215,25 +242,32 @@ export type PrototypePlatformUse =
   | { kind: "declared"; path: string; module: string }
   | { kind: "node"; path: string; module: string }
   | { kind: "handlers"; path: string }
-  | { kind: "handler"; path: string; event: string }
-  | { kind: "call"; path: string; action: Raw }
+  | { kind: "handler"; path: string; event: string; userGesture: boolean }
+  | { kind: "call"; path: string; action: Raw; userGesture: boolean }
   | { kind: "read"; path: string; pointer: string; condition?: Raw }
   | { kind: "event"; path: string; inHandler: boolean };
+
+interface ScanContext {
+  inHandler: boolean;
+  userGesture: boolean;
+}
+const USER_GESTURE_KEYS = new Set(["onTap", "onLongPress", "onDoubleTap", "onSubmit"]);
 
 // Opaque JSON: an emit payload, literal repeat items and a literal binding's value are data.
 const OPAQUE_KEYS = new Set(["payload", "repeat"]);
 
 /** The constructs `object` is itself: a call, a `{platform}` read or an `{event}` binding. */
-function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypePlatformUse[]) {
+function ownUses(object: Raw, path: string, context: ScanContext, uses: PrototypePlatformUse[]) {
   if (object.type === "pasteButton") {
     uses.push({
       kind: "call",
+      userGesture: context.userGesture,
       path,
       action: { type: "platform", call: "clipboard.paste", into: object.into },
     });
   }
   if (object.type === "platform" && typeof object.call === "string") {
-    uses.push({ kind: "call", path, action: object });
+    uses.push({ kind: "call", path, action: object, userGesture: context.userGesture });
   }
   if (object.type !== undefined) {
     return;
@@ -247,28 +281,48 @@ function ownUses(object: Raw, path: string, inHandler: boolean, uses: PrototypeP
     });
   }
   if (typeof object.event === "string") {
-    uses.push({ kind: "event", path: `${path}.event`, inHandler });
+    uses.push({ kind: "event", path: `${path}.event`, inHandler: context.inHandler });
   }
 }
 
 /** Members in sorted order; stack screens are named in brackets, as the screen-map walk does. */
-function scanMembers(object: Raw, path: string, inHandler: boolean, uses: PrototypePlatformUse[]) {
+function scanMembers(
+  object: Raw,
+  path: string,
+  context: ScanContext,
+  uses: PrototypePlatformUse[],
+) {
+  const node =
+    typeof object.type === "string" &&
+    Object.hasOwn(contract.definitions.node.variants, object.type);
   for (const key of sortedKeys(object)) {
+    // Node handlers start a fresh chain; deferred timer actions never inherit a gesture.
+    const next = {
+      inHandler: context.inHandler,
+      userGesture: node
+        ? USER_GESTURE_KEYS.has(key)
+        : object.type !== "startTimer" && context.userGesture,
+    };
     const screens = key === "screens" ? record(object.screens) : undefined;
     if (screens) {
       for (const name of sortedKeys(screens)) {
-        scanValue(screens[name], `${path}.screens[${JSON.stringify(name)}]`, inHandler, uses);
+        scanValue(screens[name], `${path}.screens[${JSON.stringify(name)}]`, next, uses);
       }
     } else if (!OPAQUE_KEYS.has(key)) {
-      scanValue(object[key], memberPath(path, key), inHandler, uses);
+      scanValue(object[key], memberPath(path, key), next, uses);
     }
   }
 }
 
 /** Deep scan of nodes and actions for platform calls, `{platform}` reads and `{event}` bindings. */
-function scanValue(value: unknown, path: string, inHandler: boolean, uses: PrototypePlatformUse[]) {
+function scanValue(
+  value: unknown,
+  path: string,
+  context: ScanContext,
+  uses: PrototypePlatformUse[],
+) {
   if (Array.isArray(value)) {
-    value.forEach((child, index) => scanValue(child, `${path}[${index}]`, inHandler, uses));
+    value.forEach((child, index) => scanValue(child, `${path}[${index}]`, context, uses));
     return;
   }
   const object = record(value);
@@ -276,8 +330,8 @@ function scanValue(value: unknown, path: string, inHandler: boolean, uses: Proto
   if (!object || (Object.keys(object).length === 1 && Object.hasOwn(object, "value"))) {
     return;
   }
-  ownUses(object, path, inHandler, uses);
-  scanMembers(object, path, inHandler, uses);
+  ownUses(object, path, context, uses);
+  scanMembers(object, path, context, uses);
 }
 
 /** `{platform:/pointer}` placeholders in every text-kind field of every node. */
@@ -317,14 +371,15 @@ export function prototypePlatformUses(spec: unknown): PrototypePlatformUse[] {
   }
   for (const event of handlers ? sortedKeys(handlers) : []) {
     const at = `platform.on[${JSON.stringify(event)}]`;
-    uses.push({ kind: "handler", path: at, event });
-    scanValue(handlers![event], at, true, uses);
+    const userGesture = prototypePlatformEvent(event)?.definition.userInitiated === true;
+    uses.push({ kind: "handler", path: at, event, userGesture });
+    scanValue(handlers![event], at, { inHandler: true, userGesture }, uses);
   }
   for (const handler of prototypeChannelHandlers(root)) {
-    scanValue(handler.value, handler.path, true, uses);
+    scanValue(handler.value, handler.path, { inHandler: true, userGesture: false }, uses);
   }
   for (const { node, path } of prototypeSpecNodeRoots(root)) {
-    scanValue(node, path, false, uses);
+    scanValue(node, path, { inHandler: false, userGesture: false }, uses);
   }
   placeholderUses(root, uses);
   // A map node draws through the map module (#14309), so its gate names the node. Only node
@@ -558,6 +613,17 @@ function comparisonError(
   return undefined;
 }
 
+function callGestureError(
+  use: Extract<PrototypePlatformUse, { kind: "call" }>,
+): PrototypePlatformError | undefined {
+  return prototypePlatformCall(use.action.call)?.definition.userGesture && !use.userGesture
+    ? {
+        path: use.path,
+        message: `Side-effecting platform call ${String(use.action.call)} needs a user gesture: move it into onTap, onLongPress, onDoubleTap or onSubmit`,
+      }
+    : undefined;
+}
+
 function useError(
   use: PrototypePlatformUse,
   context: PlatformContext,
@@ -577,7 +643,7 @@ function useError(
         : undefined;
     }
     case "call":
-      return callError(use.action, use.path, context, check);
+      return callError(use.action, use.path, context, check) ?? callGestureError(use);
     case "read":
       return readError(use, context) ?? comparisonError(use, check);
     case "event":

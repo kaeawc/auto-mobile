@@ -357,7 +357,7 @@ assert_cleaned() {
   run bash "${script}" 26
   [ "${status}" -eq 2 ] || { echo "${output}"; return 1; }
   [[ "${output}" == *'never 3000'* ]]
-  ! grep -q '^xcrun ' "${STUB_LOG}"
+  run ! grep -q '^xcrun ' "${STUB_LOG}"
 }
 
 @test "refuses nonnumeric and out-of-range ports before any xcrun call" {
@@ -365,7 +365,7 @@ assert_cleaned() {
     export PROTOTYPE_MCP_SMOKE_DAEMON_PORT="${port}"
     run bash "${script}" 26
     [ "${status}" -eq 2 ]
-    ! grep -q '^xcrun ' "${STUB_LOG}"
+    run ! grep -q '^xcrun ' "${STUB_LOG}"
   done
 }
 
@@ -375,7 +375,7 @@ assert_cleaned() {
   [ "${status}" -eq 1 ]
   [[ "${output}" == *'port 45678 is already listening'* ]]
   grep -qx 'lsof -nP -iTCP:45678 -sTCP:LISTEN' "${STUB_LOG}"
-  ! grep -Eq 'simctl create|--daemon start' "${STUB_LOG}"
+  run ! grep -Eq 'simctl create|--daemon start' "${STUB_LOG}"
 }
 
 @test "requires lsof before any xcrun call" {
@@ -383,7 +383,7 @@ assert_cleaned() {
   run bash "${script}" 26
   [ "${status}" -eq 1 ]
   [[ "${output}" == *'lsof is required'* ]]
-  ! grep -q '^xcrun ' "${STUB_LOG}"
+  run ! grep -q '^xcrun ' "${STUB_LOG}"
 }
 
 @test "default private daemon starts after build before smoke with port only on start" {
@@ -399,13 +399,33 @@ assert_cleaned() {
   assert_cleaned
 }
 
+@test "default command repeats only startup options after daemon start" {
+  export PROTOTYPE_MCP_SMOKE_DAEMON_PORT=45678
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  start="$(grep '^bun .*--daemon start' "${STUB_LOG}")"
+  [ "${start}" = 'bun run src/index.ts --debug --embedded-sdk --daemon start --debug --embedded-sdk --port 45678' ]
+  assert_cleaned
+}
+
+@test "silent runtime command repeats only startup options after daemon start" {
+  export AUTO_MOBILE_CMD="${stubs}/bun run --silent src/index.ts --debug --embedded-sdk --cli"
+  export PROTOTYPE_MCP_SMOKE_DAEMON_PORT=45678
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  start="$(grep '^bun .*--daemon start' "${STUB_LOG}")"
+  [ "${start}" = 'bun run --silent src/index.ts --debug --embedded-sdk --daemon start --debug --embedded-sdk --port 45678' ]
+  [ "$(printf '%s\n' "${start}" | grep -o -- '--silent' | wc -l)" -eq 1 ]
+  assert_cleaned
+}
+
 @test "failed explicit daemon start stops once and deletes simulator" {
   export STUB_DAEMON_START_FAIL=1
   run bash "${script}" 26
   [ "${status}" -eq 1 ]
   [[ "${output}" == *'private daemon start failed'* ]]
   [ "$(grep -c -- '--daemon stop' "${STUB_LOG}")" -eq 1 ]
-  ! grep -q '^smoke ' "${STUB_LOG}"
+  run ! grep -q '^smoke ' "${STUB_LOG}"
   assert_cleaned
 }
 

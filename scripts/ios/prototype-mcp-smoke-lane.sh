@@ -60,12 +60,27 @@ read -r -a cli_base <<< "${AUTO_MOBILE_CMD}"
 daemon_base=()
 daemon_flags=()
 in_flags=0
+has_entrypoint=0
+for word in ${cli_base[@]+"${cli_base[@]}"}; do
+  case "${word}" in
+    *.ts | *.js | *.mjs | *.cjs | *.mts | *.cts) has_entrypoint=1; break ;;
+  esac
+done
+after_entrypoint=0
 for word in ${cli_base[@]+"${cli_base[@]}"}; do
   # --cli is a command boundary: parseValueOptions stops there, hiding --port.
   # Preserve all startup flags so daemon and client reuse-critical options match.
   [[ ${word} == --cli ]] && continue
   daemon_base+=("${word}")
-  if [[ ${word} == --* ]]; then in_flags=1; fi
+  if [[ ${has_entrypoint} == 1 ]]; then
+    # Runtime options belong only in the executable prefix.
+    if [[ ${after_entrypoint} == 1 ]]; then in_flags=1; fi
+    case "${word}" in
+      *.ts | *.js | *.mjs | *.cjs | *.mts | *.cts) after_entrypoint=1 ;;
+    esac
+  elif [[ ${word} == --* ]]; then
+    in_flags=1
+  fi
   if [[ ${in_flags} == 1 ]]; then daemon_flags+=("${word}"); fi
 done
 [[ ${#daemon_base[@]} -gt 0 ]] || fail 'AUTO_MOBILE_CMD has no executable'

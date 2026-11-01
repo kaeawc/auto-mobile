@@ -61,15 +61,21 @@ export function judgeNavigation(manifest: SdkContractManifest): ContractFinding[
   const events: z.infer<typeof eventSchema>[] = [];
   const webNames: string[] = [];
   for (const envelope of manifest.events) {
-    if (envelope.eventType !== "navigation" && envelope.eventType !== "webview") continue;
+    if (envelope.eventType !== "navigation" && envelope.eventType !== "webview") {
+      continue;
+    }
     try {
       const payload: unknown = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
-      if (envelope.eventType === "navigation") events.push(eventSchema.parse(payload));
-      else {
+      if (envelope.eventType === "navigation") {
+        events.push(eventSchema.parse(payload));
+      } else {
         const event = webEventSchema.parse(payload);
-        if (event.webViewId !== "contract-navigation")
+        if (event.webViewId !== "contract-navigation") {
           fail("webview", "unexpected web view in fixture stream");
-        if (event.name.startsWith("navigation_")) webNames.push(event.name);
+        }
+        if (event.name.startsWith("navigation_")) {
+          webNames.push(event.name);
+        }
       }
     } catch {
       fail(
@@ -79,8 +85,9 @@ export function judgeNavigation(manifest: SdkContractManifest): ContractFinding[
       );
     }
   }
-  if (manifest.undecodableBatches !== 0)
+  if (manifest.undecodableBatches !== 0) {
     fail("batches", "SDK batches could not be decoded", "sdk-serialization");
+  }
   if (
     JSON.stringify(events) !== JSON.stringify(log.events.map((event) => eventSchema.parse(event)))
   ) {
@@ -97,8 +104,9 @@ export function judgeNavigation(manifest: SdkContractManifest): ContractFinding[
     ["custom", "contract-custom"],
     ...(log.multiScene === "complete" ? [["custom", "contract-second-scene"]] : []),
   ];
-  if (events.length !== expected.length)
+  if (events.length !== expected.length) {
     fail("transitions", `expected ${expected.length} events, got ${events.length}`);
+  }
   expected.forEach(([source, destination], index) => {
     const event = events[index];
     const scene = log.sceneIdentifiers[index === 4 ? 1 : 0];

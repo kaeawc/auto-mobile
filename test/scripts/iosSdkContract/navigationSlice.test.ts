@@ -92,8 +92,11 @@ describe("navigation contract judge", () => {
   test("rejects missing and duplicate transitions", () => {
     for (const duplicate of [false, true]) {
       const manifest = input();
-      if (duplicate) manifest.events.push(manifest.events[0]!);
-      else manifest.events.shift();
+      if (duplicate) {
+        manifest.events.push(manifest.events[0]!);
+      } else {
+        manifest.events.shift();
+      }
       expect(judgeNavigation(manifest).some((finding) => finding.caseName === "transitions")).toBe(
         true,
       );

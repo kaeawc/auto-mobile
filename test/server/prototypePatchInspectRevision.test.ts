@@ -6,6 +6,7 @@ import {
   performPrototypePatch,
 } from "../../src/server/prototypePatchAction";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { event } from "../helpers/prototypeTestEvent";
 
 const spec = {
   id: "p",
@@ -16,7 +17,10 @@ const spec = {
 const scope = { deviceId: "d" };
 
 /** A real status store holding prototype `p` as shown, and a device that answers the patch. */
-function shownPrototype(reply: PrototypePatchReply) {
+function shownPrototype(
+  reply: PrototypePatchReply,
+  whilePatching: (store: InMemoryPrototypeStatusStore) => void = () => {},
+) {
   const store = new InMemoryPrototypeStatusStore(new FakeTimer());
   const ticket = store.shownSpecs.beginShow("d", "p");
   store.shownSpecs.endShow("d", ticket, { id: "p", spec });
@@ -25,7 +29,12 @@ function shownPrototype(reply: PrototypePatchReply) {
     performPrototypePatch(
       {
         store,
-        transport: { patch: async () => reply },
+        transport: {
+          patch: async () => {
+            whilePatching(store);
+            return reply;
+          },
+        },
         supportsPatch: async () => true,
         specRefusal: async () => undefined,
         settleSpec: async () => {},
@@ -51,6 +60,40 @@ describe("a landed patch is visible in status and inspect (#16277)", () => {
       lastAction: "patch",
       revision: 2,
     });
+  });
+
+  test("a device /data write during the patch still records the confirmed patch", async () => {
+    const { store, patch } = shownPrototype(
+      { success: true, revision: 3, delivery: "answered" },
+      (live) =>
+        live.recordEvent(scope, {
+          ...event(1, "p", "change", "/data/n"),
+          payload: { op: "set", value: 5, revision: 2 },
+        }),
+    );
+    await patch([{ op: "replace", path: "/data/n", value: 2 }]);
+    // The order of the write and the patch on the device is unknown, so the reported data is kept.
+    expect(store.status(scope).prototypes[0]).toMatchObject({
+      lastAction: "patch",
+      revision: 3,
+      data: { n: 5 },
+    });
+  });
+
+  test("a show that overlaps the patch is not marked as patched", async () => {
+    const { store, patch } = shownPrototype(
+      { success: true, revision: 3, delivery: "answered" },
+      (live) => {
+        const ticket = live.shownSpecs.beginShow("d", "p");
+        live.shownSpecs.endShow("d", ticket, { id: "p", spec });
+        live.record(scope, "show", { id: "p" }, { result: { success: true } });
+      },
+    );
+    const out = await patch([{ op: "replace", path: "/data/n", value: 2 }]);
+    expect(out.warning).toContain("overlapped");
+    const entry = store.status(scope).prototypes[0];
+    expect(entry.lastAction).toBe("show");
+    expect(entry).not.toHaveProperty("revision");
   });
 
   test("a refused patch leaves the entry as the show left it", async () => {

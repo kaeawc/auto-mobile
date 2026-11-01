@@ -147,11 +147,14 @@ export interface PrototypeStatusStore {
     options: { result: PrototypeResult; details?: PrototypeRecordDetails },
   ): PrototypeLastResult;
   readonly shownSpecs: PrototypeShownSpecs;
-  /** A patch landed: refresh the data, mark the entry `patch` and keep the device's revision. */
+  /**
+   * A patch landed: mark the entry `patch` and keep the device's revision. With `data` (even
+   * undefined) the reported data is replaced; without it the data is left as it is.
+   */
   recordPatch(
     deviceId: string,
     id: string,
-    patch: { data: PrototypeData | undefined; revision?: number },
+    patch: { data?: PrototypeData | undefined; revision?: number },
   ): void;
   /** The device wiped this prototype's stored values (#12522): drop the reported `storage`. */
   forgetStorage(deviceId: string, id: string): void;
@@ -171,6 +174,15 @@ interface StoredPrototypeStatus extends PrototypeScope {
   lastResult?: PrototypeLastResult;
   snapshots?: Map<string, PrototypeEventState>;
   pendingSnapshots?: Map<string, PrototypeEventState>;
+}
+
+/** Sets or, for undefined, removes the entry's reported data. */
+function replaceData(entry: PrototypeLastResult, data: PrototypeData | undefined): void {
+  if (data === undefined) {
+    delete entry.data;
+  } else {
+    entry.data = structuredClone(data);
+  }
 }
 
 /** `revision` when it is newer than the one the entry already reports. */
@@ -453,8 +465,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   recordPatch(
     deviceId: string,
     id: string,
-    { data, revision }: { data: PrototypeData | undefined; revision?: number },
+    patch: { data?: PrototypeData | undefined; revision?: number },
   ): void {
+    const { data, revision } = patch;
     for (const stored of this.scopes.values()) {
       const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
       if (entry) {
@@ -463,10 +476,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
           lastAction: "patch",
           ...newerRevision(entry, revision),
         };
-        if (data === undefined) {
-          delete patched.data;
-        } else {
-          patched.data = structuredClone(data);
+        // Without `data`, it stays as reported: a device write the patch cannot be ordered against set it.
+        if (Object.hasOwn(patch, "data")) {
+          replaceData(patched, data);
         }
         stored.shown.set(id, patched);
       }

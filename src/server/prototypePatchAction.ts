@@ -194,6 +194,9 @@ async function finishPatch(
       data: applied.validated.data,
       revision: fields.revision,
     });
+  } else if (!deps.store.shownSpecs.showStartedSince(deviceId, read.version)) {
+    // Only a device /data write moved the mirror: the patch still landed on the prototype shown.
+    deps.store.recordPatch(deviceId, args.id, { revision: fields.revision });
   }
   deps.retire(result);
   const output = successfulPatchOutput(fields.revision, committed, args.id);

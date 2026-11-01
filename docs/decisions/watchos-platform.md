@@ -11,12 +11,16 @@ non-iOS Apple platform (`NonIosApplePlatform`): an Apple TV simulator is `platfo
 everything below that says "watch" applies to it unless a section names watchOS specifically.
 `tvos` supports `listDevices`, `listDeviceImages`, `provisionDevice`, `deleteDevice`,
 `startDevice`, `setActiveDevice`, `killDevice`, `installApp`, `uninstallApp`, `launchApp`,
-`terminateApp`, `listApps`, `observe` and `pressButton`. Discovery and selection require an explicit
+`terminateApp`, `listApps`, `observe`, `tapOn` and `pressButton`. Discovery and selection require an explicit
 tvOS request. Boot uses simctl readiness and the simulator gate; start binds at `booted`
 readiness after best-effort tvOS runner startup, without iOS keyboard, biometric or prototype setup.
 The tvOS runner uses `request_hierarchy` through the iOS hierarchy converter, preserving focus
 in the hierarchy and existing `focusedElement` output. `pressButton` sends remote up/down/left/right,
-select, menu, home and playPause. Touch gestures are refused with focus-navigation guidance;
+select, menu, home and playPause. `tapOn` matches visible exact text or element identifiers
+with an optional index, moves focus using frame centres and re-observes after each remote
+press before selecting. It accepts only the tap action; absent matches or focus, blocked
+directions and a 30-move limit fail with actionable guidance. Press replies synchronize
+navigation without sleeps. Touch gestures are refused with focus-navigation guidance;
 long press and text input are unsupported. A tvOS handshake is required before registration.
 `AUTOMOBILE_TVOS_RUNNER_XCTESTRUN` overrides artifact discovery; otherwise an appletvsimulator
 xctestrun is discovered or the `AutoMobileTVTest` scheme is built with a 120-second limit.

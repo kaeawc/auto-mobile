@@ -27,6 +27,7 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "observe",
   ]),
   tvos: new Set<string>([
+    "tapOn",
     "pressButton",
     "observe",
     "installApp",
@@ -50,9 +51,7 @@ export function unsupportedPlatformToolMessage(
 ): string {
   if (
     platform === "tvos" &&
-    ["tapAt", "tapOn", "swipeOn", "pinchOn", "multiTouch", "dragAndDrop", "tapAny"].includes(
-      toolName,
-    )
+    ["tapAt", "swipeOn", "pinchOn", "multiTouch", "dragAndDrop", "tapAny"].includes(toolName)
   ) {
     return `${toolName} does not support tvOS touch gestures; use focus navigation via pressButton (up/down/left/right/select).`;
   }

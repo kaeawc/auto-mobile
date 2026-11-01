@@ -41,9 +41,9 @@ describe("assertToolSupportsDevicePlatform", () => {
   });
 
   test("rejects an Apple TV for a tool that has not opted in, naming the tool and platform", () => {
-    expect(() => assertToolSupportsDevicePlatform("tapOn", appleTv)).toThrow(
+    expect(() => assertToolSupportsDevicePlatform("tapAt", appleTv)).toThrow(
       new ActionableError(
-        "tapOn does not support tvOS touch gestures; use focus navigation via pressButton (up/down/left/right/select).",
+        "tapAt does not support tvOS touch gestures; use focus navigation via pressButton (up/down/left/right/select).",
       ),
     );
   });
@@ -145,8 +145,8 @@ describe.each(["watchos", "tvos"] as const)(
 
 describe("assertRequestedPlatformSupported", () => {
   test("refuses a requested Apple TV or watch for a tool that has not opted in", () => {
-    expect(() => assertRequestedPlatformSupported("tapOn", { platform: "tvos" })).toThrow(
-      new ActionableError(unsupportedPlatformToolMessage("tapOn", "tvos")),
+    expect(() => assertRequestedPlatformSupported("tapAt", { platform: "tvos" })).toThrow(
+      new ActionableError(unsupportedPlatformToolMessage("tapAt", "tvos")),
     );
     expect(() => assertRequestedPlatformSupported("pinchOn", { platform: "watchos" })).toThrow(
       new ActionableError(unsupportedPlatformToolMessage("pinchOn", "watchos")),

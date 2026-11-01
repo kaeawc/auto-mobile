@@ -1061,7 +1061,6 @@
                     activity: model.keyframeActivity
                 ))
                 .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
-                .modifier(PrototypeHandledTapModifier(node: node, model: model))
                 .modifier(TapModifier(
                     actions: handlesOwnTap ? nil : node.onTap,
                     longPress: handlesOwnTap ? nil : node.onLongPress,
@@ -1070,6 +1069,9 @@
                     model: model,
                     style: style
                 ))
+                // Keep dead-tap consumption outermost so its simultaneous gesture accompanies
+                // the node's tap handlers instead of winning inner-first gesture arbitration.
+                .modifier(PrototypeHandledTapModifier(node: node, model: model))
                 .modifier(IdentifierModifier(
                     // The search bar's editable field owns the node identifier.
                     identifier: node.type == "searchBar" ? nil : node.testTag,

@@ -413,7 +413,7 @@ export const resetKeychainSchema = withAppIdAliases(
           .boolean()
           .optional()
           .describe(
-            "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not use confirm; app opt-in, declared aliases and the SDK mutation gate authorize deletion.",
+            "Required true on iOS Simulator, which erases EVERY app's Keychain. Android does not need confirm (app opt-in, declared aliases and the SDK mutation gate authorize deletion), but confirm: false refuses the reset.",
           ),
       })
       .strict(),

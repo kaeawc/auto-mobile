@@ -37,8 +37,10 @@ registered in that scope. An alias alone is allowed when declared in any scope;
 with a scope it must belong to that scope. An empty selector is rejected.
 
 The app must enable Keystore test state, declare the selected aliases, and enable
-both its storage mutation capability and mutation policy. Android does not use
-`confirm` and requires no session. No keys are created or re-provisioned.
+both its storage mutation capability and mutation policy. Android does not need
+`confirm` and requires no session, but `confirm: false` refuses the reset. A recorded
+plan writes `confirm: false`, so its replay stops at this step until you set
+`confirm: true`. No keys are created or re-provisioned.
 
 The result reports `scope: "app"`, `requestedScope`/`requestedAlias`, `deletedCount`
 and one outcome per attempted alias: `deleted`, `not_found`, `locked`,

@@ -231,6 +231,8 @@ data class PrototypeWindow(
    * Window controls (`prototype_platform_window_controls_v1`, #14320); no runtime applies them yet.
    */
   val keepScreenOn: Boolean? = null,
+  /** Protocol parity only; Android does not advertise or apply layout direction. */
+  val layoutDirection: String? = null,
   /** `"system"` or a whole 0-100 brightness. */
   val brightness: JsonElement? = null,
   val orientation: String? = null,

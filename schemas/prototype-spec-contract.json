@@ -16442,6 +16442,10 @@
           },
           "optional": true
         },
+        "layoutDirection": {
+          "rule": { "kind": "enum", "values": ["ltr", "rtl"] },
+          "optional": true
+        },
         "keepScreenOn": {
           "rule": {
             "kind": "boolean"

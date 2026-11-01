@@ -55,6 +55,8 @@ internal object PrototypeBundleCapabilities {
       caps.add("prototype_window_motion_v1")
     if (((spec["window"] as? JsonObject)?.get("backdrop")) != null)
       caps.add("prototype_backdrop_v1")
+    if ((spec["window"] as? JsonObject)?.get("layoutDirection") != null)
+      caps.add("prototype_layout_direction_v1")
     if (
       PrototypeEnvelopeFeatures.WINDOW_CONTROLS.any {
         (spec["window"] as? JsonObject)?.containsKey(it) == true

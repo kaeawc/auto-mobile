@@ -1,0 +1,26 @@
+{
+  "spec": {
+    "id": "layout-direction",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "layoutDirection": "auto"
+    },
+    "root": {
+      "type": "row",
+      "children": [
+        {
+          "type": "text",
+          "text": "FIRST"
+        },
+        {
+          "type": "text",
+          "text": "SECOND"
+        }
+      ]
+    }
+  },
+  "expectedPath": "window.layoutDirection",
+  "expectedMessage": "Invalid enum value"
+}

@@ -3,6 +3,12 @@ import Foundation
 import XCTest
 
 final class AutoMobilePrototypeCapabilitiesTests: XCTestCase {
+    func testLayoutDirectionIsAdvertisedAtTheMinimumOS() {
+        struct OS: OSVersionProvider { let majorVersion = 17 }
+        XCTAssertTrue(PrototypeAgentProtocol.advertisedCapabilities(os: OS()).contains("prototype_layout_direction_v1"))
+        XCTAssertTrue(AutoMobilePrototypeCapabilities.supported.contains("prototype_layout_direction_v1"))
+    }
+
     func testSharedSpecCapabilitiesAreSupported() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

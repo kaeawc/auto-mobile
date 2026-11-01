@@ -93,6 +93,7 @@ enum PrototypeAgentProtocol {
         storageCapability,
         pagerStateKeyCapability,
         backdropCapability,
+        "prototype_layout_direction_v1",
         timersCapability,
         "prototype_platform_v1",
         "prototype_platform_clipboard_v1",

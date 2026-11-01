@@ -1024,5 +1024,9 @@
       "text": "Pane"
     },
     "selectionKey": "choice"
+  },
+  "windowLayoutDirection": {
+    "placement": { "type": "fullscreen" },
+    "layoutDirection": "rtl"
   }
 }

@@ -262,7 +262,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       success: false,
       rtl,
       error:
-        "Text direction is not supported on iOS. RTL is driven by the app's language; set an RTL locale (e.g., ar_SA) instead.",
+        'Text direction is not supported on iOS. To mirror a prototype without changing the system locale, set window.layoutDirection: "rtl" on its prototype spec.',
     };
   }
 

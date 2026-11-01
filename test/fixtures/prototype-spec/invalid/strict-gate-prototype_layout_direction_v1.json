@@ -1,0 +1,29 @@
+{
+  "spec": {
+    "id": "layout-direction",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      },
+      "layoutDirection": "rtl"
+    },
+    "root": {
+      "type": "row",
+      "children": [
+        {
+          "type": "text",
+          "text": "FIRST"
+        },
+        {
+          "type": "text",
+          "text": "SECOND"
+        }
+      ]
+    }
+  },
+  "options": {
+    "supportedCapabilities": []
+  },
+  "expectedPath": "$",
+  "expectedMessage": "Unsupported capabilities: prototype_layout_direction_v1"
+}

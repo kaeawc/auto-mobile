@@ -393,7 +393,7 @@ describe("SystemConfigurationManager", () => {
       const result = await mgr.setTextDirection(true);
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Text direction is not supported on iOS");
+      expect(result.error).toContain('window.layoutDirection: "rtl"');
       expect(fakeExec.getExecutedCommands()).toHaveLength(0);
     });
   });

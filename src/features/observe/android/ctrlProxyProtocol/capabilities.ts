@@ -119,6 +119,9 @@ export const PROTOTYPE_BACKDROP_CAPABILITY = "prototype_backdrop_v1";
  * no `requires.platform` entry.
  */
 export const PROTOTYPE_WINDOW_CONTROLS_CAPABILITY = "prototype_platform_window_controls_v1";
+/** Per-prototype layout direction, implemented by the iOS prototype agent. */
+export const PROTOTYPE_LAYOUT_DIRECTION_CAPABILITY = "prototype_layout_direction_v1";
+
 /**
  * The `hideKeyboard` action (#14320): dismisses the soft keyboard and clears text focus in the
  * prototype's own window. Not a platform module, so it needs no `requires.platform` entry.

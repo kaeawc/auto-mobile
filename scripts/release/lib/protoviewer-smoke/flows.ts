@@ -55,7 +55,7 @@ async function guarded(name: string, run: () => Promise<SmokeCheck>): Promise<Sm
   }
 }
 
-async function importBundle(
+export async function importBundle(
   driver: SmokeDriver,
   bundle: SmokeBundle,
 ): Promise<{ check: SmokeCheck; libraryId?: string }> {
@@ -72,7 +72,7 @@ async function importBundle(
   }
 }
 
-async function openEntry(
+export async function openEntry(
   driver: SmokeDriver,
   name: string,
   libraryId: string,

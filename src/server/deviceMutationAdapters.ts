@@ -12,7 +12,7 @@ import { appLocaleJournalKey } from "../daemon/sessionBroker/appLocaleJournalKey
 import type { DeviceMutationInput } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import { KEYBOARD_READ_ACTIONS } from "./interactionToolTypes";
-import { dataToolMutations } from "./deviceMutationDataAdapters";
+import { dataToolMutations, isCoreDataRead } from "./deviceMutationDataAdapters";
 import { appearanceToolMutations } from "./deviceMutationAppearanceAdapters";
 import { interactionToolMutations } from "./deviceMutationInteractionAdapters";
 import { lifecycleToolMutations } from "./deviceMutationLifecycleAdapters";
@@ -226,11 +226,7 @@ function mutationCallIsRead(
       return args.action === "get";
     case "sqlQuery":
       return (
-        (typeof args.store === "string" &&
-          typeof args.entity === "string" &&
-          args.query === undefined &&
-          args.databasePath === undefined) ||
-        (typeof args.query === "string" && isReadOnlySqlQuery(args.query))
+        isCoreDataRead(args) || (typeof args.query === "string" && isReadOnlySqlQuery(args.query))
       );
     case "displayConfig":
       return settingMutations(args, platform).length === 0;

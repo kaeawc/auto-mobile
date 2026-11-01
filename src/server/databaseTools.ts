@@ -138,39 +138,20 @@ export function registerDatabaseTools(
     try {
       args = sqlQuerySchema.parse(args);
       if (args.store !== undefined && args.entity !== undefined) {
-        if (device.platform !== "ios") {
-          throw new ActionableError(
-            "Core Data queries require an iOS app with a registered store and entity. Use databasePath and query for Android SQLite databases.",
-          );
-        }
-        const result = await iosClient(device).queryCoreDataForIos(
-          args.appId,
-          args.store,
-          args.entity,
-          args.limit,
+        return await queryCoreDataForDevice(
+          device,
+          { ...args, store: args.store, entity: args.entity },
+          iosClient,
         );
-        return createStructuredToolResponse({
-          message: `Query returned ${result.rows?.length ?? 0} row(s)`,
-          ...result,
-        });
       }
-      if (args.databasePath === undefined || args.query === undefined) {
-        throw new ActionableError("Supply databasePath and query, or store and entity.");
-      }
-      const databasePath =
-        device.platform === "android"
-          ? resolveAndroidDatabasePath(args.appId, args.databasePath)
-          : args.databasePath;
-      const result = await executeSqlForDevice(
-        device,
-        { ...args, databasePath, query: args.query },
-        iosClient,
-      );
+      const sqliteArgs = sqliteQueryArgs(device, args);
+      const { databasePath, query } = sqliteArgs;
+      const result = await executeSqlForDevice(device, sqliteArgs, iosClient);
 
       // The executed result type is authoritative; SQL text classification is
       // only an approximation for decisions that must happen before execution.
       if (result.type === "mutation") {
-        const affectedTables = extractAffectedTables(args.query);
+        const affectedTables = extractAffectedTables(query);
         await notifyDatabaseChanged(
           device.deviceId,
           args.appId,
@@ -213,6 +194,42 @@ export function registerDatabaseTools(
         (typeof args.query === "string" && isReadOnlySqlQuery(args.query)),
     },
   );
+}
+
+async function queryCoreDataForDevice(
+  device: BootedDevice,
+  args: SqlQueryArgs & { store: string; entity: string },
+  iosClient: IosDatabaseClientResolver,
+) {
+  if (device.platform !== "ios") {
+    throw new ActionableError(
+      "Core Data queries require an iOS app with a registered store and entity. Use databasePath and query for Android SQLite databases.",
+    );
+  }
+  const result = await iosClient(device).queryCoreDataForIos(
+    args.appId,
+    args.store,
+    args.entity,
+    args.limit,
+  );
+  return createStructuredToolResponse({
+    message: `Query returned ${result.rows?.length ?? 0} row(s)`,
+    ...result,
+  });
+}
+
+function sqliteQueryArgs(
+  device: BootedDevice,
+  args: SqlQueryArgs,
+): SqlQueryArgs & { databasePath: string; query: string } {
+  if (args.databasePath === undefined || args.query === undefined) {
+    throw new ActionableError("Supply databasePath and query, or store and entity.");
+  }
+  const databasePath =
+    device.platform === "android"
+      ? resolveAndroidDatabasePath(args.appId, args.databasePath)
+      : args.databasePath;
+  return { ...args, databasePath, query: args.query };
 }
 
 /**

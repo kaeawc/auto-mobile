@@ -876,7 +876,7 @@ export abstract class IosCtrlProxyDelegatingFacade extends IosCtrlProxyDiagnosti
   ): Promise<import("../../database/DatabaseInspector").SQLResult> {
     const options = sdkCapabilityQueryOptions(this.timer, 5000);
     await this.sdkCapability.requireSdkCapability("database", appId, options);
-    return this.database.queryCoreData(appId, store, entity, limit, options);
+    return this.database.queryCoreData(appId, store, entity, { limit, timeout: options });
   }
 
   async executeSQLForIos(

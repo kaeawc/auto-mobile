@@ -6,8 +6,9 @@ test("sqlQuery accepts exactly one complete database mode", () => {
   for (const args of [
     { databasePath: "app.db", query: "SELECT 1" },
     { store: "Main", entity: "Item", limit: 2 },
-  ])
+  ]) {
     expect(sqlQuerySchema.safeParse({ appId, ...args }).success).toBe(true);
+  }
   for (const args of [
     {},
     { store: "Main" },
@@ -18,6 +19,7 @@ test("sqlQuery accepts exactly one complete database mode", () => {
     { databasePath: "app.db", query: "SELECT 1", limit: 2 },
     { store: "Main", entity: "Item", limit: 0 },
     { store: "Main", entity: "Item", limit: 1.5 },
-  ])
+  ]) {
     expect(sqlQuerySchema.safeParse({ appId, ...args }).success).toBe(false);
+  }
 });

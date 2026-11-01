@@ -92,8 +92,10 @@ export class CtrlProxyDatabase {
     appId: string,
     store: string,
     entity: string,
-    limit?: number,
-    timeout: number | SdkCapabilityQueryOptions = 5000,
+    {
+      limit,
+      timeout = 5000,
+    }: { limit?: number; timeout?: number | SdkCapabilityQueryOptions } = {},
   ): Promise<SQLResult> {
     const result = await this.request<ExecuteSqlResult>(
       "query_core_data",

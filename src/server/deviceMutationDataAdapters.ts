@@ -82,19 +82,24 @@ function preferenceMutations(args: Record<string, unknown>): ToolMutation[] {
   ];
 }
 
+export function isCoreDataRead(args: Record<string, unknown>): boolean {
+  return (
+    typeof args.store === "string" &&
+    typeof args.entity === "string" &&
+    args.query === undefined &&
+    args.databasePath === undefined
+  );
+}
+
 function opaqueDataToolMutations(
   name: string,
   args: Record<string, unknown>,
 ): ToolMutation[] | undefined {
   switch (name) {
     case "sqlQuery":
-      if (
-        typeof args.store === "string" &&
-        typeof args.entity === "string" &&
-        args.query === undefined &&
-        args.databasePath === undefined
-      )
+      if (isCoreDataRead(args)) {
         return [];
+      }
       return [{ kind: "opaque", key: opaqueIntentKey("sql", args.appId, args.databasePath) }];
     case "mockNetwork":
     case "clearMockNetwork":

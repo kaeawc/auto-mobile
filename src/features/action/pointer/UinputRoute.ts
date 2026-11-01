@@ -3,10 +3,9 @@ import { DispatchingRoute, SUPPORTED, unsupported } from "./DispatchingRoute";
 
 /**
  * A virtual pen registered through Android's `uinput` tool (#13105): stylus and eraser strokes with
- * pressure and stylus hover on emulators and rooted devices, where `/dev/uinput` is writable only by
- * root.
- * It is the last route, so a runner that injects without root is always preferred. Tilt,
- * orientation and barrel buttons are refused until their evdev mapping is verified on a device.
+ * pressure, tilt, orientation and barrel buttons, and stylus hover on emulators and rooted devices.
+ * `/dev/uinput` is writable only by root.
+ * It is the last route, so a runner that injects without root is always preferred.
  */
 export class UinputRoute extends DispatchingRoute {
   readonly route = "uinput" as const;
@@ -16,11 +15,6 @@ export class UinputRoute extends DispatchingRoute {
     }
     if (features.toolType !== "stylus" && features.toolType !== "eraser") {
       return unsupported("the uinput route injects a stylus or eraser only");
-    }
-    if (features.extendedAxes) {
-      return unsupported(
-        "the uinput route does not inject tilt, orientation and barrel buttons yet",
-      );
     }
     if (device.rootShell !== true) {
       return unsupported(

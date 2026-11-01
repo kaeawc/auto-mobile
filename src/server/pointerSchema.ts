@@ -3,15 +3,15 @@ import { z } from "zod/v4";
 /**
  * Shared `pointer` option of the coordinate gestures. Strict so an unknown field is a malformed
  * parameter instead of being ignored. Plain stylus uses `adb input stylus`; pressure other than 1,
- * tilt, orientation and buttons use the instrumentation route (#13081, #13099); an eraser uses the
- * uinput route only (#13105).
+ * tilt, orientation and buttons use instrumentation or root-only uinput (#13081, #13099, #13084);
+ * an eraser uses the uinput route only (#13105), with the same axes and buttons.
  */
 export const pointerSchema = z
   .object({
     toolType: z
       .enum(["stylus", "eraser"])
       .describe(
-        "Inject a stylus, or the pen's eraser end, instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath also need stylus_input_v1; pressure and dragPath alone also work on a root adb shell with a uinput tool. An eraser needs a root adb shell with a uinput tool and takes pressure but not tilt, orientation or buttons",
+        "Inject a stylus, or the pen's eraser end, instead of a finger (Android 12+, API 31). Pressure other than 1, tilt, orientation, buttons and any dragPath need stylus_input_v1 or a root adb shell with a uinput tool. An eraser needs a root adb shell with a uinput tool and supports pressure, tilt, orientation and buttons",
       ),
     pressure: z
       .number()

@@ -3,6 +3,7 @@ import {
   UINPUT_REGISTRATION_SETTLE_MS,
   uinputPenScript,
   uinputRawPoint,
+  uinputTiltAxes,
 } from "../../../../src/features/action/pointer/uinputPenScript";
 import type { PointerRequest } from "../../../../src/features/action/pointer/PointerInjector";
 
@@ -174,5 +175,242 @@ describe("uinputPenScript eraser (#13105)", () => {
     const keys = keyEvents({ ...eraser, features: { toolType: "stylus", path: true } });
     expect(keys[0]).toEqual([EV_KEY, BTN_TOOL_PEN, 1]);
     expect(keys.some(([, code]) => code === BTN_TOOL_RUBBER)).toBe(false);
+  });
+});
+
+describe("uinput extended axes", () => {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const pairs = [
+    [30, 0, 0, 30],
+    [30, 90, -30, 0],
+    [30, -90, 30, 0],
+    [60, 45, -45, 45],
+    [45, 180, 0, -45],
+    [45, -180, 0, -45],
+    [90, 45, -90, 90],
+    [0, 90, 0, 0],
+  ];
+
+  test("inverts Android tilt and orientation into integer evdev degrees", () => {
+    for (const [tilt, orientation, x, y] of pairs) {
+      const axes = uinputTiltAxes(radians(tilt), radians(orientation));
+      expect(axes).toEqual({ x, y });
+      const tx = radians(axes.x);
+      const ty = radians(axes.y);
+      expect(Math.abs(Math.acos(Math.cos(tx) * Math.cos(ty)) - radians(tilt))).toBeLessThan(
+        radians(1),
+      );
+      if (tilt > 0) {
+        const actual = Math.atan2(-Math.sin(tx), Math.sin(ty));
+        const difference = actual - radians(orientation);
+        expect(Math.abs(Math.atan2(Math.sin(difference), Math.cos(difference)))).toBeLessThan(
+          radians(1),
+        );
+      }
+    }
+  });
+
+  test("emits the converted pair with position on every contact frame, including open", () => {
+    for (const [tilt, orientation, x, y] of pairs) {
+      const frames = commands({
+        features: { toolType: "stylus", extendedAxes: true },
+        points: [
+          { x: 10, y: 20, tilt: radians(tilt), orientation: radians(orientation) },
+          { x: 10, y: 20, durationMs: 16, tilt: radians(tilt), orientation: radians(orientation) },
+        ],
+      }).filter((command) => command.command === "inject");
+      for (const frame of frames.slice(0, -1)) {
+        const events = frame.events ?? [];
+        const index = events.findIndex(
+          (value, i) => i % 3 === 0 && value === EV_ABS && events[i + 1] === 26,
+        );
+        expect(events.slice(index, index + 6)).toEqual([EV_ABS, 26, x, EV_ABS, 27, y]);
+      }
+    }
+  });
+
+  test("interpolates tilt and orientation and preserves omitted waypoint axes", () => {
+    const frames = commands({
+      features: { toolType: "stylus", extendedAxes: true },
+      points: [
+        { x: 0, y: 0, tilt: 0, orientation: 0 },
+        { x: 20, y: 20, durationMs: 32, tilt: Math.PI / 3, orientation: Math.PI / 2 },
+        { x: 30, y: 30, durationMs: 16 },
+      ],
+    }).filter((command) => command.command === "inject");
+    for (const [index, tilt, orientation] of [
+      [0, 0, 0],
+      [1, 30, 45],
+      [2, 60, 90],
+      [3, 60, 90],
+    ]) {
+      const events = frames[index].events ?? [];
+      const start = events.findIndex(
+        (value, i) => i % 3 === 0 && value === EV_ABS && events[i + 1] === 26,
+      );
+      const { x, y } = uinputTiltAxes(radians(tilt), radians(orientation));
+      expect(events.slice(start, start + 6)).toEqual([EV_ABS, 26, x, EV_ABS, 27, y]);
+    }
+  });
+
+  test("keeps first-point tilt constant when the next waypoint omits it", () => {
+    const frames = commands({
+      features: { toolType: "stylus", extendedAxes: true },
+      points: [
+        { x: 0, y: 0, tilt: Math.PI / 3 },
+        { x: 20, y: 20, durationMs: 32 },
+      ],
+    }).filter((command) => command.command === "inject");
+    for (const frame of frames.slice(0, 3)) {
+      const events = frame.events ?? [];
+      const start = events.findIndex(
+        (value, i) => i % 3 === 0 && value === EV_ABS && events[i + 1] === 26,
+      );
+      expect(events.slice(start, start + 6)).toEqual([EV_ABS, 26, 0, EV_ABS, 27, 60]);
+    }
+  });
+
+  test("defaults missing first-point tilt or orientation to zero", () => {
+    for (const [point, expected] of [
+      [{ tilt: Math.PI / 6 }, [EV_ABS, 26, 0, EV_ABS, 27, 30]],
+      [{ orientation: Math.PI / 2 }, [EV_ABS, 26, 0, EV_ABS, 27, 0]],
+    ] as const) {
+      const events =
+        commands({
+          features: { toolType: "stylus", extendedAxes: true },
+          points: [{ x: 0, y: 0, ...point }],
+        })[2].events ?? [];
+      expect(events.slice(15, 21)).toEqual([...expected]);
+    }
+  });
+
+  test("starts at zero when axes first appear at a later waypoint", () => {
+    const frames = commands({
+      features: { toolType: "stylus", extendedAxes: true },
+      points: [
+        { x: 0, y: 0 },
+        { x: 0, y: 0, durationMs: 32, tilt: Math.PI / 3 },
+      ],
+    }).filter((command) => command.command === "inject");
+    for (const [index, y] of [
+      [0, 0],
+      [1, 30],
+      [2, 60],
+    ]) {
+      expect(frames[index].events?.slice(index === 0 ? 15 : 9, index === 0 ? 21 : 15)).toEqual([
+        EV_ABS,
+        26,
+        0,
+        EV_ABS,
+        27,
+        y,
+      ]);
+    }
+  });
+
+  test("no axes or buttons keeps the legacy script even when extendedAxes is set", () => {
+    const request: PointerRequest = {
+      features: { toolType: "stylus" },
+      points: [{ x: 10, y: 20 }],
+    };
+    expect(
+      uinputPenScript(
+        { ...request, features: { ...request.features, extendedAxes: true }, buttons: 0 },
+        PORTRAIT,
+      ),
+    ).toBe(uinputPenScript(request, PORTRAIT));
+    expect(
+      commands(request)
+        .filter((command) => command.command === "inject")
+        .map((command) => command.events),
+    ).toEqual([
+      [
+        EV_KEY,
+        BTN_TOOL_PEN,
+        1,
+        EV_KEY,
+        BTN_TOUCH,
+        1,
+        EV_ABS,
+        ABS_X,
+        10,
+        EV_ABS,
+        ABS_Y,
+        20,
+        EV_ABS,
+        ABS_PRESSURE,
+        4095,
+        EV_ABS,
+        ABS_DISTANCE,
+        0,
+        ...SYN,
+      ],
+      [EV_KEY, BTN_TOUCH, 0, EV_ABS, ABS_PRESSURE, 0, ...SYN, EV_KEY, BTN_TOOL_PEN, 0, ...SYN],
+    ]);
+  });
+
+  test("presses selected barrel keys only on open and releases them before touch up", () => {
+    for (const [buttons, codes] of [
+      [32, [331]],
+      [64, [332]],
+      [96, [331, 332]],
+    ] as const) {
+      const frames = commands({
+        features: { toolType: "stylus", extendedAxes: true },
+        buttons,
+        points: [
+          { x: 0, y: 0 },
+          { x: 1, y: 1, durationMs: 16 },
+        ],
+      }).filter((command) => command.command === "inject");
+      expect(frames[0].events).toEqual([
+        EV_KEY,
+        BTN_TOOL_PEN,
+        1,
+        EV_KEY,
+        BTN_TOUCH,
+        1,
+        EV_ABS,
+        ABS_X,
+        0,
+        EV_ABS,
+        ABS_Y,
+        0,
+        EV_ABS,
+        ABS_PRESSURE,
+        4095,
+        EV_ABS,
+        ABS_DISTANCE,
+        0,
+        ...codes.flatMap((code) => [EV_KEY, code, 1]),
+        ...SYN,
+      ]);
+      expect(frames[1].events).toEqual([
+        EV_ABS,
+        ABS_X,
+        1,
+        EV_ABS,
+        ABS_Y,
+        1,
+        EV_ABS,
+        ABS_PRESSURE,
+        4095,
+        ...SYN,
+      ]);
+      expect(frames[2].events).toEqual([
+        ...codes.flatMap((code) => [EV_KEY, code, 0]),
+        EV_KEY,
+        BTN_TOUCH,
+        0,
+        EV_ABS,
+        ABS_PRESSURE,
+        0,
+        ...SYN,
+        EV_KEY,
+        BTN_TOOL_PEN,
+        0,
+        ...SYN,
+      ]);
+    }
   });
 });

@@ -139,7 +139,7 @@ Rationale:
   resolution is zero or absent), then uses Android's `acos(cos(xAngle) * cos(yAngle))`
   magnitude. It is omitted unless both samples and valid axis ranges are available.
   Empty buttons are omitted. These scalar fields summarize the contact, not its pressure
-  ramp or button timing. Rich pointers replay through instrumentation; an eraser
+  ramp or button timing. Rich pointers replay through instrumentation or root-only uinput; an eraser
   gesture exports as an eraser step with a warning that only the uinput route replays it, and
   hover-only input produces no step.
 
@@ -208,8 +208,8 @@ is the replay route.
 `src/features/action/pointer/` holds the `PointerInjector` interface and four routes:
 `ctrlproxy-a11y` (finger only), `adb-input-source` (constant-pressure stylus on API 31+),
 `instrumentation` (stylus pressure, and stylus or mouse hover, gated on the runner flags
-`stylus_input_v1` / `hover_input_v1`) and `uinput` (stylus pressure and hover through a virtual
-pen, root shells only; below). `selectPointerRoute` takes the first supporting route in that
+`stylus_input_v1` / `hover_input_v1`) and `uinput` (stylus pressure, tilt, orientation, barrel buttons
+and hover through a virtual pen, root shells only; below). `selectPointerRoute` takes the first supporting route in that
 order, so finger touches keep the accessibility path; a request no route can honour is refused
 before dispatch with the missing capability named, and contradictory requests (a finger hover,
 hover with pressure, a mouse click) are refused as invalid. `derivePointerInput` reports, per
@@ -236,7 +236,10 @@ of the pen the probe verified (`INPUT_PROP_DIRECT`; `BTN_TOOL_PEN`, `BTN_TOOL_RU
 `ABS_DISTANCE` 0..255, `ABS_TILT_X`/`Y` ±90), a 4 s wait for the device to attach (the probe's
 value), then the request as frames every 16 ms with the instrumentation planner's interpolation. A
 stroke is `BTN_TOOL_PEN` (`BTN_TOOL_RUBBER` for an eraser) and `BTN_TOUCH` down with pressure,
-then touch up and the tool out; a hover is
+then touch up and the tool out. Tilt and orientation interpolate per frame and invert InputReader's
+mapping into integer-degree `ABS_TILT_X`/`Y` values, including the opening frame; strokes with neither tilt nor orientation emit
+no tilt events. Barrel masks 32 and 64 press `BTN_STYLUS` and `BTN_STYLUS2` before the opening
+`SYN_REPORT` and release before `BTN_TOUCH` up. A hover is
 `BTN_TOOL_PEN` in range with `ABS_DISTANCE` and no `BTN_TOUCH`. Screen points in the current rotation
 map to natural-orientation digitizer coordinates by inverting the recorder's touch mapping
 (`buildScaler`). The host pipes the script through base64 into `uinput -` on the device and reads
@@ -246,7 +249,7 @@ the tool's exit status back from a marker line; the device closes the pen when t
 
 | Case                                               | Behaviour                                                         |
 | -------------------------------------------------- | ----------------------------------------------------------------- |
-| Tilt, orientation or barrel buttons                | Route refuses: their evdev mapping is not verified on a device    |
+| Tilt, orientation or barrel buttons                | Encoded for contact strokes; refused for hover                    |
 | Eraser                                             | Only this route injects one; the instrumentation route refuses it |
 | A display other than 0                             | Refused, nothing sent                                             |
 | Rotation or `wm size` unreadable                   | Refused, nothing sent                                             |
@@ -328,7 +331,7 @@ The nested `pointer` option keeps its shape and gains `tilt`, `orientation` (rad
 (`primary`, `secondary`); `pressure` may be any 0..1. A plain stylus (`pressure` omitted or 1) still uses
 `adb input stylus`, so existing calls are unchanged. Anything the shell cannot inject, and every stylus
 `dragPath` (per-point `pressure` and `tilt`, holds as repeats of the first and last point), goes through
-`dispatchRichStylus` and the instrumentation route. `strokeRequest` sets only the features the request
+`dispatchRichStylus` and instrumentation or root-only uinput. `strokeRequest` sets only the features the request
 needs (`variablePressure`, `extendedAxes`, `path`), so a refusal names the real reason, and the refusal
 comes before the display fence and any dispatch hook. A failure after dispatch is
 `StylusOutcomeIndeterminateError` (do not retry) unless the route says nothing was sent
